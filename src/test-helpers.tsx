@@ -71,6 +71,8 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       created_at: '',
     }),
     stopAgent: vi.fn().mockResolvedValue(undefined),
+    browse: vi.fn().mockResolvedValue({ current: '/tmp', parent: '/', entries: [] }),
+    recentRepos: vi.fn().mockResolvedValue([]),
   };
   return { ...defaults, ...overrides };
 }
