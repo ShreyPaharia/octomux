@@ -40,13 +40,22 @@ export default function TaskDetail() {
     async (agentId: string) => {
       if (!id) return;
       try {
+        const taskAgents = task?.agents || [];
+        const stoppedAgent = taskAgents.find((a) => a.id === agentId);
         await api.stopAgent(id, agentId);
+        // If we stopped the active tab, switch to the first remaining running agent
+        if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
+          const nextAgent = taskAgents.find(
+            (a) => a.id !== agentId && a.status !== 'stopped',
+          );
+          if (nextAgent) setActiveWindow(nextAgent.window_index);
+        }
         refresh();
       } catch (err) {
         console.error('Failed to stop agent:', err);
       }
     },
-    [id, refresh],
+    [id, refresh, task, activeWindow],
   );
 
   const handleUpdateStatus = useCallback(
