@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import Database from 'better-sqlite3';
-import {
-  createTestDb, insertTask, insertAgent, getTask,
-  DEFAULTS,
-} from './test-helpers.js';
+import { createTestDb, insertTask, insertAgent, getTask, DEFAULTS } from './test-helpers.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -37,7 +34,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-afterEach(() => { db.close(); });
+afterEach(() => {
+  db.close();
+});
 
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
 
@@ -94,7 +93,11 @@ describe('GET /api/tasks/:id', () => {
   });
 
   it('returns all task fields', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, pr_url: 'https://github.com/org/repo/pull/42', pr_number: 42 });
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_url: 'https://github.com/org/repo/pull/42',
+      pr_number: 42,
+    });
 
     const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
     expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
@@ -176,9 +179,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app)
-      .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'done' });
+    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'done' });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('done');
@@ -188,9 +189,7 @@ describe('PATCH /api/tasks/:id', () => {
   it('updates updated_at timestamp', async () => {
     insertTask(db, { updated_at: '2020-01-01 00:00:00' });
 
-    const res = await request(app)
-      .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'done' });
+    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'done' });
 
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
   });
@@ -202,18 +201,17 @@ describe('PATCH /api/tasks/:id', () => {
     { status: 'cancelled', shouldStop: true },
   ];
 
-  it.each(stopTriggerCases)(
-    'calls stopTask when status=$status',
-    async ({ status }) => {
-      insertTask(db, { ...DEFAULTS.runningTask });
-      await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status });
-      expect(stopTask).toHaveBeenCalledOnce();
-    },
-  );
+  it.each(stopTriggerCases)('calls stopTask when status=$status', async ({ status }) => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status });
+    expect(stopTask).toHaveBeenCalledOnce();
+  });
 
   it('does not call stopTask for non-terminal status changes', async () => {
     insertTask(db);
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'running' } as any);
+    await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'running' } as any);
     expect(stopTask).not.toHaveBeenCalled();
   });
 
@@ -251,7 +249,9 @@ describe('DELETE /api/tasks/:id', () => {
     insertTask(db);
     insertAgent(db);
     await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
-    expect(db.prepare('SELECT * FROM agents WHERE task_id = ?').all(DEFAULTS.task.id)).toHaveLength(0);
+    expect(db.prepare('SELECT * FROM agents WHERE task_id = ?').all(DEFAULTS.task.id)).toHaveLength(
+      0,
+    );
   });
 });
 
@@ -267,15 +267,12 @@ describe('POST /api/tasks/:id/agents', () => {
 
   const nonRunningStatuses = ['created', 'setting_up', 'done', 'cancelled', 'error'];
 
-  it.each(nonRunningStatuses)(
-    'returns 400 when task status is %s',
-    async (status) => {
-      insertTask(db, { status: status as any });
-      const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('running');
-    },
-  );
+  it.each(nonRunningStatuses)('returns 400 when task status is %s', async (status) => {
+    insertTask(db, { status: status as any });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('running');
+  });
 
   it('creates agent for running task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
@@ -333,7 +330,9 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}`);
+    const res = await request(app).delete(
+      `/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}`,
+    );
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(stopAgent).toHaveBeenCalledOnce();

@@ -23,8 +23,9 @@ export async function startTask(task: Task): Promise<void> {
 
   try {
     // 1. Update status to setting_up
-    db.prepare(`UPDATE tasks SET status = ?, tmux_session = ?, branch = ?, worktree = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run('setting_up', session, branch, worktreePath, id);
+    db.prepare(
+      `UPDATE tasks SET status = ?, tmux_session = ?, branch = ?, worktree = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run('setting_up', session, branch, worktreePath, id);
 
     // 2. Validate repo path
     if (!fs.existsSync(task.repo_path)) {
@@ -52,8 +53,12 @@ export async function startTask(task: Task): Promise<void> {
 
     // 7. Create first agent record
     const agentId = nanoid(12);
-    db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)')
-      .run(agentId, id, 0, 'Agent 1');
+    db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
+      agentId,
+      id,
+      0,
+      'Agent 1',
+    );
 
     // 8. Launch claude in window 0
     await execFile('tmux', ['send-keys', '-t', `${session}:0`, 'claude', 'Enter']);
@@ -66,12 +71,14 @@ export async function startTask(task: Task): Promise<void> {
     await dispatchToWindow(session, 0, prompt);
 
     // 11. Mark as running
-    db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run('running', id);
-
+    db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      'running',
+      id,
+    );
   } catch (err) {
-    db.prepare(`UPDATE tasks SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run('error', (err as Error).message, id);
+    db.prepare(
+      `UPDATE tasks SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run('error', (err as Error).message, id);
   }
 }
 
@@ -79,21 +86,33 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   const db = getDb();
 
   // Determine next window index and label
-  const agents = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index').all(task.id) as Agent[];
+  const agents = db
+    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+    .all(task.id) as Agent[];
   const maxWindow = agents.reduce((max, a) => Math.max(max, a.window_index), -1);
   const windowIndex = maxWindow + 1;
   const label = `Agent ${agents.length + 1}`;
 
   // Create agent record
   const agentId = nanoid(12);
-  db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)')
-    .run(agentId, task.id, windowIndex, label);
+  db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
+    agentId,
+    task.id,
+    windowIndex,
+    label,
+  );
 
   // Create new tmux window
   await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
 
   // Launch claude
-  await execFile('tmux', ['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'claude', 'Enter']);
+  await execFile('tmux', [
+    'send-keys',
+    '-t',
+    `${task.tmux_session}:${windowIndex}`,
+    'claude',
+    'Enter',
+  ]);
 
   // Dispatch prompt if provided
   if (prompt) {
@@ -124,7 +143,14 @@ export async function stopTask(task: Task): Promise<void> {
 
   // Remove worktree
   if (task.worktree) {
-    await execFile('git', ['-C', task.repo_path, 'worktree', 'remove', task.worktree, '--force']).catch(() => {});
+    await execFile('git', [
+      '-C',
+      task.repo_path,
+      'worktree',
+      'remove',
+      task.worktree,
+      '--force',
+    ]).catch(() => {});
   }
 
   // Delete branch
@@ -137,13 +163,19 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
   const db = getDb();
 
   // Kill the specific tmux window
-  await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(() => {});
+  await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
+    () => {},
+  );
 
   // Mark agent as stopped
   db.prepare('UPDATE agents SET status = ? WHERE id = ?').run('stopped', agent.id);
 }
 
-export async function dispatchToWindow(session: string, windowIndex: number, text: string): Promise<void> {
+export async function dispatchToWindow(
+  session: string,
+  windowIndex: number,
+  text: string,
+): Promise<void> {
   const target = `${session}:${windowIndex}`;
 
   // tmux load-buffer reads from stdin

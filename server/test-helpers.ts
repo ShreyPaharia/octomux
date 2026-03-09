@@ -71,11 +71,21 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
 
   db.prepare(
     `INSERT INTO tasks (id, title, description, repo_path, status, branch, worktree, tmux_session, pr_url, pr_number, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    task.id, task.title, task.description, task.repo_path, task.status,
-    task.branch, task.worktree, task.tmux_session, task.pr_url, task.pr_number,
-    task.error, task.created_at, task.updated_at,
+    task.id,
+    task.title,
+    task.description,
+    task.repo_path,
+    task.status,
+    task.branch,
+    task.worktree,
+    task.tmux_session,
+    task.pr_url,
+    task.pr_number,
+    task.error,
+    task.created_at,
+    task.updated_at,
   );
 
   return task;
@@ -88,7 +98,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO agents (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)',
   ).run(agent.id, agent.task_id, agent.window_index, agent.label, agent.status);
 
   return agent;
@@ -130,10 +140,7 @@ export function findExecCall(
 /**
  * Count matching calls in the mocked execFile calls.
  */
-export function countExecCalls(
-  mock: ReturnType<typeof vi.fn>,
-  match: ShellCallMatch,
-): number {
+export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallMatch): number {
   return mock.mock.calls.filter((c: any[]) => {
     if (c[0] !== match.cmd) return false;
     const args = c[1] as string[];
@@ -145,11 +152,26 @@ export function countExecCalls(
 // ─── Table-Driven Helpers ────────────────────────────────────────────────────
 
 export const TASKS_TABLE_COLUMNS = [
-  'id', 'title', 'description', 'repo_path', 'status',
-  'branch', 'worktree', 'tmux_session', 'pr_url', 'pr_number',
-  'error', 'created_at', 'updated_at',
+  'id',
+  'title',
+  'description',
+  'repo_path',
+  'status',
+  'branch',
+  'worktree',
+  'tmux_session',
+  'pr_url',
+  'pr_number',
+  'error',
+  'created_at',
+  'updated_at',
 ];
 
 export const AGENTS_TABLE_COLUMNS = [
-  'id', 'task_id', 'window_index', 'label', 'status', 'created_at',
+  'id',
+  'task_id',
+  'window_index',
+  'label',
+  'status',
+  'created_at',
 ];

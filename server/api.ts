@@ -2,7 +2,13 @@ import type { Express, Request, Response } from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { startTask, stopTask, addAgent, stopAgent } from './task-runner.js';
-import type { CreateTaskRequest, UpdateTaskRequest, AddAgentRequest, Task, Agent } from './types.js';
+import type {
+  CreateTaskRequest,
+  UpdateTaskRequest,
+  AddAgentRequest,
+  Task,
+  Agent,
+} from './types.js';
 
 export function setupRoutes(app: Express): void {
   // List all tasks with agents
@@ -22,12 +28,16 @@ export function setupRoutes(app: Express): void {
   // Get single task with agents
   app.get('/api/tasks/:id', (req: Request, res: Response) => {
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
     if (!task) {
       res.status(404).json({ error: 'Task not found' });
       return;
     }
-    task.agents = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index').all(task.id) as Agent[];
+    task.agents = db
+      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+      .all(task.id) as Agent[];
     res.json(task);
   });
 
@@ -42,9 +52,12 @@ export function setupRoutes(app: Express): void {
 
     const db = getDb();
     const id = nanoid(12);
-    db.prepare(
-      'INSERT INTO tasks (id, title, description, repo_path) VALUES (?, ?, ?, ?)'
-    ).run(id, body.title, body.description, body.repo_path);
+    db.prepare('INSERT INTO tasks (id, title, description, repo_path) VALUES (?, ?, ?, ?)').run(
+      id,
+      body.title,
+      body.description,
+      body.repo_path,
+    );
 
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
     task.agents = [];
@@ -59,7 +72,9 @@ export function setupRoutes(app: Express): void {
   app.patch('/api/tasks/:id', async (req: Request, res: Response) => {
     const body = req.body as UpdateTaskRequest;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
 
     if (!task) {
       res.status(404).json({ error: 'Task not found' });
@@ -71,19 +86,25 @@ export function setupRoutes(app: Express): void {
     }
 
     if (body.status) {
-      db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`)
-        .run(body.status, task.id);
+      db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
+        body.status,
+        task.id,
+      );
     }
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
-    updated.agents = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index').all(task.id) as Agent[];
+    updated.agents = db
+      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+      .all(task.id) as Agent[];
     res.json(updated);
   });
 
   // Delete task
   app.delete('/api/tasks/:id', async (req: Request, res: Response) => {
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
 
     if (!task) {
       res.status(404).json({ error: 'Task not found' });
@@ -98,7 +119,9 @@ export function setupRoutes(app: Express): void {
   // Add agent to task
   app.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
 
     if (!task) {
       res.status(404).json({ error: 'Task not found' });
@@ -118,8 +141,11 @@ export function setupRoutes(app: Express): void {
   // Stop agent
   app.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Response) => {
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as Task | undefined;
-    const agent = db.prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+    const agent = db
+      .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
       .get(req.params.agentId, req.params.id) as Agent | undefined;
 
     if (!task || !agent) {

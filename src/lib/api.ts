@@ -1,4 +1,10 @@
-import type { Task, CreateTaskRequest, UpdateTaskRequest, AddAgentRequest, Agent } from '../../server/types';
+import type {
+  Task,
+  CreateTaskRequest,
+  UpdateTaskRequest,
+  AddAgentRequest,
+  Agent,
+} from '../../server/types';
 
 const BASE = '/api';
 
@@ -22,8 +28,7 @@ export const api = {
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (id: string, data: UpdateTaskRequest) =>
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteTask: (id: string) =>
-    request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
     request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
   stopAgent: (taskId: string, agentId: string) =>
