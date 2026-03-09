@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
+import { CreatePRDialog } from '@/components/CreatePRDialog';
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
 
@@ -11,7 +12,15 @@ export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { task, loading, error, refresh } = useTask(id!);
-  const [activeWindow, setActiveWindow] = useState(0);
+  const [activeWindow, setActiveWindow] = useState<number | null>(null);
+  const [prDialogOpen, setPrDialogOpen] = useState(false);
+
+  // Initialize activeWindow from first agent's window_index
+  useEffect(() => {
+    if (activeWindow === null && task?.agents?.length) {
+      setActiveWindow(task.agents[0].window_index);
+    }
+  }, [task, activeWindow]);
 
   const handleAddAgent = useCallback(
     async (prompt?: string) => {
@@ -74,7 +83,9 @@ export default function TaskDetail() {
 
   const agents = task.agents || [];
   const isRunning = task.status === 'running';
-  const hasTerminal = !!task.tmux_session && agents.length > 0;
+  const canCreatePR =
+    !!task.branch && !task.pr_url && (task.status === 'done' || task.status === 'running');
+  const hasTerminal = !!task.tmux_session && agents.length > 0 && activeWindow !== null;
 
   return (
     <div className="flex h-screen flex-col">
@@ -117,6 +128,11 @@ export default function TaskDetail() {
               PR #{task.pr_number}
             </a>
           )}
+          {canCreatePR && (
+            <Button variant="outline" size="sm" onClick={() => setPrDialogOpen(true)}>
+              Create PR
+            </Button>
+          )}
           {isRunning && (
             <>
               <Button variant="outline" size="sm" onClick={() => handleUpdateStatus('done')}>
@@ -153,7 +169,7 @@ export default function TaskDetail() {
             canAddAgent={isRunning}
           />
           <div className="min-h-0 flex-1 p-2">
-            <TerminalView taskId={task.id} windowIndex={activeWindow} />
+            <TerminalView taskId={task.id} windowIndex={activeWindow!} />
           </div>
         </div>
       ) : (
@@ -163,6 +179,13 @@ export default function TaskDetail() {
             : 'No terminal available'}
         </div>
       )}
+
+      <CreatePRDialog
+        taskId={task.id}
+        open={prDialogOpen}
+        onOpenChange={setPrDialogOpen}
+        onCreated={refresh}
+      />
     </div>
   );
 }
