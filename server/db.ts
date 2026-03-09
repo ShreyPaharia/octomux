@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     tmux_session TEXT,
     pr_url       TEXT,
     pr_number    INTEGER,
+    initial_prompt TEXT,
     error        TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -58,4 +59,11 @@ export function initDb(instance: Database.Database): void {
   instance.pragma('journal_mode = WAL');
   instance.pragma('foreign_keys = ON');
   instance.exec(SCHEMA);
+
+  // Migrations
+  const cols = instance.pragma('table_info(tasks)') as Array<{ name: string }>;
+  const colNames = cols.map((c) => c.name);
+  if (!colNames.includes('initial_prompt')) {
+    instance.exec('ALTER TABLE tasks ADD COLUMN initial_prompt TEXT');
+  }
 }

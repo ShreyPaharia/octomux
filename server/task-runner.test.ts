@@ -114,15 +114,24 @@ describe('startTask', () => {
   ];
 
   it.each(expectedShellCalls)('$name', async ({ cmd, argsInclude }) => {
-    insertTask(db);
-    await startTask({ ...DEFAULTS.task } as Task);
+    insertTask(db, { initial_prompt: 'Do the thing' });
+    await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
   it('uses tmux load-buffer via spawn for prompt dispatch', async () => {
+    insertTask(db, { initial_prompt: 'Do the thing' });
+    await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
+    expect(spawn).toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+  });
+
+  it('skips prompt dispatch when initial_prompt is null', async () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
-    expect(spawn).toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
+    ).toBeUndefined();
+    expect(spawn).not.toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
   });
 
   // ─── Settings copy ─────────────────────────────────────────────────────

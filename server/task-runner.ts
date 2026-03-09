@@ -94,11 +94,12 @@ export async function startTask(task: Task): Promise<void> {
     // 10. Wait for claude to initialize
     await sleep(CLAUDE_INIT_DELAY);
 
-    // 11. Dispatch initial prompt
-    const prompt = buildInitialPrompt(task);
-    await dispatchToWindow(session, windowIndex, prompt);
+    // 11. Dispatch initial prompt (if provided)
+    if (task.initial_prompt) {
+      await dispatchToWindow(session, windowIndex, task.initial_prompt);
+    }
 
-    // 11. Mark as running
+    // 12. Mark as running
     db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
       'running',
       id,
@@ -246,20 +247,4 @@ export async function dispatchToWindow(
 
   // Paste into the target window
   await execFile('tmux', ['paste-buffer', '-t', target]);
-}
-
-function buildInitialPrompt(task: Task): string {
-  return `You are working on an autonomous task. Read the codebase, understand the architecture, then implement the following:
-
-<task>
-${task.title}
-
-${task.description}
-</task>
-
-When done:
-1. Commit your changes with a descriptive conventional commit message
-2. Push: git push -u origin HEAD
-3. Create a PR: gh pr create --title "${task.title}" --body "<description of changes>" --base master
-4. Report the PR URL`;
 }

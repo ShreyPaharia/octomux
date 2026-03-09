@@ -8,6 +8,12 @@ import { execFile as execFileCb, spawn } from 'child_process';
 import { promisify } from 'util';
 import { startTask, completeTask, cancelTask, addAgent, stopAgent } from './task-runner.js';
 import { buildPRPrompt } from './pr-template.js';
+import {
+  isOrchestratorRunning,
+  startOrchestrator,
+  stopOrchestrator,
+  getOrchestratorSession,
+} from './orchestrator.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -133,12 +139,9 @@ export function setupRoutes(app: Express): void {
 
     const db = getDb();
     const id = nanoid(12);
-    db.prepare('INSERT INTO tasks (id, title, description, repo_path) VALUES (?, ?, ?, ?)').run(
-      id,
-      body.title,
-      body.description,
-      body.repo_path,
-    );
+    db.prepare(
+      'INSERT INTO tasks (id, title, description, repo_path, initial_prompt) VALUES (?, ?, ?, ?, ?)',
+    ).run(id, body.title, body.description, body.repo_path, body.initial_prompt ?? null);
 
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
     task.agents = [];
@@ -238,6 +241,24 @@ export function setupRoutes(app: Express): void {
 
     await stopAgent(task, agent);
     res.json({ success: true });
+  });
+
+  // ─── Orchestrator ──────────────────────────────────────────────────────────
+
+  app.get('/api/orchestrator/status', async (_req: Request, res: Response) => {
+    const running = await isOrchestratorRunning();
+    res.json({ running, session: getOrchestratorSession() });
+  });
+
+  app.post('/api/orchestrator/start', async (req: Request, res: Response) => {
+    const cwd = (req.body as { cwd?: string })?.cwd;
+    await startOrchestrator(cwd);
+    res.json({ running: true, session: getOrchestratorSession() });
+  });
+
+  app.post('/api/orchestrator/stop', async (_req: Request, res: Response) => {
+    await stopOrchestrator();
+    res.json({ running: false });
   });
 
   // Preview PR (generate title + body via Claude)
