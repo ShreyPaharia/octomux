@@ -5,11 +5,12 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 
 interface TerminalViewProps {
-  taskId: string;
-  windowIndex: number;
+  taskId?: string;
+  windowIndex?: number;
+  wsUrl?: string;
 }
 
-export function TerminalView({ taskId, windowIndex }: TerminalViewProps) {
+export function TerminalView({ taskId, windowIndex, wsUrl: wsUrlProp }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -52,7 +53,9 @@ export function TerminalView({ taskId, windowIndex }: TerminalViewProps) {
 
     // WebSocket connection
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}`;
+    const wsUrl = wsUrlProp
+      ? `${protocol}//${window.location.host}${wsUrlProp}`
+      : `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -82,7 +85,7 @@ export function TerminalView({ taskId, windowIndex }: TerminalViewProps) {
         ws.send(data);
       }
     });
-  }, [taskId, windowIndex]);
+  }, [taskId, windowIndex, wsUrlProp]);
 
   // Connect on mount and reconnect when taskId/windowIndex changes
   useEffect(() => {

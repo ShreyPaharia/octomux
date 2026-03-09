@@ -35,6 +35,8 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [repoPath, setRepoPath] = useState('');
+  const [initialPrompt, setInitialPrompt] = useState('');
+  const [showPrompt, setShowPrompt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,10 +96,13 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         title: title.trim(),
         description: description.trim(),
         repo_path: repoPath.trim(),
+        initial_prompt: initialPrompt.trim() || undefined,
       });
       setTitle('');
       setDescription('');
       setRepoPath('');
+      setInitialPrompt('');
+      setShowPrompt(false);
       setOpen(false);
       onCreated();
     } catch (err) {
@@ -202,6 +207,26 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* Initial Prompt (optional) */}
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors text-left"
+              onClick={() => setShowPrompt(!showPrompt)}
+            >
+              {showPrompt ? '- Hide initial prompt' : '+ Add initial prompt'}
+            </button>
+            {showPrompt && (
+              <Textarea
+                id="initial-prompt"
+                placeholder="Custom prompt to send to the agent on start..."
+                rows={4}
+                value={initialPrompt}
+                onChange={(e) => setInitialPrompt(e.target.value)}
+              />
             )}
           </div>
 

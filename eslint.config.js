@@ -21,6 +21,13 @@ export default tseslint.config(
       'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },
+  // CLI needs console.log
+  {
+    files: ['cli/src/**/*.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
   // Relax rules for test files
   {
     files: ['**/*.test.ts', '**/test-helpers.ts'],
@@ -34,6 +41,7 @@ export default tseslint.config(
     ignores: [
       'dist/',
       'dist-server/',
+      'cli/dist/',
       'node_modules/',
       'data/',
       'coverage/',
