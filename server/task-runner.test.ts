@@ -215,6 +215,18 @@ describe('addAgent', () => {
     expect(agent.label).toBe('Agent 3');
   });
 
+  it('reuses window index after agent is stopped', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2', status: 'stopped' });
+    insertAgent(db, { id: 'agent-03', window_index: 2, label: 'Agent 3', status: 'stopped' });
+
+    const agent = await addAgent(runningTask);
+
+    expect(agent.window_index).toBe(1);
+    expect(agent.label).toBe('Agent 2');
+  });
+
   // ─── Shell commands ─────────────────────────────────────────────────────
 
   const addAgentShellCalls = [
