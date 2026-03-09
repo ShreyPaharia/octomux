@@ -21,7 +21,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface BrowseResult {
+  current: string;
+  parent: string | null;
+  entries: Array<{ name: string; path: string; isGit: boolean }>;
+}
+
+export interface RecentRepo {
+  repo_path: string;
+  last_used: string;
+}
+
 export const api = {
+  browse: (path?: string) =>
+    request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  recentRepos: () => request<RecentRepo[]>('/recent-repos'),
   listTasks: () => request<Task[]>('/tasks'),
   getTask: (id: string) => request<Task>(`/tasks/${id}`),
   createTask: (data: CreateTaskRequest) =>
