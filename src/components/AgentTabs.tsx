@@ -31,50 +31,51 @@ export function AgentTabs({
 }: AgentTabsProps) {
   return (
     <div className="flex items-center gap-1 border-b border-border px-1 pb-1">
-      {agents.map((agent) => (
-        <div key={agent.id} className="group flex items-center">
-          <button
-            className={cn(
-              'rounded-t-md px-3 py-1.5 text-sm transition-colors',
-              agent.window_index === activeIndex
-                ? 'bg-accent text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-              agent.status === 'stopped' && 'opacity-50',
-            )}
-            onClick={() => onSelect(agent.window_index)}
-          >
-            {agent.label}
-            {agent.status === 'running' && (
-              <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
-            )}
-          </button>
-          {agent.status === 'running' && (
+      {agents
+        .filter((agent) => agent.status !== 'stopped')
+        .map((agent) => (
+          <div key={agent.id} className="group flex items-center">
             <button
-              className="ml-0.5 hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:inline-flex"
-              onClick={(e) => {
-                e.stopPropagation();
-                onStopAgent(agent.id);
-              }}
-              title="Stop agent"
+              className={cn(
+                'rounded-t-md px-3 py-1.5 text-sm transition-colors',
+                agent.window_index === activeIndex
+                  ? 'bg-accent text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              onClick={() => onSelect(agent.window_index)}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
-              </svg>
+              {agent.label}
+              {agent.status === 'running' && (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+              )}
             </button>
-          )}
-        </div>
-      ))}
+            {agent.status === 'running' && (
+              <button
+                className="ml-0.5 hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:inline-flex"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStopAgent(agent.id);
+                }}
+                title="Stop agent"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        ))}
       {canAddAgent && <AddAgentButton onAdd={onAddAgent} />}
     </div>
   );

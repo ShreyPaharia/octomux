@@ -113,11 +113,11 @@ export async function startTask(task: Task): Promise<void> {
 export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   const db = getDb();
 
-  // Determine label from existing agent count
-  const agents = db
-    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+  // Determine label from active (non-stopped) agent count
+  const activeAgents = db
+    .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
     .all(task.id) as Agent[];
-  const label = `Agent ${agents.length + 1}`;
+  const label = `Agent ${activeAgents.length + 1}`;
 
   // Create new tmux window
   await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
