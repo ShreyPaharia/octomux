@@ -3,11 +3,15 @@ import path from 'path';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
+import { setupTerminalWebSocket } from './terminal.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = createApp();
 const server = createServer(app);
 const PORT = process.env.PORT || 7777;
+
+// WebSocket for terminal streaming
+setupTerminalWebSocket(server);
 
 // Serve SPA in production
 if (process.env.NODE_ENV === 'production') {
