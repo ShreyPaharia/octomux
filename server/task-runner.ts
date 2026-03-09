@@ -10,6 +10,31 @@ const execFile = promisify(execFileCb);
 
 const CLAUDE_INIT_DELAY = process.env.NODE_ENV === 'test' ? 0 : 3000;
 
+/** Get the active window index of a tmux session. */
+async function getActiveWindowIndex(session: string): Promise<number> {
+  const { stdout } = await execFile('tmux', [
+    'display-message',
+    '-t',
+    session,
+    '-p',
+    '#{window_index}',
+  ]);
+  return parseInt(stdout.trim(), 10);
+}
+
+/** Get the index of the last window in a tmux session. */
+async function getLastWindowIndex(session: string): Promise<number> {
+  const { stdout } = await execFile('tmux', [
+    'list-windows',
+    '-t',
+    session,
+    '-F',
+    '#{window_index}',
+  ]);
+  const indices = stdout.trim().split('\n').map(Number);
+  return Math.max(...indices);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -51,24 +76,27 @@ export async function startTask(task: Task): Promise<void> {
     // 6. Create tmux session
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
 
-    // 7. Create first agent record
+    // 7. Query the actual window index (respects tmux base-index)
+    const windowIndex = await getActiveWindowIndex(session);
+
+    // 8. Create first agent record
     const agentId = nanoid(12);
     db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
       agentId,
       id,
-      0,
+      windowIndex,
       'Agent 1',
     );
 
-    // 8. Launch claude in window 0
-    await execFile('tmux', ['send-keys', '-t', `${session}:0`, 'claude', 'Enter']);
+    // 9. Launch claude in the window
+    await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, 'claude', 'Enter']);
 
-    // 9. Wait for claude to initialize
+    // 10. Wait for claude to initialize
     await sleep(CLAUDE_INIT_DELAY);
 
-    // 10. Dispatch initial prompt
+    // 11. Dispatch initial prompt
     const prompt = buildInitialPrompt(task);
-    await dispatchToWindow(session, 0, prompt);
+    await dispatchToWindow(session, windowIndex, prompt);
 
     // 11. Mark as running
     db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
@@ -85,13 +113,17 @@ export async function startTask(task: Task): Promise<void> {
 export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   const db = getDb();
 
-  // Determine next window index and label
+  // Determine label from existing agent count
   const agents = db
     .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
     .all(task.id) as Agent[];
-  const maxWindow = agents.reduce((max, a) => Math.max(max, a.window_index), -1);
-  const windowIndex = maxWindow + 1;
   const label = `Agent ${agents.length + 1}`;
+
+  // Create new tmux window
+  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
+
+  // Query the actual window index of the newly created window
+  const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
   // Create agent record
   const agentId = nanoid(12);
@@ -101,9 +133,6 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     windowIndex,
     label,
   );
-
-  // Create new tmux window
-  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
 
   // Launch claude
   await execFile('tmux', [
@@ -130,7 +159,7 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   };
 }
 
-export async function stopTask(task: Task): Promise<void> {
+export async function completeTask(task: Task): Promise<void> {
   const db = getDb();
 
   // Mark all agents as stopped
@@ -153,7 +182,33 @@ export async function stopTask(task: Task): Promise<void> {
     ]).catch(() => {});
   }
 
-  // Delete branch
+  // Keep the branch — the agent's work is preserved for PR creation
+}
+
+export async function cancelTask(task: Task): Promise<void> {
+  const db = getDb();
+
+  // Mark all agents as stopped
+  db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
+
+  // Kill tmux session
+  if (task.tmux_session) {
+    await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
+  }
+
+  // Remove worktree
+  if (task.worktree) {
+    await execFile('git', [
+      '-C',
+      task.repo_path,
+      'worktree',
+      'remove',
+      task.worktree,
+      '--force',
+    ]).catch(() => {});
+  }
+
+  // Delete branch — discard all work
   if (task.branch) {
     await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]).catch(() => {});
   }

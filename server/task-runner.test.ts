@@ -24,9 +24,20 @@ vi.mock('fs', async (importOriginal) => {
   return { ...mocked, default: mocked };
 });
 
+let nextWindowIndex = 0;
+
 vi.mock('child_process', () => ({
-  execFile: vi.fn((_cmd: string, _args: string[], cb: Function) => {
-    cb(null, { stdout: 'true', stderr: '' });
+  execFile: vi.fn((_cmd: string, args: string[], cb: Function) => {
+    if (args.includes('display-message')) {
+      cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+    } else if (args.includes('list-windows')) {
+      cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+    } else if (args.includes('new-window')) {
+      nextWindowIndex++;
+      cb(null, { stdout: '', stderr: '' });
+    } else {
+      cb(null, { stdout: 'true', stderr: '' });
+    }
   }),
   spawn: vi.fn(() => ({
     stdin: { write: vi.fn(), end: vi.fn() },
@@ -36,7 +47,7 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, stopTask, addAgent, stopAgent, dispatchToWindow } =
+const { startTask, completeTask, cancelTask, addAgent, stopAgent, dispatchToWindow } =
   await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -49,6 +60,7 @@ beforeEach(() => {
   db = createTestDb();
   vi.clearAllMocks();
   vi.mocked(fs.existsSync).mockReturnValue(true);
+  nextWindowIndex = 0;
 });
 
 afterEach(() => {
@@ -96,6 +108,7 @@ describe('startTask', () => {
     { name: 'validates git repo', cmd: 'git', argsInclude: ['rev-parse', '--is-inside-work-tree'] },
     { name: 'creates worktree', cmd: 'git', argsInclude: ['worktree', 'add'] },
     { name: 'creates tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
+    { name: 'queries window index', cmd: 'tmux', argsInclude: ['display-message'] },
     { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'claude'] },
     { name: 'dispatches prompt', cmd: 'tmux', argsInclude: ['paste-buffer'] },
   ];
@@ -174,29 +187,31 @@ describe('addAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     const agent = await addAgent(runningTask);
 
-    expect(agent.window_index).toBe(0);
+    // Window index comes from tmux list-windows after new-window
+    expect(agent.window_index).toBe(1);
     expect(agent.label).toBe('Agent 1');
     expect(agent.status).toBe('running');
   });
 
-  it('creates second agent with incremented window index', async () => {
+  it('creates second agent with correct label', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
     const agent = await addAgent(runningTask);
 
+    // Window index comes from tmux, label increments based on DB count
     expect(agent.window_index).toBe(1);
     expect(agent.label).toBe('Agent 2');
   });
 
-  it('creates third agent after two exist', async () => {
+  it('creates third agent with correct label', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
     insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
     const agent = await addAgent(runningTask);
 
-    expect(agent.window_index).toBe(2);
+    expect(agent.window_index).toBe(1);
     expect(agent.label).toBe('Agent 3');
   });
 
@@ -204,6 +219,7 @@ describe('addAgent', () => {
 
   const addAgentShellCalls = [
     { name: 'creates tmux window', cmd: 'tmux', argsInclude: ['new-window'] },
+    { name: 'queries window index', cmd: 'tmux', argsInclude: ['list-windows'] },
     { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'claude'] },
   ];
 
@@ -239,15 +255,79 @@ describe('addAgent', () => {
   });
 });
 
-// ─── stopTask ─────────────────────────────────────────────────────────────────
+// ─── completeTask ─────────────────────────────────────────────────────────────
 
-describe('stopTask', () => {
+describe('completeTask', () => {
   it('marks all agents as stopped', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
     insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
-    await stopTask({ ...DEFAULTS.runningTask } as Task);
+    await completeTask({ ...DEFAULTS.runningTask } as Task);
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents).toHaveLength(2);
+    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
+  });
+
+  // ─── Shell cleanup commands (table-driven) ─────────────────────────────
+
+  const cleanupCalls = [
+    { name: 'kills tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
+    { name: 'removes worktree', cmd: 'git', argsInclude: ['worktree', 'remove'] },
+  ];
+
+  it.each(cleanupCalls)('$name', async ({ cmd, argsInclude }) => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await completeTask({ ...DEFAULTS.runningTask } as Task);
+    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
+  });
+
+  it('does NOT delete the branch', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await completeTask({ ...DEFAULTS.runningTask } as Task);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
+    ).toBeUndefined();
+  });
+
+  // ─── Null field handling (table-driven) ─────────────────────────────────
+
+  const nullFieldCases = [
+    {
+      name: 'skips tmux kill when tmux_session is null',
+      overrides: { tmux_session: null },
+      shouldNotCall: { cmd: 'tmux', argsInclude: ['kill-session'] },
+    },
+    {
+      name: 'skips worktree remove when worktree is null',
+      overrides: { worktree: null },
+      shouldNotCall: { cmd: 'git', argsInclude: ['worktree', 'remove'] },
+    },
+  ];
+
+  it.each(nullFieldCases)('$name', async ({ overrides, shouldNotCall }) => {
+    const task = { ...DEFAULTS.runningTask, ...overrides } as Task;
+    insertTask(db, task);
+    await completeTask(task);
+    expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
+  });
+
+  it('handles task with no agents gracefully', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await expect(completeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+  });
+});
+
+// ─── cancelTask ──────────────────────────────────────────────────────────────
+
+describe('cancelTask', () => {
+  it('marks all agents as stopped', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
+
+    await cancelTask({ ...DEFAULTS.runningTask } as Task);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents).toHaveLength(2);
@@ -264,7 +344,7 @@ describe('stopTask', () => {
 
   it.each(cleanupCalls)('$name', async ({ cmd, argsInclude }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await stopTask({ ...DEFAULTS.runningTask } as Task);
+    await cancelTask({ ...DEFAULTS.runningTask } as Task);
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
@@ -291,13 +371,13 @@ describe('stopTask', () => {
   it.each(nullFieldCases)('$name', async ({ overrides, shouldNotCall }) => {
     const task = { ...DEFAULTS.runningTask, ...overrides } as Task;
     insertTask(db, task);
-    await stopTask(task);
+    await cancelTask(task);
     expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
   });
 
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(stopTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+    await expect(cancelTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
   });
 });
 

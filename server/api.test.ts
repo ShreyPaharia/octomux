@@ -8,7 +8,8 @@ import type { Task } from './types.js';
 
 vi.mock('./task-runner.js', () => ({
   startTask: vi.fn(),
-  stopTask: vi.fn(),
+  completeTask: vi.fn(),
+  cancelTask: vi.fn(),
   addAgent: vi.fn(async (_task: any, _prompt?: string) => ({
     id: 'new-agent-id',
     task_id: _task.id,
@@ -20,8 +21,17 @@ vi.mock('./task-runner.js', () => ({
   stopAgent: vi.fn(),
 }));
 
+vi.mock('child_process', () => ({
+  execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
+    const cb = _rest.find((a: any) => typeof a === 'function');
+    if (cb) cb(null, { stdout: '', stderr: '' });
+    return undefined;
+  }),
+}));
+
 const { createApp } = await import('./app.js');
-const { startTask, stopTask, addAgent, stopAgent } = await import('./task-runner.js');
+const { startTask, completeTask, cancelTask, addAgent, stopAgent } =
+  await import('./task-runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -194,25 +204,29 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
   });
 
-  // ─── stopTask trigger (table-driven) ───────────────────────────────────
+  // ─── completeTask / cancelTask trigger ──────────────────────────────────
 
-  const stopTriggerCases = [
-    { status: 'done', shouldStop: true },
-    { status: 'cancelled', shouldStop: true },
-  ];
-
-  it.each(stopTriggerCases)('calls stopTask when status=$status', async ({ status }) => {
+  it('calls completeTask when status=done', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status });
-    expect(stopTask).toHaveBeenCalledOnce();
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'done' });
+    expect(completeTask).toHaveBeenCalledOnce();
+    expect(cancelTask).not.toHaveBeenCalled();
   });
 
-  it('does not call stopTask for non-terminal status changes', async () => {
+  it('calls cancelTask when status=cancelled', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'cancelled' });
+    expect(cancelTask).toHaveBeenCalledOnce();
+    expect(completeTask).not.toHaveBeenCalled();
+  });
+
+  it('does not call completeTask or cancelTask for non-terminal status changes', async () => {
     insertTask(db);
     await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ status: 'running' } as any);
-    expect(stopTask).not.toHaveBeenCalled();
+    expect(completeTask).not.toHaveBeenCalled();
+    expect(cancelTask).not.toHaveBeenCalled();
   });
 
   it('handles PATCH with empty body gracefully', async () => {
@@ -220,7 +234,8 @@ describe('PATCH /api/tasks/:id', () => {
     const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('running'); // unchanged
-    expect(stopTask).not.toHaveBeenCalled();
+    expect(completeTask).not.toHaveBeenCalled();
+    expect(cancelTask).not.toHaveBeenCalled();
   });
 });
 
@@ -239,10 +254,10 @@ describe('DELETE /api/tasks/:id', () => {
     expect(getTask(db, DEFAULTS.task.id)).toBeUndefined();
   });
 
-  it('calls stopTask before deleting', async () => {
+  it('calls cancelTask before deleting', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
-    expect(stopTask).toHaveBeenCalledOnce();
+    expect(cancelTask).toHaveBeenCalledOnce();
   });
 
   it('cascades delete to agents', async () => {
@@ -336,5 +351,63 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(stopAgent).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── POST /api/tasks/:id/pr ─────────────────────────────────────────────────
+
+describe('POST /api/tasks/:id/pr', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app)
+      .post('/api/tasks/nonexistent/pr')
+      .send({ base: 'main', title: 'T', body: 'B' });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when task has no branch', async () => {
+    insertTask(db);
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
+      .send({ base: 'main', title: 'T', body: 'B' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('no branch');
+  });
+
+  it('returns 400 when task already has a PR', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_url: 'https://github.com/org/repo/pull/1',
+      pr_number: 1,
+    });
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
+      .send({ base: 'main', title: 'T', body: 'B' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('already has a PR');
+  });
+
+  it('returns 400 when missing required fields', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/pr`).send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('required');
+  });
+});
+
+// ─── POST /api/tasks/:id/pr/preview ─────────────────────────────────────────
+
+describe('POST /api/tasks/:id/pr/preview', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).post('/api/tasks/nonexistent/pr/preview').send({ base: 'main' });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when task has no branch', async () => {
+    insertTask(db);
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/pr/preview`)
+      .send({ base: 'main' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('no branch');
   });
 });

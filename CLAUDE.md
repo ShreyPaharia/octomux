@@ -15,8 +15,10 @@ work in live embedded terminals (xterm.js), get PRs. Localhost tool, not deploye
 ## Commands
 
 - `bun run dev` — starts Express (7777) + Vite concurrently
-- `bun run test` — vitest run (server tests only)
+- `bun run test` — vitest run (unit + component tests)
 - `bun run test:watch` — vitest in watch mode
+- `bun run test:e2e` — Playwright E2E tests (auto-starts servers)
+- `bun run test:e2e:ui` — Playwright interactive UI mode
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
 - `bun run typecheck` — tsc --noEmit
@@ -50,6 +52,11 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
 - `CLAUDE_INIT_DELAY` is 0 in test env to avoid 3s sleeps
+- E2E: Playwright tests in `e2e/`, config in `playwright.config.ts`
+- E2E: `webServer` config auto-starts Express + Vite, reuses running servers in dev
+- E2E: helpers in `e2e/helpers.ts` — `createTaskViaAPI`, `waitForStatus`, `deleteAllTasks`, `fillCreateDialog`
+- E2E: base-ui Dialog dismisses on Playwright `fill()` — use `click({force:true})` + `pressSequentially` instead
+- E2E: terminal text leaks into locators — use `getByRole` or `.filter()` to avoid strict mode violations
 
 ## Code Style
 
@@ -65,3 +72,9 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - `fs` mock for task-runner needs `default: mocked` in vi.mock return (default import)
 - Express 5 uses `req.params` differently — use `as Record<string, string>` if needed
 - better-sqlite3 is synchronous — no await needed for DB calls
+- node-pty `spawn-helper` may lack +x after install — postinstall script fixes this
+- tmux `base-index` varies per user — always query actual window index via `display-message`/`list-windows`, never hardcode 0
+- shadcn/ui uses `@base-ui/react` — use `render={<Button />}` prop, not `asChild`
+- vitest projects: put `globals: true` in each project config individually, not just top-level
+- Frontend test helpers in `src/test-helpers.tsx`: `makeTask()`, `renderWithRouter()`, `mockApi()`
+- poller tests: use `findCallback(...args)` to find callback in promisified execFile mocks

@@ -4,7 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getDb } from './db.js';
-import { startTask, stopTask, addAgent, stopAgent } from './task-runner.js';
+import { execFile as execFileCb, spawn } from 'child_process';
+import { promisify } from 'util';
+import { startTask, completeTask, cancelTask, addAgent, stopAgent } from './task-runner.js';
+import { buildPRPrompt } from './pr-template.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -12,6 +15,25 @@ import type {
   Task,
   Agent,
 } from './types.js';
+
+const execFile = promisify(execFileCb);
+
+/** Run claude CLI with prompt piped via stdin to avoid arg length issues. */
+function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('claude', ['-p'], { env });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => (stdout += d));
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(stderr || `claude exited with code ${code}`));
+    });
+    proc.stdin.write(prompt);
+    proc.stdin.end();
+  });
+}
 
 export function setupRoutes(app: Express): void {
   // Browse directories for folder picker
@@ -140,8 +162,10 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    if (body.status === 'done' || body.status === 'cancelled') {
-      await stopTask(task);
+    if (body.status === 'done') {
+      await completeTask(task);
+    } else if (body.status === 'cancelled') {
+      await cancelTask(task);
     }
 
     if (body.status) {
@@ -170,7 +194,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    await stopTask(task);
+    await cancelTask(task);
     db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
     res.status(204).send();
   });
@@ -214,5 +238,153 @@ export function setupRoutes(app: Express): void {
 
     await stopAgent(task, agent);
     res.json({ success: true });
+  });
+
+  // Preview PR (generate title + body via Claude)
+  app.post('/api/tasks/:id/pr/preview', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    if (!task.branch) {
+      res.status(400).json({ error: 'Task has no branch' });
+      return;
+    }
+
+    try {
+      // Detect base branch
+      const base =
+        req.body.base ||
+        (await execFile('git', [
+          '-C',
+          task.repo_path,
+          'symbolic-ref',
+          'refs/remotes/origin/HEAD',
+        ]).then(
+          ({ stdout }) => stdout.trim().replace('refs/remotes/origin/', ''),
+          () => 'main',
+        ));
+
+      // Push the branch (non-fatal — may already be pushed or hooks may block)
+      await execFile('git', ['-C', task.repo_path, 'push', '-u', 'origin', task.branch]).catch(
+        () => {},
+      );
+
+      // Gather context
+      const [logResult, diffResult] = await Promise.all([
+        execFile('git', ['-C', task.repo_path, 'log', `${base}...${task.branch}`, '--oneline']),
+        execFile('git', ['-C', task.repo_path, 'diff', `${base}...${task.branch}`, '--stat']),
+      ]);
+
+      if (!logResult.stdout.trim() && !diffResult.stdout.trim()) {
+        throw new Error(
+          `No commits found on branch ${task.branch} relative to ${base}. The agent may not have committed any changes.`,
+        );
+      }
+
+      const prompt = buildPRPrompt({
+        taskTitle: task.title,
+        taskDescription: task.description,
+        commitLog: logResult.stdout.trim(),
+        diffStats: diffResult.stdout.trim(),
+      });
+
+      // Call claude CLI with prompt piped via stdin
+      const cleanEnv = { ...process.env };
+      delete cleanEnv.CLAUDECODE;
+      const claudeOutput = await runClaude(prompt, cleanEnv);
+
+      // Parse JSON from claude output (may be wrapped in markdown or have extra text)
+      const jsonMatch = claudeOutput.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('Failed to parse Claude response as JSON');
+      }
+      const { title, body } = JSON.parse(jsonMatch[0]);
+
+      res.json({ title, body, base });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Create PR
+  app.post('/api/tasks/:id/pr', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    if (!task.branch) {
+      res.status(400).json({ error: 'Task has no branch' });
+      return;
+    }
+
+    if (task.pr_url) {
+      res.status(400).json({ error: 'Task already has a PR' });
+      return;
+    }
+
+    const { base, title, body } = req.body;
+    if (!base || !title || !body) {
+      res.status(400).json({ error: 'base, title, and body are required' });
+      return;
+    }
+
+    try {
+      // Push the branch (may already be pushed from preview)
+      await execFile('git', ['-C', task.repo_path, 'push', '-u', 'origin', task.branch]).catch(
+        () => {},
+      );
+
+      // Create PR via gh CLI
+      const { stdout } = await execFile(
+        'gh',
+        [
+          'pr',
+          'create',
+          '--repo',
+          task.repo_path,
+          '--head',
+          task.branch,
+          '--base',
+          base,
+          '--title',
+          title,
+          '--body',
+          body,
+        ],
+        { cwd: task.repo_path },
+      );
+
+      // Parse PR URL from gh output
+      const prUrl = stdout.trim();
+      const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+      const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : null;
+
+      // Update DB
+      db.prepare(
+        `UPDATE tasks SET pr_url = ?, pr_number = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run(prUrl, prNumber, task.id);
+
+      const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
+      updated.agents = db
+        .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+        .all(task.id) as Agent[];
+
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 }
