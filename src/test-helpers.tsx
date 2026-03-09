@@ -16,6 +16,7 @@ export const TASK_DEFAULTS: Task = {
   tmux_session: 'octomux-agent-test-task-01',
   pr_url: null,
   pr_number: null,
+  initial_prompt: null,
   error: null,
   created_at: '2026-01-01 00:00:00',
   updated_at: '2026-01-01 00:00:00',

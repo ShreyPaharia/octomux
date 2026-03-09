@@ -4,6 +4,7 @@ import type {
   UpdateTaskRequest,
   AddAgentRequest,
   Agent,
+  OrchestratorStatus,
 } from '../../server/types';
 
 const BASE = '/api';
@@ -57,4 +58,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  orchestratorStatus: () => request<OrchestratorStatus>('/orchestrator/status'),
+  orchestratorStart: () => request<OrchestratorStatus>('/orchestrator/start', { method: 'POST' }),
+  orchestratorStop: () => request<void>('/orchestrator/stop', { method: 'POST' }),
 };
