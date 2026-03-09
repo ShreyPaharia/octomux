@@ -4,6 +4,7 @@ import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
 import { setupTerminalWebSocket } from './terminal.js';
+import { startPolling } from './poller.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = createApp();
@@ -12,6 +13,9 @@ const PORT = process.env.PORT || 7777;
 
 // WebSocket for terminal streaming
 setupTerminalWebSocket(server);
+
+// Background status + PR polling
+startPolling();
 
 // Serve SPA in production
 if (process.env.NODE_ENV === 'production') {
