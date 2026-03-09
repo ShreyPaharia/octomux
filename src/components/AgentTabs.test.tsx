@@ -88,23 +88,23 @@ describe('AgentTabs', () => {
 
   // ─── Multiple agents with different statuses (table-driven) ───────────────
 
-  const agentStatusCases = [
-    { status: 'running' as const, hasOpacity: false },
-    { status: 'stopped' as const, hasOpacity: true },
-    { status: 'idle' as const, hasOpacity: false },
+  const visibleStatusCases = [
+    { status: 'running' as const },
+    { status: 'idle' as const },
   ];
 
-  it.each(agentStatusCases)(
-    'agent with status "$status" has opacity=$hasOpacity',
-    ({ status, hasOpacity }) => {
+  it.each(visibleStatusCases)(
+    'agent with status "$status" is visible',
+    ({ status }) => {
       const agents = [makeAgent({ status })];
       renderWithRouter(<AgentTabs {...defaultProps} agents={agents} />);
-      const tab = screen.getByText('Agent 1');
-      if (hasOpacity) {
-        expect(tab.className).toContain('opacity-50');
-      } else {
-        expect(tab.className).not.toContain('opacity-50');
-      }
+      expect(screen.getByText('Agent 1')).toBeInTheDocument();
     },
   );
+
+  it('hides stopped agents', () => {
+    const agents = [makeAgent({ status: 'stopped' })];
+    renderWithRouter(<AgentTabs {...defaultProps} agents={agents} />);
+    expect(screen.queryByText('Agent 1')).not.toBeInTheDocument();
+  });
 });
