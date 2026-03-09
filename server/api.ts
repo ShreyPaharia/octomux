@@ -1,5 +1,8 @@
 import type { Express, Request, Response } from 'express';
 import { nanoid } from 'nanoid';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { getDb } from './db.js';
 import { startTask, stopTask, addAgent, stopAgent } from './task-runner.js';
 import type {
@@ -11,6 +14,62 @@ import type {
 } from './types.js';
 
 export function setupRoutes(app: Express): void {
+  // Browse directories for folder picker
+  app.get('/api/browse', (req: Request, res: Response) => {
+    const dirPath = (req.query.path as string) || os.homedir();
+
+    try {
+      const stat = fs.statSync(dirPath);
+      if (!stat.isDirectory()) {
+        res.status(400).json({ error: 'Path is not a directory' });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: 'Path does not exist' });
+      return;
+    }
+
+    const entries: Array<{ name: string; path: string; isGit: boolean }> = [];
+    for (const name of fs.readdirSync(dirPath)) {
+      const fullPath = path.join(dirPath, name);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (!stat.isDirectory()) continue;
+        const isGit = fs.existsSync(path.join(fullPath, '.git'));
+        entries.push({ name, path: fullPath, isGit });
+      } catch {
+        // skip unreadable entries
+      }
+    }
+
+    // Sort: git repos first, then hidden dirs last, then alphabetical
+    entries.sort((a, b) => {
+      if (a.isGit !== b.isGit) return a.isGit ? -1 : 1;
+      const aHidden = a.name.startsWith('.');
+      const bHidden = b.name.startsWith('.');
+      if (aHidden !== bHidden) return aHidden ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const parent = path.dirname(dirPath);
+    res.json({
+      current: dirPath,
+      parent: parent !== dirPath ? parent : null,
+      entries,
+    });
+  });
+
+  // Recent repository paths from past tasks
+  app.get('/api/recent-repos', (_req: Request, res: Response) => {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT repo_path, MAX(created_at) as last_used FROM tasks GROUP BY repo_path ORDER BY last_used DESC LIMIT 10`,
+      )
+      .all() as Array<{ repo_path: string; last_used: string }>;
+    res.json(rows);
+  });
+
   // List all tasks with agents
   app.get('/api/tasks', (_req: Request, res: Response) => {
     const db = getDb();
