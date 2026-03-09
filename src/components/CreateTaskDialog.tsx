@@ -132,7 +132,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         </svg>
         New Task
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Create Task</DialogTitle>
         </DialogHeader>
@@ -214,7 +214,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
           <div className="flex flex-col gap-2">
             <button
               type="button"
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors text-left"
+              className="w-fit cursor-pointer border-0 bg-transparent p-0 text-xs text-muted-foreground outline-0 ring-0 hover:text-foreground transition-colors text-left focus:outline-0 focus:ring-0 focus-visible:outline-0 focus-visible:ring-0"
               onClick={() => setShowPrompt(!showPrompt)}
             >
               {showPrompt ? '- Hide initial prompt' : '+ Add initial prompt'}
