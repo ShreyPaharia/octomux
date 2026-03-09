@@ -1,0 +1,178 @@
+import { execFile as execFileCb, spawn } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import fs from 'fs';
+import { nanoid } from 'nanoid';
+import { getDb } from './db.js';
+import type { Task, Agent } from './types.js';
+
+const execFile = promisify(execFileCb);
+
+const CLAUDE_INIT_DELAY = process.env.NODE_ENV === 'test' ? 0 : 3000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function startTask(task: Task): Promise<void> {
+  const db = getDb();
+  const id = task.id;
+  const session = `octomux-agent-${id}`;
+  const branch = `agents/${id}`;
+  const worktreePath = path.join(task.repo_path, '.worktrees', id);
+
+  try {
+    // 1. Update status to setting_up
+    db.prepare(`UPDATE tasks SET status = ?, tmux_session = ?, branch = ?, worktree = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run('setting_up', session, branch, worktreePath, id);
+
+    // 2. Validate repo path
+    if (!fs.existsSync(task.repo_path)) {
+      throw new Error(`Repository path does not exist: ${task.repo_path}`);
+    }
+    await execFile('git', ['-C', task.repo_path, 'rev-parse', '--is-inside-work-tree']);
+
+    // 3. Ensure .worktrees directory exists
+    const worktreeDir = path.join(task.repo_path, '.worktrees');
+    fs.mkdirSync(worktreeDir, { recursive: true });
+
+    // 4. Create worktree
+    await execFile('git', ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch]);
+
+    // 5. Copy .claude/settings.local.json if it exists
+    const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
+    const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
+    if (fs.existsSync(settingsSrc)) {
+      fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
+      fs.copyFileSync(settingsSrc, settingsDst);
+    }
+
+    // 6. Create tmux session
+    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
+
+    // 7. Create first agent record
+    const agentId = nanoid(12);
+    db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)')
+      .run(agentId, id, 0, 'Agent 1');
+
+    // 8. Launch claude in window 0
+    await execFile('tmux', ['send-keys', '-t', `${session}:0`, 'claude', 'Enter']);
+
+    // 9. Wait for claude to initialize
+    await sleep(CLAUDE_INIT_DELAY);
+
+    // 10. Dispatch initial prompt
+    const prompt = buildInitialPrompt(task);
+    await dispatchToWindow(session, 0, prompt);
+
+    // 11. Mark as running
+    db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run('running', id);
+
+  } catch (err) {
+    db.prepare(`UPDATE tasks SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run('error', (err as Error).message, id);
+  }
+}
+
+export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
+  const db = getDb();
+
+  // Determine next window index and label
+  const agents = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index').all(task.id) as Agent[];
+  const maxWindow = agents.reduce((max, a) => Math.max(max, a.window_index), -1);
+  const windowIndex = maxWindow + 1;
+  const label = `Agent ${agents.length + 1}`;
+
+  // Create agent record
+  const agentId = nanoid(12);
+  db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)')
+    .run(agentId, task.id, windowIndex, label);
+
+  // Create new tmux window
+  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
+
+  // Launch claude
+  await execFile('tmux', ['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'claude', 'Enter']);
+
+  // Dispatch prompt if provided
+  if (prompt) {
+    await sleep(CLAUDE_INIT_DELAY);
+    await dispatchToWindow(task.tmux_session!, windowIndex, prompt);
+  }
+
+  return {
+    id: agentId,
+    task_id: task.id,
+    window_index: windowIndex,
+    label,
+    status: 'running',
+    created_at: new Date().toISOString(),
+  };
+}
+
+export async function stopTask(task: Task): Promise<void> {
+  const db = getDb();
+
+  // Mark all agents as stopped
+  db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
+
+  // Kill tmux session
+  if (task.tmux_session) {
+    await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
+  }
+
+  // Remove worktree
+  if (task.worktree) {
+    await execFile('git', ['-C', task.repo_path, 'worktree', 'remove', task.worktree, '--force']).catch(() => {});
+  }
+
+  // Delete branch
+  if (task.branch) {
+    await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]).catch(() => {});
+  }
+}
+
+export async function stopAgent(task: Task, agent: Agent): Promise<void> {
+  const db = getDb();
+
+  // Kill the specific tmux window
+  await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(() => {});
+
+  // Mark agent as stopped
+  db.prepare('UPDATE agents SET status = ? WHERE id = ?').run('stopped', agent.id);
+}
+
+export async function dispatchToWindow(session: string, windowIndex: number, text: string): Promise<void> {
+  const target = `${session}:${windowIndex}`;
+
+  // tmux load-buffer reads from stdin
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn('tmux', ['load-buffer', '-']);
+    proc.stdin.write(text + '\n');
+    proc.stdin.end();
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`tmux load-buffer exited with code ${code}`));
+    });
+  });
+
+  // Paste into the target window
+  await execFile('tmux', ['paste-buffer', '-t', target]);
+}
+
+function buildInitialPrompt(task: Task): string {
+  return `You are working on an autonomous task. Read the codebase, understand the architecture, then implement the following:
+
+<task>
+${task.title}
+
+${task.description}
+</task>
+
+When done:
+1. Commit your changes with a descriptive conventional commit message
+2. Push: git push -u origin HEAD
+3. Create a PR: gh pr create --title "${task.title}" --body "<description of changes>" --base master
+4. Report the PR URL`;
+}

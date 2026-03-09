@@ -1,0 +1,341 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import request from 'supertest';
+import Database from 'better-sqlite3';
+import {
+  createTestDb, insertTask, insertAgent, getTask,
+  DEFAULTS,
+} from './test-helpers.js';
+import type { Task } from './types.js';
+
+// ─── Mocks ────────────────────────────────────────────────────────────────────
+
+vi.mock('./task-runner.js', () => ({
+  startTask: vi.fn(),
+  stopTask: vi.fn(),
+  addAgent: vi.fn(async (_task: any, _prompt?: string) => ({
+    id: 'new-agent-id',
+    task_id: _task.id,
+    window_index: 1,
+    label: 'Agent 2',
+    status: 'running',
+    created_at: '2026-01-01T00:00:00.000Z',
+  })),
+  stopAgent: vi.fn(),
+}));
+
+const { createApp } = await import('./app.js');
+const { startTask, stopTask, addAgent, stopAgent } = await import('./task-runner.js');
+
+// ─── Setup ────────────────────────────────────────────────────────────────────
+
+let db: Database.Database;
+let app: ReturnType<typeof createApp>;
+
+beforeEach(() => {
+  db = createTestDb();
+  app = createApp();
+  vi.clearAllMocks();
+});
+
+afterEach(() => { db.close(); });
+
+// ─── GET /api/tasks ───────────────────────────────────────────────────────────
+
+describe('GET /api/tasks', () => {
+  it('returns empty array when no tasks exist', async () => {
+    const res = await request(app).get('/api/tasks');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('returns tasks with nested agents', async () => {
+    insertTask(db);
+    insertAgent(db);
+
+    const res = await request(app).get('/api/tasks');
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].id).toBe(DEFAULTS.task.id);
+    expect(res.body[0].agents).toHaveLength(1);
+    expect(res.body[0].agents[0].label).toBe(DEFAULTS.agent.label);
+  });
+
+  it('orders by created_at DESC', async () => {
+    insertTask(db, { id: 'old', created_at: '2026-01-01 00:00:00' });
+    insertTask(db, { id: 'new', created_at: '2026-02-01 00:00:00' });
+
+    const res = await request(app).get('/api/tasks');
+    expect(res.body.map((t: Task) => t.id)).toEqual(['new', 'old']);
+  });
+
+  it('returns empty agents array for tasks without agents', async () => {
+    insertTask(db);
+    const res = await request(app).get('/api/tasks');
+    expect(res.body[0].agents).toEqual([]);
+  });
+});
+
+// ─── GET /api/tasks/:id ──────────────────────────────────────────────────────
+
+describe('GET /api/tasks/:id', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).get('/api/tasks/nonexistent');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Task not found');
+  });
+
+  it('returns task with agents', async () => {
+    insertTask(db);
+    insertAgent(db);
+
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe(DEFAULTS.task.title);
+    expect(res.body.agents).toHaveLength(1);
+  });
+
+  it('returns all task fields', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, pr_url: 'https://github.com/org/repo/pull/42', pr_number: 42 });
+
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
+    expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
+    expect(res.body.pr_number).toBe(42);
+    expect(res.body.branch).toBe(DEFAULTS.runningTask.branch);
+    expect(res.body.tmux_session).toBe(DEFAULTS.runningTask.tmux_session);
+  });
+});
+
+// ─── POST /api/tasks ─────────────────────────────────────────────────────────
+
+describe('POST /api/tasks', () => {
+  const validPayload = {
+    title: DEFAULTS.task.title,
+    description: DEFAULTS.task.description,
+    repo_path: DEFAULTS.task.repo_path,
+  };
+
+  it('creates task and returns 201', async () => {
+    const res = await request(app).post('/api/tasks').send(validPayload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.title).toBe(validPayload.title);
+    expect(res.body.description).toBe(validPayload.description);
+    expect(res.body.repo_path).toBe(validPayload.repo_path);
+    expect(res.body.status).toBe('created');
+    expect(res.body.agents).toEqual([]);
+  });
+
+  it('generates 12-char nanoid', async () => {
+    const res = await request(app).post('/api/tasks').send(validPayload);
+    expect(res.body.id).toHaveLength(12);
+  });
+
+  it('persists to database', async () => {
+    await request(app).post('/api/tasks').send(validPayload);
+    const tasks = db.prepare('SELECT * FROM tasks').all() as Task[];
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].title).toBe(validPayload.title);
+  });
+
+  it('calls startTask with created task', async () => {
+    const res = await request(app).post('/api/tasks').send(validPayload);
+    expect(startTask).toHaveBeenCalledOnce();
+    expect(vi.mocked(startTask).mock.calls[0][0].id).toBe(res.body.id);
+  });
+
+  // ─── Validation (table-driven) ─────────────────────────────────────────
+
+  const missingFieldCases = [
+    { name: 'title missing', body: { description: 'D', repo_path: '/tmp' } },
+    { name: 'description missing', body: { title: 'T', repo_path: '/tmp' } },
+    { name: 'repo_path missing', body: { title: 'T', description: 'D' } },
+    { name: 'empty body', body: {} },
+    { name: 'title empty string', body: { title: '', description: 'D', repo_path: '/tmp' } },
+  ];
+
+  it.each(missingFieldCases)('returns 400 when $name', async ({ body }) => {
+    const res = await request(app).post('/api/tasks').send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('required');
+  });
+
+  it('does not call startTask on validation failure', async () => {
+    await request(app).post('/api/tasks').send({});
+    expect(startTask).not.toHaveBeenCalled();
+  });
+});
+
+// ─── PATCH /api/tasks/:id ────────────────────────────────────────────────────
+
+describe('PATCH /api/tasks/:id', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).patch('/api/tasks/nonexistent').send({ status: 'done' });
+    expect(res.status).toBe(404);
+  });
+
+  it('updates status and returns updated task with agents', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'done' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('done');
+    expect(res.body.agents).toHaveLength(1);
+  });
+
+  it('updates updated_at timestamp', async () => {
+    insertTask(db, { updated_at: '2020-01-01 00:00:00' });
+
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'done' });
+
+    expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
+  });
+
+  // ─── stopTask trigger (table-driven) ───────────────────────────────────
+
+  const stopTriggerCases = [
+    { status: 'done', shouldStop: true },
+    { status: 'cancelled', shouldStop: true },
+  ];
+
+  it.each(stopTriggerCases)(
+    'calls stopTask when status=$status',
+    async ({ status }) => {
+      insertTask(db, { ...DEFAULTS.runningTask });
+      await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status });
+      expect(stopTask).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('does not call stopTask for non-terminal status changes', async () => {
+    insertTask(db);
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'running' } as any);
+    expect(stopTask).not.toHaveBeenCalled();
+  });
+
+  it('handles PATCH with empty body gracefully', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('running'); // unchanged
+    expect(stopTask).not.toHaveBeenCalled();
+  });
+});
+
+// ─── DELETE /api/tasks/:id ───────────────────────────────────────────────────
+
+describe('DELETE /api/tasks/:id', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).delete('/api/tasks/nonexistent');
+    expect(res.status).toBe(404);
+  });
+
+  it('deletes task and returns 204', async () => {
+    insertTask(db);
+    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
+    expect(res.status).toBe(204);
+    expect(getTask(db, DEFAULTS.task.id)).toBeUndefined();
+  });
+
+  it('calls stopTask before deleting', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
+    expect(stopTask).toHaveBeenCalledOnce();
+  });
+
+  it('cascades delete to agents', async () => {
+    insertTask(db);
+    insertAgent(db);
+    await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
+    expect(db.prepare('SELECT * FROM agents WHERE task_id = ?').all(DEFAULTS.task.id)).toHaveLength(0);
+  });
+});
+
+// ─── POST /api/tasks/:id/agents ──────────────────────────────────────────────
+
+describe('POST /api/tasks/:id/agents', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).post('/api/tasks/nonexistent/agents').send({});
+    expect(res.status).toBe(404);
+  });
+
+  // ─── Status gating (table-driven) ──────────────────────────────────────
+
+  const nonRunningStatuses = ['created', 'setting_up', 'done', 'cancelled', 'error'];
+
+  it.each(nonRunningStatuses)(
+    'returns 400 when task status is %s',
+    async (status) => {
+      insertTask(db, { status: status as any });
+      const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('running');
+    },
+  );
+
+  it('creates agent for running task', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents`)
+      .send({ prompt: 'Write tests' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.label).toBe('Agent 2');
+    expect(addAgent).toHaveBeenCalledOnce();
+  });
+
+  it('passes prompt to addAgent', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents`)
+      .send({ prompt: 'Write comprehensive tests' });
+
+    expect(vi.mocked(addAgent).mock.calls[0][1]).toBe('Write comprehensive tests');
+  });
+
+  it('works without prompt', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
+    expect(res.status).toBe(201);
+    expect(vi.mocked(addAgent).mock.calls[0][1]).toBeUndefined();
+  });
+});
+
+// ─── DELETE /api/tasks/:id/agents/:agentId ───────────────────────────────────
+
+describe('DELETE /api/tasks/:id/agents/:agentId', () => {
+  it('returns 404 for nonexistent agent', async () => {
+    insertTask(db);
+    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/agents/nonexistent`);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when task does not exist', async () => {
+    const res = await request(app).delete('/api/tasks/nonexistent/agents/agent1');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when agent belongs to different task', async () => {
+    insertTask(db, { id: 'task-a' });
+    insertTask(db, { id: 'task-b' });
+    insertAgent(db, { id: 'agent-on-b', task_id: 'task-b' });
+
+    const res = await request(app).delete('/api/tasks/task-a/agents/agent-on-b');
+    expect(res.status).toBe(404);
+  });
+
+  it('stops agent and returns success', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(stopAgent).toHaveBeenCalledOnce();
+  });
+});

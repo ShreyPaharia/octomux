@@ -1,0 +1,61 @@
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_DIR = path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DB_DIR, 'tasks.db');
+
+export const SCHEMA = `
+CREATE TABLE IF NOT EXISTS tasks (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    repo_path    TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'created',
+    branch       TEXT,
+    worktree     TEXT,
+    tmux_session TEXT,
+    pr_url       TEXT,
+    pr_number    INTEGER,
+    error        TEXT,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS agents (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    window_index INTEGER NOT NULL,
+    label        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'running',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id);
+`;
+
+let db: Database.Database;
+
+export function getDb(): Database.Database {
+  if (!db) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+    db = new Database(DB_PATH);
+    initDb(db);
+  }
+  return db;
+}
+
+/** Replace the singleton db instance (for testing). */
+export function setDb(instance: Database.Database): void {
+  db = instance;
+}
+
+/** Initialize a database with schema and pragmas. */
+export function initDb(instance: Database.Database): void {
+  instance.pragma('journal_mode = WAL');
+  instance.pragma('foreign_keys = ON');
+  instance.exec(SCHEMA);
+}
