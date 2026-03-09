@@ -1,5 +1,5 @@
 import { render, type RenderOptions } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import type { Task, TaskStatus } from '../server/types';
 
@@ -38,8 +38,18 @@ export const TASK_STATUSES: TaskStatus[] = [
 
 export function renderWithRouter(
   ui: ReactElement,
-  { route = '/', ...options }: RenderOptions & { route?: string } = {},
+  { route = '/', path, ...options }: RenderOptions & { route?: string; path?: string } = {},
 ) {
+  if (path) {
+    return render(
+      <MemoryRouter initialEntries={[route]}>
+        <Routes>
+          <Route path={path} element={ui} />
+        </Routes>
+      </MemoryRouter>,
+      options,
+    );
+  }
   return render(<MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>, options);
 }
 
