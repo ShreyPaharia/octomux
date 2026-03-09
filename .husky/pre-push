@@ -1,0 +1,4 @@
+bun run lint
+bun run format:check
+bun install --frozen-lockfile
+bun run test

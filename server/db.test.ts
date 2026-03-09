@@ -1,16 +1,26 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import {
-  createTestDb, insertTask, insertAgent, getTask, getAgents,
-  DEFAULTS, TASKS_TABLE_COLUMNS, AGENTS_TABLE_COLUMNS,
+  createTestDb,
+  insertTask,
+  insertAgent,
+  getTask,
+  getAgents,
+  DEFAULTS,
+  TASKS_TABLE_COLUMNS,
+  AGENTS_TABLE_COLUMNS,
 } from './test-helpers.js';
 import { getDb } from './db.js';
 
 describe('Database', () => {
   let db: Database.Database;
 
-  beforeEach(() => { db = createTestDb(); });
-  afterEach(() => { db.close(); });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+  afterEach(() => {
+    db.close();
+  });
 
   // ─── Schema Tests (table-driven) ────────────────────────────────────────
 
@@ -26,12 +36,16 @@ describe('Database', () => {
     });
 
     it('creates idx_tasks_status index', () => {
-      const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tasks'").all() as { name: string }[];
+      const indexes = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tasks'")
+        .all() as { name: string }[];
       expect(indexes.map((i) => i.name)).toContain('idx_tasks_status');
     });
 
     it('creates idx_agents_task index', () => {
-      const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='agents'").all() as { name: string }[];
+      const indexes = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='agents'")
+        .all() as { name: string }[];
       expect(indexes.map((i) => i.name)).toContain('idx_agents_task');
     });
   });
@@ -50,8 +64,9 @@ describe('Database', () => {
 
     it('enforces NOT NULL on required task fields', () => {
       expect(() => {
-        db.prepare('INSERT INTO tasks (id, title, description, repo_path) VALUES (?, NULL, ?, ?)')
-          .run('t1', 'desc', '/tmp');
+        db.prepare(
+          'INSERT INTO tasks (id, title, description, repo_path) VALUES (?, NULL, ?, ?)',
+        ).run('t1', 'desc', '/tmp');
       }).toThrow();
     });
   });
@@ -64,20 +79,22 @@ describe('Database', () => {
       { table: 'agent', field: 'status', expected: 'running' },
     ] as const;
 
-    it.each(defaultCases)(
-      '$table.$field defaults to $expected',
-      ({ table, field, expected }) => {
-        insertTask(db);
-        if (table === 'agent') insertAgent(db);
+    it.each(defaultCases)('$table.$field defaults to $expected', ({ table, field, expected }) => {
+      insertTask(db);
+      if (table === 'agent') insertAgent(db);
 
-        const row = table === 'task' ? getTask(db, DEFAULTS.task.id) : getAgents(db, DEFAULTS.task.id)[0];
-        expect((row as any)[field]).toBe(expected);
-      },
-    );
+      const row =
+        table === 'task' ? getTask(db, DEFAULTS.task.id) : getAgents(db, DEFAULTS.task.id)[0];
+      expect((row as any)[field]).toBe(expected);
+    });
 
     it('auto-populates created_at and updated_at on tasks', () => {
-      db.prepare('INSERT INTO tasks (id, title, description, repo_path) VALUES (?, ?, ?, ?)')
-        .run('auto-ts', 'T', 'D', '/tmp');
+      db.prepare('INSERT INTO tasks (id, title, description, repo_path) VALUES (?, ?, ?, ?)').run(
+        'auto-ts',
+        'T',
+        'D',
+        '/tmp',
+      );
       const task = getTask(db, 'auto-ts')!;
       expect(task.created_at).toBeTruthy();
       expect(task.updated_at).toBeTruthy();
@@ -85,8 +102,12 @@ describe('Database', () => {
 
     it('auto-populates created_at on agents', () => {
       insertTask(db);
-      db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)')
-        .run('auto-agent', DEFAULTS.task.id, 0, 'A1');
+      db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
+        'auto-agent',
+        DEFAULTS.task.id,
+        0,
+        'A1',
+      );
       const agents = getAgents(db, DEFAULTS.task.id);
       expect(agents[0].created_at).toBeTruthy();
     });

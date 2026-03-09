@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import {
-  createTestDb, insertTask, insertAgent, getTask, getAgents,
-  findExecCall, countExecCalls, DEFAULTS,
+  createTestDb,
+  insertTask,
+  insertAgent,
+  getTask,
+  getAgents,
+  findExecCall,
+  DEFAULTS,
 } from './test-helpers.js';
 import type { Task, Agent } from './types.js';
 
@@ -31,7 +36,8 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, stopTask, addAgent, stopAgent, dispatchToWindow } = await import('./task-runner.js');
+const { startTask, stopTask, addAgent, stopAgent, dispatchToWindow } =
+  await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
 
@@ -45,7 +51,9 @@ beforeEach(() => {
   vi.mocked(fs.existsSync).mockReturnValue(true);
 });
 
-afterEach(() => { db.close(); });
+afterEach(() => {
+  db.close();
+});
 
 // ─── startTask ────────────────────────────────────────────────────────────────
 
@@ -129,7 +137,9 @@ describe('startTask', () => {
   const errorCases = [
     {
       name: 'repo path does not exist',
-      setup: () => { vi.mocked(fs.existsSync).mockReturnValue(false); },
+      setup: () => {
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+      },
       errorContains: 'does not exist',
     },
     {
@@ -206,13 +216,17 @@ describe('addAgent', () => {
   it('dispatches prompt when provided', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(runningTask, 'Write tests');
-    expect(findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] })).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
+    ).toBeDefined();
   });
 
   it('does not dispatch when no prompt provided', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(runningTask);
-    expect(findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] })).toBeUndefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
+    ).toBeUndefined();
   });
 
   it('persists agent to database', async () => {
@@ -298,7 +312,9 @@ describe('stopAgent', () => {
 
     const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-window'] });
     expect(call).toBeDefined();
-    expect(call![1]).toContain(`${DEFAULTS.runningTask.tmux_session}:${DEFAULTS.agent.window_index}`);
+    expect(call![1]).toContain(
+      `${DEFAULTS.runningTask.tmux_session}:${DEFAULTS.agent.window_index}`,
+    );
   });
 
   it('marks agent as stopped in database', async () => {
@@ -353,7 +369,8 @@ describe('dispatchToWindow', () => {
       }),
     } as any);
 
-    await expect(dispatchToWindow('s', 0, 'text'))
-      .rejects.toThrow('tmux load-buffer exited with code 1');
+    await expect(dispatchToWindow('s', 0, 'text')).rejects.toThrow(
+      'tmux load-buffer exited with code 1',
+    );
   });
 });

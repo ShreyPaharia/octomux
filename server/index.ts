@@ -19,7 +19,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 server.listen(PORT, () => {
-  console.log(`octomux-agents running at http://localhost:${PORT}`);
+  console.warn(`octomux-agents running at http://localhost:${PORT}`);
 });
 
 export { server, app };
