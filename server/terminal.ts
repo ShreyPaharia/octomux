@@ -4,6 +4,7 @@ import { spawn, type IPty } from 'node-pty';
 import type { IncomingMessage } from 'http';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
+import { getOrchestratorSession } from './orchestrator.js';
 
 interface TerminalConnection {
   ws: WebSocket;
@@ -16,6 +17,15 @@ export function setupTerminalWebSocket(server: Server): void {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
+    // Match /ws/terminal/orchestrator
+    const orchMatch = req.url?.match(/^\/ws\/terminal\/orchestrator$/);
+    if (orchMatch) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleOrchestratorConnection(ws);
+      });
+      return;
+    }
+
     // Match /ws/terminal/:taskId/:windowIndex
     const match = req.url?.match(/^\/ws\/terminal\/([^/]+)\/(\d+)$/);
     if (!match) {
@@ -98,6 +108,65 @@ function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): v
   });
 
   // Cleanup on PTY exit
+  pty.onExit(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.close(4006, 'Terminal process exited');
+    }
+  });
+}
+
+function handleOrchestratorConnection(ws: WebSocket): void {
+  const session = getOrchestratorSession();
+
+  let pty: IPty;
+  try {
+    pty = spawn('tmux', ['attach-session', '-t', session], {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      env: process.env as Record<string, string>,
+    });
+  } catch {
+    ws.close(4005, 'Failed to attach to orchestrator session');
+    return;
+  }
+
+  const connKey = 'orchestrator';
+  if (!connections.has(connKey)) {
+    connections.set(connKey, []);
+  }
+  connections.get(connKey)!.push({ ws, pty });
+
+  pty.onData((data: string) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  });
+
+  ws.on('message', (data: Buffer | string) => {
+    const msg = typeof data === 'string' ? data : data.toString();
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
+        pty.resize(parsed.cols, parsed.rows);
+        return;
+      }
+    } catch {
+      // Not JSON, treat as terminal input
+    }
+    pty.write(msg);
+  });
+
+  ws.on('close', () => {
+    pty.kill();
+    const conns = connections.get(connKey);
+    if (conns) {
+      const idx = conns.findIndex((c) => c.ws === ws);
+      if (idx >= 0) conns.splice(idx, 1);
+      if (conns.length === 0) connections.delete(connKey);
+    }
+  });
+
   pty.onExit(() => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.close(4006, 'Terminal process exited');

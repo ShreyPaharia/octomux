@@ -12,6 +12,7 @@ export interface Task {
   tmux_session: string | null;
   pr_url: string | null;
   pr_number: number | null;
+  initial_prompt: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -31,6 +32,12 @@ export interface CreateTaskRequest {
   title: string;
   description: string;
   repo_path: string;
+  initial_prompt?: string;
+}
+
+export interface OrchestratorStatus {
+  running: boolean;
+  session: string;
 }
 
 export interface AddAgentRequest {
