@@ -109,7 +109,7 @@ describe('startTask', () => {
     { name: 'creates worktree', cmd: 'git', argsInclude: ['worktree', 'add'] },
     { name: 'creates tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['display-message'] },
-    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'claude'] },
+    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
     { name: 'dispatches prompt', cmd: 'tmux', argsInclude: ['paste-buffer'] },
   ];
 
@@ -241,7 +241,7 @@ describe('addAgent', () => {
   const addAgentShellCalls = [
     { name: 'creates tmux window', cmd: 'tmux', argsInclude: ['new-window'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['list-windows'] },
-    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'claude'] },
+    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
   ];
 
   it.each(addAgentShellCalls)('$name', async ({ cmd, argsInclude }) => {

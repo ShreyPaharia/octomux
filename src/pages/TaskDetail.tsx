@@ -14,6 +14,7 @@ export default function TaskDetail() {
   const { task, loading, error, refresh } = useTask(id!);
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
 
   // Initialize activeWindow from first agent's window_index
   useEffect(() => {
@@ -76,6 +77,19 @@ export default function TaskDetail() {
     }
   }, [id, refresh]);
 
+  const handleResume = useCallback(async () => {
+    if (!id) return;
+    setResuming(true);
+    try {
+      await api.updateTask(id, { status: 'running' });
+      refresh();
+    } catch (err) {
+      console.error('Failed to resume task:', err);
+    } finally {
+      setResuming(false);
+    }
+  }, [id, refresh]);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center text-muted-foreground">
@@ -98,6 +112,7 @@ export default function TaskDetail() {
   const agents = task.agents || [];
   const isRunning = task.status === 'running';
   const isDraft = task.status === 'draft';
+  const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
   const canCreatePR =
     !!task.branch && !task.pr_url && (task.status === 'closed' || task.status === 'running');
   const hasTerminal = !!task.tmux_session && agents.length > 0 && activeWindow !== null;
@@ -142,6 +157,11 @@ export default function TaskDetail() {
             >
               PR #{task.pr_number}
             </a>
+          )}
+          {canResume && (
+            <Button variant="outline" size="sm" disabled={resuming} onClick={handleResume}>
+              {resuming ? 'Resuming...' : 'Resume'}
+            </Button>
           )}
           {canCreatePR && (
             <Button variant="outline" size="sm" onClick={() => setPrDialogOpen(true)}>

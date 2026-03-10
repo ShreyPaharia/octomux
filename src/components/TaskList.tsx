@@ -4,9 +4,10 @@ import { TaskCard } from './TaskCard';
 interface TaskListProps {
   tasks: Task[];
   onDelete: (id: string) => void;
+  onResume?: (id: string) => void;
 }
 
-export function TaskList({ tasks, onDelete }: TaskListProps) {
+export function TaskList({ tasks, onDelete, onResume }: TaskListProps) {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -19,7 +20,7 @@ export function TaskList({ tasks, onDelete }: TaskListProps) {
   return (
     <div className="flex flex-col gap-3">
       {tasks.map((task) => (
-        <TaskCard key={task.id} task={task} onDelete={onDelete} />
+        <TaskCard key={task.id} task={task} onDelete={onDelete} onResume={onResume} />
       ))}
     </div>
   );
