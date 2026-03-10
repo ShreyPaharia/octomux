@@ -24,15 +24,28 @@ import type {
 
 const execFile = promisify(execFileCb);
 
+const CLAUDE_TIMEOUT_MS = 120_000;
+const MAX_CONCURRENT_TASKS = parseInt(process.env.MAX_CONCURRENT_TASKS || '10', 10);
+
 /** Run claude CLI with prompt piped via stdin to avoid arg length issues. */
 function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn('claude', ['-p'], { env });
     let stdout = '';
     let stderr = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      proc.kill();
+      reject(new Error('Claude CLI timed out'));
+    }, CLAUDE_TIMEOUT_MS);
+
     proc.stdout.on('data', (d) => (stdout += d));
     proc.stderr.on('data', (d) => (stderr += d));
     proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
       if (code === 0) resolve(stdout);
       else reject(new Error(stderr || `claude exited with code ${code}`));
     });
@@ -200,6 +213,18 @@ export function setupRoutes(app: Express): void {
     }
 
     const db = getDb();
+
+    if (!body.draft) {
+      const runningCount = db
+        .prepare("SELECT COUNT(*) as count FROM tasks WHERE status IN ('running', 'setting_up')")
+        .get() as { count: number };
+      if (runningCount.count >= MAX_CONCURRENT_TASKS) {
+        res.status(429).json({
+          error: `Maximum concurrent tasks reached (${MAX_CONCURRENT_TASKS}). Close some tasks first.`,
+        });
+        return;
+      }
+    }
     const id = nanoid(12);
     db.prepare(
       'INSERT INTO tasks (id, title, description, repo_path, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -213,15 +238,17 @@ export function setupRoutes(app: Express): void {
       body.initial_prompt ?? null,
     );
 
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
-    task.agents = [];
-
     // Start task immediately unless explicitly saved as draft
     if (!body.draft) {
-      startTask(task);
+      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
+      await startTask(task);
     }
 
-    res.status(201).json(task);
+    const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
+    created.agents = db
+      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+      .all(id) as Agent[];
+    res.status(201).json(created);
   });
 
   // Update task status
@@ -247,16 +274,9 @@ export function setupRoutes(app: Express): void {
         res.status(400).json({ error: 'Worktree no longer exists on disk' });
         return;
       }
-      resumeTask(task);
+      await resumeTask(task);
     } else if (body.status === 'closed') {
       await closeTask(task);
-    }
-
-    if (body.status) {
-      db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
-        body.status,
-        task.id,
-      );
     }
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
@@ -283,7 +303,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    startTask(task);
+    await startTask(task);
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
     updated.agents = db
@@ -433,9 +453,12 @@ export function setupRoutes(app: Express): void {
       if (!jsonMatch) {
         throw new Error('Failed to parse Claude response as JSON');
       }
-      const { title, body } = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!parsed.title || !parsed.body) {
+        throw new Error('Claude response missing required title or body fields');
+      }
 
-      res.json({ title, body, base });
+      res.json({ title: parsed.title, body: parsed.body, base });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
