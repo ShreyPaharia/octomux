@@ -47,7 +47,7 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, completeTask, cancelTask, addAgent, stopAgent, dispatchToWindow } =
+const { startTask, closeTask, addAgent, stopAgent, dispatchToWindow } =
   await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -276,15 +276,15 @@ describe('addAgent', () => {
   });
 });
 
-// ─── completeTask ─────────────────────────────────────────────────────────────
+// ─── closeTask ───────────────────────────────────────────────────────────────
 
-describe('completeTask', () => {
+describe('closeTask', () => {
   it('marks all agents as stopped', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
     insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
-    await completeTask({ ...DEFAULTS.runningTask } as Task);
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents).toHaveLength(2);
@@ -300,13 +300,13 @@ describe('completeTask', () => {
 
   it.each(cleanupCalls)('$name', async ({ cmd, argsInclude }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await completeTask({ ...DEFAULTS.runningTask } as Task);
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
   it('does NOT delete the branch', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await completeTask({ ...DEFAULTS.runningTask } as Task);
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
     ).toBeUndefined();
@@ -330,75 +330,13 @@ describe('completeTask', () => {
   it.each(nullFieldCases)('$name', async ({ overrides, shouldNotCall }) => {
     const task = { ...DEFAULTS.runningTask, ...overrides } as Task;
     insertTask(db, task);
-    await completeTask(task);
+    await closeTask(task);
     expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
   });
 
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(completeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
-  });
-});
-
-// ─── cancelTask ──────────────────────────────────────────────────────────────
-
-describe('cancelTask', () => {
-  it('marks all agents as stopped', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
-    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
-
-    await cancelTask({ ...DEFAULTS.runningTask } as Task);
-
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents).toHaveLength(2);
-    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
-  });
-
-  // ─── Shell cleanup commands (table-driven) ─────────────────────────────
-
-  const cleanupCalls = [
-    { name: 'kills tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
-    { name: 'removes worktree', cmd: 'git', argsInclude: ['worktree', 'remove'] },
-    { name: 'deletes branch', cmd: 'git', argsInclude: ['branch', '-D'] },
-  ];
-
-  it.each(cleanupCalls)('$name', async ({ cmd, argsInclude }) => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await cancelTask({ ...DEFAULTS.runningTask } as Task);
-    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
-  });
-
-  // ─── Null field handling (table-driven) ─────────────────────────────────
-
-  const nullFieldCases = [
-    {
-      name: 'skips tmux kill when tmux_session is null',
-      overrides: { tmux_session: null },
-      shouldNotCall: { cmd: 'tmux', argsInclude: ['kill-session'] },
-    },
-    {
-      name: 'skips worktree remove when worktree is null',
-      overrides: { worktree: null },
-      shouldNotCall: { cmd: 'git', argsInclude: ['worktree', 'remove'] },
-    },
-    {
-      name: 'skips branch delete when branch is null',
-      overrides: { branch: null },
-      shouldNotCall: { cmd: 'git', argsInclude: ['branch', '-D'] },
-    },
-  ];
-
-  it.each(nullFieldCases)('$name', async ({ overrides, shouldNotCall }) => {
-    const task = { ...DEFAULTS.runningTask, ...overrides } as Task;
-    insertTask(db, task);
-    await cancelTask(task);
-    expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
-  });
-
-  it('handles task with no agents gracefully', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(cancelTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
   });
 });
 

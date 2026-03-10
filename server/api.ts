@@ -6,7 +6,7 @@ import os from 'os';
 import { getDb } from './db.js';
 import { execFile as execFileCb, spawn } from 'child_process';
 import { promisify } from 'util';
-import { startTask, completeTask, cancelTask, addAgent, stopAgent } from './task-runner.js';
+import { startTask, closeTask, addAgent, stopAgent } from './task-runner.js';
 import { buildPRPrompt } from './pr-template.js';
 import {
   isOrchestratorRunning,
@@ -146,8 +146,10 @@ export function setupRoutes(app: Express): void {
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
     task.agents = [];
 
-    // Start task asynchronously (worktree, tmux, claude)
-    startTask(task);
+    // Start task immediately unless explicitly saved as draft
+    if (!body.draft) {
+      startTask(task);
+    }
 
     res.status(201).json(task);
   });
@@ -165,10 +167,8 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    if (body.status === 'done') {
-      await completeTask(task);
-    } else if (body.status === 'cancelled') {
-      await cancelTask(task);
+    if (body.status === 'closed') {
+      await closeTask(task);
     }
 
     if (body.status) {
@@ -177,6 +177,32 @@ export function setupRoutes(app: Express): void {
         task.id,
       );
     }
+
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
+    updated.agents = db
+      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+      .all(task.id) as Agent[];
+    res.json(updated);
+  });
+
+  // Start a draft task
+  app.post('/api/tasks/:id/start', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    if (task.status !== 'draft') {
+      res.status(400).json({ error: 'Only draft tasks can be started' });
+      return;
+    }
+
+    startTask(task);
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
     updated.agents = db
@@ -197,7 +223,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    await cancelTask(task);
+    await closeTask(task);
     db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
     res.status(204).send();
   });

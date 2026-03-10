@@ -24,8 +24,7 @@ test.describe('Task Detail', () => {
       page.getByRole('paragraph').filter({ hasText: 'Automated test task' }),
     ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Agent 1' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Mark Done' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close' })).toBeVisible();
   });
 
   test('renders a live terminal with content', async ({ page }) => {
@@ -75,18 +74,17 @@ test.describe('Task Detail', () => {
     await expect(page.getByRole('button', { name: 'Agent 2' })).toBeVisible();
   });
 
-  test('cancels task and updates UI', async ({ page }) => {
+  test('closes task and updates UI', async ({ page }) => {
     await page.goto(`/tasks/${taskId}`);
-    await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Close' }).click();
 
-    // Status changes to Cancelled
-    await expect(page.getByText('Cancelled')).toBeVisible({ timeout: 5_000 });
+    // Status changes to Closed
+    await expect(page.getByText('Closed')).toBeVisible({ timeout: 5_000 });
 
-    // Mark Done and Cancel buttons disappear
-    await expect(page.getByRole('button', { name: 'Mark Done' })).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Cancel' })).toBeHidden();
+    // Close button disappears
+    await expect(page.getByRole('button', { name: 'Close' })).toBeHidden();
   });
 
   test('navigates back to dashboard via Back button', async ({ page }) => {

@@ -75,7 +75,7 @@ describe('Database', () => {
 
   describe('defaults', () => {
     const defaultCases = [
-      { table: 'task', field: 'status', expected: 'created' },
+      { table: 'task', field: 'status', expected: 'draft' },
       { table: 'agent', field: 'status', expected: 'running' },
     ] as const;
 

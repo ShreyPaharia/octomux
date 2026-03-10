@@ -36,11 +36,11 @@ export async function waitForStatus(
   throw new Error(`Task ${taskId} did not reach status "${status}" within ${timeoutMs}ms`);
 }
 
-/** Cancel + delete a task and clean up its resources. */
+/** Close + delete a task and clean up its resources. */
 export async function cleanupTask(page: Page, taskId: string) {
-  // Cancel first (stops tmux, removes worktree)
+  // Close first (stops tmux, removes worktree)
   await page.request.patch(`${API}/tasks/${taskId}`, {
-    data: { status: 'cancelled' },
+    data: { status: 'closed' },
   });
   // Then delete the DB record
   await page.request.delete(`${API}/tasks/${taskId}`);
@@ -53,7 +53,7 @@ export async function deleteAllTasks(page: Page) {
   for (const task of tasks) {
     if (task.status === 'running' || task.status === 'setting_up') {
       await page.request.patch(`${API}/tasks/${task.id}`, {
-        data: { status: 'cancelled' },
+        data: { status: 'closed' },
       });
     }
     await page.request.delete(`${API}/tasks/${task.id}`);

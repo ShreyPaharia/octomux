@@ -32,8 +32,8 @@ export async function pollStatuses(): Promise<void> {
   for (const task of runningTasks) {
     const status = await checkTaskStatus(task);
     if (status === 'dead' && task.status === 'running') {
-      // Session died unexpectedly — mark as done (agent finished) or error
-      db.prepare(`UPDATE tasks SET status = 'done', updated_at = datetime('now') WHERE id = ?`).run(
+      // Session died unexpectedly — mark as closed
+      db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
         task.id,
       );
 
@@ -71,7 +71,7 @@ export async function pollPRs(): Promise<void> {
   const db = getDb();
   const tasks = db
     .prepare(
-      "SELECT * FROM tasks WHERE status IN ('running', 'done') AND pr_url IS NULL AND branch IS NOT NULL",
+      "SELECT * FROM tasks WHERE status IN ('running', 'closed') AND pr_url IS NULL AND branch IS NOT NULL",
     )
     .all() as Task[];
 

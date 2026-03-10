@@ -133,6 +133,39 @@ describe('CreateTaskDialog', () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
+  // ─── Draft checkbox ─────────────────────────────────────────────────────
+
+  it('sends draft=true when checkbox is checked', async () => {
+    await openDialog();
+    await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
+    const checkbox = screen.getByLabelText('Save as draft (start later)');
+    await user.click(checkbox);
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith({
+        title: 'Fix bug',
+        description: 'Desc',
+        repo_path: '/tmp/repo',
+        draft: true,
+      });
+    });
+  });
+
+  it('does not send draft when checkbox is unchecked', async () => {
+    await openDialog();
+    await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith({
+        title: 'Fix bug',
+        description: 'Desc',
+        repo_path: '/tmp/repo',
+      });
+    });
+  });
+
   // ─── Cancel ───────────────────────────────────────────────────────────────
 
   it('closes dialog on cancel without calling API', async () => {
