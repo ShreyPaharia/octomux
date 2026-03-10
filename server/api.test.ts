@@ -91,6 +91,33 @@ describe('GET /api/tasks', () => {
     const res = await request(app).get('/api/tasks');
     expect(res.body[0].agents).toEqual([]);
   });
+
+  it('filters tasks by repo_path query param', async () => {
+    insertTask(db, { id: 'task-a', repo_path: '/repo/alpha' });
+    insertTask(db, { id: 'task-b', repo_path: '/repo/beta' });
+    insertTask(db, { id: 'task-c', repo_path: '/repo/alpha' });
+
+    const res = await request(app).get('/api/tasks?repo_path=/repo/alpha');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body.every((t: Task) => t.repo_path === '/repo/alpha')).toBe(true);
+  });
+
+  it('returns all tasks when repo_path is not provided', async () => {
+    insertTask(db, { id: 'task-a', repo_path: '/repo/alpha' });
+    insertTask(db, { id: 'task-b', repo_path: '/repo/beta' });
+
+    const res = await request(app).get('/api/tasks');
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('returns empty array when repo_path matches no tasks', async () => {
+    insertTask(db, { id: 'task-a', repo_path: '/repo/alpha' });
+
+    const res = await request(app).get('/api/tasks?repo_path=/repo/nonexistent');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
 });
 
 // ─── GET /api/tasks/:id ──────────────────────────────────────────────────────
