@@ -33,9 +33,9 @@ export async function pollStatuses(): Promise<void> {
     const status = await checkTaskStatus(task);
     if (status === 'dead' && task.status === 'running') {
       // Session died unexpectedly — mark as closed
-      db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
-        task.id,
-      );
+      db.prepare(
+        `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
 
       // Mark all running agents as stopped
       db.prepare(
