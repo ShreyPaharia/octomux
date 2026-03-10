@@ -6,18 +6,12 @@ import {
   insertAgent,
   getTask,
   getAgents,
+  findCallback,
   DEFAULTS,
 } from './test-helpers.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
-
-function findCallback(...args: any[]): Function | undefined {
-  for (let i = args.length - 1; i >= 0; i--) {
-    if (typeof args[i] === 'function') return args[i];
-  }
-  return undefined;
-}
 
 vi.mock('child_process', () => ({
   execFile: vi.fn((...args: any[]) => {
@@ -112,6 +106,39 @@ describe('pollStatuses', () => {
     vi.mocked(execFile).mockImplementation((_cmd: any, _args: any, _opts: any, cb?: any) => {
       const callback = cb || _opts;
       if (typeof callback === 'function') callback(new Error('dead'));
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
+  });
+
+  it('marks setting_up task as error when session dies', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
+    insertAgent(db);
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) cb(new Error('session not found'));
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    const task = getTask(db, DEFAULTS.task.id)!;
+    expect(task.status).toBe('error');
+    expect(task.error).toBe('Setup interrupted');
+  });
+
+  it('marks agents as stopped when setting_up task dies', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
+    insertAgent(db);
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) cb(new Error('session not found'));
       return undefined as any;
     });
 

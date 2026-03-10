@@ -40,12 +40,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Generate a git-safe branch slug from a title + task ID suffix. */
+export function slugifyTitle(title: string, id: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-') // replace non-alphanumeric with hyphens
+    .replace(/-{2,}/g, '-') // collapse consecutive hyphens
+    .replace(/^-|-$/g, '') // trim leading/trailing hyphens
+    .slice(0, 50);
+  const suffix = id.slice(0, 6);
+  return `${slug}-${suffix}`;
+}
+
 export async function startTask(task: Task): Promise<void> {
   const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
-  const branch = task.branch || `agents/${id}`;
-  const worktreeDir = task.branch || id;
+  const slug = slugifyTitle(task.title, id);
+  const branch = task.branch || `agents/${slug}`;
+  const worktreeDir = task.branch || slug;
   const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
 
   try {
@@ -61,8 +74,8 @@ export async function startTask(task: Task): Promise<void> {
     await execFile('git', ['-C', task.repo_path, 'rev-parse', '--is-inside-work-tree']);
 
     // 3. Ensure .worktrees directory exists
-    const worktreeDir = path.join(task.repo_path, '.worktrees');
-    fs.mkdirSync(worktreeDir, { recursive: true });
+    const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
+    fs.mkdirSync(worktreeBaseDir, { recursive: true });
 
     // 4. Create worktree (optionally from a base branch)
     const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
@@ -172,7 +185,10 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 export async function closeTask(task: Task): Promise<void> {
   const db = getDb();
 
-  // Mark all agents as stopped
+  // Mark task as closed and all agents as stopped
+  db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
+    task.id,
+  );
   db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
 
   // Kill tmux session
@@ -273,10 +289,11 @@ export async function dispatchToWindow(
   text: string,
 ): Promise<void> {
   const target = `${session}:${windowIndex}`;
+  const bufferName = `octomux-${nanoid(8)}`;
 
-  // tmux load-buffer reads from stdin
+  // Load text into a named tmux buffer (avoids race with concurrent dispatches)
   await new Promise<void>((resolve, reject) => {
-    const proc = spawn('tmux', ['load-buffer', '-']);
+    const proc = spawn('tmux', ['load-buffer', '-b', bufferName, '-']);
     proc.stdin.write(text + '\n');
     proc.stdin.end();
     proc.on('close', (code) => {
@@ -285,6 +302,9 @@ export async function dispatchToWindow(
     });
   });
 
-  // Paste into the target window
-  await execFile('tmux', ['paste-buffer', '-t', target]);
+  // Paste named buffer into the target window, -d deletes buffer after paste
+  await execFile('tmux', ['paste-buffer', '-b', bufferName, '-d', '-t', target]);
+
+  // Press Enter to submit the prompt
+  await execFile('tmux', ['send-keys', '-t', target, 'Enter']);
 }

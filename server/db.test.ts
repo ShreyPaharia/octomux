@@ -10,7 +10,7 @@ import {
   TASKS_TABLE_COLUMNS,
   AGENTS_TABLE_COLUMNS,
 } from './test-helpers.js';
-import { getDb } from './db.js';
+import { getDb, initDb } from './db.js';
 
 describe('Database', () => {
   let db: Database.Database;
@@ -132,6 +132,39 @@ describe('Database', () => {
   describe('getDb', () => {
     it('returns the same instance on repeated calls', () => {
       expect(getDb()).toBe(getDb());
+    });
+  });
+
+  // ─── Pragmas ──────────────────────────────────────────────────────────
+
+  describe('pragmas', () => {
+    it('sets WAL journal mode (falls back to memory for in-memory DBs)', () => {
+      const mode = db.pragma('journal_mode') as [{ journal_mode: string }];
+      // In-memory DBs can't use WAL; real DBs will use WAL
+      expect(['wal', 'memory']).toContain(mode[0].journal_mode);
+    });
+
+    it('enables foreign keys', () => {
+      const fk = db.pragma('foreign_keys') as [{ foreign_keys: number }];
+      expect(fk[0].foreign_keys).toBe(1);
+    });
+  });
+
+  // ─── Migrations ────────────────────────────────────────────────────────
+
+  describe('migrations', () => {
+    it('is idempotent — calling initDb twice does not error', () => {
+      expect(() => initDb(db)).not.toThrow();
+    });
+
+    it.each(['initial_prompt', 'base_branch'])('tasks table has column: %s (migration)', (col) => {
+      const columns = db.pragma('table_info(tasks)') as { name: string }[];
+      expect(columns.map((c) => c.name)).toContain(col);
+    });
+
+    it('agents table has claude_session_id column (migration)', () => {
+      const columns = db.pragma('table_info(agents)') as { name: string }[];
+      expect(columns.map((c) => c.name)).toContain('claude_session_id');
     });
   });
 });
