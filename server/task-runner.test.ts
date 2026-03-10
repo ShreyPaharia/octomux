@@ -47,7 +47,7 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, closeTask, addAgent, stopAgent, resumeTask, dispatchToWindow } =
+const { startTask, closeTask, addAgent, stopAgent, resumeTask, dispatchToWindow, slugifyTitle } =
   await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -65,6 +65,22 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
+});
+
+// ─── slugifyTitle ─────────────────────────────────────────────────────────────
+
+describe('slugifyTitle', () => {
+  const cases = [
+    { title: 'Fix order validation', id: 'test-task-01', expected: 'fix-order-validation-test-t' },
+    { title: 'Add NEW feature!!!', id: 'abc123defghi', expected: 'add-new-feature-abc123' },
+    { title: '---leading---trailing---', id: 'xyz789', expected: 'leading-trailing-xyz789' },
+    { title: 'a'.repeat(60), id: 'id1234', expected: 'a'.repeat(50) + '-id1234' },
+    { title: 'Hello   World', id: '123456', expected: 'hello-world-123456' },
+  ];
+
+  it.each(cases)('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
+    expect(slugifyTitle(title, id)).toBe(expected);
+  });
 });
 
 // ─── startTask ────────────────────────────────────────────────────────────────
@@ -86,8 +102,8 @@ describe('startTask', () => {
     const expectedFields = [
       { field: 'status', expected: 'running' },
       { field: 'tmux_session', expected: `octomux-agent-${DEFAULTS.task.id}` },
-      { field: 'branch', expected: `agents/${DEFAULTS.task.id}` },
-      { field: 'worktree', expected: `${DEFAULTS.task.repo_path}/.worktrees/${DEFAULTS.task.id}` },
+      { field: 'branch', expected: 'agents/fix-order-validation-test-t' },
+      { field: 'worktree', expected: `${DEFAULTS.task.repo_path}/.worktrees/fix-order-validation-test-t` },
     ];
 
     it.each(expectedFields)('sets $field to $expected', ({ field, expected }) => {
