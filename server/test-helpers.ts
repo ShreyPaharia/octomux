@@ -48,7 +48,7 @@ export const DEFAULTS = {
     window_index: 0,
     label: 'Agent 1',
     status: 'running' as const,
-    claude_session_id: null,
+    claude_session_id: 'test-session-uuid-01',
     created_at: '2026-01-01 00:00:00',
   },
 } satisfies Record<string, Partial<Task> | Partial<Agent>>;
@@ -202,5 +202,6 @@ export const AGENTS_TABLE_COLUMNS = [
   'window_index',
   'label',
   'status',
+  'claude_session_id',
   'created_at',
 ];

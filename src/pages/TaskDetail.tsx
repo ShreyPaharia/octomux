@@ -11,7 +11,8 @@ import { api } from '@/lib/api';
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { task, loading, error, refresh } = useTask(id!);
+  const taskId = id ?? '';
+  const { task, loading, error, refresh } = useTask(taskId);
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -25,25 +26,25 @@ export default function TaskDetail() {
 
   const handleAddAgent = useCallback(
     async (prompt?: string) => {
-      if (!id) return;
+      if (!taskId) return;
       try {
-        const agent = await api.addAgent(id, prompt ? { prompt } : undefined);
+        const agent = await api.addAgent(taskId, prompt ? { prompt } : undefined);
         setActiveWindow(agent.window_index);
         refresh();
       } catch (err) {
         console.error('Failed to add agent:', err);
       }
     },
-    [id, refresh],
+    [taskId, refresh],
   );
 
   const handleStopAgent = useCallback(
     async (agentId: string) => {
-      if (!id) return;
+      if (!taskId) return;
       try {
         const taskAgents = task?.agents || [];
         const stoppedAgent = taskAgents.find((a) => a.id === agentId);
-        await api.stopAgent(id, agentId);
+        await api.stopAgent(taskId, agentId);
         // If we stopped the active tab, switch to the first remaining running agent
         if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
           const nextAgent = taskAgents.find((a) => a.id !== agentId && a.status !== 'stopped');
@@ -54,41 +55,41 @@ export default function TaskDetail() {
         console.error('Failed to stop agent:', err);
       }
     },
-    [id, refresh, task, activeWindow],
+    [taskId, refresh, task, activeWindow],
   );
 
   const handleClose = useCallback(async () => {
-    if (!id) return;
+    if (!taskId) return;
     try {
-      await api.updateTask(id, { status: 'closed' });
+      await api.updateTask(taskId, { status: 'closed' });
       refresh();
     } catch (err) {
       console.error('Failed to close task:', err);
     }
-  }, [id, refresh]);
+  }, [taskId, refresh]);
 
   const handleStart = useCallback(async () => {
-    if (!id) return;
+    if (!taskId) return;
     try {
-      await api.startTask(id);
+      await api.startTask(taskId);
       refresh();
     } catch (err) {
       console.error('Failed to start task:', err);
     }
-  }, [id, refresh]);
+  }, [taskId, refresh]);
 
   const handleResume = useCallback(async () => {
-    if (!id) return;
+    if (!taskId) return;
     setResuming(true);
     try {
-      await api.updateTask(id, { status: 'running' });
+      await api.updateTask(taskId, { status: 'running' });
       refresh();
     } catch (err) {
       console.error('Failed to resume task:', err);
     } finally {
       setResuming(false);
     }
-  }, [id, refresh]);
+  }, [taskId, refresh]);
 
   if (loading) {
     return (
