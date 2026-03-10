@@ -3,6 +3,7 @@ import request from 'supertest';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, insertAgent, getTask, DEFAULTS } from './test-helpers.js';
 import type { Task } from './types.js';
+import { EventEmitter } from 'events';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -21,14 +22,25 @@ vi.mock('./task-runner.js', () => ({
   stopAgent: vi.fn(),
 }));
 
+vi.mock('fs', () => ({
+  default: {
+    statSync: vi.fn(() => ({ isDirectory: () => true })),
+    readdirSync: vi.fn(() => []),
+    existsSync: vi.fn(() => false),
+  },
+}));
+
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
     const cb = _rest.find((a: any) => typeof a === 'function');
     if (cb) cb(null, { stdout: '', stderr: '' });
     return undefined;
   }),
+  spawn: vi.fn(),
 }));
 
+const fs = (await import('fs')).default;
+const { spawn: spawnMock } = await import('child_process');
 const { createApp } = await import('./app.js');
 const { startTask, completeTask, cancelTask, addAgent, stopAgent } =
   await import('./task-runner.js');
@@ -409,5 +421,200 @@ describe('POST /api/tasks/:id/pr/preview', () => {
       .send({ base: 'main' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('no branch');
+  });
+});
+
+// ─── GET /api/browse ─────────────────────────────────────────────────────────
+
+describe('GET /api/browse', () => {
+  it('returns directory entries for valid path', async () => {
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.readdirSync).mockReturnValue(['project-a', 'project-b'] as any);
+    vi.mocked(fs.existsSync).mockImplementation((p: any) => String(p).includes('project-a/.git'));
+
+    const res = await request(app).get('/api/browse?path=/home/user');
+    expect(res.status).toBe(200);
+    expect(res.body.current).toBe('/home/user');
+    expect(res.body.entries).toHaveLength(2);
+    // Git repos sorted first
+    expect(res.body.entries[0].name).toBe('project-a');
+    expect(res.body.entries[0].isGit).toBe(true);
+    expect(res.body.entries[1].name).toBe('project-b');
+    expect(res.body.entries[1].isGit).toBe(false);
+  });
+
+  it('returns parent directory', async () => {
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+
+    const res = await request(app).get('/api/browse?path=/home/user');
+    expect(res.body.parent).toBe('/home');
+  });
+
+  it('returns null parent for root directory', async () => {
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+
+    const res = await request(app).get('/api/browse?path=/');
+    expect(res.body.parent).toBeNull();
+  });
+
+  it('returns 400 when path is not a directory', async () => {
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as any);
+
+    const res = await request(app).get('/api/browse?path=/tmp/file.txt');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('not a directory');
+  });
+
+  it('returns 400 when path does not exist', async () => {
+    vi.mocked(fs.statSync).mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    const res = await request(app).get('/api/browse?path=/nonexistent');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('does not exist');
+  });
+
+  it('skips non-directory entries', async () => {
+    vi.mocked(fs.statSync).mockImplementation((p: any) => {
+      const pathStr = String(p);
+      if (pathStr === '/tmp') return { isDirectory: () => true } as any;
+      if (pathStr.includes('file.txt')) return { isDirectory: () => false } as any;
+      return { isDirectory: () => true } as any;
+    });
+    vi.mocked(fs.readdirSync).mockReturnValue(['dir1', 'file.txt'] as any);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const res = await request(app).get('/api/browse?path=/tmp');
+    expect(res.body.entries).toHaveLength(1);
+    expect(res.body.entries[0].name).toBe('dir1');
+  });
+
+  it('sorts hidden directories after non-hidden', async () => {
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.readdirSync).mockReturnValue(['.hidden', 'visible'] as any);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const res = await request(app).get('/api/browse?path=/tmp');
+    expect(res.body.entries[0].name).toBe('visible');
+    expect(res.body.entries[1].name).toBe('.hidden');
+  });
+});
+
+// ─── GET /api/recent-repos ───────────────────────────────────────────────────
+
+describe('GET /api/recent-repos', () => {
+  it('returns empty array when no tasks exist', async () => {
+    const res = await request(app).get('/api/recent-repos');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('returns unique repo paths ordered by most recent', async () => {
+    insertTask(db, { id: 'task-1', repo_path: '/repo/a', created_at: '2026-01-01 00:00:00' });
+    insertTask(db, { id: 'task-2', repo_path: '/repo/b', created_at: '2026-02-01 00:00:00' });
+    insertTask(db, { id: 'task-3', repo_path: '/repo/a', created_at: '2026-03-01 00:00:00' });
+
+    const res = await request(app).get('/api/recent-repos');
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0].repo_path).toBe('/repo/a');
+    expect(res.body[1].repo_path).toBe('/repo/b');
+  });
+
+  it('limits to 10 results', async () => {
+    for (let i = 0; i < 12; i++) {
+      insertTask(db, { id: `task-${i}`, repo_path: `/repo/${i}` });
+    }
+
+    const res = await request(app).get('/api/recent-repos');
+    expect(res.body).toHaveLength(10);
+  });
+});
+
+// ─── POST /api/tasks/:id/pr — success path ──────────────────────────────────
+
+describe('POST /api/tasks/:id/pr — success path', () => {
+  it('creates PR via gh CLI and updates DB', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    // Mock execFile to return PR URL for gh command
+    const { execFile } = await import('child_process');
+    vi.mocked(execFile).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (cmd === 'gh') {
+        cb(null, { stdout: 'https://github.com/org/repo/pull/42\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
+      .send({ base: 'main', title: 'feat: test', body: '## What' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
+    expect(res.body.pr_number).toBe(42);
+
+    // Verify DB was updated
+    const task = getTask(db, DEFAULTS.task.id);
+    expect(task?.pr_url).toBe('https://github.com/org/repo/pull/42');
+    expect(task?.pr_number).toBe(42);
+  });
+});
+
+// ─── POST /api/tasks/:id/pr/preview — success path ──────────────────────────
+
+describe('POST /api/tasks/:id/pr/preview — success path', () => {
+  it('returns generated title, body and base', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    // Mock execFile: return commit log for git log, diff stats for git diff
+    const { execFile } = await import('child_process');
+    vi.mocked(execFile).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      const argsArr = args as string[];
+      if (argsArr?.includes('log')) {
+        cb(null, { stdout: 'abc1234 feat: add stuff\n', stderr: '' });
+      } else if (argsArr?.includes('diff')) {
+        cb(null, { stdout: ' file.ts | 10 ++++\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    // Mock spawn for runClaude — auto-emit output on next tick so event handlers are registered
+    vi.mocked(spawnMock).mockImplementation(() => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = {
+        write: vi.fn(),
+        end: vi.fn(() => {
+          // Emit after stdin.end() is called (handlers are registered by then)
+          setTimeout(() => {
+            proc.stdout.emit(
+              'data',
+              '{"title": "feat(orders): add validation", "body": "## What\\n- test"}',
+            );
+            proc.emit('close', 0);
+          }, 0);
+        }),
+      };
+      return proc;
+    });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/pr/preview`)
+      .send({ base: 'main' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('feat(orders): add validation');
+    expect(res.body.body).toBe('## What\n- test');
+    expect(res.body.base).toBe('main');
   });
 });
