@@ -138,10 +138,14 @@ describe('startTask', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
-  it('uses tmux load-buffer via spawn for prompt dispatch', async () => {
+  it('uses tmux load-buffer with named buffer via spawn for prompt dispatch', async () => {
     insertTask(db, { initial_prompt: 'Do the thing' });
     await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
-    expect(spawn).toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    const call = vi
+      .mocked(spawn)
+      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
+    expect(call).toBeDefined();
+    expect(call![1] as string[]).toContain('-b');
   });
 
   it('skips prompt dispatch when initial_prompt is null', async () => {
@@ -150,7 +154,10 @@ describe('startTask', () => {
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
     ).toBeUndefined();
-    expect(spawn).not.toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    const loadBufferCall = vi
+      .mocked(spawn)
+      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
+    expect(loadBufferCall).toBeUndefined();
   });
 
   // ─── Custom branch and base branch ─────────────────────────────────────
@@ -452,9 +459,13 @@ describe('stopAgent', () => {
 // ─── dispatchToWindow ─────────────────────────────────────────────────────────
 
 describe('dispatchToWindow', () => {
-  it('uses tmux load-buffer via spawn', async () => {
+  it('uses tmux load-buffer with named buffer via spawn', async () => {
     await dispatchToWindow('test-session', 0, 'Hello');
-    expect(spawn).toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    const call = vi
+      .mocked(spawn)
+      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
+    expect(call).toBeDefined();
+    expect(call![1] as string[]).toContain('-b');
   });
 
   it('writes text + newline to stdin', async () => {

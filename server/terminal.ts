@@ -41,31 +41,27 @@ export function setupTerminalWebSocket(server: Server): void {
   });
 }
 
-function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): void {
-  const db = getDb();
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
-
-  if (!task || !task.tmux_session) {
-    ws.close(4004, 'Task not found or no tmux session');
-    return;
-  }
-
-  const target = `${task.tmux_session}:${windowIndex}`;
-
+function attachToTmuxSession(
+  ws: WebSocket,
+  tmuxTarget: string,
+  connKey: string,
+  closeReason: string,
+): void {
   let pty: IPty;
   try {
-    pty = spawn('tmux', ['attach-session', '-t', target], {
+    pty = spawn('tmux', ['attach-session', '-t', tmuxTarget], {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
       env: process.env as Record<string, string>,
     });
   } catch {
-    ws.close(4005, 'Failed to attach to tmux session');
+    ws.close(4005, closeReason);
     return;
   }
 
-  const connKey = `${taskId}:${windowIndex}`;
+  let ptyExited = false;
+
   if (!connections.has(connKey)) {
     connections.set(connKey, []);
   }
@@ -80,6 +76,7 @@ function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): v
 
   // WebSocket → PTY
   ws.on('message', (data: Buffer | string) => {
+    if (ptyExited) return;
     const msg = typeof data === 'string' ? data : data.toString();
 
     // Handle resize messages
@@ -93,12 +90,18 @@ function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): v
       // Not JSON, treat as terminal input
     }
 
-    pty.write(msg);
+    try {
+      pty.write(msg);
+    } catch {
+      // PTY already exited
+    }
   });
 
   // Cleanup on WebSocket close
   ws.on('close', () => {
-    pty.kill();
+    if (!ptyExited) {
+      pty.kill();
+    }
     const conns = connections.get(connKey);
     if (conns) {
       const idx = conns.findIndex((c) => c.ws === ws);
@@ -109,71 +112,48 @@ function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): v
 
   // Cleanup on PTY exit
   pty.onExit(() => {
+    ptyExited = true;
     if (ws.readyState === WebSocket.OPEN) {
       ws.close(4006, 'Terminal process exited');
     }
   });
+}
+
+function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): void {
+  const db = getDb();
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
+
+  if (!task || !task.tmux_session) {
+    ws.close(4004, 'Task not found or no tmux session');
+    return;
+  }
+
+  const target = `${task.tmux_session}:${windowIndex}`;
+  const connKey = `${taskId}:${windowIndex}`;
+  attachToTmuxSession(ws, target, connKey, 'Failed to attach to tmux session');
 }
 
 function handleOrchestratorConnection(ws: WebSocket): void {
   const session = getOrchestratorSession();
-
-  let pty: IPty;
-  try {
-    pty = spawn('tmux', ['attach-session', '-t', session], {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 30,
-      env: process.env as Record<string, string>,
-    });
-  } catch {
-    ws.close(4005, 'Failed to attach to orchestrator session');
-    return;
-  }
-
-  const connKey = 'orchestrator';
-  if (!connections.has(connKey)) {
-    connections.set(connKey, []);
-  }
-  connections.get(connKey)!.push({ ws, pty });
-
-  pty.onData((data: string) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  });
-
-  ws.on('message', (data: Buffer | string) => {
-    const msg = typeof data === 'string' ? data : data.toString();
-    try {
-      const parsed = JSON.parse(msg);
-      if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
-        pty.resize(parsed.cols, parsed.rows);
-        return;
-      }
-    } catch {
-      // Not JSON, treat as terminal input
-    }
-    pty.write(msg);
-  });
-
-  ws.on('close', () => {
-    pty.kill();
-    const conns = connections.get(connKey);
-    if (conns) {
-      const idx = conns.findIndex((c) => c.ws === ws);
-      if (idx >= 0) conns.splice(idx, 1);
-      if (conns.length === 0) connections.delete(connKey);
-    }
-  });
-
-  pty.onExit(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.close(4006, 'Terminal process exited');
-    }
-  });
+  attachToTmuxSession(ws, session, 'orchestrator', 'Failed to attach to orchestrator session');
 }
 
 export function getActiveConnections(): Map<string, TerminalConnection[]> {
   return connections;
+}
+
+export function cleanupAllConnections(): void {
+  for (const [, conns] of connections) {
+    for (const { ws, pty } of conns) {
+      try {
+        pty.kill();
+      } catch {
+        // already dead
+      }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close(1001, 'Server shutting down');
+      }
+    }
+  }
+  connections.clear();
 }
