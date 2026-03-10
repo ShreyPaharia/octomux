@@ -11,7 +11,7 @@ export const DEFAULTS = {
     title: 'Fix order validation',
     description: 'Add negative quantity checks',
     repo_path: '/tmp/test-repo',
-    status: 'created' as const,
+    status: 'draft' as const,
     branch: null,
     worktree: null,
     tmux_session: null,

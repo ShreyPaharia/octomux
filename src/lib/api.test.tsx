@@ -63,13 +63,13 @@ describe('api.createTask', () => {
 
 describe('api.updateTask', () => {
   it('sends PATCH with status', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 't1', status: 'done' }));
-    await api.updateTask('t1', { status: 'done' });
+    fetchMock.mockResolvedValue(mockResponse({ id: 't1', status: 'closed' }));
+    await api.updateTask('t1', { status: 'closed' });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tasks/t1',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ status: 'done' }),
+        body: JSON.stringify({ status: 'closed' }),
       }),
     );
   });

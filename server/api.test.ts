@@ -9,8 +9,7 @@ import { EventEmitter } from 'events';
 
 vi.mock('./task-runner.js', () => ({
   startTask: vi.fn(),
-  completeTask: vi.fn(),
-  cancelTask: vi.fn(),
+  closeTask: vi.fn(),
   addAgent: vi.fn(async (_task: any, _prompt?: string) => ({
     id: 'new-agent-id',
     task_id: _task.id,
@@ -42,8 +41,7 @@ vi.mock('child_process', () => ({
 const fs = (await import('fs')).default;
 const { spawn: spawnMock } = await import('child_process');
 const { createApp } = await import('./app.js');
-const { startTask, completeTask, cancelTask, addAgent, stopAgent } =
-  await import('./task-runner.js');
+const { startTask, closeTask, addAgent, stopAgent } = await import('./task-runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -145,7 +143,7 @@ describe('POST /api/tasks', () => {
     expect(res.body.title).toBe(validPayload.title);
     expect(res.body.description).toBe(validPayload.description);
     expect(res.body.repo_path).toBe(validPayload.repo_path);
-    expect(res.body.status).toBe('created');
+    expect(res.body.status).toBe('draft');
     expect(res.body.agents).toEqual([]);
   });
 
@@ -187,13 +185,55 @@ describe('POST /api/tasks', () => {
     await request(app).post('/api/tasks').send({});
     expect(startTask).not.toHaveBeenCalled();
   });
+
+  it('does not call startTask when draft=true', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ ...validPayload, draft: true });
+
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('draft');
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it('calls startTask when draft is not set', async () => {
+    await request(app).post('/api/tasks').send(validPayload);
+    expect(startTask).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── POST /api/tasks/:id/start ──────────────────────────────────────────────
+
+describe('POST /api/tasks/:id/start', () => {
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).post('/api/tasks/nonexistent/start');
+    expect(res.status).toBe(404);
+  });
+
+  it('starts a draft task', async () => {
+    insertTask(db);
+
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/start`);
+    expect(res.status).toBe(200);
+    expect(startTask).toHaveBeenCalledOnce();
+    expect(vi.mocked(startTask).mock.calls[0][0].id).toBe(DEFAULTS.task.id);
+  });
+
+  const nonDraftStatuses = ['setting_up', 'running', 'closed', 'error'];
+
+  it.each(nonDraftStatuses)('returns 400 when task status is %s', async (status) => {
+    insertTask(db, { status: status as any });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/start`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('draft');
+  });
 });
 
 // ─── PATCH /api/tasks/:id ────────────────────────────────────────────────────
 
 describe('PATCH /api/tasks/:id', () => {
   it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).patch('/api/tasks/nonexistent').send({ status: 'done' });
+    const res = await request(app).patch('/api/tasks/nonexistent').send({ status: 'closed' });
     expect(res.status).toBe(404);
   });
 
@@ -201,44 +241,39 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'done' });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'closed' });
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('done');
+    expect(res.body.status).toBe('closed');
     expect(res.body.agents).toHaveLength(1);
   });
 
   it('updates updated_at timestamp', async () => {
     insertTask(db, { updated_at: '2020-01-01 00:00:00' });
 
-    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'done' });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'closed' });
 
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
   });
 
-  // ─── completeTask / cancelTask trigger ──────────────────────────────────
+  // ─── closeTask trigger ─────────────────────────────────────────────────
 
-  it('calls completeTask when status=done', async () => {
+  it('calls closeTask when status=closed', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'done' });
-    expect(completeTask).toHaveBeenCalledOnce();
-    expect(cancelTask).not.toHaveBeenCalled();
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'closed' });
+    expect(closeTask).toHaveBeenCalledOnce();
   });
 
-  it('calls cancelTask when status=cancelled', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'cancelled' });
-    expect(cancelTask).toHaveBeenCalledOnce();
-    expect(completeTask).not.toHaveBeenCalled();
-  });
-
-  it('does not call completeTask or cancelTask for non-terminal status changes', async () => {
+  it('does not call closeTask for non-terminal status changes', async () => {
     insertTask(db);
     await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ status: 'running' } as any);
-    expect(completeTask).not.toHaveBeenCalled();
-    expect(cancelTask).not.toHaveBeenCalled();
+    expect(closeTask).not.toHaveBeenCalled();
   });
 
   it('handles PATCH with empty body gracefully', async () => {
@@ -246,8 +281,7 @@ describe('PATCH /api/tasks/:id', () => {
     const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('running'); // unchanged
-    expect(completeTask).not.toHaveBeenCalled();
-    expect(cancelTask).not.toHaveBeenCalled();
+    expect(closeTask).not.toHaveBeenCalled();
   });
 });
 
@@ -266,10 +300,10 @@ describe('DELETE /api/tasks/:id', () => {
     expect(getTask(db, DEFAULTS.task.id)).toBeUndefined();
   });
 
-  it('calls cancelTask before deleting', async () => {
+  it('calls closeTask before deleting', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
-    expect(cancelTask).toHaveBeenCalledOnce();
+    expect(closeTask).toHaveBeenCalledOnce();
   });
 
   it('cascades delete to agents', async () => {
@@ -292,7 +326,7 @@ describe('POST /api/tasks/:id/agents', () => {
 
   // ─── Status gating (table-driven) ──────────────────────────────────────
 
-  const nonRunningStatuses = ['created', 'setting_up', 'done', 'cancelled', 'error'];
+  const nonRunningStatuses = ['draft', 'setting_up', 'closed', 'error'];
 
   it.each(nonRunningStatuses)('returns 400 when task status is %s', async (status) => {
     insertTask(db, { status: status as any });

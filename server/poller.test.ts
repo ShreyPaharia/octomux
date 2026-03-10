@@ -87,7 +87,7 @@ describe('checkTaskStatus', () => {
 // ─── pollStatuses ────────────────────────────────────────────────────────────
 
 describe('pollStatuses', () => {
-  it('marks running task as done when session dies', async () => {
+  it('marks running task as closed when session dies', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
@@ -101,7 +101,7 @@ describe('pollStatuses', () => {
     await pollStatuses();
 
     const task = getTask(db, DEFAULTS.task.id)!;
-    expect(task.status).toBe('done');
+    expect(task.status).toBe('closed');
   });
 
   it('marks running agents as stopped when session dies', async () => {
@@ -132,7 +132,7 @@ describe('pollStatuses', () => {
 
   // ─── Status filtering (table-driven) ──────────────────────────────────────
 
-  const ignoredStatuses = ['created', 'done', 'cancelled', 'error'] as const;
+  const ignoredStatuses = ['draft', 'closed', 'error'] as const;
 
   it.each(ignoredStatuses)('ignores tasks with status "%s"', async (status) => {
     insertTask(db, { ...DEFAULTS.runningTask, status });
@@ -277,10 +277,9 @@ describe('pollPRs', () => {
 
   const prPollStatuses = [
     { status: 'running', shouldPoll: true },
-    { status: 'done', shouldPoll: true },
-    { status: 'created', shouldPoll: false },
+    { status: 'closed', shouldPoll: true },
+    { status: 'draft', shouldPoll: false },
     { status: 'setting_up', shouldPoll: false },
-    { status: 'cancelled', shouldPoll: false },
     { status: 'error', shouldPoll: false },
   ] as const;
 

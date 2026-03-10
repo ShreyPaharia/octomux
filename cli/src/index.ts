@@ -3,7 +3,7 @@
 import { createTaskCommand } from './commands/create-task.js';
 import { listTasksCommand } from './commands/list-tasks.js';
 import { getTaskCommand } from './commands/get-task.js';
-import { cancelTaskCommand } from './commands/cancel-task.js';
+import { closeTaskCommand } from './commands/close-task.js';
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -11,7 +11,7 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
   'create-task': createTaskCommand,
   'list-tasks': listTasksCommand,
   'get-task': getTaskCommand,
-  'cancel-task': cancelTaskCommand,
+  'close-task': closeTaskCommand,
 };
 
 async function main() {
@@ -23,7 +23,7 @@ async function main() {
     console.error('  create-task   Create a new task');
     console.error('  list-tasks    List all tasks');
     console.error('  get-task      Get task details');
-    console.error('  cancel-task   Cancel a task');
+    console.error('  close-task    Close a task');
     process.exit(1);
   }
 

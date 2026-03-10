@@ -53,6 +53,7 @@ describe('TaskDetail', () => {
     vi.clearAllMocks();
     apiMock.getTask.mockResolvedValue(runningTask);
     apiMock.updateTask.mockResolvedValue(runningTask);
+    apiMock.startTask.mockResolvedValue(runningTask);
     apiMock.addAgent.mockResolvedValue({
       id: 'a2',
       task_id: 'test-task-01',
@@ -114,52 +115,60 @@ describe('TaskDetail', () => {
 
   // ─── Running task controls ────────────────────────────────────────────────
 
-  it('shows Mark Done and Cancel buttons for running task', async () => {
+  it('shows Close button for running task', async () => {
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Mark Done')).toBeInTheDocument();
-      expect(screen.getByText('Cancel')).toBeInTheDocument();
+      expect(screen.getByText('Close')).toBeInTheDocument();
     });
   });
 
-  const statusActions = [
-    { button: 'Mark Done', expectedStatus: 'done' },
-    { button: 'Cancel', expectedStatus: 'cancelled' },
-  ];
+  it('clicking Close calls updateTask with status "closed"', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Close')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('Close'));
+    await waitFor(() => {
+      expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', { status: 'closed' });
+    });
+  });
 
-  it.each(statusActions)(
-    'clicking "$button" calls updateTask with status "$expectedStatus"',
-    async ({ button, expectedStatus }) => {
-      const user = userEvent.setup();
-      renderDetail();
-      await waitFor(() => {
-        expect(screen.getByText(button)).toBeInTheDocument();
-      });
-      await user.click(screen.getByText(button));
-      await waitFor(() => {
-        expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', {
-          status: expectedStatus,
-        });
-      });
-    },
-  );
+  // ─── Draft task controls ────────────────────────────────────────────────
 
-  // ─── Non-running task hides controls ──────────────────────────────────────
+  it('shows Start button for draft task', async () => {
+    apiMock.getTask.mockResolvedValue(makeTask({ status: 'draft', agents: [] }));
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Start')).toBeInTheDocument();
+    });
+  });
 
-  const nonRunningStatuses = ['done', 'cancelled', 'error', 'created'] as const;
+  it('clicking Start calls startTask', async () => {
+    const user = userEvent.setup();
+    apiMock.getTask.mockResolvedValue(makeTask({ status: 'draft', agents: [] }));
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Start')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('Start'));
+    await waitFor(() => {
+      expect(apiMock.startTask).toHaveBeenCalledWith('test-task-01');
+    });
+  });
 
-  it.each(nonRunningStatuses)(
-    'hides Mark Done/Cancel buttons when status is "%s"',
-    async (status) => {
-      apiMock.getTask.mockResolvedValue(makeTask({ status, agents: [] }));
-      renderDetail();
-      await waitFor(() => {
-        expect(screen.getByText('Fix order validation')).toBeInTheDocument();
-      });
-      expect(screen.queryByText('Mark Done')).not.toBeInTheDocument();
-      expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
-    },
-  );
+  // ─── Non-running task hides Close button ──────────────────────────────────
+
+  const nonRunningStatuses = ['closed', 'error', 'draft'] as const;
+
+  it.each(nonRunningStatuses)('hides Close button when status is "%s"', async (status) => {
+    apiMock.getTask.mockResolvedValue(makeTask({ status, agents: [] }));
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Close')).not.toBeInTheDocument();
+  });
 
   // ─── Terminal rendering ───────────────────────────────────────────────────
 
@@ -179,16 +188,18 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('shows "Setting up" message when task is created', async () => {
-    apiMock.getTask.mockResolvedValue(makeTask({ status: 'created', agents: [] }));
+  it('shows "Setting up" message when task is draft', async () => {
+    apiMock.getTask.mockResolvedValue(makeTask({ status: 'draft', agents: [] }));
     renderDetail();
     await waitFor(() => {
       expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
     });
   });
 
-  it('shows "No terminal" message for done task without agents', async () => {
-    apiMock.getTask.mockResolvedValue(makeTask({ status: 'done', tmux_session: null, agents: [] }));
+  it('shows "No terminal" message for closed task without agents', async () => {
+    apiMock.getTask.mockResolvedValue(
+      makeTask({ status: 'closed', tmux_session: null, agents: [] }),
+    );
     renderDetail();
     await waitFor(() => {
       expect(screen.getByText('No terminal available')).toBeInTheDocument();
