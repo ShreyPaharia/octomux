@@ -19,193 +19,227 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ─── request() via api methods ───────────────────────────────────────────────
+// ─── API methods (table-driven) ─────────────────────────────────────────────
 
-describe('api.listTasks', () => {
-  it('fetches /api/tasks with GET', async () => {
-    fetchMock.mockResolvedValue(mockResponse([]));
-    await api.listTasks();
+const apiCases = [
+  {
+    name: 'listTasks',
+    call: () => api.listTasks(),
+    expectedUrl: '/api/tasks',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: [{ id: 't1', title: 'Test' }],
+  },
+  {
+    name: 'getTask',
+    call: () => api.getTask('t1'),
+    expectedUrl: '/api/tasks/t1',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: { id: 't1' },
+  },
+  {
+    name: 'createTask',
+    call: () => api.createTask({ title: 'T', description: 'D', repo_path: '/tmp' }),
+    expectedUrl: '/api/tasks',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({ title: 'T', description: 'D', repo_path: '/tmp' }),
+    response: { id: 't1' },
+  },
+  {
+    name: 'updateTask',
+    call: () => api.updateTask('t1', { status: 'closed' }),
+    expectedUrl: '/api/tasks/t1',
+    expectedMethod: 'PATCH',
+    expectedBody: JSON.stringify({ status: 'closed' }),
+    response: { id: 't1', status: 'closed' },
+  },
+  {
+    name: 'startTask',
+    call: () => api.startTask('t1'),
+    expectedUrl: '/api/tasks/t1/start',
+    expectedMethod: 'POST',
+    expectedBody: undefined,
+    response: { id: 't1' },
+  },
+  {
+    name: 'deleteTask',
+    call: () => api.deleteTask('t1'),
+    expectedUrl: '/api/tasks/t1',
+    expectedMethod: 'DELETE',
+    expectedBody: undefined,
+    response: undefined,
+    status: 204,
+  },
+  {
+    name: 'addAgent with prompt',
+    call: () => api.addAgent('t1', { prompt: 'Write tests' }),
+    expectedUrl: '/api/tasks/t1/agents',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({ prompt: 'Write tests' }),
+    response: { id: 'a1' },
+  },
+  {
+    name: 'addAgent without data',
+    call: () => api.addAgent('t1'),
+    expectedUrl: '/api/tasks/t1/agents',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({}),
+    response: { id: 'a1' },
+  },
+  {
+    name: 'stopAgent',
+    call: () => api.stopAgent('t1', 'a1'),
+    expectedUrl: '/api/tasks/t1/agents/a1',
+    expectedMethod: 'DELETE',
+    expectedBody: undefined,
+    response: undefined,
+    status: 204,
+  },
+  {
+    name: 'browse with path',
+    call: () => api.browse('/tmp'),
+    expectedUrl: '/api/browse?path=%2Ftmp',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: { current: '/tmp', parent: '/', entries: [] },
+  },
+  {
+    name: 'browse without path',
+    call: () => api.browse(),
+    expectedUrl: '/api/browse',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: { current: '/home', parent: '/', entries: [] },
+  },
+  {
+    name: 'recentRepos',
+    call: () => api.recentRepos(),
+    expectedUrl: '/api/recent-repos',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: [],
+  },
+  {
+    name: 'listBranches',
+    call: () => api.listBranches('/tmp/repo'),
+    expectedUrl: '/api/branches?repo_path=%2Ftmp%2Frepo',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: ['main', 'develop'],
+  },
+  {
+    name: 'getDefaultBranch',
+    call: () => api.getDefaultBranch('/tmp/repo'),
+    expectedUrl: '/api/default-branch?repo_path=%2Ftmp%2Frepo',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: { branch: 'main' },
+  },
+  {
+    name: 'previewPR',
+    call: () => api.previewPR('t1', { base: 'main' }),
+    expectedUrl: '/api/tasks/t1/pr/preview',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({ base: 'main' }),
+    response: { title: 'feat: test', body: '## What', base: 'main' },
+  },
+  {
+    name: 'createPR',
+    call: () => api.createPR('t1', { base: 'main', title: 'feat: test', body: '## What' }),
+    expectedUrl: '/api/tasks/t1/pr',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({ base: 'main', title: 'feat: test', body: '## What' }),
+    response: { id: 't1', pr_url: 'https://gh/pr/1' },
+  },
+  {
+    name: 'orchestratorStatus',
+    call: () => api.orchestratorStatus(),
+    expectedUrl: '/api/orchestrator/status',
+    expectedMethod: undefined,
+    expectedBody: undefined,
+    response: { running: false, session: '' },
+  },
+  {
+    name: 'orchestratorStart',
+    call: () => api.orchestratorStart(),
+    expectedUrl: '/api/orchestrator/start',
+    expectedMethod: 'POST',
+    expectedBody: undefined,
+    response: { running: true, session: 'octomux-orchestrator' },
+  },
+  {
+    name: 'orchestratorStop',
+    call: () => api.orchestratorStop(),
+    expectedUrl: '/api/orchestrator/stop',
+    expectedMethod: 'POST',
+    expectedBody: undefined,
+    response: undefined,
+    status: 204,
+  },
+] as const;
+
+describe('api methods (table-driven)', () => {
+  it.each(apiCases)('$name → $expectedMethod $expectedUrl', async (testCase) => {
+    const status = 'status' in testCase ? (testCase.status as number) : 200;
+    fetchMock.mockResolvedValue(mockResponse(testCase.response, status));
+
+    const result = await testCase.call();
+
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks',
-      expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
-    );
-  });
-
-  it('returns parsed response', async () => {
-    const tasks = [{ id: 't1', title: 'Test' }];
-    fetchMock.mockResolvedValue(mockResponse(tasks));
-    const result = await api.listTasks();
-    expect(result).toEqual(tasks);
-  });
-});
-
-describe('api.getTask', () => {
-  it('fetches /api/tasks/:id', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 't1' }));
-    await api.getTask('t1');
-    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/t1', expect.any(Object));
-  });
-});
-
-describe('api.createTask', () => {
-  it('sends POST with body', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 't1' }));
-    await api.createTask({ title: 'T', description: 'D', repo_path: '/tmp' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks',
+      testCase.expectedUrl,
       expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ title: 'T', description: 'D', repo_path: '/tmp' }),
+        ...(testCase.expectedMethod ? { method: testCase.expectedMethod } : {}),
+        ...(testCase.expectedBody ? { body: testCase.expectedBody } : {}),
       }),
     );
-  });
-});
 
-describe('api.updateTask', () => {
-  it('sends PATCH with status', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 't1', status: 'closed' }));
-    await api.updateTask('t1', { status: 'closed' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1',
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'closed' }),
-      }),
-    );
-  });
-});
-
-describe('api.deleteTask', () => {
-  it('sends DELETE and returns undefined for 204', async () => {
-    fetchMock.mockResolvedValue(mockResponse(undefined, 204));
-    const result = await api.deleteTask('t1');
-    expect(result).toBeUndefined();
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-  });
-});
-
-describe('api.addAgent', () => {
-  it('sends POST with prompt', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 'a1' }));
-    await api.addAgent('t1', { prompt: 'Write tests' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1/agents',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ prompt: 'Write tests' }),
-      }),
-    );
-  });
-
-  it('sends empty object when no data provided', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 'a1' }));
-    await api.addAgent('t1');
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1/agents',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({}),
-      }),
-    );
-  });
-});
-
-describe('api.stopAgent', () => {
-  it('sends DELETE for agent', async () => {
-    fetchMock.mockResolvedValue(mockResponse(undefined, 204));
-    await api.stopAgent('t1', 'a1');
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1/agents/a1',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
-  });
-});
-
-describe('api.browse', () => {
-  it('sends path as query param', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ current: '/tmp', parent: '/', entries: [] }));
-    await api.browse('/tmp');
-    expect(fetchMock).toHaveBeenCalledWith('/api/browse?path=%2Ftmp', expect.any(Object));
-  });
-
-  it('sends no query param when path is undefined', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ current: '/home', parent: '/', entries: [] }));
-    await api.browse();
-    expect(fetchMock).toHaveBeenCalledWith('/api/browse', expect.any(Object));
-  });
-});
-
-describe('api.recentRepos', () => {
-  it('fetches /api/recent-repos', async () => {
-    fetchMock.mockResolvedValue(mockResponse([]));
-    await api.recentRepos();
-    expect(fetchMock).toHaveBeenCalledWith('/api/recent-repos', expect.any(Object));
-  });
-});
-
-describe('api.previewPR', () => {
-  it('sends POST with base branch', async () => {
-    fetchMock.mockResolvedValue(
-      mockResponse({ title: 'feat: test', body: '## What', base: 'main' }),
-    );
-    await api.previewPR('t1', { base: 'main' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1/pr/preview',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ base: 'main' }),
-      }),
-    );
-  });
-});
-
-describe('api.createPR', () => {
-  it('sends POST with PR details', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ id: 't1', pr_url: 'https://gh/pr/1' }));
-    await api.createPR('t1', { base: 'main', title: 'feat: test', body: '## What' });
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/t1/pr',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ base: 'main', title: 'feat: test', body: '## What' }),
-      }),
-    );
+    if (status === 204) {
+      expect(result).toBeUndefined();
+    } else {
+      expect(result).toEqual(testCase.response);
+    }
   });
 });
 
 // ─── Error handling ──────────────────────────────────────────────────────────
 
 describe('request error handling', () => {
-  it('throws error from response body', async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 400,
-      statusText: 'Bad Request',
-      json: () => Promise.resolve({ error: 'title is required' }),
-    });
-    await expect(api.listTasks()).rejects.toThrow('title is required');
-  });
+  const errorCases = [
+    {
+      name: 'throws error from response body',
+      response: {
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: () => Promise.resolve({ error: 'title is required' }),
+      },
+      expectedError: 'title is required',
+    },
+    {
+      name: 'falls back to statusText when body has no error',
+      response: {
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: () => Promise.resolve({}),
+      },
+      expectedError: 'Internal Server Error',
+    },
+    {
+      name: 'falls back to statusText when body parse fails',
+      response: {
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: () => Promise.reject(new Error('not json')),
+      },
+      expectedError: 'Internal Server Error',
+    },
+  ];
 
-  it('falls back to statusText when body has no error', async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      json: () => Promise.resolve({}),
-    });
-    await expect(api.listTasks()).rejects.toThrow('Internal Server Error');
-  });
-
-  it('falls back to statusText when body parse fails', async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      json: () => Promise.reject(new Error('not json')),
-    });
-    await expect(api.listTasks()).rejects.toThrow('Internal Server Error');
+  it.each(errorCases)('$name', async ({ response, expectedError }) => {
+    fetchMock.mockResolvedValue(response);
+    await expect(api.listTasks()).rejects.toThrow(expectedError);
   });
 });
