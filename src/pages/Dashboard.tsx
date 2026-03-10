@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
-  const { filters, setFilter, filtered, counts } = useTaskFilters(tasks);
+  const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
 
   async function handleDelete(id: string) {
     try {
@@ -56,6 +56,9 @@ export default function Dashboard() {
                 activeStatus={filters.status}
                 counts={counts}
                 onStatusChange={(s) => setFilter('status', s)}
+                repos={repos}
+                activeRepo={filters.repo}
+                onRepoChange={(r) => setFilter('repo', r)}
               />
               <TaskList tasks={filtered} onDelete={handleDelete} onResume={handleResume} />
             </>
