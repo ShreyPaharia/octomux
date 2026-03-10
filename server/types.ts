@@ -1,4 +1,4 @@
-export type TaskStatus = 'created' | 'setting_up' | 'running' | 'done' | 'cancelled' | 'error';
+export type TaskStatus = 'draft' | 'setting_up' | 'running' | 'closed' | 'error';
 export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
 
 export interface Task {
@@ -33,6 +33,7 @@ export interface CreateTaskRequest {
   description: string;
   repo_path: string;
   initial_prompt?: string;
+  draft?: boolean;
 }
 
 export interface OrchestratorStatus {
@@ -45,5 +46,5 @@ export interface AddAgentRequest {
 }
 
 export interface UpdateTaskRequest {
-  status?: 'done' | 'cancelled';
+  status?: 'closed';
 }
