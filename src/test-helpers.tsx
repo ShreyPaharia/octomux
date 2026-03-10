@@ -27,13 +27,7 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
   return { ...TASK_DEFAULTS, ...overrides };
 }
 
-export const TASK_STATUSES: TaskStatus[] = [
-  'draft',
-  'setting_up',
-  'running',
-  'closed',
-  'error',
-];
+export const TASK_STATUSES: TaskStatus[] = ['draft', 'setting_up', 'running', 'closed', 'error'];
 
 // ─── Router-Wrapped Render ───────────────────────────────────────────────────
 
