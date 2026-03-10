@@ -36,12 +36,16 @@ export function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
       onClick={() => navigate(`/tasks/${task.id}`)}
     >
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base">{task.title}</CardTitle>
+        <div className="flex items-start justify-between gap-3">
+          <CardTitle className="min-w-0 text-base leading-snug line-clamp-2">
+            {task.title}
+          </CardTitle>
+          <div className="flex shrink-0 items-center gap-2">
             <StatusBadge status={task.status} />
+            <span className="text-xs whitespace-nowrap text-muted-foreground">
+              {timeAgo(task.created_at)}
+            </span>
           </div>
-          <span className="text-xs text-muted-foreground">{timeAgo(task.created_at)}</span>
         </div>
         <CardDescription className="line-clamp-1">{task.description}</CardDescription>
       </CardHeader>

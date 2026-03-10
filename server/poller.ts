@@ -29,15 +29,21 @@ export async function pollStatuses(): Promise<void> {
     .prepare("SELECT * FROM tasks WHERE status IN ('running', 'setting_up')")
     .all() as Task[];
 
-  for (const task of runningTasks) {
-    const status = await checkTaskStatus(task);
+  const results = await Promise.allSettled(
+    runningTasks.map(async (task) => {
+      const status = await checkTaskStatus(task);
+      return { task, status };
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { task, status } = result.value;
+
     if (status === 'dead' && task.status === 'running') {
-      // Session died unexpectedly — mark as closed
       db.prepare(
         `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-
-      // Mark all running agents as stopped
       db.prepare(
         "UPDATE agents SET status = 'stopped' WHERE task_id = ? AND status = 'running'",
       ).run(task.id);
@@ -45,7 +51,6 @@ export async function pollStatuses(): Promise<void> {
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-
       db.prepare(
         "UPDATE agents SET status = 'stopped' WHERE task_id = ? AND status = 'running'",
       ).run(task.id);
@@ -83,8 +88,16 @@ export async function pollPRs(): Promise<void> {
     )
     .all() as Task[];
 
-  for (const task of tasks) {
-    const pr = await detectPR(task);
+  const results = await Promise.allSettled(
+    tasks.map(async (task) => {
+      const pr = await detectPR(task);
+      return { task, pr };
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { task, pr } = result.value;
     if (pr) {
       db.prepare(
         `UPDATE tasks SET pr_url = ?, pr_number = ?, updated_at = datetime('now') WHERE id = ?`,

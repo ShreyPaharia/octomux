@@ -47,7 +47,7 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, closeTask, addAgent, stopAgent, dispatchToWindow } =
+const { startTask, closeTask, addAgent, stopAgent, resumeTask, dispatchToWindow, slugifyTitle } =
   await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -65,6 +65,22 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
+});
+
+// ─── slugifyTitle ─────────────────────────────────────────────────────────────
+
+describe('slugifyTitle', () => {
+  const cases = [
+    { title: 'Fix order validation', id: 'test-task-01', expected: 'fix-order-validation-test-t' },
+    { title: 'Add NEW feature!!!', id: 'abc123defghi', expected: 'add-new-feature-abc123' },
+    { title: '---leading---trailing---', id: 'xyz789', expected: 'leading-trailing-xyz789' },
+    { title: 'a'.repeat(60), id: 'id1234', expected: 'a'.repeat(50) + '-id1234' },
+    { title: 'Hello   World', id: '123456', expected: 'hello-world-123456' },
+  ];
+
+  it.each(cases)('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
+    expect(slugifyTitle(title, id)).toBe(expected);
+  });
 });
 
 // ─── startTask ────────────────────────────────────────────────────────────────
@@ -86,8 +102,11 @@ describe('startTask', () => {
     const expectedFields = [
       { field: 'status', expected: 'running' },
       { field: 'tmux_session', expected: `octomux-agent-${DEFAULTS.task.id}` },
-      { field: 'branch', expected: `agents/${DEFAULTS.task.id}` },
-      { field: 'worktree', expected: `${DEFAULTS.task.repo_path}/.worktrees/${DEFAULTS.task.id}` },
+      { field: 'branch', expected: 'agents/fix-order-validation-test-t' },
+      {
+        field: 'worktree',
+        expected: `${DEFAULTS.task.repo_path}/.worktrees/fix-order-validation-test-t`,
+      },
     ];
 
     it.each(expectedFields)('sets $field to $expected', ({ field, expected }) => {
@@ -119,10 +138,14 @@ describe('startTask', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
-  it('uses tmux load-buffer via spawn for prompt dispatch', async () => {
+  it('uses tmux load-buffer with named buffer via spawn for prompt dispatch', async () => {
     insertTask(db, { initial_prompt: 'Do the thing' });
     await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
-    expect(spawn).toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    const call = vi
+      .mocked(spawn)
+      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
+    expect(call).toBeDefined();
+    expect(call![1] as string[]).toContain('-b');
   });
 
   it('skips prompt dispatch when initial_prompt is null', async () => {
@@ -131,7 +154,10 @@ describe('startTask', () => {
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
     ).toBeUndefined();
-    expect(spawn).not.toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    const loadBufferCall = vi
+      .mocked(spawn)
+      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
+    expect(loadBufferCall).toBeUndefined();
   });
 
   // ─── Custom branch and base branch ─────────────────────────────────────
@@ -433,9 +459,13 @@ describe('stopAgent', () => {
 // ─── dispatchToWindow ─────────────────────────────────────────────────────────
 
 describe('dispatchToWindow', () => {
-  it('uses tmux load-buffer via spawn', async () => {
+  it('uses tmux load-buffer with named buffer via spawn', async () => {
     await dispatchToWindow('test-session', 0, 'Hello');
-    expect(spawn).toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+    const call = vi
+      .mocked(spawn)
+      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
+    expect(call).toBeDefined();
+    expect(call![1] as string[]).toContain('-b');
   });
 
   it('writes text + newline to stdin', async () => {
@@ -451,6 +481,14 @@ describe('dispatchToWindow', () => {
     expect(call![1]).toContain('my-session:2');
   });
 
+  it('sends Enter key after pasting buffer', async () => {
+    await dispatchToWindow('my-session', 2, 'text');
+    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys'] });
+    expect(call).toBeTruthy();
+    expect(call![1]).toContain('my-session:2');
+    expect(call![1]).toContain('Enter');
+  });
+
   it('rejects when load-buffer exits non-zero', async () => {
     vi.mocked(spawn).mockReturnValueOnce({
       stdin: { write: vi.fn(), end: vi.fn() },
@@ -462,5 +500,125 @@ describe('dispatchToWindow', () => {
     await expect(dispatchToWindow('s', 0, 'text')).rejects.toThrow(
       'tmux load-buffer exited with code 1',
     );
+  });
+});
+
+// ─── resumeTask ──────────────────────────────────────────────────────────────
+
+describe('resumeTask', () => {
+  const closedTask = {
+    ...DEFAULTS.runningTask,
+    status: 'closed' as const,
+  } as Task;
+
+  it('sets status to setting_up then running on success', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.status).toBe('running');
+  });
+
+  it('clears error field on resume', async () => {
+    insertTask(db, { ...closedTask, status: 'error', error: 'Previous error' });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask({ ...closedTask, status: 'error' as any } as Task);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.error).toBeNull();
+  });
+
+  it('marks stopped agents as running', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2', status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.status === 'running')).toBe(true);
+  });
+
+  // ─── Shell commands (table-driven) ──────────────────────────────────────
+
+  const resumeShellCalls = [
+    { name: 'kills stale tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
+    { name: 'creates fresh tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
+    { name: 'launches claude in window', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
+  ];
+
+  it.each(resumeShellCalls)('$name', async ({ cmd, argsInclude }) => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
+  });
+
+  it('uses --resume with claude_session_id when available', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: 'session-abc-123' });
+
+    await resumeTask(closedTask);
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys'],
+    });
+    expect(sendKeysCall).toBeDefined();
+    const args = sendKeysCall![1] as string[];
+    const claudeCmd = args.find((a: string) => a.includes('claude'));
+    expect(claudeCmd).toContain('--resume');
+    expect(claudeCmd).toContain('session-abc-123');
+  });
+
+  it('uses --continue when claude_session_id is null', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: null });
+
+    await resumeTask(closedTask);
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys'],
+    });
+    const args = sendKeysCall![1] as string[];
+    const claudeCmd = args.find((a: string) => a.includes('claude'));
+    expect(claudeCmd).toContain('--continue');
+  });
+
+  it('creates new windows for agents after the first', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2', status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    // Should create exactly one new-window (for second agent; first reuses session window)
+    const newWindowCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: any[]) => c[0] === 'tmux' && (c[1] as string[]).includes('new-window'),
+      );
+    expect(newWindowCalls).toHaveLength(1);
+  });
+
+  it('sets error status on failure', async () => {
+    vi.mocked(execFile).mockImplementation(() => {
+      throw new Error('tmux not found');
+    });
+
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.status).toBe('error');
+    expect(updated.error).toContain('tmux not found');
   });
 });

@@ -4,8 +4,8 @@ import fs from 'fs';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
-import { setupTerminalWebSocket } from './terminal.js';
-import { startPolling } from './poller.js';
+import { setupTerminalWebSocket, cleanupAllConnections } from './terminal.js';
+import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
 import { resumeTask } from './task-runner.js';
 import { getDb } from './db.js';
@@ -65,5 +65,23 @@ if (process.env.NODE_ENV === 'production') {
 server.listen(PORT, () => {
   console.warn(`octomux-agents running at http://localhost:${PORT}`);
 });
+
+// ─── Graceful Shutdown ──────────────────────────────────────────────────────
+function shutdown() {
+  console.warn('[shutdown] Stopping pollers...');
+  stopPolling();
+  console.warn('[shutdown] Cleaning up terminal connections...');
+  cleanupAllConnections();
+  console.warn('[shutdown] Closing HTTP server...');
+  server.close(() => {
+    console.warn('[shutdown] Done.');
+    process.exit(0);
+  });
+  // Force exit after 5s if graceful shutdown stalls
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 export { server, app };

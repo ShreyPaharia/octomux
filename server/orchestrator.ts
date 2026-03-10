@@ -28,7 +28,7 @@ export async function startOrchestrator(cwd?: string): Promise<void> {
 }
 
 export async function stopOrchestrator(): Promise<void> {
-  await execFile('tmux', ['kill-session', '-t', ORCHESTRATOR_SESSION]);
+  await execFile('tmux', ['kill-session', '-t', ORCHESTRATOR_SESSION]).catch(() => {});
 }
 
 export function getOrchestratorSession(): string {
