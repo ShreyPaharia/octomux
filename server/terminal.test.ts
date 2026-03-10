@@ -210,4 +210,59 @@ describe('terminal WebSocket', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(mockPty.kill).toHaveBeenCalled();
   });
+
+  // ─── PTY spawn failure ─────────────────────────────────────────────────────
+
+  it('closes with 4005 when node-pty spawn fails', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    vi.mocked(nodePty.spawn).mockImplementationOnce(() => {
+      throw new Error('spawn failed');
+    });
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    const code = await new Promise<number>((resolve) => {
+      ws.on('close', (code) => resolve(code));
+    });
+    expect(code).toBe(4005);
+  });
+
+  // ─── PTY exit ──────────────────────────────────────────────────────────────
+
+  it('closes WebSocket with 4006 when PTY exits', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+
+    // Simulate PTY exit
+    const onExitCb = mockPty.onExit.mock.calls[0][0];
+    onExitCb({ exitCode: 0, signal: 0 });
+
+    const code = await new Promise<number>((resolve) => {
+      ws.on('close', (code) => resolve(code));
+    });
+    expect(code).toBe(4006);
+  });
+
+  // ─── Connection tracking ───────────────────────────────────────────────────
+
+  it('removes connection from map when WebSocket closes', async () => {
+    const { getActiveConnections } = await import('./terminal.js');
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+
+    // Connection should exist
+    const conns = getActiveConnections();
+    expect(conns.size).toBeGreaterThan(0);
+
+    ws.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // After cleanup, the specific connection key should be removed
+    expect(conns.has(`${DEFAULTS.task.id}:0`)).toBe(false);
+  });
 });
