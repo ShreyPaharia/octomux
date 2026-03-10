@@ -28,6 +28,8 @@ export function createTask(data: {
   description: string;
   repo_path: string;
   initial_prompt?: string;
+  branch?: string;
+  base_branch?: string;
 }): Promise<Task> {
   return request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) });
 }
