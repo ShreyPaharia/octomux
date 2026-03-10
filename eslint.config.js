@@ -45,6 +45,7 @@ export default tseslint.config(
       'node_modules/',
       'data/',
       'coverage/',
+      '.worktrees/',
       '*.config.js',
       '*.config.ts',
     ],
