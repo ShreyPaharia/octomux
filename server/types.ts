@@ -25,6 +25,7 @@ export interface Agent {
   window_index: number;
   label: string;
   status: AgentStatus;
+  claude_session_id: string | null;
   created_at: string;
 }
 
@@ -46,5 +47,5 @@ export interface AddAgentRequest {
 }
 
 export interface UpdateTaskRequest {
-  status?: 'closed';
+  status?: 'closed' | 'running';
 }

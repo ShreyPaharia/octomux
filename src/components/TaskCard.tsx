@@ -23,10 +23,12 @@ function repoName(repoPath: string): string {
 interface TaskCardProps {
   task: Task;
   onDelete: (id: string) => void;
+  onResume?: (id: string) => void;
 }
 
-export function TaskCard({ task, onDelete }: TaskCardProps) {
+export function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
   const navigate = useNavigate();
+  const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
 
   return (
     <Card
@@ -67,6 +69,29 @@ export function TaskCard({ task, onDelete }: TaskCardProps) {
               <span className="text-xs text-destructive" title={task.error}>
                 Error
               </span>
+            )}
+            {canResume && onResume && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground hover:text-green-400"
+                title="Resume agents"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onResume(task.id);
+                }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  stroke="none"
+                >
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+              </Button>
             )}
             <Button
               variant="ghost"

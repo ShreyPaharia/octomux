@@ -19,6 +19,15 @@ export default function Dashboard() {
     }
   }
 
+  async function handleResume(id: string) {
+    try {
+      await api.updateTask(id, { status: 'running' });
+      refresh();
+    } catch (err) {
+      console.error('Failed to resume task:', err);
+    }
+  }
+
   return (
     <div className="flex h-screen">
       <div className="flex-1 overflow-auto">
@@ -48,7 +57,7 @@ export default function Dashboard() {
                 counts={counts}
                 onStatusChange={(s) => setFilter('status', s)}
               />
-              <TaskList tasks={filtered} onDelete={handleDelete} />
+              <TaskList tasks={filtered} onDelete={handleDelete} onResume={handleResume} />
             </>
           )}
         </div>

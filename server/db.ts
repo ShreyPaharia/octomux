@@ -26,12 +26,13 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 CREATE TABLE IF NOT EXISTS agents (
-    id           TEXT PRIMARY KEY,
-    task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    window_index INTEGER NOT NULL,
-    label        TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'running',
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    id                TEXT PRIMARY KEY,
+    task_id           TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    window_index      INTEGER NOT NULL,
+    label             TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'running',
+    claude_session_id TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -65,5 +66,12 @@ export function initDb(instance: Database.Database): void {
   const colNames = cols.map((c) => c.name);
   if (!colNames.includes('initial_prompt')) {
     instance.exec('ALTER TABLE tasks ADD COLUMN initial_prompt TEXT');
+  }
+
+  // Add claude_session_id to agents table (for existing DBs)
+  const agentCols = instance.pragma('table_info(agents)') as Array<{ name: string }>;
+  const agentColNames = agentCols.map((c) => c.name);
+  if (!agentColNames.includes('claude_session_id')) {
+    instance.exec('ALTER TABLE agents ADD COLUMN claude_session_id TEXT');
   }
 }

@@ -6,7 +6,7 @@ import os from 'os';
 import { getDb } from './db.js';
 import { execFile as execFileCb, spawn } from 'child_process';
 import { promisify } from 'util';
-import { startTask, closeTask, addAgent, stopAgent } from './task-runner.js';
+import { startTask, closeTask, resumeTask, addAgent, stopAgent } from './task-runner.js';
 import { buildPRPrompt } from './pr-template.js';
 import {
   isOrchestratorRunning,
@@ -167,7 +167,18 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    if (body.status === 'closed') {
+    if (body.status === 'running') {
+      // Resume task
+      if (task.status !== 'closed' && task.status !== 'error') {
+        res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
+        return;
+      }
+      if (!task.worktree || !fs.existsSync(task.worktree)) {
+        res.status(400).json({ error: 'Worktree no longer exists on disk' });
+        return;
+      }
+      resumeTask(task);
+    } else if (body.status === 'closed') {
       await closeTask(task);
     }
 
