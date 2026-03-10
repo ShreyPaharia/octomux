@@ -451,6 +451,14 @@ describe('dispatchToWindow', () => {
     expect(call![1]).toContain('my-session:2');
   });
 
+  it('sends Enter key after pasting buffer', async () => {
+    await dispatchToWindow('my-session', 2, 'text');
+    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys'] });
+    expect(call).toBeTruthy();
+    expect(call![1]).toContain('my-session:2');
+    expect(call![1]).toContain('Enter');
+  });
+
   it('rejects when load-buffer exits non-zero', async () => {
     vi.mocked(spawn).mockReturnValueOnce({
       stdin: { write: vi.fn(), end: vi.fn() },

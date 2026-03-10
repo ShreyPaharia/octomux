@@ -287,4 +287,7 @@ export async function dispatchToWindow(
 
   // Paste into the target window
   await execFile('tmux', ['paste-buffer', '-t', target]);
+
+  // Press Enter to submit the prompt
+  await execFile('tmux', ['send-keys', '-t', target, 'Enter']);
 }
