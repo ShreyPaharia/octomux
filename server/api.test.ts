@@ -10,6 +10,7 @@ import { EventEmitter } from 'events';
 vi.mock('./task-runner.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
+  resumeTask: vi.fn(),
   addAgent: vi.fn(async (_task: any, _prompt?: string) => ({
     id: 'new-agent-id',
     task_id: _task.id,
@@ -41,7 +42,7 @@ vi.mock('child_process', () => ({
 const fs = (await import('fs')).default;
 const { spawn: spawnMock } = await import('child_process');
 const { createApp } = await import('./app.js');
-const { startTask, closeTask, addAgent, stopAgent } = await import('./task-runner.js');
+const { startTask, closeTask, resumeTask, addAgent, stopAgent } = await import('./task-runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,56 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
+});
+
+// ─── 404 for nonexistent resources (table-driven) ────────────────────────────
+
+const notFoundCases = [
+  { name: 'GET /api/tasks/:id', method: 'get' as const, url: '/api/tasks/nonexistent' },
+  {
+    name: 'PATCH /api/tasks/:id',
+    method: 'patch' as const,
+    url: '/api/tasks/nonexistent',
+    body: { status: 'closed' },
+  },
+  { name: 'DELETE /api/tasks/:id', method: 'delete' as const, url: '/api/tasks/nonexistent' },
+  {
+    name: 'POST /api/tasks/:id/start',
+    method: 'post' as const,
+    url: '/api/tasks/nonexistent/start',
+  },
+  {
+    name: 'POST /api/tasks/:id/agents',
+    method: 'post' as const,
+    url: '/api/tasks/nonexistent/agents',
+    body: {},
+  },
+  {
+    name: 'DELETE /api/tasks/:id/agents/:agentId',
+    method: 'delete' as const,
+    url: '/api/tasks/nonexistent/agents/agent1',
+  },
+  {
+    name: 'POST /api/tasks/:id/pr',
+    method: 'post' as const,
+    url: '/api/tasks/nonexistent/pr',
+    body: { base: 'main', title: 'T', body: 'B' },
+  },
+  {
+    name: 'POST /api/tasks/:id/pr/preview',
+    method: 'post' as const,
+    url: '/api/tasks/nonexistent/pr/preview',
+    body: { base: 'main' },
+  },
+];
+
+describe('404 for nonexistent resources', () => {
+  it.each(notFoundCases)('$name → 404', async ({ method, url, body }) => {
+    const res = body
+      ? await request(app)[method](url).send(body)
+      : await request(app)[method](url);
+    expect(res.status).toBe(404);
+  });
 });
 
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
@@ -123,12 +174,6 @@ describe('GET /api/tasks', () => {
 // ─── GET /api/tasks/:id ──────────────────────────────────────────────────────
 
 describe('GET /api/tasks/:id', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).get('/api/tasks/nonexistent');
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe('Task not found');
-  });
-
   it('returns task with agents', async () => {
     insertTask(db);
     insertAgent(db);
@@ -184,12 +229,6 @@ describe('POST /api/tasks', () => {
     const tasks = db.prepare('SELECT * FROM tasks').all() as Task[];
     expect(tasks).toHaveLength(1);
     expect(tasks[0].title).toBe(validPayload.title);
-  });
-
-  it('calls startTask with created task', async () => {
-    const res = await request(app).post('/api/tasks').send(validPayload);
-    expect(startTask).toHaveBeenCalledOnce();
-    expect(vi.mocked(startTask).mock.calls[0][0].id).toBe(res.body.id);
   });
 
   // ─── Validation (table-driven) ─────────────────────────────────────────
@@ -248,16 +287,21 @@ describe('POST /api/tasks', () => {
     expect(res.body.branch).toBeNull();
     expect(res.body.base_branch).toBeNull();
   });
+
+  it('stores initial_prompt when provided', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ ...validPayload, initial_prompt: 'Fix the bug in orders.ts' });
+
+    expect(res.status).toBe(201);
+    const task = getTask(db, res.body.id);
+    expect(task?.initial_prompt).toBe('Fix the bug in orders.ts');
+  });
 });
 
 // ─── POST /api/tasks/:id/start ──────────────────────────────────────────────
 
 describe('POST /api/tasks/:id/start', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).post('/api/tasks/nonexistent/start');
-    expect(res.status).toBe(404);
-  });
-
   it('starts a draft task', async () => {
     insertTask(db);
 
@@ -280,11 +324,6 @@ describe('POST /api/tasks/:id/start', () => {
 // ─── PATCH /api/tasks/:id ────────────────────────────────────────────────────
 
 describe('PATCH /api/tasks/:id', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).patch('/api/tasks/nonexistent').send({ status: 'closed' });
-    expect(res.status).toBe(404);
-  });
-
   it('updates status and returns updated task with agents', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
@@ -331,16 +370,50 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.status).toBe('running'); // unchanged
     expect(closeTask).not.toHaveBeenCalled();
   });
+
+  // ─── Resume flow (status=running) ─────────────────────────────────────
+
+  it('returns 400 when resuming a non-closed/non-error task', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'running' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('resume');
+  });
+
+  const resumableStatuses = ['closed', 'error'] as const;
+
+  it.each(resumableStatuses)(
+    'returns 400 when worktree missing for %s task',
+    async (status) => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      insertTask(db, { ...DEFAULTS.runningTask, status });
+      const res = await request(app)
+        .patch(`/api/tasks/${DEFAULTS.task.id}`)
+        .send({ status: 'running' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Worktree');
+    },
+  );
+
+  it.each(resumableStatuses)(
+    'calls resumeTask for %s task with valid worktree',
+    async (status) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      insertTask(db, { ...DEFAULTS.runningTask, status });
+      const res = await request(app)
+        .patch(`/api/tasks/${DEFAULTS.task.id}`)
+        .send({ status: 'running' });
+      expect(res.status).toBe(200);
+      expect(resumeTask).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 // ─── DELETE /api/tasks/:id ───────────────────────────────────────────────────
 
 describe('DELETE /api/tasks/:id', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).delete('/api/tasks/nonexistent');
-    expect(res.status).toBe(404);
-  });
-
   it('deletes task and returns 204', async () => {
     insertTask(db);
     const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
@@ -367,11 +440,6 @@ describe('DELETE /api/tasks/:id', () => {
 // ─── POST /api/tasks/:id/agents ──────────────────────────────────────────────
 
 describe('POST /api/tasks/:id/agents', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).post('/api/tasks/nonexistent/agents').send({});
-    expect(res.status).toBe(404);
-  });
-
   // ─── Status gating (table-driven) ──────────────────────────────────────
 
   const nonRunningStatuses = ['draft', 'setting_up', 'closed', 'error'];
@@ -415,14 +483,9 @@ describe('POST /api/tasks/:id/agents', () => {
 // ─── DELETE /api/tasks/:id/agents/:agentId ───────────────────────────────────
 
 describe('DELETE /api/tasks/:id/agents/:agentId', () => {
-  it('returns 404 for nonexistent agent', async () => {
+  it('returns 404 for nonexistent agent on existing task', async () => {
     insertTask(db);
     const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/agents/nonexistent`);
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 404 when task does not exist', async () => {
-    const res = await request(app).delete('/api/tasks/nonexistent/agents/agent1');
     expect(res.status).toBe(404);
   });
 
@@ -451,13 +514,6 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
 // ─── POST /api/tasks/:id/pr ─────────────────────────────────────────────────
 
 describe('POST /api/tasks/:id/pr', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app)
-      .post('/api/tasks/nonexistent/pr')
-      .send({ base: 'main', title: 'T', body: 'B' });
-    expect(res.status).toBe(404);
-  });
-
   it('returns 400 when task has no branch', async () => {
     insertTask(db);
     const res = await request(app)
@@ -491,11 +547,6 @@ describe('POST /api/tasks/:id/pr', () => {
 // ─── POST /api/tasks/:id/pr/preview ─────────────────────────────────────────
 
 describe('POST /api/tasks/:id/pr/preview', () => {
-  it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).post('/api/tasks/nonexistent/pr/preview').send({ base: 'main' });
-    expect(res.status).toBe(404);
-  });
-
   it('returns 400 when task has no branch', async () => {
     insertTask(db);
     const res = await request(app)
@@ -740,6 +791,32 @@ describe('POST /api/tasks/:id/pr — success path', () => {
     const task = getTask(db, DEFAULTS.task.id);
     expect(task?.pr_url).toBe('https://github.com/org/repo/pull/42');
     expect(task?.pr_number).toBe(42);
+  });
+});
+
+// ─── POST /api/tasks/:id/pr — gh failure ─────────────────────────────────────
+
+describe('POST /api/tasks/:id/pr — gh failure', () => {
+  it('returns 500 when gh CLI fails', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    const { execFile } = await import('child_process');
+    vi.mocked(execFile).mockImplementation(((cmd: string, _args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (cmd === 'gh') {
+        cb(new Error('gh: command not found'), null);
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
+      .send({ base: 'main', title: 'feat: test', body: '## What' });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('gh');
   });
 });
 

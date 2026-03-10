@@ -9,34 +9,26 @@ describe('buildPRPrompt', () => {
     diffStats: ' src/orders.ts | 10 +++++\n 1 file changed, 10 insertions(+)',
   };
 
-  it('includes task title and description', () => {
+  // ─── Required content (table-driven) ──────────────────────────────────────
+
+  const contentCases = [
+    { name: 'task title', expected: 'Task: Fix order validation' },
+    { name: 'task description', expected: 'Description: Add negative quantity checks' },
+    { name: 'commit log', expected: 'abc1234 fix: validate order quantities' },
+    { name: 'diff stats', expected: 'src/orders.ts | 10 +++++' },
+    { name: 'Conventional Commits', expected: 'Conventional Commits' },
+    { name: 'commit types', expected: 'feat, fix, refactor, test, docs, chore' },
+    { name: 'JSON output format', expected: 'Return ONLY valid JSON' },
+    { name: 'title key', expected: '"title"' },
+    { name: 'body key', expected: '"body"' },
+  ];
+
+  it.each(contentCases)('includes $name', ({ expected }) => {
     const prompt = buildPRPrompt(baseContext);
-    expect(prompt).toContain('Task: Fix order validation');
-    expect(prompt).toContain('Description: Add negative quantity checks');
+    expect(prompt).toContain(expected);
   });
 
-  it('includes commit log', () => {
-    const prompt = buildPRPrompt(baseContext);
-    expect(prompt).toContain('abc1234 fix: validate order quantities');
-  });
-
-  it('includes diff stats', () => {
-    const prompt = buildPRPrompt(baseContext);
-    expect(prompt).toContain('src/orders.ts | 10 +++++');
-  });
-
-  it('includes Conventional Commits requirement', () => {
-    const prompt = buildPRPrompt(baseContext);
-    expect(prompt).toContain('Conventional Commits');
-    expect(prompt).toContain('feat, fix, refactor, test, docs, chore');
-  });
-
-  it('requests JSON output format', () => {
-    const prompt = buildPRPrompt(baseContext);
-    expect(prompt).toContain('Return ONLY valid JSON');
-    expect(prompt).toContain('"title"');
-    expect(prompt).toContain('"body"');
-  });
+  // ─── PR body sections (table-driven) ──────────────────────────────────────
 
   const requiredSections = ['## What', '## Why', '## Testing'];
 
@@ -44,6 +36,8 @@ describe('buildPRPrompt', () => {
     const prompt = buildPRPrompt(baseContext);
     expect(prompt).toContain(section);
   });
+
+  // ─── Edge cases ───────────────────────────────────────────────────────────
 
   it('handles multi-line commit logs', () => {
     const context: PRPromptContext = {

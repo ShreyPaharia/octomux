@@ -48,6 +48,7 @@ export const DEFAULTS = {
     window_index: 0,
     label: 'Agent 1',
     status: 'running' as const,
+    claude_session_id: null,
     created_at: '2026-01-01 00:00:00',
   },
 } satisfies Record<string, Partial<Task> | Partial<Agent>>;
@@ -104,8 +105,8 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)',
-  ).run(agent.id, agent.task_id, agent.window_index, agent.label, agent.status);
+    'INSERT INTO agents (id, task_id, window_index, label, status, claude_session_id) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(agent.id, agent.task_id, agent.window_index, agent.label, agent.status, agent.claude_session_id);
 
   return agent;
 }
@@ -116,6 +117,19 @@ export function getTask(db: Database.Database, id: string): Task | undefined {
 
 export function getAgents(db: Database.Database, taskId: string): Agent[] {
   return db.prepare('SELECT * FROM agents WHERE task_id = ?').all(taskId) as Agent[];
+}
+
+// ─── Callback Finder ─────────────────────────────────────────────────────────
+
+/**
+ * Find the callback function in a variadic argument list (for promisified execFile mocks).
+ * Searches from end to start since callbacks are typically last.
+ */
+export function findCallback(...args: any[]): Function | undefined {
+  for (let i = args.length - 1; i >= 0; i--) {
+    if (typeof args[i] === 'function') return args[i];
+  }
+  return undefined;
 }
 
 // ─── Shell Mock Helpers ──────────────────────────────────────────────────────

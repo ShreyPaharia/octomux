@@ -47,7 +47,7 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, closeTask, addAgent, stopAgent, dispatchToWindow } =
+const { startTask, closeTask, addAgent, stopAgent, resumeTask, dispatchToWindow } =
   await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -470,5 +470,123 @@ describe('dispatchToWindow', () => {
     await expect(dispatchToWindow('s', 0, 'text')).rejects.toThrow(
       'tmux load-buffer exited with code 1',
     );
+  });
+});
+
+// ─── resumeTask ──────────────────────────────────────────────────────────────
+
+describe('resumeTask', () => {
+  const closedTask = {
+    ...DEFAULTS.runningTask,
+    status: 'closed' as const,
+  } as Task;
+
+  it('sets status to setting_up then running on success', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.status).toBe('running');
+  });
+
+  it('clears error field on resume', async () => {
+    insertTask(db, { ...closedTask, status: 'error', error: 'Previous error' });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask({ ...closedTask, status: 'error' as any } as Task);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.error).toBeNull();
+  });
+
+  it('marks stopped agents as running', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2', status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.status === 'running')).toBe(true);
+  });
+
+  // ─── Shell commands (table-driven) ──────────────────────────────────────
+
+  const resumeShellCalls = [
+    { name: 'kills stale tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
+    { name: 'creates fresh tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
+    { name: 'launches claude in window', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
+  ];
+
+  it.each(resumeShellCalls)('$name', async ({ cmd, argsInclude }) => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
+  });
+
+  it('uses --resume with claude_session_id when available', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: 'session-abc-123' });
+
+    await resumeTask(closedTask);
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys'],
+    });
+    expect(sendKeysCall).toBeDefined();
+    const args = sendKeysCall![1] as string[];
+    const claudeCmd = args.find((a: string) => a.includes('claude'));
+    expect(claudeCmd).toContain('--resume');
+    expect(claudeCmd).toContain('session-abc-123');
+  });
+
+  it('uses --continue when claude_session_id is null', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: null });
+
+    await resumeTask(closedTask);
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys'],
+    });
+    const args = sendKeysCall![1] as string[];
+    const claudeCmd = args.find((a: string) => a.includes('claude'));
+    expect(claudeCmd).toContain('--continue');
+  });
+
+  it('creates new windows for agents after the first', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2', status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    // Should create exactly one new-window (for second agent; first reuses session window)
+    const newWindowCalls = vi.mocked(execFile).mock.calls.filter(
+      (c: any[]) => c[0] === 'tmux' && (c[1] as string[]).includes('new-window'),
+    );
+    expect(newWindowCalls).toHaveLength(1);
+  });
+
+  it('sets error status on failure', async () => {
+    vi.mocked(execFile).mockImplementation(() => {
+      throw new Error('tmux not found');
+    });
+
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.status).toBe('error');
+    expect(updated.error).toContain('tmux not found');
   });
 });

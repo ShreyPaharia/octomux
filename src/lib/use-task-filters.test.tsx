@@ -1,28 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useTaskFilters } from './use-task-filters';
+import { makeTask } from '../test-helpers';
 import type { Task } from '../../server/types';
-
-function makeTask(overrides: Partial<Task> = {}): Task {
-  return {
-    id: 'test-01',
-    title: 'Test',
-    description: 'Desc',
-    repo_path: '/tmp/repo',
-    status: 'running',
-    branch: null,
-    base_branch: null,
-    worktree: null,
-    tmux_session: null,
-    pr_url: null,
-    pr_number: null,
-    initial_prompt: null,
-    error: null,
-    created_at: '2026-01-01 00:00:00',
-    updated_at: '2026-01-01 00:00:00',
-    ...overrides,
-  };
-}
 
 beforeEach(() => {
   localStorage.clear();
