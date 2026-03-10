@@ -40,12 +40,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Generate a git-safe branch slug from a title + task ID suffix. */
+export function slugifyTitle(title: string, id: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-') // replace non-alphanumeric with hyphens
+    .replace(/-{2,}/g, '-') // collapse consecutive hyphens
+    .replace(/^-|-$/g, '') // trim leading/trailing hyphens
+    .slice(0, 50);
+  const suffix = id.slice(0, 6);
+  return `${slug}-${suffix}`;
+}
+
 export async function startTask(task: Task): Promise<void> {
   const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
-  const branch = task.branch || `agents/${id}`;
-  const worktreeDir = task.branch || id;
+  const slug = slugifyTitle(task.title, id);
+  const branch = task.branch || `agents/${slug}`;
+  const worktreeDir = task.branch || slug;
   const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
 
   try {
