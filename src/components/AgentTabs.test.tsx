@@ -2,21 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentTabs } from './AgentTabs';
-import { renderWithRouter } from '../test-helpers';
-import type { Agent } from '../../server/types';
-
-function makeAgent(overrides: Partial<Agent> = {}): Agent {
-  return {
-    id: 'agent-01',
-    task_id: 'task-01',
-    window_index: 0,
-    label: 'Agent 1',
-    status: 'running',
-    claude_session_id: null,
-    created_at: '2026-01-01 00:00:00',
-    ...overrides,
-  };
-}
+import { renderWithRouter, makeAgent } from '../test-helpers';
 
 describe('AgentTabs', () => {
   const onSelect = vi.fn();
