@@ -74,8 +74,8 @@ export async function startTask(task: Task): Promise<void> {
     await execFile('git', ['-C', task.repo_path, 'rev-parse', '--is-inside-work-tree']);
 
     // 3. Ensure .worktrees directory exists
-    const worktreeDir = path.join(task.repo_path, '.worktrees');
-    fs.mkdirSync(worktreeDir, { recursive: true });
+    const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
+    fs.mkdirSync(worktreeBaseDir, { recursive: true });
 
     // 4. Create worktree (optionally from a base branch)
     const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
@@ -185,7 +185,10 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 export async function closeTask(task: Task): Promise<void> {
   const db = getDb();
 
-  // Mark all agents as stopped
+  // Mark task as closed and all agents as stopped
+  db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
+    task.id,
+  );
   db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
 
   // Kill tmux session
@@ -286,10 +289,11 @@ export async function dispatchToWindow(
   text: string,
 ): Promise<void> {
   const target = `${session}:${windowIndex}`;
+  const bufferName = `octomux-${nanoid(8)}`;
 
-  // tmux load-buffer reads from stdin
+  // Load text into a named tmux buffer (avoids race with concurrent dispatches)
   await new Promise<void>((resolve, reject) => {
-    const proc = spawn('tmux', ['load-buffer', '-']);
+    const proc = spawn('tmux', ['load-buffer', '-b', bufferName, '-']);
     proc.stdin.write(text + '\n');
     proc.stdin.end();
     proc.on('close', (code) => {
@@ -298,8 +302,8 @@ export async function dispatchToWindow(
     });
   });
 
-  // Paste into the target window
-  await execFile('tmux', ['paste-buffer', '-t', target]);
+  // Paste named buffer into the target window, -d deletes buffer after paste
+  await execFile('tmux', ['paste-buffer', '-b', bufferName, '-d', '-t', target]);
 
   // Press Enter to submit the prompt
   await execFile('tmux', ['send-keys', '-t', target, 'Enter']);
