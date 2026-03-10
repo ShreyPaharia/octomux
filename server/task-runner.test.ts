@@ -103,7 +103,10 @@ describe('startTask', () => {
       { field: 'status', expected: 'running' },
       { field: 'tmux_session', expected: `octomux-agent-${DEFAULTS.task.id}` },
       { field: 'branch', expected: 'agents/fix-order-validation-test-t' },
-      { field: 'worktree', expected: `${DEFAULTS.task.repo_path}/.worktrees/fix-order-validation-test-t` },
+      {
+        field: 'worktree',
+        expected: `${DEFAULTS.task.repo_path}/.worktrees/fix-order-validation-test-t`,
+      },
     ];
 
     it.each(expectedFields)('sets $field to $expected', ({ field, expected }) => {
@@ -585,9 +588,11 @@ describe('resumeTask', () => {
     await resumeTask(closedTask);
 
     // Should create exactly one new-window (for second agent; first reuses session window)
-    const newWindowCalls = vi.mocked(execFile).mock.calls.filter(
-      (c: any[]) => c[0] === 'tmux' && (c[1] as string[]).includes('new-window'),
-    );
+    const newWindowCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: any[]) => c[0] === 'tmux' && (c[1] as string[]).includes('new-window'),
+      );
     expect(newWindowCalls).toHaveLength(1);
   });
 
