@@ -56,18 +56,25 @@ export default function TaskDetail() {
     [id, refresh, task, activeWindow],
   );
 
-  const handleUpdateStatus = useCallback(
-    async (status: 'done' | 'cancelled') => {
-      if (!id) return;
-      try {
-        await api.updateTask(id, { status });
-        refresh();
-      } catch (err) {
-        console.error('Failed to update task:', err);
-      }
-    },
-    [id, refresh],
-  );
+  const handleClose = useCallback(async () => {
+    if (!id) return;
+    try {
+      await api.updateTask(id, { status: 'closed' });
+      refresh();
+    } catch (err) {
+      console.error('Failed to close task:', err);
+    }
+  }, [id, refresh]);
+
+  const handleStart = useCallback(async () => {
+    if (!id) return;
+    try {
+      await api.startTask(id);
+      refresh();
+    } catch (err) {
+      console.error('Failed to start task:', err);
+    }
+  }, [id, refresh]);
 
   if (loading) {
     return (
@@ -90,8 +97,9 @@ export default function TaskDetail() {
 
   const agents = task.agents || [];
   const isRunning = task.status === 'running';
+  const isDraft = task.status === 'draft';
   const canCreatePR =
-    !!task.branch && !task.pr_url && (task.status === 'done' || task.status === 'running');
+    !!task.branch && !task.pr_url && (task.status === 'closed' || task.status === 'running');
   const hasTerminal = !!task.tmux_session && agents.length > 0 && activeWindow !== null;
 
   return (
@@ -140,19 +148,15 @@ export default function TaskDetail() {
               Create PR
             </Button>
           )}
+          {isDraft && (
+            <Button variant="outline" size="sm" onClick={handleStart}>
+              Start
+            </Button>
+          )}
           {isRunning && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => handleUpdateStatus('done')}>
-                Mark Done
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleUpdateStatus('cancelled')}
-              >
-                Cancel
-              </Button>
-            </>
+            <Button variant="outline" size="sm" onClick={handleClose}>
+              Close
+            </Button>
           )}
         </div>
       </div>
@@ -181,7 +185,7 @@ export default function TaskDetail() {
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          {task.status === 'created' || task.status === 'setting_up'
+          {task.status === 'draft' || task.status === 'setting_up'
             ? 'Setting up terminal...'
             : 'No terminal available'}
         </div>

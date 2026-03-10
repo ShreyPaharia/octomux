@@ -74,6 +74,55 @@ describe('Dashboard', () => {
     });
   });
 
+  // ─── Filter bar ─────────────────────────────────────────────────────────
+
+  it('shows Open and Closed filter tabs', async () => {
+    renderWithRouter(<Dashboard />);
+    await waitFor(() => {
+      expect(screen.getByText(/^Open/)).toBeInTheDocument();
+      expect(screen.getByText(/^Closed/)).toBeInTheDocument();
+    });
+  });
+
+  it('defaults to Open filter', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
+      makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
+    ]);
+    renderWithRouter(<Dashboard />);
+    await waitFor(() => {
+      expect(screen.getByText('Running Task')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Closed Task')).not.toBeInTheDocument();
+  });
+
+  it('switches to Closed filter on tab click', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
+      makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
+    ]);
+    renderWithRouter(<Dashboard />);
+    await waitFor(() => {
+      expect(screen.getByText('Running Task')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/^Closed/));
+    await waitFor(() => {
+      expect(screen.getByText('Closed Task')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
+  });
+
+  it('shows draft tasks in Open filter', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', title: 'Draft Task', status: 'draft' }),
+    ]);
+    renderWithRouter(<Dashboard />);
+    await waitFor(() => {
+      expect(screen.getByText('Draft Task')).toBeInTheDocument();
+    });
+  });
+
   // ─── Delete ───────────────────────────────────────────────────────────────
 
   it('calls deleteTask when delete button is clicked', async () => {

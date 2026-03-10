@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     title        TEXT NOT NULL,
     description  TEXT NOT NULL,
     repo_path    TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'created',
+    status       TEXT NOT NULL DEFAULT 'draft',
     branch       TEXT,
     worktree     TEXT,
     tmux_session TEXT,

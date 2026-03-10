@@ -1,11 +1,14 @@
 import { useTasks } from '@/lib/hooks';
+import { useTaskFilters } from '@/lib/use-task-filters';
 import { TaskList } from '@/components/TaskList';
+import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { OrchestratorPanel } from '@/components/OrchestratorPanel';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
+  const { filters, setFilter, filtered, counts } = useTaskFilters(tasks);
 
   async function handleDelete(id: string) {
     try {
@@ -39,7 +42,14 @@ export default function Dashboard() {
               Loading...
             </div>
           ) : (
-            <TaskList tasks={tasks} onDelete={handleDelete} />
+            <>
+              <TaskFilterBar
+                activeStatus={filters.status}
+                counts={counts}
+                onStatusChange={(s) => setFilter('status', s)}
+              />
+              <TaskList tasks={filtered} onDelete={handleDelete} />
+            </>
           )}
         </div>
       </div>

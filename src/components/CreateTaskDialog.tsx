@@ -37,6 +37,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [repoPath, setRepoPath] = useState('');
   const [initialPrompt, setInitialPrompt] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
+  const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,12 +98,14 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         description: description.trim(),
         repo_path: repoPath.trim(),
         initial_prompt: initialPrompt.trim() || undefined,
+        draft: draft || undefined,
       });
       setTitle('');
       setDescription('');
       setRepoPath('');
       setInitialPrompt('');
       setShowPrompt(false);
+      setDraft(false);
       setOpen(false);
       onCreated();
     } catch (err) {
@@ -229,6 +232,17 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
               />
             )}
           </div>
+
+          {/* Draft mode */}
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={draft}
+              onChange={(e) => setDraft(e.target.checked)}
+              className="rounded border-border"
+            />
+            Save as draft (start later)
+          </label>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">

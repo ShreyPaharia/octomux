@@ -160,7 +160,7 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   };
 }
 
-export async function completeTask(task: Task): Promise<void> {
+export async function closeTask(task: Task): Promise<void> {
   const db = getDb();
 
   // Mark all agents as stopped
@@ -183,36 +183,7 @@ export async function completeTask(task: Task): Promise<void> {
     ]).catch(() => {});
   }
 
-  // Keep the branch — the agent's work is preserved for PR creation
-}
-
-export async function cancelTask(task: Task): Promise<void> {
-  const db = getDb();
-
-  // Mark all agents as stopped
-  db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
-
-  // Kill tmux session
-  if (task.tmux_session) {
-    await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
-  }
-
-  // Remove worktree
-  if (task.worktree) {
-    await execFile('git', [
-      '-C',
-      task.repo_path,
-      'worktree',
-      'remove',
-      task.worktree,
-      '--force',
-    ]).catch(() => {});
-  }
-
-  // Delete branch — discard all work
-  if (task.branch) {
-    await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]).catch(() => {});
-  }
+  // Branch is always kept — work is preserved
 }
 
 export async function stopAgent(task: Task, agent: Agent): Promise<void> {
