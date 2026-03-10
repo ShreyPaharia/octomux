@@ -41,6 +41,14 @@ export async function pollStatuses(): Promise<void> {
       db.prepare(
         "UPDATE agents SET status = 'stopped' WHERE task_id = ? AND status = 'running'",
       ).run(task.id);
+    } else if (status === 'dead' && task.status === 'setting_up') {
+      db.prepare(
+        `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+
+      db.prepare(
+        "UPDATE agents SET status = 'stopped' WHERE task_id = ? AND status = 'running'",
+      ).run(task.id);
     }
   }
 }

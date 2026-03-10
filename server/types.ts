@@ -8,6 +8,7 @@ export interface Task {
   repo_path: string;
   status: TaskStatus;
   branch: string | null;
+  base_branch: string | null;
   worktree: string | null;
   tmux_session: string | null;
   pr_url: string | null;
@@ -25,6 +26,7 @@ export interface Agent {
   window_index: number;
   label: string;
   status: AgentStatus;
+  claude_session_id: string | null;
   created_at: string;
 }
 
@@ -32,6 +34,8 @@ export interface CreateTaskRequest {
   title: string;
   description: string;
   repo_path: string;
+  branch?: string;
+  base_branch?: string;
   initial_prompt?: string;
   draft?: boolean;
 }
@@ -46,5 +50,5 @@ export interface AddAgentRequest {
 }
 
 export interface UpdateTaskRequest {
-  status?: 'closed';
+  status?: 'closed' | 'running';
 }
