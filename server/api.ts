@@ -6,7 +6,7 @@ import os from 'os';
 import { getDb } from './db.js';
 import { execFile as execFileCb, spawn } from 'child_process';
 import { promisify } from 'util';
-import { startTask, closeTask, addAgent, stopAgent } from './task-runner.js';
+import { startTask, closeTask, resumeTask, addAgent, stopAgent } from './task-runner.js';
 import { buildPRPrompt } from './pr-template.js';
 import {
   isOrchestratorRunning,
@@ -87,6 +87,58 @@ export function setupRoutes(app: Express): void {
     });
   });
 
+  // List branches for a git repo
+  app.get('/api/branches', async (req: Request, res: Response) => {
+    const repoPath = req.query.repo_path as string;
+    if (!repoPath) {
+      res.status(400).json({ error: 'repo_path is required' });
+      return;
+    }
+
+    try {
+      const { stdout } = await execFile('git', [
+        '-C',
+        repoPath,
+        'branch',
+        '-a',
+        '--format=%(refname:short)',
+      ]);
+      const branches = stdout
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((b) => b.replace(/^origin\//, ''));
+      // Deduplicate (local + remote may overlap)
+      const unique = [...new Set(branches)].filter((b) => b !== 'HEAD');
+      res.json(unique);
+    } catch {
+      res.status(400).json({ error: 'Failed to list branches' });
+    }
+  });
+
+  // Get default branch for a git repo
+  app.get('/api/default-branch', async (req: Request, res: Response) => {
+    const repoPath = req.query.repo_path as string;
+    if (!repoPath) {
+      res.status(400).json({ error: 'repo_path is required' });
+      return;
+    }
+
+    try {
+      const { stdout } = await execFile('git', [
+        '-C',
+        repoPath,
+        'symbolic-ref',
+        'refs/remotes/origin/HEAD',
+      ]);
+      const branch = stdout.trim().replace('refs/remotes/origin/', '');
+      res.json({ branch });
+    } catch {
+      // Fallback to 'main'
+      res.json({ branch: 'main' });
+    }
+  });
+
   // Recent repository paths from past tasks
   app.get('/api/recent-repos', (_req: Request, res: Response) => {
     const db = getDb();
@@ -140,8 +192,16 @@ export function setupRoutes(app: Express): void {
     const db = getDb();
     const id = nanoid(12);
     db.prepare(
-      'INSERT INTO tasks (id, title, description, repo_path, initial_prompt) VALUES (?, ?, ?, ?, ?)',
-    ).run(id, body.title, body.description, body.repo_path, body.initial_prompt ?? null);
+      'INSERT INTO tasks (id, title, description, repo_path, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      id,
+      body.title,
+      body.description,
+      body.repo_path,
+      body.branch ?? null,
+      body.base_branch ?? null,
+      body.initial_prompt ?? null,
+    );
 
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
     task.agents = [];
@@ -167,7 +227,18 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    if (body.status === 'closed') {
+    if (body.status === 'running') {
+      // Resume task
+      if (task.status !== 'closed' && task.status !== 'error') {
+        res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
+        return;
+      }
+      if (!task.worktree || !fs.existsSync(task.worktree)) {
+        res.status(400).json({ error: 'Worktree no longer exists on disk' });
+        return;
+      }
+      resumeTask(task);
+    } else if (body.status === 'closed') {
       await closeTask(task);
     }
 

@@ -11,6 +11,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     repo_path: '/tmp/repo',
     status: 'running',
     branch: null,
+    base_branch: null,
     worktree: null,
     tmux_session: null,
     pr_url: null,

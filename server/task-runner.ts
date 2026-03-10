@@ -1,5 +1,6 @@
 import { execFile as execFileCb, spawn } from 'child_process';
 import { promisify } from 'util';
+import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import { nanoid } from 'nanoid';
@@ -43,8 +44,9 @@ export async function startTask(task: Task): Promise<void> {
   const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
-  const branch = `agents/${id}`;
-  const worktreePath = path.join(task.repo_path, '.worktrees', id);
+  const branch = task.branch || `agents/${id}`;
+  const worktreeDir = task.branch || id;
+  const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
 
   try {
     // 1. Update status to setting_up
@@ -62,8 +64,12 @@ export async function startTask(task: Task): Promise<void> {
     const worktreeDir = path.join(task.repo_path, '.worktrees');
     fs.mkdirSync(worktreeDir, { recursive: true });
 
-    // 4. Create worktree
-    await execFile('git', ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch]);
+    // 4. Create worktree (optionally from a base branch)
+    const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
+    if (task.base_branch) {
+      worktreeArgs.push(task.base_branch);
+    }
+    await execFile('git', worktreeArgs);
 
     // 5. Copy .claude/settings.local.json if it exists
     const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
@@ -79,17 +85,21 @@ export async function startTask(task: Task): Promise<void> {
     // 7. Query the actual window index (respects tmux base-index)
     const windowIndex = await getActiveWindowIndex(session);
 
-    // 8. Create first agent record
+    // 8. Create first agent record with session ID
     const agentId = nanoid(12);
-    db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
-      agentId,
-      id,
-      windowIndex,
-      'Agent 1',
-    );
+    const claudeSessionId = crypto.randomUUID();
+    db.prepare(
+      'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
+    ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId);
 
-    // 9. Launch claude in the window
-    await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, 'claude', 'Enter']);
+    // 9. Launch claude in the window with session tracking
+    await execFile('tmux', [
+      'send-keys',
+      '-t',
+      `${session}:${windowIndex}`,
+      `claude --session-id ${claudeSessionId}`,
+      'Enter',
+    ]);
 
     // 10. Wait for claude to initialize
     await sleep(CLAUDE_INIT_DELAY);
@@ -126,21 +136,19 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   // Query the actual window index of the newly created window
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
-  // Create agent record
+  // Create agent record with session ID
   const agentId = nanoid(12);
-  db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
-    agentId,
-    task.id,
-    windowIndex,
-    label,
-  );
+  const claudeSessionId = crypto.randomUUID();
+  db.prepare(
+    'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
+  ).run(agentId, task.id, windowIndex, label, claudeSessionId);
 
-  // Launch claude
+  // Launch claude with session tracking
   await execFile('tmux', [
     'send-keys',
     '-t',
     `${task.tmux_session}:${windowIndex}`,
-    'claude',
+    `claude --session-id ${claudeSessionId}`,
     'Enter',
   ]);
 
@@ -156,6 +164,7 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     window_index: windowIndex,
     label,
     status: 'running',
+    claude_session_id: claudeSessionId,
     created_at: new Date().toISOString(),
   };
 }
@@ -196,6 +205,66 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
 
   // Mark agent as stopped
   db.prepare('UPDATE agents SET status = ? WHERE id = ?').run('stopped', agent.id);
+}
+
+export async function resumeTask(task: Task): Promise<void> {
+  const db = getDb();
+  const session = task.tmux_session!;
+
+  try {
+    // 1. Set status synchronously to prevent poller race
+    db.prepare(
+      `UPDATE tasks SET status = 'setting_up', error = NULL, updated_at = datetime('now') WHERE id = ?`,
+    ).run(task.id);
+
+    // 2. Kill any stale tmux session
+    await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
+
+    // 3. Create fresh tmux session
+    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', task.worktree!]);
+
+    // 4. Get stopped agents
+    const agents = db
+      .prepare(
+        `SELECT * FROM agents WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`,
+      )
+      .all(task.id) as Agent[];
+
+    for (let i = 0; i < agents.length; i++) {
+      const agent = agents[i];
+      let windowIndex: number;
+
+      if (i === 0) {
+        // Use the initial session window
+        windowIndex = await getActiveWindowIndex(session);
+      } else {
+        // Create new window for subsequent agents
+        await execFile('tmux', ['new-window', '-t', session, '-c', task.worktree!]);
+        windowIndex = await getLastWindowIndex(session);
+      }
+
+      // Launch claude with resume or continue
+      const claudeCmd = agent.claude_session_id
+        ? `claude --resume ${agent.claude_session_id}`
+        : 'claude --continue';
+      await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, claudeCmd, 'Enter']);
+
+      // Update agent record
+      db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
+        windowIndex,
+        agent.id,
+      );
+    }
+
+    // 5. Mark task as running
+    db.prepare(
+      `UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ?`,
+    ).run(task.id);
+  } catch (err) {
+    db.prepare(
+      `UPDATE tasks SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run((err as Error).message, task.id);
+  }
 }
 
 export async function dispatchToWindow(

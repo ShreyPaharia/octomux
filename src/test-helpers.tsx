@@ -12,6 +12,7 @@ export const TASK_DEFAULTS: Task = {
   repo_path: '/Users/dev/projects/my-repo',
   status: 'running',
   branch: 'agents/test-task-01',
+  base_branch: null,
   worktree: '/Users/dev/projects/my-repo/.worktrees/test-task-01',
   tmux_session: 'octomux-agent-test-task-01',
   pr_url: null,
@@ -74,6 +75,8 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     stopAgent: vi.fn().mockResolvedValue(undefined),
     browse: vi.fn().mockResolvedValue({ current: '/tmp', parent: '/', entries: [] }),
     recentRepos: vi.fn().mockResolvedValue([]),
+    listBranches: vi.fn().mockResolvedValue([]),
+    getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
     previewPR: vi.fn().mockResolvedValue({ title: '', body: '', base: 'main' }),
     createPR: vi.fn().mockResolvedValue(TASK_DEFAULTS),
   };

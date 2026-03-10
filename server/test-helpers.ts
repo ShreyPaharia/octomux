@@ -13,6 +13,7 @@ export const DEFAULTS = {
     repo_path: '/tmp/test-repo',
     status: 'draft' as const,
     branch: null,
+    base_branch: null,
     worktree: null,
     tmux_session: null,
     pr_url: null,
@@ -30,6 +31,7 @@ export const DEFAULTS = {
     repo_path: '/tmp/test-repo',
     status: 'running' as const,
     branch: 'agents/test-task-01',
+    base_branch: null,
     worktree: '/tmp/test-repo/.worktrees/test-task-01',
     tmux_session: 'octomux-agent-test-task-01',
     pr_url: null,
@@ -72,8 +74,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   } as Task;
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, repo_path, status, branch, worktree, tmux_session, pr_url, pr_number, initial_prompt, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, initial_prompt, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -81,6 +83,7 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.repo_path,
     task.status,
     task.branch,
+    task.base_branch,
     task.worktree,
     task.tmux_session,
     task.pr_url,
@@ -161,6 +164,7 @@ export const TASKS_TABLE_COLUMNS = [
   'repo_path',
   'status',
   'branch',
+  'base_branch',
   'worktree',
   'tmux_session',
   'pr_url',

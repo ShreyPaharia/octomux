@@ -109,7 +109,7 @@ describe('startTask', () => {
     { name: 'creates worktree', cmd: 'git', argsInclude: ['worktree', 'add'] },
     { name: 'creates tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['display-message'] },
-    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'claude'] },
+    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
     { name: 'dispatches prompt', cmd: 'tmux', argsInclude: ['paste-buffer'] },
   ];
 
@@ -132,6 +132,57 @@ describe('startTask', () => {
       findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
     ).toBeUndefined();
     expect(spawn).not.toHaveBeenCalledWith('tmux', ['load-buffer', '-']);
+  });
+
+  // ─── Custom branch and base branch ─────────────────────────────────────
+
+  it('uses user-specified branch name when provided', async () => {
+    insertTask(db, { branch: 'feat/my-feature' });
+    await startTask({ ...DEFAULTS.task, branch: 'feat/my-feature' } as Task);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.branch).toBe('feat/my-feature');
+
+    const worktreeCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'git',
+      argsInclude: ['worktree', 'add', '-b', 'feat/my-feature'],
+    });
+    expect(worktreeCall).toBeDefined();
+  });
+
+  it('uses worktree directory matching branch name when provided', async () => {
+    insertTask(db, { branch: 'feat/my-feature' });
+    await startTask({ ...DEFAULTS.task, branch: 'feat/my-feature' } as Task);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.worktree).toBe(`${DEFAULTS.task.repo_path}/.worktrees/feat/my-feature`);
+  });
+
+  it('passes base_branch as start point for worktree add', async () => {
+    insertTask(db, { base_branch: 'develop' });
+    await startTask({ ...DEFAULTS.task, base_branch: 'develop' } as Task);
+
+    const worktreeCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'git',
+      argsInclude: ['worktree', 'add', 'develop'],
+    });
+    expect(worktreeCall).toBeDefined();
+  });
+
+  it('does not append base branch when base_branch is null', async () => {
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    const worktreeCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'git',
+      argsInclude: ['worktree', 'add'],
+    });
+    expect(worktreeCall).toBeDefined();
+    // The args should end with the -b <branch> without an extra base branch arg
+    const args = worktreeCall![1] as string[];
+    const branchIdx = args.indexOf('-b');
+    // After -b comes the branch name, nothing after that
+    expect(args.length).toBe(branchIdx + 2);
   });
 
   // ─── Settings copy ─────────────────────────────────────────────────────
@@ -241,7 +292,7 @@ describe('addAgent', () => {
   const addAgentShellCalls = [
     { name: 'creates tmux window', cmd: 'tmux', argsInclude: ['new-window'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['list-windows'] },
-    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'claude'] },
+    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
   ];
 
   it.each(addAgentShellCalls)('$name', async ({ cmd, argsInclude }) => {
