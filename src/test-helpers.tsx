@@ -1,9 +1,23 @@
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
-import type { Task, TaskStatus } from '../server/types';
+import type { Task, TaskStatus, Agent } from '../server/types';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
+
+export const AGENT_DEFAULTS: Agent = {
+  id: 'agent-01',
+  task_id: 'test-task-01',
+  window_index: 0,
+  label: 'Agent 1',
+  status: 'running',
+  claude_session_id: null,
+  created_at: '2026-01-01 00:00:00',
+};
+
+export function makeAgent(overrides: Partial<Agent> = {}): Agent {
+  return { ...AGENT_DEFAULTS, ...overrides };
+}
 
 export const TASK_DEFAULTS: Task = {
   id: 'test-task-01',
