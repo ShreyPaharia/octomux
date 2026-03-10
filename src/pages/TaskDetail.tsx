@@ -116,7 +116,9 @@ export default function TaskDetail() {
   const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
   const canCreatePR =
     !!task.branch && !task.pr_url && (task.status === 'closed' || task.status === 'running');
-  const hasTerminal = !!task.tmux_session && agents.length > 0 && activeWindow !== null;
+  const isTerminalAlive = task.status === 'running' || task.status === 'setting_up';
+  const hasTerminal =
+    !!task.tmux_session && agents.length > 0 && activeWindow !== null && isTerminalAlive;
 
   return (
     <div className="flex h-screen flex-col">
@@ -145,7 +147,7 @@ export default function TaskDetail() {
               <h1 className="text-lg font-semibold">{task.title}</h1>
               <StatusBadge status={task.status} />
             </div>
-            <p className="text-xs text-muted-foreground">{task.description}</p>
+            <p className="max-w-xl truncate text-xs text-muted-foreground">{task.description}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -208,7 +210,9 @@ export default function TaskDetail() {
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
           {task.status === 'draft' || task.status === 'setting_up'
             ? 'Setting up terminal...'
-            : 'No terminal available'}
+            : task.status === 'closed' || task.status === 'error'
+              ? 'Terminal session ended'
+              : 'No terminal available'}
         </div>
       )}
 
