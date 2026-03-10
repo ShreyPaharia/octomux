@@ -47,6 +47,8 @@ describe('CreateTaskDialog', () => {
     expect(screen.getByLabelText('Title')).toBeInTheDocument();
     expect(screen.getByLabelText('Description')).toBeInTheDocument();
     expect(screen.getByLabelText('Repository Path')).toBeInTheDocument();
+    expect(screen.getByLabelText('Branch Name')).toBeInTheDocument();
+    expect(screen.getByText('Base Branch')).toBeInTheDocument();
   });
 
   // ─── Validation — submit button disabled (table-driven) ───────────────────
@@ -163,6 +165,66 @@ describe('CreateTaskDialog', () => {
         description: 'Desc',
         repo_path: '/tmp/repo',
       });
+    });
+  });
+
+  // ─── Branch and base branch ────────────────────────────────────────────────
+
+  it('sends branch when provided', async () => {
+    await openDialog();
+    await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
+    await user.type(screen.getByLabelText('Branch Name'), 'feat/my-feature');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: 'feat/my-feature' }),
+      );
+    });
+  });
+
+  it('does not send branch when empty', async () => {
+    await openDialog();
+    await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      const call = apiMock.createTask.mock.calls[0][0];
+      expect(call.branch).toBeUndefined();
+    });
+  });
+
+  it('fetches branches when repo path is set', async () => {
+    apiMock.listBranches = vi.fn().mockResolvedValue(['main', 'develop', 'feat/x']);
+    apiMock.getDefaultBranch = vi.fn().mockResolvedValue({ branch: 'main' });
+
+    await openDialog();
+    await user.type(screen.getByLabelText('Repository Path'), '/tmp/repo');
+
+    await waitFor(() => {
+      expect(apiMock.listBranches).toHaveBeenCalledWith('/tmp/repo');
+      expect(apiMock.getDefaultBranch).toHaveBeenCalledWith('/tmp/repo');
+    });
+  });
+
+  it('auto-selects default branch as base branch', async () => {
+    apiMock.listBranches = vi.fn().mockResolvedValue(['main', 'develop']);
+    apiMock.getDefaultBranch = vi.fn().mockResolvedValue({ branch: 'develop' });
+
+    await openDialog();
+    await fillForm({ title: 'Fix', description: 'Desc', repoPath: '/tmp/repo' });
+
+    // Wait for debounced fetch
+    await waitFor(() => {
+      expect(apiMock.getDefaultBranch).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ base_branch: 'develop' }),
+      );
     });
   });
 

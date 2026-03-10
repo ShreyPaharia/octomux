@@ -200,6 +200,27 @@ describe('POST /api/tasks', () => {
     await request(app).post('/api/tasks').send(validPayload);
     expect(startTask).toHaveBeenCalledOnce();
   });
+
+  it('stores branch and base_branch when provided', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ ...validPayload, branch: 'feat/my-feature', base_branch: 'develop' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.branch).toBe('feat/my-feature');
+    expect(res.body.base_branch).toBe('develop');
+
+    const task = getTask(db, res.body.id);
+    expect(task?.branch).toBe('feat/my-feature');
+    expect(task?.base_branch).toBe('develop');
+  });
+
+  it('stores null branch and base_branch when not provided', async () => {
+    const res = await request(app).post('/api/tasks').send(validPayload);
+
+    expect(res.body.branch).toBeNull();
+    expect(res.body.base_branch).toBeNull();
+  });
 });
 
 // ─── POST /api/tasks/:id/start ──────────────────────────────────────────────
@@ -534,6 +555,101 @@ describe('GET /api/browse', () => {
     const res = await request(app).get('/api/browse?path=/tmp');
     expect(res.body.entries[0].name).toBe('visible');
     expect(res.body.entries[1].name).toBe('.hidden');
+  });
+});
+
+// ─── GET /api/branches ──────────────────────────────────────────────────────
+
+describe('GET /api/branches', () => {
+  it('returns 400 when repo_path is missing', async () => {
+    const res = await request(app).get('/api/branches');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('repo_path');
+  });
+
+  it('returns deduplicated branch list', async () => {
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (cmd === 'git' && args.includes('branch')) {
+        cb(null, { stdout: 'main\ndevelop\norigin/main\norigin/feature\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get('/api/branches?repo_path=/tmp/repo');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(['main', 'develop', 'feature']);
+  });
+
+  it('filters out HEAD from branch list', async () => {
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (cmd === 'git' && args.includes('branch')) {
+        cb(null, { stdout: 'main\norigin/HEAD\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get('/api/branches?repo_path=/tmp/repo');
+    expect(res.body).not.toContain('HEAD');
+  });
+
+  it('returns 400 when git command fails', async () => {
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((_cmd: string, _args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      cb(new Error('not a git repo'), null);
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get('/api/branches?repo_path=/tmp/not-a-repo');
+    expect(res.status).toBe(400);
+  });
+});
+
+// ─── GET /api/default-branch ────────────────────────────────────────────────
+
+describe('GET /api/default-branch', () => {
+  it('returns 400 when repo_path is missing', async () => {
+    const res = await request(app).get('/api/default-branch');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('repo_path');
+  });
+
+  it('returns the default branch from symbolic-ref', async () => {
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (cmd === 'git' && args.includes('symbolic-ref')) {
+        cb(null, { stdout: 'refs/remotes/origin/develop\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get('/api/default-branch?repo_path=/tmp/repo');
+    expect(res.status).toBe(200);
+    expect(res.body.branch).toBe('develop');
+  });
+
+  it('falls back to main when symbolic-ref fails', async () => {
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((_cmd: string, _args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      cb(new Error('fatal: ref not found'), null);
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get('/api/default-branch?repo_path=/tmp/repo');
+    expect(res.status).toBe(200);
+    expect(res.body.branch).toBe('main');
   });
 });
 

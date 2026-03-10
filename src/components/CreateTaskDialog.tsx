@@ -36,6 +36,11 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [description, setDescription] = useState('');
   const [repoPath, setRepoPath] = useState('');
   const [initialPrompt, setInitialPrompt] = useState('');
+  const [branch, setBranch] = useState('');
+  const [baseBranch, setBaseBranch] = useState('');
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchSearch, setBranchSearch] = useState('');
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
   const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -60,6 +65,43 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         .catch(() => setRecentRepos([]));
     }
   }, [open]);
+
+  // Fetch branches + default branch when repo path changes
+  useEffect(() => {
+    const trimmed = repoPath.trim();
+    if (!trimmed) {
+      setBranches([]);
+      setBaseBranch('');
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const [branchList, defaultBranch] = await Promise.all([
+          api.listBranches(trimmed),
+          api.getDefaultBranch(trimmed),
+        ]);
+        if (!cancelled) {
+          setBranches(branchList);
+          setBaseBranch(defaultBranch.branch);
+        }
+      } catch {
+        if (!cancelled) {
+          setBranches([]);
+        }
+      }
+    }, 300); // debounce
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [repoPath]);
+
+  const filteredBranches = branches.filter((b) =>
+    b.toLowerCase().includes(branchSearch.toLowerCase()),
+  );
 
   const browseTo = useCallback(async (dirPath?: string) => {
     setBrowseLoading(true);
@@ -97,12 +139,18 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         title: title.trim(),
         description: description.trim(),
         repo_path: repoPath.trim(),
+        branch: branch.trim() || undefined,
+        base_branch: baseBranch.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
         draft: draft || undefined,
       });
       setTitle('');
       setDescription('');
       setRepoPath('');
+      setBranch('');
+      setBaseBranch('');
+      setBranches([]);
+      setBranchSearch('');
       setInitialPrompt('');
       setShowPrompt(false);
       setDraft(false);
@@ -211,6 +259,86 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Branch name */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="branch">Branch Name</Label>
+            <Input
+              id="branch"
+              placeholder="feat/my-feature"
+              className="font-mono text-sm"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+            />
+          </div>
+
+          {/* Base branch */}
+          <div className="flex flex-col gap-2">
+            <Label>Base Branch</Label>
+            <Popover open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <span className={baseBranch ? 'font-mono text-xs' : 'text-muted-foreground'}>
+                      {baseBranch || 'Select base branch...'}
+                    </span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="text-muted-foreground"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                }
+              />
+              <PopoverContent align="start" side="bottom" sideOffset={4} className="w-[--trigger-width] p-0">
+                <div className="flex flex-col">
+                  <div className="border-b border-border px-3 py-2">
+                    <input
+                      type="text"
+                      placeholder="Search branches..."
+                      className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                      value={branchSearch}
+                      onChange={(e) => setBranchSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-[200px] overflow-y-auto">
+                    {filteredBranches.length === 0 && (
+                      <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+                        {branches.length === 0 ? 'Select a repository first' : 'No matching branches'}
+                      </div>
+                    )}
+                    {filteredBranches.map((b) => (
+                      <button
+                        key={b}
+                        type="button"
+                        className={`flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted transition-colors ${b === baseBranch ? 'bg-muted font-medium' : ''}`}
+                        onClick={() => {
+                          setBaseBranch(b);
+                          setBranchSearch('');
+                          setBranchDropdownOpen(false);
+                        }}
+                      >
+                        <span className="font-mono text-xs truncate">{b}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Initial Prompt (optional) */}
