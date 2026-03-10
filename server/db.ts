@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     repo_path    TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'draft',
     branch       TEXT,
+    base_branch  TEXT,
     worktree     TEXT,
     tmux_session TEXT,
     pr_url       TEXT,
@@ -73,5 +74,8 @@ export function initDb(instance: Database.Database): void {
   const agentColNames = agentCols.map((c) => c.name);
   if (!agentColNames.includes('claude_session_id')) {
     instance.exec('ALTER TABLE agents ADD COLUMN claude_session_id TEXT');
+  }
+  if (!colNames.includes('base_branch')) {
+    instance.exec('ALTER TABLE tasks ADD COLUMN base_branch TEXT');
   }
 }

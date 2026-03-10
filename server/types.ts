@@ -8,6 +8,7 @@ export interface Task {
   repo_path: string;
   status: TaskStatus;
   branch: string | null;
+  base_branch: string | null;
   worktree: string | null;
   tmux_session: string | null;
   pr_url: string | null;
@@ -33,6 +34,8 @@ export interface CreateTaskRequest {
   title: string;
   description: string;
   repo_path: string;
+  branch?: string;
+  base_branch?: string;
   initial_prompt?: string;
   draft?: boolean;
 }

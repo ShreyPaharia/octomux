@@ -44,8 +44,9 @@ export async function startTask(task: Task): Promise<void> {
   const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
-  const branch = `agents/${id}`;
-  const worktreePath = path.join(task.repo_path, '.worktrees', id);
+  const branch = task.branch || `agents/${id}`;
+  const worktreeDir = task.branch || id;
+  const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
 
   try {
     // 1. Update status to setting_up
@@ -63,8 +64,12 @@ export async function startTask(task: Task): Promise<void> {
     const worktreeDir = path.join(task.repo_path, '.worktrees');
     fs.mkdirSync(worktreeDir, { recursive: true });
 
-    // 4. Create worktree
-    await execFile('git', ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch]);
+    // 4. Create worktree (optionally from a base branch)
+    const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
+    if (task.base_branch) {
+      worktreeArgs.push(task.base_branch);
+    }
+    await execFile('git', worktreeArgs);
 
     // 5. Copy .claude/settings.local.json if it exists
     const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
