@@ -99,9 +99,19 @@ export function setupRoutes(app: Express): void {
   });
 
   // List all tasks with agents
-  app.get('/api/tasks', (_req: Request, res: Response) => {
+  app.get('/api/tasks', (req: Request, res: Response) => {
     const db = getDb();
-    const tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Task[];
+    const repoPath = req.query.repo_path as string | undefined;
+
+    let tasks: Task[];
+    if (repoPath) {
+      tasks = db
+        .prepare('SELECT * FROM tasks WHERE repo_path = ? ORDER BY created_at DESC')
+        .all(repoPath) as Task[];
+    } else {
+      tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Task[];
+    }
+
     const agentStmt = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index');
 
     const result = tasks.map((task) => ({
