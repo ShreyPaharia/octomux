@@ -303,7 +303,12 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
                   </button>
                 }
               />
-              <PopoverContent align="start" side="bottom" sideOffset={4} className="w-[--trigger-width] p-0">
+              <PopoverContent
+                align="start"
+                side="bottom"
+                sideOffset={4}
+                className="w-[--trigger-width] p-0"
+              >
                 <div className="flex flex-col">
                   <div className="border-b border-border px-3 py-2">
                     <input
@@ -318,7 +323,9 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
                   <div className="max-h-[200px] overflow-y-auto">
                     {filteredBranches.length === 0 && (
                       <div className="px-3 py-3 text-center text-xs text-muted-foreground">
-                        {branches.length === 0 ? 'Select a repository first' : 'No matching branches'}
+                        {branches.length === 0
+                          ? 'Select a repository first'
+                          : 'No matching branches'}
                       </div>
                     )}
                     {filteredBranches.map((b) => (

@@ -106,7 +106,14 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
 
   db.prepare(
     'INSERT INTO agents (id, task_id, window_index, label, status, claude_session_id) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(agent.id, agent.task_id, agent.window_index, agent.label, agent.status, agent.claude_session_id);
+  ).run(
+    agent.id,
+    agent.task_id,
+    agent.window_index,
+    agent.label,
+    agent.status,
+    agent.claude_session_id,
+  );
 
   return agent;
 }

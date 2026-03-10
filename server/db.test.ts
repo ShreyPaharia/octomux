@@ -157,13 +157,10 @@ describe('Database', () => {
       expect(() => initDb(db)).not.toThrow();
     });
 
-    it.each(['initial_prompt', 'base_branch'])(
-      'tasks table has column: %s (migration)',
-      (col) => {
-        const columns = db.pragma('table_info(tasks)') as { name: string }[];
-        expect(columns.map((c) => c.name)).toContain(col);
-      },
-    );
+    it.each(['initial_prompt', 'base_branch'])('tasks table has column: %s (migration)', (col) => {
+      const columns = db.pragma('table_info(tasks)') as { name: string }[];
+      expect(columns.map((c) => c.name)).toContain(col);
+    });
 
     it('agents table has claude_session_id column (migration)', () => {
       const columns = db.pragma('table_info(agents)') as { name: string }[];

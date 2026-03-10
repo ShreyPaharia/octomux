@@ -26,9 +26,7 @@ export function useTaskFilters(tasks: Task[]) {
   }, [tasks]);
 
   const counts = useMemo(() => {
-    const repoFiltered = filters.repo
-      ? tasks.filter((t) => t.repo_path === filters.repo)
-      : tasks;
+    const repoFiltered = filters.repo ? tasks.filter((t) => t.repo_path === filters.repo) : tasks;
     return {
       open: repoFiltered.filter((t) => OPEN_STATUSES.includes(t.status)).length,
       closed: repoFiltered.filter((t) => t.status === 'closed').length,

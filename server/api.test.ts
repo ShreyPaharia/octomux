@@ -102,9 +102,7 @@ const notFoundCases = [
 
 describe('404 for nonexistent resources', () => {
   it.each(notFoundCases)('$name → 404', async ({ method, url, body }) => {
-    const res = body
-      ? await request(app)[method](url).send(body)
-      : await request(app)[method](url);
+    const res = body ? await request(app)[method](url).send(body) : await request(app)[method](url);
     expect(res.status).toBe(404);
   });
 });
@@ -384,31 +382,25 @@ describe('PATCH /api/tasks/:id', () => {
 
   const resumableStatuses = ['closed', 'error'] as const;
 
-  it.each(resumableStatuses)(
-    'returns 400 when worktree missing for %s task',
-    async (status) => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-      insertTask(db, { ...DEFAULTS.runningTask, status });
-      const res = await request(app)
-        .patch(`/api/tasks/${DEFAULTS.task.id}`)
-        .send({ status: 'running' });
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Worktree');
-    },
-  );
+  it.each(resumableStatuses)('returns 400 when worktree missing for %s task', async (status) => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    insertTask(db, { ...DEFAULTS.runningTask, status });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'running' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Worktree');
+  });
 
-  it.each(resumableStatuses)(
-    'calls resumeTask for %s task with valid worktree',
-    async (status) => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      insertTask(db, { ...DEFAULTS.runningTask, status });
-      const res = await request(app)
-        .patch(`/api/tasks/${DEFAULTS.task.id}`)
-        .send({ status: 'running' });
-      expect(res.status).toBe(200);
-      expect(resumeTask).toHaveBeenCalledOnce();
-    },
-  );
+  it.each(resumableStatuses)('calls resumeTask for %s task with valid worktree', async (status) => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    insertTask(db, { ...DEFAULTS.runningTask, status });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'running' });
+    expect(res.status).toBe(200);
+    expect(resumeTask).toHaveBeenCalledOnce();
+  });
 });
 
 // ─── DELETE /api/tasks/:id ───────────────────────────────────────────────────
