@@ -45,9 +45,7 @@ export default function TaskDetail() {
         await api.stopAgent(id, agentId);
         // If we stopped the active tab, switch to the first remaining running agent
         if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
-          const nextAgent = taskAgents.find(
-            (a) => a.id !== agentId && a.status !== 'stopped',
-          );
+          const nextAgent = taskAgents.find((a) => a.id !== agentId && a.status !== 'stopped');
           if (nextAgent) setActiveWindow(nextAgent.window_index);
         }
         refresh();

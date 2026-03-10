@@ -88,19 +88,13 @@ describe('AgentTabs', () => {
 
   // ─── Multiple agents with different statuses (table-driven) ───────────────
 
-  const visibleStatusCases = [
-    { status: 'running' as const },
-    { status: 'idle' as const },
-  ];
+  const visibleStatusCases = [{ status: 'running' as const }, { status: 'idle' as const }];
 
-  it.each(visibleStatusCases)(
-    'agent with status "$status" is visible',
-    ({ status }) => {
-      const agents = [makeAgent({ status })];
-      renderWithRouter(<AgentTabs {...defaultProps} agents={agents} />);
-      expect(screen.getByText('Agent 1')).toBeInTheDocument();
-    },
-  );
+  it.each(visibleStatusCases)('agent with status "$status" is visible', ({ status }) => {
+    const agents = [makeAgent({ status })];
+    renderWithRouter(<AgentTabs {...defaultProps} agents={agents} />);
+    expect(screen.getByText('Agent 1')).toBeInTheDocument();
+  });
 
   it('hides stopped agents', () => {
     const agents = [makeAgent({ status: 'stopped' })];
