@@ -1,9 +1,9 @@
-import type { Server } from 'http';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { spawn, type IPty } from 'node-pty';
 import type { IncomingMessage } from 'http';
+import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
@@ -17,33 +17,32 @@ interface TerminalConnection {
 }
 
 const connections = new Map<string, TerminalConnection[]>();
+let wss: WebSocketServer;
 
-export function setupTerminalWebSocket(server: Server): void {
-  const wss = new WebSocketServer({ noServer: true });
+export function setupTerminalWebSocket(): void {
+  wss = new WebSocketServer({ noServer: true });
+}
 
-  server.on('upgrade', (req: IncomingMessage, socket, head) => {
-    // Match /ws/terminal/orchestrator
-    const orchMatch = req.url?.match(/^\/ws\/terminal\/orchestrator$/);
-    if (orchMatch) {
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        handleOrchestratorConnection(ws);
-      });
-      return;
-    }
-
-    // Match /ws/terminal/:taskId/:windowIndex
-    const match = req.url?.match(/^\/ws\/terminal\/([^/]+)\/(\d+)$/);
-    if (!match) {
-      socket.destroy();
-      return;
-    }
-
+export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+  // Match /ws/terminal/orchestrator
+  const orchMatch = req.url?.match(/^\/ws\/terminal\/orchestrator$/);
+  if (orchMatch) {
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const taskId = match[1];
-      const windowIndex = parseInt(match[2], 10);
-      handleConnection(ws, taskId, windowIndex);
+      handleOrchestratorConnection(ws);
     });
+    return true;
+  }
+
+  // Match /ws/terminal/:taskId/:windowIndex
+  const match = req.url?.match(/^\/ws\/terminal\/([^/]+)\/(\d+)$/);
+  if (!match) return false;
+
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    const taskId = match[1];
+    const windowIndex = parseInt(match[2], 10);
+    handleConnection(ws, taskId, windowIndex);
   });
+  return true;
 }
 
 function attachToTmuxSession(

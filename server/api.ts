@@ -23,6 +23,7 @@ import {
   getOrchestratorSession,
 } from './orchestrator.js';
 import { hookRoutes } from './hooks.js';
+import { broadcast } from './events.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -315,6 +316,7 @@ export function setupRoutes(app: Express): void {
     created.agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(id) as Agent[];
+    broadcast({ type: 'task:created', payload: { taskId: id } });
     res.status(201).json(created);
   });
 
@@ -350,6 +352,7 @@ export function setupRoutes(app: Express): void {
     updated.agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
   });
 
@@ -376,6 +379,7 @@ export function setupRoutes(app: Express): void {
     updated.agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
   });
 
@@ -391,9 +395,11 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
+    const taskId = task.id;
     await deleteTask(task);
-    db.prepare('DELETE FROM agents WHERE task_id = ?').run(task.id);
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+    db.prepare('DELETE FROM agents WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+    broadcast({ type: 'task:deleted', payload: { taskId } });
     res.status(204).send();
   });
 
@@ -416,6 +422,7 @@ export function setupRoutes(app: Express): void {
 
     const body = req.body as AddAgentRequest;
     const agent = await addAgent(task, body.prompt);
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.status(201).json(agent);
   });
 
@@ -435,6 +442,7 @@ export function setupRoutes(app: Express): void {
     }
 
     await stopAgent(task, agent);
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json({ success: true });
   });
 
@@ -462,6 +470,7 @@ export function setupRoutes(app: Express): void {
 
     try {
       const userWindowIndex = await createUserTerminal(task);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
       res.json({ user_window_index: userWindowIndex });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -618,6 +627,7 @@ export function setupRoutes(app: Express): void {
         .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
         .all(task.id) as Agent[];
 
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
       res.json(updated);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
