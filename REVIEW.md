@@ -22,7 +22,7 @@ All issues identified and fixed. See commit for details.
 11. **No request body size limit** — Added `{ limit: '1mb' }` to `express.json()`
 12. **Duplicated WebSocket handlers** — Extracted shared `attachToTmuxSession()` function
 13. **DB singleton fragility** — Kept as-is (adequate for localhost tool with existing `setDb()` pattern)
-14. **No concurrent task limit** — Added `MAX_CONCURRENT_TASKS` (default 10, configurable via env)
+14. **No concurrent task limit** — Removed (no longer enforced)
 
 ### Code Quality
 
