@@ -233,6 +233,32 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
   db.prepare('UPDATE agents SET status = ? WHERE id = ?').run('stopped', agent.id);
 }
 
+export async function createUserTerminal(task: Task): Promise<number> {
+  if (task.user_window_index !== null && task.user_window_index !== undefined) {
+    return task.user_window_index;
+  }
+
+  const db = getDb();
+
+  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
+
+  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+
+  await execFile('tmux', [
+    'send-keys',
+    '-t',
+    `${task.tmux_session}:${windowIndex}`,
+    'nvim .',
+    'Enter',
+  ]);
+
+  db.prepare(
+    `UPDATE tasks SET user_window_index = ?, updated_at = datetime('now') WHERE id = ?`,
+  ).run(windowIndex, task.id);
+
+  return windowIndex;
+}
+
 export async function resumeTask(task: Task): Promise<void> {
   const db = getDb();
   const session = task.tmux_session!;
@@ -240,7 +266,7 @@ export async function resumeTask(task: Task): Promise<void> {
   try {
     // 1. Set status synchronously to prevent poller race
     db.prepare(
-      `UPDATE tasks SET status = 'setting_up', error = NULL, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE tasks SET status = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
     // 2. Kill any stale tmux session
