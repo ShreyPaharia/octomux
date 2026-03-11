@@ -70,6 +70,7 @@ setting_up → running → closed → (resume) → running
 ## How Tasks Work
 
 Each task gets:
+
 1. A git worktree at `<repo>/.worktrees/<slug>` (isolated copy of the repo)
 2. A git branch `agents/<slug>` (or custom branch name)
 3. A tmux session `octomux-agent-<id>` with one window per agent
@@ -78,6 +79,7 @@ Each task gets:
 ## Writing Good initial_prompt Values
 
 The `initial_prompt` is sent to the first Claude agent after it starts. Write prompts that are:
+
 - **Specific**: Reference exact files, functions, or behaviors to change
 - **Self-contained**: Include all context the agent needs — don't assume it knows the task title/description
 - **Action-oriented**: Tell the agent what to do, not just what's wrong

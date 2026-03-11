@@ -133,11 +133,7 @@ function attachToTmuxSession(
   });
 }
 
-async function handleConnection(
-  ws: WebSocket,
-  taskId: string,
-  windowIndex: number,
-): Promise<void> {
+async function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): Promise<void> {
   const db = getDb();
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
 
@@ -159,7 +155,13 @@ async function handleConnection(
   }
 
   const connKey = `${taskId}:${windowIndex}`;
-  attachToTmuxSession(ws, linkedSession, connKey, 'Failed to attach to tmux session', linkedSession);
+  attachToTmuxSession(
+    ws,
+    linkedSession,
+    connKey,
+    'Failed to attach to tmux session',
+    linkedSession,
+  );
 }
 
 function handleOrchestratorConnection(ws: WebSocket): void {
