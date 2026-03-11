@@ -38,18 +38,16 @@ describe('Database', () => {
       expect(columns.map((c) => c.name)).toContain(col);
     });
 
-    it('creates idx_tasks_status index', () => {
-      const indexes = db
-        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tasks'")
-        .all() as { name: string }[];
-      expect(indexes.map((i) => i.name)).toContain('idx_tasks_status');
-    });
+    const indexCases = [
+      { table: 'tasks', index: 'idx_tasks_status' },
+      { table: 'agents', index: 'idx_agents_task' },
+    ];
 
-    it('creates idx_agents_task index', () => {
+    it.each(indexCases)('creates $index on $table', ({ table, index }) => {
       const indexes = db
-        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='agents'")
+        .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='${table}'`)
         .all() as { name: string }[];
-      expect(indexes.map((i) => i.name)).toContain('idx_agents_task');
+      expect(indexes.map((i) => i.name)).toContain(index);
     });
   });
 
@@ -160,14 +158,15 @@ describe('Database', () => {
       expect(() => initDb(db)).not.toThrow();
     });
 
-    it.each(['initial_prompt', 'base_branch'])('tasks table has column: %s (migration)', (col) => {
-      const columns = db.pragma('table_info(tasks)') as { name: string }[];
-      expect(columns.map((c) => c.name)).toContain(col);
-    });
+    const migrationColumns = [
+      { table: 'tasks', column: 'initial_prompt' },
+      { table: 'tasks', column: 'base_branch' },
+      { table: 'agents', column: 'claude_session_id' },
+    ];
 
-    it('agents table has claude_session_id column (migration)', () => {
-      const columns = db.pragma('table_info(agents)') as { name: string }[];
-      expect(columns.map((c) => c.name)).toContain('claude_session_id');
+    it.each(migrationColumns)('$table has $column column (migration)', ({ table, column }) => {
+      const columns = db.pragma(`table_info(${table})`) as { name: string }[];
+      expect(columns.map((c) => c.name)).toContain(column);
     });
   });
 
@@ -200,29 +199,24 @@ describe('Database', () => {
       expect(prompts[0].resolved_at).not.toBeNull();
     });
 
-    it('resets waiting agents to active on startup', () => {
-      insertTask(db, { id: 't1', status: 'running' });
-      insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: 'waiting' });
+    const startupActivityCases = [
+      { initial: 'waiting' as const, status: 'running' as const, expected: 'active', desc: 'resets waiting to active' },
+      { initial: 'idle' as const, status: 'stopped' as const, expected: 'idle', desc: 'does not reset idle/stopped' },
+    ];
 
-      // Re-init simulates restart
-      initDb(db);
+    it.each(startupActivityCases)(
+      '$desc on startup',
+      ({ initial, status, expected }) => {
+        insertTask(db, { id: 't1', status: 'running' });
+        insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: initial, status });
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('active');
-    });
+        initDb(db);
 
-    it('does not reset idle or stopped agents on startup', () => {
-      insertTask(db, { id: 't1', status: 'running' });
-      insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: 'idle', status: 'stopped' });
-
-      initDb(db);
-
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('idle');
-    });
+        const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+          hook_activity: string;
+        };
+        expect(agent.hook_activity).toBe(expected);
+      },
+    );
   });
 });

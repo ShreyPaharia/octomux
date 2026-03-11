@@ -7,6 +7,7 @@ import {
   getTask,
   getAgents,
   findCallback,
+  deadSessionMock,
   DEFAULTS,
 } from './test-helpers.js';
 import type { Task } from './types.js';
@@ -99,110 +100,59 @@ describe('checkTaskStatus', () => {
 // ─── pollStatuses ────────────────────────────────────────────────────────────
 
 describe('pollStatuses', () => {
-  it('marks running task as closed when session dies', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
+  // ─── Session death scenarios (table-driven) ────────────────────────────────
 
-    // Make has-session fail (session dead)
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('session not found'));
-      return undefined as any;
-    });
+  const sessionDeathCases = [
+    { taskStatus: 'running' as const, expectedStatus: 'closed', expectedError: undefined },
+    { taskStatus: 'setting_up' as const, expectedStatus: 'error', expectedError: 'Setup interrupted' },
+  ];
 
-    await pollStatuses();
+  describe.each(sessionDeathCases)(
+    'when $taskStatus task session dies',
+    ({ taskStatus, expectedStatus, expectedError }) => {
+      beforeEach(() => {
+        vi.mocked(execFile).mockImplementation(deadSessionMock as any);
+      });
 
-    const task = getTask(db, DEFAULTS.task.id)!;
-    expect(task.status).toBe('closed');
-  });
+      it(`sets task status to ${expectedStatus}`, async () => {
+        insertTask(db, { ...DEFAULTS.runningTask, status: taskStatus });
+        insertAgent(db);
 
-  it('marks running agents as stopped when session dies', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
-    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
+        await pollStatuses();
 
-    vi.mocked(execFile).mockImplementation((_cmd: any, _args: any, _opts: any, cb?: any) => {
-      const callback = cb || _opts;
-      if (typeof callback === 'function') callback(new Error('dead'));
-      return undefined as any;
-    });
+        const task = getTask(db, DEFAULTS.task.id)!;
+        expect(task.status).toBe(expectedStatus);
+        if (expectedError) expect(task.error).toBe(expectedError);
+      });
 
-    await pollStatuses();
+      it('marks all agents as stopped', async () => {
+        insertTask(db, { ...DEFAULTS.runningTask, status: taskStatus });
+        insertAgent(db);
+        insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
-  });
+        await pollStatuses();
 
-  it('sets hook_activity to idle when session dies', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db, { hook_activity: 'active' });
-    insertAgent(db, {
-      id: 'agent-02',
-      window_index: 1,
-      label: 'Agent 2',
-      hook_activity: 'waiting',
-    });
+        const agents = getAgents(db, DEFAULTS.task.id);
+        expect(agents.every((a) => a.status === 'stopped')).toBe(true);
+      });
 
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('session not found'));
-      return undefined as any;
-    });
+      it('sets hook_activity to idle for all agents', async () => {
+        insertTask(db, { ...DEFAULTS.runningTask, status: taskStatus });
+        insertAgent(db, { hook_activity: 'active' });
+        insertAgent(db, {
+          id: 'agent-02',
+          window_index: 1,
+          label: 'Agent 2',
+          hook_activity: 'waiting',
+        });
 
-    await pollStatuses();
+        await pollStatuses();
 
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
-  });
-
-  it('marks setting_up task as error when session dies', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
-    insertAgent(db);
-
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('session not found'));
-      return undefined as any;
-    });
-
-    await pollStatuses();
-
-    const task = getTask(db, DEFAULTS.task.id)!;
-    expect(task.status).toBe('error');
-    expect(task.error).toBe('Setup interrupted');
-  });
-
-  it('marks agents as stopped when setting_up task dies', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
-    insertAgent(db);
-
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('session not found'));
-      return undefined as any;
-    });
-
-    await pollStatuses();
-
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
-  });
-
-  it('sets hook_activity to idle when setting_up task dies', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
-    insertAgent(db, { hook_activity: 'active' });
-
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('session not found'));
-      return undefined as any;
-    });
-
-    await pollStatuses();
-
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
-  });
+        const agents = getAgents(db, DEFAULTS.task.id);
+        expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
+      });
+    },
+  );
 
   it('does not modify task when session is alive', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
@@ -220,11 +170,7 @@ describe('pollStatuses', () => {
   it.each(ignoredStatuses)('ignores tasks with status "%s"', async (status) => {
     insertTask(db, { ...DEFAULTS.runningTask, status });
 
-    vi.mocked(execFile).mockImplementation((_cmd: any, _args: any, _opts: any, cb?: any) => {
-      const callback = cb || _opts;
-      if (typeof callback === 'function') callback(new Error('dead'));
-      return undefined as any;
-    });
+    vi.mocked(execFile).mockImplementation(deadSessionMock as any);
 
     await pollStatuses();
 
@@ -274,16 +220,13 @@ describe('ensureHooksInstalled', () => {
     expect(installHookSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('skips non-running tasks', () => {
-    insertTask(db, { ...DEFAULTS.runningTask, status: 'closed' });
+  const skipCases = [
+    { name: 'non-running tasks', overrides: { status: 'closed' as const } },
+    { name: 'tasks without worktree', overrides: { worktree: null } },
+  ];
 
-    ensureHooksInstalled();
-
-    expect(installHookSettings).not.toHaveBeenCalled();
-  });
-
-  it('skips tasks without worktree', () => {
-    insertTask(db, { ...DEFAULTS.runningTask, worktree: null });
+  it.each(skipCases)('skips $name', ({ overrides }) => {
+    insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
     ensureHooksInstalled();
 
@@ -319,28 +262,24 @@ describe('detectPR', () => {
     expect(result).toEqual({ url: 'https://github.com/org/repo/pull/42', number: 42 });
   });
 
-  it('returns null when no PR found', async () => {
-    const result = await detectPR({ ...DEFAULTS.runningTask } as Task);
-    expect(result).toBeNull();
-  });
-
-  it('returns null when gh command fails', async () => {
-    vi.mocked(execFile).mockImplementationOnce((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('gh not found'));
-      return undefined as any;
-    });
-
-    const result = await detectPR({ ...DEFAULTS.runningTask } as Task);
-    expect(result).toBeNull();
-  });
-
-  const nullFieldCases = [
-    { name: 'branch is null', overrides: { branch: null } },
-    { name: 'repo_path is null', overrides: { repo_path: '' } },
+  const nullReturnCases = [
+    { name: 'no PR found', setup: () => {} },
+    {
+      name: 'gh command fails',
+      setup: () => {
+        vi.mocked(execFile).mockImplementationOnce((...args: any[]) => {
+          const cb = findCallback(...args);
+          if (cb) cb(new Error('gh not found'));
+          return undefined as any;
+        });
+      },
+    },
+    { name: 'branch is null', setup: () => {}, overrides: { branch: null } },
+    { name: 'repo_path is empty', setup: () => {}, overrides: { repo_path: '' } },
   ];
 
-  it.each(nullFieldCases)('returns null when $name', async ({ overrides }) => {
+  it.each(nullReturnCases)('returns null when $name', async ({ setup, overrides }) => {
+    setup?.();
     const result = await detectPR({ ...DEFAULTS.runningTask, ...overrides } as Task);
     expect(result).toBeNull();
   });
@@ -385,21 +324,13 @@ describe('pollPRs', () => {
     expect(task.pr_number).toBe(99);
   });
 
-  it('skips tasks that already have a PR', async () => {
-    insertTask(db, {
-      ...DEFAULTS.runningTask,
-      pr_url: 'https://github.com/org/repo/pull/1',
-      pr_number: 1,
-    });
+  const pollPRSkipCases = [
+    { name: 'already has a PR', overrides: { pr_url: 'https://github.com/org/repo/pull/1', pr_number: 1 } },
+    { name: 'has no branch', overrides: { branch: null } },
+  ];
 
-    await pollPRs();
-
-    // execFile should not be called for gh (task already has PR)
-    expect(execFile).not.toHaveBeenCalled();
-  });
-
-  it('skips tasks without a branch', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, branch: null });
+  it.each(pollPRSkipCases)('skips tasks that $name', async ({ overrides }) => {
+    insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
     await pollPRs();
 
