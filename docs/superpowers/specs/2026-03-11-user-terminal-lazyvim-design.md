@@ -103,10 +103,14 @@ Request: empty body.
 Response: `{ user_window_index: number }`
 
 Logic:
-1. Look up task, validate it has a `tmux_session`
+1. Look up task, validate it has a `tmux_session` AND `status === 'running'`
+   - Return 400 if task status is not `running` (closed tasks have dead tmux sessions
+     even though `tmux_session` is still set in DB)
 2. If `user_window_index` is already set, return it immediately
 3. Create new tmux window: `tmux new-window -t {session} -c {worktreePath}`
-4. Get the new window's index: `tmux display-message -t {session} -p '#{window_index}'`
+4. Get the new window's index using `getLastWindowIndex()` (calls `tmux list-windows`
+   and takes max) — NOT `tmux display-message` which returns the active window, not
+   necessarily the newly created one
 5. Send nvim launch: `tmux send-keys -t {session}:{windowIndex} 'nvim .' Enter`
 6. Store `user_window_index` on the task row
 7. Return `{ user_window_index }`
@@ -115,8 +119,9 @@ Logic:
 
 - **`closeTask()`** — No special handling. Killing the tmux session kills all windows
   including the user's.
-- **`resumeTask()`** — Reset `user_window_index` to null. The user terminal will be
-  lazily recreated on next toggle.
+- **`resumeTask()`** — Reset `user_window_index` to null in the UPDATE statement:
+  `UPDATE tasks SET status = 'setting_up', error = NULL, user_window_index = NULL WHERE id = ?`
+  The user terminal will be lazily recreated on next toggle.
 - **`deleteTask()`** — No special handling. Session cleanup covers it.
 
 ### WebSocket
@@ -145,12 +150,21 @@ for the user window — it's just another window index.
 - Editor TerminalView only mounts once `userWindowIndex` is set
 
 **Editor button visibility:**
-- Only show when `task.tmux_session` exists AND status is `running` or `closed`
+- Only show when `task.tmux_session` exists AND status is `running`
 - Active visual state when `mode === 'editor'`
 
 **Auto-switch back to agents:**
-- When task status changes to `setting_up`, `closed`, or `error`, auto-set mode to `agents`
-- This handles: task close while in editor, task resume (goes through setting_up)
+- When task status changes to `setting_up` or `error`, auto-set mode to `agents`
+- This handles: task resume (goes through setting_up), unexpected errors
+- `closed` does NOT auto-switch — the button simply disappears (hidden when not running),
+  so the user stays on whatever terminal was visible; if they were in editor mode, the
+  terminal disconnects naturally and shows the existing reconnect/error UI
+
+**Page reload behavior:**
+- On page load, `user_window_index` is available from the task API response (SELECT *)
+- Mode always defaults to `agents` on page load
+- If user clicks editor button and the window already exists (user_window_index set),
+  the endpoint returns immediately (idempotent) and the terminal connects instantly
 
 ### TerminalView.tsx
 
@@ -159,14 +173,10 @@ for the user window — it's just another window index.
 The hidden terminal won't resize with the browser window. When it becomes visible again,
 it needs to refit.
 
-Options:
-- Accept a `visible` prop; run `fitAddon.fit()` in a useEffect when it changes to true
-- Or use a ResizeObserver (already exists) — if the container goes from 0 dimensions to
-  non-zero, that triggers a fit automatically
-
-The existing ResizeObserver approach should handle this naturally since the container
-goes from `display:none` (0x0) to visible (actual dimensions). Verify this works; if
-not, add the `visible` prop approach.
+Approach: Accept a `visible: boolean` prop. Add a `useEffect` that calls
+`fitAddon.fit()` when `visible` transitions to `true`. This is more reliable than
+depending on ResizeObserver behavior with `display:none` containers, which can produce
+incorrect dimensions if the terminal was initially created while hidden.
 
 ### Header Button
 
@@ -181,7 +191,7 @@ Add a toggle button in the TaskDetail header:
 | Scenario | Handling |
 |----------|----------|
 | User quits nvim (`:q`) | Lands in shell at worktree path — expected and useful |
-| Task closed while in editor mode | Auto-switch to agents mode |
+| Task closed while in editor mode | Editor button disappears; terminal shows disconnect UI |
 | Task resumed | `user_window_index` reset to null; mode switches to agents |
 | Page reload while in editor mode | Defaults to agents mode; button click reconnects instantly (window still alive) |
 | tmux session dies unexpectedly | TerminalView shows existing reconnect/error UI |
@@ -200,6 +210,7 @@ Add a toggle button in the TaskDetail header:
 - Unit test for new endpoint: creates window, returns index, idempotent on second call
 - Unit test: resumeTask resets user_window_index to null
 - Test: endpoint returns 400/404 for invalid task or task without tmux session
+- Test: endpoint returns 400 for closed task (dead tmux session)
 
 ### Frontend
 - Component test: editor button hidden when no tmux session
