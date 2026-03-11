@@ -100,7 +100,9 @@ export function initDb(instance: Database.Database): void {
   }
 
   // Add hook_activity columns to agents table (for existing DBs)
-  if (!agentColNames.includes('hook_activity')) {
+  const agentCols2 = instance.pragma('table_info(agents)') as Array<{ name: string }>;
+  const agentColNames2 = agentCols2.map((c) => c.name);
+  if (!agentColNames2.includes('hook_activity')) {
     instance.exec("ALTER TABLE agents ADD COLUMN hook_activity TEXT NOT NULL DEFAULT 'active'");
     instance.exec('ALTER TABLE agents ADD COLUMN hook_activity_updated_at TEXT');
   }
