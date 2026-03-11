@@ -21,9 +21,21 @@ vi.mock('child_process', () => ({
   }),
 }));
 
-const { checkTaskStatus, pollStatuses, detectPR, pollPRs, startPolling, stopPolling } =
-  await import('./poller.js');
+vi.mock('./task-runner.js', () => ({
+  closeTask: vi.fn(),
+}));
+
+const {
+  checkTaskStatus,
+  pollStatuses,
+  detectPR,
+  pollPRs,
+  checkMergedPRs,
+  startPolling,
+  stopPolling,
+} = await import('./poller.js');
 const { execFile } = await import('child_process');
+const { closeTask } = await import('./task-runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -324,6 +336,108 @@ describe('pollPRs', () => {
       }
     },
   );
+});
+
+// ─── checkMergedPRs ─────────────────────────────────────────────────────────
+
+describe('checkMergedPRs', () => {
+  it('closes task when PR is merged', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) {
+        const cmdArgs = args[1] as string[];
+        if (cmdArgs && cmdArgs[0] === 'pr' && cmdArgs[1] === 'view') {
+          cb(null, { stdout: JSON.stringify({ state: 'MERGED' }), stderr: '' });
+        } else {
+          cb(null, { stdout: '', stderr: '' });
+        }
+      }
+      return undefined as any;
+    });
+
+    await checkMergedPRs();
+
+    expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: DEFAULTS.task.id }));
+  });
+
+  it('does not close task when PR is open', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) {
+        const cmdArgs = args[1] as string[];
+        if (cmdArgs && cmdArgs[0] === 'pr' && cmdArgs[1] === 'view') {
+          cb(null, { stdout: JSON.stringify({ state: 'OPEN' }), stderr: '' });
+        } else {
+          cb(null, { stdout: '', stderr: '' });
+        }
+      }
+      return undefined as any;
+    });
+
+    await checkMergedPRs();
+
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+
+  it('skips tasks without pr_number', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    await checkMergedPRs();
+
+    expect(execFile).not.toHaveBeenCalled();
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+
+  it('does not crash when gh command fails', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) cb(new Error('gh not found'));
+      return undefined as any;
+    });
+
+    await expect(checkMergedPRs()).resolves.not.toThrow();
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+
+  it('runs gh pr view with correct args in repo directory', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) cb(null, { stdout: JSON.stringify({ state: 'OPEN' }), stderr: '' });
+      return undefined as any;
+    });
+
+    await checkMergedPRs();
+
+    expect(execFile).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'view', '42', '--json', 'state'],
+      expect.objectContaining({ cwd: DEFAULTS.runningTask.repo_path }),
+      expect.any(Function),
+    );
+  });
+
+  const nonRunningStatuses = ['draft', 'closed', 'error', 'setting_up'] as const;
+
+  it.each(nonRunningStatuses)('skips tasks with status "%s"', async (status) => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      status,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+    });
+
+    await checkMergedPRs();
+
+    expect(execFile).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────

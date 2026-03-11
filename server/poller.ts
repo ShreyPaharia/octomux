@@ -1,15 +1,18 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { getDb } from './db.js';
+import { closeTask } from './task-runner.js';
 import type { Task } from './types.js';
 
 const execFile = promisify(execFileCb);
 
 const STATUS_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 30000;
+const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 30000;
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
+let mergedPrTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
@@ -106,6 +109,45 @@ export async function pollPRs(): Promise<void> {
   }
 }
 
+// ─── Merged PR Detection ────────────────────────────────────────────────────
+
+export async function checkMergedPRs(): Promise<void> {
+  const db = getDb();
+  const tasks = db
+    .prepare("SELECT * FROM tasks WHERE status = 'running' AND pr_number IS NOT NULL")
+    .all() as Task[];
+
+  const results = await Promise.allSettled(
+    tasks.map(async (task) => {
+      const { stdout } = await execFile('gh', ['pr', 'view', String(task.pr_number), '--json', 'state'], {
+        cwd: task.repo_path,
+      });
+      const { state } = JSON.parse(stdout.trim());
+      return { task, state };
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { task, state } = result.value;
+    if (state === 'MERGED') {
+      try {
+        await closeTask(task);
+      } catch {
+        // closeTask failure shouldn't stop processing other tasks
+      }
+    }
+  }
+}
+
+export async function pollMergedPRs(): Promise<void> {
+  try {
+    await checkMergedPRs();
+  } catch (err) {
+    console.error('pollMergedPRs error:', err);
+  }
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 export function startPolling(): void {
@@ -114,6 +156,9 @@ export function startPolling(): void {
   }
   if (PR_INTERVAL > 0) {
     prTimer = setInterval(pollPRs, PR_INTERVAL);
+  }
+  if (MERGED_PR_INTERVAL > 0) {
+    mergedPrTimer = setInterval(pollMergedPRs, MERGED_PR_INTERVAL);
   }
 }
 
@@ -125,5 +170,9 @@ export function stopPolling(): void {
   if (prTimer) {
     clearInterval(prTimer);
     prTimer = null;
+  }
+  if (mergedPrTimer) {
+    clearInterval(mergedPrTimer);
+    mergedPrTimer = null;
   }
 }
