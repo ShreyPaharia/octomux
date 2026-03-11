@@ -13,6 +13,7 @@ export interface Task {
   tmux_session: string | null;
   pr_url: string | null;
   pr_number: number | null;
+  user_window_index: number | null;
   initial_prompt: string | null;
   error: string | null;
   created_at: string;
