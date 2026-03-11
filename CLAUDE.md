@@ -27,20 +27,25 @@ work in live embedded terminals (xterm.js), get PRs. Localhost tool, not deploye
 ## Architecture
 
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
+  - `api.ts` — REST routes mounted on Express app
+  - `app.ts` — extracted `createApp()` for testability
+  - `task-runner.ts` — worktree + tmux + claude lifecycle (closeTask, deleteTask)
+  - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
+  - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
 - `src/` — React SPA (pages, components, lib/api.ts)
-- `server/types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
-- `server/db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
-- `server/app.ts` — extracted `createApp()` for testability
-- `server/task-runner.ts` — worktree + tmux + claude lifecycle
-- `server/api.ts` — REST routes mounted on Express app
+- `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
+- `e2e/` — Playwright E2E tests
 
 ## Task Lifecycle
 
-created → setting_up → running → done/cancelled
+draft → setting_up → running → closed/error
 Error at any point → error state with message in `task.error`
 
 Per task: git worktree at `<repo>/.worktrees/<id>`, tmux session `octomux-agent-<id>`,
 branch `agents/<id>`. Each agent = tmux window within the session.
+
+- **close** = stop agents + kill tmux session. Preserves worktree and branch (for resume).
+- **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
 
 ## Testing Patterns
 
