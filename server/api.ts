@@ -22,12 +22,14 @@ import {
   stopOrchestrator,
   getOrchestratorSession,
 } from './orchestrator.js';
+import { hookRoutes } from './hooks.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   AddAgentRequest,
   Task,
   Agent,
+  DerivedTaskStatus,
 } from './types.js';
 
 const execFile = promisify(execFileCb);
@@ -62,7 +64,29 @@ function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
   });
 }
 
+function safeParseJson(s: string): Record<string, unknown> {
+  try {
+    return JSON.parse(s || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function derivedStatus(task: {
+  status: string;
+  agents: Array<{ status: string; hook_activity: string }>;
+}): DerivedTaskStatus | null {
+  if (task.status !== 'running') return null;
+  const activities = task.agents.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
+  if (activities.length === 0) return 'done';
+  if (activities.includes('active')) return 'working';
+  if (activities.includes('waiting')) return 'needs_attention';
+  return 'done';
+}
+
 export function setupRoutes(app: Express): void {
+  app.use('/api/hooks', hookRoutes);
+
   // Browse directories for folder picker
   app.get('/api/browse', (req: Request, res: Response) => {
     const dirPath = (req.query.path as string) || os.homedir();
@@ -186,11 +210,28 @@ export function setupRoutes(app: Express): void {
     }
 
     const agentStmt = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index');
+    const promptStmt = db.prepare(
+      `SELECT pp.*, a.label as agent_label
+       FROM permission_prompts pp
+       LEFT JOIN agents a ON pp.agent_id = a.id
+       WHERE pp.task_id = ? AND pp.status = 'pending'
+       ORDER BY pp.created_at ASC`,
+    );
 
-    const result = tasks.map((task) => ({
-      ...task,
-      agents: agentStmt.all(task.id) as Agent[],
-    }));
+    const result = tasks.map((task) => {
+      const agents = agentStmt.all(task.id) as Agent[];
+      const pendingPrompts = promptStmt.all(task.id) as Array<Record<string, unknown>>;
+      const parsedPrompts = pendingPrompts.map((pp) => ({
+        ...pp,
+        tool_input: safeParseJson(pp.tool_input as string),
+      }));
+      return {
+        ...task,
+        agents,
+        pending_prompts: parsedPrompts,
+        derived_status: derivedStatus({ status: task.status, agents }),
+      };
+    });
 
     res.json(result);
   });
@@ -205,10 +246,28 @@ export function setupRoutes(app: Express): void {
       res.status(404).json({ error: 'Task not found' });
       return;
     }
-    task.agents = db
+    const agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
-    res.json(task);
+    const pendingPrompts = db
+      .prepare(
+        `SELECT pp.*, a.label as agent_label
+       FROM permission_prompts pp
+       LEFT JOIN agents a ON pp.agent_id = a.id
+       WHERE pp.task_id = ? AND pp.status = 'pending'
+       ORDER BY pp.created_at ASC`,
+      )
+      .all(task.id) as Array<Record<string, unknown>>;
+    const parsedPrompts = pendingPrompts.map((pp) => ({
+      ...pp,
+      tool_input: safeParseJson(pp.tool_input as string),
+    }));
+    res.json({
+      ...task,
+      agents,
+      pending_prompts: parsedPrompts,
+      derived_status: derivedStatus({ status: task.status, agents }),
+    });
   });
 
   // Create task

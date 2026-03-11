@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
@@ -18,18 +18,27 @@ export default function TaskDetail() {
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
+  const [searchParams] = useSearchParams();
+  const agentParam = searchParams.get('agent');
 
   // Derive userWindowIndex from server-persisted data so it survives page
   // refreshes and doesn't rely on ephemeral local state.
   const userWindowIndex = task?.user_window_index ?? null;
 
-  // Initialize activeWindow from first agent's window_index
+  // Initialize activeWindow from URL ?agent= param or first agent's window_index
   const firstAgentWindow = task?.agents?.[0]?.window_index ?? null;
   useEffect(() => {
+    if (agentParam && task?.agents) {
+      const agent = task.agents.find((a) => a.id === agentParam);
+      if (agent) {
+        setActiveWindow(agent.window_index);
+        return;
+      }
+    }
     if (activeWindow === null && firstAgentWindow !== null) {
       setActiveWindow(firstAgentWindow);
     }
-  }, [firstAgentWindow, activeWindow]);
+  }, [firstAgentWindow, activeWindow, agentParam, task?.agents]);
 
   // Auto-switch back to agents when task enters non-running state
   useEffect(() => {
@@ -182,7 +191,7 @@ export default function TaskDetail() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold">{task.title}</h1>
-              <StatusBadge status={task.status} />
+              <StatusBadge status={task.derived_status || task.status} />
             </div>
             <p className="max-w-xl truncate text-xs text-muted-foreground">{task.description}</p>
           </div>

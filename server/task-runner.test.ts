@@ -4,8 +4,10 @@ import {
   createTestDb,
   insertTask,
   insertAgent,
+  insertPermissionPrompt,
   getTask,
   getAgents,
+  getPermissionPrompts,
   findExecCall,
   DEFAULTS,
 } from './test-helpers.js';
@@ -25,6 +27,10 @@ vi.mock('fs', async (importOriginal) => {
 });
 
 let nextWindowIndex = 0;
+
+vi.mock('./hook-settings.js', () => ({
+  installHookSettings: vi.fn(),
+}));
 
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, args: string[], cb: Function) => {
@@ -60,6 +66,7 @@ const {
 } = await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
+const { installHookSettings } = await import('./hook-settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -736,5 +743,105 @@ describe('createUserTerminal', () => {
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
     ).toBeUndefined();
+  });
+});
+
+// ─── hook integration ─────────────────────────────────────────────────────────
+
+describe('hook integration', () => {
+  it('startTask installs hook settings in worktree', async () => {
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    expect(vi.mocked(installHookSettings)).toHaveBeenCalledWith(
+      expect.stringContaining('.worktrees/'),
+    );
+  });
+
+  it('closeTask resolves all pending permission prompts', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+    insertPermissionPrompt(db, {
+      id: 'pp_001',
+      task_id: DEFAULTS.task.id,
+      agent_id: DEFAULTS.agent.id,
+      status: 'pending',
+    });
+    insertPermissionPrompt(db, {
+      id: 'pp_002',
+      task_id: DEFAULTS.task.id,
+      agent_id: DEFAULTS.agent.id,
+      status: 'pending',
+    });
+
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
+
+    const prompts = getPermissionPrompts(db, DEFAULTS.task.id);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((p) => p.status === 'resolved')).toBe(true);
+    expect(prompts.every((p) => p.resolved_at !== null)).toBe(true);
+  });
+
+  it('stopAgent resolves pending prompts for that agent only', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
+
+    insertPermissionPrompt(db, {
+      id: 'pp_001',
+      task_id: DEFAULTS.task.id,
+      agent_id: DEFAULTS.agent.id,
+      status: 'pending',
+    });
+    insertPermissionPrompt(db, {
+      id: 'pp_002',
+      task_id: DEFAULTS.task.id,
+      agent_id: 'agent-02',
+      status: 'pending',
+    });
+
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+
+    const prompts = getPermissionPrompts(db, DEFAULTS.task.id);
+    const agent1Prompt = prompts.find((p) => p.agent_id === DEFAULTS.agent.id)!;
+    const agent2Prompt = prompts.find((p) => p.agent_id === 'agent-02')!;
+
+    expect(agent1Prompt.status).toBe('resolved');
+    expect(agent1Prompt.resolved_at).not.toBeNull();
+    expect(agent2Prompt.status).toBe('pending');
+    expect(agent2Prompt.resolved_at).toBeNull();
+  });
+
+  it('resumeTask generates session ID for --continue agents', async () => {
+    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: null });
+
+    await resumeTask(closedTask);
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents[0].claude_session_id).toBeTruthy();
+    // UUID format check
+    expect(agents[0].claude_session_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('resumeTask installs hook settings', async () => {
+    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    expect(vi.mocked(installHookSettings)).toHaveBeenCalledWith(DEFAULTS.runningTask.worktree);
+  });
+
+  it('addAgent returns hook_activity fields', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const agent = await addAgent({ ...DEFAULTS.runningTask } as Task);
+
+    expect(agent.hook_activity).toBe('active');
+    expect(agent.hook_activity_updated_at).toBeNull();
   });
 });

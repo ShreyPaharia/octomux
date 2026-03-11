@@ -53,7 +53,19 @@ export const DEFAULTS = {
     claude_session_id: 'test-session-uuid-01',
     created_at: '2026-01-01 00:00:00',
   },
-} satisfies Record<string, Partial<Task> | Partial<Agent>>;
+
+  permissionPrompt: {
+    id: 'pp_test123456',
+    task_id: 'task_test1234',
+    agent_id: 'agent_test123',
+    session_id: 'session-uuid-test',
+    tool_name: 'Bash',
+    tool_input: '{"command":"npm test"}',
+    status: 'pending' as const,
+    created_at: new Date().toISOString(),
+    resolved_at: null,
+  },
+} satisfies Record<string, Partial<Task> | Partial<Agent> | Record<string, unknown>>;
 
 // Derived constants from defaults
 export const SESSION_PREFIX = 'octomux-agent-';
@@ -108,7 +120,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, claude_session_id) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO agents (id, task_id, window_index, label, status, claude_session_id, hook_activity) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
@@ -116,6 +128,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
     agent.label,
     agent.status,
     agent.claude_session_id,
+    (agent as any).hook_activity || 'active',
   );
 
   return agent;
@@ -127,6 +140,34 @@ export function getTask(db: Database.Database, id: string): Task | undefined {
 
 export function getAgents(db: Database.Database, taskId: string): Agent[] {
   return db.prepare('SELECT * FROM agents WHERE task_id = ?').all(taskId) as Agent[];
+}
+
+export function insertPermissionPrompt(
+  db: Database.Database,
+  overrides: Partial<typeof DEFAULTS.permissionPrompt> = {},
+) {
+  const pp = { ...DEFAULTS.permissionPrompt, ...overrides };
+  db.prepare(
+    `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    pp.id,
+    pp.task_id,
+    pp.agent_id,
+    pp.session_id,
+    pp.tool_name,
+    pp.tool_input,
+    pp.status,
+    pp.created_at,
+    pp.resolved_at,
+  );
+  return pp;
+}
+
+export function getPermissionPrompts(db: Database.Database, taskId: string) {
+  return db
+    .prepare('SELECT * FROM permission_prompts WHERE task_id = ? ORDER BY created_at ASC')
+    .all(taskId) as Array<Record<string, unknown>>;
 }
 
 // ─── Callback Finder ─────────────────────────────────────────────────────────
@@ -207,5 +248,19 @@ export const AGENTS_TABLE_COLUMNS = [
   'label',
   'status',
   'claude_session_id',
+  'hook_activity',
+  'hook_activity_updated_at',
   'created_at',
+];
+
+export const PERMISSION_PROMPTS_TABLE_COLUMNS = [
+  'id',
+  'task_id',
+  'agent_id',
+  'session_id',
+  'tool_name',
+  'tool_input',
+  'status',
+  'created_at',
+  'resolved_at',
 ];
