@@ -22,7 +22,11 @@ vi.mock('node-pty', () => ({
 let execFileShouldFail = false;
 
 const mockExecFile = vi.fn(
-  (_cmd: string, _args: string[], callback?: (err: Error | null, stdout: string, stderr: string) => void) => {
+  (
+    _cmd: string,
+    _args: string[],
+    callback?: (err: Error | null, stdout: string, stderr: string) => void,
+  ) => {
     if (callback) {
       if (execFileShouldFail) {
         process.nextTick(() => callback(new Error('tmux failed'), '', ''));
