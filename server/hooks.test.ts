@@ -105,6 +105,21 @@ describe('Hook endpoints', () => {
       };
       expect(agent.hook_activity).toBe('active');
     });
+
+    it('does not override idle state (Stop hook may have fired first)', async () => {
+      // Simulate Stop hook having already fired
+      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+
+      await request(app)
+        .post('/api/hooks/post-tool-use')
+        .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
+        .expect(200);
+
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
+      expect(agent.hook_activity).toBe('idle');
+    });
   });
 
   describe('POST /api/hooks/stop', () => {

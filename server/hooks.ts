@@ -82,10 +82,11 @@ router.post('/post-tool-use', (req, res) => {
       )
       .run(agent.id);
 
+    // Only set active if not already idle (Stop hook may have fired first)
     getDb()
       .prepare(
         `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
-         WHERE id = ?`,
+         WHERE id = ? AND hook_activity != 'idle'`,
       )
       .run(agent.id);
   });

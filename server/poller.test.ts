@@ -25,9 +25,14 @@ vi.mock('./task-runner.js', () => ({
   closeTask: vi.fn(),
 }));
 
+vi.mock('./hook-settings.js', () => ({
+  installHookSettings: vi.fn(),
+}));
+
 const {
   checkTaskStatus,
   pollStatuses,
+  ensureHooksInstalled,
   detectPR,
   pollPRs,
   checkMergedPRs,
@@ -36,6 +41,7 @@ const {
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
 const { closeTask } = await import('./task-runner.js');
+const { installHookSettings } = await import('./hook-settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -127,6 +133,28 @@ describe('pollStatuses', () => {
     expect(agents.every((a) => a.status === 'stopped')).toBe(true);
   });
 
+  it('sets hook_activity to idle when session dies', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, { hook_activity: 'active' });
+    insertAgent(db, {
+      id: 'agent-02',
+      window_index: 1,
+      label: 'Agent 2',
+      hook_activity: 'waiting',
+    });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) cb(new Error('session not found'));
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
+  });
+
   it('marks setting_up task as error when session dies', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
     insertAgent(db);
@@ -158,6 +186,22 @@ describe('pollStatuses', () => {
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents.every((a) => a.status === 'stopped')).toBe(true);
+  });
+
+  it('sets hook_activity to idle when setting_up task dies', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up' });
+    insertAgent(db, { hook_activity: 'active' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args);
+      if (cb) cb(new Error('session not found'));
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
   });
 
   it('does not modify task when session is alive', async () => {
@@ -203,6 +247,56 @@ describe('pollStatuses', () => {
     // Both should still be running (mock returns success)
     expect(getTask(db, DEFAULTS.task.id)!.status).toBe('running');
     expect(getTask(db, 'task-02')!.status).toBe('running');
+  });
+});
+
+// ─── ensureHooksInstalled ───────────────────────────────────────────────────
+
+describe('ensureHooksInstalled', () => {
+  it('installs hooks for running tasks with worktrees', () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    ensureHooksInstalled();
+
+    expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.runningTask.worktree);
+  });
+
+  it('installs hooks for multiple running tasks', () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'task-02',
+      worktree: '/tmp/test-repo/.worktrees/task-02',
+    });
+
+    ensureHooksInstalled();
+
+    expect(installHookSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips non-running tasks', () => {
+    insertTask(db, { ...DEFAULTS.runningTask, status: 'closed' });
+
+    ensureHooksInstalled();
+
+    expect(installHookSettings).not.toHaveBeenCalled();
+  });
+
+  it('skips tasks without worktree', () => {
+    insertTask(db, { ...DEFAULTS.runningTask, worktree: null });
+
+    ensureHooksInstalled();
+
+    expect(installHookSettings).not.toHaveBeenCalled();
+  });
+
+  it('does not crash when installHookSettings throws', () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    vi.mocked(installHookSettings).mockImplementation(() => {
+      throw new Error('permission denied');
+    });
+
+    expect(() => ensureHooksInstalled()).not.toThrow();
   });
 });
 

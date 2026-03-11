@@ -203,7 +203,9 @@ export async function closeTask(task: Task): Promise<void> {
   db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
     task.id,
   );
-  db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
+  db.prepare(
+    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
+  ).run(task.id);
 
   // Kill tmux session — worktree and branch are preserved for resume
   if (task.tmux_session) {
@@ -249,8 +251,10 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
     () => {},
   );
 
-  // Mark agent as stopped
-  db.prepare('UPDATE agents SET status = ? WHERE id = ?').run('stopped', agent.id);
+  // Mark agent as stopped and idle
+  db.prepare(
+    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE id = ?`,
+  ).run(agent.id);
 }
 
 export async function createUserTerminal(task: Task): Promise<number> {

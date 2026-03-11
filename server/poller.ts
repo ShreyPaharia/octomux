@@ -2,6 +2,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { getDb } from './db.js';
 import { closeTask } from './task-runner.js';
+import { installHookSettings } from './hook-settings.js';
 import type { Task } from './types.js';
 
 const execFile = promisify(execFileCb);
@@ -48,15 +49,38 @@ export async function pollStatuses(): Promise<void> {
         `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
       db.prepare(
-        "UPDATE agents SET status = 'stopped' WHERE task_id = ? AND status = 'running'",
+        `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
       ).run(task.id);
     } else if (status === 'dead' && task.status === 'setting_up') {
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
       db.prepare(
-        "UPDATE agents SET status = 'stopped' WHERE task_id = ? AND status = 'running'",
+        `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
       ).run(task.id);
+    }
+  }
+}
+
+// ─── Hook Installation ──────────────────────────────────────────────────────
+
+/**
+ * Ensure hooks are installed in all running task worktrees.
+ * Handles tasks created before the hook feature existed.
+ */
+export function ensureHooksInstalled(): void {
+  const db = getDb();
+  const runningTasks = db
+    .prepare(
+      "SELECT * FROM tasks WHERE status IN ('running', 'setting_up') AND worktree IS NOT NULL",
+    )
+    .all() as Task[];
+
+  for (const task of runningTasks) {
+    try {
+      installHookSettings(task.worktree!);
+    } catch {
+      // Non-critical — don't crash the poller
     }
   }
 }
@@ -151,6 +175,9 @@ export async function pollMergedPRs(): Promise<void> {
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 export function startPolling(): void {
+  // Install hooks in any running worktrees that might be missing them
+  ensureHooksInstalled();
+
   if (STATUS_INTERVAL > 0) {
     statusTimer = setInterval(pollStatuses, STATUS_INTERVAL);
   }

@@ -984,6 +984,8 @@ describe('GET /api/tasks with permission prompts', () => {
     { activities: ['idle'], expected: 'done' },
     { activities: ['active', 'waiting'], expected: 'working' },
     { activities: ['idle', 'idle'], expected: 'done' },
+    { activities: ['idle', 'waiting'], expected: 'needs_attention' },
+    { activities: ['active', 'idle'], expected: 'working' },
   ])(
     'derived_status is $expected when activities are $activities',
     async ({ activities, expected }) => {
@@ -1001,6 +1003,31 @@ describe('GET /api/tasks with permission prompts', () => {
       expect(res.body[0].derived_status).toBe(expected);
     },
   );
+
+  it('derived_status is done when all agents are stopped', async () => {
+    insertTask(db, { id: 't1', status: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' });
+
+    const res = await request(app).get('/api/tasks').expect(200);
+    expect(res.body[0].derived_status).toBe('done');
+  });
+
+  it('derived_status is done when task has no agents', async () => {
+    insertTask(db, { id: 't1', status: 'running' });
+
+    const res = await request(app).get('/api/tasks').expect(200);
+    expect(res.body[0].derived_status).toBe('done');
+  });
+
+  it('derived_status ignores stopped agents in activity calculation', async () => {
+    insertTask(db, { id: 't1', status: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'active' });
+    insertAgent(db, { id: 'a2', task_id: 't1', window_index: 1, hook_activity: 'waiting' });
+
+    const res = await request(app).get('/api/tasks').expect(200);
+    // Stopped agent's 'active' is ignored; only running agent's 'waiting' counts
+    expect(res.body[0].derived_status).toBe('needs_attention');
+  });
 
   it('derived_status is null for non-running tasks', async () => {
     insertTask(db, { id: 't1', status: 'closed' });
