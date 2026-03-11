@@ -166,11 +166,46 @@ export interface PermissionPrompt {
   resolved_at: string | null;
 }
 
+export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
+
 export interface Task {
   // ... existing fields
   pending_prompts: PermissionPrompt[];
+  derived_status: DerivedTaskStatus | null; // null when task is not 'running'
 }
 ```
+
+## Derived Task Status
+
+When a task's lifecycle `status` is `running`, compute a more informative display status from
+the `hook_activity` of its non-stopped agents:
+
+| Agent hook_activity states           | `derived_status` | Display        |
+| :----------------------------------- | :--------------- | :------------- |
+| Any agent `active`                   | `working`        | Green, working |
+| Any agent `waiting`, none `active`   | `needs_attention` | Amber, blocked |
+| All agents `idle`                    | `done`           | Blue, done     |
+
+Logic (computed in the API response, not stored in DB):
+
+```typescript
+function derivedStatus(task: Task): DerivedTaskStatus | null {
+  if (task.status !== 'running') return null;
+  const activities = task.agents
+    .filter((a) => a.status !== 'stopped')
+    .map((a) => a.hook_activity);
+  if (activities.length === 0) return 'done';
+  if (activities.includes('active')) return 'working';
+  if (activities.includes('waiting')) return 'needs_attention';
+  return 'done'; // all idle
+}
+```
+
+This replaces the generic "running" badge on task cards with a meaningful signal. The existing
+lifecycle `status` is unchanged — `derived_status` is a display-only field for the frontend.
+
+For non-running tasks (`draft`, `setting_up`, `closed`, `error`), `derived_status` is `null`
+and the frontend shows the lifecycle status as before.
 
 ## API Routes
 
@@ -274,18 +309,24 @@ Each prompt object in the response:
 When a task has pending permission prompts, show them inline below the task metadata:
 
 ```
-┌─ Add auth ────── [running] ──── PR #12 ──────────────┐
+┌─ Add auth ────── [⚠ needs attention] ── PR #12 ──────┐
 │                                                       │
-│  Agent 1  ● active     Agent 2  ○ idle                │
+│  Agent 1  ● active     Agent 2  ◉ waiting             │
 │                                                       │
-│  ⚠ Agent 1 · Bash "rm -rf dist"           2m ago     │
-│  ⚠ Agent 1 · Edit server/api.ts           30s ago    │
+│  ⚠ Agent 2 · Bash "rm -rf dist"           2m ago     │
+│  ⚠ Agent 2 · Edit server/api.ts           30s ago    │
 │    click to open terminal →                           │
 └───────────────────────────────────────────────────────┘
 
-┌─ Fix bug ─────── [running] ──────────────────────────┐
+┌─ Fix bug ─────── [● working] ────────────────────────┐
 │                                                       │
 │  Agent 1  ● active                                    │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+
+┌─ Refactor ────── [✓ done] ───────────────────────────┐
+│                                                       │
+│  Agent 1  ○ idle                                      │
 │                                                       │
 └───────────────────────────────────────────────────────┘
 ```
