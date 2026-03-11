@@ -1,9 +1,6 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import fs from 'fs';
-import os from 'os';
-import { nanoid } from 'nanoid';
 import { fileURLToPath } from 'url';
 
 const execFile = promisify(execFileCb);
@@ -31,28 +28,8 @@ export async function startOrchestrator(cwd?: string): Promise<void> {
     '-c',
     cwd || process.cwd(),
   ]);
-
-  // Write a launcher script that reads the prompt from a file and passes it
-  // to claude via a variable. This avoids shell interpolation issues — the
-  // original `$(cat file)` inside double quotes would expand $, backticks,
-  // and backslashes found in the prompt content.
-  const launcherId = nanoid(6);
-  const promptPath = path.join(os.tmpdir(), `octomux-orch-prompt-${launcherId}.txt`);
-  const launcherPath = path.join(os.tmpdir(), `octomux-orch-launch-${launcherId}.sh`);
-  fs.copyFileSync(PROMPT_FILE, promptPath);
-  fs.writeFileSync(
-    launcherPath,
-    `#!/bin/sh\nprompt=$(cat '${promptPath}')\nexec claude --system-prompt "$prompt"\n`,
-    { mode: 0o755 },
-  );
-
-  await execFile('tmux', [
-    'send-keys',
-    '-t',
-    ORCHESTRATOR_SESSION,
-    `sh '${launcherPath}'`,
-    'Enter',
-  ]);
+  const claudeCmd = `claude --system-prompt "$(cat ${PROMPT_FILE})"`;
+  await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, claudeCmd, 'Enter']);
 }
 
 export async function stopOrchestrator(): Promise<void> {

@@ -1,12 +1,8 @@
 const BASE_URL = process.env.OCTOMUX_URL || 'http://localhost:7777/api';
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (options?.body) {
-    headers['Content-Type'] = 'application/json';
-  }
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     ...options,
   });
   if (!res.ok) {

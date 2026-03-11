@@ -24,7 +24,6 @@ export function TerminalView({
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const onDataDisposable = useRef<{ dispose: () => void } | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(INITIAL_RECONNECT_DELAY);
   const unmounted = useRef(false);
@@ -94,9 +93,7 @@ export function TerminalView({
 
       wsRef.current = ws;
 
-      // Dispose previous onData handler to prevent accumulating listeners on reconnect
-      onDataDisposable.current?.dispose();
-      onDataDisposable.current = term.onData((data) => {
+      term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(data);
         }

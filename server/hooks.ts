@@ -55,25 +55,29 @@ router.post('/permission-request', (req, res) => {
     return;
   }
 
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare(
-      `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`,
-    ).run(
-      nanoid(12),
-      agent.task_id,
-      agent.id,
-      session_id,
-      tool_name,
-      JSON.stringify(tool_input || {}),
-    );
+  const txn = getDb().transaction(() => {
+    getDb()
+      .prepare(
+        `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`,
+      )
+      .run(
+        nanoid(12),
+        agent.task_id,
+        agent.id,
+        session_id,
+        tool_name,
+        JSON.stringify(tool_input || {}),
+      );
 
-    db.prepare(
-      `UPDATE agents SET hook_activity = 'waiting', hook_activity_updated_at = datetime('now')
-       WHERE id = ?`,
-    ).run(agent.id);
-  })();
+    getDb()
+      .prepare(
+        `UPDATE agents SET hook_activity = 'waiting', hook_activity_updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(agent.id);
+  });
+  txn();
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
@@ -93,24 +97,28 @@ router.post('/post-tool-use', (req, res) => {
     return;
   }
 
-  const db = getDb();
-  db.transaction(() => {
+  const txn = getDb().transaction(() => {
     // Resolve oldest pending prompt (FIFO)
-    db.prepare(
-      `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-       WHERE id = (
-         SELECT id FROM permission_prompts
-         WHERE agent_id = ? AND status = 'pending'
-         ORDER BY created_at ASC LIMIT 1
-       )`,
-    ).run(agent.id);
+    getDb()
+      .prepare(
+        `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
+         WHERE id = (
+           SELECT id FROM permission_prompts
+           WHERE agent_id = ? AND status = 'pending'
+           ORDER BY created_at ASC LIMIT 1
+         )`,
+      )
+      .run(agent.id);
 
     // Only set active if not already idle (Stop hook may have fired first)
-    db.prepare(
-      `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
-       WHERE id = ? AND hook_activity != 'idle'`,
-    ).run(agent.id);
-  })();
+    getDb()
+      .prepare(
+        `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+         WHERE id = ? AND hook_activity != 'idle'`,
+      )
+      .run(agent.id);
+  });
+  txn();
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
@@ -130,19 +138,23 @@ router.post('/stop', (req, res) => {
     return;
   }
 
-  const db = getDb();
-  db.transaction(() => {
+  const txn = getDb().transaction(() => {
     // Resolve ALL pending prompts for this agent
-    db.prepare(
-      `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-       WHERE agent_id = ? AND status = 'pending'`,
-    ).run(agent.id);
+    getDb()
+      .prepare(
+        `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
+         WHERE agent_id = ? AND status = 'pending'`,
+      )
+      .run(agent.id);
 
-    db.prepare(
-      `UPDATE agents SET hook_activity = 'idle', hook_activity_updated_at = datetime('now')
-       WHERE id = ?`,
-    ).run(agent.id);
-  })();
+    getDb()
+      .prepare(
+        `UPDATE agents SET hook_activity = 'idle', hook_activity_updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(agent.id);
+  });
+  txn();
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();

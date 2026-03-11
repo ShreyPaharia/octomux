@@ -3,22 +3,6 @@ import type { Task } from '../../server/types';
 import { api } from './api';
 import { subscribe } from './event-source';
 
-/**
- * Wraps an async function so that concurrent calls are deduplicated.
- * If a call is already in-flight, subsequent calls return the existing promise
- * instead of firing a new request.
- */
-function dedup<T>(fn: () => Promise<T>): () => Promise<T> {
-  let inflight: Promise<T> | null = null;
-  return () => {
-    if (inflight) return inflight;
-    inflight = fn().finally(() => {
-      inflight = null;
-    });
-    return inflight;
-  };
-}
-
 export function useOrchestrator() {
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -67,9 +51,7 @@ export function useTasks() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Deduplicate: rapid WebSocket events can trigger many refreshes, but only
-  // one API call should be in-flight at a time.
-  const refreshImpl = useCallback(async () => {
+  const refresh = useCallback(async () => {
     try {
       const data = await api.listTasks();
       setTasks(data);
@@ -80,13 +62,6 @@ export function useTasks() {
       setLoading(false);
     }
   }, []);
-
-  const dedupedRef = useRef(dedup(refreshImpl));
-  useEffect(() => {
-    dedupedRef.current = dedup(refreshImpl);
-  }, [refreshImpl]);
-
-  const refresh = useCallback(() => dedupedRef.current(), []);
 
   useEffect(() => {
     refresh();
@@ -102,9 +77,7 @@ export function useTask(id: string) {
   const [error, setError] = useState<string | null>(null);
   const lastJsonRef = useRef<string>('');
 
-  // Deduplicate: rapid WebSocket events can trigger many refreshes, but only
-  // one API call should be in-flight at a time.
-  const refreshImpl = useCallback(async () => {
+  const refresh = useCallback(async () => {
     try {
       const data = await api.getTask(id);
       // Only trigger a re-render when the task data actually changed.
@@ -122,13 +95,6 @@ export function useTask(id: string) {
       setLoading(false);
     }
   }, [id]);
-
-  const dedupedRef = useRef(dedup(refreshImpl));
-  useEffect(() => {
-    dedupedRef.current = dedup(refreshImpl);
-  }, [refreshImpl]);
-
-  const refresh = useCallback(() => dedupedRef.current(), []);
 
   useEffect(() => {
     refresh();
