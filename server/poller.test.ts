@@ -436,7 +436,11 @@ describe('pollPRs', () => {
 
 describe('checkMergedPRs', () => {
   it('closes task when PR is merged', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+    });
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cb = findCallback(...args);
@@ -457,7 +461,11 @@ describe('checkMergedPRs', () => {
   });
 
   it('does not close task when PR is open', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+    });
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cb = findCallback(...args);
@@ -487,7 +495,11 @@ describe('checkMergedPRs', () => {
   });
 
   it('does not crash when gh command fails', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+    });
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cb = findCallback(...args);
@@ -500,7 +512,11 @@ describe('checkMergedPRs', () => {
   });
 
   it('runs gh pr view with correct args in repo directory', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, pr_number: 42, pr_url: 'https://github.com/org/repo/pull/42' });
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+    });
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cb = findCallback(...args);
