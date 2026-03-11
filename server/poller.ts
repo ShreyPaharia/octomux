@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import { getDb } from './db.js';
 import { closeTask } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
+import { broadcast } from './events.js';
 import type { Task } from './types.js';
 
 const execFile = promisify(execFileCb);
@@ -51,6 +52,7 @@ export async function pollStatuses(): Promise<void> {
       db.prepare(
         `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
       ).run(task.id);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     } else if (status === 'dead' && task.status === 'setting_up') {
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
@@ -58,6 +60,7 @@ export async function pollStatuses(): Promise<void> {
       db.prepare(
         `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
       ).run(task.id);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     }
   }
 }
@@ -129,6 +132,7 @@ export async function pollPRs(): Promise<void> {
       db.prepare(
         `UPDATE tasks SET pr_url = ?, pr_number = ?, updated_at = datetime('now') WHERE id = ?`,
       ).run(pr.url, pr.number, task.id);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     }
   }
 }
@@ -161,6 +165,7 @@ export async function checkMergedPRs(): Promise<void> {
     if (state === 'MERGED') {
       try {
         await closeTask(task);
+        broadcast({ type: 'task:updated', payload: { taskId: task.id } });
       } catch {
         // closeTask failure shouldn't stop processing other tasks
       }

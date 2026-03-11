@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
+import { broadcast } from './events.js';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.post('/user-prompt-submit', (req, res) => {
     )
     .run(agent.id);
 
+  broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
 });
 
@@ -77,6 +79,7 @@ router.post('/permission-request', (req, res) => {
   });
   txn();
 
+  broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
 });
 
@@ -117,6 +120,7 @@ router.post('/post-tool-use', (req, res) => {
   });
   txn();
 
+  broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
 });
 
@@ -152,6 +156,7 @@ router.post('/stop', (req, res) => {
   });
   txn();
 
+  broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
 });
 

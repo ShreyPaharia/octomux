@@ -1,10 +1,16 @@
-import { createServer } from 'http';
+import { createServer, type IncomingMessage } from 'http';
+import type { Duplex } from 'stream';
 import path from 'path';
 import fs from 'fs';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
-import { setupTerminalWebSocket, cleanupAllConnections } from './terminal.js';
+import {
+  setupTerminalWebSocket,
+  handleTerminalUpgrade,
+  cleanupAllConnections,
+} from './terminal.js';
+import { setupEventWebSocket, handleEventUpgrade, cleanupEventClients } from './events.js';
 import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
 import { resumeTask } from './task-runner.js';
@@ -16,8 +22,15 @@ const app = createApp();
 const server = createServer(app);
 const PORT = process.env.PORT || 7777;
 
-// WebSocket for terminal streaming
-setupTerminalWebSocket(server);
+// WebSocket setup
+setupTerminalWebSocket();
+setupEventWebSocket();
+
+server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  if (handleTerminalUpgrade(req, socket, head)) return;
+  if (handleEventUpgrade(req, socket, head)) return;
+  socket.destroy();
+});
 
 // ─── Startup Recovery ──────────────────────────────────────────────────────
 async function recoverTasks(): Promise<void> {
@@ -70,8 +83,9 @@ server.listen(PORT, () => {
 function shutdown() {
   console.warn('[shutdown] Stopping pollers...');
   stopPolling();
-  console.warn('[shutdown] Cleaning up terminal connections...');
+  console.warn('[shutdown] Cleaning up connections...');
   cleanupAllConnections();
+  cleanupEventClients();
   console.warn('[shutdown] Closing HTTP server...');
   server.close(() => {
     console.warn('[shutdown] Done.');
