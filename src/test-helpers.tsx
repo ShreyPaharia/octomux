@@ -12,6 +12,8 @@ export const AGENT_DEFAULTS: Agent = {
   label: 'Agent 1',
   status: 'running',
   claude_session_id: null,
+  hook_activity: 'active',
+  hook_activity_updated_at: null,
   created_at: '2026-01-01 00:00:00',
 };
 

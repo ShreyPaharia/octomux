@@ -57,6 +57,8 @@ const runningTask: Task = makeTask({
       label: 'Agent 1',
       status: 'running',
       claude_session_id: null,
+      hook_activity: 'active' as const,
+      hook_activity_updated_at: null,
       created_at: '2026-01-01 00:00:00',
     },
   ],
