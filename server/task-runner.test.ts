@@ -56,6 +56,7 @@ const {
   resumeTask,
   dispatchToWindow,
   slugifyTitle,
+  createUserTerminal,
 } = await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -661,5 +662,79 @@ describe('resumeTask', () => {
     const updated = getTask(db, DEFAULTS.task.id)!;
     expect(updated.status).toBe('error');
     expect(updated.error).toContain('tmux not found');
+  });
+
+  it('resets user_window_index to null on resume', async () => {
+    insertTask(db, { ...closedTask, user_window_index: 3 });
+    insertAgent(db, { status: 'stopped' });
+
+    await resumeTask(closedTask);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.user_window_index).toBeNull();
+  });
+});
+
+// ─── createUserTerminal ──────────────────────────────────────────────────────
+
+describe('createUserTerminal', () => {
+  const runningTask = { ...DEFAULTS.runningTask } as Task;
+
+  beforeEach(() => {
+    // Restore the default execFile mock in case a previous test overrode it
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('display-message')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: 'true', stderr: '' });
+      }
+    }) as any);
+  });
+
+  it('creates tmux window and returns window index', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const index = await createUserTerminal(runningTask);
+
+    expect(index).toBe(1);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
+    ).toBeDefined();
+  });
+
+  it('sends nvim launch command to the new window', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await createUserTerminal(runningTask);
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys', 'nvim .', 'Enter'],
+    });
+    expect(sendKeysCall).toBeDefined();
+  });
+
+  it('stores user_window_index in the database', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await createUserTerminal(runningTask);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.user_window_index).toBe(1);
+  });
+
+  it('returns existing index without creating new window when already set', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, user_window_index: 5 });
+    const index = await createUserTerminal({
+      ...runningTask,
+      user_window_index: 5,
+    } as Task);
+
+    expect(index).toBe(5);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
+    ).toBeUndefined();
   });
 });

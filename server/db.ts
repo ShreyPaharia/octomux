@@ -78,4 +78,7 @@ export function initDb(instance: Database.Database): void {
   if (!colNames.includes('base_branch')) {
     instance.exec('ALTER TABLE tasks ADD COLUMN base_branch TEXT');
   }
+  if (!colNames.includes('user_window_index')) {
+    instance.exec('ALTER TABLE tasks ADD COLUMN user_window_index INTEGER');
+  }
 }

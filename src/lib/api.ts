@@ -57,6 +57,8 @@ export const api = {
     request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
   stopAgent: (taskId: string, agentId: string) =>
     request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
+  createUserTerminal: (taskId: string) =>
+    request<{ user_window_index: number }>(`/tasks/${taskId}/user-terminal`, { method: 'POST' }),
   previewPR: (taskId: string, data: { base: string }) =>
     request<{ title: string; body: string; base: string }>(`/tasks/${taskId}/pr/preview`, {
       method: 'POST',
