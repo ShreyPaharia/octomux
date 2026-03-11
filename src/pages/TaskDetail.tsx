@@ -17,20 +17,24 @@ export default function TaskDetail() {
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
-  const [userWindowIndex, setUserWindowIndex] = useState<number | null>(null);
+  const [creatingEditor, setCreatingEditor] = useState(false);
+
+  // Derive userWindowIndex from server-persisted data so it survives page
+  // refreshes and doesn't rely on ephemeral local state.
+  const userWindowIndex = task?.user_window_index ?? null;
 
   // Initialize activeWindow from first agent's window_index
+  const firstAgentWindow = task?.agents?.[0]?.window_index ?? null;
   useEffect(() => {
-    if (activeWindow === null && task?.agents?.length) {
-      setActiveWindow(task.agents[0].window_index);
+    if (activeWindow === null && firstAgentWindow !== null) {
+      setActiveWindow(firstAgentWindow);
     }
-  }, [task, activeWindow]);
+  }, [firstAgentWindow, activeWindow]);
 
-  // Auto-switch back to agents and reset editor state when task enters non-running state
+  // Auto-switch back to agents when task enters non-running state
   useEffect(() => {
     if (task && task.status !== 'running') {
       setMode('agents');
-      setUserWindowIndex(null);
     }
   }, [task?.status]);
 
@@ -107,16 +111,22 @@ export default function TaskDetail() {
       return;
     }
     if (userWindowIndex === null) {
+      if (creatingEditor) return; // Prevent duplicate requests
+      setCreatingEditor(true);
       try {
-        const result = await api.createUserTerminal(taskId);
-        setUserWindowIndex(result.user_window_index);
+        await api.createUserTerminal(taskId);
+        // The server persists user_window_index — the next poll refresh will
+        // pick it up via task.user_window_index, so no local state to set.
+        refresh();
       } catch (err) {
         console.error('Failed to create user terminal:', err);
         return;
+      } finally {
+        setCreatingEditor(false);
       }
     }
     setMode('editor');
-  }, [mode, userWindowIndex, taskId]);
+  }, [mode, userWindowIndex, taskId, creatingEditor, refresh]);
 
   if (loading) {
     return (
@@ -126,7 +136,7 @@ export default function TaskDetail() {
     );
   }
 
-  if (error || !task) {
+  if (!task) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
         <p className="text-destructive">{error || 'Task not found'}</p>
