@@ -22,6 +22,7 @@ import {
   stopOrchestrator,
   getOrchestratorSession,
 } from './orchestrator.js';
+import { hookRoutes } from './hooks.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -63,6 +64,8 @@ function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
 }
 
 export function setupRoutes(app: Express): void {
+  app.use('/api/hooks', hookRoutes);
+
   // Browse directories for folder picker
   app.get('/api/browse', (req: Request, res: Response) => {
     const dirPath = (req.query.path as string) || os.homedir();
