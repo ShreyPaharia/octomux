@@ -42,7 +42,7 @@ vi.mock('child_process', () => ({
   execFile: (...args: any[]) => mockExecFile(args[0], args[1], args[2]),
 }));
 
-const { setupTerminalWebSocket } = await import('./terminal.js');
+const { setupTerminalWebSocket, handleTerminalUpgrade } = await import('./terminal.js');
 const nodePty = await import('node-pty');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -78,7 +78,12 @@ beforeEach(async () => {
   mockPty.onExit.mockReset();
 
   server = createServer();
-  setupTerminalWebSocket(server);
+  setupTerminalWebSocket();
+  server.on('upgrade', (req, socket, head) => {
+    if (!handleTerminalUpgrade(req, socket, head)) {
+      socket.destroy();
+    }
+  });
 
   await new Promise<void>((resolve) => {
     server.listen(0, () => {
