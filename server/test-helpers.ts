@@ -220,6 +220,28 @@ export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallM
   }).length;
 }
 
+// ─── Agent Activity Helper ───────────────────────────────────────────────────
+
+export function getAgentActivity(
+  db: Database.Database,
+  agentId: string,
+): { hook_activity: string } {
+  return db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get(agentId) as {
+    hook_activity: string;
+  };
+}
+
+// ─── Dead Session Mock ──────────────────────────────────────────────────────
+
+/**
+ * Creates an execFile mock implementation that simulates a dead tmux session.
+ */
+export function deadSessionMock(...args: any[]): any {
+  const cb = findCallback(...args);
+  if (cb) cb(new Error('session not found'));
+  return undefined as any;
+}
+
 // ─── Table-Driven Helpers ────────────────────────────────────────────────────
 
 export const TASKS_TABLE_COLUMNS = [
