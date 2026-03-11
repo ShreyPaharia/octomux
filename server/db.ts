@@ -36,8 +36,25 @@ CREATE TABLE IF NOT EXISTS agents (
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS permission_prompts (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL,
+    agent_id   TEXT,
+    session_id TEXT NOT NULL,
+    tool_name  TEXT NOT NULL,
+    tool_input TEXT NOT NULL DEFAULT '{}',
+    status     TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id);
+CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id);
+CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status);
+CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status);
 `;
 
 let db: Database.Database;
@@ -81,4 +98,17 @@ export function initDb(instance: Database.Database): void {
   if (!colNames.includes('user_window_index')) {
     instance.exec('ALTER TABLE tasks ADD COLUMN user_window_index INTEGER');
   }
+
+  // Add hook_activity columns to agents table (for existing DBs)
+  const agentCols2 = instance.pragma('table_info(agents)') as Array<{ name: string }>;
+  const agentColNames2 = agentCols2.map((c) => c.name);
+  if (!agentColNames2.includes('hook_activity')) {
+    instance.exec("ALTER TABLE agents ADD COLUMN hook_activity TEXT NOT NULL DEFAULT 'active'");
+    instance.exec('ALTER TABLE agents ADD COLUMN hook_activity_updated_at TEXT');
+  }
+
+  // Resolve any stale pending permission prompts from previous run
+  instance.exec(
+    `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now') WHERE status = 'pending'`,
+  );
 }
