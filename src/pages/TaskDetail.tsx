@@ -16,6 +16,8 @@ export default function TaskDetail() {
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [mode, setMode] = useState<'agents' | 'editor'>('agents');
+  const [userWindowIndex, setUserWindowIndex] = useState<number | null>(null);
 
   // Initialize activeWindow from first agent's window_index
   useEffect(() => {
@@ -23,6 +25,14 @@ export default function TaskDetail() {
       setActiveWindow(task.agents[0].window_index);
     }
   }, [task, activeWindow]);
+
+  // Auto-switch back to agents and reset editor state when task enters non-running state
+  useEffect(() => {
+    if (task && task.status !== 'running') {
+      setMode('agents');
+      setUserWindowIndex(null);
+    }
+  }, [task?.status]);
 
   const handleAddAgent = useCallback(
     async (prompt?: string) => {
@@ -90,6 +100,23 @@ export default function TaskDetail() {
       setResuming(false);
     }
   }, [taskId, refresh]);
+
+  const handleToggleEditor = useCallback(async () => {
+    if (mode === 'editor') {
+      setMode('agents');
+      return;
+    }
+    if (userWindowIndex === null) {
+      try {
+        const result = await api.createUserTerminal(taskId);
+        setUserWindowIndex(result.user_window_index);
+      } catch (err) {
+        console.error('Failed to create user terminal:', err);
+        return;
+      }
+    }
+    setMode('editor');
+  }, [mode, userWindowIndex, taskId]);
 
   if (loading) {
     return (
@@ -171,6 +198,29 @@ export default function TaskDetail() {
               Create PR
             </Button>
           )}
+          {isRunning && !!task.tmux_session && (
+            <Button
+              variant={mode === 'editor' ? 'default' : 'outline'}
+              size="sm"
+              onClick={handleToggleEditor}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+              Editor
+            </Button>
+          )}
           {isDraft && (
             <Button variant="outline" size="sm" onClick={handleStart}>
               Start
@@ -191,9 +241,9 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Agent tabs + Terminal */}
+      {/* Agent view — shown in agents mode */}
       {hasTerminal ? (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className={mode === 'agents' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           <AgentTabs
             agents={agents}
             activeIndex={activeWindow}
@@ -203,16 +253,39 @@ export default function TaskDetail() {
             canAddAgent={isRunning}
           />
           <div className="min-h-0 flex-1 p-2">
-            <TerminalView taskId={task.id} windowIndex={activeWindow!} />
+            <TerminalView
+              taskId={task.id}
+              windowIndex={activeWindow!}
+              visible={mode === 'agents'}
+            />
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground">
+        <div
+          className={
+            mode === 'agents'
+              ? 'flex flex-1 items-center justify-center text-muted-foreground'
+              : 'hidden'
+          }
+        >
           {task.status === 'draft' || task.status === 'setting_up'
             ? 'Setting up terminal...'
             : task.status === 'closed' || task.status === 'error'
               ? 'Terminal session ended'
               : 'No terminal available'}
+        </div>
+      )}
+
+      {/* Editor view — shown in editor mode */}
+      {userWindowIndex !== null && (
+        <div className={mode === 'editor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+          <div className="min-h-0 flex-1 p-2">
+            <TerminalView
+              taskId={task.id}
+              windowIndex={userWindowIndex}
+              visible={mode === 'editor'}
+            />
+          </div>
         </div>
       )}
 
