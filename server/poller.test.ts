@@ -104,7 +104,11 @@ describe('pollStatuses', () => {
 
   const sessionDeathCases = [
     { taskStatus: 'running' as const, expectedStatus: 'closed', expectedError: undefined },
-    { taskStatus: 'setting_up' as const, expectedStatus: 'error', expectedError: 'Setup interrupted' },
+    {
+      taskStatus: 'setting_up' as const,
+      expectedStatus: 'error',
+      expectedError: 'Setup interrupted',
+    },
   ];
 
   describe.each(sessionDeathCases)(
@@ -325,7 +329,10 @@ describe('pollPRs', () => {
   });
 
   const pollPRSkipCases = [
-    { name: 'already has a PR', overrides: { pr_url: 'https://github.com/org/repo/pull/1', pr_number: 1 } },
+    {
+      name: 'already has a PR',
+      overrides: { pr_url: 'https://github.com/org/repo/pull/1', pr_number: 1 },
+    },
     { name: 'has no branch', overrides: { branch: null } },
   ];
 

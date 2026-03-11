@@ -200,23 +200,30 @@ describe('Database', () => {
     });
 
     const startupActivityCases = [
-      { initial: 'waiting' as const, status: 'running' as const, expected: 'active', desc: 'resets waiting to active' },
-      { initial: 'idle' as const, status: 'stopped' as const, expected: 'idle', desc: 'does not reset idle/stopped' },
+      {
+        initial: 'waiting' as const,
+        status: 'running' as const,
+        expected: 'active',
+        desc: 'resets waiting to active',
+      },
+      {
+        initial: 'idle' as const,
+        status: 'stopped' as const,
+        expected: 'idle',
+        desc: 'does not reset idle/stopped',
+      },
     ];
 
-    it.each(startupActivityCases)(
-      '$desc on startup',
-      ({ initial, status, expected }) => {
-        insertTask(db, { id: 't1', status: 'running' });
-        insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: initial, status });
+    it.each(startupActivityCases)('$desc on startup', ({ initial, status, expected }) => {
+      insertTask(db, { id: 't1', status: 'running' });
+      insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: initial, status });
 
-        initDb(db);
+      initDb(db);
 
-        const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-          hook_activity: string;
-        };
-        expect(agent.hook_activity).toBe(expected);
-      },
-    );
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
+      expect(agent.hook_activity).toBe(expected);
+    });
   });
 });
