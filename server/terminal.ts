@@ -52,6 +52,7 @@ function attachToTmuxSession(
   connKey: string,
   closeReason: string,
   linkedSession?: string,
+  pendingMessages?: (Buffer | string)[],
 ): void {
   let pty: IPty;
   try {
@@ -80,8 +81,7 @@ function attachToTmuxSession(
     }
   });
 
-  // WebSocket → PTY
-  ws.on('message', (data: Buffer | string) => {
+  const handleMessage = (data: Buffer | string) => {
     if (ptyExited) return;
     const msg = typeof data === 'string' ? data : data.toString();
 
@@ -101,7 +101,18 @@ function attachToTmuxSession(
     } catch {
       // PTY already exited
     }
-  });
+  };
+
+  // Replace any buffering handler with the real one
+  ws.removeAllListeners('message');
+  ws.on('message', handleMessage);
+
+  // Replay any messages that arrived before the PTY was ready
+  if (pendingMessages) {
+    for (const msg of pendingMessages) {
+      handleMessage(msg);
+    }
+  }
 
   const cleanupLinkedSession = () => {
     if (linkedSession) {
@@ -134,6 +145,15 @@ function attachToTmuxSession(
 }
 
 async function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): Promise<void> {
+  // Buffer messages that arrive while we set up the tmux session.
+  // Without this, the client's initial resize message (sent on WS open) would be
+  // lost because the message handler isn't registered until after the async tmux
+  // setup completes — Node.js EventEmitter discards events with no listeners.
+  const pendingMessages: (Buffer | string)[] = [];
+  ws.on('message', (data: Buffer | string) => {
+    pendingMessages.push(data);
+  });
+
   const db = getDb();
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
 
@@ -148,6 +168,10 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   const linkedSession = `${task.tmux_session}-v-${nanoid(6)}`;
   try {
     await execFile('tmux', ['new-session', '-d', '-t', task.tmux_session, '-s', linkedSession]);
+    // Prevent grouped sessions from constraining window size to the smallest client
+    await execFile('tmux', ['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(
+      () => {},
+    );
     await execFile('tmux', ['select-window', '-t', `${linkedSession}:${windowIndex}`]);
   } catch {
     ws.close(4005, 'Failed to create terminal view session');
@@ -161,6 +185,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
     connKey,
     'Failed to attach to tmux session',
     linkedSession,
+    pendingMessages,
   );
 }
 
