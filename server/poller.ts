@@ -143,9 +143,13 @@ export async function checkMergedPRs(): Promise<void> {
 
   const results = await Promise.allSettled(
     tasks.map(async (task) => {
-      const { stdout } = await execFile('gh', ['pr', 'view', String(task.pr_number), '--json', 'state'], {
-        cwd: task.repo_path,
-      });
+      const { stdout } = await execFile(
+        'gh',
+        ['pr', 'view', String(task.pr_number), '--json', 'state'],
+        {
+          cwd: task.repo_path,
+        },
+      );
       const { state } = JSON.parse(stdout.trim());
       return { task, state };
     }),
