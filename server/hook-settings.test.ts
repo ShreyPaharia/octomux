@@ -15,12 +15,23 @@ afterEach(() => {
 });
 
 describe('installHookSettings', () => {
-  it('creates .claude/settings.local.json with all 3 hook events', () => {
+  it('creates .claude/settings.local.json with all 4 hook events', () => {
     installHookSettings(tmpDir);
 
     const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
 
+    expect(settings.hooks.UserPromptSubmit).toEqual([
+      {
+        hooks: [
+          {
+            type: 'http',
+            url: 'http://localhost:7777/api/hooks/user-prompt-submit',
+            timeout: 5,
+          },
+        ],
+      },
+    ]);
     expect(settings.hooks.PermissionRequest).toEqual([
       {
         hooks: [
@@ -74,6 +85,7 @@ describe('installHookSettings', () => {
       fs.readFileSync(path.join(claudeDir, 'settings.local.json'), 'utf-8'),
     );
     expect(settings.hooks.PreToolUse).toEqual(existingHooks.hooks.PreToolUse);
+    expect(settings.hooks.UserPromptSubmit).toBeDefined();
     expect(settings.hooks.PermissionRequest).toBeDefined();
     expect(settings.hooks.PostToolUse).toBeDefined();
     expect(settings.hooks.Stop).toBeDefined();

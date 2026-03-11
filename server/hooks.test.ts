@@ -21,6 +21,47 @@ describe('Hook endpoints', () => {
     insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-123' });
   });
 
+  describe('POST /api/hooks/user-prompt-submit', () => {
+    it('sets idle agent to active when user submits a prompt', async () => {
+      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+
+      await request(app)
+        .post('/api/hooks/user-prompt-submit')
+        .send({ session_id: 'sess-123' })
+        .expect(200);
+
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
+      expect(agent.hook_activity).toBe('active');
+    });
+
+    it('sets waiting agent to active when user submits a prompt', async () => {
+      db.prepare(`UPDATE agents SET hook_activity = 'waiting' WHERE id = ?`).run('a1');
+
+      await request(app)
+        .post('/api/hooks/user-prompt-submit')
+        .send({ session_id: 'sess-123' })
+        .expect(200);
+
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
+      expect(agent.hook_activity).toBe('active');
+    });
+
+    it('ignores unknown session_id', async () => {
+      await request(app)
+        .post('/api/hooks/user-prompt-submit')
+        .send({ session_id: 'unknown' })
+        .expect(200);
+    });
+
+    it('ignores request with missing session_id', async () => {
+      await request(app).post('/api/hooks/user-prompt-submit').send({}).expect(200);
+    });
+  });
+
   describe('POST /api/hooks/permission-request', () => {
     it('creates pending permission prompt and sets agent to waiting', async () => {
       await request(app)

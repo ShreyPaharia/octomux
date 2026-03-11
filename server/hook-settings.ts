@@ -2,6 +2,17 @@ import path from 'path';
 import fs from 'fs';
 
 const HOOK_EVENTS = {
+  UserPromptSubmit: [
+    {
+      hooks: [
+        {
+          type: 'http',
+          url: 'http://localhost:7777/api/hooks/user-prompt-submit',
+          timeout: 5,
+        },
+      ],
+    },
+  ],
   PermissionRequest: [
     {
       hooks: [
