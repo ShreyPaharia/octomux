@@ -599,18 +599,7 @@ export function setupRoutes(app: Express): void {
       // Create PR via gh CLI
       const { stdout } = await execFile(
         'gh',
-        [
-          'pr',
-          'create',
-          '--head',
-          task.branch,
-          '--base',
-          base,
-          '--title',
-          title,
-          '--body',
-          body,
-        ],
+        ['pr', 'create', '--head', task.branch, '--base', base, '--title', title, '--body', body],
         { cwd: task.repo_path },
       );
 
