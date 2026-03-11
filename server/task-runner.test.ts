@@ -384,6 +384,22 @@ describe('closeTask', () => {
     expect(agents.every((a) => a.status === 'stopped')).toBe(true);
   });
 
+  it('sets hook_activity to idle for all agents', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, { hook_activity: 'active' });
+    insertAgent(db, {
+      id: 'agent-02',
+      window_index: 1,
+      label: 'Agent 2',
+      hook_activity: 'waiting',
+    });
+
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
+  });
+
   // ─── Shell cleanup commands (table-driven) ─────────────────────────────
 
   it('kills tmux session', async () => {
@@ -490,6 +506,16 @@ describe('stopAgent', () => {
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents[0].status).toBe('stopped');
+  });
+
+  it('sets hook_activity to idle', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, { hook_activity: 'active' });
+
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents[0].hook_activity).toBe('idle');
   });
 
   it('does not affect other agents', async () => {

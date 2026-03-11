@@ -108,7 +108,12 @@ export function initDb(instance: Database.Database): void {
   }
 
   // Resolve any stale pending permission prompts from previous run
+  // and reset agents stuck in 'waiting' state (hooks lost during restart)
   instance.exec(
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now') WHERE status = 'pending'`,
+  );
+  instance.exec(
+    `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+     WHERE hook_activity = 'waiting' AND status = 'running'`,
   );
 }

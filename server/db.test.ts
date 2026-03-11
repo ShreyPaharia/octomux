@@ -199,5 +199,30 @@ describe('Database', () => {
       expect(prompts[0].status).toBe('resolved');
       expect(prompts[0].resolved_at).not.toBeNull();
     });
+
+    it('resets waiting agents to active on startup', () => {
+      insertTask(db, { id: 't1', status: 'running' });
+      insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: 'waiting' });
+
+      // Re-init simulates restart
+      initDb(db);
+
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
+      expect(agent.hook_activity).toBe('active');
+    });
+
+    it('does not reset idle or stopped agents on startup', () => {
+      insertTask(db, { id: 't1', status: 'running' });
+      insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: 'idle', status: 'stopped' });
+
+      initDb(db);
+
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
+      expect(agent.hook_activity).toBe('idle');
+    });
   });
 });
