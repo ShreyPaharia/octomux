@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import type { Task } from '../../server/types';
 
 const REPO_FILTER_KEY = 'octomux-repo-filter';
+const STATUS_FILTER_KEY = 'octomux-status-filter';
 
 export interface TaskFilters {
   status: 'open' | 'closed';
@@ -12,7 +13,7 @@ const OPEN_STATUSES = ['draft', 'setting_up', 'running', 'error'];
 
 export function useTaskFilters(tasks: Task[]) {
   const [filters, setFilters] = useState<TaskFilters>({
-    status: 'open',
+    status: (localStorage.getItem(STATUS_FILTER_KEY) as 'open' | 'closed') ?? 'open',
     repo: localStorage.getItem(REPO_FILTER_KEY) ?? '',
   });
 
@@ -45,6 +46,8 @@ export function useTaskFilters(tasks: Task[]) {
   function setFilter<K extends keyof TaskFilters>(key: K, value: TaskFilters[K]) {
     if (key === 'repo') {
       localStorage.setItem(REPO_FILTER_KEY, value as string);
+    } else if (key === 'status') {
+      localStorage.setItem(STATUS_FILTER_KEY, value as string);
     }
     setFilters((prev) => ({ ...prev, [key]: value }));
   }
