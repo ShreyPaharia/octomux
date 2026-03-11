@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
@@ -18,13 +18,22 @@ export default function TaskDetail() {
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [userWindowIndex, setUserWindowIndex] = useState<number | null>(null);
+  const [searchParams] = useSearchParams();
+  const agentParam = searchParams.get('agent');
 
-  // Initialize activeWindow from first agent's window_index
+  // Initialize activeWindow from first agent's window_index or URL param
   useEffect(() => {
+    if (agentParam && task?.agents) {
+      const agent = task.agents.find((a) => a.id === agentParam);
+      if (agent) {
+        setActiveWindow(agent.window_index);
+        return;
+      }
+    }
     if (activeWindow === null && task?.agents?.length) {
       setActiveWindow(task.agents[0].window_index);
     }
-  }, [task, activeWindow]);
+  }, [task, activeWindow, agentParam]);
 
   // Auto-switch back to agents and reset editor state when task enters non-running state
   useEffect(() => {
@@ -172,7 +181,7 @@ export default function TaskDetail() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold">{task.title}</h1>
-              <StatusBadge status={task.status} />
+              <StatusBadge status={task.derived_status || task.status} />
             </div>
             <p className="max-w-xl truncate text-xs text-muted-foreground">{task.description}</p>
           </div>

@@ -4,6 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Task } from '../../server/types';
 import { StatusBadge } from './StatusBadge';
+import { AgentActivityDot } from './AgentActivityDot';
+import { PermissionPromptRow } from './PermissionPromptRow';
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr + 'Z').getTime();
@@ -41,7 +43,7 @@ export function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
             {task.title}
           </CardTitle>
           <div className="flex shrink-0 items-center gap-2">
-            <StatusBadge status={task.status} />
+            <StatusBadge status={task.derived_status || task.status} />
             <span className="text-xs whitespace-nowrap text-muted-foreground">
               {timeAgo(task.created_at)}
             </span>
@@ -124,6 +126,25 @@ export function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
             </Button>
           </div>
         </div>
+        {task.agents && task.agents.length > 0 && task.status === 'running' && (
+          <div className="mt-2 flex flex-wrap gap-3 text-xs">
+            {task.agents
+              .filter((a) => a.status !== 'stopped')
+              .map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1">
+                  <AgentActivityDot activity={a.hook_activity} />
+                  <span className="text-zinc-500">{a.label}</span>
+                </span>
+              ))}
+          </div>
+        )}
+        {task.pending_prompts && task.pending_prompts.length > 0 && (
+          <div className="mt-1 space-y-0.5">
+            {task.pending_prompts.map((pp) => (
+              <PermissionPromptRow key={pp.id} prompt={pp} taskId={task.id} />
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

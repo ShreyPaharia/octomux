@@ -46,7 +46,15 @@ export function AgentTabs({
             >
               {agent.label}
               {agent.status === 'running' && (
-                <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+                <span
+                  className={`ml-1.5 inline-block h-1.5 w-1.5 rounded-full ${
+                    agent.hook_activity === 'waiting'
+                      ? 'bg-amber-500'
+                      : agent.hook_activity === 'idle'
+                        ? 'bg-zinc-400'
+                        : 'animate-pulse bg-green-400'
+                  }`}
+                />
               )}
             </button>
             {agent.status === 'running' && (
