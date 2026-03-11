@@ -82,9 +82,9 @@ let db: Database.Database;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   db = createTestDb();
   app = createApp();
-  vi.clearAllMocks();
 });
 
 afterEach(() => {
