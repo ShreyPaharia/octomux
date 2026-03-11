@@ -74,7 +74,10 @@ describe('Hook endpoints', () => {
     });
 
     const ignoreCases = [
-      { name: 'unknown session_id', body: { session_id: 'unknown', tool_name: 'Bash', tool_input: {} } },
+      {
+        name: 'unknown session_id',
+        body: { session_id: 'unknown', tool_name: 'Bash', tool_input: {} },
+      },
       { name: 'missing fields', body: {} },
     ];
 
