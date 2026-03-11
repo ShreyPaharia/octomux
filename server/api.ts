@@ -64,6 +64,14 @@ function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
   });
 }
 
+function safeParseJson(s: string): Record<string, unknown> {
+  try {
+    return JSON.parse(s || '{}');
+  } catch {
+    return {};
+  }
+}
+
 function derivedStatus(task: {
   status: string;
   agents: Array<{ status: string; hook_activity: string }>;
@@ -205,7 +213,7 @@ export function setupRoutes(app: Express): void {
 
     const agentStmt = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index');
     const promptStmt = db.prepare(
-      `SELECT pp.id, pp.agent_id, a.label as agent_label, pp.tool_name, pp.tool_input, pp.created_at
+      `SELECT pp.*, a.label as agent_label
        FROM permission_prompts pp
        LEFT JOIN agents a ON pp.agent_id = a.id
        WHERE pp.task_id = ? AND pp.status = 'pending'
@@ -217,7 +225,7 @@ export function setupRoutes(app: Express): void {
       const pendingPrompts = promptStmt.all(task.id) as Array<Record<string, unknown>>;
       const parsedPrompts = pendingPrompts.map((pp) => ({
         ...pp,
-        tool_input: JSON.parse((pp.tool_input as string) || '{}'),
+        tool_input: safeParseJson(pp.tool_input as string),
       }));
       return {
         ...task,
@@ -245,7 +253,7 @@ export function setupRoutes(app: Express): void {
       .all(task.id) as Agent[];
     const pendingPrompts = db
       .prepare(
-        `SELECT pp.id, pp.agent_id, a.label as agent_label, pp.tool_name, pp.tool_input, pp.created_at
+        `SELECT pp.*, a.label as agent_label
        FROM permission_prompts pp
        LEFT JOIN agents a ON pp.agent_id = a.id
        WHERE pp.task_id = ? AND pp.status = 'pending'
@@ -254,7 +262,7 @@ export function setupRoutes(app: Express): void {
       .all(task.id) as Array<Record<string, unknown>>;
     const parsedPrompts = pendingPrompts.map((pp) => ({
       ...pp,
-      tool_input: JSON.parse((pp.tool_input as string) || '{}'),
+      tool_input: safeParseJson(pp.tool_input as string),
     }));
     res.json({
       ...task,
