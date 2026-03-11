@@ -36,7 +36,6 @@ import type {
 const execFile = promisify(execFileCb);
 
 const CLAUDE_TIMEOUT_MS = 120_000;
-const MAX_CONCURRENT_TASKS = parseInt(process.env.MAX_CONCURRENT_TASKS || '10', 10);
 
 /** Run claude CLI with prompt piped via stdin to avoid arg length issues. */
 function runClaude(prompt: string, env: NodeJS.ProcessEnv): Promise<string> {
@@ -282,17 +281,6 @@ export function setupRoutes(app: Express): void {
 
     const db = getDb();
 
-    if (!body.draft) {
-      const runningCount = db
-        .prepare("SELECT COUNT(*) as count FROM tasks WHERE status IN ('running', 'setting_up')")
-        .get() as { count: number };
-      if (runningCount.count >= MAX_CONCURRENT_TASKS) {
-        res.status(429).json({
-          error: `Maximum concurrent tasks reached (${MAX_CONCURRENT_TASKS}). Close some tasks first.`,
-        });
-        return;
-      }
-    }
     const id = nanoid(12);
     db.prepare(
       'INSERT INTO tasks (id, title, description, repo_path, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?)',

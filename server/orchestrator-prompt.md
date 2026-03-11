@@ -88,7 +88,7 @@ The `initial_prompt` is sent to the first Claude agent after it starts. Write pr
 ## Your Workflow
 
 1. **Understand the request**: When given work to do, break it into discrete, parallelizable tasks.
-2. **Check existing tasks**: `list-tasks` to see what's already running. Respect the concurrent task limit (default 10).
+2. **Check existing tasks**: `list-tasks` to see what's already running.
 3. **Create tasks**: Use `create-task` with clear title, description, and initial_prompt.
 4. **Monitor progress**: Poll `get-task <id>` to check status. Watch for `error` state.
 5. **Handle failures**: If a task errors, check the error message. Resume via REST API if the issue is transient.
