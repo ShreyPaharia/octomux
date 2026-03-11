@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe('installHookSettings', () => {
-  it('creates .claude/settings.local.json with all 4 hook events', () => {
+  it('creates .claude/settings.local.json with all 4 hook events and permissions', () => {
     installHookSettings(tmpDir);
 
     const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
@@ -49,6 +49,22 @@ describe('installHookSettings', () => {
         hooks: [{ type: 'http', url: 'http://localhost:7777/api/hooks/stop', timeout: 5 }],
       },
     ]);
+
+    // Verify permissions are installed
+    expect(settings.permissions).toBeDefined();
+    expect(settings.permissions.allow).toBeInstanceOf(Array);
+    expect(settings.permissions.allow).toContain('Bash(git diff:*)');
+    expect(settings.permissions.allow).toContain('Bash(bun:*)');
+    expect(settings.permissions.allow).toContain('Bash(node:*)');
+    expect(settings.permissions.allow).toContain('Bash(for:*)');
+    expect(settings.permissions.allow).toContain('Bash(sqlite3:*)');
+    // git commit, git push, git merge, git rebase, gh pr should NOT be auto-allowed
+    expect(settings.permissions.allow).not.toContain('Bash(git commit:*)');
+    expect(settings.permissions.allow).not.toContain('Bash(git push:*)');
+    expect(settings.permissions.allow).not.toContain('Bash(gh pr:*)');
+    expect(settings.permissions.allow).toContain(
+      'mcp__plugin_playwright_playwright__browser_snapshot',
+    );
   });
 
   it('merges with existing settings preserving non-hook keys', () => {
@@ -67,6 +83,35 @@ describe('installHookSettings', () => {
     expect(settings.allowedTools).toEqual(['Bash']);
     expect(settings.customKey).toBe(42);
     expect(settings.hooks.PermissionRequest).toBeDefined();
+    expect(settings.permissions.allow).toContain('Bash(git diff:*)');
+  });
+
+  it('merges existing permissions.allow with new allowed tools (deduplicated)', () => {
+    const claudeDir = path.join(tmpDir, '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeDir, 'settings.local.json'),
+      JSON.stringify({
+        permissions: { allow: ['Bash(custom-tool:*)', 'Bash(git diff:*)'], deny: ['Bash(rm:*)'] },
+      }),
+    );
+
+    installHookSettings(tmpDir);
+
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(claudeDir, 'settings.local.json'), 'utf-8'),
+    );
+    // Custom tool preserved
+    expect(settings.permissions.allow).toContain('Bash(custom-tool:*)');
+    // Existing deny preserved
+    expect(settings.permissions.deny).toEqual(['Bash(rm:*)']);
+    // Our tools added
+    expect(settings.permissions.allow).toContain('Bash(bun:*)');
+    // No duplicates
+    const diffCount = settings.permissions.allow.filter(
+      (t: string) => t === 'Bash(git diff:*)',
+    ).length;
+    expect(diffCount).toBe(1);
   });
 
   it('preserves existing hook events like PreToolUse', () => {
