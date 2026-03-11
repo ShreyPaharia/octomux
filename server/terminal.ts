@@ -1,10 +1,15 @@
 import type { Server } from 'http';
+import { execFile as execFileCb } from 'child_process';
+import { promisify } from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { spawn, type IPty } from 'node-pty';
 import type { IncomingMessage } from 'http';
+import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
 import { getOrchestratorSession } from './orchestrator.js';
+
+const execFile = promisify(execFileCb);
 
 interface TerminalConnection {
   ws: WebSocket;
@@ -46,6 +51,7 @@ function attachToTmuxSession(
   tmuxTarget: string,
   connKey: string,
   closeReason: string,
+  linkedSession?: string,
 ): void {
   let pty: IPty;
   try {
@@ -97,11 +103,18 @@ function attachToTmuxSession(
     }
   });
 
+  const cleanupLinkedSession = () => {
+    if (linkedSession) {
+      execFile('tmux', ['kill-session', '-t', linkedSession]).catch(() => {});
+    }
+  };
+
   // Cleanup on WebSocket close
   ws.on('close', () => {
     if (!ptyExited) {
       pty.kill();
     }
+    cleanupLinkedSession();
     const conns = connections.get(connKey);
     if (conns) {
       const idx = conns.findIndex((c) => c.ws === ws);
@@ -113,13 +126,18 @@ function attachToTmuxSession(
   // Cleanup on PTY exit
   pty.onExit(() => {
     ptyExited = true;
+    cleanupLinkedSession();
     if (ws.readyState === WebSocket.OPEN) {
       ws.close(4006, 'Terminal process exited');
     }
   });
 }
 
-function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): void {
+async function handleConnection(
+  ws: WebSocket,
+  taskId: string,
+  windowIndex: number,
+): Promise<void> {
   const db = getDb();
   const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
 
@@ -128,9 +146,20 @@ function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): v
     return;
   }
 
-  const target = `${task.tmux_session}:${windowIndex}`;
+  // Create a grouped session so each viewer has independent window selection.
+  // Without this, all clients attached to the same session share the active window,
+  // meaning switching tabs in one browser would affect all other viewers.
+  const linkedSession = `${task.tmux_session}-v-${nanoid(6)}`;
+  try {
+    await execFile('tmux', ['new-session', '-d', '-t', task.tmux_session, '-s', linkedSession]);
+    await execFile('tmux', ['select-window', '-t', `${linkedSession}:${windowIndex}`]);
+  } catch {
+    ws.close(4005, 'Failed to create terminal view session');
+    return;
+  }
+
   const connKey = `${taskId}:${windowIndex}`;
-  attachToTmuxSession(ws, target, connKey, 'Failed to attach to tmux session');
+  attachToTmuxSession(ws, linkedSession, connKey, 'Failed to attach to tmux session', linkedSession);
 }
 
 function handleOrchestratorConnection(ws: WebSocket): void {
