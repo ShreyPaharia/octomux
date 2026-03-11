@@ -39,9 +39,9 @@ describe('Hook endpoints', () => {
       expect(prompts[0].status).toBe('pending');
       expect(prompts[0].agent_id).toBe('a1');
 
-      const agent = db
-        .prepare('SELECT hook_activity FROM agents WHERE id = ?')
-        .get('a1') as { hook_activity: string };
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
       expect(agent.hook_activity).toBe('waiting');
     });
 
@@ -88,9 +88,9 @@ describe('Hook endpoints', () => {
       expect(pp1?.status).toBe('resolved');
       expect(pp2?.status).toBe('pending');
 
-      const agent = db
-        .prepare('SELECT hook_activity FROM agents WHERE id = ?')
-        .get('a1') as { hook_activity: string };
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
       expect(agent.hook_activity).toBe('active');
     });
 
@@ -100,9 +100,9 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
         .expect(200);
 
-      const agent = db
-        .prepare('SELECT hook_activity FROM agents WHERE id = ?')
-        .get('a1') as { hook_activity: string };
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
       expect(agent.hook_activity).toBe('active');
     });
   });
@@ -130,9 +130,9 @@ describe('Hook endpoints', () => {
       const prompts = getPermissionPrompts(db, 't1');
       expect(prompts.every((p) => p.status === 'resolved')).toBe(true);
 
-      const agent = db
-        .prepare('SELECT hook_activity FROM agents WHERE id = ?')
-        .get('a1') as { hook_activity: string };
+      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+        hook_activity: string;
+      };
       expect(agent.hook_activity).toBe('idle');
     });
   });

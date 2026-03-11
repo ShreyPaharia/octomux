@@ -30,9 +30,7 @@ describe('installHookSettings', () => {
     ]);
     expect(settings.hooks.PostToolUse).toEqual([
       {
-        hooks: [
-          { type: 'http', url: 'http://localhost:7777/api/hooks/post-tool-use', timeout: 5 },
-        ],
+        hooks: [{ type: 'http', url: 'http://localhost:7777/api/hooks/post-tool-use', timeout: 5 }],
       },
     ]);
     expect(settings.hooks.Stop).toEqual([
@@ -68,10 +66,7 @@ describe('installHookSettings', () => {
         PreToolUse: [{ hooks: [{ type: 'http', url: 'http://example.com', timeout: 3 }] }],
       },
     };
-    fs.writeFileSync(
-      path.join(claudeDir, 'settings.local.json'),
-      JSON.stringify(existingHooks),
-    );
+    fs.writeFileSync(path.join(claudeDir, 'settings.local.json'), JSON.stringify(existingHooks));
 
     installHookSettings(tmpDir);
 

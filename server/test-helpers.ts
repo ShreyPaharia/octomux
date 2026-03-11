@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import { initDb, setDb } from './db.js';
-import type { Task, Agent, PermissionPrompt } from './types.js';
+import type { Task, Agent } from './types.js';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 

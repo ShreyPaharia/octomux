@@ -77,9 +77,7 @@ function derivedStatus(task: {
   agents: Array<{ status: string; hook_activity: string }>;
 }): DerivedTaskStatus | null {
   if (task.status !== 'running') return null;
-  const activities = task.agents
-    .filter((a) => a.status !== 'stopped')
-    .map((a) => a.hook_activity);
+  const activities = task.agents.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
   if (activities.length === 0) return 'done';
   if (activities.includes('active')) return 'working';
   if (activities.includes('waiting')) return 'needs_attention';
