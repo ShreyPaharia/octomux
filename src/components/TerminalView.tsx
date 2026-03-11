@@ -8,12 +8,18 @@ interface TerminalViewProps {
   taskId?: string;
   windowIndex?: number;
   wsUrl?: string;
+  visible?: boolean;
 }
 
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
 
-export function TerminalView({ taskId, windowIndex, wsUrl: wsUrlProp }: TerminalViewProps) {
+export function TerminalView({
+  taskId,
+  windowIndex,
+  wsUrl: wsUrlProp,
+  visible = true,
+}: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -157,6 +163,23 @@ export function TerminalView({ taskId, windowIndex, wsUrl: wsUrlProp }: Terminal
       observer.disconnect();
     };
   }, []);
+
+  // Fit terminal when it becomes visible (e.g. toggling between agent/editor views)
+  useEffect(() => {
+    if (visible && fitRef.current && termRef.current) {
+      fitRef.current.fit();
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'resize',
+            cols: termRef.current.cols,
+            rows: termRef.current.rows,
+          }),
+        );
+      }
+    }
+  }, [visible]);
 
   return (
     <div

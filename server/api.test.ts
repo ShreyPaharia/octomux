@@ -43,6 +43,13 @@ vi.mock('./task-runner.js', async () => {
       created_at: '2026-01-01T00:00:00.000Z',
     })),
     stopAgent: vi.fn(),
+    createUserTerminal: vi.fn(async (task: any) => {
+      const db = getDb();
+      db.prepare(
+        `UPDATE tasks SET user_window_index = 5, updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+      return 5;
+    }),
   };
 });
 
@@ -66,7 +73,7 @@ vi.mock('child_process', () => ({
 const fs = (await import('fs')).default;
 const { spawn: spawnMock } = await import('child_process');
 const { createApp } = await import('./app.js');
-const { startTask, closeTask, deleteTask, resumeTask, addAgent, stopAgent } =
+const { startTask, closeTask, deleteTask, resumeTask, addAgent, stopAgent, createUserTerminal } =
   await import('./task-runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -122,6 +129,11 @@ const notFoundCases = [
     method: 'post' as const,
     url: '/api/tasks/nonexistent/pr/preview',
     body: { base: 'main' },
+  },
+  {
+    name: 'POST /api/tasks/:id/user-terminal',
+    method: 'post' as const,
+    url: '/api/tasks/nonexistent/user-terminal',
   },
 ];
 
@@ -834,6 +846,39 @@ describe('POST /api/tasks/:id/pr — gh failure', () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toContain('gh');
+  });
+});
+
+// ─── POST /api/tasks/:id/user-terminal ──────────────────────────────────────
+
+describe('POST /api/tasks/:id/user-terminal', () => {
+  it('creates user terminal and returns window index', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.user_window_index).toBe(5);
+    expect(createUserTerminal).toHaveBeenCalledOnce();
+  });
+
+  it('returns 404 for nonexistent task', async () => {
+    const res = await request(app).post('/api/tasks/nonexistent/user-terminal');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when task has no tmux session', async () => {
+    insertTask(db, { tmux_session: null, status: 'running' });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('tmux');
+  });
+
+  const nonRunningStatuses = ['draft', 'setting_up', 'closed', 'error'] as const;
+
+  it.each(nonRunningStatuses)('returns 400 when task status is %s', async (status) => {
+    insertTask(db, { ...DEFAULTS.runningTask, status });
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
+    expect(res.status).toBe(400);
   });
 });
 
