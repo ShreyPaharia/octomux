@@ -300,15 +300,13 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Editor view — shown in editor mode */}
-      {userWindowIndex !== null && (
-        <div className={mode === 'editor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+      {/* Editor view — fully unmounted when not active so the terminal
+          mounts fresh each time with correct dimensions. Nvim redraws its
+          own screen, so there's no lost scrollback to worry about. */}
+      {userWindowIndex !== null && mode === 'editor' && (
+        <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-hidden p-2">
-            <TerminalView
-              taskId={task.id}
-              windowIndex={userWindowIndex}
-              visible={mode === 'editor'}
-            />
+            <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
           </div>
         </div>
       )}
