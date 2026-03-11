@@ -6,7 +6,14 @@ import os from 'os';
 import { getDb } from './db.js';
 import { execFile as execFileCb, spawn } from 'child_process';
 import { promisify } from 'util';
-import { startTask, closeTask, resumeTask, addAgent, stopAgent } from './task-runner.js';
+import {
+  startTask,
+  closeTask,
+  deleteTask,
+  resumeTask,
+  addAgent,
+  stopAgent,
+} from './task-runner.js';
 import { buildPRPrompt } from './pr-template.js';
 import {
   isOrchestratorRunning,
@@ -324,7 +331,8 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    await closeTask(task);
+    await deleteTask(task);
+    db.prepare('DELETE FROM agents WHERE task_id = ?').run(task.id);
     db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
     res.status(204).send();
   });
