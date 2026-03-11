@@ -66,11 +66,11 @@ describe('startOrchestrator', () => {
     expect(calls).toHaveLength(3);
     expect(calls[1][1]).toContain('new-session');
     expect(calls[2][1]).toContain('send-keys');
-    // Verify claude command includes --system-prompt with the prompt file
+    // Verify the send-keys command launches via a shell script
     const sendKeysArgs = calls[2][1] as string[];
     const claudeCmd = sendKeysArgs[sendKeysArgs.indexOf('-t') + 2];
-    expect(claudeCmd).toContain('claude --system-prompt');
-    expect(claudeCmd).toContain('orchestrator-prompt.md');
+    expect(claudeCmd).toContain('octomux-orch-launch-');
+    expect(claudeCmd).toContain('.sh');
   });
 
   it('does not create session if already running', async () => {

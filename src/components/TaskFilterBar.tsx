@@ -1,3 +1,5 @@
+import { repoName } from '@/lib/format';
+
 interface TaskFilterBarProps {
   activeStatus: 'open' | 'closed';
   counts: { open: number; closed: number };
@@ -5,10 +7,6 @@ interface TaskFilterBarProps {
   repos: string[];
   activeRepo: string;
   onRepoChange: (repo: string) => void;
-}
-
-function repoName(repoPath: string): string {
-  return repoPath.split('/').pop() || repoPath;
 }
 
 export function TaskFilterBar({

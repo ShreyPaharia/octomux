@@ -397,7 +397,7 @@ export function setupRoutes(app: Express): void {
 
     const taskId = task.id;
     await deleteTask(task);
-    db.prepare('DELETE FROM agents WHERE task_id = ?').run(taskId);
+    // CASCADE deletes agents and permission_prompts automatically
     db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
     broadcast({ type: 'task:deleted', payload: { taskId } });
     res.status(204).send();
