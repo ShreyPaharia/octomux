@@ -19,9 +19,11 @@ export default function TaskDetail() {
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
 
-  // Derive userWindowIndex from server-persisted data so it survives page
-  // refreshes and doesn't rely on ephemeral local state.
-  const userWindowIndex = task?.user_window_index ?? null;
+  // Local override for user_window_index so we can set it immediately from
+  // the createUserTerminal API response instead of waiting for the next poll.
+  const [localUserWindowIndex, setLocalUserWindowIndex] = useState<number | null>(null);
+  // Derive userWindowIndex — prefer server-persisted data, fall back to local override.
+  const userWindowIndex = task?.user_window_index ?? localUserWindowIndex;
 
   // Initialize activeWindow from first agent's window_index
   const firstAgentWindow = task?.agents?.[0]?.window_index ?? null;
@@ -35,6 +37,8 @@ export default function TaskDetail() {
   useEffect(() => {
     if (task && task.status !== 'running') {
       setMode('agents');
+      // Reset local override so the editor terminal is re-created on next toggle
+      setLocalUserWindowIndex(null);
     }
   }, [task?.status]);
 
@@ -114,9 +118,10 @@ export default function TaskDetail() {
       if (creatingEditor) return; // Prevent duplicate requests
       setCreatingEditor(true);
       try {
-        await api.createUserTerminal(taskId);
-        // The server persists user_window_index — the next poll refresh will
-        // pick it up via task.user_window_index, so no local state to set.
+        const result = await api.createUserTerminal(taskId);
+        // Set the window index immediately from the API response so the
+        // editor terminal can mount without waiting for the next poll cycle.
+        setLocalUserWindowIndex(result.user_window_index);
         refresh();
       } catch (err) {
         console.error('Failed to create user terminal:', err);
