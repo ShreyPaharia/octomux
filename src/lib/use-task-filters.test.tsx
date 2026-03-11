@@ -71,6 +71,24 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t3']);
   });
 
+  // ─── Status persistence ──────────────────────────────────────────────
+
+  it('persists status filter to localStorage', () => {
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    act(() => result.current.setFilter('status', 'closed'));
+    expect(localStorage.getItem('octomux-status-filter')).toBe('closed');
+  });
+
+  it('restores status filter from localStorage', () => {
+    localStorage.setItem('octomux-status-filter', 'closed');
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    expect(result.current.filters.status).toBe('closed');
+    const ids = result.current.filtered.map((t) => t.id);
+    expect(ids).toEqual(['t3']);
+  });
+
+  // ─── Repo persistence ──────────────────────────────────────────────
+
   it('persists repo filter to localStorage', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     act(() => result.current.setFilter('repo', '/tmp/beta'));
