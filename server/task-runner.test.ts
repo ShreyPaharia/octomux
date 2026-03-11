@@ -8,6 +8,7 @@ import {
   getTask,
   getAgents,
   getPermissionPrompts,
+  getAgentActivity,
   findExecCall,
   DEFAULTS,
 } from './test-helpers.js';
@@ -285,36 +286,29 @@ describe('startTask', () => {
 describe('addAgent', () => {
   const runningTask = { ...DEFAULTS.runningTask } as Task;
 
-  it('creates first agent when none exist', async () => {
+  const agentLabelCases = [
+    { name: 'first agent (none exist)', existingAgents: [], expectedLabel: 'Agent 1' },
+    {
+      name: 'second agent',
+      existingAgents: [{}],
+      expectedLabel: 'Agent 2',
+    },
+    {
+      name: 'third agent',
+      existingAgents: [{}, { id: 'agent-02', window_index: 1, label: 'Agent 2' }],
+      expectedLabel: 'Agent 3',
+    },
+  ];
+
+  it.each(agentLabelCases)('creates $name with label "$expectedLabel"', async ({ existingAgents, expectedLabel }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
+    existingAgents.forEach((overrides) => insertAgent(db, overrides));
+
     const agent = await addAgent(runningTask);
 
-    // Window index comes from tmux list-windows after new-window
     expect(agent.window_index).toBe(1);
-    expect(agent.label).toBe('Agent 1');
+    expect(agent.label).toBe(expectedLabel);
     expect(agent.status).toBe('running');
-  });
-
-  it('creates second agent with correct label', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
-
-    const agent = await addAgent(runningTask);
-
-    // Window index comes from tmux, label increments based on DB count
-    expect(agent.window_index).toBe(1);
-    expect(agent.label).toBe('Agent 2');
-  });
-
-  it('creates third agent with correct label', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
-    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
-
-    const agent = await addAgent(runningTask);
-
-    expect(agent.window_index).toBe(1);
-    expect(agent.label).toBe('Agent 3');
   });
 
   it('reuses window index after agent is stopped', async () => {
@@ -343,20 +337,20 @@ describe('addAgent', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
-  it('dispatches prompt when provided', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await addAgent(runningTask, 'Write tests');
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
-    ).toBeDefined();
-  });
+  const promptDispatchCases = [
+    { name: 'dispatches prompt when provided', prompt: 'Write tests', expectPaste: true },
+    { name: 'does not dispatch when no prompt', prompt: undefined, expectPaste: false },
+  ];
 
-  it('does not dispatch when no prompt provided', async () => {
+  it.each(promptDispatchCases)('$name', async ({ prompt, expectPaste }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await addAgent(runningTask);
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
-    ).toBeUndefined();
+    await addAgent(runningTask, prompt);
+    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] });
+    if (expectPaste) {
+      expect(call).toBeDefined();
+    } else {
+      expect(call).toBeUndefined();
+    }
   });
 
   it('persists agent to database', async () => {
@@ -372,19 +366,7 @@ describe('addAgent', () => {
 // ─── closeTask ───────────────────────────────────────────────────────────────
 
 describe('closeTask', () => {
-  it('marks all agents as stopped', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
-    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
-
-    await closeTask({ ...DEFAULTS.runningTask } as Task);
-
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents).toHaveLength(2);
-    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
-  });
-
-  it('sets hook_activity to idle for all agents', async () => {
+  it('marks all agents as stopped and sets hook_activity to idle', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db, { hook_activity: 'active' });
     insertAgent(db, {
@@ -397,6 +379,8 @@ describe('closeTask', () => {
     await closeTask({ ...DEFAULTS.runningTask } as Task);
 
     const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents).toHaveLength(2);
+    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
     expect(agents.every((a) => a.hook_activity === 'idle')).toBe(true);
   });
 
@@ -410,20 +394,15 @@ describe('closeTask', () => {
     ).toBeDefined();
   });
 
-  it('does NOT remove worktree (preserved for resume)', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await closeTask({ ...DEFAULTS.runningTask } as Task);
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'remove'] }),
-    ).toBeUndefined();
-  });
+  const closePreservedResources = [
+    { name: 'worktree', cmd: 'git', argsInclude: ['worktree', 'remove'] },
+    { name: 'branch', cmd: 'git', argsInclude: ['branch', '-D'] },
+  ];
 
-  it('does NOT delete the branch', async () => {
+  it.each(closePreservedResources)('does NOT remove $name (preserved for resume)', async ({ cmd, argsInclude }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await closeTask({ ...DEFAULTS.runningTask } as Task);
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
-    ).toBeUndefined();
+    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeUndefined();
   });
 
   it('skips tmux kill when tmux_session is null', async () => {
@@ -498,23 +477,14 @@ describe('stopAgent', () => {
     );
   });
 
-  it('marks agent as stopped in database', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    insertAgent(db);
-
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
-
-    const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents[0].status).toBe('stopped');
-  });
-
-  it('sets hook_activity to idle', async () => {
+  it('marks agent as stopped and sets hook_activity to idle', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db, { hook_activity: 'active' });
 
     await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
 
     const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents[0].status).toBe('stopped');
     expect(agents[0].hook_activity).toBe('idle');
   });
 
@@ -634,9 +604,14 @@ describe('resumeTask', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
-  it('uses --resume with claude_session_id when available', async () => {
+  const resumeFlagCases = [
+    { name: 'session_id available', sessionId: 'session-abc-123', expectedFlag: '--resume', expectedId: 'session-abc-123' },
+    { name: 'session_id null', sessionId: null, expectedFlag: '--continue', expectedId: undefined },
+  ];
+
+  it.each(resumeFlagCases)('uses $expectedFlag when $name', async ({ sessionId, expectedFlag, expectedId }) => {
     insertTask(db, { ...closedTask });
-    insertAgent(db, { status: 'stopped', claude_session_id: 'session-abc-123' });
+    insertAgent(db, { status: 'stopped', claude_session_id: sessionId });
 
     await resumeTask(closedTask);
 
@@ -647,23 +622,8 @@ describe('resumeTask', () => {
     expect(sendKeysCall).toBeDefined();
     const args = sendKeysCall![1] as string[];
     const claudeCmd = args.find((a: string) => a.includes('claude'));
-    expect(claudeCmd).toContain('--resume');
-    expect(claudeCmd).toContain('session-abc-123');
-  });
-
-  it('uses --continue when claude_session_id is null', async () => {
-    insertTask(db, { ...closedTask });
-    insertAgent(db, { status: 'stopped', claude_session_id: null });
-
-    await resumeTask(closedTask);
-
-    const sendKeysCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'tmux',
-      argsInclude: ['send-keys'],
-    });
-    const args = sendKeysCall![1] as string[];
-    const claudeCmd = args.find((a: string) => a.includes('claude'));
-    expect(claudeCmd).toContain('--continue');
+    expect(claudeCmd).toContain(expectedFlag);
+    if (expectedId) expect(claudeCmd).toContain(expectedId);
   });
 
   it('creates new windows for agents after the first', async () => {

@@ -7,6 +7,7 @@ import {
   insertAgent,
   insertPermissionPrompt,
   getPermissionPrompts,
+  getAgentActivity,
 } from './test-helpers.js';
 import { createApp } from './app.js';
 
@@ -22,43 +23,32 @@ describe('Hook endpoints', () => {
   });
 
   describe('POST /api/hooks/user-prompt-submit', () => {
-    it('sets idle agent to active when user submits a prompt', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+    const activatableCases = [
+      { from: 'idle', description: 'idle agent' },
+      { from: 'waiting', description: 'waiting agent' },
+    ];
 
-      await request(app)
-        .post('/api/hooks/user-prompt-submit')
-        .send({ session_id: 'sess-123' })
-        .expect(200);
+    it.each(activatableCases)(
+      'sets $description to active when user submits a prompt',
+      async ({ from }) => {
+        db.prepare(`UPDATE agents SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('active');
-    });
+        await request(app)
+          .post('/api/hooks/user-prompt-submit')
+          .send({ session_id: 'sess-123' })
+          .expect(200);
 
-    it('sets waiting agent to active when user submits a prompt', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'waiting' WHERE id = ?`).run('a1');
+        expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
+      },
+    );
 
-      await request(app)
-        .post('/api/hooks/user-prompt-submit')
-        .send({ session_id: 'sess-123' })
-        .expect(200);
+    const ignoreCases = [
+      { name: 'unknown session_id', body: { session_id: 'unknown' } },
+      { name: 'missing session_id', body: {} },
+    ];
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('active');
-    });
-
-    it('ignores unknown session_id', async () => {
-      await request(app)
-        .post('/api/hooks/user-prompt-submit')
-        .send({ session_id: 'unknown' })
-        .expect(200);
-    });
-
-    it('ignores request with missing session_id', async () => {
-      await request(app).post('/api/hooks/user-prompt-submit').send({}).expect(200);
+    it.each(ignoreCases)('ignores request with $name', async ({ body }) => {
+      await request(app).post('/api/hooks/user-prompt-submit').send(body).expect(200);
     });
   });
 
@@ -80,24 +70,19 @@ describe('Hook endpoints', () => {
       expect(prompts[0].status).toBe('pending');
       expect(prompts[0].agent_id).toBe('a1');
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('waiting');
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('waiting');
     });
 
-    it('ignores unknown session_id', async () => {
-      await request(app)
-        .post('/api/hooks/permission-request')
-        .send({ session_id: 'unknown', tool_name: 'Bash', tool_input: {} })
-        .expect(200);
+    const ignoreCases = [
+      { name: 'unknown session_id', body: { session_id: 'unknown', tool_name: 'Bash', tool_input: {} } },
+      { name: 'missing fields', body: {} },
+    ];
+
+    it.each(ignoreCases)('ignores request with $name', async ({ body }) => {
+      await request(app).post('/api/hooks/permission-request').send(body).expect(200);
 
       const prompts = getPermissionPrompts(db, 't1');
       expect(prompts).toHaveLength(0);
-    });
-
-    it('ignores request with missing fields', async () => {
-      await request(app).post('/api/hooks/permission-request').send({}).expect(200);
     });
   });
 
@@ -129,10 +114,7 @@ describe('Hook endpoints', () => {
       expect(pp1?.status).toBe('resolved');
       expect(pp2?.status).toBe('pending');
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('active');
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
     });
 
     it('no-ops when no pending prompts exist', async () => {
@@ -141,14 +123,10 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
         .expect(200);
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('active');
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
     });
 
     it('does not override idle state (Stop hook may have fired first)', async () => {
-      // Simulate Stop hook having already fired
       db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
@@ -156,10 +134,7 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
         .expect(200);
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('idle');
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
   });
 
@@ -186,10 +161,7 @@ describe('Hook endpoints', () => {
       const prompts = getPermissionPrompts(db, 't1');
       expect(prompts.every((p) => p.status === 'resolved')).toBe(true);
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
-        hook_activity: string;
-      };
-      expect(agent.hook_activity).toBe('idle');
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
   });
 });
