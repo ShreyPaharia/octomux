@@ -83,11 +83,19 @@ export function useTask(id: string, pollInterval = 5000) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastJsonRef = useRef<string>('');
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.getTask(id);
-      setTask(data);
+      // Only trigger a re-render when the task data actually changed.
+      // Without this, every poll creates a new object reference and causes
+      // the entire TaskDetail tree to re-render, risking terminal remounts.
+      const json = JSON.stringify(data);
+      if (json !== lastJsonRef.current) {
+        lastJsonRef.current = json;
+        setTask(data);
+      }
       setError(null);
     } catch (err) {
       setError((err as Error).message);
