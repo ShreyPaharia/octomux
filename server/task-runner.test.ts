@@ -682,7 +682,7 @@ describe('createUserTerminal', () => {
 
   beforeEach(() => {
     // Restore the default execFile mock in case a previous test overrode it
-    vi.mocked(execFile).mockImplementation((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
       if (args.includes('display-message')) {
         cb(null, { stdout: String(nextWindowIndex), stderr: '' });
       } else if (args.includes('list-windows')) {
@@ -693,7 +693,7 @@ describe('createUserTerminal', () => {
       } else {
         cb(null, { stdout: 'true', stderr: '' });
       }
-    });
+    }) as any);
   });
 
   it('creates tmux window and returns window index', async () => {
