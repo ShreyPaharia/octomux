@@ -13,6 +13,7 @@ import {
   resumeTask,
   addAgent,
   stopAgent,
+  createUserTerminal,
 } from './task-runner.js';
 import { buildPRPrompt } from './pr-template.js';
 import {
@@ -376,6 +377,36 @@ export function setupRoutes(app: Express): void {
 
     await stopAgent(task, agent);
     res.json({ success: true });
+  });
+
+  // Create user terminal (lazily creates tmux window with nvim)
+  app.post('/api/tasks/:id/user-terminal', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    if (task.status !== 'running') {
+      res.status(400).json({ error: 'Can only create user terminal for running tasks' });
+      return;
+    }
+
+    if (!task.tmux_session) {
+      res.status(400).json({ error: 'Task has no tmux session' });
+      return;
+    }
+
+    try {
+      const userWindowIndex = await createUserTerminal(task);
+      res.json({ user_window_index: userWindowIndex });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // ─── Orchestrator ──────────────────────────────────────────────────────────
