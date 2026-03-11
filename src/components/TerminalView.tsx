@@ -61,10 +61,10 @@ export function TerminalView({
         // Re-fit now that we know layout is settled (WS connect takes a few ms,
         // guaranteeing the browser has completed layout), then send correct dimensions.
         fitAndSendResize(ws);
-        // Belt-and-suspenders: fit again after a short delay to catch any late layout shifts
-        setTimeout(() => {
+        // Belt-and-suspenders: fit again after a frame to catch any late layout shifts
+        requestAnimationFrame(() => {
           if (!unmounted.current) fitAndSendResize(ws);
-        }, 150);
+        });
       };
 
       ws.onmessage = (event) => {
