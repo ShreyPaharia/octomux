@@ -321,68 +321,60 @@ describe('TaskDetail', () => {
       });
     });
 
-    it(
-      'resets userWindowIndex when task leaves running state so next toggle re-creates',
-      async () => {
-        const user = userEvent.setup();
-        renderDetail();
-        await waitFor(() => {
+    it('resets userWindowIndex when task leaves running state so next toggle re-creates', async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(1);
+      });
+
+      apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
+      await waitFor(
+        () => {
+          expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+        },
+        { timeout: 6000 },
+      );
+
+      apiMock.getTask.mockResolvedValue(runningTask);
+      await waitFor(
+        () => {
           expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
-        });
+        },
+        { timeout: 6000 },
+      );
 
-        await user.click(screen.getByRole('button', { name: /editor/i }));
-        await waitFor(() => {
-          expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(1);
-        });
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(2);
+      });
+    }, 20000);
 
-        apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
-        await waitFor(
-          () => {
-            expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
-          },
-          { timeout: 6000 },
-        );
+    it('auto-switches to agents when task enters setting_up state', async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
+      });
 
-        apiMock.getTask.mockResolvedValue(runningTask);
-        await waitFor(
-          () => {
-            expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
-          },
-          { timeout: 6000 },
-        );
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(apiMock.createUserTerminal).toHaveBeenCalled();
+      });
 
-        await user.click(screen.getByRole('button', { name: /editor/i }));
-        await waitFor(() => {
-          expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(2);
-        });
-      },
-      20000,
-    );
+      apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
 
-    it(
-      'auto-switches to agents when task enters setting_up state',
-      async () => {
-        const user = userEvent.setup();
-        renderDetail();
-        await waitFor(() => {
-          expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
-        });
-
-        await user.click(screen.getByRole('button', { name: /editor/i }));
-        await waitFor(() => {
-          expect(apiMock.createUserTerminal).toHaveBeenCalled();
-        });
-
-        apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
-
-        await waitFor(
-          () => {
-            expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
-          },
-          { timeout: 6000 },
-        );
-      },
-      10000,
-    );
+      await waitFor(
+        () => {
+          expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+        },
+        { timeout: 6000 },
+      );
+    }, 10000);
   });
 });
