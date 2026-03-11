@@ -7,6 +7,18 @@ import type { Task } from '../../server/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
+let eventCallbacks: Set<() => void>;
+vi.mock('@/lib/event-source', () => ({
+  subscribe: vi.fn((cb: () => void) => {
+    eventCallbacks.add(cb);
+    return () => eventCallbacks.delete(cb);
+  }),
+}));
+
+function simulateEvent() {
+  for (const cb of eventCallbacks) cb();
+}
+
 const apiMock = mockApi();
 
 vi.mock('@/lib/api', () => ({
@@ -67,6 +79,7 @@ const runningTask: Task = makeTask({
 describe('TaskDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    eventCallbacks = new Set();
     apiMock.getTask.mockResolvedValue(runningTask);
     apiMock.updateTask.mockResolvedValue(runningTask);
     apiMock.startTask.mockResolvedValue(runningTask);
@@ -336,26 +349,22 @@ describe('TaskDetail', () => {
       });
 
       apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
-      await waitFor(
-        () => {
-          expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
-        },
-        { timeout: 6000 },
-      );
+      simulateEvent();
+      await waitFor(() => {
+        expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+      });
 
       apiMock.getTask.mockResolvedValue(runningTask);
-      await waitFor(
-        () => {
-          expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
-        },
-        { timeout: 6000 },
-      );
+      simulateEvent();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
+      });
 
       await user.click(screen.getByRole('button', { name: /editor/i }));
       await waitFor(() => {
         expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(2);
       });
-    }, 20000);
+    });
 
     it('auto-switches to agents when task enters setting_up state', async () => {
       const user = userEvent.setup();
@@ -370,13 +379,10 @@ describe('TaskDetail', () => {
       });
 
       apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
-
-      await waitFor(
-        () => {
-          expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
-        },
-        { timeout: 6000 },
-      );
-    }, 10000);
+      simulateEvent();
+      await waitFor(() => {
+        expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+      });
+    });
   });
 });

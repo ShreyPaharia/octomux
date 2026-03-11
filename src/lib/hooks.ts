@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
 import { api } from './api';
+import { subscribe } from './event-source';
 
-export function useOrchestrator(pollInterval = 5000) {
+export function useOrchestrator() {
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -22,11 +22,8 @@ export function useOrchestrator(pollInterval = 5000) {
 
   useEffect(() => {
     refresh();
-    intervalRef.current = setInterval(refresh, pollInterval);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [refresh, pollInterval]);
+    return subscribe(refresh);
+  }, [refresh]);
 
   const start = useCallback(async () => {
     try {
@@ -49,11 +46,10 @@ export function useOrchestrator(pollInterval = 5000) {
   return { running, loading, error, start, stop, refresh };
 }
 
-export function useTasks(pollInterval = 5000) {
+export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -69,27 +65,23 @@ export function useTasks(pollInterval = 5000) {
 
   useEffect(() => {
     refresh();
-    intervalRef.current = setInterval(refresh, pollInterval);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [refresh, pollInterval]);
+    return subscribe(refresh);
+  }, [refresh]);
 
   return { tasks, loading, error, refresh };
 }
 
-export function useTask(id: string, pollInterval = 5000) {
+export function useTask(id: string) {
   const [task, setTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastJsonRef = useRef<string>('');
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.getTask(id);
       // Only trigger a re-render when the task data actually changed.
-      // Without this, every poll creates a new object reference and causes
+      // Without this, every event creates a new object reference and causes
       // the entire TaskDetail tree to re-render, risking terminal remounts.
       const json = JSON.stringify(data);
       if (json !== lastJsonRef.current) {
@@ -106,11 +98,8 @@ export function useTask(id: string, pollInterval = 5000) {
 
   useEffect(() => {
     refresh();
-    intervalRef.current = setInterval(refresh, pollInterval);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [refresh, pollInterval]);
+    return subscribe(refresh);
+  }, [refresh]);
 
   return { task, loading, error, refresh };
 }
