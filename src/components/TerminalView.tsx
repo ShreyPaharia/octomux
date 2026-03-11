@@ -35,6 +35,21 @@ export function TerminalView({
       : `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}`;
   }, [taskId, windowIndex, wsUrlProp]);
 
+  // Helper to fit terminal and send resize dimensions over WebSocket
+  const fitAndSendResize = useCallback((ws: WebSocket) => {
+    if (!fitRef.current || !termRef.current) return;
+    fitRef.current.fit();
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: 'resize',
+          cols: termRef.current.cols,
+          rows: termRef.current.rows,
+        }),
+      );
+    }
+  }, []);
+
   const connectWs = useCallback(
     (term: Terminal) => {
       if (unmounted.current) return;
@@ -43,7 +58,13 @@ export function TerminalView({
 
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        // Re-fit now that we know layout is settled (WS connect takes a few ms,
+        // guaranteeing the browser has completed layout), then send correct dimensions.
+        fitAndSendResize(ws);
+        // Belt-and-suspenders: fit again after a short delay to catch any late layout shifts
+        setTimeout(() => {
+          if (!unmounted.current) fitAndSendResize(ws);
+        }, 150);
       };
 
       ws.onmessage = (event) => {
@@ -111,11 +132,26 @@ export function TerminalView({
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
-    fitAddon.fit();
+
+    // Force the xterm viewport to use a non-overlay scrollbar so FitAddon
+    // correctly subtracts scrollbar width when calculating columns.
+    // Without this, macOS overlay scrollbars report 0 width and the last
+    // column gets clipped when the scrollbar appears.
+    const viewport = containerRef.current.querySelector('.xterm-viewport');
+    if (viewport) {
+      (viewport as HTMLElement).style.overflowY = 'scroll';
+    }
 
     termRef.current = term;
     fitRef.current = fitAddon;
     reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+
+    // Defer initial fit to next frame so the browser has completed flex layout.
+    // Without this, fit() can measure a not-yet-expanded container and set xterm
+    // to a small size, which then constrains the flex parent (feedback loop).
+    requestAnimationFrame(() => {
+      if (!unmounted.current) fitAddon.fit();
+    });
 
     connectWs(term);
   }, [connectWs]);
@@ -135,22 +171,11 @@ export function TerminalView({
     };
   }, [connect]);
 
-  // Handle resize
+  // Handle resize (window + container size changes)
   useEffect(() => {
     const handleResize = () => {
-      if (fitRef.current && termRef.current) {
-        fitRef.current.fit();
-        const ws = wsRef.current;
-        if (ws?.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: 'resize',
-              cols: termRef.current.cols,
-              rows: termRef.current.rows,
-            }),
-          );
-        }
-      }
+      const ws = wsRef.current;
+      if (ws) fitAndSendResize(ws);
     };
 
     window.addEventListener('resize', handleResize);
@@ -162,29 +187,23 @@ export function TerminalView({
       window.removeEventListener('resize', handleResize);
       observer.disconnect();
     };
-  }, []);
+  }, [fitAndSendResize]);
 
-  // Fit terminal when it becomes visible (e.g. toggling between agent/editor views)
+  // Fit terminal when it becomes visible (e.g. toggling between agent/editor views).
+  // Use double-rAF to ensure the browser has fully reflowed after CSS hidden→flex toggle.
   useEffect(() => {
     if (visible && fitRef.current && termRef.current) {
-      fitRef.current.fit();
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(
-          JSON.stringify({
-            type: 'resize',
-            cols: termRef.current.cols,
-            rows: termRef.current.rows,
-          }),
-        );
-      }
+      const rafId = requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const ws = wsRef.current;
+          if (ws) fitAndSendResize(ws);
+        });
+      });
+      return () => cancelAnimationFrame(rafId);
     }
-  }, [visible]);
+  }, [visible, fitAndSendResize]);
 
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full overflow-hidden rounded-lg border border-border bg-[#09090b]"
-    />
+    <div ref={containerRef} className="h-full w-full overflow-hidden rounded-lg bg-[#09090b]" />
   );
 }

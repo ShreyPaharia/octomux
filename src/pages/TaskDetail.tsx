@@ -252,7 +252,7 @@ export default function TaskDetail() {
             onStopAgent={handleStopAgent}
             canAddAgent={isRunning}
           />
-          <div className="min-h-0 flex-1 p-2">
+          <div className="min-h-0 flex-1 overflow-hidden p-2">
             <TerminalView
               taskId={task.id}
               windowIndex={activeWindow!}
@@ -279,7 +279,7 @@ export default function TaskDetail() {
       {/* Editor view — shown in editor mode */}
       {userWindowIndex !== null && (
         <div className={mode === 'editor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-          <div className="min-h-0 flex-1 p-2">
+          <div className="min-h-0 flex-1 overflow-hidden p-2">
             <TerminalView
               taskId={task.id}
               windowIndex={userWindowIndex}

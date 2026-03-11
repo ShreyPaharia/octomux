@@ -94,6 +94,8 @@ export async function startTask(task: Task): Promise<void> {
 
     // 6. Create tmux session
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
+    // Prevent grouped viewer sessions from constraining window size
+    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
     // 7. Query the actual window index (respects tmux base-index)
     const windowIndex = await getActiveWindowIndex(session);
@@ -274,6 +276,7 @@ export async function resumeTask(task: Task): Promise<void> {
 
     // 3. Create fresh tmux session
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', task.worktree!]);
+    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
     // 4. Get stopped agents
     const agents = db
