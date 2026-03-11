@@ -602,8 +602,6 @@ export function setupRoutes(app: Express): void {
         [
           'pr',
           'create',
-          '--repo',
-          task.repo_path,
           '--head',
           task.branch,
           '--base',
