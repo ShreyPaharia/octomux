@@ -14,6 +14,31 @@ function findAgentBySessionId(sessionId: string) {
     .get(sessionId) as { id: string; task_id: string } | undefined;
 }
 
+// POST /api/hooks/user-prompt-submit
+// Fires when the user submits a prompt — agent resumes working
+router.post('/user-prompt-submit', (req, res) => {
+  const { session_id } = req.body;
+  if (!session_id) {
+    res.status(200).send();
+    return;
+  }
+
+  const agent = findAgentBySessionId(session_id);
+  if (!agent) {
+    res.status(200).send();
+    return;
+  }
+
+  getDb()
+    .prepare(
+      `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(agent.id);
+
+  res.status(200).send();
+});
+
 // POST /api/hooks/permission-request
 router.post('/permission-request', (req, res) => {
   const { session_id, tool_name, tool_input } = req.body;
