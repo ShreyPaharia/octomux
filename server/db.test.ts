@@ -4,11 +4,14 @@ import {
   createTestDb,
   insertTask,
   insertAgent,
+  insertPermissionPrompt,
   getTask,
   getAgents,
+  getPermissionPrompts,
   DEFAULTS,
   TASKS_TABLE_COLUMNS,
   AGENTS_TABLE_COLUMNS,
+  PERMISSION_PROMPTS_TABLE_COLUMNS,
 } from './test-helpers.js';
 import { getDb, initDb } from './db.js';
 
@@ -165,6 +168,36 @@ describe('Database', () => {
     it('agents table has claude_session_id column (migration)', () => {
       const columns = db.pragma('table_info(agents)') as { name: string }[];
       expect(columns.map((c) => c.name)).toContain('claude_session_id');
+    });
+  });
+
+  // ─── Permission Prompts ──────────────────────────────────────────────
+
+  describe('permission_prompts table', () => {
+    it('creates permission_prompts table with correct columns', () => {
+      const cols = (db.pragma('table_info(permission_prompts)') as { name: string }[]).map(
+        (c) => c.name,
+      );
+      expect(cols).toEqual(PERMISSION_PROMPTS_TABLE_COLUMNS);
+    });
+
+    it('adds hook_activity column to agents table', () => {
+      const cols = (db.pragma('table_info(agents)') as { name: string }[]).map((c) => c.name);
+      expect(cols).toContain('hook_activity');
+      expect(cols).toContain('hook_activity_updated_at');
+    });
+
+    it('resolves stale pending prompts on startup', () => {
+      insertTask(db, { id: 't1', status: 'running' });
+      insertAgent(db, { id: 'a1', task_id: 't1' });
+      insertPermissionPrompt(db, { id: 'pp1', task_id: 't1', agent_id: 'a1', status: 'pending' });
+
+      // Re-init simulates restart
+      initDb(db);
+
+      const prompts = getPermissionPrompts(db, 't1');
+      expect(prompts[0].status).toBe('resolved');
+      expect(prompts[0].resolved_at).not.toBeNull();
     });
   });
 });

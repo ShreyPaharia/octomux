@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
+import { installHookSettings } from './hook-settings.js';
 import type { Task, Agent } from './types.js';
 
 const execFile = promisify(execFileCb);
@@ -91,6 +92,9 @@ export async function startTask(task: Task): Promise<void> {
       fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
       fs.copyFileSync(settingsSrc, settingsDst);
     }
+
+    // 5b. Install hook settings for permission tracking
+    installHookSettings(worktreePath);
 
     // 6. Create tmux session
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
@@ -180,12 +184,20 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     label,
     status: 'running',
     claude_session_id: claudeSessionId,
+    hook_activity: 'active' as const,
+    hook_activity_updated_at: null,
     created_at: new Date().toISOString(),
   };
 }
 
 export async function closeTask(task: Task): Promise<void> {
   const db = getDb();
+
+  // Resolve all pending permission prompts for this task
+  db.prepare(
+    `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
+     WHERE task_id = ? AND status = 'pending'`,
+  ).run(task.id);
 
   // Mark task as closed and all agents as stopped
   db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
@@ -225,6 +237,12 @@ export async function deleteTask(task: Task): Promise<void> {
 
 export async function stopAgent(task: Task, agent: Agent): Promise<void> {
   const db = getDb();
+
+  // Resolve pending permission prompts for this agent
+  db.prepare(
+    `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
+     WHERE agent_id = ? AND status = 'pending'`,
+  ).run(agent.id);
 
   // Kill the specific tmux window
   await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
@@ -278,6 +296,9 @@ export async function resumeTask(task: Task): Promise<void> {
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', task.worktree!]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
+    // 3b. Install hook settings for permission tracking
+    installHookSettings(task.worktree!);
+
     // 4. Get stopped agents
     const agents = db
       .prepare(
@@ -299,9 +320,17 @@ export async function resumeTask(task: Task): Promise<void> {
       }
 
       // Launch claude with resume or continue
-      const claudeCmd = agent.claude_session_id
-        ? `claude --resume ${agent.claude_session_id}`
-        : 'claude --continue';
+      let claudeCmd: string;
+      if (agent.claude_session_id) {
+        claudeCmd = `claude --resume ${agent.claude_session_id}`;
+      } else {
+        const newSessionId = crypto.randomUUID();
+        claudeCmd = `claude --continue --session-id ${newSessionId}`;
+        db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
+          newSessionId,
+          agent.id,
+        );
+      }
       await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, claudeCmd, 'Enter']);
 
       // Update agent record

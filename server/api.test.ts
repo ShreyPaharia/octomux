@@ -1,8 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, getTask, DEFAULTS } from './test-helpers.js';
-import type { Task } from './types.js';
+import {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  getTask,
+  DEFAULTS,
+} from './test-helpers.js';
+import type { Task, Agent } from './types.js';
 import { EventEmitter } from 'events';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -932,5 +939,89 @@ describe('POST /api/tasks/:id/pr/preview — success path', () => {
     expect(res.body.title).toBe('feat(orders): add validation');
     expect(res.body.body).toBe('## What\n- test');
     expect(res.body.base).toBe('main');
+  });
+});
+
+// ─── GET /api/tasks with permission prompts ─────────────────────────────────
+
+describe('GET /api/tasks with permission prompts', () => {
+  it('includes pending_prompts in task response', async () => {
+    insertTask(db, { id: 't1', status: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-1' });
+    insertPermissionPrompt(db, {
+      id: 'pp1',
+      task_id: 't1',
+      agent_id: 'a1',
+      tool_name: 'Bash',
+      tool_input: '{"command":"npm test"}',
+    });
+
+    const res = await request(app).get('/api/tasks').expect(200);
+    const task = res.body[0];
+    expect(task.pending_prompts).toHaveLength(1);
+    expect(task.pending_prompts[0].tool_name).toBe('Bash');
+    expect(task.pending_prompts[0].tool_input).toEqual({ command: 'npm test' });
+    expect(task.pending_prompts[0].agent_label).toBe('Agent 1');
+  });
+
+  it('does not include resolved prompts', async () => {
+    insertTask(db, { id: 't1', status: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1' });
+    insertPermissionPrompt(db, {
+      id: 'pp1',
+      task_id: 't1',
+      agent_id: 'a1',
+      status: 'resolved' as any,
+    });
+
+    const res = await request(app).get('/api/tasks').expect(200);
+    expect(res.body[0].pending_prompts).toHaveLength(0);
+  });
+
+  it.each([
+    { activities: ['active'], expected: 'working' },
+    { activities: ['waiting'], expected: 'needs_attention' },
+    { activities: ['idle'], expected: 'done' },
+    { activities: ['active', 'waiting'], expected: 'working' },
+    { activities: ['idle', 'idle'], expected: 'done' },
+  ])(
+    'derived_status is $expected when activities are $activities',
+    async ({ activities, expected }) => {
+      insertTask(db, { id: 't1', status: 'running' });
+      activities.forEach((activity, i) => {
+        insertAgent(db, {
+          id: `a${i}`,
+          task_id: 't1',
+          window_index: i,
+          hook_activity: activity as Agent['hook_activity'],
+        });
+      });
+
+      const res = await request(app).get('/api/tasks').expect(200);
+      expect(res.body[0].derived_status).toBe(expected);
+    },
+  );
+
+  it('derived_status is null for non-running tasks', async () => {
+    insertTask(db, { id: 't1', status: 'closed' });
+
+    const res = await request(app).get('/api/tasks').expect(200);
+    expect(res.body[0].derived_status).toBeNull();
+  });
+
+  it('includes pending_prompts in single task response', async () => {
+    insertTask(db, { id: 't1', status: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1' });
+    insertPermissionPrompt(db, {
+      id: 'pp1',
+      task_id: 't1',
+      agent_id: 'a1',
+      tool_name: 'Edit',
+      tool_input: '{"file_path":"server/api.ts"}',
+    });
+
+    const res = await request(app).get('/api/tasks/t1').expect(200);
+    expect(res.body.pending_prompts).toHaveLength(1);
+    expect(res.body.derived_status).toBe('working');
   });
 });
