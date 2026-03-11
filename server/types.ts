@@ -1,5 +1,7 @@
 export type TaskStatus = 'draft' | 'setting_up' | 'running' | 'closed' | 'error';
 export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
+export type HookActivity = 'active' | 'idle' | 'waiting';
+export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
 
 export interface Task {
   id: string;
@@ -19,6 +21,8 @@ export interface Task {
   created_at: string;
   updated_at: string;
   agents?: Agent[];
+  pending_prompts?: PermissionPrompt[];
+  derived_status?: DerivedTaskStatus | null;
 }
 
 export interface Agent {
@@ -28,7 +32,22 @@ export interface Agent {
   label: string;
   status: AgentStatus;
   claude_session_id: string | null;
+  hook_activity: HookActivity;
+  hook_activity_updated_at: string | null;
   created_at: string;
+}
+
+export interface PermissionPrompt {
+  id: string;
+  task_id: string;
+  agent_id: string | null;
+  agent_label: string;
+  session_id: string;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  status: 'pending' | 'resolved';
+  created_at: string;
+  resolved_at: string | null;
 }
 
 export interface CreateTaskRequest {
