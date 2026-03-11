@@ -23,6 +23,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     apiMock.listTasks.mockResolvedValue([]);
     apiMock.deleteTask.mockResolvedValue(undefined);
   });
