@@ -13,21 +13,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import type { BrowseResult, RecentRepo } from '@/lib/api';
+import { timeAgo } from '@/lib/format';
 
 interface CreateTaskDialogProps {
   onCreated: () => void;
-}
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr + 'Z').getTime();
-  const diff = Math.max(0, now - then);
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
