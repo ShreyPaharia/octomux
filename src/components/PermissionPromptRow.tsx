@@ -1,14 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { PermissionPrompt } from '../../server/types';
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr + 'Z').getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
-}
+import { timeAgo } from '@/lib/format';
 
 function abbreviateInput(toolInput: Record<string, unknown>): string {
   const command = toolInput.command || toolInput.file_path || toolInput.pattern || '';
