@@ -14,7 +14,12 @@ interface TerminalViewProps {
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
 
-export function TerminalView({ taskId, windowIndex, wsUrl: wsUrlProp, visible = true }: TerminalViewProps) {
+export function TerminalView({
+  taskId,
+  windowIndex,
+  wsUrl: wsUrlProp,
+  visible = true,
+}: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);

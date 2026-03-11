@@ -701,7 +701,9 @@ describe('createUserTerminal', () => {
     const index = await createUserTerminal(runningTask);
 
     expect(index).toBe(1);
-    expect(findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] })).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
+    ).toBeDefined();
   });
 
   it('sends nvim launch command to the new window', async () => {
