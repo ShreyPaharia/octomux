@@ -19,6 +19,10 @@ export default defineConfig({
         ws: true,
       },
     },
+    watch: {
+      // Ignore git worktrees so agent file changes don't trigger HMR/reloads
+      ignored: ['**/.worktrees/**'],
+    },
   },
   build: {
     outDir: 'dist',
