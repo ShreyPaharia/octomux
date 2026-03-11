@@ -1,4 +1,4 @@
-import { execFile as execFileCb, spawn } from 'child_process';
+import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';

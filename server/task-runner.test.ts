@@ -8,7 +8,6 @@ import {
   getTask,
   getAgents,
   getPermissionPrompts,
-  getAgentActivity,
   findExecCall,
   DEFAULTS,
 } from './test-helpers.js';
@@ -300,16 +299,19 @@ describe('addAgent', () => {
     },
   ];
 
-  it.each(agentLabelCases)('creates $name with label "$expectedLabel"', async ({ existingAgents, expectedLabel }) => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    existingAgents.forEach((overrides) => insertAgent(db, overrides));
+  it.each(agentLabelCases)(
+    'creates $name with label "$expectedLabel"',
+    async ({ existingAgents, expectedLabel }) => {
+      insertTask(db, { ...DEFAULTS.runningTask });
+      existingAgents.forEach((overrides) => insertAgent(db, overrides));
 
-    const agent = await addAgent(runningTask);
+      const agent = await addAgent(runningTask);
 
-    expect(agent.window_index).toBe(1);
-    expect(agent.label).toBe(expectedLabel);
-    expect(agent.status).toBe('running');
-  });
+      expect(agent.window_index).toBe(1);
+      expect(agent.label).toBe(expectedLabel);
+      expect(agent.status).toBe('running');
+    },
+  );
 
   it('reuses window index after agent is stopped', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
@@ -399,11 +401,14 @@ describe('closeTask', () => {
     { name: 'branch', cmd: 'git', argsInclude: ['branch', '-D'] },
   ];
 
-  it.each(closePreservedResources)('does NOT remove $name (preserved for resume)', async ({ cmd, argsInclude }) => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await closeTask({ ...DEFAULTS.runningTask } as Task);
-    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeUndefined();
-  });
+  it.each(closePreservedResources)(
+    'does NOT remove $name (preserved for resume)',
+    async ({ cmd, argsInclude }) => {
+      insertTask(db, { ...DEFAULTS.runningTask });
+      await closeTask({ ...DEFAULTS.runningTask } as Task);
+      expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeUndefined();
+    },
+  );
 
   it('skips tmux kill when tmux_session is null', async () => {
     const task = { ...DEFAULTS.runningTask, tmux_session: null } as Task;
@@ -605,26 +610,34 @@ describe('resumeTask', () => {
   });
 
   const resumeFlagCases = [
-    { name: 'session_id available', sessionId: 'session-abc-123', expectedFlag: '--resume', expectedId: 'session-abc-123' },
+    {
+      name: 'session_id available',
+      sessionId: 'session-abc-123',
+      expectedFlag: '--resume',
+      expectedId: 'session-abc-123',
+    },
     { name: 'session_id null', sessionId: null, expectedFlag: '--continue', expectedId: undefined },
   ];
 
-  it.each(resumeFlagCases)('uses $expectedFlag when $name', async ({ sessionId, expectedFlag, expectedId }) => {
-    insertTask(db, { ...closedTask });
-    insertAgent(db, { status: 'stopped', claude_session_id: sessionId });
+  it.each(resumeFlagCases)(
+    'uses $expectedFlag when $name',
+    async ({ sessionId, expectedFlag, expectedId }) => {
+      insertTask(db, { ...closedTask });
+      insertAgent(db, { status: 'stopped', claude_session_id: sessionId });
 
-    await resumeTask(closedTask);
+      await resumeTask(closedTask);
 
-    const sendKeysCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'tmux',
-      argsInclude: ['send-keys'],
-    });
-    expect(sendKeysCall).toBeDefined();
-    const args = sendKeysCall![1] as string[];
-    const claudeCmd = args.find((a: string) => a.includes('claude'));
-    expect(claudeCmd).toContain(expectedFlag);
-    if (expectedId) expect(claudeCmd).toContain(expectedId);
-  });
+      const sendKeysCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['send-keys'],
+      });
+      expect(sendKeysCall).toBeDefined();
+      const args = sendKeysCall![1] as string[];
+      const claudeCmd = args.find((a: string) => a.includes('claude'));
+      expect(claudeCmd).toContain(expectedFlag);
+      if (expectedId) expect(claudeCmd).toContain(expectedId);
+    },
+  );
 
   it('creates new windows for agents after the first', async () => {
     insertTask(db, { ...closedTask });
