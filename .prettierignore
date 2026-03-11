@@ -4,3 +4,4 @@ dist-server
 data
 coverage
 bun.lock
+.worktrees

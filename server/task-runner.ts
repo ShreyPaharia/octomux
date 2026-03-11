@@ -191,6 +191,13 @@ export async function closeTask(task: Task): Promise<void> {
   );
   db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
 
+  // Kill tmux session — worktree and branch are preserved for resume
+  if (task.tmux_session) {
+    await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
+  }
+}
+
+export async function deleteTask(task: Task): Promise<void> {
   // Kill tmux session
   if (task.tmux_session) {
     await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
@@ -208,7 +215,10 @@ export async function closeTask(task: Task): Promise<void> {
     ]).catch(() => {});
   }
 
-  // Branch is always kept — work is preserved
+  // Delete branch
+  if (task.branch) {
+    await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]).catch(() => {});
+  }
 }
 
 export async function stopAgent(task: Task, agent: Agent): Promise<void> {

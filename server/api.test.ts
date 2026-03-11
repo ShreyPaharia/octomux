@@ -24,6 +24,7 @@ vi.mock('./task-runner.js', async () => {
       ).run(task.id);
       db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
     }),
+    deleteTask: vi.fn(),
     resumeTask: vi.fn(async (task: any) => {
       const db = getDb();
       db.prepare(
@@ -65,7 +66,8 @@ vi.mock('child_process', () => ({
 const fs = (await import('fs')).default;
 const { spawn: spawnMock } = await import('child_process');
 const { createApp } = await import('./app.js');
-const { startTask, closeTask, resumeTask, addAgent, stopAgent } = await import('./task-runner.js');
+const { startTask, closeTask, deleteTask, resumeTask, addAgent, stopAgent } =
+  await import('./task-runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -436,10 +438,10 @@ describe('DELETE /api/tasks/:id', () => {
     expect(getTask(db, DEFAULTS.task.id)).toBeUndefined();
   });
 
-  it('calls closeTask before deleting', async () => {
+  it('calls deleteTask before deleting', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
-    expect(closeTask).toHaveBeenCalledOnce();
+    expect(deleteTask).toHaveBeenCalledOnce();
   });
 
   it('cascades delete to agents', async () => {

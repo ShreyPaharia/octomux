@@ -47,8 +47,16 @@ vi.mock('child_process', () => ({
   })),
 }));
 
-const { startTask, closeTask, addAgent, stopAgent, resumeTask, dispatchToWindow, slugifyTitle } =
-  await import('./task-runner.js');
+const {
+  startTask,
+  closeTask,
+  deleteTask,
+  addAgent,
+  stopAgent,
+  resumeTask,
+  dispatchToWindow,
+  slugifyTitle,
+} = await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
 
@@ -370,15 +378,20 @@ describe('closeTask', () => {
 
   // ─── Shell cleanup commands (table-driven) ─────────────────────────────
 
-  const cleanupCalls = [
-    { name: 'kills tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
-    { name: 'removes worktree', cmd: 'git', argsInclude: ['worktree', 'remove'] },
-  ];
-
-  it.each(cleanupCalls)('$name', async ({ cmd, argsInclude }) => {
+  it('kills tmux session', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await closeTask({ ...DEFAULTS.runningTask } as Task);
-    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+    ).toBeDefined();
+  });
+
+  it('does NOT remove worktree (preserved for resume)', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'remove'] }),
+    ).toBeUndefined();
   });
 
   it('does NOT delete the branch', async () => {
@@ -389,7 +402,35 @@ describe('closeTask', () => {
     ).toBeUndefined();
   });
 
-  // ─── Null field handling (table-driven) ─────────────────────────────────
+  it('skips tmux kill when tmux_session is null', async () => {
+    const task = { ...DEFAULTS.runningTask, tmux_session: null } as Task;
+    insertTask(db, task);
+    await closeTask(task);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+    ).toBeUndefined();
+  });
+
+  it('handles task with no agents gracefully', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+  });
+});
+
+// ─── deleteTask ───────────────────────────────────────────────────────────────
+
+describe('deleteTask', () => {
+  const deleteCalls = [
+    { name: 'kills tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
+    { name: 'removes worktree', cmd: 'git', argsInclude: ['worktree', 'remove'] },
+    { name: 'deletes branch', cmd: 'git', argsInclude: ['branch', '-D'] },
+  ];
+
+  it.each(deleteCalls)('$name', async ({ cmd, argsInclude }) => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await deleteTask({ ...DEFAULTS.runningTask } as Task);
+    expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
+  });
 
   const nullFieldCases = [
     {
@@ -402,18 +443,18 @@ describe('closeTask', () => {
       overrides: { worktree: null },
       shouldNotCall: { cmd: 'git', argsInclude: ['worktree', 'remove'] },
     },
+    {
+      name: 'skips branch delete when branch is null',
+      overrides: { branch: null },
+      shouldNotCall: { cmd: 'git', argsInclude: ['branch', '-D'] },
+    },
   ];
 
   it.each(nullFieldCases)('$name', async ({ overrides, shouldNotCall }) => {
     const task = { ...DEFAULTS.runningTask, ...overrides } as Task;
     insertTask(db, task);
-    await closeTask(task);
+    await deleteTask(task);
     expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
-  });
-
-  it('handles task with no agents gracefully', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
   });
 });
 
