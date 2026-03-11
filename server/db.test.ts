@@ -175,16 +175,14 @@ describe('Database', () => {
 
   describe('permission_prompts table', () => {
     it('creates permission_prompts table with correct columns', () => {
-      const cols = db
-        .pragma('table_info(permission_prompts)')
-        .map((c: { name: string }) => c.name);
+      const cols = (db.pragma('table_info(permission_prompts)') as { name: string }[]).map(
+        (c) => c.name,
+      );
       expect(cols).toEqual(PERMISSION_PROMPTS_TABLE_COLUMNS);
     });
 
     it('adds hook_activity column to agents table', () => {
-      const cols = db
-        .pragma('table_info(agents)')
-        .map((c: { name: string }) => c.name);
+      const cols = (db.pragma('table_info(agents)') as { name: string }[]).map((c) => c.name);
       expect(cols).toContain('hook_activity');
       expect(cols).toContain('hook_activity_updated_at');
     });
