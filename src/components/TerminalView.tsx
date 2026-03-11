@@ -38,7 +38,11 @@ export function TerminalView({
 
   // Helper to fit terminal and send resize dimensions over WebSocket
   const fitAndSendResize = useCallback((ws: WebSocket) => {
-    if (!fitRef.current || !termRef.current) return;
+    if (!fitRef.current || !termRef.current || !containerRef.current) return;
+    // Skip when container is hidden (0 dimensions) — fitting a hidden terminal
+    // sends a 0×0 resize to the PTY, which garbles apps like nvim.
+    const { clientWidth, clientHeight } = containerRef.current;
+    if (clientWidth === 0 || clientHeight === 0) return;
     fitRef.current.fit();
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(

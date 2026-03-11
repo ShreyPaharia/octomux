@@ -366,6 +366,105 @@ describe('TaskDetail', () => {
       });
     });
 
+    it('unmounts editor terminal when switching back to agents mode (prevents stale PTY resize)', async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
+      });
+
+      // Open editor — creates user terminal and mounts editor TerminalView
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(apiMock.createUserTerminal).toHaveBeenCalled();
+      });
+
+      // Editor terminal should be mounted with the user window index
+      const editorTerminals = screen
+        .getAllByTestId('terminal-view')
+        .filter((el) => el.getAttribute('data-window-index') === '5');
+      expect(editorTerminals).toHaveLength(1);
+
+      // Switch back to agents
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+
+      // Editor terminal (window index 5) should be fully unmounted, NOT just hidden.
+      // If it were CSS-hidden, a ResizeObserver could fire a 0×0 resize to the PTY,
+      // corrupting nvim's layout on reopen.
+      await waitFor(() => {
+        const remaining = screen
+          .getAllByTestId('terminal-view')
+          .filter((el) => el.getAttribute('data-window-index') === '5');
+        expect(remaining).toHaveLength(0);
+      });
+    });
+
+    it('mounts a fresh editor terminal each time editor is reopened', async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /editor/i })).toBeInTheDocument();
+      });
+
+      // Open editor
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(1);
+      });
+
+      // Editor terminal mounted
+      expect(
+        screen
+          .getAllByTestId('terminal-view')
+          .some((el) => el.getAttribute('data-window-index') === '5'),
+      ).toBe(true);
+
+      // Close editor
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(
+          screen
+            .getAllByTestId('terminal-view')
+            .every((el) => el.getAttribute('data-window-index') !== '5'),
+        ).toBe(true);
+      });
+
+      // Reopen editor — should mount a new terminal (not reuse hidden one)
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        const editorTerminals = screen
+          .getAllByTestId('terminal-view')
+          .filter((el) => el.getAttribute('data-window-index') === '5');
+        expect(editorTerminals).toHaveLength(1);
+      });
+
+      // Should NOT call createUserTerminal again — window index already known
+      expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(1);
+    });
+
+    it('agent terminal stays mounted while editor is open', async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByTestId('terminal-view')).toBeInTheDocument();
+      });
+
+      // Agent terminal should be present (window index 0)
+      expect(screen.getByTestId('terminal-view')).toHaveAttribute('data-window-index', '0');
+
+      // Open editor
+      await user.click(screen.getByRole('button', { name: /editor/i }));
+      await waitFor(() => {
+        expect(apiMock.createUserTerminal).toHaveBeenCalled();
+      });
+
+      // Both agent (window 0) and editor (window 5) terminals should exist
+      const terminals = screen.getAllByTestId('terminal-view');
+      const windowIndices = terminals.map((el) => el.getAttribute('data-window-index'));
+      expect(windowIndices).toContain('0');
+      expect(windowIndices).toContain('5');
+    });
+
     it('auto-switches to agents when task enters setting_up state', async () => {
       const user = userEvent.setup();
       renderDetail();
