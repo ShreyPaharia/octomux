@@ -9,6 +9,7 @@ import {
   getAgents,
   getPermissionPrompts,
   findExecCall,
+  countExecCalls,
   DEFAULTS,
 } from './test-helpers.js';
 import type { Task, Agent } from './types.js';
@@ -63,6 +64,8 @@ const {
   dispatchToWindow,
   slugifyTitle,
   createUserTerminal,
+  cleanupLinkedSessions,
+  cleanupOrphanedViewerSessions,
 } = await import('./task-runner.js');
 const { execFile, spawn } = await import('child_process');
 const fs = await import('fs');
@@ -842,5 +845,184 @@ describe('hook integration', () => {
 
     expect(agent.hook_activity).toBe('active');
     expect(agent.hook_activity_updated_at).toBeNull();
+  });
+});
+
+// ─── cleanupLinkedSessions ──────────────────────────────────────────────────
+
+describe('cleanupLinkedSessions', () => {
+  it('kills all linked viewer sessions matching the prefix', async () => {
+    const session = DEFAULTS.runningTask.tmux_session!;
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('list-sessions')) {
+        cb(null, {
+          stdout: `${session}\n${session}-v-abc123\n${session}-v-def456\nother-session\n`,
+          stderr: '',
+        });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    await cleanupLinkedSessions(session);
+
+    // Should kill exactly the two linked sessions
+    expect(countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] })).toBe(
+      2,
+    );
+    expect(
+      findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['kill-session', '-t', `${session}-v-abc123`],
+      }),
+    ).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['kill-session', '-t', `${session}-v-def456`],
+      }),
+    ).toBeDefined();
+  });
+
+  it('does nothing when no linked sessions exist', async () => {
+    const session = DEFAULTS.runningTask.tmux_session!;
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('list-sessions')) {
+        cb(null, { stdout: `${session}\nother-session\n`, stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    await cleanupLinkedSessions(session);
+
+    expect(
+      countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+    ).toBe(0);
+  });
+
+  it('handles tmux not running gracefully', async () => {
+    vi.mocked(execFile).mockImplementation(((_cmd: string, _args: string[], cb: Function) => {
+      cb(new Error('no server running'), null);
+    }) as any);
+
+    await expect(cleanupLinkedSessions('any-session')).resolves.not.toThrow();
+  });
+});
+
+// ─── cleanupOrphanedViewerSessions ──────────────────────────────────────────
+
+describe('cleanupOrphanedViewerSessions', () => {
+  it('kills viewer sessions whose parent no longer exists', async () => {
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('list-sessions')) {
+        cb(null, {
+          stdout: [
+            'octomux-agent-alive',
+            'octomux-agent-alive-v-abc123', // parent alive — keep
+            'octomux-agent-dead-v-def456', // parent dead — kill
+            'octomux-agent-dead-v-ghi789', // parent dead — kill
+            'unrelated-session',
+          ].join('\n'),
+          stderr: '',
+        });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    await cleanupOrphanedViewerSessions();
+
+    // Should kill 2 orphaned sessions (not the one with alive parent)
+    expect(countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] })).toBe(
+      2,
+    );
+    expect(
+      findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['kill-session', '-t', 'octomux-agent-dead-v-def456'],
+      }),
+    ).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['kill-session', '-t', 'octomux-agent-dead-v-ghi789'],
+      }),
+    ).toBeDefined();
+    // Should NOT kill the alive linked session
+    expect(
+      findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['kill-session', '-t', 'octomux-agent-alive-v-abc123'],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('does nothing when no orphaned sessions exist', async () => {
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('list-sessions')) {
+        cb(null, { stdout: 'octomux-agent-task1\noctomux-agent-task1-v-abc\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    await cleanupOrphanedViewerSessions();
+
+    expect(
+      countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+    ).toBe(0);
+  });
+});
+
+// ─── closeTask linked session cleanup ───────────────────────────────────────
+
+describe('closeTask linked session cleanup', () => {
+  it('lists and kills linked sessions before killing main session', async () => {
+    const session = DEFAULTS.runningTask.tmux_session!;
+    const callOrder: string[] = [];
+
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('list-sessions')) {
+        cb(null, { stdout: `${session}\n${session}-v-abc123\n`, stderr: '' });
+      } else if (args.includes('kill-session')) {
+        callOrder.push((args as string[]).find((a) => a.startsWith(session) || a === session)!);
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await closeTask({ ...DEFAULTS.runningTask } as Task);
+
+    // Linked session killed before main session
+    expect(callOrder).toEqual([`${session}-v-abc123`, session]);
+  });
+});
+
+// ─── deleteTask linked session cleanup ──────────────────────────────────────
+
+describe('deleteTask linked session cleanup', () => {
+  it('lists and kills linked sessions before killing main session', async () => {
+    const session = DEFAULTS.runningTask.tmux_session!;
+    const callOrder: string[] = [];
+
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('list-sessions')) {
+        cb(null, { stdout: `${session}\n${session}-v-xyz789\n`, stderr: '' });
+      } else if (args.includes('kill-session')) {
+        callOrder.push((args as string[]).find((a) => a.startsWith(session) || a === session)!);
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await deleteTask({ ...DEFAULTS.runningTask } as Task);
+
+    // Linked session killed before main session
+    expect(callOrder).toEqual([`${session}-v-xyz789`, session]);
   });
 });
