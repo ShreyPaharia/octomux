@@ -35,7 +35,6 @@ import type {
 
 const execFile = promisify(execFileCb);
 
-
 function safeParseJson(s: string): Record<string, unknown> {
   try {
     return JSON.parse(s || '{}');
@@ -454,5 +453,4 @@ export function setupRoutes(app: Express): void {
     await stopOrchestrator();
     res.json({ running: false });
   });
-
 }
