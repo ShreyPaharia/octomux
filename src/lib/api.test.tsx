@@ -136,22 +136,7 @@ const apiCases = [
     expectedBody: undefined,
     response: { branch: 'main' },
   },
-  {
-    name: 'previewPR',
-    call: () => api.previewPR('t1', { base: 'main' }),
-    expectedUrl: '/api/tasks/t1/pr/preview',
-    expectedMethod: 'POST',
-    expectedBody: JSON.stringify({ base: 'main' }),
-    response: { title: 'feat: test', body: '## What', base: 'main' },
-  },
-  {
-    name: 'createPR',
-    call: () => api.createPR('t1', { base: 'main', title: 'feat: test', body: '## What' }),
-    expectedUrl: '/api/tasks/t1/pr',
-    expectedMethod: 'POST',
-    expectedBody: JSON.stringify({ base: 'main', title: 'feat: test', body: '## What' }),
-    response: { id: 't1', pr_url: 'https://gh/pr/1' },
-  },
+
   {
     name: 'orchestratorStatus',
     call: () => api.orchestratorStatus(),

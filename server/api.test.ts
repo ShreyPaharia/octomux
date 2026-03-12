@@ -10,7 +10,7 @@ import {
   DEFAULTS,
 } from './test-helpers.js';
 import type { Task, Agent } from './types.js';
-import { EventEmitter } from 'events';
+
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -74,11 +74,11 @@ vi.mock('child_process', () => ({
     if (cb) cb(null, { stdout: '', stderr: '' });
     return undefined;
   }),
-  spawn: vi.fn(),
+
 }));
 
 const fs = (await import('fs')).default;
-const { spawn: spawnMock } = await import('child_process');
+
 const { createApp } = await import('./app.js');
 const { startTask, closeTask, deleteTask, resumeTask, addAgent, stopAgent, createUserTerminal } =
   await import('./task-runner.js');
@@ -125,18 +125,7 @@ const notFoundCases = [
     method: 'delete' as const,
     url: '/api/tasks/nonexistent/agents/agent1',
   },
-  {
-    name: 'POST /api/tasks/:id/pr',
-    method: 'post' as const,
-    url: '/api/tasks/nonexistent/pr',
-    body: { base: 'main', title: 'T', body: 'B' },
-  },
-  {
-    name: 'POST /api/tasks/:id/pr/preview',
-    method: 'post' as const,
-    url: '/api/tasks/nonexistent/pr/preview',
-    body: { base: 'main' },
-  },
+
   {
     name: 'POST /api/tasks/:id/user-terminal',
     method: 'post' as const,
@@ -547,51 +536,6 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
   });
 });
 
-// ─── POST /api/tasks/:id/pr ─────────────────────────────────────────────────
-
-describe('POST /api/tasks/:id/pr', () => {
-  it('returns 400 when task has no branch', async () => {
-    insertTask(db);
-    const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
-      .send({ base: 'main', title: 'T', body: 'B' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('no branch');
-  });
-
-  it('returns 400 when task already has a PR', async () => {
-    insertTask(db, {
-      ...DEFAULTS.runningTask,
-      pr_url: 'https://github.com/org/repo/pull/1',
-      pr_number: 1,
-    });
-    const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
-      .send({ base: 'main', title: 'T', body: 'B' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('already has a PR');
-  });
-
-  it('returns 400 when missing required fields', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/pr`).send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('required');
-  });
-});
-
-// ─── POST /api/tasks/:id/pr/preview ─────────────────────────────────────────
-
-describe('POST /api/tasks/:id/pr/preview', () => {
-  it('returns 400 when task has no branch', async () => {
-    insertTask(db);
-    const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/pr/preview`)
-      .send({ base: 'main' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('no branch');
-  });
-});
 
 // ─── GET /api/browse ─────────────────────────────────────────────────────────
 
@@ -797,64 +741,6 @@ describe('GET /api/recent-repos', () => {
   });
 });
 
-// ─── POST /api/tasks/:id/pr — success path ──────────────────────────────────
-
-describe('POST /api/tasks/:id/pr — success path', () => {
-  it('creates PR via gh CLI and updates DB', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-
-    // Mock execFile to return PR URL for gh command
-    const { execFile } = await import('child_process');
-    vi.mocked(execFile).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
-      const cb = rest.find((a: any) => typeof a === 'function');
-      if (cmd === 'gh') {
-        cb(null, { stdout: 'https://github.com/org/repo/pull/42\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as any;
-    }) as any);
-
-    const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
-      .send({ base: 'main', title: 'feat: test', body: '## What' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
-    expect(res.body.pr_number).toBe(42);
-
-    // Verify DB was updated
-    const task = getTask(db, DEFAULTS.task.id);
-    expect(task?.pr_url).toBe('https://github.com/org/repo/pull/42');
-    expect(task?.pr_number).toBe(42);
-  });
-});
-
-// ─── POST /api/tasks/:id/pr — gh failure ─────────────────────────────────────
-
-describe('POST /api/tasks/:id/pr — gh failure', () => {
-  it('returns 500 when gh CLI fails', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-
-    const { execFile } = await import('child_process');
-    vi.mocked(execFile).mockImplementation(((cmd: string, _args: any, ...rest: any[]) => {
-      const cb = rest.find((a: any) => typeof a === 'function');
-      if (cmd === 'gh') {
-        cb(new Error('gh: command not found'), null);
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as any;
-    }) as any);
-
-    const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/pr`)
-      .send({ base: 'main', title: 'feat: test', body: '## What' });
-
-    expect(res.status).toBe(500);
-    expect(res.body.error).toContain('gh');
-  });
-});
 
 // ─── POST /api/tasks/:id/user-terminal ──────────────────────────────────────
 
@@ -889,58 +775,6 @@ describe('POST /api/tasks/:id/user-terminal', () => {
   });
 });
 
-// ─── POST /api/tasks/:id/pr/preview — success path ──────────────────────────
-
-describe('POST /api/tasks/:id/pr/preview — success path', () => {
-  it('returns generated title, body and base', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-
-    // Mock execFile: return commit log for git log, diff stats for git diff
-    const { execFile } = await import('child_process');
-    vi.mocked(execFile).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
-      const cb = rest.find((a: any) => typeof a === 'function');
-      const argsArr = args as string[];
-      if (argsArr?.includes('log')) {
-        cb(null, { stdout: 'abc1234 feat: add stuff\n', stderr: '' });
-      } else if (argsArr?.includes('diff')) {
-        cb(null, { stdout: ' file.ts | 10 ++++\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as any;
-    }) as any);
-
-    // Mock spawn for runClaude — auto-emit output on next tick so event handlers are registered
-    vi.mocked(spawnMock).mockImplementation(() => {
-      const proc = new EventEmitter() as any;
-      proc.stdout = new EventEmitter();
-      proc.stderr = new EventEmitter();
-      proc.stdin = {
-        write: vi.fn(),
-        end: vi.fn(() => {
-          // Emit after stdin.end() is called (handlers are registered by then)
-          setTimeout(() => {
-            proc.stdout.emit(
-              'data',
-              '{"title": "feat(orders): add validation", "body": "## What\\n- test"}',
-            );
-            proc.emit('close', 0);
-          }, 0);
-        }),
-      };
-      return proc;
-    });
-
-    const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/pr/preview`)
-      .send({ base: 'main' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.title).toBe('feat(orders): add validation');
-    expect(res.body.body).toBe('## What\n- test');
-    expect(res.body.base).toBe('main');
-  });
-});
 
 // ─── GET /api/tasks with permission prompts ─────────────────────────────────
 
