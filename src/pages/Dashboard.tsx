@@ -11,6 +11,18 @@ export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
 
+  const handleClose = useCallback(
+    async (id: string) => {
+      try {
+        await api.updateTask(id, { status: 'closed' });
+        refresh();
+      } catch (err) {
+        console.error('Failed to close task:', err);
+      }
+    },
+    [refresh],
+  );
+
   const handleDelete = useCallback(
     async (id: string) => {
       try {
@@ -79,7 +91,12 @@ export default function Dashboard() {
                 activeRepo={filters.repo}
                 onRepoChange={(r) => setFilter('repo', r)}
               />
-              <TaskList tasks={filtered} onDelete={handleDelete} onResume={handleResume} />
+              <TaskList
+                tasks={filtered}
+                onClose={handleClose}
+                onDelete={handleDelete}
+                onResume={handleResume}
+              />
             </>
           )}
         </div>
