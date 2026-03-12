@@ -1,12 +1,22 @@
-import { updateTask } from '../client.js';
+import { Command } from 'commander';
+import type { OctomuxClient } from '../client.js';
+import { isJsonMode, outputJson, success } from '../format.js';
 
-export async function closeTaskCommand(args: string[]): Promise<void> {
-  const id = args[0];
-  if (!id) {
-    console.error('Usage: octomux close-task <id>');
-    process.exit(1);
-  }
+export function registerCloseTask(program: Command): void {
+  program
+    .command('close-task <id>')
+    .description('Close a running task')
+    .action(async (id: string, _opts, cmd) => {
+      const globals = cmd.optsWithGlobals();
+      const client: OctomuxClient = globals._client;
 
-  const task = await updateTask(id, { status: 'closed' });
-  console.log(`Task ${task.id} closed.`);
+      const task = await client.updateTask(id, { status: 'closed' });
+
+      if (isJsonMode(globals.json)) {
+        outputJson(task);
+        return;
+      }
+
+      success(`Closed task ${task.id} (${task.title})`);
+    });
 }
