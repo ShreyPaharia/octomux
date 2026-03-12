@@ -13,7 +13,7 @@ import {
 import { setupEventWebSocket, handleEventUpgrade, cleanupEventClients } from './events.js';
 import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
-import { resumeTask } from './task-runner.js';
+import { resumeTask, cleanupOrphanedViewerSessions } from './task-runner.js';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
 
@@ -62,6 +62,7 @@ async function recoverTasks(): Promise<void> {
 }
 
 await recoverTasks();
+await cleanupOrphanedViewerSessions();
 
 // Background status + PR polling
 startPolling();
