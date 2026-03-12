@@ -78,9 +78,7 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<Task>(baseUrl, '/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
     listTasks(params) {
-      const query = params?.repo_path
-        ? `?repo_path=${encodeURIComponent(params.repo_path)}`
-        : '';
+      const query = params?.repo_path ? `?repo_path=${encodeURIComponent(params.repo_path)}` : '';
       return request<Task[]>(baseUrl, `/tasks${query}`);
     },
     getTask(id) {

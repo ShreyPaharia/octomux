@@ -14,9 +14,7 @@ export function registerListTasks(program: Command): void {
       const globals = cmd.optsWithGlobals();
       const client: OctomuxClient = globals._client;
 
-      let tasks = await client.listTasks(
-        opts.repoPath ? { repo_path: opts.repoPath } : undefined,
-      );
+      let tasks = await client.listTasks(opts.repoPath ? { repo_path: opts.repoPath } : undefined);
 
       if (opts.status) {
         tasks = tasks.filter((t) => t.status === opts.status);
