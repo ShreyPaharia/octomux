@@ -1,50 +1,41 @@
-import { createTask } from '../client.js';
+import { Command } from 'commander';
+import type { OctomuxClient } from '../client.js';
+import { isJsonMode, outputJson, label, success, colorStatus } from '../format.js';
 
-export async function createTaskCommand(args: string[]): Promise<void> {
-  let title = '';
-  let description = '';
-  let repoPath = '';
-  let initialPrompt = '';
-  let branch = '';
-  let baseBranch = '';
+export function registerCreateTask(program: Command): void {
+  program
+    .command('create-task')
+    .description('Create a new agent task')
+    .requiredOption('-t, --title <title>', 'task title')
+    .requiredOption('-d, --description <desc>', 'task description')
+    .requiredOption('-r, --repo-path <path>', 'repository path')
+    .option('-p, --initial-prompt <prompt>', 'initial prompt for the agent')
+    .option('-b, --branch <name>', 'branch name')
+    .option('--base-branch <name>', 'base branch name')
+    .option('--draft', 'create as draft without starting')
+    .action(async (opts, cmd) => {
+      const globals = cmd.optsWithGlobals();
+      const client: OctomuxClient = globals._client;
 
-  for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
-      case '--title':
-        title = args[++i] || '';
-        break;
-      case '--description':
-        description = args[++i] || '';
-        break;
-      case '--repo-path':
-        repoPath = args[++i] || '';
-        break;
-      case '--initial-prompt':
-        initialPrompt = args[++i] || '';
-        break;
-      case '--branch':
-        branch = args[++i] || '';
-        break;
-      case '--base-branch':
-        baseBranch = args[++i] || '';
-        break;
-    }
-  }
+      const task = await client.createTask({
+        title: opts.title,
+        description: opts.description,
+        repo_path: opts.repoPath,
+        initial_prompt: opts.initialPrompt,
+        branch: opts.branch,
+        base_branch: opts.baseBranch,
+        draft: opts.draft,
+      });
 
-  if (!title || !description || !repoPath) {
-    console.error('Usage: octomux create-task --title "..." --description "..." --repo-path "..."');
-    console.error('  [--initial-prompt "..."] [--branch "..."] [--base-branch "..."]');
-    process.exit(1);
-  }
+      if (isJsonMode(globals.json)) {
+        outputJson(task);
+        return;
+      }
 
-  const task = await createTask({
-    title,
-    description,
-    repo_path: repoPath,
-    initial_prompt: initialPrompt || undefined,
-    branch: branch || undefined,
-    base_branch: baseBranch || undefined,
-  });
-
-  console.log(JSON.stringify(task, null, 2));
+      success(`Created task ${task.id}`);
+      console.log(label('Title', task.title));
+      console.log(label('Status', colorStatus(task.status)));
+      console.log(label('Branch', task.branch));
+      console.log(label('Repo', task.repo_path));
+    });
 }
