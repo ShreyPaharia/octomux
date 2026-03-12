@@ -17,7 +17,11 @@ program
   .name('octomux')
   .description('CLI for managing octomux agent tasks')
   .version('0.1.0')
-  .option('-s, --server-url <url>', 'server URL', process.env.OCTOMUX_URL || 'http://localhost:7777')
+  .option(
+    '-s, --server-url <url>',
+    'server URL',
+    process.env.OCTOMUX_URL || 'http://localhost:7777',
+  )
   .option('--json', 'output as JSON (auto-enabled when piped)');
 
 registerCreateTask(program);
