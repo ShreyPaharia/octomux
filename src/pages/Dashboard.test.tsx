@@ -125,23 +125,42 @@ describe('Dashboard', () => {
     });
   });
 
-  // ─── Delete ───────────────────────────────────────────────────────────────
+  // ─── Close ───────────────────────────────────────────────────────────────
 
-  it('calls deleteTask when delete button is clicked', async () => {
+  it('calls updateTask to close when close button is clicked on running task', async () => {
     const user = userEvent.setup();
-    apiMock.listTasks.mockResolvedValue([makeTask()]);
+    apiMock.listTasks.mockResolvedValue([makeTask({ status: 'running' })]);
     renderWithRouter(<Dashboard />);
 
     await waitFor(() => {
       expect(screen.getByText('Fix order validation')).toBeInTheDocument();
     });
 
-    // Click the delete button (last button in the card)
-    const buttons = screen.getAllByRole('button');
-    const deleteBtn = buttons.find(
-      (btn) => btn.querySelector('svg') && !btn.textContent?.includes('New Task'),
-    );
-    if (deleteBtn) await user.click(deleteBtn);
+    await user.click(screen.getByTitle('Close task'));
+
+    await waitFor(() => {
+      expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', { status: 'closed' });
+    });
+  });
+
+  // ─── Delete ───────────────────────────────────────────────────────────────
+
+  it('calls deleteTask when delete button is clicked on closed task', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([makeTask({ status: 'closed' })]);
+    renderWithRouter(<Dashboard />);
+
+    // Switch to Closed filter to see closed tasks
+    await waitFor(() => {
+      expect(screen.getByText(/^Closed/)).toBeInTheDocument();
+    });
+    await user.click(screen.getByText(/^Closed/));
+
+    await waitFor(() => {
+      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTitle('Delete task'));
 
     await waitFor(() => {
       expect(apiMock.deleteTask).toHaveBeenCalledWith('test-task-01');
