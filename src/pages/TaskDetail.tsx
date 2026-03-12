@@ -305,8 +305,6 @@ export default function TaskDetail() {
           </div>
         </div>
       )}
-
-
     </div>
   );
 }
