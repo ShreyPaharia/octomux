@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
-import { TerminalView } from '@/components/TerminalView';
 import { useOrchestrator } from '@/lib/hooks';
+
+const TerminalView = lazy(() =>
+  import('@/components/TerminalView').then((m) => ({ default: m.TerminalView })),
+);
 
 const STORAGE_KEY = 'orchestrator-panel-open';
 
@@ -75,7 +78,15 @@ export function OrchestratorPanel() {
             <Button onClick={start}>Start Orchestrator</Button>
           </div>
         ) : (
-          <TerminalView wsUrl="/ws/terminal/orchestrator" />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                Loading terminal...
+              </div>
+            }
+          >
+            <TerminalView wsUrl="/ws/terminal/orchestrator" />
+          </Suspense>
         )}
       </div>
     </div>

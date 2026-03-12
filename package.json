@@ -55,7 +55,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "express": "^5.0.1",
-    "lucide-react": "^0.577.0",
     "nanoid": "^5.0.9",
     "node-pty": "^1.0.0",
     "shadcn": "latest",

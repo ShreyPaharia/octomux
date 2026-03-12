@@ -26,5 +26,26 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react-dom/') || id.includes('node_modules/react/')) {
+            return 'vendor-react';
+          }
+          if (
+            id.includes('node_modules/react-router/') ||
+            id.includes('node_modules/react-router-dom/')
+          ) {
+            return 'vendor-router';
+          }
+          if (id.includes('node_modules/@xterm/')) {
+            return 'vendor-xterm';
+          }
+          if (id.includes('node_modules/@base-ui/')) {
+            return 'vendor-ui';
+          }
+        },
+      },
+    },
   },
 });
