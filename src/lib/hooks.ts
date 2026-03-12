@@ -50,11 +50,19 @@ export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const lastJsonRef = useRef<string>('');
 
   const refresh = useCallback(async () => {
     try {
       const data = await api.listTasks();
-      setTasks(data);
+      // Only trigger a re-render when the task list actually changed.
+      // Without this, every WebSocket event creates a new array reference
+      // and causes the entire Dashboard + TaskList tree to re-render.
+      const json = JSON.stringify(data);
+      if (json !== lastJsonRef.current) {
+        lastJsonRef.current = json;
+        setTasks(data);
+      }
       setError(null);
     } catch (err) {
       setError((err as Error).message);

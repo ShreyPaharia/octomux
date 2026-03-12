@@ -32,8 +32,9 @@ describe('Dashboard', () => {
 
   it('shows loading state initially', () => {
     apiMock.listTasks.mockReturnValue(new Promise(() => {})); // never resolves
-    renderWithRouter(<Dashboard />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    const { container } = renderWithRouter(<Dashboard />);
+    // Loading state now shows skeleton cards instead of text
+    expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
   it('renders header and new task button', async () => {
