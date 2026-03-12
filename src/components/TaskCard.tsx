@@ -25,13 +25,20 @@ function repoName(repoPath: string): string {
 
 interface TaskCardProps {
   task: Task;
+  onClose: (id: string) => void;
   onDelete: (id: string) => void;
   onResume?: (id: string) => void;
 }
 
-export const TaskCard = memo(function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({
+  task,
+  onClose,
+  onDelete,
+  onResume,
+}: TaskCardProps) {
   const navigate = useNavigate();
   const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
+  const isActive = task.status === 'running' || task.status === 'setting_up';
 
   return (
     <Card
@@ -100,31 +107,60 @@ export const TaskCard = memo(function TaskCard({ task, onDelete, onResume }: Tas
                 </svg>
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(task.id);
-              }}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {isActive ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground hover:text-yellow-500"
+                title="Close task"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(task.id);
+                }}
               >
-                <path d="M3 6h18" />
-                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-              </svg>
-            </Button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="6" y="4" width="4" height="16" />
+                  <rect x="14" y="4" width="4" height="16" />
+                </svg>
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground hover:text-destructive"
+                title="Delete task"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(task.id);
+                }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                </svg>
+              </Button>
+            )}
           </div>
         </div>
         {task.agents && task.agents.length > 0 && task.status === 'running' && (
