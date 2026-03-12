@@ -89,8 +89,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     recentRepos: vi.fn().mockResolvedValue([]),
     listBranches: vi.fn().mockResolvedValue([]),
     getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
-    previewPR: vi.fn().mockResolvedValue({ title: '', body: '', base: 'main' }),
-    createPR: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+
   };
   return { ...defaults, ...overrides };
 }

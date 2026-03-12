@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
-import { CreatePRDialog } from '@/components/CreatePRDialog';
+
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
 
@@ -14,7 +14,7 @@ export default function TaskDetail() {
   const taskId = id ?? '';
   const { task, loading, error, refresh } = useTask(taskId);
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
+
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
@@ -165,8 +165,7 @@ export default function TaskDetail() {
   const isRunning = task.status === 'running';
   const isDraft = task.status === 'draft';
   const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
-  const canCreatePR =
-    !!task.branch && !task.pr_url && (task.status === 'closed' || task.status === 'running');
+
   const isTerminalAlive = task.status === 'running' || task.status === 'setting_up';
   const hasTerminal =
     !!task.tmux_session && agents.length > 0 && activeWindow !== null && isTerminalAlive;
@@ -217,11 +216,7 @@ export default function TaskDetail() {
               {resuming ? 'Resuming...' : 'Resume'}
             </Button>
           )}
-          {canCreatePR && (
-            <Button variant="outline" size="sm" onClick={() => setPrDialogOpen(true)}>
-              Create PR
-            </Button>
-          )}
+
           {isRunning && !!task.tmux_session && (
             <Button
               variant={mode === 'editor' ? 'default' : 'outline'}
@@ -311,12 +306,7 @@ export default function TaskDetail() {
         </div>
       )}
 
-      <CreatePRDialog
-        taskId={task.id}
-        open={prDialogOpen}
-        onOpenChange={setPrDialogOpen}
-        onCreated={refresh}
-      />
+
     </div>
   );
 }
