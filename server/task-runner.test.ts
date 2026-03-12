@@ -867,9 +867,9 @@ describe('cleanupLinkedSessions', () => {
     await cleanupLinkedSessions(session);
 
     // Should kill exactly the two linked sessions
-    expect(countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] })).toBe(
-      2,
-    );
+    expect(
+      countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+    ).toBe(2);
     expect(
       findExecCall(vi.mocked(execFile), {
         cmd: 'tmux',
@@ -934,9 +934,9 @@ describe('cleanupOrphanedViewerSessions', () => {
     await cleanupOrphanedViewerSessions();
 
     // Should kill 2 orphaned sessions (not the one with alive parent)
-    expect(countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] })).toBe(
-      2,
-    );
+    expect(
+      countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+    ).toBe(2);
     expect(
       findExecCall(vi.mocked(execFile), {
         cmd: 'tmux',
