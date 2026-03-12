@@ -3,11 +3,12 @@ import { TaskCard } from './TaskCard';
 
 interface TaskListProps {
   tasks: Task[];
+  onClose: (id: string) => void;
   onDelete: (id: string) => void;
   onResume?: (id: string) => void;
 }
 
-export function TaskList({ tasks, onDelete, onResume }: TaskListProps) {
+export function TaskList({ tasks, onClose, onDelete, onResume }: TaskListProps) {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
@@ -20,7 +21,13 @@ export function TaskList({ tasks, onDelete, onResume }: TaskListProps) {
   return (
     <div className="flex flex-col gap-3">
       {tasks.map((task) => (
-        <TaskCard key={task.id} task={task} onDelete={onDelete} onResume={onResume} />
+        <TaskCard
+          key={task.id}
+          task={task}
+          onClose={onClose}
+          onDelete={onDelete}
+          onResume={onResume}
+        />
       ))}
     </div>
   );
