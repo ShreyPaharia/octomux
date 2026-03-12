@@ -9,7 +9,30 @@ Web dashboard for orchestrating autonomous Claude Code agents. Create tasks, wat
 - **Terminal:** xterm.js → node-pty → tmux
 - **Isolation:** git worktrees per task, tmux sessions per task
 
-## Setup
+## Install
+
+### From npm
+
+```bash
+npm install -g octomux-agents
+octomux-agents              # starts dashboard at http://localhost:7777
+```
+
+Or run without installing:
+
+```bash
+npx octomux-agents
+```
+
+### Prerequisites
+
+The following must be available on your system:
+
+- **tmux** — `brew install tmux` (macOS) or `apt install tmux` (Linux)
+- **git** — already installed on most systems
+- **claude** — [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+
+### From source (development)
 
 ```bash
 bun install
