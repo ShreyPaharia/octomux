@@ -176,10 +176,16 @@ export function TerminalView({
   }, [connect]);
 
   // Handle resize (window + container size changes)
+  // Debounce with rAF to avoid excessive fit+resize during animated resizes.
   useEffect(() => {
+    let rafId: number | null = null;
     const handleResize = () => {
-      const ws = wsRef.current;
-      if (ws) fitAndSendResize(ws);
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const ws = wsRef.current;
+        if (ws) fitAndSendResize(ws);
+      });
     };
 
     window.addEventListener('resize', handleResize);
@@ -190,6 +196,7 @@ export function TerminalView({
     return () => {
       window.removeEventListener('resize', handleResize);
       observer.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [fitAndSendResize]);
 

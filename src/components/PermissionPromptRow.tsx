@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { PermissionPrompt } from '../../server/types';
 
@@ -16,7 +17,7 @@ function abbreviateInput(toolInput: Record<string, unknown>): string {
   return str.length > 40 ? str.slice(0, 37) + '...' : str;
 }
 
-export function PermissionPromptRow({
+export const PermissionPromptRow = memo(function PermissionPromptRow({
   prompt,
   taskId,
 }: {
@@ -43,4 +44,4 @@ export function PermissionPromptRow({
       <span className="ml-auto text-zinc-500">{timeAgo(prompt.created_at)}</span>
     </button>
   );
-}
+});

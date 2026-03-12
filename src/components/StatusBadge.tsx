@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Badge } from '@/components/ui/badge';
 
 const statusConfig: Record<string, { label: string; className: string }> = {
@@ -22,7 +23,7 @@ const fallbackConfig = {
   className: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
 };
 
-export function StatusBadge({ status }: { status: string }) {
+export const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
   const config = statusConfig[status] || fallbackConfig;
   return (
     <Badge variant="outline" className={config.className}>
@@ -32,4 +33,4 @@ export function StatusBadge({ status }: { status: string }) {
       {config.label}
     </Badge>
   );
-}
+});
