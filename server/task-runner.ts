@@ -59,9 +59,9 @@ export async function waitForClaudeReady(
   while (Date.now() - start < timeoutMs) {
     try {
       const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      // Claude Code renders a ">" prompt when ready for input
+      // Claude Code renders a "❯" (or ">") prompt when ready for input
       const lines = stdout.split('\n');
-      if (lines.some((line) => /^\s*>/.test(line))) {
+      if (lines.some((line) => /^\s*[>❯]/.test(line))) {
         return;
       }
     } catch {
