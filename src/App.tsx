@@ -1,7 +1,8 @@
-import { Component, type ReactNode } from 'react';
+import { Component, lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
-import TaskDetail from './pages/TaskDetail';
+
+const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -40,7 +41,20 @@ export default function App() {
       <div className="min-h-screen bg-background text-foreground">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/tasks/:id" element={<TaskDetail />} />
+          <Route
+            path="/tasks/:id"
+            element={
+              <Suspense
+                fallback={
+                  <div className="flex h-screen items-center justify-center text-muted-foreground">
+                    Loading...
+                  </div>
+                }
+              >
+                <TaskDetail />
+              </Suspense>
+            }
+          />
         </Routes>
       </div>
     </ErrorBoundary>

@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useTasks } from '@/lib/hooks';
 import { useTaskFilters } from '@/lib/use-task-filters';
 import { TaskList } from '@/components/TaskList';
@@ -10,23 +11,29 @@ export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
 
-  async function handleDelete(id: string) {
-    try {
-      await api.deleteTask(id);
-      refresh();
-    } catch (err) {
-      console.error('Failed to delete task:', err);
-    }
-  }
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await api.deleteTask(id);
+        refresh();
+      } catch (err) {
+        console.error('Failed to delete task:', err);
+      }
+    },
+    [refresh],
+  );
 
-  async function handleResume(id: string) {
-    try {
-      await api.updateTask(id, { status: 'running' });
-      refresh();
-    } catch (err) {
-      console.error('Failed to resume task:', err);
-    }
-  }
+  const handleResume = useCallback(
+    async (id: string) => {
+      try {
+        await api.updateTask(id, { status: 'running' });
+        refresh();
+      } catch (err) {
+        console.error('Failed to resume task:', err);
+      }
+    },
+    [refresh],
+  );
 
   return (
     <div className="flex h-screen">
@@ -47,8 +54,20 @@ export default function Dashboard() {
           )}
 
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground">
-              Loading...
+            <div className="flex flex-col gap-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="h-5 w-48 rounded bg-muted" />
+                    <div className="h-5 w-16 rounded bg-muted" />
+                  </div>
+                  <div className="mt-2 h-4 w-64 rounded bg-muted" />
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="h-5 w-20 rounded bg-muted" />
+                    <div className="h-4 w-32 rounded bg-muted" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <>
