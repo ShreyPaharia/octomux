@@ -112,16 +112,13 @@ describe('TaskCard', () => {
 
   // ─── Delete (closed/error/draft tasks) ──────────────────────────────────
 
-  it.each(['closed', 'error', 'draft'] as const)(
-    'shows delete button for %s tasks',
-    (status) => {
-      renderWithRouter(
-        <TaskCard task={makeTask({ status })} onClose={onClose} onDelete={onDelete} />,
-      );
-      expect(screen.getByTitle('Delete task')).toBeInTheDocument();
-      expect(screen.queryByTitle('Close task')).not.toBeInTheDocument();
-    },
-  );
+  it.each(['closed', 'error', 'draft'] as const)('shows delete button for %s tasks', (status) => {
+    renderWithRouter(
+      <TaskCard task={makeTask({ status })} onClose={onClose} onDelete={onDelete} />,
+    );
+    expect(screen.getByTitle('Delete task')).toBeInTheDocument();
+    expect(screen.queryByTitle('Close task')).not.toBeInTheDocument();
+  });
 
   it('calls onDelete with task id when delete button clicked on closed task', async () => {
     const user = userEvent.setup();
@@ -141,7 +138,9 @@ describe('TaskCard', () => {
   ];
 
   it.each(repoPaths)('extracts repo name "$expected" from "$path"', ({ path, expected }) => {
-    renderWithRouter(<TaskCard task={makeTask({ repo_path: path })} onClose={onClose} onDelete={onDelete} />);
+    renderWithRouter(
+      <TaskCard task={makeTask({ repo_path: path })} onClose={onClose} onDelete={onDelete} />,
+    );
     expect(screen.getByText(expected)).toBeInTheDocument();
   });
 });

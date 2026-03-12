@@ -11,7 +11,6 @@ import {
 } from './test-helpers.js';
 import type { Task, Agent } from './types.js';
 
-
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 vi.mock('./task-runner.js', async () => {
@@ -74,7 +73,6 @@ vi.mock('child_process', () => ({
     if (cb) cb(null, { stdout: '', stderr: '' });
     return undefined;
   }),
-
 }));
 
 const fs = (await import('fs')).default;
@@ -536,7 +534,6 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
   });
 });
 
-
 // ─── GET /api/browse ─────────────────────────────────────────────────────────
 
 describe('GET /api/browse', () => {
@@ -741,7 +738,6 @@ describe('GET /api/recent-repos', () => {
   });
 });
 
-
 // ─── POST /api/tasks/:id/user-terminal ──────────────────────────────────────
 
 describe('POST /api/tasks/:id/user-terminal', () => {
@@ -774,7 +770,6 @@ describe('POST /api/tasks/:id/user-terminal', () => {
     expect(res.status).toBe(400);
   });
 });
-
 
 // ─── GET /api/tasks with permission prompts ─────────────────────────────────
 
