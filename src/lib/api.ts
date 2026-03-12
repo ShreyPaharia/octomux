@@ -59,16 +59,7 @@ export const api = {
     request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
   createUserTerminal: (taskId: string) =>
     request<{ user_window_index: number }>(`/tasks/${taskId}/user-terminal`, { method: 'POST' }),
-  previewPR: (taskId: string, data: { base: string }) =>
-    request<{ title: string; body: string; base: string }>(`/tasks/${taskId}/pr/preview`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  createPR: (taskId: string, data: { base: string; title: string; body: string }) =>
-    request<Task>(`/tasks/${taskId}/pr`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+
   orchestratorStatus: () => request<OrchestratorStatus>('/orchestrator/status'),
   orchestratorStart: () => request<OrchestratorStatus>('/orchestrator/start', { method: 'POST' }),
   orchestratorStop: () => request<void>('/orchestrator/stop', { method: 'POST' }),
