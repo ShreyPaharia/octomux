@@ -12,16 +12,24 @@ const ALLOWED_TOOLS = [
   'Bash(cat:*)',
   'Bash(cd:*)',
   'Bash(echo:*)',
+  'Bash(env:*)',
   'Bash(find:*)',
   'Bash(grep:*)',
   'Bash(head:*)',
   'Bash(jq:*)',
   'Bash(ls:*)',
   'Bash(lsof:*)',
+  'Bash(pwd:*)',
+  'Bash(rg:*)',
+  'Bash(sed:*)',
+  'Bash(sort:*)',
   'Bash(sqlite3:*)',
+  'Bash(stat:*)',
   'Bash(tail:*)',
+  'Bash(tree:*)',
   'Bash(wc:*)',
   'Bash(which:*)',
+  'Bash(xargs:*)',
 
   // --- Safe write: build tools & package managers ---
   'Bash(bun:*)',
@@ -30,8 +38,10 @@ const ALLOWED_TOOLS = [
   'Bash(npx:*)',
   'Bash(npm:*)',
   'Bash(tsc:*)',
+  'Bash(vitest:*)',
+  'Bash(playwright:*)',
 
-  // --- Safe write: git (read + stage, no commit/push/force/reset) ---
+  // --- Safe: git (read + stage, no commit/push/force/reset) ---
   'Bash(git add:*)',
   'Bash(git branch:*)',
   'Bash(git checkout:*)',
@@ -43,17 +53,27 @@ const ALLOWED_TOOLS = [
   'Bash(git show:*)',
   'Bash(git rev-parse:*)',
   'Bash(git worktree:*)',
+  'Bash(git ls-remote:*)',
+  'Bash(git remote:*)',
+  'Bash(git fetch:*)',
+  'Bash(git merge:*)',
+  'Bash(git rebase:*)',
+  'Bash(git cherry-pick:*)',
+  'Bash(git tag:*)',
 
-  // --- Safe read: GitHub CLI (no PR creation) ---
+  // --- Safe read: GitHub CLI (no PR creation/merge) ---
   'Bash(gh issue:*)',
   'Bash(gh api:*)',
   'Bash(gh repo view:*)',
+  'Bash(gh pr view:*)',
+  'Bash(gh pr list:*)',
 
   // --- Safe write: file operations ---
   'Bash(cp:*)',
   'Bash(mkdir:*)',
   'Bash(chmod:*)',
   'Bash(touch:*)',
+  'Bash(mv:*)',
 
   // --- Safe write: network & misc ---
   'Bash(curl:*)',
