@@ -1,16 +1,25 @@
 {
   "name": "octomux-agents",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
+    "octomux-agents": "./bin/octomux-agents.js",
     "octomux": "./cli/dist/index.js"
   },
+  "files": [
+    "bin/",
+    "dist/",
+    "dist-server/",
+    "!dist-server/*.test.*",
+    "!dist-server/test-helpers.*",
+    "cli/dist/",
+    "cli/package.json"
+  ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
-    "build": "vite build && bun run build:server",
+    "build": "vite build && bun run build:server && bun run cli:build",
     "build:server": "tsc -p tsconfig.server.json",
     "start": "NODE_ENV=production node dist-server/index.js",
     "test": "vitest run",
@@ -23,6 +32,7 @@
     "format:check": "prettier --check .",
     "cli:build": "cd cli && tsc",
     "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper 2>/dev/null || true",
     "prepare": "husky"
   },
