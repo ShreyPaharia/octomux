@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 interface TaskFilterBarProps {
   activeStatus: 'open' | 'closed';
   counts: { open: number; closed: number };
@@ -11,7 +13,7 @@ function repoName(repoPath: string): string {
   return repoPath.split('/').pop() || repoPath;
 }
 
-export function TaskFilterBar({
+export const TaskFilterBar = memo(function TaskFilterBar({
   activeStatus,
   counts,
   onStatusChange,
@@ -58,4 +60,4 @@ export function TaskFilterBar({
       )}
     </div>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,7 +29,7 @@ interface TaskCardProps {
   onResume?: (id: string) => void;
 }
 
-export function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
   const navigate = useNavigate();
   const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
 
@@ -148,4 +149,4 @@ export function TaskCard({ task, onDelete, onResume }: TaskCardProps) {
       </CardContent>
     </Card>
   );
-}
+});
