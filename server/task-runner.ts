@@ -41,6 +41,55 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Kill all linked viewer sessions (`<tmuxSession>-v-*`) for a specific task.
+ * Safe to call even if no linked sessions exist.
+ */
+export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFile('tmux', ['list-sessions', '-F', '#{session_name}']));
+  } catch {
+    return; // tmux server not running or no sessions
+  }
+
+  const prefix = `${tmuxSession}-v-`;
+  const linked = stdout
+    .trim()
+    .split('\n')
+    .filter((name) => name.startsWith(prefix));
+
+  for (const session of linked) {
+    await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
+  }
+}
+
+/**
+ * Clean up orphaned `-v-` viewer sessions from previous runs.
+ * Only kills linked sessions whose parent session no longer exists.
+ */
+export async function cleanupOrphanedViewerSessions(): Promise<void> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFile('tmux', ['list-sessions', '-F', '#{session_name}']));
+  } catch {
+    return;
+  }
+
+  const sessions = new Set(stdout.trim().split('\n').filter(Boolean));
+  const viewerPattern = /^(octomux-agent-.+)-v-/;
+
+  for (const name of sessions) {
+    const match = name.match(viewerPattern);
+    if (match) {
+      const parentSession = match[1];
+      if (!sessions.has(parentSession)) {
+        await execFile('tmux', ['kill-session', '-t', name]).catch(() => {});
+      }
+    }
+  }
+}
+
 /** Generate a git-safe branch slug from a title + task ID suffix. */
 export function slugifyTitle(title: string, id: string): string {
   const slug = title
@@ -207,15 +256,17 @@ export async function closeTask(task: Task): Promise<void> {
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
   ).run(task.id);
 
-  // Kill tmux session — worktree and branch are preserved for resume
+  // Kill linked viewer sessions, then main tmux session — worktree and branch are preserved for resume
   if (task.tmux_session) {
+    await cleanupLinkedSessions(task.tmux_session);
     await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
   }
 }
 
 export async function deleteTask(task: Task): Promise<void> {
-  // Kill tmux session
+  // Kill linked viewer sessions, then main tmux session
   if (task.tmux_session) {
+    await cleanupLinkedSessions(task.tmux_session);
     await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
   }
 
@@ -293,7 +344,8 @@ export async function resumeTask(task: Task): Promise<void> {
       `UPDATE tasks SET status = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
-    // 2. Kill any stale tmux session
+    // 2. Kill any stale linked viewer sessions and tmux session
+    await cleanupLinkedSessions(session);
     await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
 
     // 3. Create fresh tmux session
