@@ -10,6 +10,7 @@ import { registerCloseTask } from './commands/close-task.js';
 import { registerDeleteTask } from './commands/delete-task.js';
 import { registerResumeTask } from './commands/resume-task.js';
 import { registerAddAgent } from './commands/add-agent.js';
+import { registerSendMessage } from './commands/send-message.js';
 
 const program = new Command();
 
@@ -31,6 +32,7 @@ registerCloseTask(program);
 registerDeleteTask(program);
 registerResumeTask(program);
 registerAddAgent(program);
+registerSendMessage(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();
