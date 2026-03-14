@@ -62,7 +62,15 @@ function StatusIcon({ item }: { item: SidebarItem }) {
             strokeWidth="1.5"
             strokeLinejoin="round"
           />
-          <line x1="8" y1="6" x2="8" y2="9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <line
+            x1="8"
+            y1="6"
+            x2="8"
+            y2="9.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
           <circle cx="8" cy="11.5" r="0.75" fill="currentColor" />
         </svg>
       );
@@ -75,7 +83,12 @@ function StatusIcon({ item }: { item: SidebarItem }) {
           aria-hidden="true"
         >
           <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <path
+            d="M5.5 5.5l5 5M10.5 5.5l-5 5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
         </svg>
       );
     default:
@@ -224,11 +237,7 @@ export function TaskSidebar() {
                   }`}
                 >
                   <StatusIcon item={item} />
-                  {!collapsed && (
-                    <span className="truncate max-w-[180px]">
-                      {item.title}
-                    </span>
-                  )}
+                  {!collapsed && <span className="truncate max-w-[180px]">{item.title}</span>}
                 </Link>
               );
             })}

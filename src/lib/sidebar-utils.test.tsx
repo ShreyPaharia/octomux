@@ -30,18 +30,12 @@ describe('groupTasksForSidebar', () => {
   it.each([
     {
       name: 'running before error',
-      tasks: [
-        makeTask({ id: '1', status: 'error' }),
-        makeTask({ id: '2', status: 'running' }),
-      ],
+      tasks: [makeTask({ id: '1', status: 'error' }), makeTask({ id: '2', status: 'running' })],
       expectedOrder: ['2', '1'],
     },
     {
       name: 'setting_up before error',
-      tasks: [
-        makeTask({ id: '1', status: 'error' }),
-        makeTask({ id: '2', status: 'setting_up' }),
-      ],
+      tasks: [makeTask({ id: '1', status: 'error' }), makeTask({ id: '2', status: 'setting_up' })],
       expectedOrder: ['2', '1'],
     },
     {
