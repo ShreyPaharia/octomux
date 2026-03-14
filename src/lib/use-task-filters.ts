@@ -38,7 +38,7 @@ export function useTaskFilters(tasks: Task[]) {
   }, [tasks, filters.repo]);
 
   const filtered = useMemo(() => {
-    return tasks.filter((t) => {
+    const result = tasks.filter((t) => {
       let statusMatch: boolean;
       if (filters.status === 'open') {
         statusMatch = OPEN_STATUSES.includes(t.status);
@@ -50,6 +50,27 @@ export function useTaskFilters(tasks: Task[]) {
       const repoMatch = !filters.repo || t.repo_path === filters.repo;
       return statusMatch && repoMatch;
     });
+
+    // Sort open tasks: needs_attention first, then working, then others
+    if (filters.status === 'open') {
+      const priorityOrder: Record<string, number> = {
+        needs_attention: 0,
+        working: 1,
+        running: 2,
+        setting_up: 3,
+        error: 4,
+        draft: 5,
+      };
+      result.sort((a, b) => {
+        const aPriority = priorityOrder[a.derived_status ?? a.status] ?? 9;
+        const bPriority = priorityOrder[b.derived_status ?? b.status] ?? 9;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        // Within same priority, keep newest first
+        return b.created_at.localeCompare(a.created_at);
+      });
+    }
+
+    return result;
   }, [tasks, filters]);
 
   function setFilter<K extends keyof TaskFilters>(key: K, value: TaskFilters[K]) {

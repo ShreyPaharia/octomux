@@ -6,6 +6,7 @@ import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { NotificationToggle } from '@/components/NotificationToggle';
 import { OrchestratorPanel } from '@/components/OrchestratorPanel';
+import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
@@ -52,7 +53,7 @@ export default function Dashboard() {
     <div className="flex h-screen">
       <div className="flex-1 overflow-auto">
         <div className="mx-auto max-w-3xl px-4 py-8">
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">octomux-agents</h1>
               <p className="text-sm text-muted-foreground">Autonomous agent fleet</p>
@@ -64,8 +65,18 @@ export default function Dashboard() {
           </div>
 
           {error && (
-            <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-              {error}
+            <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium">
+                    Unable to load tasks. Check that the server is running on port 7777.
+                  </p>
+                  <p className="mt-1 text-xs text-destructive/70">{error}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={refresh}>
+                  Retry
+                </Button>
+              </div>
             </div>
           )}
 
