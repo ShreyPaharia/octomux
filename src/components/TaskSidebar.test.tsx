@@ -48,11 +48,11 @@ describe('TaskSidebar', () => {
 
     const toggle = screen.getByRole('button', { name: /collapse/i });
     await user.click(toggle);
-    expect(screen.queryByText('Running task')).not.toBeVisible();
+    expect(screen.queryByText('Running task')).not.toBeInTheDocument();
 
     const expand = screen.getByRole('button', { name: /expand/i });
     await user.click(expand);
-    expect(await screen.findByText('Running task')).toBeVisible();
+    expect(await screen.findByText('Running task')).toBeInTheDocument();
   });
 
   it('persists collapsed state to localStorage', async () => {
