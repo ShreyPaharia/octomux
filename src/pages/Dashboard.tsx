@@ -1,15 +1,20 @@
 import { useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTasks } from '@/lib/hooks';
 import { useTaskFilters } from '@/lib/use-task-filters';
+import { useNotifications } from '@/lib/use-notifications';
 import { TaskList } from '@/components/TaskList';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
+import { NotificationToggle } from '@/components/NotificationToggle';
 import { OrchestratorPanel } from '@/components/OrchestratorPanel';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
+  useNotifications(tasks, navigate);
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -56,7 +61,10 @@ export default function Dashboard() {
               <h1 className="text-2xl font-bold tracking-tight">octomux-agents</h1>
               <p className="text-sm text-muted-foreground">Autonomous agent fleet</p>
             </div>
-            <CreateTaskDialog onCreated={refresh} />
+            <div className="flex items-center gap-2">
+              <NotificationToggle />
+              <CreateTaskDialog onCreated={refresh} />
+            </div>
           </div>
 
           {error && (
