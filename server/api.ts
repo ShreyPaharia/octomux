@@ -334,7 +334,7 @@ export function setupRoutes(app: Express): void {
       ] as const) {
         if (body[key] !== undefined) {
           fields.push(`${key} = ?`);
-          values.push(body[key] || null);
+          values.push(body[key] ?? null);
         }
       }
       if (fields.length > 0) {

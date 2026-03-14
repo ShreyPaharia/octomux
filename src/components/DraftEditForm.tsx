@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,6 +35,11 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Ref to read baseBranch inside useEffect without adding it as a dep.
+  // We only want to auto-set baseBranch when it's empty, not re-fetch on every change.
+  const baseBranchRef = useRef(baseBranch);
+  baseBranchRef.current = baseBranch;
+
   // Fetch branches + default branch when repo path changes
   useEffect(() => {
     const trimmed = repoPath.trim();
@@ -53,7 +58,7 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
         if (!cancelled) {
           setBranches(branchList);
           // Only auto-set base branch if it's currently empty
-          if (!baseBranch) {
+          if (!baseBranchRef.current) {
             setBaseBranch(defaultBranch.branch);
           }
         }
@@ -103,7 +108,7 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
     setError(null);
     setSaved(false);
     try {
-      await api.updateDraftTask(task.id, {
+      await api.updateTask(task.id, {
         title: title.trim(),
         description: description.trim(),
         repo_path: repoPath.trim(),
@@ -390,9 +395,14 @@ function FolderBrowser({
         ))}
       </div>
       <div className="flex items-center justify-between border-t border-border px-3 py-2">
-        <span className="font-mono text-[10px] text-muted-foreground truncate mr-2">
-          {data.current}
-        </span>
+        <div className="flex flex-col truncate mr-2">
+          <span className="font-mono text-[10px] text-muted-foreground truncate">
+            {data.current}
+          </span>
+          <span className="text-[10px] text-muted-foreground/60">
+            Double-click a git repo to select it
+          </span>
+        </div>
         <Button
           type="button"
           size="sm"

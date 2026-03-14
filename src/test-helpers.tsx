@@ -73,7 +73,6 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     getTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     createTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     updateTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    updateDraftTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     startTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     deleteTask: vi.fn().mockResolvedValue(undefined),
     addAgent: vi.fn().mockResolvedValue({
