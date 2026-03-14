@@ -34,14 +34,17 @@ export const PermissionPromptRow = memo(function PermissionPromptRow({
   return (
     <button
       onClick={handleClick}
-      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-amber-400 hover:bg-amber-500/10"
+      className="flex w-full items-center gap-2 rounded border-l-2 border-amber-500 bg-amber-500/5 px-2 py-1.5 text-left text-sm text-amber-400 hover:bg-amber-500/10"
     >
-      <span className="text-amber-500">&#x26A0;</span>
+      <span className="animate-pulse text-amber-500">&#x26A0;</span>
+      <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-500">
+        Action required
+      </span>
       <span className="text-zinc-400">{prompt.agent_label}</span>
       <span className="font-medium">
         {prompt.tool_name} {abbreviateInput(prompt.tool_input)}
       </span>
-      <span className="ml-auto text-zinc-500">{timeAgo(prompt.created_at)}</span>
+      <span className="ml-auto shrink-0 text-xs text-zinc-500">{timeAgo(prompt.created_at)}</span>
     </button>
   );
 });
