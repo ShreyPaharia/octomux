@@ -52,16 +52,12 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
         // Check for new pending permission prompts
         if (task.pending_prompts) {
           for (const prompt of task.pending_prompts) {
-            if (
-              prompt.status === 'pending' &&
-              !notifiedPrompts.current.has(prompt.id)
-            ) {
+            if (prompt.status === 'pending' && !notifiedPrompts.current.has(prompt.id)) {
               notifiedPrompts.current.add(prompt.id);
               sendNotification(`${prompt.agent_label} needs permission`, {
                 body: `${prompt.tool_name} — ${task.title}`,
                 tag: `permission-${prompt.id}`,
-                onClick: () =>
-                  navigate(`/tasks/${task.id}?agent=${prompt.agent_id}`),
+                onClick: () => navigate(`/tasks/${task.id}?agent=${prompt.agent_id}`),
               });
             }
           }
@@ -79,14 +75,11 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
             return prev && prev.status !== 'stopped';
           });
           if (hadActiveAgents) {
-            sendNotification(
-              task.status === 'error' ? `Task errored` : `Task closed`,
-              {
-                body: task.title,
-                tag: `task-${task.status}-${task.id}`,
-                onClick: () => navigate(`/tasks/${task.id}`),
-              },
-            );
+            sendNotification(task.status === 'error' ? `Task errored` : `Task closed`, {
+              body: task.title,
+              tag: `task-${task.status}-${task.id}`,
+              onClick: () => navigate(`/tasks/${task.id}`),
+            });
           }
         }
       }
