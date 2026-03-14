@@ -144,7 +144,7 @@ export default function TaskDetail() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-muted-foreground">
         Loading...
       </div>
     );
@@ -152,7 +152,7 @@ export default function TaskDetail() {
 
   if (!task) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4">
+      <div className="flex h-full flex-col items-center justify-center gap-4">
         <p className="text-destructive">{error || 'Task not found'}</p>
         <Button variant="outline" onClick={() => navigate('/')}>
           Back to Dashboard
@@ -171,7 +171,7 @@ export default function TaskDetail() {
     !!task.tmux_session && agents.length > 0 && activeWindow !== null && isTerminalAlive;
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-3">
