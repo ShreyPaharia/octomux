@@ -5,7 +5,6 @@ export interface SidebarItem {
   title: string;
   status: TaskStatus;
   derivedStatus: DerivedTaskStatus | null;
-  pendingPromptCount: number;
 }
 
 export interface SidebarGroup {
@@ -34,7 +33,6 @@ export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
       title: task.title,
       status: task.status,
       derivedStatus: task.derived_status ?? null,
-      pendingPromptCount: task.pending_prompts?.length ?? 0,
     };
     const existing = grouped.get(repo);
     if (existing) {
@@ -56,5 +54,6 @@ export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
     groups.push({ repo, items });
   }
 
+  groups.sort((a, b) => a.repo.localeCompare(b.repo));
   return groups;
 }

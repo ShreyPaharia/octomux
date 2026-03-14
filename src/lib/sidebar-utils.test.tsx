@@ -93,20 +93,6 @@ describe('groupTasksForSidebar', () => {
         title: 'My Task',
         repo_path: '/home/dev/repo',
         derived_status: 'needs_attention',
-        pending_prompts: [
-          {
-            id: 'p1',
-            task_id: '1',
-            agent_id: 'a1',
-            agent_label: 'Agent 1',
-            session_id: 'sess-1',
-            tool_name: 'bash',
-            tool_input: { command: 'rm -rf' },
-            status: 'pending' as const,
-            created_at: '2026-01-01 00:00:00',
-            resolved_at: null,
-          },
-        ],
       }),
     ];
     const groups = groupTasksForSidebar(tasks);
@@ -116,8 +102,17 @@ describe('groupTasksForSidebar', () => {
       title: 'My Task',
       status: 'running',
       derivedStatus: 'needs_attention',
-      pendingPromptCount: 1,
     });
+  });
+
+  it('sorts groups alphabetically by repo name', () => {
+    const tasks = [
+      makeTask({ id: '1', status: 'running', repo_path: '/home/dev/zebra' }),
+      makeTask({ id: '2', status: 'running', repo_path: '/home/dev/alpha' }),
+      makeTask({ id: '3', status: 'running', repo_path: '/home/dev/middle' }),
+    ];
+    const groups = groupTasksForSidebar(tasks);
+    expect(groups.map((g) => g.repo)).toEqual(['alpha', 'middle', 'zebra']);
   });
 
   // Type-only checks — these ensure the exported types satisfy the expected shape
@@ -127,7 +122,6 @@ describe('groupTasksForSidebar', () => {
       title: 'T',
       status: 'running',
       derivedStatus: null,
-      pendingPromptCount: 0,
     };
     const group: SidebarGroup = { repo: 'r', items: [item] };
     expect(group.repo).toBe('r');
