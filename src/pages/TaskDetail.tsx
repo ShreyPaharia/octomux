@@ -200,7 +200,9 @@ export default function TaskDetail() {
               <h1 className="truncate text-base font-semibold sm:text-lg">{task.title}</h1>
               <StatusBadge status={task.derived_status || task.status} />
             </div>
-            <p className="hidden max-w-xl truncate text-xs text-muted-foreground sm:block">{task.description}</p>
+            <p className="hidden max-w-xl truncate text-xs text-muted-foreground sm:block">
+              {task.description}
+            </p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
