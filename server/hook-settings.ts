@@ -7,6 +7,17 @@ import fs from 'fs';
  *
  * NEVER auto-allow: git push --force, git reset --hard, rm -rf, deploy commands
  */
+const DENIED_TOOLS = [
+  // Agents must use /octomux-create-commit and /octomux-create-pr skills instead
+  'Bash(git commit:*)',
+  'Bash(gh pr create:*)',
+
+  // Destructive operations
+  'Bash(git push --force:*)',
+  'Bash(git reset --hard:*)',
+  'Bash(rm -rf:*)',
+];
+
 const ALLOWED_TOOLS = [
   // --- Read-only shell commands ---
   'Bash(cat:*)',
@@ -34,20 +45,24 @@ const ALLOWED_TOOLS = [
   // --- Safe write: build tools & package managers ---
   'Bash(bun:*)',
   'Bash(bunx:*)',
+  'Bash(go:*)',
+  'Bash(GOPATH=$(go:*)',
   'Bash(node:*)',
   'Bash(npx:*)',
   'Bash(npm:*)',
+  'Bash(python3:*)',
   'Bash(tsc:*)',
   'Bash(vitest:*)',
   'Bash(playwright:*)',
 
-  // --- Safe: git (read + stage, no commit/push/force/reset) ---
+  // --- Safe: git (read + stage + push, commit denied — use /octomux-create-commit) ---
   'Bash(git add:*)',
   'Bash(git branch:*)',
   'Bash(git checkout:*)',
   'Bash(git diff:*)',
   'Bash(git log:*)',
   'Bash(git pull:*)',
+  'Bash(git push:*)',
   'Bash(git stash:*)',
   'Bash(git status:*)',
   'Bash(git show:*)',
@@ -61,7 +76,7 @@ const ALLOWED_TOOLS = [
   'Bash(git cherry-pick:*)',
   'Bash(git tag:*)',
 
-  // --- Safe read: GitHub CLI (no PR creation/merge) ---
+  // --- Safe: GitHub CLI (read only, PR creation denied — use /octomux-create-pr) ---
   'Bash(gh issue:*)',
   'Bash(gh api:*)',
   'Bash(gh repo view:*)',
@@ -78,6 +93,18 @@ const ALLOWED_TOOLS = [
   // --- Safe write: network & misc ---
   'Bash(curl:*)',
   'Bash(for:*)',
+
+  // --- Claude Code internal tools ---
+  'ExitPlanMode',
+  'AskUserQuestion',
+
+  // --- Atlassian MCP tools (read-only) ---
+  'mcp__plugin_atlassian_atlassian__getJiraIssue',
+  'mcp__plugin_atlassian_atlassian__searchJiraIssuesUsingJql',
+  'mcp__plugin_atlassian_atlassian__getVisibleJiraProjects',
+  'mcp__plugin_atlassian_atlassian__getConfluencePage',
+  'mcp__plugin_atlassian_atlassian__searchConfluenceUsingCql',
+  'mcp__plugin_atlassian_atlassian__searchAtlassian',
 
   // --- Playwright MCP tools ---
   'mcp__plugin_playwright_playwright__browser_click',
@@ -180,7 +207,9 @@ export function installHookSettings(worktreePath: string): void {
       : {};
   const existingAllow = Array.isArray(existingPerms.allow) ? (existingPerms.allow as string[]) : [];
   const mergedAllow = [...new Set([...ALLOWED_TOOLS, ...existingAllow])];
-  const mergedPermissions = { ...existingPerms, allow: mergedAllow };
+  const existingDeny = Array.isArray(existingPerms.deny) ? (existingPerms.deny as string[]) : [];
+  const mergedDeny = [...new Set([...DENIED_TOOLS, ...existingDeny])];
+  const mergedPermissions = { ...existingPerms, allow: mergedAllow, deny: mergedDeny };
 
   const merged = { ...existing, permissions: mergedPermissions, hooks: mergedHooks };
 
