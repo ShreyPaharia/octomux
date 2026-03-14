@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { useOrchestrator } from '@/lib/hooks';
 
@@ -8,34 +8,56 @@ const TerminalView = lazy(() =>
 
 const STORAGE_KEY = 'orchestrator-panel-open';
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 767px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  return isMobile;
+}
+
 export function OrchestratorPanel() {
   const [isOpen, setIsOpen] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
   const { running, loading, start, stop } = useOrchestrator();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(isOpen));
   }, [isOpen]);
 
+  const closePanel = useCallback(() => setIsOpen(false), []);
+
   if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-50 rounded-l-md border border-r-0 border-border bg-card px-1.5 py-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        className={`hidden md:block fixed right-0 top-1/2 -translate-y-1/2 z-50 rounded-l-md border-2 border-r-0 px-1.5 py-3 text-xs font-medium transition-colors ${
+          running
+            ? 'border-emerald-500/50 bg-card/90 text-foreground shadow-[0_0_8px_rgba(16,185,129,0.2)]'
+            : 'border-border bg-card/80 text-muted-foreground hover:bg-muted hover:text-foreground'
+        }`}
         style={{ writingMode: 'vertical-rl' }}
       >
         Orchestrator
-        {running && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+        {running && (
+          <span className="ml-1 inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+        )}
       </button>
     );
   }
 
-  return (
-    <div className="w-[500px] shrink-0 border-l border-border bg-card flex flex-col">
+  const panelContent = (
+    <>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
           <span
-            className={`h-2 w-2 rounded-full ${running ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
+            className={`h-2 w-2 rounded-full ${running ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/30'}`}
           />
           <span className="text-sm font-medium">Orchestrator</span>
         </div>
@@ -46,7 +68,7 @@ export function OrchestratorPanel() {
             </Button>
           )}
           <button
-            onClick={() => setIsOpen(false)}
+            onClick={closePanel}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <svg
@@ -89,6 +111,27 @@ export function OrchestratorPanel() {
           </Suspense>
         )}
       </div>
+    </>
+  );
+
+  // Mobile: full-width overlay
+  if (isMobile) {
+    return (
+      <>
+        {/* Backdrop */}
+        <div className="fixed inset-0 z-40 bg-black/50" onClick={closePanel} />
+        {/* Slide-out panel */}
+        <div className="fixed inset-y-0 right-0 z-50 w-full bg-card flex flex-col animate-in slide-in-from-right duration-200">
+          {panelContent}
+        </div>
+      </>
+    );
+  }
+
+  // Desktop: inline panel with responsive width
+  return (
+    <div className="w-[500px] max-[1279px]:w-[400px] max-[1023px]:w-[350px] shrink-0 border-l border-border bg-card flex flex-col">
+      {panelContent}
     </div>
   );
 }

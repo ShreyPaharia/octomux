@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
@@ -17,6 +18,7 @@ export default function TaskDetail() {
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
 
   const [resuming, setResuming] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(() => window.innerWidth >= 640);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
   const [searchParams] = useSearchParams();
@@ -174,9 +176,9 @@ export default function TaskDetail() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
+      <div className="flex items-center justify-between border-b border-border px-3 py-2 sm:px-4 sm:py-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={() => navigate('/')}>
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="16"
@@ -191,30 +193,30 @@ export default function TaskDetail() {
             >
               <path d="m15 18-6-6 6-6" />
             </svg>
-            Back
+            <span className="hidden sm:inline">Back</span>
           </Button>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold">{task.title}</h1>
+              <h1 className="truncate text-base font-semibold sm:text-lg">{task.title}</h1>
               <StatusBadge status={task.derived_status || task.status} />
             </div>
-            <p className="max-w-xl truncate text-xs text-muted-foreground">{task.description}</p>
+            <p className="hidden max-w-xl truncate text-xs text-muted-foreground sm:block">{task.description}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {task.pr_url && (
             <a
               href={task.pr_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm text-blue-400 hover:underline"
+              className="text-xs text-blue-400 hover:underline sm:text-sm"
             >
               PR #{task.pr_number}
             </a>
           )}
           {canResume && (
             <Button variant="outline" size="sm" disabled={resuming} onClick={handleResume}>
-              {resuming ? 'Resuming...' : 'Resume'}
+              {resuming ? '...' : 'Resume'}
             </Button>
           )}
 
@@ -238,7 +240,7 @@ export default function TaskDetail() {
                 <polyline points="16 18 22 12 16 6" />
                 <polyline points="8 6 2 12 8 18" />
               </svg>
-              Editor
+              <span className="hidden sm:inline">Editor</span>
             </Button>
           )}
           {isDraft && (
@@ -260,6 +262,91 @@ export default function TaskDetail() {
           {task.error}
         </div>
       )}
+
+      {/* Metadata panel */}
+      <div className="border-b border-border">
+        <button
+          onClick={() => setMetadataOpen((prev) => !prev)}
+          className="flex w-full items-center gap-1.5 px-4 py-1.5 text-xs text-muted-foreground hover:bg-muted/50"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`transition-transform ${metadataOpen ? 'rotate-90' : ''}`}
+          >
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+          Details
+        </button>
+        {metadataOpen && (
+          <div className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 px-4 pb-3 text-xs">
+            {task.repo_path && (
+              <>
+                <span className="text-muted-foreground">Repo</span>
+                <span className="font-mono text-muted-foreground">{task.repo_path}</span>
+              </>
+            )}
+            {task.branch && (
+              <>
+                <span className="text-muted-foreground">Branch</span>
+                <span className="font-mono text-muted-foreground">{task.branch}</span>
+              </>
+            )}
+            {task.base_branch && (
+              <>
+                <span className="text-muted-foreground">Base</span>
+                <Badge variant="outline" className="w-fit text-xs font-normal">
+                  {task.base_branch}
+                </Badge>
+              </>
+            )}
+            {task.description && (
+              <>
+                <span className="text-muted-foreground">Description</span>
+                <span className="whitespace-pre-wrap text-muted-foreground">
+                  {task.description}
+                </span>
+              </>
+            )}
+            {task.pr_url && (
+              <>
+                <span className="text-muted-foreground">PR</span>
+                <a
+                  href={task.pr_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:underline"
+                >
+                  #{task.pr_number} &mdash; {task.pr_url}
+                </a>
+              </>
+            )}
+            {task.created_at && (
+              <>
+                <span className="text-muted-foreground">Created</span>
+                <span className="text-muted-foreground">
+                  {new Date(task.created_at).toLocaleString()}
+                </span>
+              </>
+            )}
+            {task.updated_at && (
+              <>
+                <span className="text-muted-foreground">Updated</span>
+                <span className="text-muted-foreground">
+                  {new Date(task.updated_at).toLocaleString()}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Agent view — shown in agents mode */}
       {hasTerminal ? (

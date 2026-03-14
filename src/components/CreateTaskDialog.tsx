@@ -54,6 +54,19 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [browseData, setBrowseData] = useState<BrowseResult | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
 
+  // Inline validation — touched state per field
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  // Repo path validation state
+  const [repoValidation, setRepoValidation] = useState<'idle' | 'loading' | 'valid' | 'invalid'>(
+    'idle',
+  );
+
+  // Branch auto-generation tracking
+  const [branchIsAuto, setBranchIsAuto] = useState(true);
+
+  const markTouched = (field: string) => setTouched((prev) => ({ ...prev, [field]: true }));
+
   const canSubmit = title.trim() && description.trim() && repoPath.trim() && !submitting;
 
   // Fetch recent repos when dialog opens
@@ -66,16 +79,18 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
     }
   }, [open]);
 
-  // Fetch branches + default branch when repo path changes
+  // Fetch branches + default branch + validate repo when repo path changes
   useEffect(() => {
     const trimmed = repoPath.trim();
     if (!trimmed) {
       setBranches([]);
       setBaseBranch('');
+      setRepoValidation('idle');
       return;
     }
 
     let cancelled = false;
+    setRepoValidation('loading');
     const timer = setTimeout(async () => {
       try {
         const [branchList, defaultBranch] = await Promise.all([
@@ -85,19 +100,38 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         if (!cancelled) {
           setBranches(branchList);
           setBaseBranch(defaultBranch.branch);
+          setRepoValidation('valid');
         }
       } catch {
         if (!cancelled) {
           setBranches([]);
+          setRepoValidation('invalid');
         }
       }
-    }, 300); // debounce
+    }, 500); // debounce
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
   }, [repoPath]);
+
+  // Auto-generate branch name from title
+  useEffect(() => {
+    if (!branchIsAuto) return;
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setBranch('');
+      return;
+    }
+    const slug = trimmed
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    setBranch(slug ? `feat/${slug}` : '');
+  }, [title, branchIsAuto]);
 
   const filteredBranches = branches.filter((b) =>
     b.toLowerCase().includes(branchSearch.toLowerCase()),
@@ -154,6 +188,9 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
       setInitialPrompt('');
       setShowPrompt(false);
       setDraft(false);
+      setTouched({});
+      setRepoValidation('idle');
+      setBranchIsAuto(true);
       setOpen(false);
       onCreated();
     } catch (err) {
@@ -183,7 +220,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         </svg>
         New Task
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Create Task</DialogTitle>
         </DialogHeader>
@@ -195,7 +232,11 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
               placeholder="Fix order validation"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onBlur={() => markTouched('title')}
             />
+            {touched.title && !title.trim() && (
+              <p className="text-xs text-destructive">Title is required</p>
+            )}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="description">Description</Label>
@@ -205,20 +246,86 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => markTouched('description')}
             />
+            {touched.description && !description.trim() && (
+              <p className="text-xs text-destructive">Description is required</p>
+            )}
           </div>
 
           {/* Repository path with Browse button */}
           <div className="flex flex-col gap-2">
             <Label htmlFor="repo-path">Repository Path</Label>
             <div className="flex gap-2">
-              <Input
-                id="repo-path"
-                placeholder="/Users/you/projects/my-repo"
-                className="flex-1 font-mono text-sm"
-                value={repoPath}
-                onChange={(e) => setRepoPath(e.target.value)}
-              />
+              <div className="relative flex-1">
+                <Input
+                  id="repo-path"
+                  placeholder="/Users/you/projects/my-repo"
+                  className="font-mono text-sm pr-8"
+                  value={repoPath}
+                  onChange={(e) => setRepoPath(e.target.value)}
+                  onBlur={() => markTouched('repoPath')}
+                />
+                {/* Repo validation indicator */}
+                {repoPath.trim() && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2">
+                    {repoValidation === 'loading' && (
+                      <svg
+                        className="h-4 w-4 animate-spin text-muted-foreground"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        aria-label="Validating repo"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                    )}
+                    {repoValidation === 'valid' && (
+                      <svg
+                        className="h-4 w-4 text-emerald-500"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-label="Valid git repo"
+                      >
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    )}
+                    {repoValidation === 'invalid' && (
+                      <svg
+                        className="h-4 w-4 text-destructive"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-label="Not a git repository"
+                      >
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                      </svg>
+                    )}
+                  </span>
+                )}
+              </div>
               <Popover open={browseOpen} onOpenChange={setBrowseOpen}>
                 <PopoverTrigger
                   render={
@@ -237,6 +344,16 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
                 </PopoverContent>
               </Popover>
             </div>
+            {/* Repo validation message */}
+            {repoPath.trim() && repoValidation === 'valid' && (
+              <p className="text-xs text-emerald-500">Valid git repo</p>
+            )}
+            {repoPath.trim() && repoValidation === 'invalid' && (
+              <p className="text-xs text-destructive">Not a git repository</p>
+            )}
+            {touched.repoPath && !repoPath.trim() && (
+              <p className="text-xs text-destructive">Repository path is required</p>
+            )}
 
             {/* Recent repos */}
             {!repoPath.trim() && recentRepos.length > 0 && (
@@ -263,13 +380,23 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
 
           {/* Branch name */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="branch">Branch Name</Label>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="branch">Branch Name</Label>
+              {branchIsAuto && branch && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  auto
+                </span>
+              )}
+            </div>
             <Input
               id="branch"
               placeholder="feat/my-feature"
               className="font-mono text-sm"
               value={branch}
-              onChange={(e) => setBranch(e.target.value)}
+              onChange={(e) => {
+                setBranch(e.target.value);
+                setBranchIsAuto(false);
+              }}
             />
           </div>
 
@@ -380,7 +507,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
           </label>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="flex justify-end gap-2">
+          <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border bg-background pt-3 -mb-1">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>

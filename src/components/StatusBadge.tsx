@@ -15,7 +15,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     label: 'Needs attention',
     className: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
   },
-  done: { label: 'Done', className: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  done: { label: 'Done', className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
 };
 
 const fallbackConfig = {
