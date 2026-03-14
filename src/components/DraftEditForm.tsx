@@ -245,9 +245,7 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
                 <div className="max-h-[200px] overflow-y-auto">
                   {filteredBranches.length === 0 && (
                     <div className="px-3 py-3 text-center text-xs text-muted-foreground">
-                      {branches.length === 0
-                        ? 'Select a repository first'
-                        : 'No matching branches'}
+                      {branches.length === 0 ? 'Select a repository first' : 'No matching branches'}
                     </div>
                   )}
                   {filteredBranches.map((b) => (

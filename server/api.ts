@@ -294,9 +294,14 @@ export function setupRoutes(app: Express): void {
     }
 
     // Draft field updates (title, description, repo_path, branch, base_branch, initial_prompt)
-    const hasDraftFields = ['title', 'description', 'repo_path', 'branch', 'base_branch', 'initial_prompt'].some(
-      (k) => (body as Record<string, unknown>)[k] !== undefined,
-    );
+    const hasDraftFields = [
+      'title',
+      'description',
+      'repo_path',
+      'branch',
+      'base_branch',
+      'initial_prompt',
+    ].some((k) => (body as Record<string, unknown>)[k] !== undefined);
 
     if (hasDraftFields) {
       if (task.status !== 'draft') {

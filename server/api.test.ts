@@ -464,9 +464,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('rejects empty title on draft update', async () => {
     insertTask(db);
-    const res = await request(app)
-      .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ title: '   ' });
+    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ title: '   ' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('title');
   });
