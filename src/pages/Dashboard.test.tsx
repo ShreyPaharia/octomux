@@ -115,11 +115,19 @@ describe('Dashboard', () => {
     expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
   });
 
-  it('shows draft tasks in Open filter', async () => {
+  it('shows draft tasks in Backlog filter', async () => {
+    const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
       makeTask({ id: 't1', title: 'Draft Task', status: 'draft' }),
     ]);
     renderWithRouter(<Dashboard />);
+    // Default filter is 'open', so draft should NOT appear
+    await waitFor(() => {
+      expect(screen.getByText('Backlog (1)')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Draft Task')).not.toBeInTheDocument();
+    // Switch to backlog tab
+    await user.click(screen.getByText('Backlog (1)'));
     await waitFor(() => {
       expect(screen.getByText('Draft Task')).toBeInTheDocument();
     });

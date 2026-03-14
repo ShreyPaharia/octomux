@@ -438,6 +438,66 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.status).toBe(200);
     expect(resumeTask).toHaveBeenCalledOnce();
   });
+
+  // ─── Draft field updates ──────────────────────────────────────────────────
+
+  it('updates draft task fields', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    insertTask(db); // default status is 'draft'
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ title: 'Updated title', description: 'Updated desc', repo_path: '/tmp/other-repo' });
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('Updated title');
+    expect(res.body.description).toBe('Updated desc');
+    expect(res.body.repo_path).toBe('/tmp/other-repo');
+  });
+
+  it('rejects field updates on non-draft tasks', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ title: 'New title' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('draft');
+  });
+
+  it('rejects empty title on draft update', async () => {
+    insertTask(db);
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ title: '   ' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('title');
+  });
+
+  it('rejects empty description on draft update', async () => {
+    insertTask(db);
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ description: '' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('description');
+  });
+
+  it('rejects non-existent repo_path on draft update', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    insertTask(db);
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ repo_path: '/nonexistent/path' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('repo_path');
+  });
+
+  it('updates updated_at on draft field change', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    insertTask(db, { updated_at: '2020-01-01 00:00:00' });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ title: 'New title' });
+    expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
+  });
 });
 
 // ─── DELETE /api/tasks/:id ───────────────────────────────────────────────────

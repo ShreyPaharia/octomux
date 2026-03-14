@@ -1,9 +1,10 @@
 import { memo } from 'react';
+import type { StatusTab } from '@/lib/use-task-filters';
 
 interface TaskFilterBarProps {
-  activeStatus: 'open' | 'closed';
-  counts: { open: number; closed: number };
-  onStatusChange: (status: 'open' | 'closed') => void;
+  activeStatus: StatusTab;
+  counts: { open: number; closed: number; backlog: number };
+  onStatusChange: (status: StatusTab) => void;
   repos: string[];
   activeRepo: string;
   onRepoChange: (repo: string) => void;
@@ -23,6 +24,7 @@ export const TaskFilterBar = memo(function TaskFilterBar({
 }: TaskFilterBarProps) {
   const tabs = [
     { key: 'open' as const, label: `Open (${counts.open})` },
+    { key: 'backlog' as const, label: `Backlog (${counts.backlog})` },
     { key: 'closed' as const, label: `Closed (${counts.closed})` },
   ];
 
