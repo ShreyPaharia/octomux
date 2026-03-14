@@ -122,7 +122,10 @@ export function TaskSidebar() {
 
   const attentionCount = useMemo(
     () =>
-      allItems.filter((i) => i.status === 'error' || i.derivedStatus === 'needs_attention').length,
+      allItems.filter((i) => {
+        const effective = i.derivedStatus ?? i.status;
+        return effective === 'error' || effective === 'needs_attention';
+      }).length,
     [allItems],
   );
 
@@ -183,18 +186,14 @@ export function TaskSidebar() {
             )}
           </svg>
         </button>
-        {!collapsed && attentionCount > 0 && (
+        {attentionCount > 0 && (
           <span
             data-testid="attention-count"
-            className="ml-auto inline-flex items-center justify-center rounded-full bg-red-500/20 text-red-400 text-xs font-medium min-w-5 h-5 px-1.5"
-          >
-            {attentionCount}
-          </span>
-        )}
-        {collapsed && attentionCount > 0 && (
-          <span
-            data-testid="attention-count"
-            className="sr-only"
+            className={
+              collapsed
+                ? 'sr-only'
+                : 'ml-auto inline-flex items-center justify-center rounded-full bg-red-500/20 text-red-400 text-xs font-medium min-w-5 h-5 px-1.5'
+            }
           >
             {attentionCount}
           </span>
@@ -225,15 +224,11 @@ export function TaskSidebar() {
                   }`}
                 >
                   <StatusIcon item={item} />
-                  <span
-                    className="truncate"
-                    style={{
-                      maxWidth: 180,
-                      display: collapsed ? 'none' : undefined,
-                    }}
-                  >
-                    {item.title}
-                  </span>
+                  {!collapsed && (
+                    <span className="truncate max-w-[180px]">
+                      {item.title}
+                    </span>
+                  )}
                 </Link>
               );
             })}
