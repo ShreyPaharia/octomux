@@ -71,4 +71,10 @@ export interface AddAgentRequest {
 
 export interface UpdateTaskRequest {
   status?: 'closed' | 'running';
+  title?: string;
+  description?: string;
+  repo_path?: string;
+  branch?: string;
+  base_branch?: string;
+  initial_prompt?: string;
 }
