@@ -438,50 +438,47 @@ export function setupRoutes(app: Express): void {
   });
 
   // Send message to agent via tmux send-keys
-  app.post(
-    '/api/tasks/:id/agents/:agentId/message',
-    async (req: Request, res: Response) => {
-      const db = getDb();
-      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-        | Task
-        | undefined;
+  app.post('/api/tasks/:id/agents/:agentId/message', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
 
-      if (!task) {
-        res.status(404).json({ error: 'Task not found' });
-        return;
-      }
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
 
-      if (task.status !== 'running') {
-        res.status(400).json({ error: 'Task is not running' });
-        return;
-      }
+    if (task.status !== 'running') {
+      res.status(400).json({ error: 'Task is not running' });
+      return;
+    }
 
-      const agent = db
-        .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
-        .get(req.params.agentId, req.params.id) as Agent | undefined;
+    const agent = db
+      .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
+      .get(req.params.agentId, req.params.id) as Agent | undefined;
 
-      if (!agent) {
-        res.status(404).json({ error: 'Agent not found' });
-        return;
-      }
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
 
-      const { message } = req.body as { message?: string };
-      if (!message) {
-        res.status(400).json({ error: 'message is required' });
-        return;
-      }
+    const { message } = req.body as { message?: string };
+    if (!message) {
+      res.status(400).json({ error: 'message is required' });
+      return;
+    }
 
-      await execFile('tmux', [
-        'send-keys',
-        '-t',
-        `${task.tmux_session}:${agent.window_index}`,
-        message,
-        'Enter',
-      ]);
+    await execFile('tmux', [
+      'send-keys',
+      '-t',
+      `${task.tmux_session}:${agent.window_index}`,
+      message,
+      'Enter',
+    ]);
 
-      res.json({ success: true });
-    },
-  );
+    res.json({ success: true });
+  });
 
   // ─── Orchestrator ──────────────────────────────────────────────────────────
 

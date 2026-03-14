@@ -896,11 +896,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     insertAgent(db);
 
     const { execFile: execFileMock } = await import('child_process');
-    vi.mocked(execFileMock).mockImplementation(((
-      _cmd: string,
-      _args: any,
-      ...rest: any[]
-    ) => {
+    vi.mocked(execFileMock).mockImplementation(((_cmd: string, _args: any, ...rest: any[]) => {
       const cb = rest.find((a: any) => typeof a === 'function');
       if (cb) cb(null, { stdout: '', stderr: '' });
       return undefined as any;
