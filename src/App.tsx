@@ -1,9 +1,20 @@
 import { Component, lazy, type ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
+import { useTasks } from './lib/hooks';
+import { useNotifications } from './lib/use-notifications';
 import Dashboard from './pages/Dashboard';
 import TaskDetailLayout from './components/TaskDetailLayout';
 
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+
+/** Runs at app root so notifications fire on every page. */
+function GlobalNotifications() {
+  const { tasks } = useTasks();
+  const navigate = useNavigate();
+  useNotifications(tasks, navigate);
+  return null;
+}
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -40,6 +51,8 @@ export default function App() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-background text-foreground">
+        <Toaster theme="dark" position="bottom-right" richColors />
+        <GlobalNotifications />
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route element={<TaskDetailLayout />}>

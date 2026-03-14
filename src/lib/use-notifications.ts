@@ -1,20 +1,36 @@
 import { useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+import { toast } from 'sonner';
 import type { Task, Agent } from '../../server/types';
-import { sendNotification, getNotificationsEnabled } from './notification-settings';
+import { getNotificationsEnabled } from './notification-settings';
 
 interface AgentSnapshot {
   status: Agent['status'];
   hookActivity: Agent['hook_activity'];
 }
 
+/** Format: "Task Title #1" — extracts number from agent label like "Agent 1". */
+function agentTag(task: Task, agent: Agent): string {
+  const num = agent.label.match(/\d+/)?.[0] ?? '1';
+  return `${task.title} #${num}`;
+}
+
+/** Returns the task ID from the current URL if on a task detail page. */
+function useViewingTaskId(): string | null {
+  const { pathname } = useLocation();
+  const match = pathname.match(/^\/tasks\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
 /**
- * Watches tasks for agent state transitions and fires desktop notifications.
- * Accepts the tasks array from useTasks() — no extra fetching.
+ * Watches tasks for agent state transitions and fires toast notifications.
+ * Suppresses notifications for the task the user is currently viewing.
  */
 export function useNotifications(tasks: Task[], navigate: (path: string) => void) {
   const prevAgents = useRef<Map<string, AgentSnapshot>>(new Map());
   const notifiedPrompts = useRef<Set<string>>(new Set());
   const initialized = useRef(false);
+  const viewingTaskId = useViewingTaskId();
 
   useEffect(() => {
     if (!getNotificationsEnabled()) return;
@@ -24,6 +40,8 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
 
     for (const task of tasks) {
       if (!task.agents) continue;
+
+      const isViewing = task.id === viewingTaskId;
 
       for (const agent of task.agents) {
         currentAgents.set(agent.id, {
@@ -37,29 +55,50 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
         const prev = prevAgents.current.get(agent.id);
         if (!prev) continue;
 
+        // Skip notifications for the task the user is currently viewing
+        if (isViewing) continue;
+
         // Agent stopped transition
         if (prev.status !== 'stopped' && agent.status === 'stopped') {
-          sendNotification(`${agent.label} stopped`, {
-            body: task.title,
-            tag: `agent-stopped-${agent.id}`,
-            onClick: () => navigate(`/tasks/${task.id}`),
+          const taskId = task.id;
+          toast(agentTag(task, agent), {
+            description: 'Agent stopped',
+            action: {
+              label: 'View',
+              onClick: () => navigate(`/tasks/${taskId}`),
+            },
+          });
+        }
+
+        // Agent finished (went idle after being active)
+        if (prev.hookActivity === 'active' && agent.hook_activity === 'idle') {
+          const taskId = task.id;
+          toast.success(agentTag(task, agent), {
+            description: 'Agent finished',
+            action: {
+              label: 'View',
+              onClick: () => navigate(`/tasks/${taskId}`),
+            },
           });
         }
       }
 
-      // Task moved to closed/error
-      if (initialized.current) {
-        // Check for new pending permission prompts
-        if (task.pending_prompts) {
-          for (const prompt of task.pending_prompts) {
-            if (prompt.status === 'pending' && !notifiedPrompts.current.has(prompt.id)) {
-              notifiedPrompts.current.add(prompt.id);
-              sendNotification(`${prompt.agent_label} needs permission`, {
-                body: `${prompt.tool_name} — ${task.title}`,
-                tag: `permission-${prompt.id}`,
-                onClick: () => navigate(`/tasks/${task.id}?agent=${prompt.agent_id}`),
-              });
-            }
+      // Check for new pending permission prompts
+      if (initialized.current && !isViewing && task.pending_prompts) {
+        for (const prompt of task.pending_prompts) {
+          if (prompt.status === 'pending' && !notifiedPrompts.current.has(prompt.id)) {
+            notifiedPrompts.current.add(prompt.id);
+            const taskId = task.id;
+            const agentId = prompt.agent_id;
+            const promptAgent = task.agents?.find((a) => a.id === prompt.agent_id);
+            const promptTag = promptAgent ? agentTag(task, promptAgent) : `${task.title} #?`;
+            toast.warning(promptTag, {
+              description: `Needs permission: ${prompt.tool_name}`,
+              action: {
+                label: 'View',
+                onClick: () => navigate(`/tasks/${taskId}?agent=${agentId}`),
+              },
+            });
           }
         }
       }
@@ -68,18 +107,32 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
     // Task-level transitions (closed/error)
     if (initialized.current) {
       for (const task of tasks) {
+        if (task.id === viewingTaskId) continue;
+
         if (task.status === 'closed' || task.status === 'error') {
-          // Check if any agent was previously non-stopped (task just ended)
           const hadActiveAgents = task.agents?.some((a) => {
             const prev = prevAgents.current.get(a.id);
             return prev && prev.status !== 'stopped';
           });
           if (hadActiveAgents) {
-            sendNotification(task.status === 'error' ? `Task errored` : `Task closed`, {
-              body: task.title,
-              tag: `task-${task.status}-${task.id}`,
-              onClick: () => navigate(`/tasks/${task.id}`),
-            });
+            const taskId = task.id;
+            if (task.status === 'error') {
+              toast.error(task.title, {
+                description: 'Task errored',
+                action: {
+                  label: 'View',
+                  onClick: () => navigate(`/tasks/${taskId}`),
+                },
+              });
+            } else {
+              toast.success(task.title, {
+                description: 'Task closed',
+                action: {
+                  label: 'View',
+                  onClick: () => navigate(`/tasks/${taskId}`),
+                },
+              });
+            }
           }
         }
       }
@@ -98,5 +151,5 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
       }
       initialized.current = true;
     }
-  }, [tasks, navigate]);
+  }, [tasks, navigate, viewingTaskId]);
 }
