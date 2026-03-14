@@ -58,10 +58,15 @@ describe('installHookSettings', () => {
     expect(settings.permissions.allow).toContain('Bash(node:*)');
     expect(settings.permissions.allow).toContain('Bash(for:*)');
     expect(settings.permissions.allow).toContain('Bash(sqlite3:*)');
-    // git commit, git push, git merge, git rebase, gh pr should NOT be auto-allowed
-    expect(settings.permissions.allow).not.toContain('Bash(git commit:*)');
-    expect(settings.permissions.allow).not.toContain('Bash(git push:*)');
-    expect(settings.permissions.allow).not.toContain('Bash(gh pr:*)');
+    // git commit and gh pr create should be denied (use octomux skills instead)
+    expect(settings.permissions.deny).toContain('Bash(git commit:*)');
+    expect(settings.permissions.deny).toContain('Bash(gh pr create:*)');
+    // Destructive operations denied
+    expect(settings.permissions.deny).toContain('Bash(git push --force:*)');
+    expect(settings.permissions.deny).toContain('Bash(git reset --hard:*)');
+    expect(settings.permissions.deny).toContain('Bash(rm -rf:*)');
+    // Regular git push is allowed (only force push is denied)
+    expect(settings.permissions.allow).toContain('Bash(git push:*)');
     expect(settings.permissions.allow).toContain(
       'mcp__plugin_playwright_playwright__browser_snapshot',
     );
@@ -103,8 +108,10 @@ describe('installHookSettings', () => {
     );
     // Custom tool preserved
     expect(settings.permissions.allow).toContain('Bash(custom-tool:*)');
-    // Existing deny preserved
-    expect(settings.permissions.deny).toEqual(['Bash(rm:*)']);
+    // Existing deny preserved and merged with our denied tools
+    expect(settings.permissions.deny).toContain('Bash(rm:*)');
+    expect(settings.permissions.deny).toContain('Bash(git commit:*)');
+    expect(settings.permissions.deny).toContain('Bash(rm -rf:*)');
     // Our tools added
     expect(settings.permissions.allow).toContain('Bash(bun:*)');
     // No duplicates
