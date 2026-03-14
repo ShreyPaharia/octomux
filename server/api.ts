@@ -254,12 +254,13 @@ export function setupRoutes(app: Express): void {
 
     const id = nanoid(12);
     db.prepare(
-      'INSERT INTO tasks (id, title, description, repo_path, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       id,
       body.title,
       body.description,
       body.repo_path,
+      'draft',
       body.branch ?? null,
       body.base_branch ?? null,
       body.initial_prompt ?? null,

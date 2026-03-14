@@ -107,6 +107,9 @@ export function initDb(instance: Database.Database): void {
     instance.exec('ALTER TABLE agents ADD COLUMN hook_activity_updated_at TEXT');
   }
 
+  // Migrate any legacy 'created' status to 'draft' (old schema default)
+  instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);
+
   // Resolve any stale pending permission prompts from previous run
   // and reset agents stuck in 'waiting' state (hooks lost during restart)
   instance.exec(
