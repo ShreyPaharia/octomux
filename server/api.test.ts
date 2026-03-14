@@ -129,6 +129,12 @@ const notFoundCases = [
     method: 'post' as const,
     url: '/api/tasks/nonexistent/user-terminal',
   },
+  {
+    name: 'POST /api/tasks/:id/agents/:agentId/message',
+    method: 'post' as const,
+    url: '/api/tasks/nonexistent/agents/agent1/message',
+    body: { message: 'hello' },
+  },
 ];
 
 describe('404 for nonexistent resources', () => {
@@ -879,5 +885,91 @@ describe('GET /api/tasks with permission prompts', () => {
     const res = await request(app).get('/api/tasks/t1').expect(200);
     expect(res.body.pending_prompts).toHaveLength(1);
     expect(res.body.derived_status).toBe('working');
+  });
+});
+
+// ─── POST /api/tasks/:id/agents/:agentId/message ────────────────────────────
+
+describe('POST /api/tasks/:id/agents/:agentId/message', () => {
+  it('sends message via tmux send-keys and returns success', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((
+      _cmd: string,
+      _args: any,
+      ...rest: any[]
+    ) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (cb) cb(null, { stdout: '', stderr: '' });
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .send({ message: 'hello agent' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const calls = vi.mocked(execFileMock).mock.calls;
+    const tmuxCall = calls.find(
+      (c: any[]) => c[0] === 'tmux' && (c[1] as string[]).includes('send-keys'),
+    );
+    expect(tmuxCall).toBeDefined();
+    const args = tmuxCall![1] as string[];
+    expect(args).toContain('send-keys');
+    expect(args).toContain('-t');
+    expect(args).toContain(`${DEFAULTS.runningTask.tmux_session}:${DEFAULTS.agent.window_index}`);
+    expect(args).toContain('hello agent');
+    expect(args).toContain('Enter');
+  });
+
+  it('returns 404 when agent not found on existing task', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents/nonexistent/message`)
+      .send({ message: 'hello' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('Agent not found');
+  });
+
+  it('returns 400 when task is not running', async () => {
+    insertTask(db, { status: 'closed' });
+    insertAgent(db);
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .send({ message: 'hello' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('not running');
+  });
+
+  it('returns 400 when message is missing', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('message is required');
+  });
+
+  it('returns 400 when message is empty string', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .send({ message: '' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('message is required');
   });
 });
