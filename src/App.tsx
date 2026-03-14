@@ -1,6 +1,7 @@
-import { Component, lazy, Suspense, type ReactNode } from 'react';
+import { Component, lazy, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
+import TaskDetailLayout from './components/TaskDetailLayout';
 
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 
@@ -41,20 +42,9 @@ export default function App() {
       <div className="min-h-screen bg-background text-foreground">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route
-            path="/tasks/:id"
-            element={
-              <Suspense
-                fallback={
-                  <div className="flex h-screen items-center justify-center text-muted-foreground">
-                    Loading...
-                  </div>
-                }
-              >
-                <TaskDetail />
-              </Suspense>
-            }
-          />
+          <Route element={<TaskDetailLayout />}>
+            <Route path="/tasks/:id" element={<TaskDetail />} />
+          </Route>
         </Routes>
       </div>
     </ErrorBoundary>
