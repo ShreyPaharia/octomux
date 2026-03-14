@@ -293,7 +293,56 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    if (body.status === 'running') {
+    // Draft field updates (title, description, repo_path, branch, base_branch, initial_prompt)
+    const hasDraftFields = ['title', 'description', 'repo_path', 'branch', 'base_branch', 'initial_prompt'].some(
+      (k) => (body as Record<string, unknown>)[k] !== undefined,
+    );
+
+    if (hasDraftFields) {
+      if (task.status !== 'draft') {
+        res.status(400).json({ error: 'Can only edit fields on draft tasks' });
+        return;
+      }
+      if (body.title !== undefined && !body.title.trim()) {
+        res.status(400).json({ error: 'title is required' });
+        return;
+      }
+      if (body.description !== undefined && !body.description.trim()) {
+        res.status(400).json({ error: 'description is required' });
+        return;
+      }
+      if (body.repo_path !== undefined) {
+        if (!body.repo_path.trim()) {
+          res.status(400).json({ error: 'repo_path is required' });
+          return;
+        }
+        if (!fs.existsSync(body.repo_path)) {
+          res.status(400).json({ error: 'repo_path does not exist' });
+          return;
+        }
+      }
+
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      for (const key of [
+        'title',
+        'description',
+        'repo_path',
+        'branch',
+        'base_branch',
+        'initial_prompt',
+      ] as const) {
+        if (body[key] !== undefined) {
+          fields.push(`${key} = ?`);
+          values.push(body[key] || null);
+        }
+      }
+      if (fields.length > 0) {
+        fields.push(`updated_at = datetime('now')`);
+        values.push(task.id);
+        db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+      }
+    } else if (body.status === 'running') {
       // Resume task
       if (task.status !== 'closed' && task.status !== 'error') {
         res.status(400).json({ error: 'Can only resume tasks in closed or error state' });

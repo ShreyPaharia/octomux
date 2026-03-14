@@ -16,11 +16,11 @@ describe('useTaskFilters', () => {
     makeTask({ id: 't4', status: 'error', repo_path: '/tmp/beta' }),
   ];
 
-  it('defaults to open filter showing non-closed tasks', () => {
+  it('defaults to open filter showing non-closed, non-draft tasks', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     expect(result.current.filters.status).toBe('open');
     const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t1', 't2', 't4']);
+    expect(ids).toEqual(['t1', 't4']);
   });
 
   it('switches to closed filter', () => {
@@ -30,10 +30,18 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t3']);
   });
 
-  it('provides status counts', () => {
+  it('switches to backlog filter showing only drafts', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
-    expect(result.current.counts.open).toBe(3);
+    act(() => result.current.setFilter('status', 'backlog'));
+    const ids = result.current.filtered.map((t) => t.id);
+    expect(ids).toEqual(['t2']);
+  });
+
+  it('provides status counts including backlog', () => {
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    expect(result.current.counts.open).toBe(2);
     expect(result.current.counts.closed).toBe(1);
+    expect(result.current.counts.backlog).toBe(1);
   });
 
   // ─── Repo filtering ─────────────────────────────────────────────────────
@@ -61,6 +69,7 @@ describe('useTaskFilters', () => {
     act(() => result.current.setFilter('repo', '/tmp/alpha'));
     expect(result.current.counts.open).toBe(1);
     expect(result.current.counts.closed).toBe(1);
+    expect(result.current.counts.backlog).toBe(0);
   });
 
   it('shows all tasks for selected repo when switching status tabs', () => {
@@ -87,6 +96,20 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t3']);
   });
 
+  it('persists backlog status filter to localStorage', () => {
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    act(() => result.current.setFilter('status', 'backlog'));
+    expect(localStorage.getItem('octomux-status-filter')).toBe('backlog');
+  });
+
+  it('restores backlog status filter from localStorage', () => {
+    localStorage.setItem('octomux-status-filter', 'backlog');
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    expect(result.current.filters.status).toBe('backlog');
+    const ids = result.current.filtered.map((t) => t.id);
+    expect(ids).toEqual(['t2']);
+  });
+
   // ─── Repo persistence ──────────────────────────────────────────────
 
   it('persists repo filter to localStorage', () => {
@@ -99,8 +122,8 @@ describe('useTaskFilters', () => {
     localStorage.setItem('octomux-repo-filter', '/tmp/beta');
     const { result } = renderHook(() => useTaskFilters(tasks));
     expect(result.current.filters.repo).toBe('/tmp/beta');
-    // Should filter immediately
+    // Should filter immediately — open tasks in beta (no draft)
     const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t2', 't4']); // open tasks in beta
+    expect(ids).toEqual(['t4']);
   });
 });
