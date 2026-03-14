@@ -6,7 +6,7 @@ import { renderWithRouter } from '../test-helpers';
 
 const defaultProps = {
   activeStatus: 'open' as const,
-  counts: { open: 3, closed: 1 },
+  counts: { open: 3, closed: 1, backlog: 2 },
   onStatusChange: () => {},
   repos: ['/path/to/alpha', '/path/to/beta'],
   activeRepo: '',
@@ -14,9 +14,10 @@ const defaultProps = {
 };
 
 describe('TaskFilterBar', () => {
-  it('renders Open and Closed tabs with counts', () => {
+  it('renders Open, Backlog, and Closed tabs with counts', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} />);
     expect(screen.getByText('Open (3)')).toBeInTheDocument();
+    expect(screen.getByText('Backlog (2)')).toBeInTheDocument();
     expect(screen.getByText('Closed (1)')).toBeInTheDocument();
   });
 
@@ -32,6 +33,14 @@ describe('TaskFilterBar', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} onStatusChange={onChange} />);
     await user.click(screen.getByText('Closed (1)'));
     expect(onChange).toHaveBeenCalledWith('closed');
+  });
+
+  it('calls onStatusChange when clicking backlog tab', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithRouter(<TaskFilterBar {...defaultProps} onStatusChange={onChange} />);
+    await user.click(screen.getByText('Backlog (2)'));
+    expect(onChange).toHaveBeenCalledWith('backlog');
   });
 
   it('renders repo dropdown when multiple repos exist', () => {

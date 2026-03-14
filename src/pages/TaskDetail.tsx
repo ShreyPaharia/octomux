@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
+import { DraftEditForm } from '@/components/DraftEditForm';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
@@ -279,6 +280,10 @@ export default function TaskDetail() {
             />
           </div>
         </div>
+      ) : isDraft ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <DraftEditForm task={task} onSaved={refresh} onStart={handleStart} />
+        </div>
       ) : (
         <div
           className={
@@ -287,7 +292,7 @@ export default function TaskDetail() {
               : 'hidden'
           }
         >
-          {task.status === 'draft' || task.status === 'setting_up'
+          {task.status === 'setting_up'
             ? 'Setting up terminal...'
             : task.status === 'closed' || task.status === 'error'
               ? 'Terminal session ended'

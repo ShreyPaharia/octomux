@@ -169,7 +169,9 @@ describe('TaskDetail', () => {
     apiMock.getTask.mockResolvedValue(makeTask({ status: 'draft', agents: [] }));
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Start')).toBeInTheDocument();
+      // Header has a Start button, edit form also has one
+      const startButtons = screen.getAllByText('Start');
+      expect(startButtons.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -178,9 +180,10 @@ describe('TaskDetail', () => {
     apiMock.getTask.mockResolvedValue(makeTask({ status: 'draft', agents: [] }));
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Start')).toBeInTheDocument();
+      expect(screen.getAllByText('Start').length).toBeGreaterThanOrEqual(1);
     });
-    await user.click(screen.getByText('Start'));
+    // Click the header Start button (first one)
+    await user.click(screen.getAllByText('Start')[0]);
     await waitFor(() => {
       expect(apiMock.startTask).toHaveBeenCalledWith('test-task-01');
     });
@@ -217,11 +220,12 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('shows "Setting up" message when task is draft', async () => {
+  it('shows edit form when task is draft', async () => {
     apiMock.getTask.mockResolvedValue(makeTask({ status: 'draft', agents: [] }));
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+      expect(screen.getByLabelText('Title')).toBeInTheDocument();
+      expect(screen.getByLabelText('Description')).toBeInTheDocument();
     });
   });
 
