@@ -46,7 +46,6 @@ const ALLOWED_TOOLS = [
   'Bash(bun:*)',
   'Bash(bunx:*)',
   'Bash(go:*)',
-  'Bash(GOPATH=$(go:*)',
   'Bash(node:*)',
   'Bash(npx:*)',
   'Bash(npm:*)',
