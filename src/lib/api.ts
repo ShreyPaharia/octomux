@@ -51,10 +51,6 @@ export const api = {
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (id: string, data: UpdateTaskRequest) =>
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  updateDraftTask: (
-    id: string,
-    data: Omit<UpdateTaskRequest, 'status'>,
-  ) => request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   startTask: (id: string) => request<Task>(`/tasks/${id}/start`, { method: 'POST' }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
