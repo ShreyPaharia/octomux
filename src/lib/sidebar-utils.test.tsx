@@ -52,6 +52,14 @@ describe('groupTasksForSidebar', () => {
       ],
       expectedOrder: ['2', '1'],
     },
+    {
+      name: 'needs_attention before error',
+      tasks: [
+        makeTask({ id: '1', status: 'error' }),
+        makeTask({ id: '2', status: 'running', derived_status: 'needs_attention' }),
+      ],
+      expectedOrder: ['2', '1'],
+    },
   ])('sorts $name', ({ tasks, expectedOrder }) => {
     const groups = groupTasksForSidebar(tasks);
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));

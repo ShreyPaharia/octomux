@@ -15,8 +15,7 @@ export interface SidebarGroup {
 
 const ACTIVE_STATUSES: TaskStatus[] = ['running', 'setting_up', 'error'];
 
-/** Sort priority: running/setting_up first, then error/needs_attention, then rest.
- *  Within running: needs_attention sorts after normal running. */
+/** Sort priority: running/setting_up (0), needs_attention (1), error (2), rest (3). */
 function sortPriority(item: SidebarItem): number {
   if (item.status === 'error') return 2;
   if (item.derivedStatus === 'needs_attention') return 1;
