@@ -78,11 +78,13 @@ describe('CreateTaskDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(apiMock.createTask).toHaveBeenCalledWith({
-        title: 'Fix bug',
-        description: 'Fix the order bug',
-        repo_path: '/tmp/repo',
-      });
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Fix bug',
+          description: 'Fix the order bug',
+          repo_path: '/tmp/repo',
+        }),
+      );
     });
   });
 
@@ -102,11 +104,13 @@ describe('CreateTaskDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(apiMock.createTask).toHaveBeenCalledWith({
-        title: 'Fix bug',
-        description: 'Desc',
-        repo_path: '/tmp/repo',
-      });
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Fix bug',
+          description: 'Desc',
+          repo_path: '/tmp/repo',
+        }),
+      );
     });
   });
 
@@ -145,12 +149,14 @@ describe('CreateTaskDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(apiMock.createTask).toHaveBeenCalledWith({
-        title: 'Fix bug',
-        description: 'Desc',
-        repo_path: '/tmp/repo',
-        draft: true,
-      });
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Fix bug',
+          description: 'Desc',
+          repo_path: '/tmp/repo',
+          draft: true,
+        }),
+      );
     });
   });
 
@@ -160,11 +166,8 @@ describe('CreateTaskDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(apiMock.createTask).toHaveBeenCalledWith({
-        title: 'Fix bug',
-        description: 'Desc',
-        repo_path: '/tmp/repo',
-      });
+      const call = apiMock.createTask.mock.calls[0][0];
+      expect(call.draft).toBeUndefined();
     });
   });
 
@@ -173,7 +176,10 @@ describe('CreateTaskDialog', () => {
   it('sends branch when provided', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.type(screen.getByLabelText('Branch Name'), 'feat/my-feature');
+    // Clear the auto-generated branch and type a custom one
+    const branchInput = screen.getByLabelText('Branch Name');
+    await user.clear(branchInput);
+    await user.type(branchInput, 'feat/my-feature');
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
@@ -183,14 +189,14 @@ describe('CreateTaskDialog', () => {
     });
   });
 
-  it('does not send branch when empty', async () => {
+  it('sends auto-generated branch from title', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
       const call = apiMock.createTask.mock.calls[0][0];
-      expect(call.branch).toBeUndefined();
+      expect(call.branch).toBe('feat/fix-bug');
     });
   });
 
