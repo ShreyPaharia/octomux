@@ -57,5 +57,4 @@ Each task gets a **git worktree** for isolation, a **tmux session** for process 
 ## Links
 
 - [octomux.dev](https://octomux.dev) (coming soon)
-- [GitHub](https://github.com/ShreyPaharia/octomux-agents)
 - [npm](https://www.npmjs.com/package/octomux)
