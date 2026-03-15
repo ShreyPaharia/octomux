@@ -18,9 +18,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: https://registry.npmjs.org
 
       - run: bun install
+
+      # setup-node with registry-url AFTER bun install, so bun doesn't overwrite .npmrc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
 
       - run: bun run lint
 
