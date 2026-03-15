@@ -98,23 +98,23 @@ Test files excluded from dist-server via existing `"files"` config.
    - `tmux` installed → if not, print: `tmux is required. Install with: brew install tmux`
    - `git` installed → if not, print: `git is required. Install with: brew install git`
    - `claude` CLI installed → if not, print: `Claude Code CLI is required. See: https://docs.anthropic.com/en/docs/claude-code`
-3. Start Express server on `--port` or `PORT` env var (default 7777)
+3. Install Claude Code skills (if not already present):
+   - Check if `~/.claude/skills/octomux-create-task/` exists
+   - If not, copy generalized skill files from the package's bundled `skills/` directory to `~/.claude/skills/`
+   - Skills shipped: `octomux-create-task`, `octomux-create-pr`, `octomux-create-commit`
+   - Skills use `octomux <command>` (not hardcoded paths) so they work for any user
+   - Print: `Installed octomux skills for Claude Code` (silent if already installed)
+4. Start Express server on `--port` or `PORT` env var (default 7777)
    - Detect EADDRINUSE and print: `Port 7777 is in use. Try: octomux start --port 8080`
-4. Auto-open browser: `exec('open http://localhost:<port>')` on macOS (skip if `--no-open`)
-5. Print: `Dashboard running at http://localhost:<port> — press Ctrl+C to stop`
+5. Auto-open browser: `exec('open http://localhost:<port>')` on macOS (skip if `--no-open`)
+6. Print: `Dashboard running at http://localhost:<port> — press Ctrl+C to stop`
 
-### CLI commands (all except `start`, `init`)
+### CLI commands (all except `start`)
 All CLI commands require a running server. Before making HTTP requests, check connectivity and print a helpful error if the server is unreachable:
 ```
 Error: Cannot connect to octomux server at http://localhost:7777
 Start it with: octomux start
 ```
-
-### `octomux init`
-Run in a git repo to prepare it for octomux:
-1. Check current directory is a git repo
-2. Create `.claude/settings.local.json` with sensible agent permission defaults
-3. Print what was created and suggest next steps
 
 ## 4. CI/CD via GitHub Actions
 
@@ -159,38 +159,34 @@ jobs:
 - Push tag to trigger publish workflow
 - Auto-generate changelog from conventional commits using `conventional-changelog-cli`
 
-## 5. `octomux init` Command
+## 5. Bundled Skills
 
 ### Purpose
-Prepare a repo for use with octomux by scaffolding recommended Claude Code settings.
+Ship Claude Code skills inside the npm package so users get slash commands (`/octomux-create-task`, etc.) automatically.
 
-### Behavior
-```bash
-$ cd my-project
-$ octomux init
+### Skills to bundle
+Package includes a `skills/` directory with generalized versions of:
+- `octomux-create-task/SKILL.md` — create tasks from within Claude Code
+- `octomux-create-pr/SKILL.md` — create PRs for completed tasks
+- `octomux-create-commit/SKILL.md` — generate conventional commits
+
+### Generalization
+Current skills reference hardcoded paths like `/Users/shreypaharia/.../cli/dist/index.js`. Generalized versions use `octomux <command>` (the globally installed binary). Remove any user-specific repo path mappings — let the skill query the API for recent repos instead.
+
+### Installation logic (in `octomux start`)
+```js
+const skillsDir = path.join(os.homedir(), '.claude', 'skills');
+const bundledSkills = path.join(__dirname, '..', 'skills');
+for (const skill of fs.readdirSync(bundledSkills)) {
+  const target = path.join(skillsDir, skill);
+  if (!fs.existsSync(target)) {
+    fs.cpSync(path.join(bundledSkills, skill), target, { recursive: true });
+  }
+}
 ```
 
-1. Verify current directory is a git repo (check for `.git/`)
-2. Create `.claude/settings.local.json` if it doesn't exist:
-   ```json
-   {
-     "permissions": {
-       "allow": [
-         "Bash(git *)",
-         "Bash(npm *)",
-         "Bash(bun *)",
-         "Read",
-         "Write",
-         "Edit"
-       ]
-     }
-   }
-   ```
-3. Print summary:
-   ```
-   Created .claude/settings.local.json with recommended agent permissions.
-   Add to .gitignore: .claude/settings.local.json
-   ```
+### Package.json update
+Add `"skills/"` to the `files` array so skills are included in the npm tarball.
 
 ## 6. Landing Page (octomux.dev)
 
@@ -325,8 +321,13 @@ Before every publish, run `npm pack --dry-run` to verify package contents. Ensur
 - [ ] Auto-open browser on start (macOS `open` command)
 - [ ] Add EADDRINUSE detection with helpful error
 - [ ] Add server connectivity check to CLI commands
-- [ ] Implement `octomux init` command
-- [ ] Remove duplicate `octomux init` section (consolidate §3 and §5)
+- [ ] Auto-install Claude Code skills on `octomux start` (if not present)
+
+### Skills
+- [ ] Generalize skills (replace hardcoded paths with `octomux` CLI commands)
+- [ ] Create `skills/` directory in package with bundled skill markdown files
+- [ ] Add `"skills/"` to `files` array in package.json
+- [ ] Add skill install logic to `octomux start` (copy to `~/.claude/skills/`)
 
 ### CI/CD
 - [ ] Create `.github/workflows/ci.yml`
