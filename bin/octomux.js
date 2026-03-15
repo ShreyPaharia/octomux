@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { execFileSync, exec as execCb } from 'child_process';
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, cpSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import os from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,8 +19,6 @@ const command = args[0];
 
 if (command === 'start') {
   await runStart(args.slice(1));
-} else if (command === 'init') {
-  runInit();
 } else {
   // Delegate to CLI (commander-based) for all other commands
   await import('../cli/dist/index.js');
@@ -43,6 +42,9 @@ async function runStart(startArgs) {
 
   // Welcome banner
   console.log(`\n\uD83D\uDC19 octomux v${version}\n`);
+
+  // Install bundled skills
+  installSkills();
 
   // Preflight checks
   const required = [
@@ -108,32 +110,24 @@ async function runStart(startArgs) {
   }
 }
 
-// ─── init command ────────────────────────────────────────────────────────────
+// ─── skill installer ─────────────────────────────────────────────────────────
 
-function runInit() {
-  // Verify git repo
-  if (!existsSync('.git')) {
-    console.error('Error: Current directory is not a git repository.');
-    console.error('Run this command from the root of a git repo.');
-    process.exit(1);
+function installSkills() {
+  const skillsSource = path.join(__dirname, '..', 'skills');
+  const skillsTarget = path.join(os.homedir(), '.claude', 'skills');
+
+  if (!existsSync(skillsSource)) return;
+
+  let installed = false;
+  for (const skill of readdirSync(skillsSource)) {
+    const target = path.join(skillsTarget, skill);
+    if (!existsSync(target)) {
+      mkdirSync(target, { recursive: true });
+      cpSync(path.join(skillsSource, skill), target, { recursive: true });
+      installed = true;
+    }
   }
-
-  const settingsPath = path.join('.claude', 'settings.local.json');
-
-  if (existsSync(settingsPath)) {
-    console.log(`${settingsPath} already exists. No changes made.`);
-    return;
+  if (installed) {
+    console.log('Installed octomux skills for Claude Code');
   }
-
-  const settings = {
-    permissions: {
-      allow: ['Bash(git *)', 'Bash(npm *)', 'Bash(bun *)', 'Read', 'Write', 'Edit'],
-    },
-  };
-
-  mkdirSync('.claude', { recursive: true });
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-
-  console.log(`Created ${settingsPath} with recommended agent permissions.`);
-  console.log(`Add to .gitignore: .claude/settings.local.json`);
 }

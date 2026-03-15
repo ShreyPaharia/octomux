@@ -15,7 +15,8 @@
     "!dist-server/*.test.*",
     "!dist-server/test-helpers.*",
     "cli/dist/",
-    "cli/package.json"
+    "cli/package.json",
+    "skills/"
   ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
