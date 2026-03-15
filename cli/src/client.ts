@@ -59,7 +59,9 @@ async function request<T>(baseUrl: string, path: string, options?: RequestInit):
       (err as NodeJS.ErrnoException).cause &&
       ((err as NodeJS.ErrnoException).cause as NodeJS.ErrnoException).code === 'ECONNREFUSED'
     ) {
-      throw new Error(`Cannot connect to octomux server at ${baseUrl}. Is it running?`);
+      throw new Error(
+        `Cannot connect to octomux server at ${baseUrl.replace('/api', '')}\nStart it with: octomux start`,
+      );
     }
     throw err;
   }
