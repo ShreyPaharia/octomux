@@ -10,7 +10,6 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -20,9 +19,6 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
-
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
 
       - run: bun install
 
@@ -34,7 +30,9 @@ jobs:
 
       - run: bun run build
 
-      - run: npm publish --provenance --access public
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - uses: softprops/action-gh-release@v2
         with:
