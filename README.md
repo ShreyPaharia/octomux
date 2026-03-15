@@ -1,73 +1,61 @@
-# octomux-agents
+# octomux
 
-Web dashboard for orchestrating autonomous Claude Code agents. Create tasks, watch agents work in live embedded terminals, get PRs. Runs locally.
+Orchestrate autonomous Claude Code agents from a web dashboard.
+Create tasks, watch agents work in live terminals, get PRs.
 
-## Tech Stack
+## Prerequisites
 
-- **Frontend:** React 19 + Vite + Tailwind CSS 4 + shadcn/ui
-- **Backend:** Express 5 + better-sqlite3 (WAL mode) + node-pty + WebSockets
-- **Terminal:** xterm.js → node-pty → tmux
-- **Isolation:** git worktrees per task, tmux sessions per task
+- **macOS** (ARM64 or x64)
+- **Node.js 20+** — [nodejs.org](https://nodejs.org)
+- **Xcode Command Line Tools** — `xcode-select --install`
+- **tmux** — `brew install tmux`
+- **git** — `brew install git`
+- **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
 
 ## Install
 
-### From npm
+```bash
+npm install -g octomux
+```
+
+## Quick Start
 
 ```bash
-npm install -g octomux-agents
-octomux-agents              # starts dashboard at http://localhost:7777
+cd your-project
+octomux init          # scaffold .claude/ settings
+octomux start         # open dashboard at http://localhost:7777
 ```
 
-Or run without installing:
+## CLI Commands
 
-```bash
-npx octomux-agents
-```
+| Command | Description |
+|---------|-------------|
+| `octomux start` | Launch the web dashboard |
+| `octomux init` | Scaffold `.claude/` settings in current repo |
+| `octomux create-task` | Create a new task |
+| `octomux list-tasks` | List all tasks |
+| `octomux get-task <id>` | Get task details |
+| `octomux close-task <id>` | Stop agents, preserve worktree |
+| `octomux delete-task <id>` | Full cleanup (worktree, branch, DB) |
+| `octomux resume-task <id>` | Resume a closed task |
+| `octomux add-agent <task-id>` | Add an agent to a task |
+| `octomux send-message <task-id> <agent-id> "msg"` | Send a message to an agent |
 
-### Prerequisites
+## Configuration
 
-The following must be available on your system:
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--port <port>` | Port for the dashboard | `7777` |
+| `--no-open` | Don't auto-open browser on start | — |
+| `PORT` env var | Alternative to `--port` | `7777` |
+| `OCTOMUX_URL` env var | Server URL for CLI commands | `http://localhost:7777` |
 
-- **tmux** — `brew install tmux` (macOS) or `apt install tmux` (Linux)
-- **git** — already installed on most systems
-- **claude** — [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+## How It Works
 
-### From source (development)
+Each task gets a **git worktree** for isolation, a **tmux session** for process management, and one or more **Claude Code agents** running in tmux windows. Watch it all from the web dashboard with live terminal streaming.
 
-```bash
-bun install
-bun run dev      # starts Express (port 7777) + Vite dev server
-```
+## Links
 
-## CLI
-
-```bash
-node cli/dist/index.js create-task --title "..." --description "..." --repo-path /path/to/repo
-node cli/dist/index.js list-tasks [--status running]
-node cli/dist/index.js get-task <id>
-node cli/dist/index.js close-task <id>
-```
-
-## Architecture
-
-```
-server/           Express backend (API, terminal streaming, task lifecycle, DB)
-  api.ts          REST routes
-  task-runner.ts  worktree + tmux + claude lifecycle
-  db.ts           SQLite singleton
-  types.ts        shared types (Task, Agent, TaskStatus, AgentStatus)
-src/              React SPA (pages, components, lib/api.ts)
-cli/              CLI tool for task management
-e2e/              Playwright E2E tests
-```
-
-## Task Lifecycle
-
-```
-draft → setting_up → running → closed / error
-```
-
-Each task gets a git worktree at `<repo>/.worktrees/<id>`, a tmux session `octomux-agent-<id>`, and a branch `agents/<id>`. Each agent runs in a tmux window within the session.
-
-- **Close** — stops agents and kills the tmux session. Worktree and branch are preserved so the task can be resumed later.
-- **Delete** — kills tmux session, removes worktree, deletes branch, and removes DB rows. Full cleanup, not reversible.
+- [octomux.dev](https://octomux.dev) (coming soon)
+- [GitHub](https://github.com/ShreyPaharia/octomux-agents)
+- [npm](https://www.npmjs.com/package/octomux)
