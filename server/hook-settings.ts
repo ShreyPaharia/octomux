@@ -7,12 +7,12 @@ import fs from 'fs';
  *
  * NEVER auto-allow: git push --force, git reset --hard, rm -rf, deploy commands
  */
-const DENIED_TOOLS = [
-  // Agents must use /octomux-create-commit and /octomux-create-pr skills instead
-  'Bash(git commit:*)',
-  'Bash(gh pr create:*)',
+// Tools that are neither allowed nor denied will prompt for permission each time.
+// git commit and gh pr create are intentionally omitted from both lists so agents
+// must get explicit approval before committing or creating PRs.
 
-  // Destructive operations
+const DENIED_TOOLS = [
+  // Destructive operations — always blocked
   'Bash(git push --force:*)',
   'Bash(git reset --hard:*)',
   'Bash(rm -rf:*)',

@@ -28,8 +28,7 @@ async function createDraftTask(
       title: overrides.title ?? 'Test Task',
       description: overrides.description ?? 'A test task',
       repo_path:
-        overrides.repo_path ??
-        '/Users/shreypaharia/Documents/Projects/Ostium/octomux-agents',
+        overrides.repo_path ?? '/Users/shreypaharia/Documents/Projects/Ostium/octomux-agents',
       branch: overrides.branch ?? undefined,
       base_branch: overrides.base_branch ?? undefined,
       draft: true,

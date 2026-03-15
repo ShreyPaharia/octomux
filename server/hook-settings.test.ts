@@ -58,9 +58,11 @@ describe('installHookSettings', () => {
     expect(settings.permissions.allow).toContain('Bash(node:*)');
     expect(settings.permissions.allow).toContain('Bash(for:*)');
     expect(settings.permissions.allow).toContain('Bash(sqlite3:*)');
-    // git commit and gh pr create should be denied (use octomux skills instead)
-    expect(settings.permissions.deny).toContain('Bash(git commit:*)');
-    expect(settings.permissions.deny).toContain('Bash(gh pr create:*)');
+    // git commit and gh pr create should NOT be in allow or deny (prompts for permission)
+    expect(settings.permissions.allow).not.toContain('Bash(git commit:*)');
+    expect(settings.permissions.allow).not.toContain('Bash(gh pr create:*)');
+    expect(settings.permissions.deny).not.toContain('Bash(git commit:*)');
+    expect(settings.permissions.deny).not.toContain('Bash(gh pr create:*)');
     // Destructive operations denied
     expect(settings.permissions.deny).toContain('Bash(git push --force:*)');
     expect(settings.permissions.deny).toContain('Bash(git reset --hard:*)');
@@ -110,7 +112,6 @@ describe('installHookSettings', () => {
     expect(settings.permissions.allow).toContain('Bash(custom-tool:*)');
     // Existing deny preserved and merged with our denied tools
     expect(settings.permissions.deny).toContain('Bash(rm:*)');
-    expect(settings.permissions.deny).toContain('Bash(git commit:*)');
     expect(settings.permissions.deny).toContain('Bash(rm -rf:*)');
     // Our tools added
     expect(settings.permissions.allow).toContain('Bash(bun:*)');
