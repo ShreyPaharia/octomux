@@ -1,11 +1,19 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_DIR = path.join(__dirname, '..', 'data');
+const isProduction = process.env.NODE_ENV === 'production';
+
+const PROD_DB_DIR = path.join(os.homedir(), '.octomux', 'data');
+const DEV_DB_DIR = path.join(__dirname, '..', 'data');
+const DB_DIR = isProduction ? PROD_DB_DIR : DEV_DB_DIR;
 const DB_PATH = path.join(DB_DIR, 'tasks.db');
+
+/** Path to the old package-relative database (for migration detection). */
+const OLD_DB_PATH = path.join(__dirname, '..', 'data', 'tasks.db');
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -62,6 +70,15 @@ let db: Database.Database;
 export function getDb(): Database.Database {
   if (!db) {
     fs.mkdirSync(DB_DIR, { recursive: true });
+
+    // In production, check for database at old package-relative location
+    if (isProduction && OLD_DB_PATH !== DB_PATH && fs.existsSync(OLD_DB_PATH)) {
+      console.log(
+        `Found database at old location: ${OLD_DB_PATH}\n` +
+          `Copy to ${DB_PATH} to migrate your data.`,
+      );
+    }
+
     db = new Database(DB_PATH);
     initDb(db);
   }
