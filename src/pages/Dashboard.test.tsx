@@ -40,7 +40,7 @@ describe('Dashboard', () => {
   it('renders header and new task button', async () => {
     renderWithRouter(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getByText('octomux-agents')).toBeInTheDocument();
+      expect(screen.getByText('octomux')).toBeInTheDocument();
     });
     expect(screen.getByText('New Task')).toBeInTheDocument();
   });
