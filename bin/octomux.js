@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, exec as execCb } from 'child_process';
-import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, cpSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, cpSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
