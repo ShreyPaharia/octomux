@@ -13,3 +13,4 @@ playwright-report/
 blob-report/
 .playwright-mcp/
 .worktrees/
+.claude/
