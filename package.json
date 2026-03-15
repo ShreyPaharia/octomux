@@ -2,6 +2,10 @@
   "name": "octomux",
   "version": "1.0.2",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShreyPaharia/octomux.git"
+  },
   "bin": {
     "octomux": "./bin/octomux.js"
   },
