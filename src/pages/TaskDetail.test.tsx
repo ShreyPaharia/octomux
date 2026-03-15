@@ -138,7 +138,9 @@ describe('TaskDetail', () => {
   it.each(headerElements)('shows $name in header', async ({ text }) => {
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText(text)).toBeInTheDocument();
+      // Description may appear in both the truncated header and the body
+      const matches = screen.getAllByText(text);
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
   });
 
