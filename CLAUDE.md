@@ -1,7 +1,8 @@
-# octomux-agents
+# octomux
 
-Web dashboard for orchestrating autonomous Claude Code agents. Create tasks, watch agents
-work in live embedded terminals (xterm.js), get PRs. Localhost tool, not deployed.
+npm package (`octomux`) for orchestrating autonomous Claude Code agents from a web dashboard.
+Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
+`./data/` in development (`NODE_ENV !== 'production'`).
 
 ## Tech Stack
 
@@ -11,6 +12,7 @@ work in live embedded terminals (xterm.js), get PRs. Localhost tool, not deploye
 - **Isolation:** git worktrees per task, tmux sessions per task, tmux windows per agent
 - **IDs:** nanoid(12)
 - **Runtime:** bun (package manager + script runner), tsx (dev server)
+- **Binary:** single `octomux` command (`bin/octomux.js`) — `start` launches dashboard, all other subcommands are CLI operations
 
 ## Commands
 
