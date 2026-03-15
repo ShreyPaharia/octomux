@@ -55,12 +55,13 @@ export default function Dashboard() {
         <div className="mx-auto max-w-3xl px-4 py-8">
           <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex items-center gap-3">
-                <img src="/logo.png" alt="octomux" className="h-8 w-8" />
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight">octomux</h1>
-                  <p className="text-sm text-muted-foreground">Autonomous agent fleet</p>
-                </div>
+              <div className="flex items-center gap-2.5">
+                <img
+                  src="/logo.png"
+                  alt="octomux"
+                  className="h-8 w-8 brightness-150 saturate-200"
+                />
+                <h1 className="text-2xl font-bold tracking-tight">octomux</h1>
               </div>
             </div>
             <div className="flex items-center gap-2">
