@@ -76,8 +76,16 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\nPort ${PORT} is in use. Try: octomux start --port 8080`);
+    process.exit(1);
+  }
+  throw err;
+});
+
 server.listen(PORT, () => {
-  console.warn(`octomux-agents running at http://localhost:${PORT}`);
+  console.warn(`octomux running at http://localhost:${PORT}`);
 });
 
 // ─── Graceful Shutdown ──────────────────────────────────────────────────────
