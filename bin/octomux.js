@@ -127,14 +127,7 @@ function runInit() {
 
   const settings = {
     permissions: {
-      allow: [
-        'Bash(git *)',
-        'Bash(npm *)',
-        'Bash(bun *)',
-        'Read',
-        'Write',
-        'Edit',
-      ],
+      allow: ['Bash(git *)', 'Bash(npm *)', 'Bash(bun *)', 'Read', 'Write', 'Edit'],
     },
   };
 

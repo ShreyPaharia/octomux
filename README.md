@@ -28,27 +28,27 @@ octomux start         # open dashboard at http://localhost:7777
 
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `octomux start` | Launch the web dashboard |
-| `octomux init` | Scaffold `.claude/` settings in current repo |
-| `octomux create-task` | Create a new task |
-| `octomux list-tasks` | List all tasks |
-| `octomux get-task <id>` | Get task details |
-| `octomux close-task <id>` | Stop agents, preserve worktree |
-| `octomux delete-task <id>` | Full cleanup (worktree, branch, DB) |
-| `octomux resume-task <id>` | Resume a closed task |
-| `octomux add-agent <task-id>` | Add an agent to a task |
-| `octomux send-message <task-id> <agent-id> "msg"` | Send a message to an agent |
+| Command                                           | Description                                  |
+| ------------------------------------------------- | -------------------------------------------- |
+| `octomux start`                                   | Launch the web dashboard                     |
+| `octomux init`                                    | Scaffold `.claude/` settings in current repo |
+| `octomux create-task`                             | Create a new task                            |
+| `octomux list-tasks`                              | List all tasks                               |
+| `octomux get-task <id>`                           | Get task details                             |
+| `octomux close-task <id>`                         | Stop agents, preserve worktree               |
+| `octomux delete-task <id>`                        | Full cleanup (worktree, branch, DB)          |
+| `octomux resume-task <id>`                        | Resume a closed task                         |
+| `octomux add-agent <task-id>`                     | Add an agent to a task                       |
+| `octomux send-message <task-id> <agent-id> "msg"` | Send a message to an agent                   |
 
 ## Configuration
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--port <port>` | Port for the dashboard | `7777` |
-| `--no-open` | Don't auto-open browser on start | — |
-| `PORT` env var | Alternative to `--port` | `7777` |
-| `OCTOMUX_URL` env var | Server URL for CLI commands | `http://localhost:7777` |
+| Option                | Description                      | Default                 |
+| --------------------- | -------------------------------- | ----------------------- |
+| `--port <port>`       | Port for the dashboard           | `7777`                  |
+| `--no-open`           | Don't auto-open browser on start | —                       |
+| `PORT` env var        | Alternative to `--port`          | `7777`                  |
+| `OCTOMUX_URL` env var | Server URL for CLI commands      | `http://localhost:7777` |
 
 ## How It Works
 
