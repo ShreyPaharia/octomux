@@ -55,8 +55,13 @@ export default function Dashboard() {
         <div className="mx-auto max-w-3xl px-4 py-8">
           <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">octomux-agents</h1>
-              <p className="text-sm text-muted-foreground">Autonomous agent fleet</p>
+              <div className="flex items-center gap-3">
+                <img src="/logo.png" alt="octomux" className="h-8 w-8" />
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight">octomux</h1>
+                  <p className="text-sm text-muted-foreground">Autonomous agent fleet</p>
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <NotificationToggle />

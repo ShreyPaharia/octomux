@@ -95,6 +95,6 @@ test.describe('Task Detail', () => {
 
     // Should be on dashboard
     await expect(page).toHaveURL('/');
-    await expect(page.getByRole('heading', { name: 'octomux-agents' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'octomux' })).toBeVisible();
   });
 });
