@@ -49,6 +49,7 @@
     ]
   },
   "trustedDependencies": [
+    "better-sqlite3",
     "husky"
   ],
   "dependencies": {
