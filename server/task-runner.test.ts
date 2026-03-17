@@ -1009,4 +1009,3 @@ describe('deleteTask linked session cleanup', () => {
     expect(callOrder).toEqual([`${session}-v-xyz789`, session]);
   });
 });
-
