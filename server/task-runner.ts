@@ -164,13 +164,7 @@ export async function startTask(task: Task): Promise<void> {
       fs.writeFileSync(promptFile, task.initial_prompt);
       claudeCmd += ` "$(cat ${promptFile})"`;
     }
-    await execFile('tmux', [
-      'send-keys',
-      '-t',
-      `${session}:${windowIndex}`,
-      claudeCmd,
-      'Enter',
-    ]);
+    await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, claudeCmd, 'Enter']);
     // Clean up the temp prompt file after a short delay (shell has read it)
     if (promptFile) {
       const pf = promptFile;
@@ -411,5 +405,3 @@ export async function resumeTask(task: Task): Promise<void> {
     ).run((err as Error).message, task.id);
   }
 }
-
-
