@@ -180,17 +180,31 @@ export function TaskSidebar() {
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            {/* Panel outline */}
+            <rect
+              x="1.5"
+              y="2.5"
+              width="13"
+              height="11"
+              rx="1.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+            {/* Sidebar divider */}
+            <path d="M5.5 2.5v11" stroke="currentColor" strokeWidth="1.5" />
             {collapsed ? (
+              /* Arrow pointing right (expand) */
               <path
-                d="M6 3l5 5-5 5"
+                d="M9 6l2 2-2 2"
                 stroke="currentColor"
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
             ) : (
+              /* Arrow pointing left (collapse) */
               <path
-                d="M10 3l-5 5 5 5"
+                d="M11 6l-2 2 2 2"
                 stroke="currentColor"
                 strokeWidth="1.5"
                 strokeLinecap="round"
