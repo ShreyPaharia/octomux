@@ -133,7 +133,7 @@ describe('TaskDetail', () => {
   const headerElements = [
     { name: 'title', text: 'Fix order validation' },
     { name: 'description', text: 'Add negative quantity checks' },
-    { name: 'back button', text: 'Back' },
+    { name: 'back button', text: 'Tasks' },
   ];
 
   it.each(headerElements)('shows $name in header', async ({ text }) => {
@@ -284,9 +284,9 @@ describe('TaskDetail', () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Back')).toBeInTheDocument();
+      expect(screen.getByText('Tasks')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('Back'));
+    await user.click(screen.getByText('Tasks'));
     expect(mockNavigate).toHaveBeenCalledWith('/');
   });
 
