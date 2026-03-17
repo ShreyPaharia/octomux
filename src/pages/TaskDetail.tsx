@@ -43,12 +43,22 @@ export default function TaskDetail() {
   const userWindowIndex = task?.user_window_index ?? localUserWindowIndex;
 
   // --- Per-task state save/restore on task switch ---
+  // Refs let the switch effect read current values without depending on them,
+  // so it only fires when taskId actually changes.
   const prevTaskIdRef = useRef<string>(taskId);
+  const activeWindowRef = useRef(activeWindow);
+  const modeRef = useRef(mode);
+  activeWindowRef.current = activeWindow;
+  modeRef.current = mode;
+
   useEffect(() => {
     const prevId = prevTaskIdRef.current;
     if (prevId !== taskId) {
       // Save outgoing task state
-      perTaskUiState.set(prevId, { activeWindow, mode });
+      perTaskUiState.set(prevId, {
+        activeWindow: activeWindowRef.current,
+        mode: modeRef.current,
+      });
       // Restore incoming task state (or reset to defaults)
       const saved = perTaskUiState.get(taskId);
       setActiveWindow(saved?.activeWindow ?? null);
@@ -56,7 +66,7 @@ export default function TaskDetail() {
       setLocalUserWindowIndex(null);
       prevTaskIdRef.current = taskId;
     }
-  }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [taskId]);
 
   // Keep the map in sync as user interacts
   useEffect(() => {
