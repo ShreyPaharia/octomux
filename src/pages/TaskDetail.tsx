@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,18 @@ import { DraftEditForm } from '@/components/DraftEditForm';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
+
+// Per-task UI state preserved across task switches (session-only, not persisted to disk).
+interface PerTaskUiState {
+  activeWindow: number | null;
+  mode: 'agents' | 'editor';
+}
+const perTaskUiState = new Map<string, PerTaskUiState>();
+
+/** Reset per-task UI state — exposed for tests only. */
+export function _resetPerTaskUiState() {
+  perTaskUiState.clear();
+}
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +41,39 @@ export default function TaskDetail() {
   const [localUserWindowIndex, setLocalUserWindowIndex] = useState<number | null>(null);
   // Derive userWindowIndex — prefer server-persisted data, fall back to local override.
   const userWindowIndex = task?.user_window_index ?? localUserWindowIndex;
+
+  // --- Per-task state save/restore on task switch ---
+  // Refs let the switch effect read current values without depending on them,
+  // so it only fires when taskId actually changes.
+  const prevTaskIdRef = useRef<string>(taskId);
+  const activeWindowRef = useRef(activeWindow);
+  const modeRef = useRef(mode);
+  activeWindowRef.current = activeWindow;
+  modeRef.current = mode;
+
+  useEffect(() => {
+    const prevId = prevTaskIdRef.current;
+    if (prevId !== taskId) {
+      // Save outgoing task state
+      perTaskUiState.set(prevId, {
+        activeWindow: activeWindowRef.current,
+        mode: modeRef.current,
+      });
+      // Restore incoming task state (or reset to defaults)
+      const saved = perTaskUiState.get(taskId);
+      setActiveWindow(saved?.activeWindow ?? null);
+      setMode(saved?.mode ?? 'agents');
+      setLocalUserWindowIndex(null);
+      prevTaskIdRef.current = taskId;
+    }
+  }, [taskId]);
+
+  // Keep the map in sync as user interacts
+  useEffect(() => {
+    if (taskId) {
+      perTaskUiState.set(taskId, { activeWindow, mode });
+    }
+  }, [taskId, activeWindow, mode]);
 
   // Initialize activeWindow from URL ?agent= param or first agent's window_index
   const firstAgentWindow = task?.agents?.[0]?.window_index ?? null;
