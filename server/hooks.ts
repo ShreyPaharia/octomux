@@ -126,8 +126,15 @@ router.post('/post-tool-use', (req, res) => {
 
 // POST /api/hooks/stop
 router.post('/stop', (req, res) => {
-  const { session_id } = req.body;
+  const { session_id, agent_id: subagentId } = req.body;
   if (!session_id) {
+    res.status(200).send();
+    return;
+  }
+
+  // Ignore subagent stops — agent_id is only present when a Claude Code
+  // subagent (spawned via the Agent tool) finishes, not the main session.
+  if (subagentId) {
     res.status(200).send();
     return;
   }

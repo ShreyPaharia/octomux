@@ -166,5 +166,15 @@ describe('Hook endpoints', () => {
 
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
+
+    it('ignores subagent stops (agent_id present in payload)', async () => {
+      await request(app)
+        .post('/api/hooks/stop')
+        .send({ session_id: 'sess-123', agent_id: 'subagent-abc' })
+        .expect(200);
+
+      // Agent should remain active — subagent stop must not set it to idle
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
+    });
   });
 });
