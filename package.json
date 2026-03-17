@@ -1,6 +1,6 @@
 {
   "name": "octomux",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
     "build": "vite build && bun run build:server && bun run cli:build",
-    "build:server": "tsup server/index.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws",
+    "build:server": "tsup server/index.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws && cp server/orchestrator-prompt.md dist-server/",
     "start": "NODE_ENV=production node dist-server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
