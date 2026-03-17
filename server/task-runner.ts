@@ -1,4 +1,4 @@
-import { execFile as execFileCb, spawn } from 'child_process';
+import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import path from 'path';
@@ -9,9 +9,6 @@ import { installHookSettings } from './hook-settings.js';
 import type { Task, Agent } from './types.js';
 
 const execFile = promisify(execFileCb);
-
-const CLAUDE_READY_TIMEOUT = process.env.NODE_ENV === 'test' ? 0 : 30_000;
-const CLAUDE_READY_POLL_INTERVAL = 500;
 
 /** Get the active window index of a tmux session. */
 async function getActiveWindowIndex(session: string): Promise<number> {
@@ -36,40 +33,6 @@ async function getLastWindowIndex(session: string): Promise<number> {
   ]);
   const indices = stdout.trim().split('\n').map(Number);
   return Math.max(...indices);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Poll tmux pane content until Claude Code's TUI is ready for input.
- * Detects readiness by looking for the `>` input prompt character that
- * Claude renders once its ink-based TUI has fully initialized.
- * Falls back to proceeding after timeout (best-effort).
- */
-export async function waitForClaudeReady(
-  session: string,
-  windowIndex: number,
-  timeoutMs: number = CLAUDE_READY_TIMEOUT,
-): Promise<void> {
-  if (timeoutMs === 0) return; // skip in tests
-  const target = `${session}:${windowIndex}`;
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      // Claude Code renders a "❯" (or ">") prompt when ready for input
-      const lines = stdout.split('\n');
-      if (lines.some((line) => /^\s*[>❯]/.test(line))) {
-        return;
-      }
-    } catch {
-      // pane may not exist yet — keep polling
-    }
-    await sleep(CLAUDE_READY_POLL_INTERVAL);
-  }
-  // Timeout — proceed anyway (best-effort)
 }
 
 /**
@@ -191,19 +154,27 @@ export async function startTask(task: Task): Promise<void> {
       'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
     ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId);
 
-    // 9. Launch claude in the window with session tracking
+    // 9. Launch claude in the window, passing initial prompt as a CLI argument
+    //    so it is submitted at startup without needing readiness polling.
+    //    The prompt is written to a temp file to avoid shell-escaping issues.
+    let claudeCmd = `claude --session-id ${claudeSessionId}`;
+    let promptFile: string | null = null;
+    if (task.initial_prompt) {
+      promptFile = path.join(worktreePath, `.claude-prompt-${agentId}`);
+      fs.writeFileSync(promptFile, task.initial_prompt);
+      claudeCmd += ` "$(cat ${promptFile})"`;
+    }
     await execFile('tmux', [
       'send-keys',
       '-t',
       `${session}:${windowIndex}`,
-      `claude --session-id ${claudeSessionId}`,
+      claudeCmd,
       'Enter',
     ]);
-
-    // 10. Wait for Claude to be ready, then dispatch initial prompt
-    if (task.initial_prompt) {
-      await waitForClaudeReady(session, windowIndex);
-      await dispatchToWindow(session, windowIndex, task.initial_prompt);
+    // Clean up the temp prompt file after a short delay (shell has read it)
+    if (promptFile) {
+      const pf = promptFile;
+      setTimeout(() => fs.unlinkSync(pf), 5000);
     }
 
     // 12. Mark as running
@@ -240,19 +211,24 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
   ).run(agentId, task.id, windowIndex, label, claudeSessionId);
 
-  // Launch claude with session tracking
+  // Launch claude with session tracking, passing prompt as CLI argument
+  let claudeCmd = `claude --session-id ${claudeSessionId}`;
+  let promptFile: string | null = null;
+  if (prompt) {
+    promptFile = path.join(task.worktree!, `.claude-prompt-${agentId}`);
+    fs.writeFileSync(promptFile, prompt);
+    claudeCmd += ` "$(cat ${promptFile})"`;
+  }
   await execFile('tmux', [
     'send-keys',
     '-t',
     `${task.tmux_session}:${windowIndex}`,
-    `claude --session-id ${claudeSessionId}`,
+    claudeCmd,
     'Enter',
   ]);
-
-  // Dispatch prompt if provided
-  if (prompt) {
-    await waitForClaudeReady(task.tmux_session!, windowIndex);
-    await dispatchToWindow(task.tmux_session!, windowIndex, prompt);
+  if (promptFile) {
+    const pf = promptFile;
+    setTimeout(() => fs.unlinkSync(pf), 5000);
   }
 
   return {
@@ -436,29 +412,4 @@ export async function resumeTask(task: Task): Promise<void> {
   }
 }
 
-export async function dispatchToWindow(
-  session: string,
-  windowIndex: number,
-  text: string,
-): Promise<void> {
-  const target = `${session}:${windowIndex}`;
-  const bufferName = `octomux-${nanoid(8)}`;
 
-  // Load text into a named tmux buffer (avoids race with concurrent dispatches).
-  // Do NOT append '\n' — send-keys Enter handles submission separately.
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn('tmux', ['load-buffer', '-b', bufferName, '-']);
-    proc.stdin.write(text);
-    proc.stdin.end();
-    proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`tmux load-buffer exited with code ${code}`));
-    });
-  });
-
-  // Paste named buffer into the target window, -d deletes buffer after paste
-  await execFile('tmux', ['paste-buffer', '-b', bufferName, '-d', '-t', target]);
-
-  // Press Enter to submit the prompt
-  await execFile('tmux', ['send-keys', '-t', target, 'Enter']);
-}
