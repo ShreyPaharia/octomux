@@ -48,12 +48,6 @@ vi.mock('child_process', () => ({
       cb(null, { stdout: 'true', stderr: '' });
     }
   }),
-  spawn: vi.fn(() => ({
-    stdin: { write: vi.fn(), end: vi.fn() },
-    on: vi.fn((event: string, cb: Function) => {
-      if (event === 'close') cb(0);
-    }),
-  })),
 }));
 
 const {
@@ -63,14 +57,12 @@ const {
   addAgent,
   stopAgent,
   resumeTask,
-  dispatchToWindow,
-  waitForClaudeReady,
   slugifyTitle,
   createUserTerminal,
   cleanupLinkedSessions,
   cleanupOrphanedViewerSessions,
 } = await import('./task-runner.js');
-const { execFile, spawn } = await import('child_process');
+const { execFile } = await import('child_process');
 const fs = await import('fs');
 const { installHookSettings } = await import('./hook-settings.js');
 
@@ -547,53 +539,6 @@ describe('stopAgent', () => {
   });
 });
 
-// ─── dispatchToWindow ─────────────────────────────────────────────────────────
-
-describe('dispatchToWindow', () => {
-  it('uses tmux load-buffer with named buffer via spawn', async () => {
-    await dispatchToWindow('test-session', 0, 'Hello');
-    const call = vi
-      .mocked(spawn)
-      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
-    expect(call).toBeDefined();
-    expect(call![1] as string[]).toContain('-b');
-  });
-
-  it('writes text without trailing newline to stdin', async () => {
-    await dispatchToWindow('test-session', 0, 'Hello');
-    const spawnCall = vi.mocked(spawn).mock.results[0].value;
-    expect(spawnCall.stdin.write).toHaveBeenCalledWith('Hello');
-    expect(spawnCall.stdin.end).toHaveBeenCalled();
-  });
-
-  it('pastes buffer to correct target', async () => {
-    await dispatchToWindow('my-session', 2, 'text');
-    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] });
-    expect(call![1]).toContain('my-session:2');
-  });
-
-  it('sends Enter key after pasting buffer', async () => {
-    await dispatchToWindow('my-session', 2, 'text');
-    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys'] });
-    expect(call).toBeTruthy();
-    expect(call![1]).toContain('my-session:2');
-    expect(call![1]).toContain('Enter');
-  });
-
-  it('rejects when load-buffer exits non-zero', async () => {
-    vi.mocked(spawn).mockReturnValueOnce({
-      stdin: { write: vi.fn(), end: vi.fn() },
-      on: vi.fn((event: string, cb: Function) => {
-        if (event === 'close') cb(1);
-      }),
-    } as any);
-
-    await expect(dispatchToWindow('s', 0, 'text')).rejects.toThrow(
-      'tmux load-buffer exited with code 1',
-    );
-  });
-});
-
 // ─── resumeTask ──────────────────────────────────────────────────────────────
 
 describe('resumeTask', () => {
@@ -1065,52 +1010,3 @@ describe('deleteTask linked session cleanup', () => {
   });
 });
 
-// ─── waitForClaudeReady ──────────────────────────────────────────────────────
-// Placed last because these tests override the execFile mock implementation.
-
-describe('waitForClaudeReady', () => {
-  it('returns immediately when timeout is 0 (test env)', async () => {
-    await expect(waitForClaudeReady('session', 0, 0)).resolves.not.toThrow();
-    // Should not call capture-pane at all
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['capture-pane'] }),
-    ).toBeUndefined();
-  });
-
-  it('returns when pane contains > prompt', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('capture-pane')) {
-        cb(null, { stdout: '  >\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
-  });
-
-  it('proceeds after timeout if Claude never shows prompt', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('capture-pane')) {
-        cb(null, { stdout: 'loading...\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    // Use a very short timeout so the test doesn't hang
-    await expect(waitForClaudeReady('session', 0, 50)).resolves.not.toThrow();
-  });
-
-  it('handles capture-pane errors gracefully', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('capture-pane')) {
-        cb(new Error('pane not found'), null);
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await expect(waitForClaudeReady('session', 0, 50)).resolves.not.toThrow();
-  });
-});
