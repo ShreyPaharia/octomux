@@ -354,14 +354,6 @@ export default function TaskDetail() {
                 </Badge>
               </>
             )}
-            {task.description && (
-              <>
-                <span className="text-muted-foreground">Description</span>
-                <span className="whitespace-pre-wrap text-muted-foreground">
-                  {task.description}
-                </span>
-              </>
-            )}
             {task.pr_url && (
               <>
                 <span className="text-muted-foreground">PR</span>
@@ -422,15 +414,45 @@ export default function TaskDetail() {
         <div
           className={
             mode === 'agents'
-              ? 'flex flex-1 items-center justify-center text-muted-foreground'
+              ? 'flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground'
               : 'hidden'
           }
         >
-          {task.status === 'setting_up'
-            ? 'Setting up terminal...'
-            : task.status === 'closed' || task.status === 'error'
-              ? 'Terminal session ended'
-              : 'No terminal available'}
+          {task.status === 'setting_up' ? (
+            'Setting up terminal...'
+          ) : task.status === 'closed' || task.status === 'error' ? (
+            <>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-muted-foreground/50"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="m7 8 4 4-4 4" />
+                <path d="M13 16h4" />
+              </svg>
+              <span className="text-sm">Terminal session ended</span>
+              {canResume && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={resuming}
+                  onClick={handleResume}
+                >
+                  {resuming ? 'Resuming...' : 'Resume Task'}
+                </Button>
+              )}
+            </>
+          ) : (
+            'No terminal available'
+          )}
         </div>
       )}
 
