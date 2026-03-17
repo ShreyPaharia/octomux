@@ -40,7 +40,7 @@
     "cli:build": "cd cli && tsc",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
+    "postinstall": "bash scripts/postinstall.sh",
     "prepare": "husky",
     "changelog": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s"
   },
