@@ -477,13 +477,15 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
 
           {/* Initial Prompt (optional) */}
           <div className="flex flex-col gap-2">
-            <button
+            <Button
               type="button"
-              className="w-fit cursor-pointer border-0 bg-transparent p-0 text-xs text-muted-foreground outline-0 ring-0 hover:text-foreground transition-colors text-left focus:outline-0 focus:ring-0 focus-visible:outline-0 focus-visible:ring-0"
+              variant="ghost"
+              size="sm"
+              className="w-fit h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setShowPrompt(!showPrompt)}
             >
               {showPrompt ? '- Hide initial prompt' : '+ Add initial prompt'}
-            </button>
+            </Button>
             {showPrompt && (
               <Textarea
                 id="initial-prompt"

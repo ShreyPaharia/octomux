@@ -1,4 +1,6 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 import type { StatusTab } from '@/lib/use-task-filters';
 
 interface TaskFilterBarProps {
@@ -12,6 +14,82 @@ interface TaskFilterBarProps {
 
 function repoName(repoPath: string): string {
   return repoPath.split('/').pop() || repoPath;
+}
+
+function RepoFilterDropdown({
+  repos,
+  activeRepo,
+  onRepoChange,
+}: {
+  repos: string[];
+  activeRepo: string;
+  onRepoChange: (repo: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="mb-1 flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs transition-colors hover:bg-muted"
+          >
+            {activeRepo ? (
+              <Badge variant="outline" className="text-xs font-normal">
+                {repoName(activeRepo)}
+              </Badge>
+            ) : (
+              <span>All projects</span>
+            )}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-muted-foreground"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+        }
+      />
+      <PopoverContent align="end" side="bottom" sideOffset={4} className="w-[200px] p-0">
+        <div className="flex flex-col">
+          <button
+            type="button"
+            className={`px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted ${!activeRepo ? 'bg-muted font-medium' : ''}`}
+            onClick={() => {
+              onRepoChange('');
+              setOpen(false);
+            }}
+          >
+            All projects
+          </button>
+          {repos.map((repo) => (
+            <button
+              key={repo}
+              type="button"
+              className={`flex items-center px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted ${repo === activeRepo ? 'bg-muted font-medium' : ''}`}
+              onClick={() => {
+                onRepoChange(repo);
+                setOpen(false);
+              }}
+            >
+              <Badge variant="outline" className="text-xs font-normal">
+                {repoName(repo)}
+              </Badge>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export const TaskFilterBar = memo(function TaskFilterBar({
@@ -46,19 +124,11 @@ export const TaskFilterBar = memo(function TaskFilterBar({
         ))}
       </div>
       {repos.length > 1 && (
-        <select
-          value={activeRepo}
-          onChange={(e) => onRepoChange(e.target.value)}
-          title={activeRepo || 'All projects'}
-          className="mb-1 rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
-        >
-          <option value="">All projects</option>
-          {repos.map((repo) => (
-            <option key={repo} value={repo}>
-              {repoName(repo)}
-            </option>
-          ))}
-        </select>
+        <RepoFilterDropdown
+          repos={repos}
+          activeRepo={activeRepo}
+          onRepoChange={onRepoChange}
+        />
       )}
     </div>
   );
