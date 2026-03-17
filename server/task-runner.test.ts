@@ -23,6 +23,8 @@ vi.mock('fs', async (importOriginal) => {
     existsSync: vi.fn(() => true),
     mkdirSync: vi.fn(),
     copyFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
   };
   return { ...mocked, default: mocked };
 });
@@ -149,7 +151,6 @@ describe('startTask', () => {
     { name: 'creates tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['display-message'] },
     { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
-    { name: 'dispatches prompt', cmd: 'tmux', argsInclude: ['paste-buffer'] },
   ];
 
   it.each(expectedShellCalls)('$name', async ({ cmd, argsInclude }) => {
@@ -158,26 +159,38 @@ describe('startTask', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
-  it('uses tmux load-buffer with named buffer via spawn for prompt dispatch', async () => {
+  it('includes prompt via temp file in claude launch command', async () => {
     insertTask(db, { initial_prompt: 'Do the thing' });
     await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
-    const call = vi
-      .mocked(spawn)
-      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
-    expect(call).toBeDefined();
-    expect(call![1] as string[]).toContain('-b');
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys', 'Enter'],
+    });
+    expect(sendKeysCall).toBeDefined();
+    const claudeCmd = (sendKeysCall![1] as string[]).find((a: string) =>
+      a.includes('claude --session-id'),
+    );
+    expect(claudeCmd).toContain('$(cat ');
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      expect.stringContaining('.claude-prompt-'),
+      'Do the thing',
+    );
   });
 
-  it('skips prompt dispatch when initial_prompt is null', async () => {
+  it('launches claude without prompt file when initial_prompt is null', async () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] }),
-    ).toBeUndefined();
-    const loadBufferCall = vi
-      .mocked(spawn)
-      .mock.calls.find((c) => c[0] === 'tmux' && (c[1] as string[]).includes('load-buffer'));
-    expect(loadBufferCall).toBeUndefined();
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys', 'Enter'],
+    });
+    const claudeCmd = (sendKeysCall![1] as string[]).find((a: string) =>
+      a.includes('claude --session-id'),
+    );
+    expect(claudeCmd).not.toContain('$(cat ');
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled();
   });
 
   // ─── Custom branch and base branch ─────────────────────────────────────
@@ -343,20 +356,44 @@ describe('addAgent', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
-  const promptDispatchCases = [
-    { name: 'dispatches prompt when provided', prompt: 'Write tests', expectPaste: true },
-    { name: 'does not dispatch when no prompt', prompt: undefined, expectPaste: false },
-  ];
-
-  it.each(promptDispatchCases)('$name', async ({ prompt, expectPaste }) => {
+  it('includes prompt via temp file in claude launch command when provided', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await addAgent(runningTask, prompt);
-    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['paste-buffer'] });
-    if (expectPaste) {
-      expect(call).toBeDefined();
-    } else {
-      expect(call).toBeUndefined();
-    }
+    await addAgent(runningTask, 'Write tests');
+
+    const sendKeysCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: any[]) =>
+          c[0] === 'tmux' &&
+          (c[1] as string[]).includes('send-keys') &&
+          (c[1] as string[]).some((a: string) => a.includes('claude --session-id')),
+      );
+    const claudeCmd = (sendKeysCalls[0][1] as string[]).find((a: string) =>
+      a.includes('claude --session-id'),
+    );
+    expect(claudeCmd).toContain('$(cat ');
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      expect.stringContaining('.claude-prompt-'),
+      'Write tests',
+    );
+  });
+
+  it('launches claude without prompt file when no prompt provided', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await addAgent(runningTask);
+
+    const sendKeysCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: any[]) =>
+          c[0] === 'tmux' &&
+          (c[1] as string[]).includes('send-keys') &&
+          (c[1] as string[]).some((a: string) => a.includes('claude --session-id')),
+      );
+    const claudeCmd = (sendKeysCalls[0][1] as string[]).find((a: string) =>
+      a.includes('claude --session-id'),
+    );
+    expect(claudeCmd).not.toContain('$(cat ');
   });
 
   it('persists agent to database', async () => {
@@ -1040,67 +1077,16 @@ describe('waitForClaudeReady', () => {
     ).toBeUndefined();
   });
 
-  it('returns when pane contains bare > prompt (no launch command visible)', async () => {
+  it('returns when pane contains > prompt', async () => {
     vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
       if (args.includes('capture-pane')) {
-        cb(null, { stdout: 'Claude Code v2.1\n  >\n', stderr: '' });
+        cb(null, { stdout: '  >\n', stderr: '' });
       } else {
         cb(null, { stdout: '', stderr: '' });
       }
     }) as any);
 
     await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
-  });
-
-  it('returns when pane contains bare ❯ prompt', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('capture-pane')) {
-        cb(null, { stdout: 'Claude Code v2.1\n❯ \n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
-  });
-
-  it('waits through phase 1 while launch command is visible', async () => {
-    let callCount = 0;
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('capture-pane')) {
-        callCount++;
-        if (callCount <= 2) {
-          // Phase 1: shell still shows the launch command
-          cb(null, { stdout: '❯ claude --session-id abc-123\n', stderr: '' });
-        } else {
-          // Phase 2: Claude TUI has taken over
-          cb(null, { stdout: 'Claude Code v2.1\n❯ \n', stderr: '' });
-        }
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
-    // Should have polled multiple times (at least through phase 1 + phase 2)
-    expect(callCount).toBeGreaterThanOrEqual(3);
-  });
-
-  it('does not match trust dialog select cursor as ready', async () => {
-    let callCount = 0;
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('capture-pane')) {
-        callCount++;
-        // Trust dialog shows ❯ with text after it — should NOT match
-        cb(null, { stdout: ' ❯ 1. Yes, I trust this folder\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    // Should timeout because the trust dialog prompt is not the bare input prompt
-    await expect(waitForClaudeReady('session', 0, 50)).resolves.not.toThrow();
-    expect(callCount).toBeGreaterThanOrEqual(1);
   });
 
   it('proceeds after timeout if Claude never shows prompt', async () => {
