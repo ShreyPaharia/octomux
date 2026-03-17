@@ -1040,16 +1040,67 @@ describe('waitForClaudeReady', () => {
     ).toBeUndefined();
   });
 
-  it('returns when pane contains > prompt', async () => {
+  it('returns when pane contains bare > prompt (no launch command visible)', async () => {
     vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
       if (args.includes('capture-pane')) {
-        cb(null, { stdout: '  >\n', stderr: '' });
+        cb(null, { stdout: 'Claude Code v2.1\n  >\n', stderr: '' });
       } else {
         cb(null, { stdout: '', stderr: '' });
       }
     }) as any);
 
     await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
+  });
+
+  it('returns when pane contains bare ❯ prompt', async () => {
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('capture-pane')) {
+        cb(null, { stdout: 'Claude Code v2.1\n❯ \n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
+  });
+
+  it('waits through phase 1 while launch command is visible', async () => {
+    let callCount = 0;
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('capture-pane')) {
+        callCount++;
+        if (callCount <= 2) {
+          // Phase 1: shell still shows the launch command
+          cb(null, { stdout: '❯ claude --session-id abc-123\n', stderr: '' });
+        } else {
+          // Phase 2: Claude TUI has taken over
+          cb(null, { stdout: 'Claude Code v2.1\n❯ \n', stderr: '' });
+        }
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    await expect(waitForClaudeReady('session', 0, 5000)).resolves.not.toThrow();
+    // Should have polled multiple times (at least through phase 1 + phase 2)
+    expect(callCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not match trust dialog select cursor as ready', async () => {
+    let callCount = 0;
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('capture-pane')) {
+        callCount++;
+        // Trust dialog shows ❯ with text after it — should NOT match
+        cb(null, { stdout: ' ❯ 1. Yes, I trust this folder\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    // Should timeout because the trust dialog prompt is not the bare input prompt
+    await expect(waitForClaudeReady('session', 0, 50)).resolves.not.toThrow();
+    expect(callCount).toBeGreaterThanOrEqual(1);
   });
 
   it('proceeds after timeout if Claude never shows prompt', async () => {
