@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import TaskDetail from './TaskDetail';
+import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
 import { renderWithRouter, makeTask, mockApi } from '../test-helpers';
 import type { Task } from '../../server/types';
 
@@ -79,6 +79,7 @@ const runningTask: Task = makeTask({
 describe('TaskDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetPerTaskUiState();
     eventCallbacks = new Set();
     apiMock.getTask.mockResolvedValue(runningTask);
     apiMock.updateTask.mockResolvedValue(runningTask);
