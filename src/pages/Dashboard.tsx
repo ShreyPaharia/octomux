@@ -5,13 +5,18 @@ import { TaskList } from '@/components/TaskList';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { NotificationToggle } from '@/components/NotificationToggle';
-import { OrchestratorPanel } from '@/components/OrchestratorPanel';
+import {
+  OrchestratorPanel,
+  OrchestratorToggle,
+  useOrchestratorPanel,
+} from '@/components/OrchestratorPanel';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
+  const orchestrator = useOrchestratorPanel();
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -65,6 +70,11 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <OrchestratorToggle
+                isOpen={orchestrator.isOpen}
+                running={orchestrator.running}
+                toggle={orchestrator.toggle}
+              />
               <NotificationToggle />
               <CreateTaskDialog onCreated={refresh} />
             </div>
@@ -122,7 +132,7 @@ export default function Dashboard() {
           )}
         </div>
       </div>
-      <OrchestratorPanel />
+      <OrchestratorPanel state={orchestrator} />
     </div>
   );
 }
