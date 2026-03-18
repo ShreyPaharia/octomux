@@ -15,7 +15,9 @@ describe('TaskList', () => {
   // ─── Empty state ──────────────────────────────────────────────────────────
 
   it('shows empty state when no tasks', () => {
-    renderWithRouter(<TaskList tasks={[]} onClose={onClose} onDelete={onDelete} viewMode="cards" />);
+    renderWithRouter(
+      <TaskList tasks={[]} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
+    );
     expect(screen.getByText('No tasks yet')).toBeInTheDocument();
     expect(screen.getByText('Create a task to get started')).toBeInTheDocument();
   });
@@ -23,7 +25,9 @@ describe('TaskList', () => {
   // ─── Rendering tasks ─────────────────────────────────────────────────────
 
   it('renders one task card', () => {
-    renderWithRouter(<TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} viewMode="cards" />);
+    renderWithRouter(
+      <TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
+    );
     expect(screen.getByText('Fix order validation')).toBeInTheDocument();
   });
 
@@ -33,14 +37,18 @@ describe('TaskList', () => {
       makeTask({ id: 't2', title: 'Task Two' }),
       makeTask({ id: 't3', title: 'Task Three' }),
     ];
-    renderWithRouter(<TaskList tasks={tasks} onClose={onClose} onDelete={onDelete} viewMode="cards" />);
+    renderWithRouter(
+      <TaskList tasks={tasks} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
+    );
     expect(screen.getByText('Task One')).toBeInTheDocument();
     expect(screen.getByText('Task Two')).toBeInTheDocument();
     expect(screen.getByText('Task Three')).toBeInTheDocument();
   });
 
   it('does not show empty state when tasks exist', () => {
-    renderWithRouter(<TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} viewMode="cards" />);
+    renderWithRouter(
+      <TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
+    );
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument();
   });
 });
