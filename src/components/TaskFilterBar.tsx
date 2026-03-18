@@ -2,6 +2,7 @@ import { memo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import type { StatusTab } from '@/lib/use-task-filters';
+import type { ViewMode } from './TaskList';
 
 interface TaskFilterBarProps {
   activeStatus: StatusTab;
@@ -10,6 +11,8 @@ interface TaskFilterBarProps {
   repos: string[];
   activeRepo: string;
   onRepoChange: (repo: string) => void;
+  viewMode: ViewMode;
+  onViewChange: (mode: ViewMode) => void;
 }
 
 function repoName(repoPath: string): string {
@@ -92,6 +95,64 @@ function RepoFilterDropdown({
   );
 }
 
+function ViewToggle({
+  viewMode,
+  onViewChange,
+}: {
+  viewMode: ViewMode;
+  onViewChange: (mode: ViewMode) => void;
+}) {
+  return (
+    <div className="mb-1 flex items-center rounded-md border border-border">
+      <button
+        type="button"
+        title="Card view"
+        className={`rounded-l-md px-1.5 py-1 transition-colors ${viewMode === 'cards' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+        onClick={() => onViewChange('cards')}
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="7" />
+          <rect x="14" y="3" width="7" height="7" />
+          <rect x="3" y="14" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        title="List view"
+        className={`rounded-r-md px-1.5 py-1 transition-colors ${viewMode === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+        onClick={() => onViewChange('table')}
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 export const TaskFilterBar = memo(function TaskFilterBar({
   activeStatus,
   counts,
@@ -99,15 +160,17 @@ export const TaskFilterBar = memo(function TaskFilterBar({
   repos,
   activeRepo,
   onRepoChange,
+  viewMode,
+  onViewChange,
 }: TaskFilterBarProps) {
   const tabs = [
-    { key: 'open' as const, label: `Open (${counts.open})` },
-    { key: 'backlog' as const, label: `Backlog (${counts.backlog})` },
-    { key: 'closed' as const, label: `Closed (${counts.closed})` },
+    { key: 'open' as const, label: 'Open', count: counts.open },
+    { key: 'backlog' as const, label: 'Backlog', count: counts.backlog },
+    { key: 'closed' as const, label: 'Closed', count: counts.closed },
   ];
 
   return (
-    <div className="mb-4 flex items-center justify-between border-b border-border">
+    <div className="mb-3 flex items-center justify-between border-b border-border">
       <div className="flex gap-1">
         {tabs.map((tab) => (
           <button
@@ -119,13 +182,17 @@ export const TaskFilterBar = memo(function TaskFilterBar({
             }`}
             onClick={() => onStatusChange(tab.key)}
           >
-            {tab.label}
+            {tab.label}{' '}
+            <span className="tabular-nums text-xs">({tab.count})</span>
           </button>
         ))}
       </div>
-      {repos.length > 1 && (
-        <RepoFilterDropdown repos={repos} activeRepo={activeRepo} onRepoChange={onRepoChange} />
-      )}
+      <div className="flex items-center gap-2">
+        {repos.length > 1 && (
+          <RepoFilterDropdown repos={repos} activeRepo={activeRepo} onRepoChange={onRepoChange} />
+        )}
+        <ViewToggle viewMode={viewMode} onViewChange={onViewChange} />
+      </div>
     </div>
   );
 });

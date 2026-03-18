@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useTasks } from '@/lib/hooks';
 import { useTaskFilters } from '@/lib/use-task-filters';
+import type { ViewMode } from '@/components/TaskList';
 import { TaskList } from '@/components/TaskList';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
@@ -17,6 +18,9 @@ export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
   const orchestrator = useOrchestratorPanel();
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => (localStorage.getItem('octomux-view-mode') as ViewMode) || 'cards',
+  );
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -42,6 +46,11 @@ export default function Dashboard() {
     [refresh],
   );
 
+  const handleViewChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem('octomux-view-mode', mode);
+  }, []);
+
   const handleResume = useCallback(
     async (id: string) => {
       try {
@@ -57,7 +66,7 @@ export default function Dashboard() {
   return (
     <div className="flex h-screen">
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-3xl px-4 py-8">
+        <div className="mx-auto max-w-6xl px-4 py-4">
           <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2.5">
@@ -121,12 +130,15 @@ export default function Dashboard() {
                 repos={repos}
                 activeRepo={filters.repo}
                 onRepoChange={(r) => setFilter('repo', r)}
+                viewMode={viewMode}
+                onViewChange={handleViewChange}
               />
               <TaskList
                 tasks={filtered}
                 onClose={handleClose}
                 onDelete={handleDelete}
                 onResume={handleResume}
+                viewMode={viewMode}
               />
             </>
           )}
