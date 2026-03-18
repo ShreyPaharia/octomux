@@ -14,10 +14,48 @@ describe('TaskList', () => {
 
   // ─── Empty state ──────────────────────────────────────────────────────────
 
-  it('shows empty state when no tasks', () => {
-    renderWithRouter(<TaskList tasks={[]} onClose={onClose} onDelete={onDelete} viewMode="cards" />);
+  it('shows "no tasks" empty state when totalCount is 0', () => {
+    renderWithRouter(
+      <TaskList tasks={[]} totalCount={0} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
+    );
     expect(screen.getByText('No tasks yet')).toBeInTheDocument();
-    expect(screen.getByText('Create a task to get started')).toBeInTheDocument();
+    expect(screen.getByText('Create your first task to start running agents')).toBeInTheDocument();
+  });
+
+  it('shows "no matching" empty state when totalCount > 0 but filtered to zero', () => {
+    renderWithRouter(
+      <TaskList tasks={[]} totalCount={5} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
+    );
+    expect(screen.getByText('No matching tasks')).toBeInTheDocument();
+    expect(screen.getByText('Try adjusting your filters or status tab')).toBeInTheDocument();
+  });
+
+  it('renders emptyAction in no-tasks state', () => {
+    renderWithRouter(
+      <TaskList
+        tasks={[]}
+        totalCount={0}
+        emptyAction={<button>Create Task</button>}
+        onClose={onClose}
+        onDelete={onDelete}
+        viewMode="cards"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Create Task' })).toBeInTheDocument();
+  });
+
+  it('does not render emptyAction in filtered state', () => {
+    renderWithRouter(
+      <TaskList
+        tasks={[]}
+        totalCount={5}
+        emptyAction={<button>Create Task</button>}
+        onClose={onClose}
+        onDelete={onDelete}
+        viewMode="cards"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Create Task' })).not.toBeInTheDocument();
   });
 
   // ─── Rendering tasks ─────────────────────────────────────────────────────
