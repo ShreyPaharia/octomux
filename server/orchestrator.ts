@@ -28,7 +28,7 @@ export async function startOrchestrator(cwd?: string): Promise<void> {
     '-c',
     cwd || process.cwd(),
   ]);
-  const claudeCmd = `claude --system-prompt "$(cat ${PROMPT_FILE})"`;
+  const claudeCmd = `claude --system-prompt "$(cat ${PROMPT_FILE})" "Greet me and show what you can do"`;
   await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, claudeCmd, 'Enter']);
 }
 
