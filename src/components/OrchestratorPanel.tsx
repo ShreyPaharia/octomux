@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { useOrchestrator } from '@/lib/hooks';
+import { EmptyState } from './EmptyState';
 
 const TerminalView = lazy(() =>
   import('@/components/TerminalView').then((m) => ({ default: m.TerminalView })),
@@ -119,10 +120,28 @@ export function OrchestratorPanel({ state }: { state: OrchestratorPanelState }) 
             Loading...
           </div>
         ) : !running ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3">
-            <p className="text-sm text-muted-foreground">Orchestrator is not running</p>
-            <Button onClick={start}>Start Orchestrator</Button>
-          </div>
+          <EmptyState
+            icon={
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="48"
+                height="48"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" x2="20" y1="19" y2="19" />
+              </svg>
+            }
+            heading="Orchestrator not running"
+            subtext="Start the orchestrator to manage task queues"
+            action={<Button onClick={start}>Start Orchestrator</Button>}
+            className="h-full"
+          />
         ) : (
           <Suspense
             fallback={
