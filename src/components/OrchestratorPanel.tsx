@@ -69,11 +69,7 @@ export function OrchestratorToggle({
 }
 
 /** Side panel — only renders content when open */
-export function OrchestratorPanel({
-  state,
-}: {
-  state: OrchestratorPanelState;
-}) {
+export function OrchestratorPanel({ state }: { state: OrchestratorPanelState }) {
   const { isOpen, close, running, loading, start, stop } = state;
   const isMobile = useIsMobile();
 

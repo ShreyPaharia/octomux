@@ -45,9 +45,7 @@ describe('useAttentionIndicator', () => {
   });
 
   it('resets title on unmount', () => {
-    const { unmount } = renderHook(() =>
-      useAttentionIndicator([makeTask({ status: 'error' })]),
-    );
+    const { unmount } = renderHook(() => useAttentionIndicator([makeTask({ status: 'error' })]));
     expect(document.title).toBe('(1) octomux');
     unmount();
     expect(document.title).toBe('octomux');
