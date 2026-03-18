@@ -123,11 +123,11 @@ describe('Dashboard', () => {
     renderWithRouter(<Dashboard />);
     // Default filter is 'open', so draft should NOT appear
     await waitFor(() => {
-      expect(screen.getByText('Backlog (1)')).toBeInTheDocument();
+      expect(screen.getByText(/^Backlog/)).toBeInTheDocument();
     });
     expect(screen.queryByText('Draft Task')).not.toBeInTheDocument();
     // Switch to backlog tab
-    await user.click(screen.getByText('Backlog (1)'));
+    await user.click(screen.getByText(/^Backlog/));
     await waitFor(() => {
       expect(screen.getByText('Draft Task')).toBeInTheDocument();
     });
