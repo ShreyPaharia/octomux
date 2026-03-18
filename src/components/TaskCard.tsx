@@ -5,19 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { Task } from '../../server/types';
 import { StatusBadge } from './StatusBadge';
-import { AgentActivityDot } from './AgentActivityDot';
+import { AgentActivitySummary } from './AgentActivitySummary';
 import { PermissionPromptRow } from './PermissionPromptRow';
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr + 'Z').getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
+import { timeAgo } from '@/lib/time';
 
 function repoName(repoPath: string): string {
   return repoPath.split('/').pop() || repoPath;
@@ -164,15 +154,11 @@ export const TaskCard = memo(function TaskCard({
           </div>
         </div>
         {task.agents && task.agents.length > 0 && task.status === 'running' && (
-          <div className="mt-2 flex flex-wrap gap-3 text-xs">
-            {task.agents
-              .filter((a) => a.status !== 'stopped')
-              .map((a) => (
-                <span key={a.id} className="inline-flex items-center gap-1">
-                  <AgentActivityDot activity={a.hook_activity} />
-                  <span className="text-zinc-500">{a.label}</span>
-                </span>
-              ))}
+          <div className="mt-2">
+            <AgentActivitySummary
+              agents={task.agents}
+              pendingPrompts={task.pending_prompts}
+            />
           </div>
         )}
         {task.pending_prompts && task.pending_prompts.length > 0 && (
