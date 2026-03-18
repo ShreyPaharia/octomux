@@ -124,11 +124,7 @@ export const TaskFilterBar = memo(function TaskFilterBar({
         ))}
       </div>
       {repos.length > 1 && (
-        <RepoFilterDropdown
-          repos={repos}
-          activeRepo={activeRepo}
-          onRepoChange={onRepoChange}
-        />
+        <RepoFilterDropdown repos={repos} activeRepo={activeRepo} onRepoChange={onRepoChange} />
       )}
     </div>
   );
