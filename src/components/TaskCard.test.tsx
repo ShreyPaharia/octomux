@@ -37,7 +37,7 @@ describe('TaskCard', () => {
   it('shows PR link when pr_url is set', () => {
     const task = makeTask({ pr_url: 'https://github.com/org/repo/pull/42', pr_number: 42 });
     renderWithRouter(<TaskCard task={task} onClose={onClose} onDelete={onDelete} />);
-    const link = screen.getByText('PR #42');
+    const link = screen.getByRole('link', { name: /PR #\s*42/ });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute('href', 'https://github.com/org/repo/pull/42');
     expect(link).toHaveAttribute('target', '_blank');

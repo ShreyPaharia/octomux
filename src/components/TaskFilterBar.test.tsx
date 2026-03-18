@@ -11,19 +11,24 @@ const defaultProps = {
   repos: ['/path/to/alpha', '/path/to/beta'],
   activeRepo: '',
   onRepoChange: () => {},
+  viewMode: 'cards' as const,
+  onViewChange: () => {},
 };
 
 describe('TaskFilterBar', () => {
   it('renders Open, Backlog, and Closed tabs with counts', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} />);
-    expect(screen.getByText('Open (3)')).toBeInTheDocument();
-    expect(screen.getByText('Backlog (2)')).toBeInTheDocument();
-    expect(screen.getByText('Closed (1)')).toBeInTheDocument();
+    expect(screen.getByText(/^Open/)).toBeInTheDocument();
+    expect(screen.getByText('(3)')).toBeInTheDocument();
+    expect(screen.getByText(/^Backlog/)).toBeInTheDocument();
+    expect(screen.getByText('(2)')).toBeInTheDocument();
+    expect(screen.getByText(/^Closed/)).toBeInTheDocument();
+    expect(screen.getByText('(1)')).toBeInTheDocument();
   });
 
   it('highlights active tab', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} />);
-    const openBtn = screen.getByText('Open (3)');
+    const openBtn = screen.getByText(/^Open/).closest('button')!;
     expect(openBtn.className).toContain('border-b-2');
   });
 
@@ -31,7 +36,7 @@ describe('TaskFilterBar', () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderWithRouter(<TaskFilterBar {...defaultProps} onStatusChange={onChange} />);
-    await user.click(screen.getByText('Closed (1)'));
+    await user.click(screen.getByText(/^Closed/).closest('button')!);
     expect(onChange).toHaveBeenCalledWith('closed');
   });
 
@@ -39,7 +44,7 @@ describe('TaskFilterBar', () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderWithRouter(<TaskFilterBar {...defaultProps} onStatusChange={onChange} />);
-    await user.click(screen.getByText('Backlog (2)'));
+    await user.click(screen.getByText(/^Backlog/).closest('button')!);
     expect(onChange).toHaveBeenCalledWith('backlog');
   });
 
