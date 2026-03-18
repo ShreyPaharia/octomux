@@ -30,7 +30,7 @@ export default function TaskDetail() {
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
 
   const [resuming, setResuming] = useState(false);
-  const [metadataOpen, setMetadataOpen] = useState(() => window.innerWidth >= 640);
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
   const [searchParams] = useSearchParams();
@@ -238,7 +238,7 @@ export default function TaskDetail() {
             >
               <path d="m15 18-6-6 6-6" />
             </svg>
-            <span className="hidden sm:inline">Back</span>
+            <span className="hidden sm:inline">Tasks</span>
           </Button>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -262,7 +262,7 @@ export default function TaskDetail() {
             </a>
           )}
           {canResume && (
-            <Button variant="outline" size="sm" disabled={resuming} onClick={handleResume}>
+            <Button variant="default" size="sm" disabled={resuming} onClick={handleResume}>
               {resuming ? '...' : 'Resume'}
             </Button>
           )}
@@ -291,12 +291,17 @@ export default function TaskDetail() {
             </Button>
           )}
           {isDraft && (
-            <Button variant="outline" size="sm" onClick={handleStart}>
+            <Button variant="default" size="sm" onClick={handleStart}>
               Start
             </Button>
           )}
           {isRunning && (
-            <Button variant="outline" size="sm" onClick={handleClose}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={handleClose}
+            >
               Close
             </Button>
           )}
@@ -398,7 +403,7 @@ export default function TaskDetail() {
             onStopAgent={handleStopAgent}
             canAddAgent={isRunning}
           />
-          <div className="min-h-0 flex-1 overflow-hidden p-2">
+          <div className="min-h-0 flex-1 overflow-hidden p-1">
             <TerminalView
               taskId={task.id}
               windowIndex={activeWindow!}
@@ -440,13 +445,8 @@ export default function TaskDetail() {
               </svg>
               <span className="text-sm">Terminal session ended</span>
               {canResume && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={resuming}
-                  onClick={handleResume}
-                >
-                  {resuming ? 'Resuming...' : 'Resume Task'}
+                <Button variant="default" size="sm" disabled={resuming} onClick={handleResume}>
+                  {resuming ? 'Resuming...' : 'Resume'}
                 </Button>
               )}
             </>
@@ -461,7 +461,7 @@ export default function TaskDetail() {
           own screen, so there's no lost scrollback to worry about. */}
       {userWindowIndex !== null && mode === 'editor' && (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-hidden p-2">
+          <div className="min-h-0 flex-1 overflow-hidden p-1">
             <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
           </div>
         </div>
