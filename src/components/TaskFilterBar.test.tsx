@@ -45,23 +45,23 @@ describe('TaskFilterBar', () => {
 
   it('renders repo dropdown when multiple repos exist', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} />);
-    const select = screen.getByRole('combobox');
-    expect(select).toBeInTheDocument();
-    expect(screen.getByText('All projects')).toBeInTheDocument();
-    expect(screen.getByText('alpha')).toBeInTheDocument();
-    expect(screen.getByText('beta')).toBeInTheDocument();
+    const trigger = screen.getByText('All projects');
+    expect(trigger).toBeInTheDocument();
   });
 
   it('hides repo dropdown when only one repo exists', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} repos={['/path/to/only-one']} />);
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByText('All projects')).not.toBeInTheDocument();
   });
 
   it('calls onRepoChange when selecting a repo', async () => {
     const user = userEvent.setup();
     const onRepoChange = vi.fn();
     renderWithRouter(<TaskFilterBar {...defaultProps} onRepoChange={onRepoChange} />);
-    await user.selectOptions(screen.getByRole('combobox'), '/path/to/beta');
+    // Open the popover
+    await user.click(screen.getByText('All projects'));
+    // Click the repo option
+    await user.click(screen.getByText('beta'));
     expect(onRepoChange).toHaveBeenCalledWith('/path/to/beta');
   });
 });
