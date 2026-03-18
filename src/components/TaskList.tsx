@@ -50,9 +50,7 @@ const TaskTableRow = memo(function TaskTableRow({
         <div className="min-w-0">
           <span className="block truncate text-sm font-medium">{task.title}</span>
           {task.description && (
-            <span className="block truncate text-xs text-muted-foreground">
-              {task.description}
-            </span>
+            <span className="block truncate text-xs text-muted-foreground">{task.description}</span>
           )}
         </div>
       </td>
@@ -70,7 +68,9 @@ const TaskTableRow = memo(function TaskTableRow({
           />
         ) : (
           <span className="tabular-nums text-xs text-muted-foreground">
-            {activeAgents.length > 0 ? `${activeAgents.length} agent${activeAgents.length > 1 ? 's' : ''}` : '—'}
+            {activeAgents.length > 0
+              ? `${activeAgents.length} agent${activeAgents.length > 1 ? 's' : ''}`
+              : '—'}
           </span>
         )}
       </td>
@@ -163,12 +163,7 @@ const TaskTableRow = memo(function TaskTableRow({
   );
 });
 
-function TaskTableView({
-  tasks,
-  onClose,
-  onDelete,
-  onResume,
-}: Omit<TaskListProps, 'viewMode'>) {
+function TaskTableView({ tasks, onClose, onDelete, onResume }: Omit<TaskListProps, 'viewMode'>) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-left">
@@ -209,7 +204,9 @@ export function TaskList({ tasks, onClose, onDelete, onResume, viewMode }: TaskL
   }
 
   if (viewMode === 'table') {
-    return <TaskTableView tasks={tasks} onClose={onClose} onDelete={onDelete} onResume={onResume} />;
+    return (
+      <TaskTableView tasks={tasks} onClose={onClose} onDelete={onDelete} onResume={onResume} />
+    );
   }
 
   return (
