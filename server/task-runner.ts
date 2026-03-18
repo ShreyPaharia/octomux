@@ -35,6 +35,33 @@ async function getLastWindowIndex(session: string): Promise<number> {
   return Math.max(...indices);
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
+ * This prevents the classic tmux race condition where send-keys fires before
+ * the shell has initialized, causing the first character(s) to be swallowed.
+ */
+async function waitForShellReady(
+  target: string,
+  timeoutMs = 5000,
+  intervalMs = 100,
+): Promise<void> {
+  if (process.env.NODE_ENV === 'test') return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
+      // Look for common shell prompts: $, %, >, ❯, or the user@host pattern
+      if (/[$%>❯#]\s*$/m.test(stdout)) return;
+    } catch {
+      // pane may not exist yet
+    }
+    await sleep(intervalMs);
+  }
+  // Best-effort: proceed after timeout even if prompt not detected
+}
+
 /**
  * Kill all linked viewer sessions (`<tmuxSession>-v-*`) for a specific task.
  * Safe to call even if no linked sessions exist.
@@ -164,7 +191,10 @@ export async function startTask(task: Task): Promise<void> {
       fs.writeFileSync(promptFile, task.initial_prompt);
       claudeCmd += ` "$(cat ${promptFile})"`;
     }
-    await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, claudeCmd, 'Enter']);
+    // Wait for shell to be ready before sending keys (prevents first char being swallowed)
+    const target = `${session}:${windowIndex}`;
+    await waitForShellReady(target);
+    await execFile('tmux', ['send-keys', '-t', target, claudeCmd, 'Enter']);
     // Clean up the temp prompt file after a short delay (shell has read it)
     if (promptFile) {
       const pf = promptFile;
@@ -213,13 +243,10 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     fs.writeFileSync(promptFile, prompt);
     claudeCmd += ` "$(cat ${promptFile})"`;
   }
-  await execFile('tmux', [
-    'send-keys',
-    '-t',
-    `${task.tmux_session}:${windowIndex}`,
-    claudeCmd,
-    'Enter',
-  ]);
+  // Wait for shell to be ready before sending keys (prevents first char being swallowed)
+  const addTarget = `${task.tmux_session}:${windowIndex}`;
+  await waitForShellReady(addTarget);
+  await execFile('tmux', ['send-keys', '-t', addTarget, claudeCmd, 'Enter']);
   if (promptFile) {
     const pf = promptFile;
     setTimeout(() => fs.unlinkSync(pf), 5000);
@@ -386,7 +413,10 @@ export async function resumeTask(task: Task): Promise<void> {
           agent.id,
         );
       }
-      await execFile('tmux', ['send-keys', '-t', `${session}:${windowIndex}`, claudeCmd, 'Enter']);
+      // Wait for shell to be ready before sending keys (prevents first char being swallowed)
+      const resumeTarget = `${session}:${windowIndex}`;
+      await waitForShellReady(resumeTarget);
+      await execFile('tmux', ['send-keys', '-t', resumeTarget, claudeCmd, 'Enter']);
 
       // Update agent record
       db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
