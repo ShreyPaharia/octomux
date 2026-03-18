@@ -6,6 +6,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
 import { DraftEditForm } from '@/components/DraftEditForm';
+import { EmptyState } from '@/components/EmptyState';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
@@ -451,7 +452,34 @@ export default function TaskDetail() {
               )}
             </>
           ) : (
-            'No terminal available'
+            <EmptyState
+              icon={
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect width="18" height="18" x="3" y="3" rx="2" />
+                  <path d="m7 8 4 4-4 4" />
+                  <path d="M13 16h4" />
+                </svg>
+              }
+              heading="No agents running"
+              subtext="Add an agent to start working on this task"
+              action={
+                isRunning ? (
+                  <Button variant="default" size="sm" onClick={() => handleAddAgent()}>
+                    Add Agent
+                  </Button>
+                ) : undefined
+              }
+            />
           )}
         </div>
       )}
