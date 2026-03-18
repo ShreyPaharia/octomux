@@ -42,7 +42,7 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText('octomux')).toBeInTheDocument();
     });
-    expect(screen.getByText('New Task')).toBeInTheDocument();
+    expect(screen.getAllByText('New Task').length).toBeGreaterThan(0);
   });
 
   // ─── Task list rendering ──────────────────────────────────────────────────
@@ -72,7 +72,7 @@ describe('Dashboard', () => {
     apiMock.listTasks.mockRejectedValue(new Error('Network error'));
     renderWithRouter(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText(/Network error/)).toBeInTheDocument();
     });
   });
 

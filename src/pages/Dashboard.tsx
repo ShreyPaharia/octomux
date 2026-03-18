@@ -3,6 +3,7 @@ import { useTasks } from '@/lib/hooks';
 import { useTaskFilters } from '@/lib/use-task-filters';
 import type { ViewMode } from '@/components/TaskList';
 import { TaskList } from '@/components/TaskList';
+import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { NotificationToggle } from '@/components/NotificationToggle';
@@ -90,19 +91,32 @@ export default function Dashboard() {
           </div>
 
           {error && (
-            <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium">
-                    Unable to load tasks. Check that the server is running on port 7777.
-                  </p>
-                  <p className="mt-1 text-xs text-destructive/70">{error}</p>
-                </div>
+            <EmptyState
+              icon={
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                  <path d="M12 9v4" />
+                  <path d="M12 17h.01" />
+                </svg>
+              }
+              heading="Unable to load tasks"
+              subtext={`Check that the server is running on port 7777. ${error}`}
+              action={
                 <Button variant="outline" size="sm" onClick={refresh}>
                   Retry
                 </Button>
-              </div>
-            </div>
+              }
+            />
           )}
 
           {loading ? (
@@ -135,6 +149,8 @@ export default function Dashboard() {
               />
               <TaskList
                 tasks={filtered}
+                totalCount={tasks.length}
+                emptyAction={<CreateTaskDialog onCreated={refresh} />}
                 onClose={handleClose}
                 onDelete={handleDelete}
                 onResume={handleResume}
