@@ -2,6 +2,7 @@ import { Component, lazy, type ReactNode } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useTasks } from './lib/hooks';
+import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import Dashboard from './pages/Dashboard';
 import TaskDetailLayout from './components/TaskDetailLayout';
@@ -12,6 +13,7 @@ const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 function GlobalNotifications() {
   const { tasks } = useTasks();
   const navigate = useNavigate();
+  useAttentionIndicator(tasks);
   useNotifications(tasks, navigate);
   return null;
 }
