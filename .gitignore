@@ -14,3 +14,6 @@ blob-report/
 .playwright-mcp/
 .worktrees/
 .claude/
+# Repo-local neovim runtime data
+.local/
+.config/nvim/.luarc.json
