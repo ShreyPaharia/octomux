@@ -6,6 +6,9 @@ import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import Dashboard from './pages/Dashboard';
 import TaskDetailLayout from './components/TaskDetailLayout';
+import { OrchestratorProvider } from './lib/orchestrator-context';
+import { AppHeader } from './components/AppHeader';
+import { OrchestratorModal } from './components/OrchestratorPanel';
 
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 
@@ -52,16 +55,22 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 export default function App() {
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-background text-foreground">
-        <Toaster theme="dark" position="bottom-right" richColors />
-        <GlobalNotifications />
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route element={<TaskDetailLayout />}>
-            <Route path="/tasks/:id" element={<TaskDetail />} />
-          </Route>
-        </Routes>
-      </div>
+      <OrchestratorProvider>
+        <div className="flex h-screen flex-col bg-background text-foreground">
+          <Toaster theme="dark" position="bottom-right" richColors />
+          <GlobalNotifications />
+          <AppHeader />
+          <div className="min-h-0 flex-1">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route element={<TaskDetailLayout />}>
+                <Route path="/tasks/:id" element={<TaskDetail />} />
+              </Route>
+            </Routes>
+          </div>
+        </div>
+        <OrchestratorModal />
+      </OrchestratorProvider>
     </ErrorBoundary>
   );
 }
