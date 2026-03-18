@@ -21,35 +21,63 @@ function useIsMobile() {
   return isMobile;
 }
 
-export function OrchestratorPanel() {
+export function useOrchestratorPanel() {
   const [isOpen, setIsOpen] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
-  const { running, loading, start, stop } = useOrchestrator();
-  const isMobile = useIsMobile();
+  const orchestrator = useOrchestrator();
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(isOpen));
   }, [isOpen]);
 
-  const closePanel = useCallback(() => setIsOpen(false), []);
+  const open = useCallback(() => setIsOpen(true), []);
+  const close = useCallback(() => setIsOpen(false), []);
+  const toggle = useCallback(() => setIsOpen((prev) => !prev), []);
 
-  if (!isOpen) {
-    return (
-      <button
-        onClick={() => setIsOpen(true)}
-        className={`hidden md:block fixed right-0 top-1/2 -translate-y-1/2 z-50 rounded-l-md border-2 border-r-0 px-1.5 py-3 text-xs font-medium transition-colors ${
-          running
-            ? 'border-emerald-500/50 bg-card/90 text-foreground shadow-[0_0_8px_rgba(16,185,129,0.2)]'
-            : 'border-border bg-card/80 text-muted-foreground hover:bg-muted hover:text-foreground'
-        }`}
-        style={{ writingMode: 'vertical-rl' }}
-      >
-        Orchestrator
-        {running && (
-          <span className="ml-1 inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-        )}
-      </button>
-    );
-  }
+  return { isOpen, open, close, toggle, ...orchestrator };
+}
+
+export type OrchestratorPanelState = ReturnType<typeof useOrchestratorPanel>;
+
+/** Header toggle button — renders in the Dashboard toolbar */
+export function OrchestratorToggle({
+  isOpen,
+  running,
+  toggle,
+}: {
+  isOpen: boolean;
+  running: boolean;
+  toggle: () => void;
+}) {
+  return (
+    <Button
+      variant={isOpen ? 'secondary' : 'ghost'}
+      size="sm"
+      onClick={toggle}
+      title="Toggle orchestrator panel"
+      className="relative gap-1.5 hidden md:inline-flex"
+    >
+      <TerminalIcon className="h-4 w-4" />
+      <span className="text-xs">Orchestrator</span>
+      {running && (
+        <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        </span>
+      )}
+    </Button>
+  );
+}
+
+/** Side panel — only renders content when open */
+export function OrchestratorPanel({
+  state,
+}: {
+  state: OrchestratorPanelState;
+}) {
+  const { isOpen, close, running, loading, start, stop } = state;
+  const isMobile = useIsMobile();
+
+  if (!isOpen) return null;
 
   const panelContent = (
     <>
@@ -68,7 +96,7 @@ export function OrchestratorPanel() {
             </Button>
           )}
           <button
-            onClick={closePanel}
+            onClick={close}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <svg
@@ -119,7 +147,7 @@ export function OrchestratorPanel() {
     return (
       <>
         {/* Backdrop */}
-        <div className="fixed inset-0 z-40 bg-black/50" onClick={closePanel} />
+        <div className="fixed inset-0 z-40 bg-black/50" onClick={close} />
         {/* Slide-out panel */}
         <div className="fixed inset-y-0 right-0 z-50 w-full bg-card flex flex-col animate-in slide-in-from-right duration-200">
           {panelContent}
@@ -133,5 +161,23 @@ export function OrchestratorPanel() {
     <div className="w-[500px] max-[1279px]:w-[400px] max-[1023px]:w-[350px] shrink-0 border-l border-border bg-card flex flex-col">
       {panelContent}
     </div>
+  );
+}
+
+function TerminalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" x2="20" y1="19" y2="19" />
+    </svg>
   );
 }
