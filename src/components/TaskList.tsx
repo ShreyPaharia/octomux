@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import type { Task } from '../../server/types';
 import { TaskCard } from './TaskCard';
 import { StatusBadge } from './StatusBadge';
-import { AgentActivityDot } from './AgentActivityDot';
+import { AgentActivitySummary } from './AgentActivitySummary';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { timeAgo } from '@/lib/time';
 
 export type ViewMode = 'cards' | 'table';
 
@@ -15,17 +16,6 @@ interface TaskListProps {
   onDelete: (id: string) => void;
   onResume?: (id: string) => void;
   viewMode: ViewMode;
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr + 'Z').getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
 }
 
 function repoName(repoPath: string): string {
@@ -73,14 +63,11 @@ const TaskTableRow = memo(function TaskTableRow({
       </td>
       <td className="py-2 pr-3">
         {activeAgents.length > 0 && task.status === 'running' ? (
-          <div className="flex items-center gap-2">
-            {activeAgents.map((a) => (
-              <span key={a.id} className="inline-flex items-center gap-1">
-                <AgentActivityDot activity={a.hook_activity} />
-                <span className="text-xs text-zinc-500">{a.label}</span>
-              </span>
-            ))}
-          </div>
+          <AgentActivitySummary
+            agents={task.agents ?? []}
+            pendingPrompts={task.pending_prompts}
+            compact
+          />
         ) : (
           <span className="tabular-nums text-xs text-muted-foreground">
             {activeAgents.length > 0 ? `${activeAgents.length} agent${activeAgents.length > 1 ? 's' : ''}` : '—'}
