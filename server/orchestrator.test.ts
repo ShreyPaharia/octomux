@@ -71,6 +71,7 @@ describe('startOrchestrator', () => {
     const claudeCmd = sendKeysArgs[sendKeysArgs.indexOf('-t') + 2];
     expect(claudeCmd).toContain('claude --system-prompt');
     expect(claudeCmd).toContain('orchestrator-prompt.md');
+    expect(claudeCmd).toContain('"Greet me and show what you can do"');
   });
 
   it('does not create session if already running', async () => {
