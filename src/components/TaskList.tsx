@@ -63,9 +63,7 @@ const TaskTableRow = memo(function TaskTableRow({
         <div className="min-w-0">
           <span className="block truncate text-sm font-medium">{task.title}</span>
           {task.description && (
-            <span className="block truncate text-xs text-muted-foreground">
-              {task.description}
-            </span>
+            <span className="block truncate text-xs text-muted-foreground">{task.description}</span>
           )}
         </div>
       </td>
@@ -86,7 +84,9 @@ const TaskTableRow = memo(function TaskTableRow({
           </div>
         ) : (
           <span className="tabular-nums text-xs text-muted-foreground">
-            {activeAgents.length > 0 ? `${activeAgents.length} agent${activeAgents.length > 1 ? 's' : ''}` : '—'}
+            {activeAgents.length > 0
+              ? `${activeAgents.length} agent${activeAgents.length > 1 ? 's' : ''}`
+              : '—'}
           </span>
         )}
       </td>
@@ -179,12 +179,7 @@ const TaskTableRow = memo(function TaskTableRow({
   );
 });
 
-function TaskTableView({
-  tasks,
-  onClose,
-  onDelete,
-  onResume,
-}: Omit<TaskListProps, 'viewMode'>) {
+function TaskTableView({ tasks, onClose, onDelete, onResume }: Omit<TaskListProps, 'viewMode'>) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-left">
@@ -214,13 +209,31 @@ function TaskTableView({
   );
 }
 
-export function TaskList({ tasks, onClose, onDelete, onResume, viewMode, totalCount = 0, emptyAction }: TaskListProps) {
+export function TaskList({
+  tasks,
+  onClose,
+  onDelete,
+  onResume,
+  viewMode,
+  totalCount = 0,
+  emptyAction,
+}: TaskListProps) {
   if (tasks.length === 0) {
     const isFiltered = totalCount > 0;
     return isFiltered ? (
       <EmptyState
         icon={
-          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="48"
+            height="48"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.3-4.3" />
             <path d="M8 11h6" />
@@ -232,7 +245,17 @@ export function TaskList({ tasks, onClose, onDelete, onResume, viewMode, totalCo
     ) : (
       <EmptyState
         icon={
-          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="48"
+            height="48"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <rect width="18" height="18" x="3" y="3" rx="2" />
             <path d="m7 8 4 4-4 4" />
             <path d="M13 16h4" />
@@ -246,7 +269,9 @@ export function TaskList({ tasks, onClose, onDelete, onResume, viewMode, totalCo
   }
 
   if (viewMode === 'table') {
-    return <TaskTableView tasks={tasks} onClose={onClose} onDelete={onDelete} onResume={onResume} />;
+    return (
+      <TaskTableView tasks={tasks} onClose={onClose} onDelete={onDelete} onResume={onResume} />
+    );
   }
 
   return (

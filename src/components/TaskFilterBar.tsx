@@ -182,8 +182,7 @@ export const TaskFilterBar = memo(function TaskFilterBar({
             }`}
             onClick={() => onStatusChange(tab.key)}
           >
-            {tab.label}{' '}
-            <span className="tabular-nums text-xs">({tab.count})</span>
+            {tab.label} <span className="tabular-nums text-xs">({tab.count})</span>
           </button>
         ))}
       </div>
