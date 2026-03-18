@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { AgentActivitySummary } from './AgentActivitySummary';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from './EmptyState';
 import { timeAgo } from '@/lib/time';
 
 export type ViewMode = 'cards' | 'table';
@@ -16,6 +17,8 @@ interface TaskListProps {
   onDelete: (id: string) => void;
   onResume?: (id: string) => void;
   viewMode: ViewMode;
+  totalCount?: number;
+  emptyAction?: React.ReactNode;
 }
 
 function repoName(repoPath: string): string {
@@ -193,13 +196,62 @@ function TaskTableView({ tasks, onClose, onDelete, onResume }: Omit<TaskListProp
   );
 }
 
-export function TaskList({ tasks, onClose, onDelete, onResume, viewMode }: TaskListProps) {
+export function TaskList({
+  tasks,
+  onClose,
+  onDelete,
+  onResume,
+  viewMode,
+  totalCount = 0,
+  emptyAction,
+}: TaskListProps) {
   if (tasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-        <p className="text-lg">No tasks yet</p>
-        <p className="text-sm">Create a task to get started</p>
-      </div>
+    const isFiltered = totalCount > 0;
+    return isFiltered ? (
+      <EmptyState
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="48"
+            height="48"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+            <path d="M8 11h6" />
+          </svg>
+        }
+        heading="No matching tasks"
+        subtext="Try adjusting your filters or status tab"
+      />
+    ) : (
+      <EmptyState
+        icon={
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="48"
+            height="48"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect width="18" height="18" x="3" y="3" rx="2" />
+            <path d="m7 8 4 4-4 4" />
+            <path d="M13 16h4" />
+          </svg>
+        }
+        heading="No tasks yet"
+        subtext="Create your first task to start running agents"
+        action={emptyAction}
+      />
     );
   }
 
