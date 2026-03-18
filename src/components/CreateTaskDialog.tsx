@@ -15,7 +15,7 @@ import { api } from '@/lib/api';
 import type { BrowseResult, RecentRepo } from '@/lib/api';
 
 interface CreateTaskDialogProps {
-  onCreated: () => void;
+  onCreated?: () => void;
 }
 
 function timeAgo(dateStr: string): string {
@@ -192,7 +192,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
       setRepoValidation('idle');
       setBranchIsAuto(true);
       setOpen(false);
-      onCreated();
+      onCreated?.();
     } catch (err) {
       setError((err as Error).message);
     } finally {
