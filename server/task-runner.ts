@@ -367,8 +367,6 @@ export async function createShellTerminal(task: Task): Promise<UserTerminal> {
   const db = getDb();
   await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
-  const target = `${task.tmux_session}:${windowIndex}`;
-  await waitForShellReady(target);
 
   const { count } = db
     .prepare('SELECT COUNT(*) as count FROM user_terminals WHERE task_id = ?')
