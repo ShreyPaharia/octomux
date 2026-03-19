@@ -6,6 +6,7 @@ import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
+import { OrchestratorCommandBar } from '@/components/OrchestratorCommandBar';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
@@ -107,6 +108,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
+            <OrchestratorCommandBar />
             <TaskFilterBar
               activeStatus={filters.status}
               counts={counts}
