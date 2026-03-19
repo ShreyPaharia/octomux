@@ -102,6 +102,32 @@ describe('startOrchestrator', () => {
     expect(claudeCmd).toContain('Create a task to fix bugs');
   });
 
+  it('escapes shell metacharacters in initial message with single quotes', async () => {
+    let callCount = 0;
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      callCount++;
+      const cb = args.find((a: any) => typeof a === 'function');
+      if (callCount === 1) {
+        if (cb) cb(new Error('no session'));
+      } else {
+        if (cb) cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await startOrchestrator('/test/cwd', "Fix the $HOME bug; rm -rf / && echo `whoami`");
+
+    const sendKeysCall = vi.mocked(execFile).mock.calls[2];
+    const claudeCmd = (sendKeysCall[1] as string[])[
+      (sendKeysCall[1] as string[]).indexOf('-t') + 2
+    ];
+    // Message should be wrapped in single quotes to prevent shell interpretation
+    expect(claudeCmd).toContain("'Greet me, then handle:");
+    // Dangerous chars should be inside single quotes (not interpreted)
+    expect(claudeCmd).toContain('$HOME');
+    expect(claudeCmd).toContain('`whoami`');
+  });
+
   it('does not create session if already running', async () => {
     await startOrchestrator();
 
