@@ -400,6 +400,52 @@ describe('addAgent', () => {
     expect(dbAgents).toHaveLength(1);
     expect(dbAgents[0].id).toBe(agent.id);
   });
+
+  it('marks agent as stopped if async claude launch fails', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+
+    // Make send-keys fail (but let new-window and list-windows succeed)
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('send-keys')) {
+        cb(new Error('tmux send-keys failed'), null);
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const agent = await addAgent(runningTask);
+    // Flush the fire-and-forget async IIFE
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Agent should be marked as stopped in DB
+    const agents = getAgents(db, DEFAULTS.task.id);
+    const dbAgent = agents.find((a) => a.id === agent.id)!;
+    expect(dbAgent.status).toBe('stopped');
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[addAgent]'),
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
+    // Restore default execFile implementation for subsequent tests
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('display-message')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: 'true', stderr: '' });
+      }
+    }) as any);
+  });
 });
 
 // ─── closeTask ───────────────────────────────────────────────────────────────
@@ -997,10 +1043,12 @@ describe('createShellTerminal', () => {
     expect(terminal.label).toBe('Terminal 1');
     expect(terminal.task_id).toBe(DEFAULTS.runningTask.id);
     expect(typeof terminal.window_index).toBe('number');
-    expect(findExecCall(execFile as any, {
-      cmd: 'tmux',
-      argsInclude: ['new-window'],
-    })).toBeTruthy();
+    expect(
+      findExecCall(execFile as any, {
+        cmd: 'tmux',
+        argsInclude: ['new-window'],
+      }),
+    ).toBeTruthy();
   });
 
   it('auto-increments terminal labels', async () => {
@@ -1026,10 +1074,12 @@ describe('closeShellTerminal', () => {
     insertTask(db, DEFAULTS.runningTask);
     insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
     await closeShellTerminal(DEFAULTS.runningTask as Task, DEFAULTS.userTerminal as any);
-    expect(findExecCall(execFile as any, {
-      cmd: 'tmux',
-      argsInclude: ['kill-window'],
-    })).toBeTruthy();
+    expect(
+      findExecCall(execFile as any, {
+        cmd: 'tmux',
+        argsInclude: ['kill-window'],
+      }),
+    ).toBeTruthy();
     expect(getUserTerminals(db, DEFAULTS.runningTask.id)).toHaveLength(0);
   });
 });

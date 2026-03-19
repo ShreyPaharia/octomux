@@ -61,7 +61,10 @@ export const api = {
   createUserTerminal: (taskId: string) =>
     request<{ user_window_index: number }>(`/tasks/${taskId}/user-terminal`, { method: 'POST' }),
   createTerminal: (taskId: string) =>
-    request<UserTerminal>(`/tasks/${taskId}/terminals`, { method: 'POST', body: JSON.stringify({}) }),
+    request<UserTerminal>(`/tasks/${taskId}/terminals`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   closeTerminal: (taskId: string, terminalId: string) =>
     request<void>(`/tasks/${taskId}/terminals/${terminalId}`, { method: 'DELETE' }),
 
