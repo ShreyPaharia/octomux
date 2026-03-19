@@ -235,22 +235,32 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
   ).run(agentId, task.id, windowIndex, label, claudeSessionId);
 
-  // Launch claude with session tracking, passing prompt as CLI argument
-  let claudeCmd = `claude --session-id ${claudeSessionId}`;
-  let promptFile: string | null = null;
-  if (prompt) {
-    promptFile = path.join(task.worktree!, `.claude-prompt-${agentId}`);
-    fs.writeFileSync(promptFile, prompt);
-    claudeCmd += ` "$(cat ${promptFile})"`;
-  }
-  // Wait for shell to be ready before sending keys (prevents first char being swallowed)
+  // Launch claude asynchronously — do not block the HTTP response
   const addTarget = `${task.tmux_session}:${windowIndex}`;
-  await waitForShellReady(addTarget);
-  await execFile('tmux', ['send-keys', '-t', addTarget, claudeCmd, 'Enter']);
-  if (promptFile) {
-    const pf = promptFile;
-    setTimeout(() => fs.unlinkSync(pf), 5000);
-  }
+  (async () => {
+    try {
+      let promptFile: string | null = null;
+      let claudeCmd = `claude --session-id ${claudeSessionId}`;
+      if (prompt) {
+        promptFile = path.join(task.worktree!, `.claude-prompt-${agentId}`);
+        fs.writeFileSync(promptFile, prompt);
+        claudeCmd += ` "$(cat ${promptFile})"`;
+      }
+      await waitForShellReady(addTarget);
+      await execFile('tmux', ['send-keys', '-t', addTarget, claudeCmd, 'Enter']);
+      if (promptFile) {
+        const pf = promptFile;
+        setTimeout(() => fs.unlinkSync(pf), 5000);
+      }
+    } catch (err) {
+      console.error(`[addAgent] Failed to launch claude in window ${windowIndex}:`, err);
+      try {
+        getDb()
+          .prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`)
+          .run(agentId);
+      } catch { /* DB may be closed in edge cases */ }
+    }
+  })().catch(() => {}); // inner try/catch handles all errors; this prevents unhandled rejection
 
   return {
     id: agentId,
