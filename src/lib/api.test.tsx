@@ -138,6 +138,30 @@ const apiCases = [
   },
 
   {
+    name: 'createTerminal',
+    call: () => api.createTerminal('t1'),
+    expectedUrl: '/api/tasks/t1/terminals',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({}),
+    response: {
+      id: 'term-1',
+      task_id: 't1',
+      window_index: 3,
+      label: 'Terminal 1',
+      status: 'idle',
+      created_at: '',
+    },
+  },
+  {
+    name: 'closeTerminal',
+    call: () => api.closeTerminal('t1', 'term-1'),
+    expectedUrl: '/api/tasks/t1/terminals/term-1',
+    expectedMethod: 'DELETE',
+    expectedBody: undefined,
+    response: undefined,
+    status: 204,
+  },
+  {
     name: 'orchestratorStatus',
     call: () => api.orchestratorStatus(),
     expectedUrl: '/api/orchestrator/status',

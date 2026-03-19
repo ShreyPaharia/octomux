@@ -5,6 +5,7 @@ import type {
   AddAgentRequest,
   Agent,
   OrchestratorStatus,
+  UserTerminal,
 } from '../../server/types';
 
 const BASE = '/api';
@@ -59,6 +60,10 @@ export const api = {
     request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
   createUserTerminal: (taskId: string) =>
     request<{ user_window_index: number }>(`/tasks/${taskId}/user-terminal`, { method: 'POST' }),
+  createTerminal: (taskId: string) =>
+    request<UserTerminal>(`/tasks/${taskId}/terminals`, { method: 'POST', body: JSON.stringify({}) }),
+  closeTerminal: (taskId: string, terminalId: string) =>
+    request<void>(`/tasks/${taskId}/terminals/${terminalId}`, { method: 'DELETE' }),
 
   orchestratorStatus: () => request<OrchestratorStatus>('/orchestrator/status'),
   orchestratorStart: () => request<OrchestratorStatus>('/orchestrator/start', { method: 'POST' }),
