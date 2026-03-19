@@ -4,8 +4,10 @@ import {
   createTestDb,
   insertTask,
   insertAgent,
+  insertUserTerminal,
   getTask,
   getAgents,
+  getUserTerminals,
   findCallback,
   deadSessionMock,
   DEFAULTS,
@@ -30,9 +32,14 @@ vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
 }));
 
+vi.mock('./events.js', () => ({
+  broadcast: vi.fn(),
+}));
+
 const {
   checkTaskStatus,
   pollStatuses,
+  pollTerminalActivity,
   ensureHooksInstalled,
   detectPR,
   pollPRs,
@@ -43,6 +50,7 @@ const {
 const { execFile } = await import('child_process');
 const { closeTask } = await import('./task-runner.js');
 const { installHookSettings } = await import('./hook-settings.js');
+const { broadcast } = await import('./events.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -485,6 +493,91 @@ describe('checkMergedPRs', () => {
     await checkMergedPRs();
 
     expect(execFile).not.toHaveBeenCalled();
+  });
+});
+
+// ─── pollTerminalActivity ────────────────────────────────────────────────────
+
+describe('pollTerminalActivity', () => {
+  it('updates terminal status to working when process is not shell', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id, status: 'idle' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cmdArgs = args[1] as string[];
+      const cb = findCallback(...args)!;
+      if (cmdArgs?.includes('list-panes')) {
+        cb(null, { stdout: 'npm', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await pollTerminalActivity();
+    const terminals = getUserTerminals(db, DEFAULTS.runningTask.id);
+    expect(terminals[0].status).toBe('working');
+  });
+
+  it('updates terminal status to idle when process is shell', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id, status: 'working' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cmdArgs = args[1] as string[];
+      const cb = findCallback(...args)!;
+      if (cmdArgs?.includes('list-panes')) {
+        cb(null, { stdout: 'zsh', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await pollTerminalActivity();
+    const terminals = getUserTerminals(db, DEFAULTS.runningTask.id);
+    expect(terminals[0].status).toBe('idle');
+  });
+
+  it('broadcasts update when status changes', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id, status: 'idle' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cmdArgs = args[1] as string[];
+      const cb = findCallback(...args)!;
+      if (cmdArgs?.includes('list-panes')) {
+        cb(null, { stdout: 'npm', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await pollTerminalActivity();
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:updated',
+      payload: { taskId: DEFAULTS.runningTask.id },
+    });
+  });
+
+  it('does not broadcast when status unchanged', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id, status: 'idle' });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cmdArgs = args[1] as string[];
+      const cb = findCallback(...args)!;
+      if (cmdArgs?.includes('list-panes')) {
+        cb(null, { stdout: 'zsh', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await pollTerminalActivity();
+    expect(broadcast).not.toHaveBeenCalled();
   });
 });
 
