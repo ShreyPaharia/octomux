@@ -505,7 +505,7 @@ describe('pollTerminalActivity', () => {
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = findCallback(...args);
+      const cb = findCallback(...args)!;
       if (cmdArgs?.includes('list-panes')) {
         cb(null, { stdout: 'npm', stderr: '' });
       } else {
@@ -525,7 +525,7 @@ describe('pollTerminalActivity', () => {
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = findCallback(...args);
+      const cb = findCallback(...args)!;
       if (cmdArgs?.includes('list-panes')) {
         cb(null, { stdout: 'zsh', stderr: '' });
       } else {
@@ -545,7 +545,7 @@ describe('pollTerminalActivity', () => {
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = findCallback(...args);
+      const cb = findCallback(...args)!;
       if (cmdArgs?.includes('list-panes')) {
         cb(null, { stdout: 'npm', stderr: '' });
       } else {
@@ -567,7 +567,7 @@ describe('pollTerminalActivity', () => {
 
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cmdArgs = args[1] as string[];
-      const cb = findCallback(...args);
+      const cb = findCallback(...args)!;
       if (cmdArgs?.includes('list-panes')) {
         cb(null, { stdout: 'zsh', stderr: '' });
       } else {
