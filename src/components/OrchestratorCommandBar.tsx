@@ -14,10 +14,8 @@ export function OrchestratorCommandBar() {
 
   const filteredCommands = input.startsWith('/') ? filterCommands(input.slice(1)) : [];
 
-  const handleSend = useCallback(async () => {
-    const message = input.trim();
-    if (!message || sending) return;
-
+  const sendMessage = async (message: string) => {
+    if (!message.trim() || sending) return;
     setSending(true);
     try {
       await api.orchestratorSend(message);
@@ -29,7 +27,9 @@ export function OrchestratorCommandBar() {
     } finally {
       setSending(false);
     }
-  }, [input, sending, open, refresh]);
+  };
+
+  const handleSend = () => sendMessage(input.trim());
 
   const slashMenuOpen = showSlashMenu && input.startsWith('/') && filteredCommands.length > 0;
 
@@ -71,17 +71,7 @@ export function OrchestratorCommandBar() {
   const handleChipClick = (command: (typeof COMMANDS)[number]) => {
     if (!command.hasPlaceholders) {
       setInput(command.template);
-      // Send immediately for commands with no placeholders
-      setSending(true);
-      api
-        .orchestratorSend(command.template)
-        .then(() => {
-          setInput('');
-          refresh();
-          open();
-        })
-        .catch((err) => console.error('Failed to send:', err))
-        .finally(() => setSending(false));
+      sendMessage(command.template);
       return;
     }
 
