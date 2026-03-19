@@ -5,6 +5,8 @@ import {
   insertTask,
   insertAgent,
   insertPermissionPrompt,
+  insertUserTerminal,
+  getUserTerminals,
   getTask,
   getAgents,
   getPermissionPrompts,
@@ -12,6 +14,7 @@ import {
   TASKS_TABLE_COLUMNS,
   AGENTS_TABLE_COLUMNS,
   PERMISSION_PROMPTS_TABLE_COLUMNS,
+  USER_TERMINALS_TABLE_COLUMNS,
 } from './test-helpers.js';
 import { getDb, initDb } from './db.js';
 
@@ -224,6 +227,23 @@ describe('Database', () => {
         hook_activity: string;
       };
       expect(agent.hook_activity).toBe(expected);
+    });
+  });
+
+  // ─── User Terminals ──────────────────────────────────────────────────────
+
+  describe('user_terminals table', () => {
+    it('creates user_terminals table with expected columns', () => {
+      const cols = db.pragma('table_info(user_terminals)') as Array<{ name: string }>;
+      const names = cols.map((c) => c.name);
+      expect(names).toEqual(USER_TERMINALS_TABLE_COLUMNS);
+    });
+
+    it('cascades user_terminals on task delete', () => {
+      insertTask(db, DEFAULTS.runningTask);
+      insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(DEFAULTS.runningTask.id);
+      expect(getUserTerminals(db, DEFAULTS.runningTask.id)).toHaveLength(0);
     });
   });
 });
