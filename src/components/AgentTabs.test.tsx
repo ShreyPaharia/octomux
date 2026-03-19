@@ -80,7 +80,12 @@ describe('AgentTabs', () => {
 
   it('hides add button when canAddAgent is false', () => {
     renderWithRouter(
-      <AgentTabs {...defaultProps} agents={[makeAgent()]} canAddAgent={false} onAddTerminal={undefined} />,
+      <AgentTabs
+        {...defaultProps}
+        agents={[makeAgent()]}
+        canAddAgent={false}
+        onAddTerminal={undefined}
+      />,
     );
     expect(screen.queryByTitle('Add agent without prompt')).not.toBeInTheDocument();
   });
