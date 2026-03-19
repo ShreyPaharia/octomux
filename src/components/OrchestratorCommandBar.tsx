@@ -104,51 +104,30 @@ export function OrchestratorCommandBar() {
   };
 
   return (
-    <div className="mb-4 rounded-xl border border-border bg-card">
-      <div className="relative">
-        <div className="flex items-end gap-2 p-3">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask the orchestrator anything..."
-            rows={1}
-            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-          <Button
-            size="sm"
-            disabled={!input.trim() || sending}
-            onClick={handleSend}
-            aria-label="Send"
-            className="shrink-0"
-          >
-            {sending ? (
-              <LoadingIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <SendIcon className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        {slashMenuOpen && (
-          <div className="absolute bottom-full left-0 z-50 mb-1 w-72 rounded-lg border border-border bg-popover p-1 shadow-md">
-            {filteredCommands.map((cmd, i) => (
-              <button
-                key={cmd.slash}
-                onClick={() => {
-                  handleChipClick(cmd);
-                  setShowSlashMenu(false);
-                }}
-                className={`flex w-full flex-col items-start rounded-md px-3 py-2 text-left text-sm ${
-                  i === selectedIndex ? 'bg-muted' : ''
-                }`}
-              >
-                <span className="font-semibold">{cmd.slash}</span>
-                <span className="text-xs text-muted-foreground">{cmd.description}</span>
-              </button>
-            ))}
-          </div>
-        )}
+    <div className="relative mb-4 rounded-xl border border-border bg-card">
+      <div className="flex items-end gap-2 p-3">
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask the orchestrator anything..."
+          rows={1}
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        />
+        <Button
+          size="sm"
+          disabled={!input.trim() || sending}
+          onClick={handleSend}
+          aria-label="Send"
+          className="shrink-0"
+        >
+          {sending ? (
+            <LoadingIcon className="h-4 w-4 animate-spin" />
+          ) : (
+            <SendIcon className="h-4 w-4" />
+          )}
+        </Button>
       </div>
       <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2">
         {COMMANDS.map((cmd) => (
@@ -161,6 +140,25 @@ export function OrchestratorCommandBar() {
           </button>
         ))}
       </div>
+      {slashMenuOpen && (
+        <div className="absolute top-full left-0 z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-1 shadow-md">
+          {filteredCommands.map((cmd, i) => (
+            <button
+              key={cmd.slash}
+              onClick={() => {
+                handleChipClick(cmd);
+                setShowSlashMenu(false);
+              }}
+              className={`flex w-full flex-col items-start rounded-md px-3 py-2 text-left text-sm ${
+                i === selectedIndex ? 'bg-muted' : ''
+              }`}
+            >
+              <span className="font-semibold">{cmd.slash}</span>
+              <span className="text-xs text-muted-foreground">{cmd.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
