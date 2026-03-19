@@ -17,3 +17,4 @@ blob-report/
 # Repo-local neovim runtime data
 .local/
 .config/nvim/.luarc.json
+docs/superpowers

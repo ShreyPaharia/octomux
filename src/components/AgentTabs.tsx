@@ -10,7 +10,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { Agent } from '../../server/types';
+import type { Agent, UserTerminal } from '../../server/types';
 
 interface AgentTabsProps {
   agents: Agent[];
@@ -19,6 +19,9 @@ interface AgentTabsProps {
   onAddAgent: (prompt?: string) => void;
   onStopAgent: (agentId: string) => void;
   canAddAgent: boolean;
+  userTerminals?: UserTerminal[];
+  onAddTerminal?: () => void;
+  onCloseTerminal?: (terminalId: string) => void;
 }
 
 export function AgentTabs({
@@ -28,6 +31,9 @@ export function AgentTabs({
   onAddAgent,
   onStopAgent,
   canAddAgent,
+  userTerminals = [],
+  onAddTerminal,
+  onCloseTerminal,
 }: AgentTabsProps) {
   return (
     <div className="flex items-center gap-1 border-b border-border px-1 pb-1">
@@ -85,6 +91,63 @@ export function AgentTabs({
           </div>
         ))}
       {canAddAgent && <AddAgentButton onAdd={onAddAgent} />}
+      {(userTerminals.length > 0 || onAddTerminal) && (
+        <div data-testid="tab-separator" className="mx-1 h-5 w-px bg-border" />
+      )}
+      {userTerminals.map((terminal) => (
+        <div key={terminal.id} className="group flex items-center">
+          <button
+            className={cn(
+              'rounded-t-md px-3 py-1.5 text-sm transition-colors',
+              terminal.window_index === activeIndex
+                ? 'bg-accent text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => onSelect(terminal.window_index)}
+          >
+            {terminal.label}
+            <span
+              className={`ml-1.5 inline-block h-1.5 w-1.5 rounded-full ${
+                terminal.status === 'working' ? 'animate-pulse bg-green-400' : 'bg-zinc-400'
+              }`}
+            />
+          </button>
+          {onCloseTerminal && (
+            <button
+              className="ml-0.5 hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:inline-flex"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCloseTerminal(terminal.id);
+              }}
+              title="Close terminal"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      ))}
+      {onAddTerminal && (
+        <button
+          className="rounded-t-md px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+          onClick={onAddTerminal}
+          title="Add terminal"
+        >
+          +
+        </button>
+      )}
     </div>
   );
 }
