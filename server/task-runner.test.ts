@@ -5,6 +5,8 @@ import {
   insertTask,
   insertAgent,
   insertPermissionPrompt,
+  insertUserTerminal,
+  getUserTerminals,
   getTask,
   getAgents,
   getPermissionPrompts,
@@ -59,6 +61,8 @@ const {
   resumeTask,
   slugifyTitle,
   createUserTerminal,
+  createShellTerminal,
+  closeShellTerminal,
   cleanupLinkedSessions,
   cleanupOrphanedViewerSessions,
 } = await import('./task-runner.js');
@@ -981,6 +985,77 @@ describe('closeTask linked session cleanup', () => {
 
     // Linked session killed before main session
     expect(callOrder).toEqual([`${session}-v-abc123`, session]);
+  });
+});
+
+// ─── createShellTerminal ─────────────────────────────────────────────────────
+
+describe('createShellTerminal', () => {
+  it('creates tmux window and returns terminal record', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    const terminal = await createShellTerminal(DEFAULTS.runningTask as Task);
+    expect(terminal.label).toBe('Terminal 1');
+    expect(terminal.task_id).toBe(DEFAULTS.runningTask.id);
+    expect(typeof terminal.window_index).toBe('number');
+    expect(findExecCall(execFile as any, {
+      cmd: 'tmux',
+      argsInclude: ['new-window'],
+    })).toBeTruthy();
+  });
+
+  it('auto-increments terminal labels', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
+    const terminal = await createShellTerminal(DEFAULTS.runningTask as Task);
+    expect(terminal.label).toBe('Terminal 2');
+  });
+
+  it('inserts record into user_terminals table', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    const terminal = await createShellTerminal(DEFAULTS.runningTask as Task);
+    const terminals = getUserTerminals(db, DEFAULTS.runningTask.id);
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0].id).toBe(terminal.id);
+  });
+});
+
+// ─── closeShellTerminal ──────────────────────────────────────────────────────
+
+describe('closeShellTerminal', () => {
+  it('kills tmux window and deletes DB record', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
+    await closeShellTerminal(DEFAULTS.runningTask as Task, DEFAULTS.userTerminal as any);
+    expect(findExecCall(execFile as any, {
+      cmd: 'tmux',
+      argsInclude: ['kill-window'],
+    })).toBeTruthy();
+    expect(getUserTerminals(db, DEFAULTS.runningTask.id)).toHaveLength(0);
+  });
+});
+
+// ─── closeTask — user terminal cleanup ──────────────────────────────────────
+
+describe('closeTask — user terminal cleanup', () => {
+  it('deletes user_terminals rows on close', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertAgent(db);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
+    await closeTask(DEFAULTS.runningTask as Task);
+    expect(getUserTerminals(db, DEFAULTS.runningTask.id)).toHaveLength(0);
+  });
+});
+
+// ─── resumeTask — user terminal cleanup ─────────────────────────────────────
+
+describe('resumeTask — user terminal cleanup', () => {
+  it('deletes user_terminals rows on resume', async () => {
+    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const };
+    insertTask(db, closedTask);
+    insertAgent(db, { status: 'stopped' });
+    insertUserTerminal(db, { task_id: closedTask.id });
+    await resumeTask(closedTask as Task);
+    expect(getUserTerminals(db, closedTask.id)).toHaveLength(0);
   });
 });
 
