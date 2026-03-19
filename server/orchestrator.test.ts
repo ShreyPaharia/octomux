@@ -115,7 +115,7 @@ describe('startOrchestrator', () => {
       return undefined as any;
     });
 
-    await startOrchestrator('/test/cwd', "Fix the $HOME bug; rm -rf / && echo `whoami`");
+    await startOrchestrator('/test/cwd', 'Fix the $HOME bug; rm -rf / && echo `whoami`');
 
     const sendKeysCall = vi.mocked(execFile).mock.calls[2];
     const claudeCmd = (sendKeysCall[1] as string[])[
