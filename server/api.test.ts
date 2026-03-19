@@ -67,6 +67,14 @@ vi.mock('fs', () => ({
   },
 }));
 
+vi.mock('./orchestrator.js', () => ({
+  isOrchestratorRunning: vi.fn(async () => true),
+  startOrchestrator: vi.fn(),
+  stopOrchestrator: vi.fn(),
+  getOrchestratorSession: vi.fn(() => 'octomux-orchestrator'),
+  sendToOrchestrator: vi.fn(),
+}));
+
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
     const cb = _rest.find((a: any) => typeof a === 'function');
@@ -80,6 +88,8 @@ const fs = (await import('fs')).default;
 const { createApp } = await import('./app.js');
 const { startTask, closeTask, deleteTask, resumeTask, addAgent, stopAgent, createUserTerminal } =
   await import('./task-runner.js');
+const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
+  await import('./orchestrator.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -1025,5 +1035,45 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('message is required');
+  });
+});
+
+// ─── POST /api/orchestrator/send ─────────────────────────────────────────────
+
+describe('POST /api/orchestrator/send', () => {
+  it('sends message when orchestrator is running', async () => {
+    vi.mocked(isOrchestratorRunning).mockResolvedValue(true);
+    const res = await request(app)
+      .post('/api/orchestrator/send')
+      .send({ message: 'Show me all tasks' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, running: true });
+    expect(sendToOrchestrator).toHaveBeenCalledWith('Show me all tasks');
+  });
+
+  it('auto-starts orchestrator when not running', async () => {
+    vi.mocked(isOrchestratorRunning).mockResolvedValue(false);
+    const res = await request(app)
+      .post('/api/orchestrator/send')
+      .send({ message: 'Create a task' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, running: true });
+    expect(startOrchestrator).toHaveBeenCalledWith(undefined, 'Create a task');
+  });
+
+  it('returns 400 when message is missing', async () => {
+    const res = await request(app).post('/api/orchestrator/send').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('message is required');
+  });
+
+  it('returns 500 when orchestrator fails to start', async () => {
+    vi.mocked(isOrchestratorRunning).mockResolvedValue(false);
+    vi.mocked(startOrchestrator).mockRejectedValueOnce(new Error('tmux failed'));
+    const res = await request(app)
+      .post('/api/orchestrator/send')
+      .send({ message: 'hello' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'tmux failed' });
   });
 });
