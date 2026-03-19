@@ -1070,9 +1070,7 @@ describe('POST /api/orchestrator/send', () => {
   it('returns 500 when orchestrator fails to start', async () => {
     vi.mocked(isOrchestratorRunning).mockResolvedValue(false);
     vi.mocked(startOrchestrator).mockRejectedValueOnce(new Error('tmux failed'));
-    const res = await request(app)
-      .post('/api/orchestrator/send')
-      .send({ message: 'hello' });
+    const res = await request(app).post('/api/orchestrator/send').send({ message: 'hello' });
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ ok: false, error: 'tmux failed' });
   });

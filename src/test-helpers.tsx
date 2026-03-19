@@ -89,8 +89,12 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     recentRepos: vi.fn().mockResolvedValue([]),
     listBranches: vi.fn().mockResolvedValue([]),
     getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
-    orchestratorStatus: vi.fn().mockResolvedValue({ running: false, session: 'octomux-orchestrator' }),
-    orchestratorStart: vi.fn().mockResolvedValue({ running: true, session: 'octomux-orchestrator' }),
+    orchestratorStatus: vi
+      .fn()
+      .mockResolvedValue({ running: false, session: 'octomux-orchestrator' }),
+    orchestratorStart: vi
+      .fn()
+      .mockResolvedValue({ running: true, session: 'octomux-orchestrator' }),
     orchestratorStop: vi.fn().mockResolvedValue({ running: false }),
     orchestratorSend: vi.fn().mockResolvedValue({ ok: true, running: true }),
   };
