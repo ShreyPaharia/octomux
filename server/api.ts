@@ -21,6 +21,7 @@ import {
   startOrchestrator,
   stopOrchestrator,
   getOrchestratorSession,
+  sendToOrchestrator,
 } from './orchestrator.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
@@ -550,5 +551,25 @@ export function setupRoutes(app: Express): void {
   app.post('/api/orchestrator/stop', async (_req: Request, res: Response) => {
     await stopOrchestrator();
     res.json({ running: false });
+  });
+
+  app.post('/api/orchestrator/send', async (req: Request, res: Response) => {
+    const { message } = req.body as { message?: string };
+    if (!message) {
+      res.status(400).json({ error: 'message is required' });
+      return;
+    }
+
+    try {
+      const running = await isOrchestratorRunning();
+      if (!running) {
+        await startOrchestrator(undefined, message);
+      } else {
+        await sendToOrchestrator(message);
+      }
+      res.json({ ok: true, running: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
   });
 }
