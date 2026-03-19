@@ -31,10 +31,13 @@ interface OrchestratorCommand {
   chipLabel: string;
   description: string;
   fields?: CommandField[];
-  template: string | ((values: Record<string, string>) => string);
-  hasPlaceholders?: boolean; // only used when template is a string (backward compat)
+  // Always a function. For simple commands (no fields), a thunk returning the fixed message.
+  // For field-based commands, receives form values.
+  buildMessage: (values: Record<string, string>) => string;
 }
 ```
+
+The previous `template: string` and `hasPlaceholders: boolean` are replaced by a single `buildMessage` function. For commands without fields (like "List Tasks"), the function ignores its argument: `buildMessage: () => 'Show me all running tasks'`. This eliminates the union type and the need for type guards.
 
 Commands with `fields` render a structured form. Commands without fields (e.g., "List Tasks") send immediately (unchanged behavior).
 
@@ -88,8 +91,8 @@ When a user clicks a chip or selects a slash command that has `fields`:
 
 #### Submit Flow
 
-1. User fills fields, clicks Send (or presses Enter in a text field)
-2. `template(values)` assembles a natural language message from field values
+1. User fills fields, clicks Send (or presses Enter in a `text` field — NOT in `textarea` fields where Enter inserts a newline; use Cmd/Ctrl+Enter or the Send button to submit from a textarea)
+2. `buildMessage(values)` assembles a natural language message from field values
 3. Message is sent to orchestrator via `api.orchestratorSend(message)`
 4. Orchestrator modal auto-opens
 5. Form collapses back to plain text input
@@ -114,17 +117,21 @@ The `CreateTaskDialog` contains inline implementations of repo picker (~120 line
 
 After extraction, `CreateTaskDialog` is refactored to use these extracted components, eliminating duplication.
 
+The `FolderBrowser` sub-component (currently inline in `CreateTaskDialog`, ~108 lines) is co-located with `RepoPickerField` since it's only used there.
+
 #### RepoPickerField Props
 
 ```ts
+type RepoValidation = 'idle' | 'loading' | 'valid' | 'invalid';
+
 interface RepoPickerFieldProps {
   value: string;
   onChange: (value: string) => void;
-  validation: 'idle' | 'loading' | 'valid' | 'invalid';
+  onValidationChange?: (state: RepoValidation) => void; // callback, not input prop
 }
 ```
 
-Internally manages: browse popover state, browse data, recent repos fetch. Exposes only value + onChange + validation state.
+Internally manages: browse popover state, browse data, recent repos fetch, git validation (debounced 500ms). Calls `onValidationChange` when validation state changes so parent can use it (e.g., to control branch picker's disabled state).
 
 #### BranchPickerField Props
 
@@ -163,10 +170,12 @@ Internally manages: fetch tasks from `api.listTasks()`, search filter, dropdown 
 ```
 
 - Fetches tasks from `api.listTasks()` on mount
+- Filters to `running` and `closed` statuses by default (excludes `draft`, `setting_up`, `error`). Can be overridden via optional `statusFilter` prop if needed.
 - Shows title (primary text) + first 6 chars of ID (muted secondary text)
 - Searchable by title
-- Selected value = task ID (used in template)
+- Selected value = task ID (used in buildMessage)
 - Displays selected task's title in the trigger button
+- Shows loading spinner while fetching, error message on fetch failure
 
 ### New Component: CommandFieldForm
 
@@ -183,11 +192,11 @@ interface CommandFieldFormProps {
 }
 ```
 
-- Manages form values as `Record<string, string>`
+- Manages form values as `Record<string, string>` and repo validation state
 - Renders each field using the appropriate component based on `field.type`
-- Handles `dependsOn` by disabling fields whose dependency is empty
-- Calls `command.template(values)` on submit
-- Passes repo path to branch-picker when `dependsOn: 'repo'` is specified
+- Handles `dependsOn`: disables fields whose dependency is empty, and passes dependency value as context prop. Specifically: if `field.type === 'branch-picker'` and `field.dependsOn` is set, pass `values[field.dependsOn]` as the `repoPath` prop. This convention means `dependsOn` both controls disabled state AND provides contextual data to the dependent field.
+- Calls `command.buildMessage(values)` on submit
+- Resets dependent field values when their dependency changes (e.g., branch resets when repo changes)
 
 ### OrchestratorCommandBar Changes
 
@@ -205,13 +214,15 @@ Updated behavior:
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Create | `src/components/fields/RepoPickerField.tsx` | Repo input + browse + recent + validation |
+| Create | `src/components/fields/RepoPickerField.tsx` | Repo input + browse + FolderBrowser + recent + validation |
 | Create | `src/components/fields/BranchPickerField.tsx` | Searchable branch dropdown |
 | Create | `src/components/fields/TaskPickerField.tsx` | Task title dropdown |
 | Create | `src/components/CommandFieldForm.tsx` | Dynamic field form renderer |
-| Modify | `src/lib/orchestrator-commands.ts` | Add `fields` + function templates to commands |
-| Modify | `src/components/OrchestratorCommandBar.tsx` | Add `activeCommand` state, render form |
+| Modify | `src/lib/orchestrator-commands.ts` | Replace `template`/`hasPlaceholders` with `fields` + `buildMessage` |
+| Modify | `src/components/OrchestratorCommandBar.tsx` | Add `activeCommand` state, render form, update to use `buildMessage` |
 | Modify | `src/components/CreateTaskDialog.tsx` | Refactor to use extracted field components |
+
+**Note on CreateTaskDialog refactoring:** The dialog has additional state tightly coupled to the inline fields — specifically `branchIsAuto` (auto-generates branch name from title) and `touched` (inline validation). The extracted `BranchPickerField` should expose an `onBranchesLoaded` callback so `CreateTaskDialog` can set the default branch for auto-generation. The `touched` validation remains in the dialog since it's form-level concern, not field-level.
 
 ### Edge Cases
 
@@ -220,7 +231,7 @@ Updated behavior:
 - **Task picker with no tasks**: Shows "No tasks found"
 - **dependsOn chain**: Branch picker resets when repo changes (branches reload)
 - **Escape key**: When form is open, closes form (does not send). When form is closed, clears text input (existing behavior).
-- **Switching commands**: Clicking a different chip while a form is open replaces it with the new command's form (values reset)
+- **Switching commands**: Clicking a different chip with fields while a form is open replaces it with the new command's form (values reset). Clicking a fieldless chip (e.g., "List Tasks") while a form is open sends immediately and collapses the form.
 
 ## What We're NOT Building
 
