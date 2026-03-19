@@ -155,10 +155,7 @@ export const TaskCard = memo(function TaskCard({
         </div>
         {task.agents && task.agents.length > 0 && task.status === 'running' && (
           <div className="mt-2">
-            <AgentActivitySummary
-              agents={task.agents}
-              pendingPrompts={task.pending_prompts}
-            />
+            <AgentActivitySummary agents={task.agents} pendingPrompts={task.pending_prompts} />
           </div>
         )}
         {task.pending_prompts && task.pending_prompts.length > 0 && (
