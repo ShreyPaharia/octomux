@@ -6,8 +6,13 @@ vi.mock('child_process', () => ({
   }),
 }));
 
-const { isOrchestratorRunning, startOrchestrator, stopOrchestrator, getOrchestratorSession } =
-  await import('./orchestrator.js');
+const {
+  isOrchestratorRunning,
+  startOrchestrator,
+  stopOrchestrator,
+  getOrchestratorSession,
+  sendToOrchestrator,
+} = await import('./orchestrator.js');
 const { execFile } = await import('child_process');
 
 beforeEach(() => {
@@ -74,6 +79,29 @@ describe('startOrchestrator', () => {
     expect(claudeCmd).toContain('"Greet me and show what you can do"');
   });
 
+  it('bakes initial message into claude launch command', async () => {
+    let callCount = 0;
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      callCount++;
+      const cb = args.find((a: any) => typeof a === 'function');
+      if (callCount === 1) {
+        if (cb) cb(new Error('no session'));
+      } else {
+        if (cb) cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await startOrchestrator('/test/cwd', 'Create a task to fix bugs');
+
+    const sendKeysCall = vi.mocked(execFile).mock.calls[2];
+    const claudeCmd = (sendKeysCall[1] as string[])[
+      (sendKeysCall[1] as string[]).indexOf('-t') + 2
+    ];
+    expect(claudeCmd).toContain('Greet me, then handle:');
+    expect(claudeCmd).toContain('Create a task to fix bugs');
+  });
+
   it('does not create session if already running', async () => {
     await startOrchestrator();
 
@@ -99,6 +127,32 @@ describe('startOrchestrator', () => {
 
     const newSessionCall = vi.mocked(execFile).mock.calls[1];
     expect(newSessionCall[1]).toContain('/my/project');
+  });
+});
+
+describe('sendToOrchestrator', () => {
+  it('sends message via tmux send-keys with literal flag then Enter separately', async () => {
+    await sendToOrchestrator('hello world');
+
+    const calls = vi.mocked(execFile).mock.calls;
+    // has-session check + send-keys -l (message) + send-keys (Enter)
+    expect(calls).toHaveLength(3);
+    // Literal message send
+    expect(calls[1][0]).toBe('tmux');
+    expect(calls[1][1]).toEqual(['send-keys', '-l', '-t', 'octomux-orchestrator', 'hello world']);
+    // Enter key send (NOT literal)
+    expect(calls[2][0]).toBe('tmux');
+    expect(calls[2][1]).toEqual(['send-keys', '-t', 'octomux-orchestrator', 'Enter']);
+  });
+
+  it('throws if orchestrator is not running', async () => {
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = args.find((a: any) => typeof a === 'function');
+      if (cb) cb(new Error('session not found'));
+      return undefined as any;
+    });
+
+    await expect(sendToOrchestrator('hello')).rejects.toThrow('Orchestrator is not running');
   });
 });
 
