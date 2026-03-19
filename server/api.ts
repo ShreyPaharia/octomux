@@ -38,6 +38,8 @@ import type {
 
 const execFile = promisify(execFileCb);
 
+const TERMINALS_BY_TASK_SQL = 'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index';
+
 function safeParseJson(s: string): Record<string, unknown> {
   try {
     return JSON.parse(s || '{}');
@@ -192,7 +194,7 @@ export function setupRoutes(app: Express): void {
        ORDER BY pp.created_at ASC`,
     );
     const userTerminalsStmt = db.prepare(
-      'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index',
+      TERMINALS_BY_TASK_SQL,
     );
 
     const result = tasks.map((task) => {
@@ -242,7 +244,7 @@ export function setupRoutes(app: Express): void {
       tool_input: safeParseJson(pp.tool_input as string),
     }));
     const userTerminals = db
-      .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
+      .prepare(TERMINALS_BY_TASK_SQL)
       .all(task.id) as UserTerminal[];
     res.json({
       ...task,
@@ -289,7 +291,7 @@ export function setupRoutes(app: Express): void {
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(id) as Agent[];
     created.user_terminals = db
-      .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
+      .prepare(TERMINALS_BY_TASK_SQL)
       .all(id) as UserTerminal[];
     broadcast({ type: 'task:created', payload: { taskId: id } });
     res.status(201).json(created);
@@ -382,7 +384,7 @@ export function setupRoutes(app: Express): void {
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
     updated.user_terminals = db
-      .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
+      .prepare(TERMINALS_BY_TASK_SQL)
       .all(task.id) as UserTerminal[];
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
@@ -412,7 +414,7 @@ export function setupRoutes(app: Express): void {
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
     updated.user_terminals = db
-      .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
+      .prepare(TERMINALS_BY_TASK_SQL)
       .all(task.id) as UserTerminal[];
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
