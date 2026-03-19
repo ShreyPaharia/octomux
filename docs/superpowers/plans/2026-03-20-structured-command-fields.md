@@ -151,7 +151,7 @@ Internally manages:
 - `branchSearch` for filtering
 - `dropdownOpen` for popover state
 
-Render: Searchable dropdown using `Popover` (copy from `CreateTaskDialog` lines 406-475). Show "Select a repository first" when `disabled` or no branches. Auto-set value to default branch on first load.
+Render: Searchable dropdown using `Popover` (copy from `CreateTaskDialog` lines 406-475, note: use `render={<Button />}` prop pattern per CLAUDE.md). Show "Select a repository first" when `disabled` or no branches. When branches load, call `onBranchesLoaded` if provided. Auto-set value to default branch via `onChange` ONLY when `onBranchesLoaded` is NOT provided (to avoid double-set when parent controls value).
 
 - [ ] **Step 2: Write basic test**
 
@@ -245,10 +245,12 @@ import userEvent from '@testing-library/user-event';
 import { TaskPickerField } from './TaskPickerField';
 import { renderWithRouter } from '../../test-helpers';
 
+import { makeTask } from '../../test-helpers';
+
 const mockTasks = [
-  { id: 'abc123456789', title: 'Fix login bug', status: 'running', agents: [] },
-  { id: 'def987654321', title: 'Add auth middleware', status: 'closed', agents: [] },
-  { id: 'ghi111222333', title: 'Draft task', status: 'draft', agents: [] },
+  makeTask({ id: 'abc123456789', title: 'Fix login bug', status: 'running' }),
+  makeTask({ id: 'def987654321', title: 'Add auth middleware', status: 'closed' }),
+  makeTask({ id: 'ghi111222333', title: 'Draft task', status: 'draft' }),
 ];
 
 vi.mock('@/lib/api', () => ({
@@ -299,7 +301,9 @@ git commit -m "feat: add TaskPickerField component"
 
 ---
 
-## Batch 2: Command Definitions + Form Renderer
+## Batch 2: Command Definitions + Form Renderer + Wire Up
+
+**IMPORTANT:** Tasks 4, 5, and 6 MUST be done as a single atomic batch. Task 4 changes the command type interface which breaks `OrchestratorCommandBar` at compile time. Task 6 fixes the command bar to use the new interface. Do NOT run the full test suite between Tasks 4 and 6 — only run the specific test files being modified.
 
 ### Task 4: Update `orchestrator-commands.ts` with `fields` and `buildMessage`
 
@@ -537,8 +541,6 @@ git commit -m "feat: add CommandFieldForm dynamic field renderer"
 
 ---
 
-## Batch 3: Wire Up Command Bar
-
 ### Task 6: Update `OrchestratorCommandBar` to show form for field-based commands
 
 **Files:**
@@ -635,6 +637,26 @@ describe('field-based commands', () => {
     await userEvent.click(screen.getByLabelText(/close/i));
     expect(screen.getByPlaceholderText(/ask the orchestrator/i)).toBeInTheDocument();
   });
+
+  it('replaces form when clicking a different chip with fields', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    await userEvent.click(screen.getByText('+ Create Task'));
+    expect(screen.getByText('Title')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Task Status'));
+    expect(screen.queryByText('Title')).not.toBeInTheDocument();
+    expect(screen.getByText('Task')).toBeInTheDocument();
+  });
+
+  it('sends immediately and collapses form when clicking fieldless chip', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    await userEvent.click(screen.getByText('+ Create Task'));
+    expect(screen.getByText('Title')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('List Tasks'));
+    await waitFor(() => {
+      expect(mockSend).toHaveBeenCalledWith('Show me all running tasks');
+    });
+    expect(screen.getByPlaceholderText(/ask the orchestrator/i)).toBeInTheDocument();
+  });
 });
 ```
 
@@ -652,7 +674,7 @@ git commit -m "feat: wire command bar to show field forms for structured command
 
 ---
 
-## Batch 4: Refactor CreateTaskDialog
+## Batch 3: Refactor CreateTaskDialog
 
 ### Task 7: Refactor `CreateTaskDialog` to use extracted field components
 
@@ -705,7 +727,7 @@ git commit -m "refactor: use extracted field components in CreateTaskDialog"
 
 ---
 
-## Batch 5: Polish
+## Batch 4: Polish
 
 ### Task 8: Run full test suite, lint, format, typecheck
 
