@@ -63,4 +63,9 @@ export const api = {
   orchestratorStatus: () => request<OrchestratorStatus>('/orchestrator/status'),
   orchestratorStart: () => request<OrchestratorStatus>('/orchestrator/start', { method: 'POST' }),
   orchestratorStop: () => request<void>('/orchestrator/stop', { method: 'POST' }),
+  orchestratorSend: (message: string) =>
+    request<{ ok: boolean; running: boolean }>('/orchestrator/send', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
 };
