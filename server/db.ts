@@ -63,6 +63,17 @@ CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status);
+
+CREATE TABLE IF NOT EXISTS user_terminals (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    window_index INTEGER NOT NULL,
+    label        TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'idle',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_terminals_task ON user_terminals(task_id);
 `;
 
 let db: Database.Database;

@@ -21,6 +21,7 @@ export interface Task {
   created_at: string;
   updated_at: string;
   agents?: Agent[];
+  user_terminals?: UserTerminal[];
   pending_prompts?: PermissionPrompt[];
   derived_status?: DerivedTaskStatus | null;
 }
@@ -34,6 +35,17 @@ export interface Agent {
   claude_session_id: string | null;
   hook_activity: HookActivity;
   hook_activity_updated_at: string | null;
+  created_at: string;
+}
+
+export type UserTerminalStatus = 'idle' | 'working';
+
+export interface UserTerminal {
+  id: string;
+  task_id: string;
+  window_index: number;
+  label: string;
+  status: UserTerminalStatus;
   created_at: string;
 }
 

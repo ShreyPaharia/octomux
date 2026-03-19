@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import { initDb, setDb } from './db.js';
-import type { Task, Agent } from './types.js';
+import type { Task, Agent, UserTerminal } from './types.js';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 
@@ -54,6 +54,15 @@ export const DEFAULTS = {
     created_at: '2026-01-01 00:00:00',
   },
 
+  userTerminal: {
+    id: 'test-terminal-01',
+    task_id: 'test-task-01',
+    window_index: 2,
+    label: 'Terminal 1',
+    status: 'idle' as const,
+    created_at: '2026-01-01 00:00:00',
+  },
+
   permissionPrompt: {
     id: 'pp_test123456',
     task_id: 'task_test1234',
@@ -65,7 +74,7 @@ export const DEFAULTS = {
     created_at: new Date().toISOString(),
     resolved_at: null,
   },
-} satisfies Record<string, Partial<Task> | Partial<Agent> | Record<string, unknown>>;
+} satisfies Record<string, Partial<Task> | Partial<Agent> | Partial<UserTerminal> | Record<string, unknown>>;
 
 // Derived constants from defaults
 export const SESSION_PREFIX = 'octomux-agent-';
@@ -168,6 +177,23 @@ export function getPermissionPrompts(db: Database.Database, taskId: string) {
   return db
     .prepare('SELECT * FROM permission_prompts WHERE task_id = ? ORDER BY created_at ASC')
     .all(taskId) as Array<Record<string, unknown>>;
+}
+
+export function insertUserTerminal(
+  db: Database.Database,
+  overrides: Partial<UserTerminal> = {},
+): UserTerminal {
+  const ut: UserTerminal = { ...DEFAULTS.userTerminal, ...overrides } as UserTerminal;
+  db.prepare(
+    'INSERT INTO user_terminals (id, task_id, window_index, label, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(ut.id, ut.task_id, ut.window_index, ut.label, ut.status, ut.created_at);
+  return ut;
+}
+
+export function getUserTerminals(db: Database.Database, taskId: string): UserTerminal[] {
+  return db
+    .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
+    .all(taskId) as UserTerminal[];
 }
 
 // ─── Callback Finder ─────────────────────────────────────────────────────────
@@ -285,4 +311,13 @@ export const PERMISSION_PROMPTS_TABLE_COLUMNS = [
   'status',
   'created_at',
   'resolved_at',
+];
+
+export const USER_TERMINALS_TABLE_COLUMNS = [
+  'id',
+  'task_id',
+  'window_index',
+  'label',
+  'status',
+  'created_at',
 ];
