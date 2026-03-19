@@ -255,10 +255,10 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     } catch (err) {
       console.error(`[addAgent] Failed to launch claude in window ${windowIndex}:`, err);
       try {
-        getDb()
-          .prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`)
-          .run(agentId);
-      } catch { /* DB may be closed in edge cases */ }
+        getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
+      } catch {
+        /* DB may be closed in edge cases */
+      }
     }
   })().catch(() => {}); // inner try/catch handles all errors; this prevents unhandled rejection
 
@@ -401,7 +401,9 @@ export async function createShellTerminal(task: Task): Promise<UserTerminal> {
 export async function closeShellTerminal(task: Task, terminal: UserTerminal): Promise<void> {
   const db = getDb();
   await execFile('tmux', [
-    'kill-window', '-t', `${task.tmux_session}:${terminal.window_index}`,
+    'kill-window',
+    '-t',
+    `${task.tmux_session}:${terminal.window_index}`,
   ]).catch(() => {});
   db.prepare('DELETE FROM user_terminals WHERE id = ?').run(terminal.id);
 }

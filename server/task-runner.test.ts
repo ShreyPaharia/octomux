@@ -1043,10 +1043,12 @@ describe('createShellTerminal', () => {
     expect(terminal.label).toBe('Terminal 1');
     expect(terminal.task_id).toBe(DEFAULTS.runningTask.id);
     expect(typeof terminal.window_index).toBe('number');
-    expect(findExecCall(execFile as any, {
-      cmd: 'tmux',
-      argsInclude: ['new-window'],
-    })).toBeTruthy();
+    expect(
+      findExecCall(execFile as any, {
+        cmd: 'tmux',
+        argsInclude: ['new-window'],
+      }),
+    ).toBeTruthy();
   });
 
   it('auto-increments terminal labels', async () => {
@@ -1072,10 +1074,12 @@ describe('closeShellTerminal', () => {
     insertTask(db, DEFAULTS.runningTask);
     insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
     await closeShellTerminal(DEFAULTS.runningTask as Task, DEFAULTS.userTerminal as any);
-    expect(findExecCall(execFile as any, {
-      cmd: 'tmux',
-      argsInclude: ['kill-window'],
-    })).toBeTruthy();
+    expect(
+      findExecCall(execFile as any, {
+        cmd: 'tmux',
+        argsInclude: ['kill-window'],
+      }),
+    ).toBeTruthy();
     expect(getUserTerminals(db, DEFAULTS.runningTask.id)).toHaveLength(0);
   });
 });
