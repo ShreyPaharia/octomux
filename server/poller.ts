@@ -4,7 +4,7 @@ import { getDb } from './db.js';
 import { closeTask } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
-import type { Task } from './types.js';
+import type { Task, UserTerminal } from './types.js';
 
 const execFile = promisify(execFileCb);
 
@@ -63,6 +63,8 @@ export async function pollStatuses(): Promise<void> {
       broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     }
   }
+
+  await pollTerminalActivity();
 }
 
 // ─── Hook Installation ──────────────────────────────────────────────────────
@@ -178,6 +180,50 @@ export async function pollMergedPRs(): Promise<void> {
     await checkMergedPRs();
   } catch (err) {
     console.error('pollMergedPRs error:', err);
+  }
+}
+
+// ─── Terminal Activity Polling ───────────────────────────────────────────────
+
+const SHELL_COMMANDS = new Set(['zsh', 'bash', 'sh', 'fish', 'dash']);
+
+export async function pollTerminalActivity(): Promise<void> {
+  const db = getDb();
+  const runningTasks = db
+    .prepare("SELECT * FROM tasks WHERE status = 'running' AND tmux_session IS NOT NULL")
+    .all() as Task[];
+
+  for (const task of runningTasks) {
+    const terminals = db
+      .prepare('SELECT * FROM user_terminals WHERE task_id = ?')
+      .all(task.id) as UserTerminal[];
+
+    let changed = false;
+    for (const terminal of terminals) {
+      try {
+        const { stdout } = await execFile('tmux', [
+          'list-panes',
+          '-t',
+          `${task.tmux_session}:${terminal.window_index}`,
+          '-F',
+          '#{pane_current_command}',
+        ]);
+        const command = stdout.trim().split('\n')[0];
+        const newStatus = SHELL_COMMANDS.has(command) ? 'idle' : 'working';
+        if (newStatus !== terminal.status) {
+          db.prepare('UPDATE user_terminals SET status = ? WHERE id = ?').run(
+            newStatus,
+            terminal.id,
+          );
+          changed = true;
+        }
+      } catch {
+        // Window may have been killed — ignore
+      }
+    }
+    if (changed) {
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    }
   }
 }
 
