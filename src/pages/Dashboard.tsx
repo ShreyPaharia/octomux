@@ -6,19 +6,12 @@ import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
-import { NotificationToggle } from '@/components/NotificationToggle';
-import {
-  OrchestratorPanel,
-  OrchestratorToggle,
-  useOrchestratorPanel,
-} from '@/components/OrchestratorPanel';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
-  const orchestrator = useOrchestratorPanel();
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem('octomux-view-mode') as ViewMode) || 'cards',
   );
@@ -65,102 +58,77 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="flex h-screen">
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl px-4 py-4">
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <img
-                  src="/logo.png"
-                  alt="octomux"
-                  className="h-8 w-8 brightness-150 saturate-200"
-                />
-                <h1 className="text-2xl font-bold tracking-tight">octomux</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <OrchestratorToggle
-                isOpen={orchestrator.isOpen}
-                running={orchestrator.running}
-                toggle={orchestrator.toggle}
-              />
-              <NotificationToggle />
-              <CreateTaskDialog onCreated={refresh} />
-            </div>
-          </div>
+    <div className="h-full overflow-auto">
+      <div className="mx-auto max-w-6xl px-4 py-4">
+        {error && (
+          <EmptyState
+            icon={
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="48"
+                height="48"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <path d="M12 9v4" />
+                <path d="M12 17h.01" />
+              </svg>
+            }
+            heading="Unable to load tasks"
+            subtext={`Check that the server is running on port 7777. ${error}`}
+            action={
+              <Button variant="outline" size="sm" onClick={refresh}>
+                Retry
+              </Button>
+            }
+          />
+        )}
 
-          {error && (
-            <EmptyState
-              icon={
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="48"
-                  height="48"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                  <path d="M12 9v4" />
-                  <path d="M12 17h.01" />
-                </svg>
-              }
-              heading="Unable to load tasks"
-              subtext={`Check that the server is running on port 7777. ${error}`}
-              action={
-                <Button variant="outline" size="sm" onClick={refresh}>
-                  Retry
-                </Button>
-              }
-            />
-          )}
-
-          {loading ? (
-            <div className="flex flex-col gap-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="h-5 w-48 rounded bg-muted" />
-                    <div className="h-5 w-16 rounded bg-muted" />
-                  </div>
-                  <div className="mt-2 h-4 w-64 rounded bg-muted" />
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="h-5 w-20 rounded bg-muted" />
-                    <div className="h-4 w-32 rounded bg-muted" />
-                  </div>
+        {loading ? (
+          <div className="flex flex-col gap-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="h-5 w-48 rounded bg-muted" />
+                  <div className="h-5 w-16 rounded bg-muted" />
                 </div>
-              ))}
-            </div>
-          ) : (
-            <>
-              <TaskFilterBar
-                activeStatus={filters.status}
-                counts={counts}
-                onStatusChange={(s) => setFilter('status', s)}
-                repos={repos}
-                activeRepo={filters.repo}
-                onRepoChange={(r) => setFilter('repo', r)}
-                viewMode={viewMode}
-                onViewChange={handleViewChange}
-              />
-              <TaskList
-                tasks={filtered}
-                totalCount={tasks.length}
-                emptyAction={<CreateTaskDialog onCreated={refresh} />}
-                onClose={handleClose}
-                onDelete={handleDelete}
-                onResume={handleResume}
-                viewMode={viewMode}
-              />
-            </>
-          )}
-        </div>
+                <div className="mt-2 h-4 w-64 rounded bg-muted" />
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="h-5 w-20 rounded bg-muted" />
+                  <div className="h-4 w-32 rounded bg-muted" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <TaskFilterBar
+              activeStatus={filters.status}
+              counts={counts}
+              onStatusChange={(s) => setFilter('status', s)}
+              repos={repos}
+              activeRepo={filters.repo}
+              onRepoChange={(r) => setFilter('repo', r)}
+              viewMode={viewMode}
+              onViewChange={handleViewChange}
+            />
+            <TaskList
+              tasks={filtered}
+              totalCount={tasks.length}
+              emptyAction={<CreateTaskDialog onCreated={refresh} />}
+              onClose={handleClose}
+              onDelete={handleDelete}
+              onResume={handleResume}
+              viewMode={viewMode}
+            />
+          </>
+        )}
       </div>
-      <OrchestratorPanel state={orchestrator} />
     </div>
   );
 }

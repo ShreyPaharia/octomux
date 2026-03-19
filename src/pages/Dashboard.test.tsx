@@ -37,12 +37,11 @@ describe('Dashboard', () => {
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
-  it('renders header and new task button', async () => {
+  it('renders new task button', async () => {
     renderWithRouter(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getByText('octomux')).toBeInTheDocument();
+      expect(screen.getAllByText('New Task').length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText('New Task').length).toBeGreaterThan(0);
   });
 
   // ─── Task list rendering ──────────────────────────────────────────────────
