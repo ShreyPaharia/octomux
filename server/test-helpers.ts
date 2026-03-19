@@ -74,7 +74,10 @@ export const DEFAULTS = {
     created_at: new Date().toISOString(),
     resolved_at: null,
   },
-} satisfies Record<string, Partial<Task> | Partial<Agent> | Partial<UserTerminal> | Record<string, unknown>>;
+} satisfies Record<
+  string,
+  Partial<Task> | Partial<Agent> | Partial<UserTerminal> | Record<string, unknown>
+>;
 
 // Derived constants from defaults
 export const SESSION_PREFIX = 'octomux-agent-';

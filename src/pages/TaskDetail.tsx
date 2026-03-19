@@ -436,7 +436,7 @@ export default function TaskDetail() {
             onAddAgent={handleAddAgent}
             onStopAgent={handleStopAgent}
             canAddAgent={isRunning}
-            userTerminals={isRunning ? (task.user_terminals || []) : []}
+            userTerminals={isRunning ? task.user_terminals || [] : []}
             onAddTerminal={isRunning ? handleAddTerminal : undefined}
             onCloseTerminal={isRunning ? handleCloseTerminal : undefined}
           />
