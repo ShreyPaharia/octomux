@@ -7,7 +7,6 @@ import {
   insertAgent,
   insertPermissionPrompt,
   insertUserTerminal,
-  getUserTerminals,
   getTask,
   DEFAULTS,
 } from './test-helpers.js';
