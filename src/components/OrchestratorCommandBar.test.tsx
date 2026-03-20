@@ -27,6 +27,11 @@ vi.mock('@/lib/orchestrator-context', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     orchestratorSend: (...args: any[]) => mockSend(...args),
+    recentRepos: vi.fn().mockResolvedValue([]),
+    browse: vi.fn().mockResolvedValue({ current: '/tmp', parent: '/', entries: [] }),
+    listBranches: vi.fn().mockResolvedValue([]),
+    getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
+    listTasks: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -121,22 +126,13 @@ describe('slash command autocomplete', () => {
     expect(screen.queryByText('/create-task')).not.toBeInTheDocument();
   });
 
-  it('selects command on click and fills template', async () => {
-    renderWithRouter(<OrchestratorCommandBar />);
-    const input = screen.getByPlaceholderText(/ask the orchestrator/i);
-    await userEvent.type(input, '/cr');
-    await userEvent.click(screen.getByText('/create-task'));
-    expect((input as HTMLTextAreaElement).value).toContain('Create a task titled');
-  });
-
   it('navigates with arrow keys and selects with Enter', async () => {
     renderWithRouter(<OrchestratorCommandBar />);
     const input = screen.getByPlaceholderText(/ask the orchestrator/i);
     await userEvent.type(input, '/');
-    // Arrow down to second item
+    // Arrow down to second item (/list-tasks — no fields, sends immediately)
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
-    // Second command is /list-tasks which has no placeholders — should send immediately
     await waitFor(() => {
       expect(mockSend).toHaveBeenCalledWith('Show me all running tasks');
     });
@@ -157,5 +153,60 @@ describe('slash command autocomplete', () => {
     const input = screen.getByPlaceholderText(/ask the orchestrator/i);
     await userEvent.type(input, 'hello /create');
     expect(screen.queryByText('/create-task')).not.toBeInTheDocument();
+  });
+});
+
+describe('field-based commands', () => {
+  it('shows form when clicking a chip with fields', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    // Click the Create Task chip button (not the form header which also has the same text)
+    const chips = screen.getAllByText('+ Create Task');
+    await userEvent.click(chips[0]);
+    // Should show the form — textarea input should be gone, close button visible
+    expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/ask the orchestrator/i)).not.toBeInTheDocument();
+  });
+
+  it('sends immediately for commands without fields', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    await userEvent.click(screen.getByText('List Tasks'));
+    await waitFor(() => {
+      expect(mockSend).toHaveBeenCalledWith('Show me all running tasks');
+    });
+    // Should NOT show a form
+    expect(screen.queryByRole('button', { name: /close/i })).not.toBeInTheDocument();
+  });
+
+  it('closes form and returns to input on close button', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    await userEvent.click(screen.getAllByText('+ Create Task')[0]);
+    expect(screen.queryByPlaceholderText(/ask the orchestrator/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /close/i }));
+    expect(screen.getByPlaceholderText(/ask the orchestrator/i)).toBeInTheDocument();
+  });
+
+  it('replaces form when clicking a different chip with fields', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    await userEvent.click(screen.getByText('+ Create Task'));
+    expect(screen.getByText('Title')).toBeInTheDocument();
+
+    // Click a different field-based command
+    await userEvent.click(screen.getByText('Task Status'));
+    expect(screen.queryByText('Title')).not.toBeInTheDocument();
+    expect(screen.getByText('Task')).toBeInTheDocument();
+  });
+
+  it('sends immediately and collapses form when clicking fieldless chip while form is open', async () => {
+    renderWithRouter(<OrchestratorCommandBar />);
+    await userEvent.click(screen.getByText('+ Create Task'));
+    expect(screen.queryByPlaceholderText(/ask the orchestrator/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('List Tasks'));
+    await waitFor(() => {
+      expect(mockSend).toHaveBeenCalledWith('Show me all running tasks');
+    });
+    // Form should be closed, input should be back
+    expect(screen.getByPlaceholderText(/ask the orchestrator/i)).toBeInTheDocument();
   });
 });

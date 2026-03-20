@@ -1,14 +1,17 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
 import { api } from '@/lib/api';
-import { COMMANDS, filterCommands, findFirstPlaceholder } from '@/lib/orchestrator-commands';
+import { COMMANDS, filterCommands } from '@/lib/orchestrator-commands';
+import type { OrchestratorCommand } from '@/lib/orchestrator-commands';
+import { CommandFieldForm } from './CommandFieldForm';
 
 export function OrchestratorCommandBar() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [activeCommand, setActiveCommand] = useState<OrchestratorCommand | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { open, refresh } = useOrchestratorContext();
 
@@ -64,28 +67,23 @@ export function OrchestratorCommandBar() {
     }
     if (e.key === 'Escape') {
       e.stopPropagation();
-      setInput('');
+      if (activeCommand) {
+        setActiveCommand(null);
+      } else {
+        setInput('');
+      }
     }
   };
 
-  const handleChipClick = (command: (typeof COMMANDS)[number]) => {
-    if (!command.hasPlaceholders) {
-      setInput(command.template);
-      sendMessage(command.template);
+  const handleChipClick = (command: OrchestratorCommand) => {
+    if (command.fields) {
+      setActiveCommand(command);
+      setShowSlashMenu(false);
       return;
     }
-
-    setInput(command.template);
-    // Focus and select the first placeholder
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      const placeholder = findFirstPlaceholder(command.template);
-      if (placeholder) {
-        ta.setSelectionRange(placeholder.start, placeholder.end);
-      }
-    });
+    // No fields — send immediately
+    setActiveCommand(null);
+    sendMessage(command.buildMessage({}));
   };
 
   // Auto-resize textarea
@@ -105,30 +103,42 @@ export function OrchestratorCommandBar() {
 
   return (
     <div className="relative mb-4 rounded-xl border border-border bg-card">
-      <div className="flex items-end gap-2 p-3">
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask the orchestrator anything..."
-          rows={1}
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+      {activeCommand ? (
+        <CommandFieldForm
+          command={activeCommand}
+          onSubmit={(message) => {
+            sendMessage(message);
+            setActiveCommand(null);
+          }}
+          onClose={() => setActiveCommand(null)}
+          sending={sending}
         />
-        <Button
-          size="sm"
-          disabled={!input.trim() || sending}
-          onClick={handleSend}
-          aria-label="Send"
-          className="shrink-0"
-        >
-          {sending ? (
-            <LoadingIcon className="h-4 w-4 animate-spin" />
-          ) : (
-            <SendIcon className="h-4 w-4" />
-          )}
-        </Button>
-      </div>
+      ) : (
+        <div className="flex items-end gap-2 p-3">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask the orchestrator anything..."
+            rows={1}
+            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+          <Button
+            size="sm"
+            disabled={!input.trim() || sending}
+            onClick={handleSend}
+            aria-label="Send"
+            className="shrink-0"
+          >
+            {sending ? (
+              <LoadingIcon className="h-4 w-4 animate-spin" />
+            ) : (
+              <SendIcon className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2">
         {COMMANDS.map((cmd) => (
           <button

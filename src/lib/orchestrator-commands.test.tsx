@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterCommands, findFirstPlaceholder, COMMANDS } from './orchestrator-commands';
+import { filterCommands, COMMANDS } from './orchestrator-commands';
 
 describe('filterCommands', () => {
   it('returns all commands for empty query', () => {
@@ -16,13 +16,36 @@ describe('filterCommands', () => {
   });
 });
 
-describe('findFirstPlaceholder', () => {
-  it('finds first bracketed placeholder', () => {
-    const result = findFirstPlaceholder('Create task "[title]" in [repo]');
-    expect(result).toEqual({ start: 13, end: 20 });
+describe('buildMessage', () => {
+  it('list-tasks builds message without values', () => {
+    const cmd = COMMANDS.find((c) => c.slash === '/list-tasks')!;
+    expect(cmd.buildMessage({})).toBe('Show me all running tasks');
   });
 
-  it('returns null when no placeholder', () => {
-    expect(findFirstPlaceholder('Show me all running tasks')).toBeNull();
+  it('create-task builds message from field values', () => {
+    const cmd = COMMANDS.find((c) => c.slash === '/create-task')!;
+    const msg = cmd.buildMessage({
+      title: 'Fix bug',
+      repo: '/tmp/repo',
+      baseBranch: 'main',
+      description: 'Fix the login bug',
+      prompt: 'Please fix the login validation',
+    });
+    expect(msg).toContain('Fix bug');
+    expect(msg).toContain('/tmp/repo');
+    expect(msg).toContain('main');
+    expect(msg).toContain('Fix the login bug');
+    expect(msg).toContain('Please fix the login validation');
+  });
+
+  it('create-task handles missing optional fields without undefined', () => {
+    const cmd = COMMANDS.find((c) => c.slash === '/create-task')!;
+    const msg = cmd.buildMessage({
+      title: 'Fix bug',
+      repo: '/tmp/repo',
+    });
+    expect(msg).not.toContain('undefined');
+    expect(msg).toContain('Fix bug');
+    expect(msg).toContain('/tmp/repo');
   });
 });
