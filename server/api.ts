@@ -67,11 +67,11 @@ export function setupRoutes(app: Express): void {
   app.use('/api/hooks', hookRoutes);
 
   // Browse directories for folder picker
-  app.get('/api/browse', (req: Request, res: Response) => {
+  app.get('/api/browse', async (req: Request, res: Response) => {
     const dirPath = (req.query.path as string) || os.homedir();
 
     try {
-      const stat = fs.statSync(dirPath);
+      const stat = await fs.promises.stat(dirPath);
       if (!stat.isDirectory()) {
         res.status(400).json({ error: 'Path is not a directory' });
         return;
@@ -81,20 +81,27 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
+    const dirEntries = await fs.promises.readdir(dirPath);
     const entries: Array<{ name: string; path: string; isGit: boolean }> = [];
-    for (const name of fs.readdirSync(dirPath)) {
+
+    for (const name of dirEntries) {
       const fullPath = path.join(dirPath, name);
       try {
-        const stat = fs.statSync(fullPath);
+        const stat = await fs.promises.stat(fullPath);
         if (!stat.isDirectory()) continue;
-        const isGit = fs.existsSync(path.join(fullPath, '.git'));
+        let isGit = false;
+        try {
+          await fs.promises.access(path.join(fullPath, '.git'));
+          isGit = true;
+        } catch {
+          // not a git repo
+        }
         entries.push({ name, path: fullPath, isGit });
       } catch {
         // skip unreadable entries
       }
     }
 
-    // Sort: git repos first, then hidden dirs last, then alphabetical
     entries.sort((a, b) => {
       if (a.isGit !== b.isGit) return a.isGit ? -1 : 1;
       const aHidden = a.name.startsWith('.');
