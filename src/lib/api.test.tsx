@@ -186,6 +186,14 @@ const apiCases = [
     response: undefined,
     status: 204,
   },
+  {
+    name: 'orchestratorSend',
+    call: () => api.orchestratorSend('hello'),
+    expectedUrl: '/api/orchestrator/send',
+    expectedMethod: 'POST',
+    expectedBody: JSON.stringify({ message: 'hello' }),
+    response: { ok: true, running: true },
+  },
 ] as const;
 
 describe('api methods (table-driven)', () => {
