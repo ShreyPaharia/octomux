@@ -73,10 +73,23 @@ function attachToTmuxSession(
   }
   connections.get(connKey)!.push({ ws, pty });
 
-  // PTY → WebSocket
+  // PTY → WebSocket (microtask batching)
+  // Collect chunks arriving in the same event loop tick and send as one frame.
+  let pendingOutput = '';
+  let outputScheduled = false;
+
   pty.onData((data: string) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
+    if (ws.readyState !== WebSocket.OPEN) return;
+    pendingOutput += data;
+    if (!outputScheduled) {
+      outputScheduled = true;
+      queueMicrotask(() => {
+        if (ws.readyState === WebSocket.OPEN && pendingOutput) {
+          ws.send(pendingOutput);
+        }
+        pendingOutput = '';
+        outputScheduled = false;
+      });
     }
   });
 
@@ -84,15 +97,19 @@ function attachToTmuxSession(
     if (ptyExited) return;
     const msg = typeof data === 'string' ? data : data.toString();
 
-    // Handle resize messages
-    try {
-      const parsed = JSON.parse(msg);
-      if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
-        pty.resize(parsed.cols, parsed.rows);
-        return;
+    // Only attempt JSON parse for messages that look like JSON objects (resize messages).
+    // Raw terminal input (keystrokes) never starts with '{', so skip the expensive try/catch.
+    if (msg.charCodeAt(0) === 123) {
+      // 123 = '{'
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
+          pty.resize(parsed.cols, parsed.rows);
+          return;
+        }
+      } catch {
+        // Not valid JSON, fall through to write as terminal input
       }
-    } catch {
-      // Not JSON, treat as terminal input
     }
 
     try {
