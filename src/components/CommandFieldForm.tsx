@@ -18,7 +18,7 @@ interface CommandFieldFormProps {
 
 export function CommandFieldForm({ command, onSubmit, onClose, sending }: CommandFieldFormProps) {
   const [values, setValues] = useState<Record<string, string>>({});
-  const [repoValidation, setRepoValidation] = useState<RepoValidation>('idle');
+  const [_repoValidation, setRepoValidation] = useState<RepoValidation>('idle');
 
   const setValue = useCallback(
     (name: string, value: string) => {
