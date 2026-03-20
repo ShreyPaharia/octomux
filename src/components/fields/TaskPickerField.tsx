@@ -56,7 +56,12 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
           </button>
         }
       />
-      <PopoverContent align="start" side="bottom" sideOffset={4} className="w-[var(--popover-trigger-width)] p-0">
+      <PopoverContent
+        align="start"
+        side="bottom"
+        sideOffset={4}
+        className="w-[var(--popover-trigger-width)] p-0"
+      >
         <div className="flex flex-col">
           <div className="p-2 border-b border-border">
             <Input
