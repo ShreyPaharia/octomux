@@ -14,6 +14,8 @@ import {
   addAgent,
   stopAgent,
   createUserTerminal,
+  createShellTerminal,
+  closeShellTerminal,
 } from './task-runner.js';
 
 import {
@@ -33,9 +35,13 @@ import type {
   Task,
   Agent,
   DerivedTaskStatus,
+  UserTerminal,
 } from './types.js';
 
 const execFile = promisify(execFileCb);
+
+const TERMINALS_BY_TASK_SQL =
+  'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index';
 
 function safeParseJson(s: string): Record<string, unknown> {
   try {
@@ -190,6 +196,7 @@ export function setupRoutes(app: Express): void {
        WHERE pp.task_id = ? AND pp.status = 'pending'
        ORDER BY pp.created_at ASC`,
     );
+    const userTerminalsStmt = db.prepare(TERMINALS_BY_TASK_SQL);
 
     const result = tasks.map((task) => {
       const agents = agentStmt.all(task.id) as Agent[];
@@ -198,11 +205,13 @@ export function setupRoutes(app: Express): void {
         ...pp,
         tool_input: safeParseJson(pp.tool_input as string),
       }));
+      const userTerminals = userTerminalsStmt.all(task.id) as UserTerminal[];
       return {
         ...task,
         agents,
         pending_prompts: parsedPrompts,
         derived_status: derivedStatus({ status: task.status, agents }),
+        user_terminals: userTerminals,
       };
     });
 
@@ -235,11 +244,13 @@ export function setupRoutes(app: Express): void {
       ...pp,
       tool_input: safeParseJson(pp.tool_input as string),
     }));
+    const userTerminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
     res.json({
       ...task,
       agents,
       pending_prompts: parsedPrompts,
       derived_status: derivedStatus({ status: task.status, agents }),
+      user_terminals: userTerminals,
     });
   });
 
@@ -278,6 +289,7 @@ export function setupRoutes(app: Express): void {
     created.agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(id) as Agent[];
+    created.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(id) as UserTerminal[];
     broadcast({ type: 'task:created', payload: { taskId: id } });
     res.status(201).json(created);
   });
@@ -368,6 +380,7 @@ export function setupRoutes(app: Express): void {
     updated.agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
+    updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
   });
@@ -395,6 +408,7 @@ export function setupRoutes(app: Express): void {
     updated.agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
+    updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
   });
@@ -488,6 +502,65 @@ export function setupRoutes(app: Express): void {
       const userWindowIndex = await createUserTerminal(task);
       broadcast({ type: 'task:updated', payload: { taskId: task.id } });
       res.json({ user_window_index: userWindowIndex });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Create shell terminal
+  app.post('/api/tasks/:id/terminals', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+    if (task.status !== 'running') {
+      res.status(400).json({ error: 'Can only create terminals for running tasks' });
+      return;
+    }
+    if (!task.tmux_session) {
+      res.status(400).json({ error: 'Task has no tmux session' });
+      return;
+    }
+
+    try {
+      const terminal = await createShellTerminal(task);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      res.status(201).json(terminal);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Close shell terminal
+  app.delete('/api/tasks/:id/terminals/:terminalId', async (req: Request, res: Response) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+      | Task
+      | undefined;
+
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    const terminal = db
+      .prepare('SELECT * FROM user_terminals WHERE id = ? AND task_id = ?')
+      .get(req.params.terminalId, req.params.id) as UserTerminal | undefined;
+
+    if (!terminal) {
+      res.status(404).json({ error: 'Terminal not found' });
+      return;
+    }
+
+    try {
+      await closeShellTerminal(task, terminal);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

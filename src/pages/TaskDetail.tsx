@@ -167,6 +167,39 @@ export default function TaskDetail() {
     }
   }, [taskId, refresh]);
 
+  const handleAddTerminal = useCallback(async () => {
+    if (!taskId) return;
+    try {
+      const terminal = await api.createTerminal(taskId);
+      setActiveWindow(terminal.window_index);
+      refresh();
+    } catch (err) {
+      console.error('Failed to create terminal:', err);
+    }
+  }, [taskId, refresh]);
+
+  const handleCloseTerminal = useCallback(
+    async (terminalId: string) => {
+      if (!taskId) return;
+      try {
+        const terminals = task?.user_terminals || [];
+        const closedTerminal = terminals.find((t) => t.id === terminalId);
+        await api.closeTerminal(taskId, terminalId);
+        // If we closed the active tab, switch to first agent or next terminal
+        if (closedTerminal && closedTerminal.window_index === activeWindow) {
+          const agents = task?.agents || [];
+          const runningAgent = agents.find((a) => a.status !== 'stopped');
+          const otherTerminal = terminals.find((t) => t.id !== terminalId);
+          setActiveWindow(runningAgent?.window_index ?? otherTerminal?.window_index ?? null);
+        }
+        refresh();
+      } catch (err) {
+        console.error('Failed to close terminal:', err);
+      }
+    },
+    [taskId, refresh, task, activeWindow],
+  );
+
   const handleToggleEditor = useCallback(async () => {
     if (mode === 'editor') {
       setMode('agents');
@@ -403,6 +436,9 @@ export default function TaskDetail() {
             onAddAgent={handleAddAgent}
             onStopAgent={handleStopAgent}
             canAddAgent={isRunning}
+            userTerminals={isRunning ? task.user_terminals || [] : []}
+            onAddTerminal={isRunning ? handleAddTerminal : undefined}
+            onCloseTerminal={isRunning ? handleCloseTerminal : undefined}
           />
           <div className="min-h-0 flex-1 overflow-hidden p-1">
             <TerminalView

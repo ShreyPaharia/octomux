@@ -6,7 +6,7 @@ import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
-import type { Task, Agent } from './types.js';
+import type { Task, Agent, UserTerminal } from './types.js';
 
 const execFile = promisify(execFileCb);
 
@@ -235,22 +235,32 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
   ).run(agentId, task.id, windowIndex, label, claudeSessionId);
 
-  // Launch claude with session tracking, passing prompt as CLI argument
-  let claudeCmd = `claude --session-id ${claudeSessionId}`;
-  let promptFile: string | null = null;
-  if (prompt) {
-    promptFile = path.join(task.worktree!, `.claude-prompt-${agentId}`);
-    fs.writeFileSync(promptFile, prompt);
-    claudeCmd += ` "$(cat ${promptFile})"`;
-  }
-  // Wait for shell to be ready before sending keys (prevents first char being swallowed)
+  // Launch claude asynchronously — do not block the HTTP response
   const addTarget = `${task.tmux_session}:${windowIndex}`;
-  await waitForShellReady(addTarget);
-  await execFile('tmux', ['send-keys', '-t', addTarget, claudeCmd, 'Enter']);
-  if (promptFile) {
-    const pf = promptFile;
-    setTimeout(() => fs.unlinkSync(pf), 5000);
-  }
+  (async () => {
+    try {
+      let promptFile: string | null = null;
+      let claudeCmd = `claude --session-id ${claudeSessionId}`;
+      if (prompt) {
+        promptFile = path.join(task.worktree!, `.claude-prompt-${agentId}`);
+        fs.writeFileSync(promptFile, prompt);
+        claudeCmd += ` "$(cat ${promptFile})"`;
+      }
+      await waitForShellReady(addTarget);
+      await execFile('tmux', ['send-keys', '-t', addTarget, claudeCmd, 'Enter']);
+      if (promptFile) {
+        const pf = promptFile;
+        setTimeout(() => fs.unlinkSync(pf), 5000);
+      }
+    } catch (err) {
+      console.error(`[addAgent] Failed to launch claude in window ${windowIndex}:`, err);
+      try {
+        getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
+      } catch {
+        /* DB may be closed in edge cases */
+      }
+    }
+  })().catch(() => {}); // inner try/catch handles all errors; this prevents unhandled rejection
 
   return {
     id: agentId,
@@ -273,6 +283,9 @@ export async function closeTask(task: Task): Promise<void> {
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
      WHERE task_id = ? AND status = 'pending'`,
   ).run(task.id);
+
+  // Delete user terminals for this task
+  db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
 
   // Mark task as closed and all agents as stopped
   db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
@@ -360,6 +373,41 @@ export async function createUserTerminal(task: Task): Promise<number> {
   return windowIndex;
 }
 
+export async function createShellTerminal(task: Task): Promise<UserTerminal> {
+  const db = getDb();
+  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
+  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+
+  const { count } = db
+    .prepare('SELECT COUNT(*) as count FROM user_terminals WHERE task_id = ?')
+    .get(task.id) as { count: number };
+  const label = `Terminal ${count + 1}`;
+
+  const id = nanoid(12);
+  db.prepare(
+    `INSERT INTO user_terminals (id, task_id, window_index, label) VALUES (?, ?, ?, ?)`,
+  ).run(id, task.id, windowIndex, label);
+
+  return {
+    id,
+    task_id: task.id,
+    window_index: windowIndex,
+    label,
+    status: 'idle',
+    created_at: new Date().toISOString(),
+  };
+}
+
+export async function closeShellTerminal(task: Task, terminal: UserTerminal): Promise<void> {
+  const db = getDb();
+  await execFile('tmux', [
+    'kill-window',
+    '-t',
+    `${task.tmux_session}:${terminal.window_index}`,
+  ]).catch(() => {});
+  db.prepare('DELETE FROM user_terminals WHERE id = ?').run(terminal.id);
+}
+
 export async function resumeTask(task: Task): Promise<void> {
   const db = getDb();
   const session = task.tmux_session!;
@@ -369,6 +417,9 @@ export async function resumeTask(task: Task): Promise<void> {
     db.prepare(
       `UPDATE tasks SET status = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
+
+    // Delete user terminals for this task (fresh start on resume)
+    db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
 
     // 2. Kill any stale linked viewer sessions and tmux session
     await cleanupLinkedSessions(session);
