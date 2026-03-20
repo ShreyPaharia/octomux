@@ -81,6 +81,11 @@ vi.mock('fs', () => ({
     statSync: vi.fn(() => ({ isDirectory: () => true })),
     readdirSync: vi.fn(() => []),
     existsSync: vi.fn(() => false),
+    promises: {
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      readdir: vi.fn(async () => []),
+      access: vi.fn(async () => {}),
+    },
   },
 }));
 
@@ -645,9 +650,12 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
 
 describe('GET /api/browse', () => {
   it('returns directory entries for valid path', async () => {
-    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
-    vi.mocked(fs.readdirSync).mockReturnValue(['project-a', 'project-b'] as any);
-    vi.mocked(fs.existsSync).mockImplementation((p: any) => String(p).includes('project-a/.git'));
+    vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.promises.readdir).mockResolvedValue(['project-a', 'project-b'] as any);
+    vi.mocked(fs.promises.access).mockImplementation(async (p: any) => {
+      if (String(p).includes('project-a/.git')) return;
+      throw new Error('ENOENT');
+    });
 
     const res = await request(app).get('/api/browse?path=/home/user');
     expect(res.status).toBe(200);
@@ -661,23 +669,23 @@ describe('GET /api/browse', () => {
   });
 
   it('returns parent directory', async () => {
-    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
-    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+    vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.promises.readdir).mockResolvedValue([] as any);
 
     const res = await request(app).get('/api/browse?path=/home/user');
     expect(res.body.parent).toBe('/home');
   });
 
   it('returns null parent for root directory', async () => {
-    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
-    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+    vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.promises.readdir).mockResolvedValue([] as any);
 
     const res = await request(app).get('/api/browse?path=/');
     expect(res.body.parent).toBeNull();
   });
 
   it('returns 400 when path is not a directory', async () => {
-    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as any);
+    vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => false } as any);
 
     const res = await request(app).get('/api/browse?path=/tmp/file.txt');
     expect(res.status).toBe(400);
@@ -685,9 +693,7 @@ describe('GET /api/browse', () => {
   });
 
   it('returns 400 when path does not exist', async () => {
-    vi.mocked(fs.statSync).mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
+    vi.mocked(fs.promises.stat).mockRejectedValue(new Error('ENOENT'));
 
     const res = await request(app).get('/api/browse?path=/nonexistent');
     expect(res.status).toBe(400);
@@ -695,14 +701,14 @@ describe('GET /api/browse', () => {
   });
 
   it('skips non-directory entries', async () => {
-    vi.mocked(fs.statSync).mockImplementation((p: any) => {
+    vi.mocked(fs.promises.stat).mockImplementation(async (p: any) => {
       const pathStr = String(p);
       if (pathStr === '/tmp') return { isDirectory: () => true } as any;
       if (pathStr.includes('file.txt')) return { isDirectory: () => false } as any;
       return { isDirectory: () => true } as any;
     });
-    vi.mocked(fs.readdirSync).mockReturnValue(['dir1', 'file.txt'] as any);
-    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.promises.readdir).mockResolvedValue(['dir1', 'file.txt'] as any);
+    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
 
     const res = await request(app).get('/api/browse?path=/tmp');
     expect(res.body.entries).toHaveLength(1);
@@ -710,9 +716,9 @@ describe('GET /api/browse', () => {
   });
 
   it('sorts hidden directories after non-hidden', async () => {
-    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
-    vi.mocked(fs.readdirSync).mockReturnValue(['.hidden', 'visible'] as any);
-    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any);
+    vi.mocked(fs.promises.readdir).mockResolvedValue(['.hidden', 'visible'] as any);
+    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
 
     const res = await request(app).get('/api/browse?path=/tmp');
     expect(res.body.entries[0].name).toBe('visible');
