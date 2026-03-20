@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS user_terminals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_terminals_task ON user_terminals(task_id);
+CREATE INDEX IF NOT EXISTS idx_agents_claude_session_id ON agents(claude_session_id);
+CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status_created ON permission_prompts(agent_id, status, created_at);
 `;
 
 let db: Database.Database;
