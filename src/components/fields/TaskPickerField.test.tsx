@@ -2,13 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskPickerField } from './TaskPickerField';
-import { makeTask, renderWithRouter } from '../../test-helpers';
-
-const mockTasks = [
-  makeTask({ id: 'abc123456789', title: 'Fix login bug', status: 'running' }),
-  makeTask({ id: 'def987654321', title: 'Add auth middleware', status: 'closed' }),
-  makeTask({ id: 'ghi111222333', title: 'Draft task', status: 'draft' }),
-];
+import { renderWithRouter } from '../../test-helpers';
 
 vi.mock('@/lib/api', async () => {
   const { makeTask: mt } = await import('../../test-helpers');

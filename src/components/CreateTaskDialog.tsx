@@ -36,7 +36,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   // Repo path validation state (set via RepoPickerField callback)
-  const [repoValidation, setRepoValidation] = useState<RepoValidation>('idle');
+  const [_repoValidation, setRepoValidation] = useState<RepoValidation>('idle');
 
   // Branch auto-generation tracking
   const [branchIsAuto, setBranchIsAuto] = useState(true);
