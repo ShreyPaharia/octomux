@@ -188,30 +188,66 @@ export function setupRoutes(app: Express): void {
       tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Task[];
     }
 
-    const agentStmt = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index');
-    const promptStmt = db.prepare(
-      `SELECT pp.*, a.label as agent_label
-       FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
-       WHERE pp.task_id = ? AND pp.status = 'pending'
-       ORDER BY pp.created_at ASC`,
-    );
-    const userTerminalsStmt = db.prepare(TERMINALS_BY_TASK_SQL);
+    if (tasks.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    // Bulk-fetch all related data for the matching tasks
+    const taskIds = tasks.map((t) => t.id);
+    const placeholders = taskIds.map(() => '?').join(',');
+
+    const allAgents = db
+      .prepare(`SELECT * FROM agents WHERE task_id IN (${placeholders}) ORDER BY window_index`)
+      .all(...taskIds) as Agent[];
+
+    const allPrompts = db
+      .prepare(
+        `SELECT pp.*, a.label as agent_label
+         FROM permission_prompts pp
+         LEFT JOIN agents a ON pp.agent_id = a.id
+         WHERE pp.task_id IN (${placeholders}) AND pp.status = 'pending'
+         ORDER BY pp.created_at ASC`,
+      )
+      .all(...taskIds) as Array<Record<string, unknown>>;
+
+    const allTerminals = db
+      .prepare(
+        `SELECT * FROM user_terminals WHERE task_id IN (${placeholders}) ORDER BY window_index`,
+      )
+      .all(...taskIds) as UserTerminal[];
+
+    // Group by task_id using Maps
+    const agentsByTask = new Map<string, Agent[]>();
+    for (const agent of allAgents) {
+      const list = agentsByTask.get(agent.task_id) || [];
+      list.push(agent);
+      agentsByTask.set(agent.task_id, list);
+    }
+
+    const promptsByTask = new Map<string, Array<Record<string, unknown>>>();
+    for (const pp of allPrompts) {
+      const taskId = pp.task_id as string;
+      const list = promptsByTask.get(taskId) || [];
+      list.push({ ...pp, tool_input: safeParseJson(pp.tool_input as string) });
+      promptsByTask.set(taskId, list);
+    }
+
+    const terminalsByTask = new Map<string, UserTerminal[]>();
+    for (const ut of allTerminals) {
+      const list = terminalsByTask.get(ut.task_id) || [];
+      list.push(ut);
+      terminalsByTask.set(ut.task_id, list);
+    }
 
     const result = tasks.map((task) => {
-      const agents = agentStmt.all(task.id) as Agent[];
-      const pendingPrompts = promptStmt.all(task.id) as Array<Record<string, unknown>>;
-      const parsedPrompts = pendingPrompts.map((pp) => ({
-        ...pp,
-        tool_input: safeParseJson(pp.tool_input as string),
-      }));
-      const userTerminals = userTerminalsStmt.all(task.id) as UserTerminal[];
+      const agents = agentsByTask.get(task.id) || [];
       return {
         ...task,
         agents,
-        pending_prompts: parsedPrompts,
+        pending_prompts: promptsByTask.get(task.id) || [],
         derived_status: derivedStatus({ status: task.status, agents }),
-        user_terminals: userTerminals,
+        user_terminals: terminalsByTask.get(task.id) || [],
       };
     });
 
