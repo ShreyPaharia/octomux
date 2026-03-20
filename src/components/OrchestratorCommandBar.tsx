@@ -79,6 +79,7 @@ export function OrchestratorCommandBar() {
     if (command.fields) {
       setActiveCommand(command);
       setShowSlashMenu(false);
+      setInput(''); // Clear free-text input when switching to structured form
       return;
     }
     // No fields — send immediately
