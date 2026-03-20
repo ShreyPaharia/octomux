@@ -188,7 +188,9 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
           </div>
 
           {/* Base branch */}
-          <BranchPickerField
+          <div className="flex flex-col gap-2">
+            <Label>Base Branch</Label>
+            <BranchPickerField
             repoPath={repoPath}
             value={baseBranch}
             onChange={setBaseBranch}
@@ -197,6 +199,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
             }}
             disabled={!repoPath.trim()}
           />
+          </div>
 
           {/* Initial Prompt (optional) */}
           <div className="flex flex-col gap-2">
