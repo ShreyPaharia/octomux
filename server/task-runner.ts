@@ -439,42 +439,51 @@ export async function resumeTask(task: Task): Promise<void> {
       )
       .all(task.id) as Agent[];
 
+    // Phase 1: Create all tmux windows sequentially (fast, no shell wait)
+    const agentTargets: Array<{ agent: Agent; windowIndex: number; target: string }> = [];
+
     for (let i = 0; i < agents.length; i++) {
       const agent = agents[i];
       let windowIndex: number;
 
       if (i === 0) {
-        // Use the initial session window
         windowIndex = await getActiveWindowIndex(session);
       } else {
-        // Create new window for subsequent agents
         await execFile('tmux', ['new-window', '-t', session, '-c', task.worktree!]);
         windowIndex = await getLastWindowIndex(session);
       }
 
-      // Launch claude with resume or continue
-      let claudeCmd: string;
-      if (agent.claude_session_id) {
-        claudeCmd = `claude --resume ${agent.claude_session_id}`;
-      } else {
-        const newSessionId = crypto.randomUUID();
-        claudeCmd = `claude --continue --session-id ${newSessionId}`;
-        db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
-          newSessionId,
+      agentTargets.push({
+        agent,
+        windowIndex,
+        target: `${session}:${windowIndex}`,
+      });
+    }
+
+    // Phase 2: Launch claude in all windows concurrently (slow part — waitForShellReady)
+    await Promise.all(
+      agentTargets.map(async ({ agent, windowIndex, target }) => {
+        let claudeCmd: string;
+        if (agent.claude_session_id) {
+          claudeCmd = `claude --resume ${agent.claude_session_id}`;
+        } else {
+          const newSessionId = crypto.randomUUID();
+          claudeCmd = `claude --continue --session-id ${newSessionId}`;
+          db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
+            newSessionId,
+            agent.id,
+          );
+        }
+
+        await waitForShellReady(target);
+        await execFile('tmux', ['send-keys', '-t', target, claudeCmd, 'Enter']);
+
+        db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
+          windowIndex,
           agent.id,
         );
-      }
-      // Wait for shell to be ready before sending keys (prevents first char being swallowed)
-      const resumeTarget = `${session}:${windowIndex}`;
-      await waitForShellReady(resumeTarget);
-      await execFile('tmux', ['send-keys', '-t', resumeTarget, claudeCmd, 'Enter']);
-
-      // Update agent record
-      db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
-        windowIndex,
-        agent.id,
-      );
-    }
+      }),
+    );
 
     // 5. Mark task as running
     db.prepare(
