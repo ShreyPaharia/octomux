@@ -65,14 +65,15 @@ describe('event-source', () => {
     unsub();
   });
 
-  it('calls subscriber on message', async () => {
+  it('calls subscriber with parsed event on message', async () => {
     const cb = vi.fn();
     const unsub = subscribe(cb);
 
     await vi.waitFor(() => expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.OPEN));
 
-    MockWebSocket.instances[0].simulateMessage('{"type":"task:updated"}');
+    MockWebSocket.instances[0].simulateMessage('{"type":"task:updated","payload":{"taskId":"t1"}}');
     expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith({ type: 'task:updated', payload: { taskId: 't1' } });
 
     unsub();
   });
