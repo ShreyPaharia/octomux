@@ -1,9 +1,18 @@
+export interface CommandField {
+  name: string;
+  label: string;
+  type: 'text' | 'textarea' | 'repo-picker' | 'branch-picker' | 'task-picker';
+  required?: boolean;
+  placeholder?: string;
+  dependsOn?: string;
+}
+
 export interface OrchestratorCommand {
   slash: string;
   chipLabel: string;
   description: string;
-  template: string;
-  hasPlaceholders: boolean;
+  fields?: CommandField[];
+  buildMessage: (values: Record<string, string>) => string;
 }
 
 export const COMMANDS: OrchestratorCommand[] = [
@@ -11,42 +20,49 @@ export const COMMANDS: OrchestratorCommand[] = [
     slash: '/create-task',
     chipLabel: '+ Create Task',
     description: 'Create a task for an autonomous agent',
-    template:
-      'Create a task titled "[title]" in repo [/path/to/repo] with prompt: [describe what the agent should do]',
-    hasPlaceholders: true,
+    fields: [
+      { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Fix login bug' },
+      { name: 'repo', label: 'Repository', type: 'repo-picker', required: true },
+      { name: 'baseBranch', label: 'Base Branch', type: 'branch-picker', dependsOn: 'repo' },
+      {
+        name: 'description',
+        label: 'Description',
+        type: 'textarea',
+        placeholder: 'Describe what needs to be done...',
+      },
+      {
+        name: 'prompt',
+        label: 'Initial Prompt',
+        type: 'textarea',
+        placeholder: 'Tell the agent what to do...',
+      },
+    ],
+    buildMessage: (v) =>
+      `Create a task titled "${v.title}" in repo ${v.repo}${v.baseBranch ? ` with base branch ${v.baseBranch}` : ''}${v.description ? `. Description: ${v.description}` : ''} with prompt: ${v.prompt || v.description || v.title}`,
   },
   {
     slash: '/list-tasks',
     chipLabel: 'List Tasks',
     description: 'Show all running tasks',
-    template: 'Show me all running tasks',
-    hasPlaceholders: false,
+    buildMessage: () => 'Show me all running tasks',
   },
   {
     slash: '/status',
     chipLabel: 'Task Status',
     description: 'Check status of a specific task',
-    template: 'What is the status of task [id]?',
-    hasPlaceholders: true,
+    fields: [{ name: 'task', label: 'Task', type: 'task-picker', required: true }],
+    buildMessage: (v) => `What is the status of task ${v.task}?`,
   },
   {
     slash: '/create-pr',
     chipLabel: 'Create PR',
     description: 'Create a PR for a completed task',
-    template: 'Create a PR for task [id]',
-    hasPlaceholders: true,
+    fields: [{ name: 'task', label: 'Task', type: 'task-picker', required: true }],
+    buildMessage: (v) => `Create a PR for task ${v.task}`,
   },
 ];
 
-/** Filter commands by slash prefix (e.g., "cr" matches "/create-task" and "/create-pr") */
 export function filterCommands(query: string): OrchestratorCommand[] {
   const q = query.toLowerCase();
   return COMMANDS.filter((cmd) => cmd.slash.slice(1).startsWith(q));
-}
-
-/** Find the first [placeholder] in a template and return its start/end indices */
-export function findFirstPlaceholder(template: string): { start: number; end: number } | null {
-  const match = template.match(/\[([^\]]+)\]/);
-  if (!match || match.index === undefined) return null;
-  return { start: match.index, end: match.index + match[0].length };
 }
