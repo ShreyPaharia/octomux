@@ -20,11 +20,11 @@ vi.mock('./api', () => ({
 
 // ─── Mock event-source ──────────────────────────────────────────────────────
 
-let eventCallback: (() => void) | null = null;
+let eventCallback: ((event: any) => void) | null = null;
 const unsubscribe = vi.fn();
 
 vi.mock('./event-source', () => ({
-  subscribe: vi.fn((cb: () => void) => {
+  subscribe: vi.fn((cb: (event: any) => void) => {
     eventCallback = cb;
     return unsubscribe;
   }),
@@ -101,7 +101,7 @@ describe.each(hookCases)('$name', ({ renderFn, mockFn, successValue, resultKey, 
 
     // Simulate a server event
     await act(async () => {
-      eventCallback?.();
+      eventCallback?.({ type: 'task:updated', payload: { taskId: 't1' } });
     });
 
     expect(mockFn()).toHaveBeenCalledTimes(2);
