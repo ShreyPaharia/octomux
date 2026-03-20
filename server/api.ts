@@ -300,8 +300,9 @@ export function setupRoutes(app: Express): void {
     }
 
     const db = getDb();
-
     const id = nanoid(12);
+    const isDraft = !!body.draft;
+
     db.prepare(
       'INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
@@ -309,24 +310,29 @@ export function setupRoutes(app: Express): void {
       body.title,
       body.description,
       body.repo_path,
-      'draft',
+      isDraft ? 'draft' : 'setting_up',
       body.branch ?? null,
       body.base_branch ?? null,
       body.initial_prompt ?? null,
     );
 
-    // Start task immediately unless explicitly saved as draft
-    if (!body.draft) {
-      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
-      await startTask(task);
+    const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
+    created.agents = [];
+    created.user_terminals = [];
+    broadcast({ type: 'task:created', payload: { taskId: id } });
+
+    if (!isDraft) {
+      // Fire-and-forget: startTask runs in background, broadcasts task:updated when done
+      startTask(created)
+        .then(() => {
+          broadcast({ type: 'task:updated', payload: { taskId: id } });
+        })
+        .catch(() => {
+          // startTask already sets error status in its own catch block
+          broadcast({ type: 'task:updated', payload: { taskId: id } });
+        });
     }
 
-    const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
-    created.agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(id) as Agent[];
-    created.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(id) as UserTerminal[];
-    broadcast({ type: 'task:created', payload: { taskId: id } });
     res.status(201).json(created);
   });
 
@@ -438,7 +444,10 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    await startTask(task);
+    // Set status immediately so client sees setting_up
+    db.prepare(
+      `UPDATE tasks SET status = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
+    ).run(task.id);
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
     updated.agents = db
@@ -447,6 +456,15 @@ export function setupRoutes(app: Express): void {
     updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
+
+    // Fire-and-forget
+    startTask(task)
+      .then(() => {
+        broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      })
+      .catch(() => {
+        broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      });
   });
 
   // Delete task
