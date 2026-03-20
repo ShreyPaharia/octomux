@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 
 interface BranchPickerFieldProps {
@@ -65,7 +64,6 @@ export function BranchPickerField({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label>Base Branch</Label>
       <Popover open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
         <PopoverTrigger
           render={
