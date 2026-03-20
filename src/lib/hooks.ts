@@ -22,7 +22,7 @@ export function useOrchestrator() {
 
   useEffect(() => {
     refresh();
-    return subscribe(refresh);
+    return subscribe(() => refresh());
   }, [refresh]);
 
   const start = useCallback(async () => {
@@ -73,7 +73,7 @@ export function useTasks() {
 
   useEffect(() => {
     refresh();
-    return subscribe(refresh);
+    return subscribe(() => refresh());
   }, [refresh]);
 
   return { tasks, loading, error, refresh };
@@ -106,8 +106,12 @@ export function useTask(id: string) {
 
   useEffect(() => {
     refresh();
-    return subscribe(refresh);
-  }, [refresh]);
+    return subscribe((event) => {
+      if (event.payload.taskId === id) {
+        refresh();
+      }
+    });
+  }, [refresh, id]);
 
   return { task, loading, error, refresh };
 }

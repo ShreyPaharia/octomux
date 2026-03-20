@@ -7,10 +7,15 @@
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
 
+export interface ServerEvent {
+  type: 'task:updated' | 'task:created' | 'task:deleted';
+  payload: { taskId: string };
+}
+
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = INITIAL_RECONNECT_DELAY;
-const subscribers = new Set<() => void>();
+const subscribers = new Set<(event: ServerEvent) => void>();
 
 function getWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -26,8 +31,14 @@ function connect(): void {
     reconnectDelay = INITIAL_RECONNECT_DELAY;
   };
 
-  ws.onmessage = () => {
-    for (const cb of subscribers) cb();
+  ws.onmessage = (event) => {
+    let parsed: ServerEvent;
+    try {
+      parsed = JSON.parse(event.data);
+    } catch {
+      return; // Ignore malformed messages
+    }
+    for (const cb of subscribers) cb(parsed);
   };
 
   ws.onclose = (event) => {
@@ -45,7 +56,7 @@ function connect(): void {
   };
 }
 
-export function subscribe(callback: () => void): () => void {
+export function subscribe(callback: (event: ServerEvent) => void): () => void {
   subscribers.add(callback);
   connect();
   return () => {

@@ -67,11 +67,11 @@ export function setupRoutes(app: Express): void {
   app.use('/api/hooks', hookRoutes);
 
   // Browse directories for folder picker
-  app.get('/api/browse', (req: Request, res: Response) => {
+  app.get('/api/browse', async (req: Request, res: Response) => {
     const dirPath = (req.query.path as string) || os.homedir();
 
     try {
-      const stat = fs.statSync(dirPath);
+      const stat = await fs.promises.stat(dirPath);
       if (!stat.isDirectory()) {
         res.status(400).json({ error: 'Path is not a directory' });
         return;
@@ -81,20 +81,27 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
+    const dirEntries = await fs.promises.readdir(dirPath);
     const entries: Array<{ name: string; path: string; isGit: boolean }> = [];
-    for (const name of fs.readdirSync(dirPath)) {
+
+    for (const name of dirEntries) {
       const fullPath = path.join(dirPath, name);
       try {
-        const stat = fs.statSync(fullPath);
+        const stat = await fs.promises.stat(fullPath);
         if (!stat.isDirectory()) continue;
-        const isGit = fs.existsSync(path.join(fullPath, '.git'));
+        let isGit = false;
+        try {
+          await fs.promises.access(path.join(fullPath, '.git'));
+          isGit = true;
+        } catch {
+          // not a git repo
+        }
         entries.push({ name, path: fullPath, isGit });
       } catch {
         // skip unreadable entries
       }
     }
 
-    // Sort: git repos first, then hidden dirs last, then alphabetical
     entries.sort((a, b) => {
       if (a.isGit !== b.isGit) return a.isGit ? -1 : 1;
       const aHidden = a.name.startsWith('.');
@@ -188,30 +195,66 @@ export function setupRoutes(app: Express): void {
       tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Task[];
     }
 
-    const agentStmt = db.prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index');
-    const promptStmt = db.prepare(
-      `SELECT pp.*, a.label as agent_label
-       FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
-       WHERE pp.task_id = ? AND pp.status = 'pending'
-       ORDER BY pp.created_at ASC`,
-    );
-    const userTerminalsStmt = db.prepare(TERMINALS_BY_TASK_SQL);
+    if (tasks.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    // Bulk-fetch all related data for the matching tasks
+    const taskIds = tasks.map((t) => t.id);
+    const placeholders = taskIds.map(() => '?').join(',');
+
+    const allAgents = db
+      .prepare(`SELECT * FROM agents WHERE task_id IN (${placeholders}) ORDER BY window_index`)
+      .all(...taskIds) as Agent[];
+
+    const allPrompts = db
+      .prepare(
+        `SELECT pp.*, a.label as agent_label
+         FROM permission_prompts pp
+         LEFT JOIN agents a ON pp.agent_id = a.id
+         WHERE pp.task_id IN (${placeholders}) AND pp.status = 'pending'
+         ORDER BY pp.created_at ASC`,
+      )
+      .all(...taskIds) as Array<Record<string, unknown>>;
+
+    const allTerminals = db
+      .prepare(
+        `SELECT * FROM user_terminals WHERE task_id IN (${placeholders}) ORDER BY window_index`,
+      )
+      .all(...taskIds) as UserTerminal[];
+
+    // Group by task_id using Maps
+    const agentsByTask = new Map<string, Agent[]>();
+    for (const agent of allAgents) {
+      const list = agentsByTask.get(agent.task_id) || [];
+      list.push(agent);
+      agentsByTask.set(agent.task_id, list);
+    }
+
+    const promptsByTask = new Map<string, Array<Record<string, unknown>>>();
+    for (const pp of allPrompts) {
+      const taskId = pp.task_id as string;
+      const list = promptsByTask.get(taskId) || [];
+      list.push({ ...pp, tool_input: safeParseJson(pp.tool_input as string) });
+      promptsByTask.set(taskId, list);
+    }
+
+    const terminalsByTask = new Map<string, UserTerminal[]>();
+    for (const ut of allTerminals) {
+      const list = terminalsByTask.get(ut.task_id) || [];
+      list.push(ut);
+      terminalsByTask.set(ut.task_id, list);
+    }
 
     const result = tasks.map((task) => {
-      const agents = agentStmt.all(task.id) as Agent[];
-      const pendingPrompts = promptStmt.all(task.id) as Array<Record<string, unknown>>;
-      const parsedPrompts = pendingPrompts.map((pp) => ({
-        ...pp,
-        tool_input: safeParseJson(pp.tool_input as string),
-      }));
-      const userTerminals = userTerminalsStmt.all(task.id) as UserTerminal[];
+      const agents = agentsByTask.get(task.id) || [];
       return {
         ...task,
         agents,
-        pending_prompts: parsedPrompts,
+        pending_prompts: promptsByTask.get(task.id) || [],
         derived_status: derivedStatus({ status: task.status, agents }),
-        user_terminals: userTerminals,
+        user_terminals: terminalsByTask.get(task.id) || [],
       };
     });
 
@@ -264,8 +307,9 @@ export function setupRoutes(app: Express): void {
     }
 
     const db = getDb();
-
     const id = nanoid(12);
+    const isDraft = !!body.draft;
+
     db.prepare(
       'INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
@@ -273,24 +317,29 @@ export function setupRoutes(app: Express): void {
       body.title,
       body.description,
       body.repo_path,
-      'draft',
+      isDraft ? 'draft' : 'setting_up',
       body.branch ?? null,
       body.base_branch ?? null,
       body.initial_prompt ?? null,
     );
 
-    // Start task immediately unless explicitly saved as draft
-    if (!body.draft) {
-      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
-      await startTask(task);
+    const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
+    created.agents = [];
+    created.user_terminals = [];
+    broadcast({ type: 'task:created', payload: { taskId: id } });
+
+    if (!isDraft) {
+      // Fire-and-forget: startTask runs in background, broadcasts task:updated when done
+      startTask(created)
+        .then(() => {
+          broadcast({ type: 'task:updated', payload: { taskId: id } });
+        })
+        .catch(() => {
+          // startTask already sets error status in its own catch block
+          broadcast({ type: 'task:updated', payload: { taskId: id } });
+        });
     }
 
-    const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
-    created.agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(id) as Agent[];
-    created.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(id) as UserTerminal[];
-    broadcast({ type: 'task:created', payload: { taskId: id } });
     res.status(201).json(created);
   });
 
@@ -402,7 +451,10 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    await startTask(task);
+    // Set status immediately so client sees setting_up
+    db.prepare(
+      `UPDATE tasks SET status = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
+    ).run(task.id);
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
     updated.agents = db
@@ -411,6 +463,15 @@ export function setupRoutes(app: Express): void {
     updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
+
+    // Fire-and-forget
+    startTask(task)
+      .then(() => {
+        broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      })
+      .catch(() => {
+        broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      });
   });
 
   // Delete task

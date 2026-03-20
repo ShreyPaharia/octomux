@@ -10,7 +10,30 @@ import type {
 
 const BASE = '/api';
 
+// In-flight GET request deduplication: if the same GET is already pending,
+// reuse its promise instead of firing a duplicate network request.
+const inflight = new Map<string, Promise<unknown>>();
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = options?.method || 'GET';
+
+  // Only deduplicate GET requests — mutations must always execute
+  if (method === 'GET') {
+    const key = `GET:${path}`;
+    const existing = inflight.get(key);
+    if (existing) return existing as Promise<T>;
+
+    const promise = doRequest<T>(path, options).finally(() => {
+      inflight.delete(key);
+    });
+    inflight.set(key, promise);
+    return promise;
+  }
+
+  return doRequest<T>(path, options);
+}
+
+async function doRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {};
   if (options?.body) {
     headers['Content-Type'] = 'application/json';
