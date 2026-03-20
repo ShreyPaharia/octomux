@@ -6,6 +6,7 @@ import {
   insertTask,
   insertAgent,
   insertPermissionPrompt,
+  insertUserTerminal,
   getTask,
   DEFAULTS,
 } from './test-helpers.js';
@@ -56,6 +57,22 @@ vi.mock('./task-runner.js', async () => {
       ).run(task.id);
       return 5;
     }),
+    createShellTerminal: vi.fn(async (task: any) => {
+      const { getDb } = await import('./db.js');
+      const db = getDb();
+      db.prepare(
+        `INSERT INTO user_terminals (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)`,
+      ).run('new-terminal-id', task.id, 3, 'Terminal 1', 'idle');
+      return {
+        id: 'new-terminal-id',
+        task_id: task.id,
+        window_index: 3,
+        label: 'Terminal 1',
+        status: 'idle',
+        created_at: '2026-01-01T00:00:00.000Z',
+      };
+    }),
+    closeShellTerminal: vi.fn(),
   };
 });
 
@@ -86,8 +103,17 @@ vi.mock('child_process', () => ({
 const fs = (await import('fs')).default;
 
 const { createApp } = await import('./app.js');
-const { startTask, closeTask, deleteTask, resumeTask, addAgent, stopAgent, createUserTerminal } =
-  await import('./task-runner.js');
+const {
+  startTask,
+  closeTask,
+  deleteTask,
+  resumeTask,
+  addAgent,
+  stopAgent,
+  createUserTerminal,
+  createShellTerminal,
+  closeShellTerminal,
+} = await import('./task-runner.js');
 const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
   await import('./orchestrator.js');
 
@@ -842,6 +868,66 @@ describe('POST /api/tasks/:id/user-terminal', () => {
     insertTask(db, { ...DEFAULTS.runningTask, status });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
     expect(res.status).toBe(400);
+  });
+});
+
+// ─── POST /api/tasks/:id/terminals ──────────────────────────────────────────
+
+describe('POST /api/tasks/:id/terminals', () => {
+  it('creates a terminal for a running task', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertAgent(db);
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.runningTask.id}/terminals`);
+    expect(res.status).toBe(201);
+    expect(res.body.label).toBe('Terminal 1');
+    expect(createShellTerminal).toHaveBeenCalled();
+  });
+
+  it('returns 400 for non-running task', async () => {
+    insertTask(db);
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/terminals`);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 for unknown task', async () => {
+    const res = await request(app).post('/api/tasks/unknown/terminals');
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── DELETE /api/tasks/:id/terminals/:terminalId ────────────────────────────
+
+describe('DELETE /api/tasks/:id/terminals/:terminalId', () => {
+  it('closes a terminal', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
+    const res = await request(app).delete(
+      `/api/tasks/${DEFAULTS.runningTask.id}/terminals/${DEFAULTS.userTerminal.id}`,
+    );
+    expect(res.status).toBe(204);
+    expect(closeShellTerminal).toHaveBeenCalled();
+  });
+
+  it('returns 404 for unknown terminal', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    const res = await request(app).delete(
+      `/api/tasks/${DEFAULTS.runningTask.id}/terminals/unknown`,
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── GET /api/tasks/:id — user_terminals ────────────────────────────────────
+
+describe('GET /api/tasks/:id — user_terminals', () => {
+  it('includes user_terminals array in response', async () => {
+    insertTask(db, DEFAULTS.runningTask);
+    insertAgent(db);
+    insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user_terminals).toHaveLength(1);
+    expect(res.body.user_terminals[0].label).toBe('Terminal 1');
   });
 });
 

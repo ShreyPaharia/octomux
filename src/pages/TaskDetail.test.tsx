@@ -491,4 +491,73 @@ describe('TaskDetail', () => {
       });
     });
   });
+
+  // ─── User terminals ────────────────────────────────────────────────────────
+
+  describe('User terminals', () => {
+    const taskWithTerminals = makeTask({
+      status: 'running',
+      tmux_session: 'octomux-agent-test-task-01',
+      agents: [
+        {
+          id: 'a1',
+          task_id: 'test-task-01',
+          window_index: 0,
+          label: 'Agent 1',
+          status: 'running',
+          claude_session_id: null,
+          hook_activity: 'active' as const,
+          hook_activity_updated_at: null,
+          created_at: '2026-01-01 00:00:00',
+        },
+      ],
+      user_terminals: [
+        {
+          id: 'term-1',
+          task_id: 'test-task-01',
+          window_index: 3,
+          label: 'Terminal 1',
+          status: 'idle' as const,
+          created_at: '2026-01-01 00:00:00',
+        },
+      ],
+    });
+
+    it('renders terminal tabs from task data', async () => {
+      apiMock.getTask.mockResolvedValue(taskWithTerminals);
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByText('Terminal 1')).toBeInTheDocument();
+      });
+    });
+
+    it('creates terminal on add and switches to it', async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByTitle('Add terminal')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTitle('Add terminal'));
+
+      await waitFor(() => {
+        expect(apiMock.createTerminal).toHaveBeenCalledWith('test-task-01');
+      });
+    });
+
+    it('closes terminal on close click', async () => {
+      const user = userEvent.setup();
+      apiMock.getTask.mockResolvedValue(taskWithTerminals);
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByText('Terminal 1')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTitle('Close terminal'));
+
+      await waitFor(() => {
+        expect(apiMock.closeTerminal).toHaveBeenCalledWith('test-task-01', 'term-1');
+      });
+    });
+  });
 });
