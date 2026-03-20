@@ -68,4 +68,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
+  orchestratorType: (message: string) =>
+    request<{ ok: boolean; running: boolean }>('/orchestrator/type', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
 };

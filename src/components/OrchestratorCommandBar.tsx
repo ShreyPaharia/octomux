@@ -107,9 +107,18 @@ export function OrchestratorCommandBar() {
       {activeCommand ? (
         <CommandFieldForm
           command={activeCommand}
-          onSubmit={(message) => {
-            sendMessage(message);
-            setActiveCommand(null);
+          onSubmit={async (message) => {
+            setSending(true);
+            try {
+              await api.orchestratorType(message);
+              refresh();
+              open();
+              setActiveCommand(null);
+            } catch (err) {
+              console.error('Failed to type to orchestrator:', err);
+            } finally {
+              setSending(false);
+            }
           }}
           onClose={() => setActiveCommand(null)}
           sending={sending}

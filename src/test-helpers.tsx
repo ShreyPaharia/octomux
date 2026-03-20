@@ -97,6 +97,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       .mockResolvedValue({ running: true, session: 'octomux-orchestrator' }),
     orchestratorStop: vi.fn().mockResolvedValue({ running: false }),
     orchestratorSend: vi.fn().mockResolvedValue({ ok: true, running: true }),
+    orchestratorType: vi.fn().mockResolvedValue({ ok: true, running: true }),
   };
   return { ...defaults, ...overrides };
 }

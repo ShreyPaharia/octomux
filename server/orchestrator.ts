@@ -46,6 +46,14 @@ export async function sendToOrchestrator(message: string): Promise<void> {
   await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, 'Enter']);
 }
 
+/** Type message into orchestrator terminal WITHOUT pressing Enter. User reviews and sends. */
+export async function typeToOrchestrator(message: string): Promise<void> {
+  if (!(await isOrchestratorRunning())) {
+    throw new Error('Orchestrator is not running');
+  }
+  await execFile('tmux', ['send-keys', '-l', '-t', ORCHESTRATOR_SESSION, message]);
+}
+
 export async function stopOrchestrator(): Promise<void> {
   await execFile('tmux', ['kill-session', '-t', ORCHESTRATOR_SESSION]).catch(() => {});
 }
