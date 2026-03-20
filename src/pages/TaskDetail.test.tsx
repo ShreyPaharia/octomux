@@ -7,16 +7,17 @@ import type { Task } from '../../server/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-let eventCallbacks: Set<() => void>;
+let eventCallbacks: Set<(event: any) => void>;
 vi.mock('@/lib/event-source', () => ({
-  subscribe: vi.fn((cb: () => void) => {
+  subscribe: vi.fn((cb: (event: any) => void) => {
     eventCallbacks.add(cb);
     return () => eventCallbacks.delete(cb);
   }),
 }));
 
-function simulateEvent() {
-  for (const cb of eventCallbacks) cb();
+function simulateEvent(taskId = 'test-task-01') {
+  const event = { type: 'task:updated', payload: { taskId } };
+  for (const cb of eventCallbacks) cb(event);
 }
 
 const apiMock = mockApi();
