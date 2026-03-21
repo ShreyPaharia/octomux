@@ -37,6 +37,6 @@ describe('AppHeader', () => {
 
   it('renders new task button', () => {
     renderWithRouter(<AppHeader />);
-    expect(screen.getAllByText('New Task').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('NEW TASK').length).toBeGreaterThan(0);
   });
 });
