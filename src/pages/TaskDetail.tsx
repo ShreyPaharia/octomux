@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
@@ -10,6 +9,12 @@ import { EmptyState } from '@/components/EmptyState';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
+
+/** Extract the last path segment (repo name) from a full path. */
+function repoName(path?: string | null): string {
+  if (!path) return '—';
+  return path.split('/').filter(Boolean).pop() || path;
+}
 
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).
 interface PerTaskUiState {
@@ -31,7 +36,6 @@ export default function TaskDetail() {
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
 
   const [resuming, setResuming] = useState(false);
-  const [metadataOpen, setMetadataOpen] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
   const [searchParams] = useSearchParams();
@@ -257,23 +261,6 @@ export default function TaskDetail() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2 sm:px-4 sm:py-3">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <Button variant="ghost" size="sm" className="shrink-0" onClick={() => navigate('/')}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              data-icon="inline-start"
-            >
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-            <span className="hidden sm:inline">Tasks</span>
-          </Button>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-base font-semibold sm:text-lg">{task.title}</h1>
@@ -285,16 +272,6 @@ export default function TaskDetail() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-          {task.pr_url && (
-            <a
-              href={task.pr_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-400 hover:underline sm:text-sm"
-            >
-              PR #{task.pr_number}
-            </a>
-          )}
           {canResume && (
             <Button variant="default" size="sm" disabled={resuming} onClick={handleResume}>
               {resuming ? '...' : 'Resume'}
@@ -303,25 +280,12 @@ export default function TaskDetail() {
 
           {isRunning && !!task.tmux_session && (
             <Button
-              variant={mode === 'editor' ? 'default' : 'outline'}
+              variant="outline"
               size="sm"
+              className="border-[#2f2f2f] text-[#8a8a8a]"
               onClick={handleToggleEditor}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
-              </svg>
-              <span className="hidden sm:inline">Editor</span>
+              &lt;&gt; EDITOR
             </Button>
           )}
           {isDraft && (
@@ -331,12 +295,12 @@ export default function TaskDetail() {
           )}
           {isRunning && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="text-destructive hover:text-destructive"
+              className="border-[#2f2f2f] text-[#EF4444]"
               onClick={handleClose}
             >
-              Close
+              CLOSE
             </Button>
           )}
         </div>
@@ -349,80 +313,39 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Metadata panel */}
-      <div className="border-b border-border">
-        <button
-          onClick={() => setMetadataOpen((prev) => !prev)}
-          className="flex w-full items-center gap-1.5 px-4 py-1.5 text-xs text-muted-foreground hover:bg-muted/50"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={`transition-transform ${metadataOpen ? 'rotate-90' : ''}`}
-          >
-            <path d="m9 18 6-6-6-6" />
-          </svg>
-          Details
-        </button>
-        {metadataOpen && (
-          <div className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 px-4 pb-3 text-xs">
-            {task.repo_path && (
-              <>
-                <span className="text-muted-foreground">Repo</span>
-                <span className="font-mono text-muted-foreground">{task.repo_path}</span>
-              </>
-            )}
-            {task.branch && (
-              <>
-                <span className="text-muted-foreground">Branch</span>
-                <span className="font-mono text-muted-foreground">{task.branch}</span>
-              </>
-            )}
-            {task.base_branch && (
-              <>
-                <span className="text-muted-foreground">Base</span>
-                <Badge variant="outline" className="w-fit text-xs font-normal">
-                  {task.base_branch}
-                </Badge>
-              </>
-            )}
-            {task.pr_url && (
-              <>
-                <span className="text-muted-foreground">PR</span>
-                <a
-                  href={task.pr_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-400 hover:underline"
-                >
-                  #{task.pr_number} &mdash; {task.pr_url}
-                </a>
-              </>
-            )}
-            {task.created_at && (
-              <>
-                <span className="text-muted-foreground">Created</span>
-                <span className="text-muted-foreground">
-                  {new Date(task.created_at).toLocaleString()}
-                </span>
-              </>
-            )}
-            {task.updated_at && (
-              <>
-                <span className="text-muted-foreground">Updated</span>
-                <span className="text-muted-foreground">
-                  {new Date(task.updated_at).toLocaleString()}
-                </span>
-              </>
-            )}
-          </div>
+      {/* Metadata bar — always visible */}
+      <div className="flex items-center gap-5 border-b border-border bg-[#141414] px-6 py-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">REPO</span>
+        <span className="text-[11px] text-[#8a8a8a]">{repoName(task.repo_path)}</span>
+        <span className="text-[11px] text-[#2f2f2f]">|</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+          BRANCH
+        </span>
+        <span className="text-[11px] font-medium text-[#3B82F6]">{task.branch}</span>
+        {task.base_branch && (
+          <>
+            <span className="text-[11px] text-[#2f2f2f]">|</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+              BASE
+            </span>
+            <span className="text-[11px] text-[#8a8a8a]">{task.base_branch}</span>
+          </>
+        )}
+        {task.pr_url && (
+          <>
+            <span className="text-[11px] text-[#2f2f2f]">|</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+              PR
+            </span>
+            <a
+              href={task.pr_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-medium text-[#3B82F6] hover:underline"
+            >
+              #{task.pr_number}
+            </a>
+          </>
         )}
       </div>
 

@@ -5,7 +5,6 @@ import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
-import { OrchestratorCommandBar } from '@/components/OrchestratorCommandBar';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
@@ -99,7 +98,19 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            <OrchestratorCommandBar />
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1.5">
+                <h1
+                  className="font-display text-[42px] font-bold leading-none tracking-tight"
+                  style={{ letterSpacing: '-1px' }}
+                >
+                  COMMAND CENTER
+                </h1>
+                <span className="text-sm text-[#8a8a8a]">// autonomous agent orchestration</span>
+              </div>
+              <CreateTaskDialog onCreated={refresh} />
+            </div>
             <TaskFilterBar
               activeStatus={filters.status}
               counts={counts}

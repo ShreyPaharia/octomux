@@ -13,7 +13,7 @@ export function OrchestratorCommandBar() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeCommand, setActiveCommand] = useState<OrchestratorCommand | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { open, refresh } = useOrchestratorContext();
+  const { refresh } = useOrchestratorContext();
 
   const filteredCommands = input.startsWith('/') ? filterCommands(input.slice(1)) : [];
 
@@ -24,7 +24,6 @@ export function OrchestratorCommandBar() {
       await api.orchestratorSend(message);
       setInput('');
       refresh();
-      open();
     } catch (err) {
       console.error('Failed to send to orchestrator:', err);
     } finally {
@@ -112,7 +111,6 @@ export function OrchestratorCommandBar() {
             try {
               await api.orchestratorType(message);
               refresh();
-              open();
               setActiveCommand(null);
             } catch (err) {
               console.error('Failed to type to orchestrator:', err);
