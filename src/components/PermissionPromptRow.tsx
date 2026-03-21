@@ -32,9 +32,12 @@ export const PermissionPromptRow = memo(function PermissionPromptRow({
   };
 
   return (
-    <div className="w-full border border-[#FFB80040] bg-[#FFB80010] px-[20px] py-[14px]">
+    <div
+      className="w-full cursor-pointer border border-[#FFB80040] bg-[#FFB80010] px-[20px] py-[14px] transition-colors hover:bg-[#FFB80018]"
+      onClick={handleClick}
+    >
       {/* Header */}
-      <div className="mb-2 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <span className="inline-block h-[10px] w-[10px] animate-pulse bg-[#FFB800]" />
         <span className="text-xs font-bold uppercase tracking-wide text-[#FFB800]">
           {prompt.agent_label} — PERMISSION REQUIRED
@@ -44,26 +47,11 @@ export const PermissionPromptRow = memo(function PermissionPromptRow({
         </span>
       </div>
       {/* Details */}
-      <div className="mb-3 flex flex-col gap-0.5">
+      <div className="mt-2 flex flex-col gap-0.5">
         <span className="text-xs text-white">
           {prompt.tool_name} {abbreviateInput(prompt.tool_input)}
         </span>
         <span className="text-[11px] text-[#6a6a6a]">{JSON.stringify(prompt.tool_input)}</span>
-      </div>
-      {/* Actions */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleClick}
-          className="border-0 bg-[#22C55E] px-3 py-1 text-xs font-bold text-[#0C0C0C] transition-opacity hover:opacity-90"
-        >
-          APPROVE
-        </button>
-        <button
-          onClick={(e) => e.stopPropagation()}
-          className="border border-[#EF4444] bg-transparent px-3 py-1 text-xs font-bold text-[#EF4444] transition-opacity hover:opacity-90"
-        >
-          DENY
-        </button>
       </div>
     </div>
   );
