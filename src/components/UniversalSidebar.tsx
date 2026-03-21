@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Link, useParams, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useTasks } from '@/lib/hooks';
 import { groupTasksForSidebar, type SidebarItem } from '@/lib/sidebar-utils';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
@@ -150,9 +150,14 @@ function SettingsIcon({ color }: { color: string }) {
 export function UniversalSidebar() {
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
   const { tasks } = useTasks();
-  const { id: activeId } = useParams<{ id: string }>();
   const location = useLocation();
   const { running: orchestratorRunning } = useOrchestratorContext();
+
+  // Extract task ID from URL — useParams doesn't work here since we're outside <Routes>
+  const activeTaskId = useMemo(() => {
+    const match = location.pathname.match(/^\/tasks\/([^/]+)/);
+    return match?.[1] ?? null;
+  }, [location.pathname]);
 
   const groups = useMemo(() => groupTasksForSidebar(tasks), [tasks]);
 
@@ -180,12 +185,13 @@ export function UniversalSidebar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleCollapsed]);
 
-  // Active nav detection
+  // Active nav detection — no nav highlighted when viewing a task
   const activeNav = useMemo(() => {
     if (location.pathname === '/orchestrator') return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
-    return 'dashboard'; // / and /tasks/*
-  }, [location.pathname]);
+    if (activeTaskId) return null; // on /tasks/:id — task item highlights instead
+    return 'dashboard';
+  }, [location.pathname, activeTaskId]);
 
   const navItems = [
     { key: 'dashboard', label: 'DASHBOARD', to: '/', Icon: DashboardIcon },
@@ -345,7 +351,7 @@ export function UniversalSidebar() {
               </div>
             )}
             {group.items.map((item) => {
-              const isActive = item.id === activeId;
+              const isActive = item.id === activeTaskId;
               return (
                 <Link
                   key={item.id}
