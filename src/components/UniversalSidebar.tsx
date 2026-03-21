@@ -206,11 +206,13 @@ export function UniversalSidebar() {
       }}
     >
       {/* Logo row */}
-      <div
-        className="flex items-center justify-between shrink-0"
-        style={{ padding: collapsed ? '24px 8px' : '24px 20px' }}
-      >
-        <div className="flex items-center gap-2 min-w-0">
+      {collapsed ? (
+        <button
+          onClick={toggleCollapsed}
+          className="flex shrink-0 items-center justify-center py-4 hover:opacity-80"
+          style={{ height: 48 }}
+          aria-label="Expand sidebar"
+        >
           <svg
             width="18"
             height="18"
@@ -220,25 +222,41 @@ export function UniversalSidebar() {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="shrink-0"
             aria-hidden="true"
           >
             <polyline points="4 17 10 11 4 5" />
             <line x1="12" y1="19" x2="20" y2="19" />
           </svg>
-          {!collapsed && (
-            <>
-              <span
-                className="font-sans font-semibold text-white"
-                style={{ fontSize: 16, letterSpacing: 1 }}
-              >
-                OCTOMUX
-              </span>
-              <span style={{ fontSize: 11, color: '#6a6a6a' }}>v2.0</span>
-            </>
-          )}
-        </div>
-        {!collapsed && (
+        </button>
+      ) : (
+        <div
+          className="flex shrink-0 items-center justify-between"
+          style={{ padding: '24px 20px' }}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#3B82F6"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="shrink-0"
+              aria-hidden="true"
+            >
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+            <span
+              className="font-sans font-semibold text-white"
+              style={{ fontSize: 16, letterSpacing: 1 }}
+            >
+              OCTOMUX
+            </span>
+            <span style={{ fontSize: 11, color: '#6a6a6a' }}>v2.0</span>
+          </div>
           <button
             onClick={toggleCollapsed}
             className="p-1 hover:opacity-80"
@@ -258,29 +276,8 @@ export function UniversalSidebar() {
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
-        )}
-        {collapsed && (
-          <button
-            onClick={toggleCollapsed}
-            className="p-1 hover:opacity-80"
-            aria-label="Expand sidebar"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#6a6a6a"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Navigation section */}
       <div style={{ paddingBottom: 24 }}>
@@ -305,25 +302,35 @@ export function UniversalSidebar() {
               to={to}
               className="flex items-center"
               style={{
-                padding: collapsed ? '12px 16px' : '12px 20px',
+                padding: collapsed ? '12px 0' : '12px 20px',
                 gap: 12,
                 backgroundColor: isActive ? '#3B82F620' : 'transparent',
                 color,
                 fontWeight: isActive ? 700 : 500,
                 fontSize: 13,
-                justifyContent: key === 'orchestrator' ? 'space-between' : undefined,
+                justifyContent: collapsed
+                  ? 'center'
+                  : key === 'orchestrator'
+                    ? 'space-between'
+                    : undefined,
               }}
             >
-              <span className="flex items-center" style={{ gap: 12 }}>
+              {collapsed ? (
                 <Icon color={color} />
-                {!collapsed && label}
-              </span>
-              {key === 'orchestrator' && orchestratorRunning && !collapsed && (
-                <span
-                  className="shrink-0 rounded-full"
-                  style={{ width: 6, height: 6, backgroundColor: '#22C55E' }}
-                  aria-label="Orchestrator running"
-                />
+              ) : (
+                <>
+                  <span className="flex items-center" style={{ gap: 12 }}>
+                    <Icon color={color} />
+                    {label}
+                  </span>
+                  {key === 'orchestrator' && orchestratorRunning && (
+                    <span
+                      className="shrink-0 rounded-full"
+                      style={{ width: 6, height: 6, backgroundColor: '#22C55E' }}
+                      aria-label="Orchestrator running"
+                    />
+                  )}
+                </>
               )}
             </Link>
           );
@@ -356,9 +363,10 @@ export function UniversalSidebar() {
                   title={collapsed ? item.title : undefined}
                   className="flex items-center"
                   style={{
-                    padding: collapsed ? '10px 16px' : '10px 20px',
+                    padding: collapsed ? '10px 0' : '10px 20px',
                     gap: 10,
                     backgroundColor: isActive ? '#3B82F620' : 'transparent',
+                    justifyContent: collapsed ? 'center' : undefined,
                   }}
                 >
                   <StatusIcon item={item} />
