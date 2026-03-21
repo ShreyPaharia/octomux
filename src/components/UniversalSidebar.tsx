@@ -213,15 +213,12 @@ export function UniversalSidebar() {
           style={{ height: 48 }}
           aria-label="Expand sidebar"
         >
-          <img
-            src="/logo.png"
-            alt="octomux"
-            className="h-5 w-5"
-            style={{
-              filter:
-                'brightness(0) saturate(100%) invert(45%) sepia(98%) saturate(2000%) hue-rotate(210deg) brightness(100%) contrast(96%)',
-            }}
-          />
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center bg-[#3B82F6]"
+            style={{ borderRadius: '50%' }}
+          >
+            <img src="/logo.png" alt="octomux" className="h-4 w-4 brightness-0 invert" />
+          </span>
         </button>
       ) : (
         <div
