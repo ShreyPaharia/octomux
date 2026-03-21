@@ -8,11 +8,11 @@ describe('StatusBadge', () => {
   // ─── Renders all statuses ─────────────────────────────────────────────────
 
   const statusLabels: [TaskStatus, string][] = [
-    ['draft', 'Draft'],
-    ['setting_up', 'Setting up'],
-    ['running', 'Running'],
-    ['closed', 'Closed'],
-    ['error', 'Error'],
+    ['draft', '[DRAFT]'],
+    ['setting_up', '[SETTING_UP]'],
+    ['running', '[RUNNING]'],
+    ['closed', '[CLOSED]'],
+    ['error', '[ERROR]'],
   ];
 
   it.each(statusLabels)('renders "%s" with label "%s"', (status, label) => {

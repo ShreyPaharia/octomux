@@ -2,9 +2,9 @@ import { memo } from 'react';
 import type { HookActivity } from '../../server/types';
 
 const ACTIVITY_STYLES: Record<HookActivity, { dot: string; label: string }> = {
-  active: { dot: 'bg-green-500', label: 'active' },
-  idle: { dot: 'bg-zinc-400', label: 'idle' },
-  waiting: { dot: 'bg-amber-500', label: 'waiting' },
+  active: { dot: 'bg-[#22C55E]', label: 'Active' },
+  idle: { dot: 'bg-[#6a6a6a]', label: 'Idle' },
+  waiting: { dot: 'bg-[#FFB800]', label: 'Waiting' },
 };
 
 export const AgentActivityDot = memo(function AgentActivityDot({
@@ -14,9 +14,9 @@ export const AgentActivityDot = memo(function AgentActivityDot({
 }) {
   const style = ACTIVITY_STYLES[activity] || ACTIVITY_STYLES.active;
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
+    <span className="inline-flex items-center gap-1 text-xs text-[#8a8a8a]">
       <span
-        className={`inline-block h-2 w-2 rounded-full ${style.dot} ${activity === 'active' ? 'animate-pulse' : ''}`}
+        className={`inline-block h-2 w-2 ${style.dot} ${activity === 'active' ? 'animate-pulse' : ''}`}
       />
       {style.label}
     </span>

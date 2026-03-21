@@ -17,13 +17,9 @@ export function NotificationToggle() {
       size="icon"
       onClick={toggle}
       title={enabled ? 'Disable notifications' : 'Enable notifications'}
-      className="relative h-8 w-8"
+      className="relative h-8 w-8 text-[#8a8a8a] hover:text-white"
     >
-      {enabled ? (
-        <BellIcon className="h-4 w-4" />
-      ) : (
-        <BellOffIcon className="h-4 w-4 text-muted-foreground" />
-      )}
+      {enabled ? <BellIcon className="h-4 w-4" /> : <BellOffIcon className="h-4 w-4" />}
     </Button>
   );
 }

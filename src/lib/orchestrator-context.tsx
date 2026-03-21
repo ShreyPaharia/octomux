@@ -1,15 +1,10 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { useOrchestrator } from './hooks';
 
 function useOrchestratorPanel() {
-  const [isOpen, setIsOpen] = useState(false);
   const orchestrator = useOrchestrator();
 
-  const open = useCallback(() => setIsOpen(true), []);
-  const close = useCallback(() => setIsOpen(false), []);
-  const toggle = useCallback(() => setIsOpen((prev) => !prev), []);
-
-  return { isOpen, open, close, toggle, ...orchestrator };
+  return { ...orchestrator };
 }
 
 export type OrchestratorState = ReturnType<typeof useOrchestratorPanel>;
