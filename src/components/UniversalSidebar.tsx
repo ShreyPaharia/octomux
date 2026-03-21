@@ -213,42 +213,31 @@ export function UniversalSidebar() {
           style={{ height: 48 }}
           aria-label="Expand sidebar"
         >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#3B82F6"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <polyline points="4 17 10 11 4 5" />
-            <line x1="12" y1="19" x2="20" y2="19" />
-          </svg>
+          <img
+            src="/logo.png"
+            alt="octomux"
+            className="h-5 w-5"
+            style={{
+              filter:
+                'brightness(0) saturate(100%) invert(45%) sepia(98%) saturate(2000%) hue-rotate(210deg) brightness(100%) contrast(96%)',
+            }}
+          />
         </button>
       ) : (
         <div
           className="flex shrink-0 items-center justify-between"
           style={{ padding: '24px 20px' }}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#3B82F6"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="shrink-0"
-              aria-hidden="true"
-            >
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
-            </svg>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img
+              src="/logo.png"
+              alt="octomux"
+              className="h-5 w-5"
+              style={{
+                filter:
+                  'brightness(0) saturate(100%) invert(45%) sepia(98%) saturate(2000%) hue-rotate(210deg) brightness(100%) contrast(96%)',
+              }}
+            />
             <span
               className="font-sans font-semibold text-white"
               style={{ fontSize: 16, letterSpacing: 1 }}
