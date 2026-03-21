@@ -4,19 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { OrchestratorCommandBar } from './OrchestratorCommandBar';
 import { renderWithRouter } from '../test-helpers';
 
-const mockOpen = vi.fn();
 const mockRefresh = vi.fn();
 let mockRunning = true;
 const mockSend = vi.fn().mockResolvedValue({ ok: true, running: true });
 
 vi.mock('@/lib/orchestrator-context', () => ({
   useOrchestratorContext: () => ({
-    isOpen: false,
     running: mockRunning,
     loading: false,
-    open: mockOpen,
-    close: vi.fn(),
-    toggle: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
     error: null,
@@ -58,7 +53,7 @@ describe('OrchestratorCommandBar', () => {
     expect(screen.getByRole('button', { name: /send/i })).toBeEnabled();
   });
 
-  it('sends message and opens modal on submit', async () => {
+  it('sends message and refreshes on submit', async () => {
     renderWithRouter(<OrchestratorCommandBar />);
     const input = screen.getByPlaceholderText(/ask the orchestrator/i);
     await userEvent.type(input, 'Show me tasks');
@@ -66,7 +61,7 @@ describe('OrchestratorCommandBar', () => {
 
     expect(mockSend).toHaveBeenCalledWith('Show me tasks');
     await waitFor(() => {
-      expect(mockOpen).toHaveBeenCalled();
+      expect(mockRefresh).toHaveBeenCalled();
     });
   });
 

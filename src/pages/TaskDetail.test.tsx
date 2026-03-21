@@ -134,7 +134,6 @@ describe('TaskDetail', () => {
   const headerElements = [
     { name: 'title', text: 'Fix order validation' },
     { name: 'description', text: 'Add negative quantity checks' },
-    { name: 'back button', text: 'Tasks' },
   ];
 
   it.each(headerElements)('shows $name in header', async ({ text }) => {
@@ -151,7 +150,7 @@ describe('TaskDetail', () => {
   it('shows Close button for running task', async () => {
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Close')).toBeInTheDocument();
+      expect(screen.getByText('CLOSE')).toBeInTheDocument();
     });
   });
 
@@ -159,9 +158,9 @@ describe('TaskDetail', () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Close')).toBeInTheDocument();
+      expect(screen.getByText('CLOSE')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('Close'));
+    await user.click(screen.getByText('CLOSE'));
     await waitFor(() => {
       expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', { status: 'closed' });
     });
@@ -203,7 +202,7 @@ describe('TaskDetail', () => {
     await waitFor(() => {
       expect(screen.getByText('Fix order validation')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Close')).not.toBeInTheDocument();
+    expect(screen.queryByText('CLOSE')).not.toBeInTheDocument();
   });
 
   // ─── Terminal rendering ───────────────────────────────────────────────────
@@ -264,7 +263,7 @@ describe('TaskDetail', () => {
     );
     renderDetail();
     await waitFor(() => {
-      const link = screen.getByText('PR #42');
+      const link = screen.getByText('#42');
       expect(link).toHaveAttribute('href', 'https://github.com/org/repo/pull/42');
     });
   });
@@ -277,18 +276,6 @@ describe('TaskDetail', () => {
     await waitFor(() => {
       expect(screen.getByText('Setup failed')).toBeInTheDocument();
     });
-  });
-
-  // ─── Navigation ───────────────────────────────────────────────────────────
-
-  it('navigates back to dashboard on back button click', async () => {
-    const user = userEvent.setup();
-    renderDetail();
-    await waitFor(() => {
-      expect(screen.getByText('Tasks')).toBeInTheDocument();
-    });
-    await user.click(screen.getByText('Tasks'));
-    expect(mockNavigate).toHaveBeenCalledWith('/');
   });
 
   // ─── Editor toggle ───────────────────────────────────────────────────────
