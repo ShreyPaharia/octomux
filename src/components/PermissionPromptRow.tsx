@@ -32,19 +32,39 @@ export const PermissionPromptRow = memo(function PermissionPromptRow({
   };
 
   return (
-    <button
-      onClick={handleClick}
-      className="flex w-full items-center gap-2 rounded border-l-2 border-amber-500 bg-amber-500/5 px-2 py-1.5 text-left text-sm text-amber-400 hover:bg-amber-500/10"
-    >
-      <span className="animate-pulse text-amber-500">&#x26A0;</span>
-      <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-500">
-        Action required
-      </span>
-      <span className="text-zinc-400">{prompt.agent_label}</span>
-      <span className="font-medium">
-        {prompt.tool_name} {abbreviateInput(prompt.tool_input)}
-      </span>
-      <span className="ml-auto shrink-0 text-xs text-zinc-500">{timeAgo(prompt.created_at)}</span>
-    </button>
+    <div className="w-full border border-[#FFB80040] bg-[#FFB80010] px-[20px] py-[14px]">
+      {/* Header */}
+      <div className="mb-2 flex items-center gap-2">
+        <span className="inline-block h-[10px] w-[10px] animate-pulse bg-[#FFB800]" />
+        <span className="text-xs font-bold uppercase tracking-wide text-[#FFB800]">
+          {prompt.agent_label} — PERMISSION REQUIRED
+        </span>
+        <span className="ml-auto shrink-0 text-[10px] text-[#6a6a6a]">
+          {timeAgo(prompt.created_at)}
+        </span>
+      </div>
+      {/* Details */}
+      <div className="mb-3 flex flex-col gap-0.5">
+        <span className="text-xs text-white">
+          {prompt.tool_name} {abbreviateInput(prompt.tool_input)}
+        </span>
+        <span className="text-[11px] text-[#6a6a6a]">{JSON.stringify(prompt.tool_input)}</span>
+      </div>
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleClick}
+          className="border-0 bg-[#22C55E] px-3 py-1 text-xs font-bold text-[#0C0C0C] transition-opacity hover:opacity-90"
+        >
+          APPROVE
+        </button>
+        <button
+          onClick={(e) => e.stopPropagation()}
+          className="border border-[#EF4444] bg-transparent px-3 py-1 text-xs font-bold text-[#EF4444] transition-opacity hover:opacity-90"
+        >
+          DENY
+        </button>
+      </div>
+    </div>
   );
 });

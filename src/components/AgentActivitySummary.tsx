@@ -10,9 +10,9 @@ interface AgentActivitySummaryProps {
 }
 
 const ACTIVITY_DOT: Record<string, string> = {
-  active: 'bg-green-500',
-  idle: 'bg-zinc-400',
-  waiting: 'bg-amber-500',
+  active: 'bg-[#22C55E]',
+  idle: 'bg-[#6a6a6a]',
+  waiting: 'bg-[#FFB800]',
 };
 
 function agentStatusText(agent: Agent): string {
@@ -57,7 +57,7 @@ export const AgentActivitySummary = memo(function AgentActivitySummary({
             <span
               key={a.id}
               title={`${a.label}: ${agentStatusText(a)}`}
-              className={`inline-block h-2 w-2 rounded-full ${ACTIVITY_DOT[a.hook_activity] || ACTIVITY_DOT.active} ${a.hook_activity === 'active' ? 'animate-pulse' : ''}`}
+              className={`inline-block h-2 w-2 ${ACTIVITY_DOT[a.hook_activity] || ACTIVITY_DOT.active} ${a.hook_activity === 'active' ? 'animate-pulse' : ''}`}
             />
           ))}
         </div>
@@ -99,10 +99,10 @@ export const AgentActivitySummary = memo(function AgentActivitySummary({
         {activeAgents.map((a) => (
           <span key={a.id} className="inline-flex items-center gap-1">
             <span
-              className={`inline-block h-2 w-2 rounded-full ${ACTIVITY_DOT[a.hook_activity] || ACTIVITY_DOT.active} ${a.hook_activity === 'active' ? 'animate-pulse' : ''}`}
+              className={`inline-block h-2 w-2 ${ACTIVITY_DOT[a.hook_activity] || ACTIVITY_DOT.active} ${a.hook_activity === 'active' ? 'animate-pulse' : ''}`}
             />
-            <span className="text-zinc-400">{agentStatusText(a)}</span>
-            <span className="text-zinc-500">{a.label}</span>
+            <span className="text-[#8a8a8a]">{agentStatusText(a)}</span>
+            <span className="text-[#6a6a6a]">{a.label}</span>
           </span>
         ))}
       </div>

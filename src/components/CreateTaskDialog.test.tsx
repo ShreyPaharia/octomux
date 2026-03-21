@@ -25,28 +25,29 @@ describe('CreateTaskDialog', () => {
 
   async function openDialog() {
     renderWithRouter(<CreateTaskDialog onCreated={onCreated} />);
-    await user.click(screen.getByText('New Task'));
+    await user.click(screen.getByText('NEW TASK'));
   }
 
   async function fillForm(fields: { title?: string; description?: string; repoPath?: string }) {
-    if (fields.title) await user.type(screen.getByLabelText('Title'), fields.title);
+    if (fields.title) await user.type(screen.getByLabelText(/^Title/), fields.title);
     if (fields.description)
-      await user.type(screen.getByLabelText('Description'), fields.description);
-    if (fields.repoPath) await user.type(screen.getByLabelText('Repository Path'), fields.repoPath);
+      await user.type(screen.getByLabelText(/^Description/), fields.description);
+    if (fields.repoPath)
+      await user.type(screen.getByLabelText(/^Repository Path/), fields.repoPath);
   }
 
   // ─── Dialog open/close ────────────────────────────────────────────────────
 
   it('opens dialog on button click', async () => {
     await openDialog();
-    expect(screen.getByText('Create Task')).toBeInTheDocument();
+    expect(screen.getByText('// NEW TASK')).toBeInTheDocument();
   });
 
   it('shows all form fields', async () => {
     await openDialog();
-    expect(screen.getByLabelText('Title')).toBeInTheDocument();
-    expect(screen.getByLabelText('Description')).toBeInTheDocument();
-    expect(screen.getByLabelText('Repository Path')).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Title/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Description/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Repository Path/)).toBeInTheDocument();
     expect(screen.getByLabelText('Branch Name')).toBeInTheDocument();
     expect(screen.getByText('Base Branch')).toBeInTheDocument();
   });
@@ -66,7 +67,7 @@ describe('CreateTaskDialog', () => {
   it.each(incompleteFormCases)('Create button is disabled when $name', async ({ fields }) => {
     await openDialog();
     await fillForm(fields);
-    const createBtn = screen.getByRole('button', { name: 'Create' });
+    const createBtn = screen.getByRole('button', { name: /DISPATCH/i });
     expect(createBtn).toBeDisabled();
   });
 
@@ -75,7 +76,7 @@ describe('CreateTaskDialog', () => {
   it('calls createTask with form data on submit', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Fix the order bug', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(apiMock.createTask).toHaveBeenCalledWith(
@@ -91,7 +92,7 @@ describe('CreateTaskDialog', () => {
   it('calls onCreated callback after successful creation', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(onCreated).toHaveBeenCalled();
@@ -101,7 +102,7 @@ describe('CreateTaskDialog', () => {
   it('trims whitespace from form values', async () => {
     await openDialog();
     await fillForm({ title: '  Fix bug  ', description: '  Desc  ', repoPath: '  /tmp/repo  ' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(apiMock.createTask).toHaveBeenCalledWith(
@@ -120,7 +121,7 @@ describe('CreateTaskDialog', () => {
     apiMock.createTask.mockRejectedValueOnce(new Error('Repository not found'));
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(screen.getByText('Repository not found')).toBeInTheDocument();
@@ -131,7 +132,7 @@ describe('CreateTaskDialog', () => {
     apiMock.createTask.mockRejectedValueOnce(new Error('fail'));
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(screen.getByText('fail')).toBeInTheDocument();
@@ -144,9 +145,9 @@ describe('CreateTaskDialog', () => {
   it('sends draft=true when checkbox is checked', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    const checkbox = screen.getByLabelText('Save as draft (start later)');
+    const checkbox = screen.getByLabelText('DRAFT');
     await user.click(checkbox);
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(apiMock.createTask).toHaveBeenCalledWith(
@@ -163,7 +164,7 @@ describe('CreateTaskDialog', () => {
   it('does not send draft when checkbox is unchecked', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       const call = apiMock.createTask.mock.calls[0][0];
@@ -180,7 +181,7 @@ describe('CreateTaskDialog', () => {
     const branchInput = screen.getByLabelText('Branch Name');
     await user.clear(branchInput);
     await user.type(branchInput, 'feat/my-feature');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(apiMock.createTask).toHaveBeenCalledWith(
@@ -192,7 +193,7 @@ describe('CreateTaskDialog', () => {
   it('sends auto-generated branch from title', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       const call = apiMock.createTask.mock.calls[0][0];
@@ -205,7 +206,7 @@ describe('CreateTaskDialog', () => {
     apiMock.getDefaultBranch = vi.fn().mockResolvedValue({ branch: 'main' });
 
     await openDialog();
-    await user.type(screen.getByLabelText('Repository Path'), '/tmp/repo');
+    await user.type(screen.getByLabelText(/^Repository Path/), '/tmp/repo');
 
     await waitFor(() => {
       expect(apiMock.listBranches).toHaveBeenCalledWith('/tmp/repo');
@@ -225,7 +226,7 @@ describe('CreateTaskDialog', () => {
       expect(apiMock.getDefaultBranch).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: /DISPATCH/i }));
 
     await waitFor(() => {
       expect(apiMock.createTask).toHaveBeenCalledWith(
@@ -239,7 +240,7 @@ describe('CreateTaskDialog', () => {
   it('closes dialog on cancel without calling API', async () => {
     await openDialog();
     await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'CANCEL' }));
 
     expect(apiMock.createTask).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();

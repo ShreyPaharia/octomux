@@ -19,6 +19,24 @@ interface CreateTaskDialogProps {
   onCreated?: () => void;
 }
 
+function ZapIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
 export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -117,15 +135,19 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
           <path d="M12 5v14" />
           <path d="M5 12h14" />
         </svg>
-        New Task
+        NEW TASK
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Create Task</DialogTitle>
+          <DialogTitle className="font-mono font-bold text-sm tracking-wide">
+            // NEW TASK
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="title">Title</Label>
+            <Label htmlFor="title">
+              Title <span className="text-[#8a8a8a]">*</span>
+            </Label>
             <Input
               id="title"
               placeholder="Fix order validation"
@@ -138,7 +160,9 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
             )}
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description">
+              Description <span className="text-[#8a8a8a]">*</span>
+            </Label>
             <Textarea
               id="description"
               placeholder="Add negative quantity checks to the order form..."
@@ -154,7 +178,9 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
 
           {/* Repository path */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="repo-path">Repository Path</Label>
+            <Label htmlFor="repo-path">
+              Repository Path <span className="text-[#8a8a8a]">*</span>
+            </Label>
             <RepoPickerField
               value={repoPath}
               onChange={setRepoPath}
@@ -207,10 +233,10 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
               type="button"
               variant="ghost"
               size="sm"
-              className="w-fit h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+              className="w-fit h-auto px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a] hover:text-foreground"
               onClick={() => setShowPrompt(!showPrompt)}
             >
-              {showPrompt ? '- Hide initial prompt' : '+ Add initial prompt'}
+              {showPrompt ? '- HIDE INITIAL PROMPT' : '+ ADD INITIAL PROMPT'}
             </Button>
             {showPrompt && (
               <Textarea
@@ -224,23 +250,33 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
           </div>
 
           {/* Draft mode */}
-          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+          <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a] cursor-pointer">
             <input
               type="checkbox"
               checked={draft}
               onChange={(e) => setDraft(e.target.checked)}
-              className="rounded border-border"
+              className="h-4 w-4 rounded-none border border-[#3f3f3f] bg-transparent accent-[#3B82F6] cursor-pointer"
             />
-            Save as draft (start later)
+            DRAFT
           </label>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border bg-background pt-3 -mb-1">
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+            <Button
+              type="button"
+              variant="outline"
+              className="border-[#2f2f2f] uppercase text-xs tracking-wider"
+              onClick={() => setOpen(false)}
+            >
+              CANCEL
             </Button>
-            <Button type="submit" disabled={!canSubmit}>
-              {submitting ? 'Creating...' : 'Create'}
+            <Button
+              type="submit"
+              disabled={!canSubmit}
+              className="bg-[#3B82F6] hover:bg-[#2563EB] text-white uppercase text-xs tracking-wider gap-1.5"
+            >
+              <ZapIcon size={13} />
+              {submitting ? 'DISPATCHING...' : 'DISPATCH'}
             </Button>
           </div>
         </form>
