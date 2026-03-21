@@ -31,9 +31,11 @@ function StatusIcon({ item }: { item: SidebarItem }) {
       );
     case 'setting_up':
       return (
-        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="6" stroke="#FFB800" strokeWidth="2" strokeDasharray="4 2" />
-        </svg>
+        <span
+          className="inline-block h-2 w-2 shrink-0 animate-pulse"
+          style={{ borderRadius: '50%', backgroundColor: '#FFB800' }}
+          aria-hidden="true"
+        />
       );
     case 'needs_attention':
       return (
@@ -58,21 +60,19 @@ function StatusIcon({ item }: { item: SidebarItem }) {
       );
     case 'error':
       return (
-        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="6" stroke="#EF4444" strokeWidth="1.5" />
-          <path
-            d="M5.5 5.5l5 5M10.5 5.5l-5 5"
-            stroke="#EF4444"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
+        <span
+          className="inline-block h-2 w-2 shrink-0"
+          style={{ borderRadius: '50%', backgroundColor: '#EF4444' }}
+          aria-hidden="true"
+        />
       );
     default:
       return (
-        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="6" stroke="#6a6a6a" strokeWidth="1.5" />
-        </svg>
+        <span
+          className="inline-block h-2 w-2 shrink-0"
+          style={{ borderRadius: '50%', backgroundColor: '#6a6a6a' }}
+          aria-hidden="true"
+        />
       );
   }
 }
