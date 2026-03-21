@@ -14,23 +14,71 @@ function getInitialCollapsed(): boolean {
   }
 }
 
-// ─── Status dot (8px circle) ─────────────────────────────────────────────────
+// ─── Status Icons (16x16 inline SVGs) ──────────────────────────────────────
 
-function StatusDot({ item }: { item: SidebarItem }) {
+function StatusIcon({ item }: { item: SidebarItem }) {
   const effectiveStatus = item.derivedStatus ?? item.status;
-  let color = '#6a6a6a';
-  if (effectiveStatus === 'running' || effectiveStatus === 'working') color = '#22C55E';
-  if (effectiveStatus === 'setting_up') color = '#EAB308';
-  if (effectiveStatus === 'needs_attention') color = '#F59E0B';
-  if (effectiveStatus === 'error') color = '#EF4444';
 
-  return (
-    <span
-      className="shrink-0 rounded-full"
-      style={{ width: 8, height: 8, backgroundColor: color }}
-      aria-hidden="true"
-    />
-  );
+  switch (effectiveStatus) {
+    case 'working':
+    case 'running':
+      return (
+        <svg
+          className="h-4 w-4 shrink-0 animate-spin"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <circle cx="8" cy="8" r="6" stroke="#22C55E" strokeWidth="2" opacity="0.3" />
+          <path d="M14 8a6 6 0 0 0-6-6" stroke="#22C55E" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case 'setting_up':
+      return (
+        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" stroke="#FFB800" strokeWidth="2" strokeDasharray="4 2" />
+        </svg>
+      );
+    case 'needs_attention':
+      return (
+        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M8 1.5l6.5 12H1.5L8 1.5z"
+            stroke="#FFB800"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <line
+            x1="8"
+            y1="6"
+            x2="8"
+            y2="9.5"
+            stroke="#FFB800"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+          <circle cx="8" cy="11.5" r="0.75" fill="#FFB800" />
+        </svg>
+      );
+    case 'error':
+      return (
+        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" stroke="#EF4444" strokeWidth="1.5" />
+          <path
+            d="M5.5 5.5l5 5M10.5 5.5l-5 5"
+            stroke="#EF4444"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      );
+    default:
+      return (
+        <svg className="h-4 w-4 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" stroke="#6a6a6a" strokeWidth="1.5" />
+        </svg>
+      );
+  }
 }
 
 // ─── Nav icons (inline SVGs, 16px) ──────────────────────────────────────────
@@ -311,7 +359,7 @@ export function UniversalSidebar() {
                     backgroundColor: isActive ? '#3B82F620' : 'transparent',
                   }}
                 >
-                  <StatusDot item={item} />
+                  <StatusIcon item={item} />
                   {!collapsed && (
                     <span
                       className="truncate font-medium"
