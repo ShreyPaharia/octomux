@@ -11,8 +11,6 @@ const defaultProps = {
   repos: ['/path/to/alpha', '/path/to/beta'],
   activeRepo: '',
   onRepoChange: () => {},
-  viewMode: 'cards' as const,
-  onViewChange: () => {},
 };
 
 describe('TaskFilterBar', () => {
@@ -50,13 +48,13 @@ describe('TaskFilterBar', () => {
 
   it('renders repo dropdown when multiple repos exist', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} />);
-    const trigger = screen.getByText('All projects');
+    const trigger = screen.getByText('ALL REPOS');
     expect(trigger).toBeInTheDocument();
   });
 
   it('hides repo dropdown when only one repo exists', () => {
     renderWithRouter(<TaskFilterBar {...defaultProps} repos={['/path/to/only-one']} />);
-    expect(screen.queryByText('All projects')).not.toBeInTheDocument();
+    expect(screen.queryByText('ALL REPOS')).not.toBeInTheDocument();
   });
 
   it('calls onRepoChange when selecting a repo', async () => {
@@ -64,7 +62,7 @@ describe('TaskFilterBar', () => {
     const onRepoChange = vi.fn();
     renderWithRouter(<TaskFilterBar {...defaultProps} onRepoChange={onRepoChange} />);
     // Open the popover
-    await user.click(screen.getByText('All projects'));
+    await user.click(screen.getByText('ALL REPOS'));
     // Click the repo option
     await user.click(screen.getByText('beta'));
     expect(onRepoChange).toHaveBeenCalledWith('/path/to/beta');

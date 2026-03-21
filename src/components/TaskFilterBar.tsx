@@ -2,7 +2,6 @@ import { memo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import type { StatusTab } from '@/lib/use-task-filters';
-import type { ViewMode } from './TaskList';
 
 interface TaskFilterBarProps {
   activeStatus: StatusTab;
@@ -11,8 +10,6 @@ interface TaskFilterBarProps {
   repos: string[];
   activeRepo: string;
   onRepoChange: (repo: string) => void;
-  viewMode: ViewMode;
-  onViewChange: (mode: ViewMode) => void;
 }
 
 function repoName(repoPath: string): string {
@@ -36,14 +33,14 @@ function RepoFilterDropdown({
         render={
           <button
             type="button"
-            className="mb-1 flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs transition-colors hover:bg-muted"
+            className="mb-1 flex items-center gap-1.5 rounded border border-[#2f2f2f] bg-background px-[14px] py-[8px] text-[11px] text-[#8a8a8a] transition-colors hover:bg-muted"
           >
             {activeRepo ? (
               <Badge variant="outline" className="text-xs font-normal">
                 {repoName(activeRepo)}
               </Badge>
             ) : (
-              <span>All projects</span>
+              <span>ALL REPOS</span>
             )}
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -55,7 +52,7 @@ function RepoFilterDropdown({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="text-muted-foreground"
+              className="text-[#8a8a8a]"
             >
               <path d="m6 9 6 6 6-6" />
             </svg>
@@ -95,64 +92,6 @@ function RepoFilterDropdown({
   );
 }
 
-function ViewToggle({
-  viewMode,
-  onViewChange,
-}: {
-  viewMode: ViewMode;
-  onViewChange: (mode: ViewMode) => void;
-}) {
-  return (
-    <div className="mb-1 flex items-center rounded-md border border-border">
-      <button
-        type="button"
-        title="Card view"
-        className={`rounded-l-md px-1.5 py-1 transition-colors ${viewMode === 'cards' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-        onClick={() => onViewChange('cards')}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <rect x="3" y="3" width="7" height="7" />
-          <rect x="14" y="3" width="7" height="7" />
-          <rect x="3" y="14" width="7" height="7" />
-          <rect x="14" y="14" width="7" height="7" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        title="List view"
-        className={`rounded-r-md px-1.5 py-1 transition-colors ${viewMode === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-        onClick={() => onViewChange('table')}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="3" y1="18" x2="21" y2="18" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-
 export const TaskFilterBar = memo(function TaskFilterBar({
   activeStatus,
   counts,
@@ -160,8 +99,6 @@ export const TaskFilterBar = memo(function TaskFilterBar({
   repos,
   activeRepo,
   onRepoChange,
-  viewMode,
-  onViewChange,
 }: TaskFilterBarProps) {
   const tabs = [
     { key: 'open' as const, label: 'Open', count: counts.open },
@@ -175,14 +112,19 @@ export const TaskFilterBar = memo(function TaskFilterBar({
         {tabs.map((tab) => (
           <button
             key={tab.key}
-            className={`px-3 py-2 text-sm font-medium ${
+            className={`px-[16px] py-[10px] text-xs tracking-wider uppercase ${
               activeStatus === tab.key
-                ? 'border-b-2 border-primary text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
+                ? 'border-b-2 border-[#3B82F6] font-bold text-[#3B82F6]'
+                : 'font-medium text-[#6a6a6a] hover:text-[#8a8a8a]'
             }`}
             onClick={() => onStatusChange(tab.key)}
           >
-            {tab.label} <span className="tabular-nums text-xs">({tab.count})</span>
+            {tab.label}{' '}
+            <span
+              className={`tabular-nums ${activeStatus === tab.key ? 'text-[#3B82F6]' : 'text-[#6a6a6a]'}`}
+            >
+              ({tab.count})
+            </span>
           </button>
         ))}
       </div>
@@ -190,7 +132,6 @@ export const TaskFilterBar = memo(function TaskFilterBar({
         {repos.length > 1 && (
           <RepoFilterDropdown repos={repos} activeRepo={activeRepo} onRepoChange={onRepoChange} />
         )}
-        <ViewToggle viewMode={viewMode} onViewChange={onViewChange} />
       </div>
     </div>
   );

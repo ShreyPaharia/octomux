@@ -1,7 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useTasks } from '@/lib/hooks';
 import { useTaskFilters } from '@/lib/use-task-filters';
-import type { ViewMode } from '@/components/TaskList';
 import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
@@ -13,9 +12,6 @@ import { api } from '@/lib/api';
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
-  const [viewMode, setViewMode] = useState<ViewMode>(
-    () => (localStorage.getItem('octomux-view-mode') as ViewMode) || 'cards',
-  );
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -40,11 +36,6 @@ export default function Dashboard() {
     },
     [refresh],
   );
-
-  const handleViewChange = useCallback((mode: ViewMode) => {
-    setViewMode(mode);
-    localStorage.setItem('octomux-view-mode', mode);
-  }, []);
 
   const handleResume = useCallback(
     async (id: string) => {
@@ -116,8 +107,6 @@ export default function Dashboard() {
               repos={repos}
               activeRepo={filters.repo}
               onRepoChange={(r) => setFilter('repo', r)}
-              viewMode={viewMode}
-              onViewChange={handleViewChange}
             />
             <TaskList
               tasks={filtered}
@@ -126,7 +115,6 @@ export default function Dashboard() {
               onClose={handleClose}
               onDelete={handleDelete}
               onResume={handleResume}
-              viewMode={viewMode}
             />
           </>
         )}
