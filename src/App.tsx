@@ -6,8 +6,6 @@ import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import Dashboard from './pages/Dashboard';
 import { OrchestratorProvider } from './lib/orchestrator-context';
-import { AppHeader } from './components/AppHeader';
-import { OrchestratorModal } from './components/OrchestratorPanel';
 import { UniversalSidebar } from './components/UniversalSidebar';
 
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
@@ -74,27 +72,23 @@ export default function App() {
           />
           <GlobalNotifications />
           <UniversalSidebar />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <AppHeader /> {/* Keep temporarily — removed in Task 14 */}
-            <div className="min-h-0 flex-1">
-              <Suspense
-                fallback={
-                  <div className="flex h-full items-center justify-center text-muted-foreground">
-                    Loading...
-                  </div>
-                }
-              >
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/tasks/:id" element={<TaskDetail />} />
-                  <Route path="/orchestrator" element={<OrchestratorPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                </Routes>
-              </Suspense>
-            </div>
-          </div>
+          <main className="min-h-0 min-w-0 flex-1">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Loading...
+                </div>
+              }
+            >
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route path="/orchestrator" element={<OrchestratorPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Routes>
+            </Suspense>
+          </main>
         </div>
-        <OrchestratorModal /> {/* Keep temporarily — removed in Task 14 */}
       </OrchestratorProvider>
     </ErrorBoundary>
   );
