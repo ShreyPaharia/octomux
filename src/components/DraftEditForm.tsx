@@ -291,13 +291,21 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         <div className="flex items-center gap-2">
-          <Button onClick={handleSave} disabled={!canSave}>
-            {saving ? 'Saving...' : 'Save'}
+          <Button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="font-mono text-xs font-bold uppercase tracking-wider"
+          >
+            {saving ? 'SAVING...' : 'SAVE'}
           </Button>
-          <Button variant="outline" onClick={onStart}>
-            Start
+          <Button
+            variant="outline"
+            onClick={onStart}
+            className="font-mono text-xs font-bold uppercase tracking-wider"
+          >
+            START
           </Button>
-          {saved && <span className="text-sm text-emerald-500">Saved</span>}
+          {saved && <span className="font-mono text-xs text-[#22C55E]">SAVED</span>}
         </div>
       </div>
     </div>

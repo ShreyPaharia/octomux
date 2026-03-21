@@ -1,16 +1,16 @@
-import { Component, lazy, type ReactNode } from 'react';
+import { Component, lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useTasks } from './lib/hooks';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import Dashboard from './pages/Dashboard';
-import TaskDetailLayout from './components/TaskDetailLayout';
 import { OrchestratorProvider } from './lib/orchestrator-context';
-import { AppHeader } from './components/AppHeader';
-import { OrchestratorModal } from './components/OrchestratorPanel';
+import { UniversalSidebar } from './components/UniversalSidebar';
 
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -56,20 +56,39 @@ export default function App() {
   return (
     <ErrorBoundary>
       <OrchestratorProvider>
-        <div className="flex h-screen flex-col bg-background text-foreground">
-          <Toaster theme="dark" position="bottom-right" richColors />
+        <div className="flex h-screen bg-background text-foreground">
+          <Toaster
+            theme="dark"
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: '#0A0A0A',
+                border: '1px solid #2f2f2f',
+                borderRadius: 0,
+                color: '#FFFFFF',
+                fontFamily: "'JetBrains Mono Variable', monospace",
+              },
+            }}
+          />
           <GlobalNotifications />
-          <AppHeader />
-          <div className="min-h-0 flex-1">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route element={<TaskDetailLayout />}>
+          <UniversalSidebar />
+          <main className="min-h-0 min-w-0 flex-1">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Loading...
+                </div>
+              }
+            >
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
-              </Route>
-            </Routes>
-          </div>
+                <Route path="/orchestrator" element={<OrchestratorPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Routes>
+            </Suspense>
+          </main>
         </div>
-        <OrchestratorModal />
       </OrchestratorProvider>
     </ErrorBoundary>
   );

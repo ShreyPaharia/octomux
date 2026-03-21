@@ -32,12 +32,12 @@ export const TaskCard = memo(function TaskCard({
 
   return (
     <Card
-      className="cursor-pointer transition-colors hover:bg-accent/50"
+      className="cursor-pointer bg-[#0A0A0A] border border-[#2f2f2f] transition-colors hover:bg-[#141414]"
       onClick={() => navigate(`/tasks/${task.id}`)}
     >
-      <CardHeader className="px-4 py-3 pb-2">
+      <CardHeader className="px-6 py-5 pb-3">
         <div className="flex items-start justify-between gap-3">
-          <CardTitle className="min-w-0 text-base leading-snug line-clamp-2">
+          <CardTitle className="font-display min-w-0 text-base leading-snug line-clamp-2">
             {task.title}
           </CardTitle>
           <div className="flex shrink-0 items-center gap-2">
@@ -47,33 +47,50 @@ export const TaskCard = memo(function TaskCard({
             </span>
           </div>
         </div>
-        <CardDescription className="line-clamp-1">{task.description}</CardDescription>
+        <CardDescription className="line-clamp-1 font-mono text-[#6a6a6a]">
+          {task.description}
+        </CardDescription>
       </CardHeader>
-      <CardContent className="px-4 pb-3 pt-0">
+      <CardContent className="px-6 pb-5 pt-0">
+        {/* Metadata row */}
         <div className="flex items-center justify-between text-sm">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Badge variant="outline" className="text-xs font-normal">
+          <div className="flex items-center gap-2 text-xs">
+            <Badge
+              variant="outline"
+              className="font-normal bg-[#141414] border-[#2f2f2f] px-2 py-1 text-xs"
+            >
               {repoName(task.repo_path)}
             </Badge>
-            {task.branch && <span className="font-mono text-xs">{task.branch}</span>}
+            {task.branch && (
+              <>
+                <span className="text-[#2f2f2f]">|</span>
+                <span className="font-mono text-[#3B82F6]">{task.branch}</span>
+              </>
+            )}
+            {task.agents && task.agents.length > 0 && (
+              <>
+                <span className="text-[#2f2f2f]">|</span>
+                <span className="text-[#6a6a6a]">
+                  {task.agents.length} agent{task.agents.length !== 1 ? 's' : ''}
+                </span>
+              </>
+            )}
+            {task.pr_url && (
+              <>
+                <span className="text-[#2f2f2f]">|</span>
+                <a
+                  href={task.pr_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#3B82F6] hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  PR #<span className="tabular-nums">{task.pr_number}</span>
+                </a>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            {task.pr_url && (
-              <a
-                href={task.pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-blue-400 hover:underline"
-                onClick={(e) => e.stopPropagation()}
-              >
-                PR #<span className="tabular-nums">{task.pr_number}</span>
-              </a>
-            )}
-            {task.error && (
-              <span className="text-xs text-destructive" title={task.error}>
-                Error
-              </span>
-            )}
             {canResume && onResume && (
               <Button
                 variant="ghost"
@@ -153,8 +170,18 @@ export const TaskCard = memo(function TaskCard({
             )}
           </div>
         </div>
+
+        {/* Error banner */}
+        {task.error && (
+          <div className="mt-3 rounded-none bg-[#EF444410] px-3 py-2 text-xs" title={task.error}>
+            <span className="font-bold text-red-500">Error:</span>{' '}
+            <span className="text-red-400">{task.error}</span>
+          </div>
+        )}
+
+        {/* Agent activity */}
         {task.agents && task.agents.length > 0 && task.status === 'running' && (
-          <div className="mt-2">
+          <div className="mt-3">
             <AgentActivitySummary agents={task.agents} pendingPrompts={task.pending_prompts} />
           </div>
         )}

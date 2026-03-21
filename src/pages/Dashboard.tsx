@@ -1,21 +1,16 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useTasks } from '@/lib/hooks';
 import { useTaskFilters } from '@/lib/use-task-filters';
-import type { ViewMode } from '@/components/TaskList';
 import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
-import { OrchestratorCommandBar } from '@/components/OrchestratorCommandBar';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasks();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
-  const [viewMode, setViewMode] = useState<ViewMode>(
-    () => (localStorage.getItem('octomux-view-mode') as ViewMode) || 'cards',
-  );
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -40,11 +35,6 @@ export default function Dashboard() {
     },
     [refresh],
   );
-
-  const handleViewChange = useCallback((mode: ViewMode) => {
-    setViewMode(mode);
-    localStorage.setItem('octomux-view-mode', mode);
-  }, []);
 
   const handleResume = useCallback(
     async (id: string) => {
@@ -108,7 +98,19 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            <OrchestratorCommandBar />
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1.5">
+                <h1
+                  className="font-display text-[42px] font-bold leading-none tracking-tight"
+                  style={{ letterSpacing: '-1px' }}
+                >
+                  COMMAND CENTER
+                </h1>
+                <span className="text-sm text-[#8a8a8a]">// autonomous agent orchestration</span>
+              </div>
+              <CreateTaskDialog onCreated={refresh} />
+            </div>
             <TaskFilterBar
               activeStatus={filters.status}
               counts={counts}
@@ -116,8 +118,6 @@ export default function Dashboard() {
               repos={repos}
               activeRepo={filters.repo}
               onRepoChange={(r) => setFilter('repo', r)}
-              viewMode={viewMode}
-              onViewChange={handleViewChange}
             />
             <TaskList
               tasks={filtered}
@@ -126,7 +126,6 @@ export default function Dashboard() {
               onClose={handleClose}
               onDelete={handleDelete}
               onResume={handleResume}
-              viewMode={viewMode}
             />
           </>
         )}

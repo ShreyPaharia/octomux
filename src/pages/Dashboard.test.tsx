@@ -17,12 +17,8 @@ vi.mock('@/lib/api', () => ({
 
 vi.mock('@/lib/orchestrator-context', () => ({
   useOrchestratorContext: () => ({
-    isOpen: false,
     running: false,
     loading: false,
-    open: vi.fn(),
-    close: vi.fn(),
-    toggle: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
     error: null,
@@ -55,16 +51,16 @@ describe('Dashboard', () => {
   it('renders new task button', async () => {
     renderWithRouter(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getAllByText('New Task').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('NEW TASK').length).toBeGreaterThan(0);
     });
   });
 
-  // ─── Orchestrator command bar ────────────────────────────────────────────
+  // ─── Header ────────────────────────────────────────────────────────────────
 
-  it('renders orchestrator command bar', async () => {
+  it('renders COMMAND CENTER heading', async () => {
     renderWithRouter(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/ask the orchestrator/i)).toBeInTheDocument();
+      expect(screen.getByText('COMMAND CENTER')).toBeInTheDocument();
     });
   });
 

@@ -43,29 +43,29 @@ export function AgentTabs({
           <div key={agent.id} className="group flex items-center">
             <button
               className={cn(
-                'rounded-t-md px-3 py-1.5 text-sm transition-colors',
+                'flex items-center gap-1.5 px-3.5 py-2.5 text-sm transition-colors',
                 agent.window_index === activeIndex
-                  ? 'bg-accent text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
+                  ? 'border-b-2 border-[#3B82F6] text-[#3B82F6] font-bold'
+                  : 'text-[#8a8a8a] font-medium hover:text-foreground',
               )}
               onClick={() => onSelect(agent.window_index)}
             >
-              {agent.label}
               {agent.status === 'running' && (
                 <span
-                  className={`ml-1.5 inline-block h-1.5 w-1.5 rounded-full ${
+                  className={`inline-block h-2 w-2 ${
                     agent.hook_activity === 'waiting'
-                      ? 'bg-amber-500'
+                      ? 'bg-[#FFB800]'
                       : agent.hook_activity === 'idle'
-                        ? 'bg-zinc-400'
-                        : 'animate-pulse bg-green-400'
+                        ? 'bg-[#6a6a6a]'
+                        : 'animate-pulse bg-[#22C55E]'
                   }`}
                 />
               )}
+              {agent.label}
             </button>
             {agent.status === 'running' && (
               <button
-                className="ml-0.5 hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:inline-flex"
+                className="ml-0.5 hidden rounded p-0.5 text-[#6a6a6a] hover:text-destructive group-hover:inline-flex"
                 onClick={(e) => {
                   e.stopPropagation();
                   onStopAgent(agent.id);
@@ -74,8 +74,8 @@ export function AgentTabs({
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  width="12"
-                  height="12"
+                  width="10"
+                  height="10"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -92,29 +92,29 @@ export function AgentTabs({
         ))}
       {canAddAgent && <AddAgentButton onAdd={onAddAgent} />}
       {(userTerminals.length > 0 || onAddTerminal) && (
-        <div data-testid="tab-separator" className="mx-1 h-5 w-px bg-border" />
+        <div data-testid="tab-separator" className="mx-1 h-6 w-px bg-[#2f2f2f]" />
       )}
       {userTerminals.map((terminal) => (
         <div key={terminal.id} className="group flex items-center">
           <button
             className={cn(
-              'rounded-t-md px-3 py-1.5 text-sm transition-colors',
+              'flex items-center gap-1.5 px-3.5 py-2.5 text-sm transition-colors',
               terminal.window_index === activeIndex
-                ? 'bg-accent text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'border-b-2 border-[#3B82F6] text-[#3B82F6] font-bold'
+                : 'text-[#8a8a8a] font-medium hover:text-foreground',
             )}
             onClick={() => onSelect(terminal.window_index)}
           >
-            {terminal.label}
             <span
-              className={`ml-1.5 inline-block h-1.5 w-1.5 rounded-full ${
-                terminal.status === 'working' ? 'animate-pulse bg-green-400' : 'bg-zinc-400'
+              className={`inline-block h-2 w-2 ${
+                terminal.status === 'working' ? 'animate-pulse bg-[#22C55E]' : 'bg-[#6a6a6a]'
               }`}
             />
+            {terminal.label}
           </button>
           {onCloseTerminal && (
             <button
-              className="ml-0.5 hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:inline-flex"
+              className="ml-0.5 hidden rounded p-0.5 text-[#6a6a6a] hover:text-destructive group-hover:inline-flex"
               onClick={(e) => {
                 e.stopPropagation();
                 onCloseTerminal(terminal.id);
@@ -123,8 +123,8 @@ export function AgentTabs({
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
+                width="10"
+                height="10"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -141,7 +141,7 @@ export function AgentTabs({
       ))}
       {onAddTerminal && (
         <button
-          className="rounded-t-md px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+          className="p-[10px] text-sm text-[#6a6a6a] hover:text-foreground"
           onClick={onAddTerminal}
           title="Add terminal"
         >
@@ -170,7 +170,7 @@ function AddAgentButton({ onAdd }: { onAdd: (prompt?: string) => void }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <div className="flex items-center gap-0.5">
         <button
-          className="rounded-t-md px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+          className="p-[10px] text-sm text-[#6a6a6a] hover:text-foreground"
           onClick={handleQuickAdd}
           title="Add agent without prompt"
         >
@@ -179,7 +179,7 @@ function AddAgentButton({ onAdd }: { onAdd: (prompt?: string) => void }) {
         <DialogTrigger
           render={
             <button
-              className="rounded px-1 py-1 text-xs text-muted-foreground hover:text-foreground"
+              className="rounded px-1 py-1 text-xs font-bold text-[#6a6a6a] hover:text-foreground"
               title="Add agent with prompt"
             />
           }

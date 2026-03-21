@@ -13,7 +13,7 @@ export function OrchestratorCommandBar() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeCommand, setActiveCommand] = useState<OrchestratorCommand | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { open, refresh } = useOrchestratorContext();
+  const { refresh } = useOrchestratorContext();
 
   const filteredCommands = input.startsWith('/') ? filterCommands(input.slice(1)) : [];
 
@@ -24,7 +24,6 @@ export function OrchestratorCommandBar() {
       await api.orchestratorSend(message);
       setInput('');
       refresh();
-      open();
     } catch (err) {
       console.error('Failed to send to orchestrator:', err);
     } finally {
@@ -103,7 +102,7 @@ export function OrchestratorCommandBar() {
   };
 
   return (
-    <div className="relative mb-4 rounded-xl border border-border bg-card">
+    <div className="relative mb-4 border border-[#2f2f2f] bg-[#0A0A0A]">
       {activeCommand ? (
         <CommandFieldForm
           command={activeCommand}
@@ -112,7 +111,6 @@ export function OrchestratorCommandBar() {
             try {
               await api.orchestratorType(message);
               refresh();
-              open();
               setActiveCommand(null);
             } catch (err) {
               console.error('Failed to type to orchestrator:', err);
@@ -125,6 +123,7 @@ export function OrchestratorCommandBar() {
         />
       ) : (
         <div className="flex items-end gap-2 p-3">
+          <span className="shrink-0 select-none font-mono text-sm text-[#8a8a8a]">&gt;</span>
           <textarea
             ref={textareaRef}
             value={input}
@@ -132,7 +131,7 @@ export function OrchestratorCommandBar() {
             onKeyDown={handleKeyDown}
             placeholder="Ask the orchestrator anything..."
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex-1 resize-none bg-transparent font-mono text-sm outline-none placeholder:text-[#6a6a6a]"
           />
           <Button
             size="sm"
@@ -149,19 +148,19 @@ export function OrchestratorCommandBar() {
           </Button>
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2">
+      <div className="flex flex-wrap gap-1.5 border-t border-[#2f2f2f] px-3 py-2">
         {COMMANDS.map((cmd) => (
           <button
             key={cmd.slash}
             onClick={() => handleChipClick(cmd)}
-            className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="border border-[#2f2f2f] bg-transparent px-2.5 py-1 text-xs text-[#8a8a8a] transition-colors hover:border-[#4a4a4a] hover:text-white"
           >
             {cmd.chipLabel}
           </button>
         ))}
       </div>
       {slashMenuOpen && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-1 shadow-md">
+        <div className="absolute top-full left-0 z-50 mt-1 w-72 border border-[#2f2f2f] bg-[#0A0A0A] p-1 shadow-md">
           {filteredCommands.map((cmd, i) => (
             <button
               key={cmd.slash}
@@ -169,12 +168,12 @@ export function OrchestratorCommandBar() {
                 handleChipClick(cmd);
                 setShowSlashMenu(false);
               }}
-              className={`flex w-full flex-col items-start rounded-md px-3 py-2 text-left text-sm ${
-                i === selectedIndex ? 'bg-muted' : ''
+              className={`flex w-full flex-col items-start px-3 py-2 text-left text-sm ${
+                i === selectedIndex ? 'bg-[#1a1a1a]' : ''
               }`}
             >
-              <span className="font-semibold">{cmd.slash}</span>
-              <span className="text-xs text-muted-foreground">{cmd.description}</span>
+              <span className="font-mono font-semibold text-white">{cmd.slash}</span>
+              <span className="text-xs text-[#8a8a8a]">{cmd.description}</span>
             </button>
           ))}
         </div>

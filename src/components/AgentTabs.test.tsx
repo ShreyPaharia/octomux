@@ -175,7 +175,7 @@ describe('AgentTabs', () => {
       const { container } = renderWithRouter(
         <AgentTabs {...defaultProps} agents={[]} userTerminals={terminals} />,
       );
-      expect(container.querySelector('.bg-zinc-400')).toBeInTheDocument();
+      expect(container.querySelector('.bg-\\[\\#6a6a6a\\]')).toBeInTheDocument();
     });
   });
 });

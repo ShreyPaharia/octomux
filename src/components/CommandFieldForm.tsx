@@ -122,9 +122,17 @@ export function CommandFieldForm({ command, onSubmit, onClose, sending }: Comman
     <div className="flex flex-col gap-3 p-3" onKeyDown={handleKeyDown}>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">{command.chipLabel}</span>
+        <span className="font-mono text-xs font-bold uppercase tracking-wider text-[#8a8a8a]">
+          {command.chipLabel}
+        </span>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close" className="h-7">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            aria-label="Close"
+            className="h-7 text-[#8a8a8a] hover:text-white"
+          >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="14"
@@ -145,9 +153,9 @@ export function CommandFieldForm({ command, onSubmit, onClose, sending }: Comman
             disabled={!canSubmit}
             onClick={handleSubmit}
             aria-label="Send"
-            className="h-7"
+            className="h-7 font-mono text-xs font-bold uppercase tracking-wider"
           >
-            Send
+            SEND
           </Button>
         </div>
       </div>
@@ -155,9 +163,12 @@ export function CommandFieldForm({ command, onSubmit, onClose, sending }: Comman
       {/* Fields */}
       {command.fields?.map((field) => (
         <div key={field.name} className="flex flex-col gap-1.5">
-          <Label htmlFor={field.name}>
+          <Label
+            htmlFor={field.name}
+            className="font-mono text-[10px] uppercase tracking-wider text-[#8a8a8a]"
+          >
             {field.label}
-            {field.required && <span className="text-destructive ml-0.5">*</span>}
+            {field.required && <span className="text-[#EF4444] ml-0.5">*</span>}
           </Label>
           {renderField(field)}
         </div>
