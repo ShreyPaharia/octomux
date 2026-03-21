@@ -23,15 +23,11 @@ function StatusIcon({ item }: { item: SidebarItem }) {
     case 'working':
     case 'running':
       return (
-        <svg
-          className="h-4 w-4 shrink-0 animate-spin"
-          viewBox="0 0 16 16"
-          fill="none"
+        <span
+          className="inline-block h-2 w-2 shrink-0 animate-pulse bg-[#22C55E]"
+          style={{ borderRadius: '50%' }}
           aria-hidden="true"
-        >
-          <circle cx="8" cy="8" r="6" stroke="#22C55E" strokeWidth="2" opacity="0.3" />
-          <path d="M14 8a6 6 0 0 0-6-6" stroke="#22C55E" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        />
       );
     case 'setting_up':
       return (
