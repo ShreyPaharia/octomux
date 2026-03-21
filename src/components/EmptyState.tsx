@@ -14,9 +14,9 @@ export function EmptyState({ icon, heading, subtext, action, className = '' }: E
     <div
       className={`flex flex-col items-center justify-center py-16 animate-in fade-in duration-300 ${className}`}
     >
-      <div className="text-muted-foreground/40">{icon}</div>
-      <h3 className="mt-4 text-lg font-medium">{heading}</h3>
-      {subtext && <p className="mt-1 text-sm text-muted-foreground">{subtext}</p>}
+      <div className="text-[#6a6a6a]">{icon}</div>
+      <h3 className="mt-4 text-lg font-display font-bold uppercase tracking-wider">{heading}</h3>
+      {subtext && <p className="mt-1 text-sm text-[#6a6a6a]">{subtext}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
