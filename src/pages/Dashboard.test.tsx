@@ -55,7 +55,7 @@ describe('Dashboard', () => {
   it('renders new task button', async () => {
     renderWithRouter(<Dashboard />);
     await waitFor(() => {
-      expect(screen.getAllByText('New Task').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('NEW TASK').length).toBeGreaterThan(0);
     });
   });
 
