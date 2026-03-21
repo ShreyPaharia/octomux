@@ -15,17 +15,13 @@ describe('TaskList', () => {
   // ─── Empty state ──────────────────────────────────────────────────────────
 
   it('shows "no tasks" empty state when totalCount is 0', () => {
-    renderWithRouter(
-      <TaskList tasks={[]} totalCount={0} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
-    );
+    renderWithRouter(<TaskList tasks={[]} totalCount={0} onClose={onClose} onDelete={onDelete} />);
     expect(screen.getByText('No tasks yet')).toBeInTheDocument();
     expect(screen.getByText('Create your first task to start running agents')).toBeInTheDocument();
   });
 
   it('shows "no matching" empty state when totalCount > 0 but filtered to zero', () => {
-    renderWithRouter(
-      <TaskList tasks={[]} totalCount={5} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
-    );
+    renderWithRouter(<TaskList tasks={[]} totalCount={5} onClose={onClose} onDelete={onDelete} />);
     expect(screen.getByText('No matching tasks')).toBeInTheDocument();
     expect(screen.getByText('Try adjusting your filters or status tab')).toBeInTheDocument();
   });
@@ -38,7 +34,6 @@ describe('TaskList', () => {
         emptyAction={<button>Create Task</button>}
         onClose={onClose}
         onDelete={onDelete}
-        viewMode="cards"
       />,
     );
     expect(screen.getByRole('button', { name: 'Create Task' })).toBeInTheDocument();
@@ -52,7 +47,6 @@ describe('TaskList', () => {
         emptyAction={<button>Create Task</button>}
         onClose={onClose}
         onDelete={onDelete}
-        viewMode="cards"
       />,
     );
     expect(screen.queryByRole('button', { name: 'Create Task' })).not.toBeInTheDocument();
@@ -61,9 +55,7 @@ describe('TaskList', () => {
   // ─── Rendering tasks ─────────────────────────────────────────────────────
 
   it('renders one task card', () => {
-    renderWithRouter(
-      <TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
-    );
+    renderWithRouter(<TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} />);
     expect(screen.getByText('Fix order validation')).toBeInTheDocument();
   });
 
@@ -73,18 +65,14 @@ describe('TaskList', () => {
       makeTask({ id: 't2', title: 'Task Two' }),
       makeTask({ id: 't3', title: 'Task Three' }),
     ];
-    renderWithRouter(
-      <TaskList tasks={tasks} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
-    );
+    renderWithRouter(<TaskList tasks={tasks} onClose={onClose} onDelete={onDelete} />);
     expect(screen.getByText('Task One')).toBeInTheDocument();
     expect(screen.getByText('Task Two')).toBeInTheDocument();
     expect(screen.getByText('Task Three')).toBeInTheDocument();
   });
 
   it('does not show empty state when tasks exist', () => {
-    renderWithRouter(
-      <TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} viewMode="cards" />,
-    );
+    renderWithRouter(<TaskList tasks={[makeTask()]} onClose={onClose} onDelete={onDelete} />);
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument();
   });
 });
