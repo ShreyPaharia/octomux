@@ -170,6 +170,6 @@ graph LR
 
 - GitHub: [github.com/ShreyPaharia/octomux](https://github.com/ShreyPaharia/octomux)
 - npm: [npmjs.com/package/octomux](https://www.npmjs.com/package/octomux)
-- Landing page: [octomux.dev](https://octomux.dev)
+- Landing page: [octomux.com](https://octomux.com)
 
 Contributions welcome — [open an issue](https://github.com/ShreyPaharia/octomux/issues) or submit a PR.
