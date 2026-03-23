@@ -113,6 +113,18 @@ export function CommandFieldForm({ command, onSubmit, onClose, sending }: Comman
         );
       case 'task-picker':
         return <TaskPickerField value={value} onChange={(v) => setValue(field.name, v)} />;
+      case 'checkbox':
+        return (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={value === 'true'}
+              onChange={(e) => setValue(field.name, e.target.checked ? 'true' : '')}
+              className="rounded border-border"
+            />
+            {field.label}
+          </label>
+        );
       default:
         return null;
     }
@@ -163,13 +175,15 @@ export function CommandFieldForm({ command, onSubmit, onClose, sending }: Comman
       {/* Fields */}
       {command.fields?.map((field) => (
         <div key={field.name} className="flex flex-col gap-1.5">
-          <Label
-            htmlFor={field.name}
-            className="font-mono text-[10px] uppercase tracking-wider text-[#8a8a8a]"
-          >
-            {field.label}
-            {field.required && <span className="text-[#EF4444] ml-0.5">*</span>}
-          </Label>
+          {field.type !== 'checkbox' && (
+            <Label
+              htmlFor={field.name}
+              className="font-mono text-[10px] uppercase tracking-wider text-[#8a8a8a]"
+            >
+              {field.label}
+              {field.required && <span className="text-[#EF4444] ml-0.5">*</span>}
+            </Label>
+          )}
           {renderField(field)}
         </div>
       ))}

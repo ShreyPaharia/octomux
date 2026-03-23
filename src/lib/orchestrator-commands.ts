@@ -1,7 +1,7 @@
 export interface CommandField {
   name: string;
   label: string;
-  type: 'text' | 'textarea' | 'repo-picker' | 'branch-picker' | 'task-picker';
+  type: 'text' | 'textarea' | 'repo-picker' | 'branch-picker' | 'task-picker' | 'checkbox';
   required?: boolean;
   placeholder?: string;
   dependsOn?: string;
@@ -36,9 +36,14 @@ export const COMMANDS: OrchestratorCommand[] = [
         type: 'textarea',
         placeholder: 'Tell the agent what to do...',
       },
+      {
+        name: 'draft',
+        label: 'Save as draft (start later)',
+        type: 'checkbox',
+      },
     ],
     buildMessage: (v) =>
-      `Create a task titled "${v.title}" in repo ${v.repo}${v.baseBranch ? ` with base branch ${v.baseBranch}` : ''}${v.description ? `. Description: ${v.description}` : ''} with prompt: ${v.prompt || v.description || v.title}`,
+      `Create a task titled "${v.title}" in repo ${v.repo}${v.baseBranch ? ` with base branch ${v.baseBranch}` : ''}${v.description ? `. Description: ${v.description}` : ''}${v.prompt ? `. Prompt: ${v.prompt}` : ''}${v.draft === 'true' ? '. Create it as a draft — do not start it yet.' : ''}`,
   },
   {
     slash: '/list-tasks',
