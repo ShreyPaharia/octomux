@@ -46,6 +46,12 @@ async function runStart(startArgs) {
   // Install bundled skills
   installSkills();
 
+  // Ensure cli/ dependencies are installed
+  ensureCliDeps();
+
+  // Fix node-pty spawn-helper permissions (may have been missed if postinstall didn't run)
+  fixNodePtyPermissions();
+
   // Preflight checks
   const required = [
     {
@@ -107,6 +113,49 @@ async function runStart(startArgs) {
     if (autoOpen && process.platform === 'darwin') {
       execCb(`open ${url}`);
     }
+  }
+}
+
+// ─── cli dependency installer ────────────────────────────────────────────────
+
+function ensureCliDeps() {
+  const cliDir = path.join(__dirname, '..', 'cli');
+  const cliPkg = path.join(cliDir, 'package.json');
+  if (!existsSync(cliPkg)) return;
+
+  // Check if cli has dependencies that need installing
+  const pkg = JSON.parse(readFileSync(cliPkg, 'utf8'));
+  const hasDeps =
+    (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) ||
+    (pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0);
+  if (!hasDeps) return;
+
+  const cliModules = path.join(cliDir, 'node_modules');
+  if (existsSync(cliModules)) return;
+
+  console.log('Installing cli/ dependencies...');
+  try {
+    execFileSync('npm', ['install', '--ignore-scripts'], { cwd: cliDir, stdio: 'ignore' });
+  } catch {
+    console.warn('⚠  Could not install cli/ dependencies. Run manually: cd cli && npm install');
+  }
+}
+
+// ─── node-pty permissions fix ────────────────────────────────────────────────
+
+function fixNodePtyPermissions() {
+  try {
+    const nodePtyDir = path.join(__dirname, '..', 'node_modules', 'node-pty', 'prebuilds');
+    if (!existsSync(nodePtyDir)) return;
+    const entries = readdirSync(nodePtyDir).filter((e) => e.startsWith('darwin-'));
+    for (const entry of entries) {
+      const helper = path.join(nodePtyDir, entry, 'spawn-helper');
+      if (existsSync(helper)) {
+        execFileSync('chmod', ['+x', helper], { stdio: 'ignore' });
+      }
+    }
+  } catch {
+    // Non-critical — node-pty may still work without this
   }
 }
 
