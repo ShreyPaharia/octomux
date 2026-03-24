@@ -20,7 +20,8 @@
     "!dist-server/test-helpers.*",
     "cli/dist/",
     "cli/package.json",
-    "skills/"
+    "skills/",
+    "scripts/"
   ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
