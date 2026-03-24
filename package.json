@@ -20,6 +20,7 @@
     "!dist-server/test-helpers.*",
     "cli/dist/",
     "cli/package.json",
+    "scripts/",
     "skills/"
   ],
   "scripts": {
