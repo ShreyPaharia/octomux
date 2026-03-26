@@ -737,10 +737,7 @@ export function setupRoutes(app: Express): void {
 
   app.get('/api/orchestrator/prompt', async (_req: Request, res: Response) => {
     try {
-      const [custom, defaultPrompt] = await Promise.all([
-        getCustomPrompt(),
-        getDefaultPrompt(),
-      ]);
+      const [custom, defaultPrompt] = await Promise.all([getCustomPrompt(), getDefaultPrompt()]);
       res.json({
         content: custom ?? defaultPrompt,
         default: defaultPrompt,
@@ -799,7 +796,11 @@ export function setupRoutes(app: Express): void {
       res.json(skill);
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+      if (
+        e.code === 'ENOENT' ||
+        e.message.includes('not found') ||
+        e.message.includes('does not exist')
+      ) {
         res.status(404).json({ error: e.message });
       } else if (e.message.includes('Invalid skill name')) {
         res.status(400).json({ error: e.message });
@@ -841,7 +842,11 @@ export function setupRoutes(app: Express): void {
       res.json(skill);
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+      if (
+        e.code === 'ENOENT' ||
+        e.message.includes('not found') ||
+        e.message.includes('does not exist')
+      ) {
         res.status(404).json({ error: e.message });
       } else if (e.message.includes('Invalid skill name')) {
         res.status(400).json({ error: e.message });
@@ -857,7 +862,11 @@ export function setupRoutes(app: Express): void {
       res.status(204).send();
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+      if (
+        e.code === 'ENOENT' ||
+        e.message.includes('not found') ||
+        e.message.includes('does not exist')
+      ) {
         res.status(404).json({ error: e.message });
       } else if (e.message.includes('Invalid skill name')) {
         res.status(400).json({ error: e.message });
