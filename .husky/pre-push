@@ -1,6 +1,9 @@
 # Ensure we run in the active worktree, not the main repo
 cd "$(git rev-parse --show-toplevel)"
 
+# Ensure we run in the active worktree, not the main repo
+cd "$(git rev-parse --show-toplevel)"
+
 bun run lint
 bun run format:check
 bun install --frozen-lockfile
