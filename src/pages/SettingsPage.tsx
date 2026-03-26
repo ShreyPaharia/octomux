@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useSkills } from '../lib/hooks';
-import { api } from '../lib/api';
+import { api } from '@/lib/api';
+import type { OrchestratorPromptData } from '@/lib/api';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -240,6 +241,106 @@ function SkillsSection() {
   );
 }
 
+function OrchestratorPromptSection() {
+  const [data, setData] = useState<OrchestratorPromptData | null>(null);
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const savedContentRef = useRef('');
+  const isDirty = content !== savedContentRef.current;
+
+  useEffect(() => {
+    api
+      .getOrchestratorPrompt()
+      .then((result) => {
+        setData(result);
+        setContent(result.content);
+        savedContentRef.current = result.content;
+      })
+      .catch((err) => toast.error(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = useCallback(async () => {
+    if (!isDirty || saving) return;
+    setSaving(true);
+    try {
+      await api.updateOrchestratorPrompt(content);
+      savedContentRef.current = content;
+      setData((prev) => (prev ? { ...prev, content, isCustom: true } : prev));
+      toast.success('Prompt saved. Orchestrator restarted.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save prompt');
+    } finally {
+      setSaving(false);
+    }
+  }, [content, isDirty, saving]);
+
+  const reset = useCallback(async () => {
+    if (!window.confirm('Reset orchestrator prompt to default? This cannot be undone.')) return;
+    try {
+      await api.resetOrchestratorPrompt();
+      const result = await api.getOrchestratorPrompt();
+      setData(result);
+      setContent(result.content);
+      savedContentRef.current = result.content;
+      toast.success('Prompt reset to default. Orchestrator restarted.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reset prompt');
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        save();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [save]);
+
+  if (loading) {
+    return <p className="py-3 text-xs text-[#6a6a6a]">Loading prompt...</p>;
+  }
+
+  return (
+    <>
+      <SettingRow
+        label="Orchestrator Prompt"
+        description="Customize the orchestrator's system prompt"
+      >
+        <div className="flex items-center gap-2">
+          {isDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
+          <button
+            onClick={save}
+            disabled={!isDirty || saving}
+            className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </SettingRow>
+      <div className="border-b border-[#2f2f2f] pb-4">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          className="mt-2 h-64 w-full resize-y border border-[#2f2f2f] bg-[#0A0A0A] p-3 font-mono text-xs leading-relaxed text-white outline-none focus:border-[#3B82F6]"
+          spellCheck={false}
+        />
+        <div className="mt-2 flex items-center gap-3">
+          {data?.isCustom && (
+            <button onClick={reset} className="text-xs text-red-400 hover:text-red-300">
+              Reset to Default
+            </button>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function SettingsPage() {
   const [notifications, setNotifications] = useState(
     () => localStorage.getItem('octomux-notifications') !== 'false',
@@ -292,6 +393,26 @@ export default function SettingsPage() {
             description="Start orchestrator when dashboard loads"
           >
             <ToggleSwitch checked={false} onChange={() => {}} />
+          </SettingRow>
+          <OrchestratorPromptSection />
+          <SettingRow
+            label="Restart Orchestrator"
+            description="Stop and restart the orchestrator process"
+          >
+            <button
+              onClick={async () => {
+                try {
+                  await api.orchestratorStop();
+                  await api.orchestratorStart();
+                  toast.success('Orchestrator restarted');
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Failed to restart');
+                }
+              }}
+              className="bg-[#2f2f2f] px-3 py-1 text-xs text-white hover:bg-[#3f3f3f]"
+            >
+              Restart
+            </button>
           </SettingRow>
         </section>
 
