@@ -52,45 +52,31 @@ async function runStart(startArgs) {
   // Fix node-pty spawn-helper permissions (may have been missed if postinstall didn't run)
   fixNodePtyPermissions();
 
-  // Preflight checks
+  // Preflight: ensure all required binaries are installed
+  const { ensureBinary, checkNeovimVersion, syncLazyVimPlugins } =
+    await import('../dist-server/startup.js');
+
   const required = [
-    {
-      cmd: 'tmux',
-      args: ['-V'],
-      name: 'tmux',
-      hint: 'Install with: brew install tmux',
-    },
-    {
-      cmd: 'git',
-      args: ['--version'],
-      name: 'git',
-      hint: 'Install with: brew install git',
-    },
+    { cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' },
+    { cmd: 'git', checkArgs: ['--version'], brewPkg: 'git' },
     {
       cmd: 'claude',
-      args: ['--version'],
+      checkArgs: ['--version'],
       name: 'Claude Code CLI',
-      hint: 'See: https://docs.anthropic.com/en/docs/claude-code',
+      installUrl: 'https://docs.anthropic.com/en/docs/claude-code',
     },
+    { cmd: 'nvim', checkArgs: ['--version'], brewPkg: 'neovim', name: 'neovim' },
+    { cmd: 'lazygit', checkArgs: ['--version'], brewPkg: 'lazygit' },
   ];
 
-  const missing = [];
-  for (const { cmd, args: checkArgs, name, hint } of required) {
-    try {
-      execFileSync(cmd, checkArgs, { stdio: 'ignore' });
-    } catch {
-      missing.push({ name, hint });
-    }
+  for (const dep of required) {
+    ensureBinary(dep);
   }
 
-  if (missing.length > 0) {
-    console.error('Missing required dependencies:\n');
-    for (const { name, hint } of missing) {
-      console.error(`  - ${name}`);
-      console.error(`    ${hint}\n`);
-    }
-    process.exit(1);
-  }
+  // Neovim-specific: version check + LazyVim plugin sync
+  const repoRoot = path.resolve(__dirname, '..');
+  checkNeovimVersion();
+  syncLazyVimPlugins(repoRoot);
 
   // Start server
   process.env.NODE_ENV = 'production';
