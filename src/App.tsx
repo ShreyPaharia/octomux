@@ -62,13 +62,7 @@ export default function App() {
             theme="dark"
             position="bottom-right"
             toastOptions={{
-              style: {
-                background: '#0A0A0A',
-                border: '1px solid #2f2f2f',
-                borderRadius: 0,
-                color: '#FFFFFF',
-                fontFamily: "'JetBrains Mono Variable', monospace",
-              },
+              unstyled: true,
             }}
           />
           <GlobalNotifications />
