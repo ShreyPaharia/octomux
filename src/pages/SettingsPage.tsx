@@ -116,10 +116,7 @@ function SkillsSection() {
       {error && (
         <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
-          <button
-            className="text-xs text-[#3B82F6] hover:text-[#60a5fa]"
-            onClick={refresh}
-          >
+          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
             Retry
           </button>
         </div>
@@ -147,9 +144,7 @@ function SkillsSection() {
             >
               <div>
                 <span className="text-sm font-mono">{skill.name}</span>
-                {skill.description && (
-                  <p className="text-xs text-[#8a8a8a]">{skill.description}</p>
-                )}
+                {skill.description && <p className="text-xs text-[#8a8a8a]">{skill.description}</p>}
               </div>
               <button
                 className="text-xs text-[#6a6a6a] hover:text-red-400"

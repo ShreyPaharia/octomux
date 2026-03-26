@@ -16,9 +16,7 @@ vi.mock('fs', () => {
 });
 vi.mock('os');
 
-const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import(
-  './skills.js'
-);
+const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
 
 const SKILLS_DIR = '/mock-home/.claude/skills';
 
@@ -71,9 +69,7 @@ describe('listSkills', () => {
       { name: 'readme.txt', isDirectory: () => false },
     ];
     vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
-    vi.mocked(fs.promises.readFile).mockResolvedValue(
-      '---\ndescription: A skill\n---\nContent',
-    );
+    vi.mocked(fs.promises.readFile).mockResolvedValue('---\ndescription: A skill\n---\nContent');
 
     const result = await listSkills();
 
