@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { toast } from 'sonner';
 import type { Task, Agent } from '../../server/types';
+import { showToast } from '../components/CustomToast';
 import { getNotificationsEnabled } from './notification-settings';
 
 interface AgentSnapshot {
@@ -61,24 +61,18 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
         // Agent stopped transition
         if (prev.status !== 'stopped' && agent.status === 'stopped') {
           const taskId = task.id;
-          toast(agentTag(task, agent), {
-            description: 'Agent stopped',
-            action: {
-              label: 'View',
-              onClick: () => navigate(`/tasks/${taskId}`),
-            },
+          showToast('info', agentTag(task, agent), 'Agent stopped', {
+            label: 'View',
+            onClick: () => navigate(`/tasks/${taskId}`),
           });
         }
 
         // Agent finished (went idle after being active)
         if (prev.hookActivity === 'active' && agent.hook_activity === 'idle') {
           const taskId = task.id;
-          toast.success(agentTag(task, agent), {
-            description: 'Agent finished',
-            action: {
-              label: 'View',
-              onClick: () => navigate(`/tasks/${taskId}`),
-            },
+          showToast('success', agentTag(task, agent), 'Agent finished', {
+            label: 'View',
+            onClick: () => navigate(`/tasks/${taskId}`),
           });
         }
       }
@@ -92,12 +86,9 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
             const agentId = prompt.agent_id;
             const promptAgent = task.agents?.find((a) => a.id === prompt.agent_id);
             const promptTag = promptAgent ? agentTag(task, promptAgent) : `${task.title} #?`;
-            toast.warning(promptTag, {
-              description: `Needs permission: ${prompt.tool_name}`,
-              action: {
-                label: 'View',
-                onClick: () => navigate(`/tasks/${taskId}?agent=${agentId}`),
-              },
+            showToast('warning', promptTag, `Needs permission: ${prompt.tool_name}`, {
+              label: 'View',
+              onClick: () => navigate(`/tasks/${taskId}?agent=${agentId}`),
             });
           }
         }
@@ -117,20 +108,14 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
           if (hadActiveAgents) {
             const taskId = task.id;
             if (task.status === 'error') {
-              toast.error(task.title, {
-                description: 'Task errored',
-                action: {
-                  label: 'View',
-                  onClick: () => navigate(`/tasks/${taskId}`),
-                },
+              showToast('error', task.title, 'Task errored', {
+                label: 'View',
+                onClick: () => navigate(`/tasks/${taskId}`),
               });
             } else {
-              toast.success(task.title, {
-                description: 'Task closed',
-                action: {
-                  label: 'View',
-                  onClick: () => navigate(`/tasks/${taskId}`),
-                },
+              showToast('success', task.title, 'Task closed', {
+                label: 'View',
+                onClick: () => navigate(`/tasks/${taskId}`),
               });
             }
           }
