@@ -112,6 +112,13 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
     updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
     deleteSkill: vi.fn().mockResolvedValue(undefined),
+    getOrchestratorPrompt: vi.fn().mockResolvedValue({
+      content: '# Default prompt',
+      default: '# Default prompt',
+      isCustom: false,
+    }),
+    updateOrchestratorPrompt: vi.fn().mockResolvedValue({ ok: true, isCustom: true }),
+    resetOrchestratorPrompt: vi.fn().mockResolvedValue({ ok: true, isCustom: false }),
   };
   return { ...defaults, ...overrides };
 }

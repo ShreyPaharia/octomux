@@ -25,6 +25,10 @@ import {
   getOrchestratorSession,
   sendToOrchestrator,
   typeToOrchestrator,
+  getCustomPrompt,
+  getDefaultPrompt,
+  saveCustomPrompt,
+  resetCustomPrompt,
 } from './orchestrator.js';
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import { hookRoutes } from './hooks.js';
@@ -729,6 +733,52 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // ─── Orchestrator Prompt ────────────────────────────────────────────────────
+
+  app.get('/api/orchestrator/prompt', async (_req: Request, res: Response) => {
+    try {
+      const [custom, defaultPrompt] = await Promise.all([getCustomPrompt(), getDefaultPrompt()]);
+      res.json({
+        content: custom ?? defaultPrompt,
+        default: defaultPrompt,
+        isCustom: custom !== null,
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.put('/api/orchestrator/prompt', async (req: Request, res: Response) => {
+    const { content } = req.body as { content?: string };
+    if (content === undefined || content === null) {
+      res.status(400).json({ error: 'content is required' });
+      return;
+    }
+    try {
+      await saveCustomPrompt(content);
+      if (await isOrchestratorRunning()) {
+        await stopOrchestrator();
+        await startOrchestrator();
+      }
+      res.json({ ok: true, isCustom: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete('/api/orchestrator/prompt', async (_req: Request, res: Response) => {
+    try {
+      await resetCustomPrompt();
+      if (await isOrchestratorRunning()) {
+        await stopOrchestrator();
+        await startOrchestrator();
+      }
+      res.json({ ok: true, isCustom: false });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Skills ──────────────────────────────────────────────────────────────────
 
   app.get('/api/skills', async (_req: Request, res: Response) => {
@@ -746,7 +796,11 @@ export function setupRoutes(app: Express): void {
       res.json(skill);
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+      if (
+        e.code === 'ENOENT' ||
+        e.message.includes('not found') ||
+        e.message.includes('does not exist')
+      ) {
         res.status(404).json({ error: e.message });
       } else if (e.message.includes('Invalid skill name')) {
         res.status(400).json({ error: e.message });
@@ -788,7 +842,11 @@ export function setupRoutes(app: Express): void {
       res.json(skill);
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+      if (
+        e.code === 'ENOENT' ||
+        e.message.includes('not found') ||
+        e.message.includes('does not exist')
+      ) {
         res.status(404).json({ error: e.message });
       } else if (e.message.includes('Invalid skill name')) {
         res.status(400).json({ error: e.message });
@@ -804,7 +862,11 @@ export function setupRoutes(app: Express): void {
       res.status(204).send();
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+      if (
+        e.code === 'ENOENT' ||
+        e.message.includes('not found') ||
+        e.message.includes('does not exist')
+      ) {
         res.status(404).json({ error: e.message });
       } else if (e.message.includes('Invalid skill name')) {
         res.status(400).json({ error: e.message });

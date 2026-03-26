@@ -129,8 +129,7 @@ const {
 } = await import('./task-runner.js');
 const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
   await import('./orchestrator.js');
-const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } =
-  await import('./skills.js');
+const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -1189,9 +1188,7 @@ describe('POST /api/orchestrator/send', () => {
 
 describe('Skills API', () => {
   it('GET /api/skills returns skill list', async () => {
-    vi.mocked(listSkills).mockResolvedValue([
-      { name: 'my-skill', description: 'A test skill' },
-    ]);
+    vi.mocked(listSkills).mockResolvedValue([{ name: 'my-skill', description: 'A test skill' }]);
     const res = await request(app).get('/api/skills');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([{ name: 'my-skill', description: 'A test skill' }]);
@@ -1228,18 +1225,14 @@ describe('Skills API', () => {
 
   it('POST /api/skills returns 409 when exists', async () => {
     vi.mocked(createSkill).mockRejectedValue(new Error('Skill already exists: dupe'));
-    const res = await request(app)
-      .post('/api/skills')
-      .send({ name: 'dupe', content: '# Dupe' });
+    const res = await request(app).post('/api/skills').send({ name: 'dupe', content: '# Dupe' });
     expect(res.status).toBe(409);
     expect(res.body.error).toContain('already exists');
   });
 
   it('PUT /api/skills/:name updates content', async () => {
     vi.mocked(updateSkill).mockResolvedValue({ name: 'my-skill', content: '# Updated' });
-    const res = await request(app)
-      .put('/api/skills/my-skill')
-      .send({ content: '# Updated' });
+    const res = await request(app).put('/api/skills/my-skill').send({ content: '# Updated' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ name: 'my-skill', content: '# Updated' });
   });
