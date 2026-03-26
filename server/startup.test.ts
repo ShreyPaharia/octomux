@@ -163,7 +163,7 @@ describe('checkNeovimVersion', () => {
     { version: 'NVIM v0.11.0', desc: '0.11.0' },
     { version: 'NVIM v1.0.0', desc: '1.0.0' },
   ])('passes for version $desc', ({ version }) => {
-    mockExecFileSync.mockReturnValue(version as unknown as Buffer);
+    mockExecFileSync.mockReturnValue(version);
     checkNeovimVersion();
     expect(mockExit).not.toHaveBeenCalled();
   });
@@ -172,13 +172,13 @@ describe('checkNeovimVersion', () => {
     { version: 'NVIM v0.9.5', desc: '0.9.5' },
     { version: 'NVIM v0.8.0', desc: '0.8.0' },
   ])('exits for version $desc (too old)', ({ version }) => {
-    mockExecFileSync.mockReturnValue(version as unknown as Buffer);
+    mockExecFileSync.mockReturnValue(version);
     expect(() => checkNeovimVersion()).toThrow('process.exit');
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it('exits when version cannot be determined', () => {
-    mockExecFileSync.mockReturnValue('unknown output' as unknown as Buffer);
+    mockExecFileSync.mockReturnValue('unknown output');
     expect(() => checkNeovimVersion()).toThrow('process.exit');
     expect(mockExit).toHaveBeenCalledWith(1);
   });
