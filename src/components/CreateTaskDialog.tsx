@@ -46,6 +46,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
   const [branch, setBranch] = useState('');
   const [baseBranch, setBaseBranch] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
+  const [noWorktree, setNoWorktree] = useState(false);
   const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +96,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
         branch: branch.trim() || undefined,
         base_branch: baseBranch.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
+        no_worktree: noWorktree || undefined,
         draft: draft || undefined,
       });
       setTitle('');
@@ -104,6 +106,7 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
       setBaseBranch('');
       setInitialPrompt('');
       setShowPrompt(false);
+      setNoWorktree(false);
       setDraft(false);
       setTouched({});
       setRepoValidation('idle');
@@ -191,41 +194,45 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
             )}
           </div>
 
-          {/* Branch name */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="branch">Branch Name</Label>
-              {branchIsAuto && branch && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  auto
-                </span>
-              )}
-            </div>
-            <Input
-              id="branch"
-              placeholder="feat/my-feature"
-              className="font-mono text-sm"
-              value={branch}
-              onChange={(e) => {
-                setBranch(e.target.value);
-                setBranchIsAuto(false);
-              }}
-            />
-          </div>
+          {!noWorktree && (
+            <>
+              {/* Branch name */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="branch">Branch Name</Label>
+                  {branchIsAuto && branch && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      auto
+                    </span>
+                  )}
+                </div>
+                <Input
+                  id="branch"
+                  placeholder="feat/my-feature"
+                  className="font-mono text-sm"
+                  value={branch}
+                  onChange={(e) => {
+                    setBranch(e.target.value);
+                    setBranchIsAuto(false);
+                  }}
+                />
+              </div>
 
-          {/* Base branch */}
-          <div className="flex flex-col gap-2">
-            <Label>Base Branch</Label>
-            <BranchPickerField
-              repoPath={repoPath}
-              value={baseBranch}
-              onChange={setBaseBranch}
-              onBranchesLoaded={(_branches, defaultBranch) => {
-                setBaseBranch(defaultBranch);
-              }}
-              disabled={!repoPath.trim()}
-            />
-          </div>
+              {/* Base branch */}
+              <div className="flex flex-col gap-2">
+                <Label>Base Branch</Label>
+                <BranchPickerField
+                  repoPath={repoPath}
+                  value={baseBranch}
+                  onChange={setBaseBranch}
+                  onBranchesLoaded={(_branches, defaultBranch) => {
+                    setBaseBranch(defaultBranch);
+                  }}
+                  disabled={!repoPath.trim()}
+                />
+              </div>
+            </>
+          )}
 
           {/* Initial Prompt (optional) */}
           <div className="flex flex-col gap-2">
@@ -248,6 +255,17 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
               />
             )}
           </div>
+
+          {/* No-worktree mode */}
+          <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={noWorktree}
+              onChange={(e) => setNoWorktree(e.target.checked)}
+              className="h-4 w-4 rounded-none border border-[#3f3f3f] bg-transparent accent-[#3B82F6] cursor-pointer"
+            />
+            NO WORKTREE
+          </label>
 
           {/* Draft mode */}
           <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a] cursor-pointer">
