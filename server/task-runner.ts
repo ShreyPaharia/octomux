@@ -321,6 +321,9 @@ export async function deleteTask(task: Task): Promise<void> {
     await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
   }
 
+  // Skip worktree and branch cleanup for no-worktree tasks
+  if (task.no_worktree) return;
+
   // Remove worktree
   if (task.worktree) {
     await execFile('git', [
