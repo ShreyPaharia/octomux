@@ -44,6 +44,7 @@ export interface OctomuxClient {
   updateTask(id: string, data: { status: string }): Promise<Task>;
   deleteTask(id: string): Promise<void>;
   addAgent(taskId: string, data?: { prompt?: string }): Promise<Agent>;
+  stopAgent(taskId: string, agentId: string): Promise<void>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
@@ -107,6 +108,13 @@ export function createClient(serverUrl: string): OctomuxClient {
         method: 'POST',
         body: JSON.stringify(data || {}),
       });
+    },
+    stopAgent(taskId, agentId) {
+      return request<void>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}`,
+        { method: 'DELETE' },
+      );
     },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(
