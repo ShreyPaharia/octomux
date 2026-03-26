@@ -11,6 +11,12 @@ import { registerDeleteTask } from './commands/delete-task.js';
 import { registerResumeTask } from './commands/resume-task.js';
 import { registerAddAgent } from './commands/add-agent.js';
 import { registerSendMessage } from './commands/send-message.js';
+import { registerListSkills } from './commands/list-skills.js';
+import { registerGetSkill } from './commands/get-skill.js';
+import { registerCreateSkill } from './commands/create-skill.js';
+import { registerDeleteSkill } from './commands/delete-skill.js';
+import { registerRecentRepos } from './commands/recent-repos.js';
+import { registerDefaultBranch } from './commands/default-branch.js';
 
 const program = new Command();
 
@@ -33,6 +39,12 @@ registerDeleteTask(program);
 registerResumeTask(program);
 registerAddAgent(program);
 registerSendMessage(program);
+registerListSkills(program);
+registerGetSkill(program);
+registerCreateSkill(program);
+registerDeleteSkill(program);
+registerRecentRepos(program);
+registerDefaultBranch(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();
