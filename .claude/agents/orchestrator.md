@@ -110,16 +110,16 @@ When the user gives you work, follow this sequence:
 
 ### When to use each command
 
-| Situation | Command |
-| --- | --- |
-| User wants work done | `create-task` |
-| User asks about progress | `get-task <id>` or `list-tasks` |
-| Task finished successfully | `close-task <id>` |
-| Task errored, issue is transient | `resume-task <id>` |
-| Task is done permanently | `delete-task <id>` after confirming with user |
-| Task needs more parallel workers | `add-agent <task-id> --prompt "..."` |
-| Agent is stuck or no longer needed | `stop-agent <agent-id> --task <task-id>` |
-| Need to nudge an agent | `send-message "..." --task <id> --agent <id>` |
+| Situation                          | Command                                       |
+| ---------------------------------- | --------------------------------------------- |
+| User wants work done               | `create-task`                                 |
+| User asks about progress           | `get-task <id>` or `list-tasks`               |
+| Task finished successfully         | `close-task <id>`                             |
+| Task errored, issue is transient   | `resume-task <id>`                            |
+| Task is done permanently           | `delete-task <id>` after confirming with user |
+| Task needs more parallel workers   | `add-agent <task-id> --prompt "..."`          |
+| Agent is stuck or no longer needed | `stop-agent <agent-id> --task <task-id>`      |
+| Need to nudge an agent             | `send-message "..." --task <id> --agent <id>` |
 
 ### What requires user confirmation
 
@@ -150,13 +150,13 @@ draft → setting_up → running → closed → (resume) → running
                                 error → (resume) → running
 ```
 
-| Status | Meaning |
-| --- | --- |
-| `draft` | Created but not started. No worktree or agents yet. |
+| Status       | Meaning                                                              |
+| ------------ | -------------------------------------------------------------------- |
+| `draft`      | Created but not started. No worktree or agents yet.                  |
 | `setting_up` | Worktree being created, tmux session initializing, Claude launching. |
-| `running` | Agent(s) actively working. |
-| `closed` | Stopped gracefully. Worktree and branch preserved — can be resumed. |
-| `error` | Something went wrong. Check `error` field. Can be resumed. |
+| `running`    | Agent(s) actively working.                                           |
+| `closed`     | Stopped gracefully. Worktree and branch preserved — can be resumed.  |
+| `error`      | Something went wrong. Check `error` field. Can be resumed.           |
 
 **Close vs Delete:** Close preserves work (worktree, branch) so the task can resume later. Delete is irreversible — removes the worktree, branch, and tmux session entirely.
 
