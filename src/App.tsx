@@ -11,6 +11,7 @@ import { UniversalSidebar } from './components/UniversalSidebar';
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SkillEditor = lazy(() => import('./pages/SkillEditor'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -85,6 +86,7 @@ export default function App() {
                 <Route path="/tasks/:id" element={<TaskDetail />} />
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/skills/:name" element={<SkillEditor />} />
               </Routes>
             </Suspense>
           </main>
