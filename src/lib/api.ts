@@ -71,6 +71,12 @@ export interface SkillDetail {
   content: string;
 }
 
+export interface OrchestratorPromptData {
+  content: string;
+  default: string;
+  isCustom: boolean;
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -114,6 +120,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
+
+  // Orchestrator Prompt
+  getOrchestratorPrompt: () => request<OrchestratorPromptData>('/orchestrator/prompt'),
+  updateOrchestratorPrompt: (content: string) =>
+    request<{ ok: boolean; isCustom: boolean }>('/orchestrator/prompt', {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+  resetOrchestratorPrompt: () =>
+    request<{ ok: boolean; isCustom: boolean }>('/orchestrator/prompt', { method: 'DELETE' }),
 
   // Skills
   listSkills: () => request<Skill[]>('/skills'),

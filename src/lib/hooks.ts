@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
-import type { Skill } from './api';
+import type { Skill, OrchestratorPromptData } from './api';
 import { api } from './api';
 import { subscribe } from './event-source';
 
@@ -139,4 +139,43 @@ export function useSkills() {
   }, [refresh]);
 
   return { skills, loading, error, refresh };
+}
+
+export function useOrchestratorPrompt() {
+  const [data, setData] = useState<OrchestratorPromptData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = await api.getOrchestratorPrompt();
+      setData(result);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const save = useCallback(
+    async (content: string) => {
+      const result = await api.updateOrchestratorPrompt(content);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
+  const reset = useCallback(async () => {
+    const result = await api.resetOrchestratorPrompt();
+    await refresh();
+    return result;
+  }, [refresh]);
+
+  return { data, loading, error, save, reset, refresh };
 }

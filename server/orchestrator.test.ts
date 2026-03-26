@@ -6,14 +6,33 @@ vi.mock('child_process', () => ({
   }),
 }));
 
+vi.mock('fs', () => {
+  const promises = {
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    unlink: vi.fn(),
+    mkdir: vi.fn(),
+  };
+  return { default: { promises } };
+});
+
+vi.mock('os');
+
 const {
   isOrchestratorRunning,
   startOrchestrator,
   stopOrchestrator,
   getOrchestratorSession,
   sendToOrchestrator,
+  getCustomPrompt,
+  getDefaultPrompt,
+  getOrchestratorPrompt,
+  saveCustomPrompt,
+  resetCustomPrompt,
 } = await import('./orchestrator.js');
 const { execFile } = await import('child_process');
+const fs = await import('fs');
+const os = await import('os');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -23,6 +42,8 @@ beforeEach(() => {
     if (cb) cb(null, { stdout: '', stderr: '' });
     return undefined as any;
   });
+  vi.mocked(os.default.homedir).mockReturnValue('/mock-home');
+  vi.mocked(os.default.tmpdir).mockReturnValue('/mock-tmp');
 });
 
 describe('getOrchestratorSession', () => {
@@ -51,7 +72,113 @@ describe('isOrchestratorRunning', () => {
   });
 });
 
+describe('getCustomPrompt', () => {
+  it('returns file content when custom prompt exists', async () => {
+    vi.mocked(fs.default.promises.readFile).mockResolvedValue('custom prompt content');
+    const result = await getCustomPrompt();
+    expect(result).toBe('custom prompt content');
+    expect(fs.default.promises.readFile).toHaveBeenCalledWith(
+      '/mock-home/.octomux/orchestrator-prompt.md',
+      'utf-8',
+    );
+  });
+
+  it('returns null when file does not exist', async () => {
+    const err = new Error('ENOENT') as any;
+    err.code = 'ENOENT';
+    vi.mocked(fs.default.promises.readFile).mockRejectedValue(err);
+    const result = await getCustomPrompt();
+    expect(result).toBeNull();
+  });
+
+  it('throws on non-ENOENT errors', async () => {
+    const err = new Error('EACCES') as any;
+    err.code = 'EACCES';
+    vi.mocked(fs.default.promises.readFile).mockRejectedValue(err);
+    await expect(getCustomPrompt()).rejects.toThrow('EACCES');
+  });
+});
+
+describe('getDefaultPrompt', () => {
+  it('reads the bundled default prompt file', async () => {
+    vi.mocked(fs.default.promises.readFile).mockResolvedValue('default prompt');
+    const result = await getDefaultPrompt();
+    expect(result).toBe('default prompt');
+    const calledPath = vi.mocked(fs.default.promises.readFile).mock.calls[0][0] as string;
+    expect(calledPath).toContain('orchestrator-prompt.md');
+    expect(calledPath).not.toContain('.octomux');
+  });
+});
+
+describe('getOrchestratorPrompt', () => {
+  it('returns custom prompt when it exists', async () => {
+    vi.mocked(fs.default.promises.readFile).mockResolvedValue('custom prompt');
+    const result = await getOrchestratorPrompt();
+    expect(result).toBe('custom prompt');
+  });
+
+  it('falls back to default when custom does not exist', async () => {
+    let callCount = 0;
+    vi.mocked(fs.default.promises.readFile).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        const err = new Error('ENOENT') as any;
+        err.code = 'ENOENT';
+        return Promise.reject(err);
+      }
+      return Promise.resolve('default prompt');
+    });
+    const result = await getOrchestratorPrompt();
+    expect(result).toBe('default prompt');
+  });
+});
+
+describe('saveCustomPrompt', () => {
+  it('creates directory and writes file', async () => {
+    vi.mocked(fs.default.promises.mkdir).mockResolvedValue(undefined as any);
+    vi.mocked(fs.default.promises.writeFile).mockResolvedValue(undefined);
+    await saveCustomPrompt('new prompt');
+    expect(fs.default.promises.mkdir).toHaveBeenCalledWith('/mock-home/.octomux', {
+      recursive: true,
+    });
+    expect(fs.default.promises.writeFile).toHaveBeenCalledWith(
+      '/mock-home/.octomux/orchestrator-prompt.md',
+      'new prompt',
+      'utf-8',
+    );
+  });
+});
+
+describe('resetCustomPrompt', () => {
+  it('deletes the custom prompt file', async () => {
+    vi.mocked(fs.default.promises.unlink).mockResolvedValue(undefined);
+    await resetCustomPrompt();
+    expect(fs.default.promises.unlink).toHaveBeenCalledWith(
+      '/mock-home/.octomux/orchestrator-prompt.md',
+    );
+  });
+
+  it('ignores ENOENT when file does not exist', async () => {
+    const err = new Error('ENOENT') as any;
+    err.code = 'ENOENT';
+    vi.mocked(fs.default.promises.unlink).mockRejectedValue(err);
+    await expect(resetCustomPrompt()).resolves.not.toThrow();
+  });
+
+  it('throws on non-ENOENT errors', async () => {
+    const err = new Error('EACCES') as any;
+    err.code = 'EACCES';
+    vi.mocked(fs.default.promises.unlink).mockRejectedValue(err);
+    await expect(resetCustomPrompt()).rejects.toThrow('EACCES');
+  });
+});
+
 describe('startOrchestrator', () => {
+  beforeEach(() => {
+    vi.mocked(fs.default.promises.readFile).mockResolvedValue('prompt content');
+    vi.mocked(fs.default.promises.writeFile).mockResolvedValue(undefined);
+  });
+
   it('creates tmux session and launches claude with system prompt', async () => {
     let callCount = 0;
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
@@ -71,12 +198,13 @@ describe('startOrchestrator', () => {
     expect(calls).toHaveLength(3);
     expect(calls[1][1]).toContain('new-session');
     expect(calls[2][1]).toContain('send-keys');
-    // Verify claude command includes --system-prompt with the prompt file
+    // Verify claude command includes --system-prompt with the temp prompt file
     const sendKeysArgs = calls[2][1] as string[];
     const claudeCmd = sendKeysArgs[sendKeysArgs.indexOf('-t') + 2];
     expect(claudeCmd).toContain('claude --system-prompt');
-    expect(claudeCmd).toContain('orchestrator-prompt.md');
-    expect(claudeCmd).toContain('"Greet me and show what you can do"');
+    expect(claudeCmd).toContain('octomux-orchestrator-prompt.md');
+    // No user message when no initialMessage provided
+    expect(claudeCmd).not.toContain('Greet me');
   });
 
   it('bakes initial message into claude launch command', async () => {
@@ -98,8 +226,8 @@ describe('startOrchestrator', () => {
     const claudeCmd = (sendKeysCall[1] as string[])[
       (sendKeysCall[1] as string[]).indexOf('-t') + 2
     ];
-    expect(claudeCmd).toContain('Greet me, then handle:');
     expect(claudeCmd).toContain('Create a task to fix bugs');
+    expect(claudeCmd).not.toContain('Greet me');
   });
 
   it('escapes shell metacharacters in initial message with single quotes', async () => {
@@ -122,7 +250,7 @@ describe('startOrchestrator', () => {
       (sendKeysCall[1] as string[]).indexOf('-t') + 2
     ];
     // Message should be wrapped in single quotes to prevent shell interpretation
-    expect(claudeCmd).toContain("'Greet me, then handle:");
+    expect(claudeCmd).toContain("'Fix the $HOME bug");
     // Dangerous chars should be inside single quotes (not interpreted)
     expect(claudeCmd).toContain('$HOME');
     expect(claudeCmd).toContain('`whoami`');
