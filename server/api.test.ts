@@ -389,6 +389,24 @@ describe('POST /api/tasks', () => {
     const task = getTask(db, res.body.id);
     expect(task?.initial_prompt).toBe('Fix the bug in orders.ts');
   });
+
+  it('stores no_worktree when provided', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ ...validPayload, no_worktree: true });
+
+    expect(res.status).toBe(201);
+    const task = getTask(db, res.body.id);
+    expect(task?.no_worktree).toBe(1);
+  });
+
+  it('defaults no_worktree to 0 when not provided', async () => {
+    const res = await request(app).post('/api/tasks').send(validPayload);
+
+    expect(res.status).toBe(201);
+    const task = getTask(db, res.body.id);
+    expect(task?.no_worktree).toBe(0);
+  });
 });
 
 // ─── POST /api/tasks/:id/start ──────────────────────────────────────────────
@@ -496,6 +514,19 @@ describe('PATCH /api/tasks/:id', () => {
     expect(resumeTask).toHaveBeenCalledOnce();
   });
 
+  it.each(resumableStatuses)(
+    'allows resume of no_worktree %s task without worktree check',
+    async (status) => {
+      vi.mocked(fs.existsSync).mockReturnValue(false); // no worktree on disk
+      insertTask(db, { ...DEFAULTS.runningTask, status, no_worktree: 1 });
+      const res = await request(app)
+        .patch(`/api/tasks/${DEFAULTS.task.id}`)
+        .send({ status: 'running' });
+      expect(res.status).toBe(200);
+      expect(resumeTask).toHaveBeenCalledOnce();
+    },
+  );
+
   // ─── Draft field updates ──────────────────────────────────────────────────
 
   it('updates draft task fields', async () => {
@@ -552,6 +583,16 @@ describe('PATCH /api/tasks/:id', () => {
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ title: 'New title' });
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
+  });
+
+  it('updates no_worktree on draft task', async () => {
+    insertTask(db);
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ no_worktree: true });
+    expect(res.status).toBe(200);
+    const task = getTask(db, res.body.id);
+    expect(task?.no_worktree).toBe(1);
   });
 });
 
