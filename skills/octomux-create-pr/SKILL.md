@@ -92,7 +92,7 @@ Create a GitHub pull request directly using `gh pr create`. The octomux dashboar
      --repo <repo_path>
    ```
 
-6. **Report** — Print the PR URL. The octomux dashboard at localhost:7777 will auto-detect and link it to the task within ~30 seconds via the PR poller.
+6. **Report** — Print the PR URL. The octomux dashboard will auto-detect and link it to the task within ~30 seconds via the PR poller.
 
 ## Notes
 

@@ -1,4 +1,8 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { useSkills } from '../lib/hooks';
+import { api } from '../lib/api';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -41,6 +45,198 @@ function SettingRow({
       </div>
       {children}
     </div>
+  );
+}
+
+function SkillsSection() {
+  const { skills, loading, error, refresh } = useSkills();
+  const navigate = useNavigate();
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleCreate = useCallback(async () => {
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
+      await api.createSkill({ name: newName.trim(), content });
+      toast.success(`Skill "${newName.trim()}" created`);
+      setShowCreate(false);
+      setNewName('');
+      navigate(`/skills/${encodeURIComponent(newName.trim())}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  }, [newName, navigate]);
+
+  const handleDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.deleteSkill(deleteTarget);
+      toast.success(`Skill "${deleteTarget}" deleted`);
+      setDeleteTarget(null);
+      refresh();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteTarget, refresh]);
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between">
+        <SectionHeader label="SKILLS" />
+        <button
+          className="mb-4 text-xs text-[#3B82F6] hover:text-[#60a5fa]"
+          onClick={() => setShowCreate(true)}
+        >
+          + New Skill
+        </button>
+      </div>
+
+      {loading && (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]"
+            />
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
+          <span className="text-sm text-red-400">{error}</span>
+          <button
+            className="text-xs text-[#3B82F6] hover:text-[#60a5fa]"
+            onClick={refresh}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && skills.length === 0 && (
+        <div className="py-8 text-center text-sm text-[#6a6a6a]">
+          No skills installed.{' '}
+          <button
+            className="text-[#3B82F6] hover:text-[#60a5fa]"
+            onClick={() => setShowCreate(true)}
+          >
+            Create your first skill
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && skills.length > 0 && (
+        <div className="space-y-0">
+          {skills.map((skill) => (
+            <div
+              key={skill.name}
+              className="flex items-center justify-between border-b border-[#2f2f2f] py-3 cursor-pointer hover:bg-[#141414]"
+              onClick={() => navigate(`/skills/${encodeURIComponent(skill.name)}`)}
+            >
+              <div>
+                <span className="text-sm font-mono">{skill.name}</span>
+                {skill.description && (
+                  <p className="text-xs text-[#8a8a8a]">{skill.description}</p>
+                )}
+              </div>
+              <button
+                className="text-xs text-[#6a6a6a] hover:text-red-400"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTarget(skill.name);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create Dialog */}
+      {showCreate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowCreate(false)}
+        >
+          <div
+            className="w-full max-w-md rounded border border-[#2f2f2f] bg-[#0A0A0A] p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-4 text-sm font-bold">Create Skill</h3>
+            <input
+              type="text"
+              placeholder="Skill name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              className="mb-4 w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+                onClick={() => setShowCreate(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+                onClick={handleCreate}
+                disabled={creating || !newName.trim()}
+              >
+                {creating ? 'Creating…' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded border border-[#2f2f2f] bg-[#0A0A0A] p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-2 text-sm font-bold">Delete Skill</h3>
+            <p className="mb-4 text-xs text-[#8a8a8a]">
+              Are you sure you want to delete{' '}
+              <span className="font-mono text-white">{deleteTarget}</span>? This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -98,6 +294,8 @@ export default function SettingsPage() {
             <ToggleSwitch checked={false} onChange={() => {}} />
           </SettingRow>
         </section>
+
+        <SkillsSection />
       </div>
     </div>
   );

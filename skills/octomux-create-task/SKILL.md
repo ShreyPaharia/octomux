@@ -14,16 +14,16 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    - If given a Jira ticket URL, fetch the ticket details to extract title, description, and acceptance criteria
 
 2. **Resolve the repo:**
-   - Query the octomux API for recent repos:
+   - Query recent repos via CLI:
      ```bash
-     curl -s http://localhost:7777/api/recent-repos | jq .
+     octomux recent-repos
      ```
    - If the repo is ambiguous, ask the user
 
 3. **Detect base branch:**
 
    ```bash
-   curl -s 'http://localhost:7777/api/default-branch?repo_path=<resolved_path>' | jq -r .branch
+   octomux default-branch --repo-path <resolved_path>
    ```
 
 4. **Generate the branch name:**
@@ -85,15 +85,15 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
 
 7. **Report:**
    - Print the task ID returned by the CLI
-   - Tell the user to monitor at the dashboard: http://localhost:7777
+   - Tell the user to monitor via `octomux list-tasks` or the dashboard
    - Or via CLI: `octomux list-tasks`
 
 ## Notes
 
-- The octomux server must be running at localhost:7777
+- The octomux server must be running (start with `octomux start`)
 - Tasks start immediately by default — agents begin working right away
 - Each task gets its own git worktree and tmux session for isolation
 - Keep titles short (under 60 chars) and descriptive
 - Initial prompts should be specific and actionable
-- The user can monitor tasks at the dashboard or via the CLI
+- Monitor tasks via `octomux list-tasks` or the dashboard
 - To create PRs for completed tasks, use the `octomux-create-pr` skill
