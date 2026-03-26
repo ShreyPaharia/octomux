@@ -38,6 +38,7 @@ export interface OctomuxClient {
     branch?: string;
     base_branch?: string;
     draft?: boolean;
+    no_worktree?: boolean;
   }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
