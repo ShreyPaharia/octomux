@@ -9,7 +9,7 @@ const execFile = promisify(execFileCb);
 
 const ORCHESTRATOR_SESSION = 'octomux-orchestrator';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROMPT_FILE = path.resolve(__dirname, 'orchestrator-prompt.md');
+const DEFAULT_AGENT_FILE = path.resolve(__dirname, '..', '.claude', 'agents', 'orchestrator.md');
 
 function customPromptPath(): string {
   return path.join(os.homedir(), '.octomux', 'orchestrator-prompt.md');
@@ -25,7 +25,7 @@ export async function getCustomPrompt(): Promise<string | null> {
 }
 
 export async function getDefaultPrompt(): Promise<string> {
-  return fs.promises.readFile(DEFAULT_PROMPT_FILE, 'utf-8');
+  return fs.promises.readFile(DEFAULT_AGENT_FILE, 'utf-8');
 }
 
 export async function getOrchestratorPrompt(): Promise<string> {
@@ -67,14 +67,24 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
     '-c',
     cwd || process.cwd(),
   ]);
-  const promptContent = await getOrchestratorPrompt();
-  const tmpPrompt = path.join(os.tmpdir(), 'octomux-orchestrator-prompt.md');
-  await fs.promises.writeFile(tmpPrompt, promptContent, 'utf-8');
+
+  const customPrompt = await getCustomPrompt();
+
+  let claudeCmd: string;
+  if (customPrompt) {
+    // Custom prompt: write to temp file and use --system-prompt
+    const tmpPrompt = path.join(os.tmpdir(), 'octomux-orchestrator-prompt.md');
+    await fs.promises.writeFile(tmpPrompt, customPrompt, 'utf-8');
+    claudeCmd = `claude --system-prompt "$(cat ${tmpPrompt})"`;
+  } else {
+    // Default: use the agent definition
+    claudeCmd = 'claude --agent orchestrator';
+  }
+
   // Use single quotes for the user message to prevent shell interpretation of $, `, etc.
-  const messagePart = initialMessage
-    ? ` '${initialMessage.replace(/'/g, "'\"'\"'")}'`
-    : '';
-  const claudeCmd = `claude --system-prompt "$(cat ${tmpPrompt})"${messagePart}`;
+  const messagePart = initialMessage ? ` '${initialMessage.replace(/'/g, "'\"'\"'")}'` : '';
+  claudeCmd += messagePart;
+
   await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, claudeCmd, 'Enter']);
 }
 

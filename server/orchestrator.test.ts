@@ -100,12 +100,12 @@ describe('getCustomPrompt', () => {
 });
 
 describe('getDefaultPrompt', () => {
-  it('reads the bundled default prompt file', async () => {
+  it('reads the agent definition file', async () => {
     vi.mocked(fs.default.promises.readFile).mockResolvedValue('default prompt');
     const result = await getDefaultPrompt();
     expect(result).toBe('default prompt');
     const calledPath = vi.mocked(fs.default.promises.readFile).mock.calls[0][0] as string;
-    expect(calledPath).toContain('orchestrator-prompt.md');
+    expect(calledPath).toContain('.claude/agents/orchestrator.md');
     expect(calledPath).not.toContain('.octomux');
   });
 });
@@ -175,11 +175,10 @@ describe('resetCustomPrompt', () => {
 
 describe('startOrchestrator', () => {
   beforeEach(() => {
-    vi.mocked(fs.default.promises.readFile).mockResolvedValue('prompt content');
     vi.mocked(fs.default.promises.writeFile).mockResolvedValue(undefined);
   });
 
-  it('creates tmux session and launches claude with system prompt', async () => {
+  function mockSessionNotRunning() {
     let callCount = 0;
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       callCount++;
@@ -191,6 +190,20 @@ describe('startOrchestrator', () => {
       }
       return undefined as any;
     });
+  }
+
+  function getClaudeCmd(): string {
+    const sendKeysCall = vi.mocked(execFile).mock.calls[2];
+    const sendKeysArgs = sendKeysCall[1] as string[];
+    return sendKeysArgs[sendKeysArgs.indexOf('-t') + 2];
+  }
+
+  it('uses --agent orchestrator when no custom prompt exists', async () => {
+    mockSessionNotRunning();
+    // No custom prompt — readFile for custom path throws ENOENT
+    const enoent = new Error('ENOENT') as any;
+    enoent.code = 'ENOENT';
+    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
 
     await startOrchestrator('/test/cwd');
 
@@ -198,57 +211,43 @@ describe('startOrchestrator', () => {
     expect(calls).toHaveLength(3);
     expect(calls[1][1]).toContain('new-session');
     expect(calls[2][1]).toContain('send-keys');
-    // Verify claude command includes --system-prompt with the temp prompt file
-    const sendKeysArgs = calls[2][1] as string[];
-    const claudeCmd = sendKeysArgs[sendKeysArgs.indexOf('-t') + 2];
+    const claudeCmd = getClaudeCmd();
+    expect(claudeCmd).toBe('claude --agent orchestrator');
+    expect(claudeCmd).not.toContain('--system-prompt');
+  });
+
+  it('falls back to --system-prompt when custom prompt exists', async () => {
+    mockSessionNotRunning();
+    vi.mocked(fs.default.promises.readFile).mockResolvedValue('custom prompt content');
+
+    await startOrchestrator('/test/cwd');
+
+    const claudeCmd = getClaudeCmd();
     expect(claudeCmd).toContain('claude --system-prompt');
     expect(claudeCmd).toContain('octomux-orchestrator-prompt.md');
-    // No user message when no initialMessage provided
-    expect(claudeCmd).not.toContain('Greet me');
   });
 
   it('bakes initial message into claude launch command', async () => {
-    let callCount = 0;
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      callCount++;
-      const cb = args.find((a: any) => typeof a === 'function');
-      if (callCount === 1) {
-        if (cb) cb(new Error('no session'));
-      } else {
-        if (cb) cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as any;
-    });
+    mockSessionNotRunning();
+    const enoent = new Error('ENOENT') as any;
+    enoent.code = 'ENOENT';
+    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
 
     await startOrchestrator('/test/cwd', 'Create a task to fix bugs');
 
-    const sendKeysCall = vi.mocked(execFile).mock.calls[2];
-    const claudeCmd = (sendKeysCall[1] as string[])[
-      (sendKeysCall[1] as string[]).indexOf('-t') + 2
-    ];
+    const claudeCmd = getClaudeCmd();
     expect(claudeCmd).toContain('Create a task to fix bugs');
-    expect(claudeCmd).not.toContain('Greet me');
   });
 
   it('escapes shell metacharacters in initial message with single quotes', async () => {
-    let callCount = 0;
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      callCount++;
-      const cb = args.find((a: any) => typeof a === 'function');
-      if (callCount === 1) {
-        if (cb) cb(new Error('no session'));
-      } else {
-        if (cb) cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as any;
-    });
+    mockSessionNotRunning();
+    const enoent = new Error('ENOENT') as any;
+    enoent.code = 'ENOENT';
+    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
 
     await startOrchestrator('/test/cwd', 'Fix the $HOME bug; rm -rf / && echo `whoami`');
 
-    const sendKeysCall = vi.mocked(execFile).mock.calls[2];
-    const claudeCmd = (sendKeysCall[1] as string[])[
-      (sendKeysCall[1] as string[]).indexOf('-t') + 2
-    ];
+    const claudeCmd = getClaudeCmd();
     // Message should be wrapped in single quotes to prevent shell interpretation
     expect(claudeCmd).toContain("'Fix the $HOME bug");
     // Dangerous chars should be inside single quotes (not interpreted)
@@ -265,17 +264,10 @@ describe('startOrchestrator', () => {
   });
 
   it('uses cwd when provided', async () => {
-    let callCount = 0;
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      callCount++;
-      const cb = args.find((a: any) => typeof a === 'function');
-      if (callCount === 1) {
-        if (cb) cb(new Error('no session'));
-      } else {
-        if (cb) cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as any;
-    });
+    mockSessionNotRunning();
+    const enoent = new Error('ENOENT') as any;
+    enoent.code = 'ENOENT';
+    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
 
     await startOrchestrator('/my/project');
 
