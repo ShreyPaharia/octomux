@@ -105,6 +105,14 @@ vi.mock('child_process', () => ({
   }),
 }));
 
+vi.mock('./skills.js', () => ({
+  listSkills: vi.fn(),
+  getSkill: vi.fn(),
+  createSkill: vi.fn(),
+  updateSkill: vi.fn(),
+  deleteSkill: vi.fn(),
+}));
+
 const fs = (await import('fs')).default;
 
 const { createApp } = await import('./app.js');
@@ -121,6 +129,8 @@ const {
 } = await import('./task-runner.js');
 const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
   await import('./orchestrator.js');
+const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } =
+  await import('./skills.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -1172,5 +1182,84 @@ describe('POST /api/orchestrator/send', () => {
     const res = await request(app).post('/api/orchestrator/send').send({ message: 'hello' });
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ ok: false, error: 'tmux failed' });
+  });
+});
+
+// ─── Skills API ──────────────────────────────────────────────────────────────
+
+describe('Skills API', () => {
+  it('GET /api/skills returns skill list', async () => {
+    vi.mocked(listSkills).mockResolvedValue([
+      { name: 'my-skill', description: 'A test skill' },
+    ]);
+    const res = await request(app).get('/api/skills');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ name: 'my-skill', description: 'A test skill' }]);
+  });
+
+  it('GET /api/skills/:name returns skill content', async () => {
+    vi.mocked(getSkill).mockResolvedValue({ name: 'my-skill', content: '# My Skill' });
+    const res = await request(app).get('/api/skills/my-skill');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ name: 'my-skill', content: '# My Skill' });
+  });
+
+  it('GET /api/skills/:name returns 404 for missing', async () => {
+    vi.mocked(getSkill).mockRejectedValue(new Error('Skill not found: missing'));
+    const res = await request(app).get('/api/skills/missing');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('not found');
+  });
+
+  it('POST /api/skills creates skill (201)', async () => {
+    vi.mocked(createSkill).mockResolvedValue({ name: 'new-skill', content: '# New' });
+    const res = await request(app)
+      .post('/api/skills')
+      .send({ name: 'new-skill', content: '# New' });
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ name: 'new-skill', content: '# New' });
+  });
+
+  it('POST /api/skills returns 400 when name missing', async () => {
+    const res = await request(app).post('/api/skills').send({ content: '# No name' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('name is required');
+  });
+
+  it('POST /api/skills returns 409 when exists', async () => {
+    vi.mocked(createSkill).mockRejectedValue(new Error('Skill already exists: dupe'));
+    const res = await request(app)
+      .post('/api/skills')
+      .send({ name: 'dupe', content: '# Dupe' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('already exists');
+  });
+
+  it('PUT /api/skills/:name updates content', async () => {
+    vi.mocked(updateSkill).mockResolvedValue({ name: 'my-skill', content: '# Updated' });
+    const res = await request(app)
+      .put('/api/skills/my-skill')
+      .send({ content: '# Updated' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ name: 'my-skill', content: '# Updated' });
+  });
+
+  it('PUT /api/skills/:name returns 400 when content missing', async () => {
+    const res = await request(app).put('/api/skills/my-skill').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('content is required');
+  });
+
+  it('DELETE /api/skills/:name removes skill (204)', async () => {
+    vi.mocked(deleteSkill).mockResolvedValue(undefined);
+    const res = await request(app).delete('/api/skills/my-skill');
+    expect(res.status).toBe(204);
+  });
+
+  it('DELETE /api/skills/:name returns 404 for missing', async () => {
+    vi.mocked(deleteSkill).mockRejectedValue(new Error('Skill not found: missing'));
+    const res = await request(app).delete('/api/skills/missing');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('not found');
   });
 });
