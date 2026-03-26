@@ -127,46 +127,58 @@ export async function startTask(task: Task): Promise<void> {
   const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
-  const slug = slugifyTitle(task.title, id);
-  const branch = task.branch || `agents/${slug}`;
-  const worktreeDir = task.branch || slug;
-  const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
+  const isNoWorktree = !!task.no_worktree;
 
   try {
-    // 1. Update status to setting_up
-    db.prepare(
-      `UPDATE tasks SET status = ?, tmux_session = ?, branch = ?, worktree = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run('setting_up', session, branch, worktreePath, id);
-
-    // 2. Validate repo path
+    // 1. Validate repo path
     if (!fs.existsSync(task.repo_path)) {
       throw new Error(`Repository path does not exist: ${task.repo_path}`);
     }
     await execFile('git', ['-C', task.repo_path, 'rev-parse', '--is-inside-work-tree']);
 
-    // 3. Ensure .worktrees directory exists
-    const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
-    fs.mkdirSync(worktreeBaseDir, { recursive: true });
+    let worktreePath: string;
 
-    // 4. Create worktree (optionally from a base branch)
-    const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
-    if (task.base_branch) {
-      worktreeArgs.push(task.base_branch);
+    if (isNoWorktree) {
+      // No-worktree mode: run directly in repo
+      worktreePath = task.repo_path;
+      db.prepare(
+        `UPDATE tasks SET status = ?, tmux_session = ?, branch = NULL, worktree = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run('setting_up', session, worktreePath, id);
+    } else {
+      // Standard mode: create worktree and branch
+      const slug = slugifyTitle(task.title, id);
+      const branch = task.branch || `agents/${slug}`;
+      const worktreeDir = task.branch || slug;
+      worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
+
+      db.prepare(
+        `UPDATE tasks SET status = ?, tmux_session = ?, branch = ?, worktree = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run('setting_up', session, branch, worktreePath, id);
+
+      // Ensure .worktrees directory exists
+      const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
+      fs.mkdirSync(worktreeBaseDir, { recursive: true });
+
+      // Create worktree (optionally from a base branch)
+      const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
+      if (task.base_branch) {
+        worktreeArgs.push(task.base_branch);
+      }
+      await execFile('git', worktreeArgs);
+
+      // Copy .claude/settings.local.json if it exists
+      const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
+      const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
+      if (fs.existsSync(settingsSrc)) {
+        fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
+        fs.copyFileSync(settingsSrc, settingsDst);
+      }
     }
-    await execFile('git', worktreeArgs);
 
-    // 5. Copy .claude/settings.local.json if it exists
-    const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
-    const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
-    if (fs.existsSync(settingsSrc)) {
-      fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
-      fs.copyFileSync(settingsSrc, settingsDst);
-    }
-
-    // 5b. Install hook settings for permission tracking
+    // Install hook settings
     installHookSettings(worktreePath);
 
-    // 6. Create tmux session
+    // Create tmux session
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
     // Prevent grouped viewer sessions from constraining window size
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);

@@ -291,6 +291,64 @@ describe('startTask', () => {
     expect(updated.status).toBe('error');
     expect(updated.error).toContain(errorContains);
   });
+
+  // ─── No-worktree mode ─────────────────────────────────────────────────
+
+  describe('no_worktree mode', () => {
+    const noWorktreeTask = { ...DEFAULTS.task, no_worktree: 1 } as Task;
+
+    beforeEach(async () => {
+      insertTask(db, { no_worktree: 1 });
+      await startTask(noWorktreeTask);
+    });
+
+    it('sets worktree to repo_path', () => {
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.worktree).toBe(DEFAULTS.task.repo_path);
+    });
+
+    it('sets branch to null', () => {
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.branch).toBeNull();
+    });
+
+    it('sets status to running', () => {
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.status).toBe('running');
+    });
+
+    it('does not create a git worktree', () => {
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'add'] }),
+      ).toBeUndefined();
+    });
+
+    it('does not create .worktrees directory', () => {
+      expect(vi.mocked(fs.mkdirSync)).not.toHaveBeenCalledWith(
+        expect.stringContaining('.worktrees'),
+        expect.anything(),
+      );
+    });
+
+    it('creates tmux session with repo_path as cwd', () => {
+      const call = findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['new-session'],
+      });
+      expect(call).toBeDefined();
+      expect(call![1]).toContain(DEFAULTS.task.repo_path);
+    });
+
+    it('still creates an agent', () => {
+      const agents = getAgents(db, DEFAULTS.task.id);
+      expect(agents).toHaveLength(1);
+      expect(agents[0].label).toBe('Agent 1');
+    });
+
+    it('installs hook settings in repo_path', () => {
+      expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.task.repo_path);
+    });
+  });
 });
 
 // ─── addAgent ─────────────────────────────────────────────────────────────────
