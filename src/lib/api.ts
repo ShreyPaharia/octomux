@@ -61,6 +61,16 @@ export interface RecentRepo {
   last_used: string;
 }
 
+export interface Skill {
+  name: string;
+  description: string;
+}
+
+export interface SkillDetail {
+  name: string;
+  content: string;
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -104,4 +114,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
+
+  // Skills
+  listSkills: () => request<Skill[]>('/skills'),
+  getSkill: (name: string) => request<SkillDetail>(`/skills/${encodeURIComponent(name)}`),
+  createSkill: (data: { name: string; content: string }) =>
+    request<SkillDetail>('/skills', { method: 'POST', body: JSON.stringify(data) }),
+  updateSkill: (name: string, data: { content: string }) =>
+    request<SkillDetail>(`/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteSkill: (name: string) =>
+    request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };

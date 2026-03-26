@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
+import type { Skill } from './api';
 import { api } from './api';
 import { subscribe } from './event-source';
 
@@ -114,4 +115,28 @@ export function useTask(id: string) {
   }, [refresh, id]);
 
   return { task, loading, error, refresh };
+}
+
+export function useSkills() {
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api.listSkills();
+      setSkills(data);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { skills, loading, error, refresh };
 }

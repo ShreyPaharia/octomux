@@ -107,6 +107,11 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     orchestratorStop: vi.fn().mockResolvedValue({ running: false }),
     orchestratorSend: vi.fn().mockResolvedValue({ ok: true, running: true }),
     orchestratorType: vi.fn().mockResolvedValue({ ok: true, running: true }),
+    listSkills: vi.fn().mockResolvedValue([]),
+    getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
+    createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
+    updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
+    deleteSkill: vi.fn().mockResolvedValue(undefined),
   };
   return { ...defaults, ...overrides };
 }
