@@ -128,6 +128,9 @@ export function initDb(instance: Database.Database): void {
   if (!colNames.includes('user_window_index')) {
     instance.exec('ALTER TABLE tasks ADD COLUMN user_window_index INTEGER');
   }
+  if (!colNames.includes('no_worktree')) {
+    instance.exec('ALTER TABLE tasks ADD COLUMN no_worktree INTEGER NOT NULL DEFAULT 0');
+  }
 
   // Add hook_activity columns to agents table (for existing DBs)
   const agentCols2 = instance.pragma('table_info(agents)') as Array<{ name: string }>;
