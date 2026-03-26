@@ -26,6 +26,7 @@ import {
   sendToOrchestrator,
   typeToOrchestrator,
 } from './orchestrator.js';
+import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
 import type {
@@ -725,6 +726,91 @@ export function setupRoutes(app: Express): void {
       res.json({ ok: true, running: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // ─── Skills ──────────────────────────────────────────────────────────────────
+
+  app.get('/api/skills', async (_req: Request, res: Response) => {
+    try {
+      const skills = await listSkills();
+      res.json(skills);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/skills/:name', async (req: Request, res: Response) => {
+    try {
+      const skill = await getSkill(req.params.name as string);
+      res.json(skill);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+        res.status(404).json({ error: e.message });
+      } else if (e.message.includes('Invalid skill name')) {
+        res.status(400).json({ error: e.message });
+      } else {
+        res.status(500).json({ error: e.message });
+      }
+    }
+  });
+
+  app.post('/api/skills', async (req: Request, res: Response) => {
+    const { name, content } = req.body as { name?: string; content?: string };
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    try {
+      const skill = await createSkill(name, content || '');
+      res.status(201).json(skill);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.message.includes('already exists')) {
+        res.status(409).json({ error: e.message });
+      } else if (e.message.includes('Invalid skill name')) {
+        res.status(400).json({ error: e.message });
+      } else {
+        res.status(500).json({ error: e.message });
+      }
+    }
+  });
+
+  app.put('/api/skills/:name', async (req: Request, res: Response) => {
+    const { content } = req.body as { content?: string };
+    if (content === undefined || content === null) {
+      res.status(400).json({ error: 'content is required' });
+      return;
+    }
+    try {
+      const skill = await updateSkill(req.params.name as string, content);
+      res.json(skill);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+        res.status(404).json({ error: e.message });
+      } else if (e.message.includes('Invalid skill name')) {
+        res.status(400).json({ error: e.message });
+      } else {
+        res.status(500).json({ error: e.message });
+      }
+    }
+  });
+
+  app.delete('/api/skills/:name', async (req: Request, res: Response) => {
+    try {
+      await deleteSkill(req.params.name as string);
+      res.status(204).send();
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === 'ENOENT' || e.message.includes('not found') || e.message.includes('does not exist')) {
+        res.status(404).json({ error: e.message });
+      } else if (e.message.includes('Invalid skill name')) {
+        res.status(400).json({ error: e.message });
+      } else {
+        res.status(500).json({ error: e.message });
+      }
     }
   });
 }
