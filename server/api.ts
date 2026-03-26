@@ -316,7 +316,7 @@ export function setupRoutes(app: Express): void {
     const isDraft = !!body.draft;
 
     db.prepare(
-      'INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, initial_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, initial_prompt, no_worktree) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       id,
       body.title,
@@ -326,6 +326,7 @@ export function setupRoutes(app: Express): void {
       body.branch ?? null,
       body.base_branch ?? null,
       body.initial_prompt ?? null,
+      body.no_worktree ? 1 : 0,
     );
 
     const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
@@ -369,6 +370,7 @@ export function setupRoutes(app: Express): void {
       'branch',
       'base_branch',
       'initial_prompt',
+      'no_worktree',
     ].some((k) => (body as Record<string, unknown>)[k] !== undefined);
 
     if (hasDraftFields) {
@@ -404,10 +406,11 @@ export function setupRoutes(app: Express): void {
         'branch',
         'base_branch',
         'initial_prompt',
+        'no_worktree',
       ] as const) {
         if (body[key] !== undefined) {
           fields.push(`${key} = ?`);
-          values.push(body[key] ?? null);
+          values.push(key === 'no_worktree' ? (body[key] ? 1 : 0) : (body[key] ?? null));
         }
       }
       if (fields.length > 0) {
@@ -421,7 +424,7 @@ export function setupRoutes(app: Express): void {
         res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
         return;
       }
-      if (!task.worktree || !fs.existsSync(task.worktree)) {
+      if (!task.no_worktree && (!task.worktree || !fs.existsSync(task.worktree))) {
         res.status(400).json({ error: 'Worktree no longer exists on disk' });
         return;
       }

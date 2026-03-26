@@ -35,6 +35,7 @@ export const TASK_DEFAULTS: Task = {
   pr_number: null,
   user_window_index: null,
   initial_prompt: null,
+  no_worktree: 0,
   error: null,
   created_at: '2026-01-01 00:00:00',
   updated_at: '2026-01-01 00:00:00',

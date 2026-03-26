@@ -291,6 +291,64 @@ describe('startTask', () => {
     expect(updated.status).toBe('error');
     expect(updated.error).toContain(errorContains);
   });
+
+  // ─── No-worktree mode ─────────────────────────────────────────────────
+
+  describe('no_worktree mode', () => {
+    const noWorktreeTask = { ...DEFAULTS.task, no_worktree: 1 } as Task;
+
+    beforeEach(async () => {
+      insertTask(db, { no_worktree: 1 });
+      await startTask(noWorktreeTask);
+    });
+
+    it('sets worktree to repo_path', () => {
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.worktree).toBe(DEFAULTS.task.repo_path);
+    });
+
+    it('sets branch to null', () => {
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.branch).toBeNull();
+    });
+
+    it('sets status to running', () => {
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.status).toBe('running');
+    });
+
+    it('does not create a git worktree', () => {
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'add'] }),
+      ).toBeUndefined();
+    });
+
+    it('does not create .worktrees directory', () => {
+      expect(vi.mocked(fs.mkdirSync)).not.toHaveBeenCalledWith(
+        expect.stringContaining('.worktrees'),
+        expect.anything(),
+      );
+    });
+
+    it('creates tmux session with repo_path as cwd', () => {
+      const call = findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['new-session'],
+      });
+      expect(call).toBeDefined();
+      expect(call![1]).toContain(DEFAULTS.task.repo_path);
+    });
+
+    it('still creates an agent', () => {
+      const agents = getAgents(db, DEFAULTS.task.id);
+      expect(agents).toHaveLength(1);
+      expect(agents[0].label).toBe('Agent 1');
+    });
+
+    it('installs hook settings in repo_path', () => {
+      expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.task.repo_path);
+    });
+  });
 });
 
 // ─── addAgent ─────────────────────────────────────────────────────────────────
@@ -547,6 +605,39 @@ describe('deleteTask', () => {
     await deleteTask(task);
     expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
   });
+
+  describe('no_worktree mode', () => {
+    const noWorktreeRunningTask = {
+      ...DEFAULTS.runningTask,
+      no_worktree: 1,
+      worktree: DEFAULTS.runningTask.repo_path,
+      branch: null,
+    } as Task;
+
+    it('kills tmux session', async () => {
+      insertTask(db, noWorktreeRunningTask);
+      await deleteTask(noWorktreeRunningTask);
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
+      ).toBeDefined();
+    });
+
+    it('does not remove worktree', async () => {
+      insertTask(db, noWorktreeRunningTask);
+      await deleteTask(noWorktreeRunningTask);
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'remove'] }),
+      ).toBeUndefined();
+    });
+
+    it('does not delete branch', async () => {
+      insertTask(db, noWorktreeRunningTask);
+      await deleteTask(noWorktreeRunningTask);
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
+      ).toBeUndefined();
+    });
+  });
 });
 
 // ─── stopAgent ────────────────────────────────────────────────────────────────
@@ -714,6 +805,65 @@ describe('resumeTask', () => {
 
     const updated = getTask(db, DEFAULTS.task.id)!;
     expect(updated.user_window_index).toBeNull();
+  });
+
+  describe('no_worktree mode', () => {
+    const noWorktreeClosedTask = {
+      ...DEFAULTS.runningTask,
+      status: 'closed' as const,
+      no_worktree: 1,
+      worktree: DEFAULTS.runningTask.repo_path,
+      branch: null,
+    } as Task;
+
+    beforeEach(() => {
+      vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+        if (args.includes('display-message')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('list-windows')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('new-window')) {
+          nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else {
+          cb(null, { stdout: 'true', stderr: '' });
+        }
+      }) as any);
+    });
+
+    it('resumes to running status', async () => {
+      insertTask(db, { ...noWorktreeClosedTask });
+      insertAgent(db, { status: 'stopped' });
+
+      await resumeTask(noWorktreeClosedTask);
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.status).toBe('running');
+    });
+
+    it('creates tmux session with repo_path as cwd', async () => {
+      insertTask(db, { ...noWorktreeClosedTask });
+      insertAgent(db, { status: 'stopped' });
+
+      await resumeTask(noWorktreeClosedTask);
+
+      const call = findExecCall(vi.mocked(execFile), {
+        cmd: 'tmux',
+        argsInclude: ['new-session'],
+      });
+      expect(call).toBeDefined();
+      expect(call![1]).toContain(DEFAULTS.task.repo_path);
+    });
+
+    it('marks stopped agents as running', async () => {
+      insertTask(db, { ...noWorktreeClosedTask });
+      insertAgent(db, { status: 'stopped' });
+
+      await resumeTask(noWorktreeClosedTask);
+
+      const agents = getAgents(db, DEFAULTS.task.id);
+      expect(agents[0].status).toBe('running');
+    });
   });
 });
 

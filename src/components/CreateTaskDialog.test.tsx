@@ -235,6 +235,51 @@ describe('CreateTaskDialog', () => {
     });
   });
 
+  // ─── No-worktree mode ──────────────────────────────────────────────────────
+
+  describe('no-worktree mode', () => {
+    it('renders NO WORKTREE checkbox', async () => {
+      await openDialog();
+      expect(screen.getByLabelText(/NO WORKTREE/)).toBeInTheDocument();
+    });
+
+    it('hides branch and base branch fields when checked', async () => {
+      await openDialog();
+      // Branch fields visible by default
+      expect(screen.getByLabelText(/^Branch Name/)).toBeInTheDocument();
+      // Check no-worktree
+      await user.click(screen.getByLabelText(/NO WORKTREE/));
+      // Branch fields hidden
+      expect(screen.queryByLabelText(/^Branch Name/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Base Branch/)).not.toBeInTheDocument();
+    });
+
+    it('passes no_worktree to API when checked', async () => {
+      await openDialog();
+      await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
+      await user.click(screen.getByLabelText(/NO WORKTREE/));
+      await user.click(screen.getByText('DISPATCH'));
+
+      await waitFor(() => {
+        expect(apiMock.createTask).toHaveBeenCalledWith(
+          expect.objectContaining({ no_worktree: true }),
+        );
+      });
+    });
+
+    it('does not pass no_worktree when unchecked', async () => {
+      await openDialog();
+      await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
+      await user.click(screen.getByText('DISPATCH'));
+
+      await waitFor(() => {
+        expect(apiMock.createTask).toHaveBeenCalledWith(
+          expect.not.objectContaining({ no_worktree: true }),
+        );
+      });
+    });
+  });
+
   // ─── Cancel ───────────────────────────────────────────────────────────────
 
   it('closes dialog on cancel without calling API', async () => {

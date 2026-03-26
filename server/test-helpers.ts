@@ -20,6 +20,7 @@ export const DEFAULTS = {
     pr_number: null,
     user_window_index: null,
     initial_prompt: null,
+    no_worktree: 0,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -39,6 +40,7 @@ export const DEFAULTS = {
     pr_number: null,
     user_window_index: null,
     initial_prompt: null,
+    no_worktree: 0,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -101,8 +103,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   } as Task;
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, user_window_index, initial_prompt, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, user_window_index, initial_prompt, no_worktree, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -117,6 +119,7 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.pr_number,
     task.user_window_index,
     task.initial_prompt,
+    task.no_worktree ?? 0,
     task.error,
     task.created_at,
     task.updated_at,
@@ -287,6 +290,7 @@ export const TASKS_TABLE_COLUMNS = [
   'pr_number',
   'user_window_index',
   'initial_prompt',
+  'no_worktree',
   'error',
   'created_at',
   'updated_at',

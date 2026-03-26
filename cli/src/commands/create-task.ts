@@ -13,6 +13,7 @@ export function registerCreateTask(program: Command): void {
     .option('-b, --branch <name>', 'branch name')
     .option('--base-branch <name>', 'base branch name')
     .option('--draft', 'create as draft without starting')
+    .option('--no-worktree', 'run agent in the repo directory without creating a worktree')
     .action(async (opts, cmd) => {
       const globals = cmd.optsWithGlobals();
       const client: OctomuxClient = globals._client;
@@ -25,6 +26,7 @@ export function registerCreateTask(program: Command): void {
         branch: opts.branch,
         base_branch: opts.baseBranch,
         draft: opts.draft,
+        no_worktree: opts.noWorktree,
       });
 
       if (isJsonMode(globals.json)) {
