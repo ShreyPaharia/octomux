@@ -17,6 +17,7 @@ export interface Task {
   pr_number: number | null;
   user_window_index: number | null;
   initial_prompt: string | null;
+  no_worktree: number;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -70,6 +71,7 @@ export interface CreateTaskRequest {
   base_branch?: string;
   initial_prompt?: string;
   draft?: boolean;
+  no_worktree?: boolean;
 }
 
 export interface OrchestratorStatus {
@@ -89,4 +91,5 @@ export interface UpdateTaskRequest {
   branch?: string;
   base_branch?: string;
   initial_prompt?: string;
+  no_worktree?: boolean;
 }
