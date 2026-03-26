@@ -45,6 +45,12 @@ export interface OctomuxClient {
   deleteTask(id: string): Promise<void>;
   addAgent(taskId: string, data?: { prompt?: string }): Promise<Agent>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
+  listSkills(): Promise<{ name: string; description: string }[]>;
+  getSkill(name: string): Promise<{ name: string; content: string }>;
+  createSkill(data: { name: string; content: string }): Promise<{ name: string; content: string }>;
+  deleteSkill(name: string): Promise<void>;
+  recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
+  defaultBranch(repoPath: string): Promise<{ branch: string }>;
 }
 
 async function request<T>(baseUrl: string, path: string, options?: RequestInit): Promise<T> {
@@ -107,6 +113,33 @@ export function createClient(serverUrl: string): OctomuxClient {
         baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/message`,
         { method: 'POST', body: JSON.stringify({ message }) },
+      );
+    },
+    listSkills() {
+      return request<{ name: string; description: string }[]>(baseUrl, '/skills');
+    },
+    getSkill(name) {
+      return request<{ name: string; content: string }>(
+        baseUrl,
+        `/skills/${encodeURIComponent(name)}`,
+      );
+    },
+    createSkill(data) {
+      return request<{ name: string; content: string }>(baseUrl, '/skills', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    deleteSkill(name) {
+      return request<void>(baseUrl, `/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    },
+    recentRepos() {
+      return request<{ repo_path: string; last_used: string }[]>(baseUrl, '/recent-repos');
+    },
+    defaultBranch(repoPath) {
+      return request<{ branch: string }>(
+        baseUrl,
+        `/default-branch?repo_path=${encodeURIComponent(repoPath)}`,
       );
     },
   };
