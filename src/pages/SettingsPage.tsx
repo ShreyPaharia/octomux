@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 import { useSkills } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { OrchestratorPromptData } from '@/lib/api';
+import { showToast } from '@/components/CustomToast';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -64,12 +64,12 @@ function SkillsSection() {
     try {
       const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
       await api.createSkill({ name: newName.trim(), content });
-      toast.success(`Skill "${newName.trim()}" created`);
+      showToast('success', 'SKILL CREATED', `Skill "${newName.trim()}" created`);
       setShowCreate(false);
       setNewName('');
       navigate(`/skills/${encodeURIComponent(newName.trim())}`);
     } catch (err) {
-      toast.error((err as Error).message);
+      showToast('error', 'ERROR', (err as Error).message);
     } finally {
       setCreating(false);
     }
@@ -80,11 +80,11 @@ function SkillsSection() {
     setDeleting(true);
     try {
       await api.deleteSkill(deleteTarget);
-      toast.success(`Skill "${deleteTarget}" deleted`);
+      showToast('success', 'SKILL DELETED', `Skill "${deleteTarget}" deleted`);
       setDeleteTarget(null);
       refresh();
     } catch (err) {
-      toast.error((err as Error).message);
+      showToast('error', 'ERROR', (err as Error).message);
     } finally {
       setDeleting(false);
     }
@@ -246,7 +246,7 @@ function EditorSection() {
       .then((s) => {
         setEditor(s.editor);
       })
-      .catch((err) => toast.error(err.message))
+      .catch((err) => showToast('error', 'ERROR', err.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -255,10 +255,10 @@ function EditorSection() {
     setEditor(value);
     try {
       await api.updateSettings({ editor: value as 'nvim' | 'vscode' | 'cursor' });
-      toast.success(`Editor set to ${value}`);
+      showToast('success', 'EDITOR', `Editor set to ${value}`);
     } catch (err) {
       setEditor(prev);
-      toast.error(err instanceof Error ? err.message : 'Failed to update editor');
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to update editor');
     }
   };
 
@@ -301,7 +301,7 @@ function OrchestratorPromptSection() {
         setContent(result.content);
         savedContentRef.current = result.content;
       })
-      .catch((err) => toast.error(err.message))
+      .catch((err) => showToast('error', 'ERROR', err.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -312,9 +312,9 @@ function OrchestratorPromptSection() {
       await api.updateOrchestratorPrompt(content);
       savedContentRef.current = content;
       setData((prev) => (prev ? { ...prev, content, isCustom: true } : prev));
-      toast.success('Prompt saved. Orchestrator restarted.');
+      showToast('success', 'PROMPT SAVED', 'Orchestrator restarted');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save prompt');
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to save prompt');
     } finally {
       setSaving(false);
     }
@@ -328,9 +328,9 @@ function OrchestratorPromptSection() {
       setData(result);
       setContent(result.content);
       savedContentRef.current = result.content;
-      toast.success('Prompt reset to default. Orchestrator restarted.');
+      showToast('success', 'PROMPT RESET', 'Orchestrator restarted');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to reset prompt');
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to reset prompt');
     }
   }, []);
 
@@ -434,9 +434,13 @@ export default function SettingsPage() {
                 try {
                   await api.orchestratorStop();
                   await api.orchestratorStart();
-                  toast.success('Orchestrator restarted');
+                  showToast('success', 'ORCHESTRATOR', 'Orchestrator restarted');
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : 'Failed to restart');
+                  showToast(
+                    'error',
+                    'ERROR',
+                    err instanceof Error ? err.message : 'Failed to restart',
+                  );
                 }
               }}
               className="bg-[#2f2f2f] px-3 py-1 text-xs text-white hover:bg-[#3f3f3f]"

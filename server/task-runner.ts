@@ -378,9 +378,9 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
     return { editor, windowIndex: null };
   }
 
-  // nvim: existing behavior
+  // nvim: reuse existing tmux window if already created
   if (task.user_window_index !== null && task.user_window_index !== undefined) {
-    return { editor: 'nvim', windowIndex: task.user_window_index };
+    return { editor, windowIndex: task.user_window_index };
   }
 
   const db = getDb();
