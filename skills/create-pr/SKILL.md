@@ -20,6 +20,7 @@ Create a GitHub pull request directly using `gh pr create`. The octomux dashboar
 2. **Gather context for the PR description:**
 
    Use the task's `base_branch` as `<base>`:
+
    ```bash
    git -C <worktree> log <base_branch>..HEAD --oneline
    git -C <worktree> diff <base_branch>...HEAD --stat

@@ -1,36 +1,36 @@
 os:
-  editPreset: "nvim"
+  editPreset: 'nvim'
 git:
   pagers:
     - colorArg: always
       pager: delta --dark --paging=never --line-numbers
 customCommands:
-  - key: "C"
-    context: "files"
+  - key: 'C'
+    context: 'files'
     command: "(echo '---RECENT COMMITS (do NOT repeat these)---' && git log --oneline -5 2>/dev/null && echo '---DIFF---' && git diff --cached) | claude --model sonnet -p 'You are a commit message generator. Guidelines: use conventional commits format type(scope): message. Types: feat, fix, chore, refactor, style, test, docs. Use kebab-case scopes. Max 100 chars for the header line. Use imperative mood. Do NOT include Co-Authored-By lines. The RECENT COMMITS section shows what was already committed — your message MUST be different and describe only what is new in this diff. Cover ALL changes but keep the message short. Output ONLY the commit message, nothing else.' > /tmp/claude-commit-msg && git commit -e -F /tmp/claude-commit-msg"
-    description: "Commit with Claude-generated message"
+    description: 'Commit with Claude-generated message'
     output: terminal
 gui:
-  nerdFontsVersion: "3"
+  nerdFontsVersion: '3'
   sidePanelWidth: 0.25
   enlargedSideViewLocation: top
   theme:
     activeBorderColor:
-      - "#89b4fa"
+      - '#89b4fa'
       - bold
     inactiveBorderColor:
-      - "#a6adc8"
+      - '#a6adc8'
     optionsTextColor:
-      - "#89b4fa"
+      - '#89b4fa'
     selectedLineBgColor:
-      - "#313244"
+      - '#313244'
     cherryPickedCommitBgColor:
-      - "#45475a"
+      - '#45475a'
     cherryPickedCommitFgColor:
-      - "#89b4fa"
+      - '#89b4fa'
     unstagedChangesColor:
-      - "#f38ba8"
+      - '#f38ba8'
     defaultFgColor:
-      - "#cdd6f4"
+      - '#cdd6f4'
     searchingActiveBorderColor:
-      - "#f9e2af"
+      - '#f9e2af'

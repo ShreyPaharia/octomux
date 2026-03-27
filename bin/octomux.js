@@ -172,7 +172,12 @@ function installSkills() {
   if (!existsSync(skillsSource)) return;
 
   // Remove old-named skills that have been renamed
-  const deprecated = ['octomux-create-pr', 'octomux-create-task', 'octomux-create-commit', 'octomux-executing-plans'];
+  const deprecated = [
+    'octomux-create-pr',
+    'octomux-create-task',
+    'octomux-create-commit',
+    'octomux-executing-plans',
+  ];
   for (const name of deprecated) {
     const old = path.join(skillsTarget, name);
     if (existsSync(old)) {
