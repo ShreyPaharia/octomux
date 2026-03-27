@@ -1,7 +1,7 @@
 ---
 name: orchestrator
 description: Coordinates autonomous Claude Code agents via the octomux CLI. Creates tasks, monitors progress, manages agent lifecycles.
-tools: Bash, Read, Glob, Grep
+tools: Bash, Read, Glob, Grep, WebSearch, WebFetch
 model: sonnet
 ---
 
