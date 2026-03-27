@@ -31,6 +31,7 @@ import {
   resetCustomPrompt,
 } from './orchestrator.js';
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
+import { getSettings, updateSettings } from './settings.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
 import type {
@@ -676,6 +677,31 @@ export function setupRoutes(app: Express): void {
     ]);
 
     res.json({ success: true });
+  });
+
+  // ─── Settings ──────────────────────────────────────────────────────────────
+
+  app.get('/api/settings', async (_req: Request, res: Response) => {
+    try {
+      const settings = await getSettings();
+      res.json(settings);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.patch('/api/settings', async (req: Request, res: Response) => {
+    try {
+      const settings = await updateSettings(req.body);
+      res.json(settings);
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.startsWith('Invalid editor')) {
+        res.status(400).json({ error: message });
+      } else {
+        res.status(500).json({ error: message });
+      }
+    }
   });
 
   // ─── Orchestrator ──────────────────────────────────────────────────────────

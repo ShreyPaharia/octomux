@@ -113,6 +113,11 @@ vi.mock('./skills.js', () => ({
   deleteSkill: vi.fn(),
 }));
 
+vi.mock('./settings.js', () => ({
+  getSettings: vi.fn(async () => ({ editor: 'nvim' })),
+  updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({ editor: 'nvim', ...patch })),
+}));
+
 const fs = (await import('fs')).default;
 
 const { createApp } = await import('./app.js');
@@ -130,6 +135,7 @@ const {
 const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
   await import('./orchestrator.js');
 const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
+const { getSettings, updateSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -1295,5 +1301,30 @@ describe('Skills API', () => {
     const res = await request(app).delete('/api/skills/missing');
     expect(res.status).toBe(404);
     expect(res.body.error).toContain('not found');
+  });
+});
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+describe('GET /api/settings', () => {
+  it('returns default settings', async () => {
+    const res = await request(app).get('/api/settings');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ editor: 'nvim' });
+  });
+});
+
+describe('PATCH /api/settings', () => {
+  it('updates editor setting', async () => {
+    vi.mocked(updateSettings).mockResolvedValue({ editor: 'cursor' });
+    const res = await request(app).patch('/api/settings').send({ editor: 'cursor' });
+    expect(res.status).toBe(200);
+    expect(res.body.editor).toBe('cursor');
+  });
+
+  it('rejects invalid editor', async () => {
+    vi.mocked(updateSettings).mockRejectedValue(new Error('Invalid editor: emacs'));
+    const res = await request(app).patch('/api/settings').send({ editor: 'emacs' });
+    expect(res.status).toBe(400);
   });
 });
