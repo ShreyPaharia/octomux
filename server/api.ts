@@ -569,9 +569,9 @@ export function setupRoutes(app: Express): void {
     }
 
     try {
-      const userWindowIndex = await createUserTerminal(task);
+      const result = await createUserTerminal(task);
       broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-      res.json({ user_window_index: userWindowIndex });
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

@@ -15,6 +15,7 @@ import {
   DEFAULTS,
 } from './test-helpers.js';
 import type { Task, Agent } from './types.js';
+import { getSettings } from './settings.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,10 @@ let nextWindowIndex = 0;
 
 vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
+}));
+
+vi.mock('./settings.js', () => ({
+  getSettings: vi.fn().mockResolvedValue({ editor: 'nvim' }),
 }));
 
 vi.mock('child_process', () => ({
@@ -890,9 +895,9 @@ describe('createUserTerminal', () => {
 
   it('creates tmux window and returns window index', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const index = await createUserTerminal(runningTask);
+    const result = await createUserTerminal(runningTask);
 
-    expect(index).toBe(1);
+    expect(result).toEqual({ editor: 'nvim', windowIndex: 1 });
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
     ).toBeDefined();
@@ -919,15 +924,44 @@ describe('createUserTerminal', () => {
 
   it('returns existing index without creating new window when already set', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, user_window_index: 5 });
-    const index = await createUserTerminal({
+    const result = await createUserTerminal({
       ...runningTask,
       user_window_index: 5,
     } as Task);
 
-    expect(index).toBe(5);
+    expect(result).toEqual({ editor: 'nvim', windowIndex: 5 });
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
     ).toBeUndefined();
+  });
+
+  it('opens vscode when editor setting is vscode', async () => {
+    vi.mocked(getSettings).mockResolvedValue({ editor: 'vscode' });
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
+    const result = await createUserTerminal(task);
+    expect(result).toEqual({ editor: 'vscode', windowIndex: null });
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'code', argsInclude: ['/repo/.worktrees/test'] }),
+    ).toBeTruthy();
+  });
+
+  it('opens cursor when editor setting is cursor', async () => {
+    vi.mocked(getSettings).mockResolvedValue({ editor: 'cursor' });
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
+    const result = await createUserTerminal(task);
+    expect(result).toEqual({ editor: 'cursor', windowIndex: null });
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'cursor', argsInclude: ['/repo/.worktrees/test'] }),
+    ).toBeTruthy();
+  });
+
+  it('creates tmux window with nvim when editor setting is nvim', async () => {
+    vi.mocked(getSettings).mockResolvedValue({ editor: 'nvim' });
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const result = await createUserTerminal(runningTask);
+    expect(result).toEqual({ editor: 'nvim', windowIndex: expect.any(Number) });
   });
 });
 
