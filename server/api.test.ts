@@ -55,7 +55,7 @@ vi.mock('./task-runner.js', async () => {
       db.prepare(
         `UPDATE tasks SET user_window_index = 5, updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      return 5;
+      return { editor: 'nvim', windowIndex: 5 };
     }),
     createShellTerminal: vi.fn(async (task: any) => {
       const { getDb } = await import('./db.js');
@@ -915,7 +915,7 @@ describe('POST /api/tasks/:id/user-terminal', () => {
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
 
     expect(res.status).toBe(200);
-    expect(res.body.user_window_index).toBe(5);
+    expect(res.body).toEqual({ editor: 'nvim', windowIndex: 5 });
     expect(createUserTerminal).toHaveBeenCalledOnce();
   });
 

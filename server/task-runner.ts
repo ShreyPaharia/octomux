@@ -6,7 +6,13 @@ import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
+import { getSettings } from './settings.js';
 import type { Task, Agent, UserTerminal } from './types.js';
+
+export interface UserTerminalResult {
+  editor: 'nvim' | 'vscode' | 'cursor';
+  windowIndex: number | null;
+}
 
 const execFile = promisify(execFileCb);
 
@@ -362,15 +368,24 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
   ).run(agent.id);
 }
 
-export async function createUserTerminal(task: Task): Promise<number> {
+export async function createUserTerminal(task: Task): Promise<UserTerminalResult> {
+  const settings = await getSettings();
+  const editor = settings.editor;
+
+  if (editor === 'vscode' || editor === 'cursor') {
+    const cmd = editor === 'vscode' ? 'code' : 'cursor';
+    await execFile(cmd, [task.worktree!]);
+    return { editor, windowIndex: null };
+  }
+
+  // nvim: existing behavior
   if (task.user_window_index !== null && task.user_window_index !== undefined) {
-    return task.user_window_index;
+    return { editor: 'nvim', windowIndex: task.user_window_index };
   }
 
   const db = getDb();
 
   await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
-
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
   await execFile('tmux', [
@@ -385,7 +400,7 @@ export async function createUserTerminal(task: Task): Promise<number> {
     `UPDATE tasks SET user_window_index = ?, updated_at = datetime('now') WHERE id = ?`,
   ).run(windowIndex, task.id);
 
-  return windowIndex;
+  return { editor: 'nvim', windowIndex };
 }
 
 export async function createShellTerminal(task: Task): Promise<UserTerminal> {
