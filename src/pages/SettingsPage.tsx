@@ -267,7 +267,10 @@ function EditorSection() {
   return (
     <section className="mb-8">
       <SectionHeader label="EDITOR" />
-      <SettingRow label="Editor" description="Editor to open when clicking the Editor button on tasks">
+      <SettingRow
+        label="Editor"
+        description="Editor to open when clicking the Editor button on tasks"
+      >
         <select
           value={editor}
           onChange={(e) => handleChange(e.target.value)}
