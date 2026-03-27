@@ -1,5 +1,5 @@
 ---
-name: octomux-create-pr
+name: create-pr
 description: Use when creating a pull request, opening a PR, or pushing and creating a PR for an octomux task
 ---
 

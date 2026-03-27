@@ -1,5 +1,5 @@
 ---
-name: octomux-create-task
+name: create-task
 description: Use when creating an octomux task to dispatch autonomous Claude Code agents for building features, fixing bugs, or any code changes
 ---
 
@@ -116,4 +116,4 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
 - Keep titles short (under 60 chars) and descriptive
 - Initial prompts should be specific and actionable
 - Monitor tasks via `octomux list-tasks` or the dashboard
-- To create PRs for completed tasks, use the `octomux-create-pr` skill
+- To create PRs for completed tasks, use the `create-pr` skill
