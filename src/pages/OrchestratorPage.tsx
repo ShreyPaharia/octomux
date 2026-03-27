@@ -2,14 +2,13 @@ import { lazy, Suspense, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
 import { OrchestratorCommandBar } from '@/components/OrchestratorCommandBar';
-import { EmptyState } from '@/components/EmptyState';
 
 const TerminalView = lazy(() =>
   import('@/components/TerminalView').then((m) => ({ default: m.TerminalView })),
 );
 
 export default function OrchestratorPage() {
-  const { running, loading, start, stop } = useOrchestratorContext();
+  const { running, loading, restart } = useOrchestratorContext();
   const [showHelp, setShowHelp] = useState(false);
 
   return (
@@ -54,10 +53,10 @@ export default function OrchestratorPage() {
           <Button
             variant="ghost"
             size="sm"
-            className="text-destructive uppercase text-xs tracking-wider font-bold"
-            onClick={stop}
+            className="uppercase text-xs tracking-wider font-bold text-[#8a8a8a]"
+            onClick={restart}
           >
-            STOP
+            RESTART
           </Button>
         )}
       </div>
@@ -67,28 +66,9 @@ export default function OrchestratorPage() {
         {loading ? (
           <div className="flex h-full items-center justify-center text-[#6a6a6a]">Loading...</div>
         ) : !running ? (
-          <EmptyState
-            icon={
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="48"
-                height="48"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="4 17 10 11 4 5" />
-                <line x1="12" x2="20" y1="19" y2="19" />
-              </svg>
-            }
-            heading="ORCHESTRATOR STOPPED"
-            subtext="Start the orchestrator to manage tasks autonomously"
-            action={<Button onClick={start}>START ORCHESTRATOR</Button>}
-            className="h-full"
-          />
+          <div className="flex h-full items-center justify-center text-[#6a6a6a]">
+            Starting orchestrator...
+          </div>
         ) : (
           <Suspense
             fallback={
