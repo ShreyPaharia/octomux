@@ -11,7 +11,18 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
 
 1. **Understand the goal:**
    - Ask the user what they want built/fixed, or infer from context (e.g. a Jira ticket URL, a bug description, a feature request)
-   - If given a Jira ticket URL, fetch the ticket details to extract title, description, and acceptance criteria
+   - If given a Jira ticket URL or key (e.g. IN-843), fetch the ticket details:
+
+   **Fetching Jira ticket details:**
+   1. Extract the ticket key from the URL (e.g., IN-843 from `https://ostium.atlassian.net/browse/IN-843`)
+   2. Use Atlassian MCP tools:
+      - `getAccessibleAtlassianResources()` to get `cloudId`
+      - `getJiraIssue(cloudId, issueKey, fields=["summary","description","priority","labels","status"])` to get ticket details
+   3. Map fields to the prompt template:
+      - `summary` -> title + What section
+      - `description` -> Context section (extract acceptance criteria if embedded)
+      - `priority` / `labels` -> inform urgency in Why section
+   4. If the description contains acceptance criteria (bullet lists, checkboxes), extract them verbatim for the Acceptance Criteria section
 
 2. **Resolve the repo:**
    - Query recent repos via CLI:
@@ -70,6 +81,15 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    - Standard instructions: `Run tests before finishing. Follow conventional commits. Keep changes minimal and focused.`
 
    The prompt should be specific and actionable — vague prompts lead to agents going in circles.
+
+   **Always append this to the end of the prompt:**
+   ```
+   When finished, output a structured summary:
+   ## Done
+   - **Changes:** <file count> files changed
+   - **Tests:** <pass/fail summary>
+   - **Commits:** <commit messages>
+   ```
 
 6. **Create the task:**
 
