@@ -44,7 +44,17 @@ export function useOrchestrator() {
     }
   }, []);
 
-  return { running, loading, error, start, stop, refresh };
+  const restart = useCallback(async () => {
+    try {
+      await api.orchestratorStop();
+      await api.orchestratorStart();
+      setRunning(true);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
+  return { running, loading, error, start, stop, restart, refresh };
 }
 
 export function useTasks() {
