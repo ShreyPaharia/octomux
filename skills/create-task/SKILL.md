@@ -83,6 +83,7 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    The prompt should be specific and actionable — vague prompts lead to agents going in circles.
 
    **Always append this to the end of the prompt:**
+
    ```
    When finished, output a structured summary:
    ## Done
