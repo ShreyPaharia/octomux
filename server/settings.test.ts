@@ -69,9 +69,7 @@ describe('settings', () => {
     });
 
     it('rejects invalid editor values', async () => {
-      await expect(updateSettings({ editor: 'emacs' as any })).rejects.toThrow(
-        'Invalid editor',
-      );
+      await expect(updateSettings({ editor: 'emacs' as any })).rejects.toThrow('Invalid editor');
     });
   });
 });
