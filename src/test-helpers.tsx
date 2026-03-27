@@ -85,7 +85,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       created_at: '',
     }),
     stopAgent: vi.fn().mockResolvedValue(undefined),
-    createUserTerminal: vi.fn().mockResolvedValue({ user_window_index: 5 }),
+    createUserTerminal: vi.fn().mockResolvedValue({ editor: 'nvim', windowIndex: 5 }),
     createTerminal: vi.fn().mockResolvedValue({
       id: 'term-1',
       task_id: 'test-task-01',

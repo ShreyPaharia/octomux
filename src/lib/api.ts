@@ -102,7 +102,9 @@ export const api = {
   stopAgent: (taskId: string, agentId: string) =>
     request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
   createUserTerminal: (taskId: string) =>
-    request<{ user_window_index: number }>(`/tasks/${taskId}/user-terminal`, { method: 'POST' }),
+    request<{ editor: string; windowIndex: number | null }>(`/tasks/${taskId}/user-terminal`, {
+      method: 'POST',
+    }),
   createTerminal: (taskId: string) =>
     request<UserTerminal>(`/tasks/${taskId}/terminals`, {
       method: 'POST',
