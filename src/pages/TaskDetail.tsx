@@ -38,6 +38,7 @@ export default function TaskDetail() {
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
+  const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const [searchParams] = useSearchParams();
   const agentParam = searchParams.get('agent');
 
@@ -99,8 +100,8 @@ export default function TaskDetail() {
   useEffect(() => {
     if (task && task.status !== 'running') {
       setMode('agents');
-      // Reset local override so the editor terminal is re-created on next toggle
       setLocalUserWindowIndex(null);
+      setExternalEditorOpen(false);
     }
   }, [task?.status]);
 
@@ -207,16 +208,19 @@ export default function TaskDetail() {
   const handleToggleEditor = useCallback(async () => {
     if (mode === 'editor') {
       setMode('agents');
+      setExternalEditorOpen(false);
       return;
     }
-    if (userWindowIndex === null) {
-      if (creatingEditor) return; // Prevent duplicate requests
+    if (userWindowIndex === null && !externalEditorOpen) {
+      if (creatingEditor) return;
       setCreatingEditor(true);
       try {
         const result = await api.createUserTerminal(taskId);
-        // Set the window index immediately from the API response so the
-        // editor terminal can mount without waiting for the next poll cycle.
-        setLocalUserWindowIndex(result.user_window_index);
+        if (result.editor === 'vscode' || result.editor === 'cursor') {
+          setExternalEditorOpen(true);
+        } else {
+          setLocalUserWindowIndex(result.windowIndex);
+        }
         refresh();
       } catch (err) {
         console.error('Failed to create user terminal:', err);
@@ -226,7 +230,7 @@ export default function TaskDetail() {
       }
     }
     setMode('editor');
-  }, [mode, userWindowIndex, taskId, creatingEditor, refresh]);
+  }, [mode, userWindowIndex, externalEditorOpen, taskId, creatingEditor, refresh]);
 
   if (loading) {
     return (
@@ -443,14 +447,42 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Editor view — fully unmounted when not active so the terminal
-          mounts fresh each time with correct dimensions. Nvim redraws its
-          own screen, so there's no lost scrollback to worry about. */}
-      {userWindowIndex !== null && mode === 'editor' && (
+      {/* Editor view */}
+      {mode === 'editor' && (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-hidden p-1">
-            <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
-          </div>
+          {externalEditorOpen ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-muted-foreground/50"
+              >
+                <path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
+                <path d="m21 3-9 9" />
+                <path d="M15 3h6v6" />
+              </svg>
+              <span className="text-sm">Opened in external editor</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#2f2f2f] text-[#8a8a8a]"
+                onClick={handleToggleEditor}
+              >
+                Back to Agents
+              </Button>
+            </div>
+          ) : userWindowIndex !== null ? (
+            <div className="min-h-0 flex-1 overflow-hidden p-1">
+              <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
+            </div>
+          ) : null}
         </div>
       )}
     </div>
