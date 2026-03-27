@@ -135,7 +135,7 @@ const {
 const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
   await import('./orchestrator.js');
 const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
-const { getSettings, updateSettings } = await import('./settings.js');
+const { updateSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
