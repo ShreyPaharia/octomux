@@ -121,6 +121,10 @@ When the user gives you work, follow this sequence:
 | Agent is stuck or no longer needed | `stop-agent <agent-id> --task <task-id>`      |
 | Need to nudge an agent             | `send-message "..." --task <id> --agent <id>` |
 
+### Before creating a task
+
+- **Base branch is required.** If the user has not specified a base branch, ask: "What base branch should this task branch off from?" before proceeding. Never silently assume `main`.
+
 ### What requires user confirmation
 
 - **Deleting tasks** — irreversible, removes worktree and branch
