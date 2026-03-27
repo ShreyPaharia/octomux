@@ -236,6 +236,52 @@ function SkillsSection() {
   );
 }
 
+function EditorSection() {
+  const [editor, setEditor] = useState<string>('nvim');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => {
+        setEditor(s.editor);
+      })
+      .catch((err) => toast.error(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleChange = async (value: string) => {
+    const prev = editor;
+    setEditor(value);
+    try {
+      await api.updateSettings({ editor: value as 'nvim' | 'vscode' | 'cursor' });
+      toast.success(`Editor set to ${value}`);
+    } catch (err) {
+      setEditor(prev);
+      toast.error(err instanceof Error ? err.message : 'Failed to update editor');
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <section className="mb-8">
+      <SectionHeader label="EDITOR" />
+      <SettingRow label="Editor" description="Editor to open when clicking the Editor button on tasks">
+        <select
+          value={editor}
+          onChange={(e) => handleChange(e.target.value)}
+          className="bg-[#141414] border border-[#2f2f2f] px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
+        >
+          <option value="nvim">Neovim</option>
+          <option value="vscode">VS Code</option>
+          <option value="cursor">Cursor</option>
+        </select>
+      </SettingRow>
+    </section>
+  );
+}
+
 function OrchestratorPromptSection() {
   const [data, setData] = useState<OrchestratorPromptData | null>(null);
   const [content, setContent] = useState('');
@@ -371,24 +417,10 @@ export default function SettingsPage() {
           </SettingRow>
         </section>
 
-        <section className="mb-8">
-          <SectionHeader label="TASK DEFAULTS" />
-          <SettingRow
-            label="Default base branch"
-            description="Branch used as default when creating tasks"
-          >
-            <span className="text-xs text-[#8a8a8a]">main</span>
-          </SettingRow>
-        </section>
+        <EditorSection />
 
         <section className="mb-8">
           <SectionHeader label="ORCHESTRATOR" />
-          <SettingRow
-            label="Auto-start orchestrator"
-            description="Start orchestrator when dashboard loads"
-          >
-            <ToggleSwitch checked={false} onChange={() => {}} />
-          </SettingRow>
           <OrchestratorPromptSection />
           <SettingRow
             label="Restart Orchestrator"
