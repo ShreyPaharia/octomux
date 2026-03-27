@@ -77,6 +77,10 @@ export interface OrchestratorPromptData {
   isCustom: boolean;
 }
 
+export interface OctomuxSettings {
+  editor: 'nvim' | 'vscode' | 'cursor';
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -106,6 +110,10 @@ export const api = {
     }),
   closeTerminal: (taskId: string, terminalId: string) =>
     request<void>(`/tasks/${taskId}/terminals/${terminalId}`, { method: 'DELETE' }),
+
+  getSettings: () => request<OctomuxSettings>('/settings'),
+  updateSettings: (data: Partial<OctomuxSettings>) =>
+    request<OctomuxSettings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
 
   orchestratorStatus: () => request<OrchestratorStatus>('/orchestrator/status'),
   orchestratorStart: () => request<OrchestratorStatus>('/orchestrator/start', { method: 'POST' }),
