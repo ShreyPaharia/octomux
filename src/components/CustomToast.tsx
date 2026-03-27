@@ -1,5 +1,4 @@
 import { toast as sonnerToast } from 'sonner';
-import { X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -109,7 +108,19 @@ export function CustomToast({ id, type, title, description, action }: CustomToas
           justifyContent: 'center',
         }}
       >
-        <X size={12} color="#6a6a6a" />
+        <svg
+          width={12}
+          height={12}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#6a6a6a"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
       </button>
     </div>
   );
