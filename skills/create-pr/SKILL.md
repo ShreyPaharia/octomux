@@ -1,5 +1,5 @@
 ---
-name: octomux-create-pr
+name: create-pr
 description: Use when creating a pull request, opening a PR, or pushing and creating a PR for an octomux task
 ---
 
@@ -15,13 +15,14 @@ Create a GitHub pull request directly using `gh pr create`. The octomux dashboar
      ```bash
      octomux get-task <task-id>
      ```
-   - You need `branch`, `repo_path`, and `base_branch` (if set). If no base_branch, default to `main`.
+   - You need `branch`, `repo_path`, and `base_branch`. The task's `base_branch` is the PR base branch. If not set, default to `main`.
 
 2. **Gather context for the PR description:**
 
+   Use the task's `base_branch` as `<base>`:
    ```bash
-   git -C <worktree> log <base>..HEAD --oneline
-   git -C <worktree> diff <base>...HEAD --stat
+   git -C <worktree> log <base_branch>..HEAD --oneline
+   git -C <worktree> diff <base_branch>...HEAD --stat
    ```
 
 3. **Check if branch is pushed and push if needed:**
@@ -86,7 +87,7 @@ Create a GitHub pull request directly using `gh pr create`. The octomux dashboar
    ```bash
    gh pr create \
      --head <branch> \
-     --base <base> \
+     --base <base_branch> \
      --title "<title>" \
      --body "<body>" \
      --repo <repo_path>

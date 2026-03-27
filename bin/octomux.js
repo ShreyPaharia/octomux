@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, exec as execCb } from 'child_process';
-import { readFileSync, existsSync, mkdirSync, readdirSync, cpSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, cpSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
@@ -152,6 +152,15 @@ function installSkills() {
   const skillsTarget = path.join(os.homedir(), '.claude', 'skills');
 
   if (!existsSync(skillsSource)) return;
+
+  // Remove old-named skills that have been renamed
+  const deprecated = ['octomux-create-pr', 'octomux-create-task', 'octomux-create-commit', 'octomux-executing-plans'];
+  for (const name of deprecated) {
+    const old = path.join(skillsTarget, name);
+    if (existsSync(old)) {
+      rmSync(old, { recursive: true });
+    }
+  }
 
   let installed = false;
   for (const skill of readdirSync(skillsSource)) {
