@@ -43,8 +43,9 @@ async function runStart(startArgs) {
   // Welcome banner
   console.log(`\n\uD83D\uDC19 octomux v${version}\n`);
 
-  // Install bundled skills
+  // Install bundled skills and configs
   installSkills();
+  installLazygitConfig();
 
   // Ensure cli/ dependencies are installed
   ensureCliDeps();
@@ -146,6 +147,23 @@ function fixNodePtyPermissions() {
 }
 
 // ─── skill installer ─────────────────────────────────────────────────────────
+
+function installLazygitConfig() {
+  const source = path.join(__dirname, '..', '.config', 'lazygit', 'config.yml');
+  if (!existsSync(source)) return;
+
+  const configDir =
+    process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support', 'lazygit')
+      : path.join(os.homedir(), '.config', 'lazygit');
+  const target = path.join(configDir, 'config.yml');
+
+  if (existsSync(target)) return;
+
+  mkdirSync(configDir, { recursive: true });
+  cpSync(source, target);
+  console.log('Installed lazygit config');
+}
 
 function installSkills() {
   const skillsSource = path.join(__dirname, '..', 'skills');
