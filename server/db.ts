@@ -76,6 +76,16 @@ CREATE TABLE IF NOT EXISTS user_terminals (
 CREATE INDEX IF NOT EXISTS idx_user_terminals_task ON user_terminals(task_id);
 CREATE INDEX IF NOT EXISTS idx_agents_claude_session_id ON agents(claude_session_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status_created ON permission_prompts(agent_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS repo_configs (
+    repo_path       TEXT PRIMARY KEY,
+    base_branch     TEXT,
+    test_command    TEXT NOT NULL DEFAULT 'bun run test',
+    format_command  TEXT NOT NULL DEFAULT 'bun run format',
+    lint_command    TEXT NOT NULL DEFAULT 'bun run lint:fix',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 let db: Database.Database;
