@@ -15,6 +15,7 @@ import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
 import { resumeTask, cleanupOrphanedViewerSessions } from './task-runner.js';
 import { getDb } from './db.js';
+import { startOrchestrator } from './orchestrator.js';
 import type { Task } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,6 +64,11 @@ async function recoverTasks(): Promise<void> {
 
 await recoverTasks();
 await cleanupOrphanedViewerSessions();
+
+// Auto-start orchestrator
+startOrchestrator().catch((err) => {
+  console.error('[startup] Failed to auto-start orchestrator:', err);
+});
 
 // Background status + PR polling
 startPolling();
