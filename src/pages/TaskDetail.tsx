@@ -38,7 +38,6 @@ export default function TaskDetail() {
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
-  const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const [searchParams] = useSearchParams();
   const agentParam = searchParams.get('agent');
 
@@ -101,7 +100,6 @@ export default function TaskDetail() {
     if (task && task.status !== 'running') {
       setMode('agents');
       setLocalUserWindowIndex(null);
-      setExternalEditorOpen(false);
     }
   }, [task?.status]);
 
@@ -208,7 +206,6 @@ export default function TaskDetail() {
   const handleToggleEditor = useCallback(async () => {
     if (mode === 'editor') {
       setMode('agents');
-      setExternalEditorOpen(false);
       return;
     }
     if (creatingEditor) return;
@@ -216,20 +213,18 @@ export default function TaskDetail() {
     try {
       const result = await api.createUserTerminal(taskId);
       if (result.editor === 'vscode' || result.editor === 'cursor') {
-        setExternalEditorOpen(true);
+        // External editor opened — stay on agents view
         setLocalUserWindowIndex(null);
       } else {
-        setExternalEditorOpen(false);
         setLocalUserWindowIndex(result.windowIndex);
+        setMode('editor');
       }
       refresh();
     } catch (err) {
       console.error('Failed to create user terminal:', err);
-      return;
     } finally {
       setCreatingEditor(false);
     }
-    setMode('editor');
   }, [mode, taskId, creatingEditor, refresh]);
 
   if (loading) {
@@ -447,42 +442,12 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Editor view */}
-      {mode === 'editor' && (
+      {/* Editor view — only shown for nvim (external editors stay on agents view) */}
+      {userWindowIndex !== null && mode === 'editor' && (
         <div className="flex min-h-0 flex-1 flex-col">
-          {externalEditorOpen ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-muted-foreground/50"
-              >
-                <path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
-                <path d="m21 3-9 9" />
-                <path d="M15 3h6v6" />
-              </svg>
-              <span className="text-sm">Opened in external editor</span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-[#2f2f2f] text-[#8a8a8a]"
-                onClick={handleToggleEditor}
-              >
-                Back to Agents
-              </Button>
-            </div>
-          ) : userWindowIndex !== null ? (
-            <div className="min-h-0 flex-1 overflow-hidden p-1">
-              <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
-            </div>
-          ) : null}
+          <div className="min-h-0 flex-1 overflow-hidden p-1">
+            <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
+          </div>
         </div>
       )}
     </div>
