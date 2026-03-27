@@ -34,7 +34,9 @@ jobs:
 
       - run: bun run build
 
-      - run: npm publish --provenance --access public
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
       - uses: softprops/action-gh-release@v2
         with:
