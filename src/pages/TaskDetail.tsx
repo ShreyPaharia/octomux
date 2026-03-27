@@ -211,26 +211,26 @@ export default function TaskDetail() {
       setExternalEditorOpen(false);
       return;
     }
-    if (userWindowIndex === null && !externalEditorOpen) {
-      if (creatingEditor) return;
-      setCreatingEditor(true);
-      try {
-        const result = await api.createUserTerminal(taskId);
-        if (result.editor === 'vscode' || result.editor === 'cursor') {
-          setExternalEditorOpen(true);
-        } else {
-          setLocalUserWindowIndex(result.windowIndex);
-        }
-        refresh();
-      } catch (err) {
-        console.error('Failed to create user terminal:', err);
-        return;
-      } finally {
-        setCreatingEditor(false);
+    if (creatingEditor) return;
+    setCreatingEditor(true);
+    try {
+      const result = await api.createUserTerminal(taskId);
+      if (result.editor === 'vscode' || result.editor === 'cursor') {
+        setExternalEditorOpen(true);
+        setLocalUserWindowIndex(null);
+      } else {
+        setExternalEditorOpen(false);
+        setLocalUserWindowIndex(result.windowIndex);
       }
+      refresh();
+    } catch (err) {
+      console.error('Failed to create user terminal:', err);
+      return;
+    } finally {
+      setCreatingEditor(false);
     }
     setMode('editor');
-  }, [mode, userWindowIndex, externalEditorOpen, taskId, creatingEditor, refresh]);
+  }, [mode, taskId, creatingEditor, refresh]);
 
   if (loading) {
     return (

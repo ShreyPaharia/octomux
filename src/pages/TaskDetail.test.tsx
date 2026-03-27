@@ -433,8 +433,8 @@ describe('TaskDetail', () => {
         expect(editorTerminals).toHaveLength(1);
       });
 
-      // Should NOT call createUserTerminal again — window index already known
-      expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(1);
+      // Always calls API to check current editor setting
+      expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(2);
     });
 
     it('agent terminal stays mounted while editor is open', async () => {
