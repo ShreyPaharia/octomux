@@ -1,51 +1,35 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import os from 'os';
+import { getAgent, saveAgent, resetAgent } from './agents.js';
 
 const execFile = promisify(execFileCb);
 
 const ORCHESTRATOR_SESSION = 'octomux-orchestrator';
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_AGENT_FILE = path.resolve(__dirname, '..', '.claude', 'agents', 'orchestrator.md');
-
-function customPromptPath(): string {
-  return path.join(os.homedir(), '.octomux', 'orchestrator-prompt.md');
-}
 
 export async function getCustomPrompt(): Promise<string | null> {
-  try {
-    return await fs.promises.readFile(customPromptPath(), 'utf-8');
-  } catch (err: any) {
-    if (err.code === 'ENOENT') return null;
-    throw err;
-  }
+  const agent = await getAgent('orchestrator');
+  return agent.isCustom ? agent.content : null;
 }
 
 export async function getDefaultPrompt(): Promise<string> {
-  return fs.promises.readFile(DEFAULT_AGENT_FILE, 'utf-8');
+  const agent = await getAgent('orchestrator');
+  return agent.defaultContent;
 }
 
 export async function getOrchestratorPrompt(): Promise<string> {
-  const custom = await getCustomPrompt();
-  return custom ?? (await getDefaultPrompt());
+  const agent = await getAgent('orchestrator');
+  return agent.content;
 }
 
 export async function saveCustomPrompt(content: string): Promise<void> {
-  const filePath = customPromptPath();
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, content, 'utf-8');
+  await saveAgent('orchestrator', content);
 }
 
 export async function resetCustomPrompt(): Promise<void> {
-  try {
-    await fs.promises.unlink(customPromptPath());
-  } catch (err: any) {
-    if (err.code === 'ENOENT') return;
-    throw err;
-  }
+  await resetAgent('orchestrator');
 }
 
 export async function isOrchestratorRunning(): Promise<boolean> {

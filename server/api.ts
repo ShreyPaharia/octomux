@@ -3,6 +3,8 @@ import { nanoid } from 'nanoid';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { getDb } from './db.js';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
@@ -31,6 +33,14 @@ import {
   resetCustomPrompt,
 } from './orchestrator.js';
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
+import {
+  listAgents,
+  getAgent,
+  saveAgent,
+  resetAgent,
+  createAgent,
+  deleteAgent,
+} from './agents.js';
 import { getSettings, updateSettings } from './settings.js';
 import {
   getOrCreateRepoConfig,
@@ -849,6 +859,82 @@ export function setupRoutes(app: Express): void {
       res.json({ ok: true, isCustom: false });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─── Agents ──────────────────────────────────────────────────────────────────
+
+  app.get('/api/agents', async (_req: Request, res: Response) => {
+    try {
+      const agents = await listAgents();
+      res.json(agents);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/agents/:name', async (req: Request, res: Response) => {
+    try {
+      const agent = await getAgent(req.params.name as string);
+      res.json(agent);
+    } catch (err) {
+      const status = (err as Error).message.includes('not found') ? 404 : 500;
+      res.status(status).json({ error: (err as Error).message });
+    }
+  });
+
+  app.put('/api/agents/:name', async (req: Request, res: Response) => {
+    const { content } = req.body as { content?: string };
+    if (content === undefined || content === null) {
+      res.status(400).json({ error: 'content is required' });
+      return;
+    }
+    try {
+      await saveAgent(req.params.name as string, content);
+      const agent = await getAgent(req.params.name as string);
+      if (req.params.name === 'orchestrator' && (await isOrchestratorRunning())) {
+        await stopOrchestrator();
+        await startOrchestrator();
+      }
+      res.json(agent);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete('/api/agents/:name', async (req: Request, res: Response) => {
+    try {
+      const name = req.params.name as string;
+      const builtInPath = path.join(__dirname, '..', '.claude', 'agents', `${name}.md`);
+      if (fs.existsSync(builtInPath)) {
+        await resetAgent(name);
+      } else {
+        await deleteAgent(name);
+      }
+      if (name === 'orchestrator' && (await isOrchestratorRunning())) {
+        await stopOrchestrator();
+        await startOrchestrator();
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      const status = (err as Error).message.includes('not found') ? 404 : 500;
+      res.status(status).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/agents', async (req: Request, res: Response) => {
+    const { name, content } = req.body as { name?: string; content?: string };
+    if (!name || !content) {
+      res.status(400).json({ error: 'name and content are required' });
+      return;
+    }
+    try {
+      await createAgent(name, content);
+      const agent = await getAgent(name);
+      res.status(201).json(agent);
+    } catch (err) {
+      const status = (err as Error).message.includes('already exists') ? 409 : 500;
+      res.status(status).json({ error: (err as Error).message });
     }
   });
 
