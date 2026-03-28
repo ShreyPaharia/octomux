@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
-import type { OrchestratorPromptData } from '@/lib/api';
+import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -358,7 +358,7 @@ function RepoConfigsSection() {
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  const startEdit = (config: any) => {
+  const startEdit = (config: RepoConfig) => {
     setEditingPath(config.repo_path);
     setEditForm({
       base_branch: config.base_branch ?? '',

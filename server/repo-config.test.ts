@@ -25,12 +25,12 @@ describe('repo-config', () => {
 
   describe('getOrCreateRepoConfig', () => {
     it('auto-detects default branch and creates config on first call', async () => {
-      mockExecFile.mockImplementation((...args: any[]) => {
+      mockExecFile.mockImplementation(((...args: any[]) => {
         const cb = args[args.length - 1];
         if (typeof cb === 'function') {
           cb(null, { stdout: 'refs/remotes/origin/main\n', stderr: '' });
         }
-      });
+      }) as any);
 
       const config = await getOrCreateRepoConfig('/tmp/test-repo');
 
@@ -53,12 +53,12 @@ describe('repo-config', () => {
     });
 
     it('falls back to null when git detection fails', async () => {
-      mockExecFile.mockImplementation((...args: any[]) => {
+      mockExecFile.mockImplementation(((...args: any[]) => {
         const cb = args[args.length - 1];
         if (typeof cb === 'function') {
           cb(new Error('not a git repo'), { stdout: '', stderr: '' });
         }
-      });
+      }) as any);
 
       const config = await getOrCreateRepoConfig('/tmp/no-git');
 
