@@ -18,6 +18,18 @@ export function registerCreateTask(program: Command): void {
       const globals = cmd.optsWithGlobals();
       const client: OctomuxClient = globals._client;
 
+      // Auto-fill base branch from repo config if not specified
+      if (!opts.baseBranch) {
+        try {
+          const config = await client.getRepoConfig(opts.repoPath);
+          if (config.base_branch) {
+            opts.baseBranch = config.base_branch;
+          }
+        } catch {
+          // Non-critical: server may not be running or repo not configured
+        }
+      }
+
       const task = await client.createTask({
         title: opts.title,
         description: opts.description,

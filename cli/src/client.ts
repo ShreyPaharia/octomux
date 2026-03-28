@@ -53,6 +53,13 @@ export interface OctomuxClient {
   deleteSkill(name: string): Promise<void>;
   recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
   defaultBranch(repoPath: string): Promise<{ branch: string }>;
+  getRepoConfig(repoPath: string): Promise<{
+    repo_path: string;
+    base_branch: string | null;
+    test_command: string;
+    format_command: string;
+    lint_command: string;
+  }>;
 }
 
 async function request<T>(baseUrl: string, path: string, options?: RequestInit): Promise<T> {
@@ -150,6 +157,9 @@ export function createClient(serverUrl: string): OctomuxClient {
         baseUrl,
         `/default-branch?repo_path=${encodeURIComponent(repoPath)}`,
       );
+    },
+    getRepoConfig(repoPath) {
+      return request(baseUrl, `/repo-config?repo_path=${encodeURIComponent(repoPath)}`);
     },
   };
 }

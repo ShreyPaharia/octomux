@@ -138,6 +138,36 @@ When the user gives you work, follow this sequence:
 - Listing tasks
 - Adding agents to running tasks when the user asks for parallel work
 
+## Planning
+
+For non-trivial tasks, spawn a planner subagent before creating the task. The planner
+reads the codebase and produces a structured implementation plan that becomes the
+agent's initial prompt.
+
+### When to plan first
+- Jira tickets with multiple acceptance criteria
+- Changes likely spanning 3+ files
+- Unfamiliar repos or areas of the codebase
+- Any request where you'd need to explore the code to write a good prompt
+
+### When to skip planning
+- Single-file fixes with clear instructions from the user
+- PR reviews (the reviewer agent handles its own scoping)
+- Tasks where the user already provided a detailed initial prompt
+
+### How to plan
+
+1. Spawn a planner subagent:
+   ```
+   Agent(subagent_type="planner", prompt="Plan implementation for: <description>.
+   Target repo: <repo_path>. Read CLAUDE.md and explore the codebase.")
+   ```
+2. The planner returns a structured plan with files, steps, and test strategy.
+3. Use the plan output as the `--initial-prompt` for `create-task`.
+
+The planner's output is designed to be used directly as an initial prompt —
+don't rewrite it, just pass it through.
+
 ## Writing Effective Prompts
 
 The `--initial-prompt` is sent to the first Claude agent after it starts. Good prompts are:
@@ -146,6 +176,10 @@ The `--initial-prompt` is sent to the first Claude agent after it starts. Good p
 - **Self-contained** — include all context the agent needs; don't assume it knows the task title
 - **Action-oriented** — tell the agent what to do, not just what's wrong
 - **Scoped** — one clear objective per task; split large work into multiple tasks
+
+For complex tasks, use the planner subagent instead of writing prompts manually.
+The planner explores the codebase and produces prompts that reference specific
+files, functions, and line ranges — more precise than manual prompt writing.
 
 ## Task Lifecycle
 
