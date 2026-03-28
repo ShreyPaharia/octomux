@@ -32,6 +32,11 @@ import {
 } from './orchestrator.js';
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import { getSettings, updateSettings } from './settings.js';
+import {
+  getOrCreateRepoConfig,
+  updateRepoConfig,
+  listRepoConfigs,
+} from './repo-config.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
 import type {
@@ -701,6 +706,45 @@ export function setupRoutes(app: Express): void {
       } else {
         res.status(500).json({ error: message });
       }
+    }
+  });
+
+  // ─── Repo Config ────────────────────────────────────────────────────────────
+
+  app.get('/api/repo-configs', async (_req: Request, res: Response) => {
+    try {
+      const configs = listRepoConfigs();
+      res.json(configs);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/repo-config', async (req: Request, res: Response) => {
+    const repoPath = req.query.repo_path as string;
+    if (!repoPath) {
+      res.status(400).json({ error: 'repo_path query parameter is required' });
+      return;
+    }
+    try {
+      const config = await getOrCreateRepoConfig(repoPath);
+      res.json(config);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.patch('/api/repo-config', async (req: Request, res: Response) => {
+    const { repo_path, ...updates } = req.body as Record<string, unknown>;
+    if (!repo_path || typeof repo_path !== 'string') {
+      res.status(400).json({ error: 'repo_path is required' });
+      return;
+    }
+    try {
+      const config = updateRepoConfig(repo_path, updates);
+      res.json(config);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
     }
   });
 
