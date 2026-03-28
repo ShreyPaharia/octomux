@@ -18,6 +18,12 @@ vi.mock('fs', () => {
 
 vi.mock('os');
 
+vi.mock('./agents.js', () => ({
+  getAgent: vi.fn(),
+  saveAgent: vi.fn(),
+  resetAgent: vi.fn(),
+}));
+
 const {
   isOrchestratorRunning,
   startOrchestrator,
@@ -33,6 +39,7 @@ const {
 const { execFile } = await import('child_process');
 const fs = await import('fs');
 const os = await import('os');
+const agents = await import('./agents.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -73,60 +80,67 @@ describe('isOrchestratorRunning', () => {
 });
 
 describe('getCustomPrompt', () => {
-  it('returns file content when custom prompt exists', async () => {
-    vi.mocked(fs.default.promises.readFile).mockResolvedValue('custom prompt content');
+  it('returns content when agent is custom', async () => {
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'custom prompt content',
+      defaultContent: 'default content',
+      isCustom: true,
+    });
     const result = await getCustomPrompt();
     expect(result).toBe('custom prompt content');
-    expect(fs.default.promises.readFile).toHaveBeenCalledWith(
-      '/mock-home/.octomux/orchestrator-prompt.md',
-      'utf-8',
-    );
+    expect(agents.getAgent).toHaveBeenCalledWith('orchestrator');
   });
 
-  it('returns null when file does not exist', async () => {
-    const err = new Error('ENOENT') as any;
-    err.code = 'ENOENT';
-    vi.mocked(fs.default.promises.readFile).mockRejectedValue(err);
+  it('returns null when agent is not custom', async () => {
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'default content',
+      defaultContent: 'default content',
+      isCustom: false,
+    });
     const result = await getCustomPrompt();
     expect(result).toBeNull();
   });
 
-  it('throws on non-ENOENT errors', async () => {
-    const err = new Error('EACCES') as any;
-    err.code = 'EACCES';
-    vi.mocked(fs.default.promises.readFile).mockRejectedValue(err);
+  it('throws when getAgent throws', async () => {
+    vi.mocked(agents.getAgent).mockRejectedValue(new Error('EACCES'));
     await expect(getCustomPrompt()).rejects.toThrow('EACCES');
   });
 });
 
 describe('getDefaultPrompt', () => {
-  it('reads the agent definition file', async () => {
-    vi.mocked(fs.default.promises.readFile).mockResolvedValue('default prompt');
+  it('returns the defaultContent from the agent', async () => {
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'custom content',
+      defaultContent: 'default prompt',
+      isCustom: true,
+    });
     const result = await getDefaultPrompt();
     expect(result).toBe('default prompt');
-    const calledPath = vi.mocked(fs.default.promises.readFile).mock.calls[0][0] as string;
-    expect(calledPath).toContain('.claude/agents/orchestrator.md');
-    expect(calledPath).not.toContain('.octomux');
+    expect(agents.getAgent).toHaveBeenCalledWith('orchestrator');
   });
 });
 
 describe('getOrchestratorPrompt', () => {
-  it('returns custom prompt when it exists', async () => {
-    vi.mocked(fs.default.promises.readFile).mockResolvedValue('custom prompt');
+  it('returns content (custom or default) from the agent', async () => {
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'custom prompt',
+      defaultContent: 'default prompt',
+      isCustom: true,
+    });
     const result = await getOrchestratorPrompt();
     expect(result).toBe('custom prompt');
   });
 
-  it('falls back to default when custom does not exist', async () => {
-    let callCount = 0;
-    vi.mocked(fs.default.promises.readFile).mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        const err = new Error('ENOENT') as any;
-        err.code = 'ENOENT';
-        return Promise.reject(err);
-      }
-      return Promise.resolve('default prompt');
+  it('returns default content when agent is not custom', async () => {
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'default prompt',
+      defaultContent: 'default prompt',
+      isCustom: false,
     });
     const result = await getOrchestratorPrompt();
     expect(result).toBe('default prompt');
@@ -134,41 +148,24 @@ describe('getOrchestratorPrompt', () => {
 });
 
 describe('saveCustomPrompt', () => {
-  it('creates directory and writes file', async () => {
-    vi.mocked(fs.default.promises.mkdir).mockResolvedValue(undefined as any);
-    vi.mocked(fs.default.promises.writeFile).mockResolvedValue(undefined);
+  it('delegates to saveAgent with orchestrator name', async () => {
+    vi.mocked(agents.saveAgent).mockResolvedValue(undefined);
     await saveCustomPrompt('new prompt');
-    expect(fs.default.promises.mkdir).toHaveBeenCalledWith('/mock-home/.octomux', {
-      recursive: true,
-    });
-    expect(fs.default.promises.writeFile).toHaveBeenCalledWith(
-      '/mock-home/.octomux/orchestrator-prompt.md',
-      'new prompt',
-      'utf-8',
-    );
+    expect(agents.saveAgent).toHaveBeenCalledWith('orchestrator', 'new prompt');
   });
 });
 
 describe('resetCustomPrompt', () => {
-  it('deletes the custom prompt file', async () => {
-    vi.mocked(fs.default.promises.unlink).mockResolvedValue(undefined);
+  it('delegates to resetAgent with orchestrator name', async () => {
+    vi.mocked(agents.resetAgent).mockResolvedValue(undefined);
     await resetCustomPrompt();
-    expect(fs.default.promises.unlink).toHaveBeenCalledWith(
-      '/mock-home/.octomux/orchestrator-prompt.md',
-    );
+    expect(agents.resetAgent).toHaveBeenCalledWith('orchestrator');
   });
 
-  it('ignores ENOENT when file does not exist', async () => {
-    const err = new Error('ENOENT') as any;
-    err.code = 'ENOENT';
-    vi.mocked(fs.default.promises.unlink).mockRejectedValue(err);
-    await expect(resetCustomPrompt()).resolves.not.toThrow();
-  });
-
-  it('throws on non-ENOENT errors', async () => {
+  it('propagates errors from resetAgent', async () => {
     const err = new Error('EACCES') as any;
     err.code = 'EACCES';
-    vi.mocked(fs.default.promises.unlink).mockRejectedValue(err);
+    vi.mocked(agents.resetAgent).mockRejectedValue(err);
     await expect(resetCustomPrompt()).rejects.toThrow('EACCES');
   });
 });
@@ -200,10 +197,12 @@ describe('startOrchestrator', () => {
 
   it('uses --agent orchestrator when no custom prompt exists', async () => {
     mockSessionNotRunning();
-    // No custom prompt — readFile for custom path throws ENOENT
-    const enoent = new Error('ENOENT') as any;
-    enoent.code = 'ENOENT';
-    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'default content',
+      defaultContent: 'default content',
+      isCustom: false,
+    });
 
     await startOrchestrator('/test/cwd');
 
@@ -218,7 +217,12 @@ describe('startOrchestrator', () => {
 
   it('falls back to --system-prompt when custom prompt exists', async () => {
     mockSessionNotRunning();
-    vi.mocked(fs.default.promises.readFile).mockResolvedValue('custom prompt content');
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'custom prompt content',
+      defaultContent: 'default content',
+      isCustom: true,
+    });
 
     await startOrchestrator('/test/cwd');
 
@@ -229,9 +233,12 @@ describe('startOrchestrator', () => {
 
   it('bakes initial message into claude launch command', async () => {
     mockSessionNotRunning();
-    const enoent = new Error('ENOENT') as any;
-    enoent.code = 'ENOENT';
-    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'default content',
+      defaultContent: 'default content',
+      isCustom: false,
+    });
 
     await startOrchestrator('/test/cwd', 'Create a task to fix bugs');
 
@@ -241,9 +248,12 @@ describe('startOrchestrator', () => {
 
   it('escapes shell metacharacters in initial message with single quotes', async () => {
     mockSessionNotRunning();
-    const enoent = new Error('ENOENT') as any;
-    enoent.code = 'ENOENT';
-    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'default content',
+      defaultContent: 'default content',
+      isCustom: false,
+    });
 
     await startOrchestrator('/test/cwd', 'Fix the $HOME bug; rm -rf / && echo `whoami`');
 
@@ -265,9 +275,12 @@ describe('startOrchestrator', () => {
 
   it('uses cwd when provided', async () => {
     mockSessionNotRunning();
-    const enoent = new Error('ENOENT') as any;
-    enoent.code = 'ENOENT';
-    vi.mocked(fs.default.promises.readFile).mockRejectedValue(enoent);
+    vi.mocked(agents.getAgent).mockResolvedValue({
+      name: 'orchestrator',
+      content: 'default content',
+      defaultContent: 'default content',
+      isCustom: false,
+    });
 
     await startOrchestrator('/my/project');
 
