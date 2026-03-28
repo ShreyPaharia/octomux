@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
-import type { Skill, OrchestratorPromptData } from './api';
+import type { Skill, OrchestratorPromptData, RepoConfig } from './api';
 import { api } from './api';
 import { subscribe } from './event-source';
 
@@ -149,6 +149,30 @@ export function useSkills() {
   }, [refresh]);
 
   return { skills, loading, error, refresh };
+}
+
+export function useRepoConfigs() {
+  const [configs, setConfigs] = useState<RepoConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api.listRepoConfigs();
+      setConfigs(data);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { configs, loading, error, refresh };
 }
 
 export function useOrchestratorPrompt() {
