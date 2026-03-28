@@ -16,9 +16,9 @@ export interface RepoConfig {
 
 export async function getOrCreateRepoConfig(repoPath: string): Promise<RepoConfig> {
   const db = getDb();
-  const existing = db
-    .prepare('SELECT * FROM repo_configs WHERE repo_path = ?')
-    .get(repoPath) as RepoConfig | undefined;
+  const existing = db.prepare('SELECT * FROM repo_configs WHERE repo_path = ?').get(repoPath) as
+    | RepoConfig
+    | undefined;
 
   if (existing) return existing;
 
@@ -58,9 +58,9 @@ export function updateRepoConfig(
   >,
 ): RepoConfig {
   const db = getDb();
-  const existing = db
-    .prepare('SELECT * FROM repo_configs WHERE repo_path = ?')
-    .get(repoPath) as RepoConfig | undefined;
+  const existing = db.prepare('SELECT * FROM repo_configs WHERE repo_path = ?').get(repoPath) as
+    | RepoConfig
+    | undefined;
 
   if (!existing) {
     throw new Error(`No config found for repo: ${repoPath}`);

@@ -26,6 +26,7 @@ or Jira ticket, produce a concrete implementation plan for a coding agent.
 ## When to Ask Questions
 
 Always ask when:
+
 - The request is ambiguous or could be interpreted multiple ways
 - There are multiple valid implementation approaches (present options with trade-offs)
 - You're unsure about scope (what's in vs out)
@@ -33,6 +34,7 @@ Always ask when:
 - You need to know about external constraints (deadlines, dependencies, rollout strategy)
 
 Skip questions when:
+
 - The request is completely unambiguous
 - There's only one reasonable implementation approach
 - CLAUDE.md already answers your concerns
@@ -87,6 +89,7 @@ One paragraph: what this change does and why.
 ```
 
 ## Constraints
+
 - **Do not write code.** Plan only.
 - Be specific: name files, functions, types, and line ranges.
 - The plan must be self-contained — a coding agent should execute it

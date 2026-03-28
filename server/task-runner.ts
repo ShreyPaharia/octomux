@@ -45,10 +45,7 @@ async function getLastWindowIndex(session: string): Promise<number> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function preflightWorktree(
-  worktreePath: string,
-  config: RepoConfig,
-): Promise<void> {
+export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
   // Auto-fix formatting drift
   try {
     await execFile('sh', ['-c', config.format_command], { cwd: worktreePath });
