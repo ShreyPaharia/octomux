@@ -42,9 +42,10 @@ describe('repo-config', () => {
     });
 
     it('returns existing config on subsequent calls without shelling out', async () => {
-      db.prepare(
-        `INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?)`,
-      ).run('/tmp/test-repo', 'staging');
+      db.prepare(`INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?)`).run(
+        '/tmp/test-repo',
+        'staging',
+      );
 
       const config = await getOrCreateRepoConfig('/tmp/test-repo');
 
@@ -68,9 +69,10 @@ describe('repo-config', () => {
 
   describe('updateRepoConfig', () => {
     it('updates specified fields and returns updated config', () => {
-      db.prepare(
-        `INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?)`,
-      ).run('/tmp/test-repo', 'main');
+      db.prepare(`INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?)`).run(
+        '/tmp/test-repo',
+        'main',
+      );
 
       const config = updateRepoConfig('/tmp/test-repo', { base_branch: 'staging' });
 

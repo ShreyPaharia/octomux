@@ -88,7 +88,10 @@ function AgentsSection() {
       {loading && (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]" />
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]"
+            />
           ))}
         </div>
       )}
@@ -96,7 +99,9 @@ function AgentsSection() {
       {error && (
         <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
-          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>Retry</button>
+          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
+            Retry
+          </button>
         </div>
       )}
 
@@ -392,7 +397,10 @@ function RepoConfigsSection() {
       {loading && (
         <div className="space-y-3">
           {[1, 2].map((i) => (
-            <div key={i} className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]" />
+            <div
+              key={i}
+              className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]"
+            />
           ))}
         </div>
       )}
@@ -400,64 +408,77 @@ function RepoConfigsSection() {
       {error && (
         <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
-          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>Retry</button>
+          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
+            Retry
+          </button>
         </div>
       )}
 
       {!loading && !error && configs.length === 0 && (
         <div className="py-8 text-center text-sm text-[#6a6a6a]">
-          No repositories configured yet. Repositories appear here automatically when you create tasks.
+          No repositories configured yet. Repositories appear here automatically when you create
+          tasks.
         </div>
       )}
 
-      {!loading && !error && configs.map((config) => (
-        <div key={config.repo_path} className="border-b border-[#2f2f2f] py-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-sm font-bold">{repoName(config.repo_path)}</span>
-              <span className="ml-2 text-xs text-[#6a6a6a]">{config.repo_path}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              {config.base_branch && (
-                <span className="bg-[#1a1a2e] px-2 py-0.5 text-xs text-[#8a8aff]">
-                  {config.base_branch}
-                </span>
-              )}
-              <button
-                className="text-xs text-[#3B82F6] hover:text-[#60a5fa]"
-                onClick={() => editingPath === config.repo_path ? setEditingPath(null) : startEdit(config)}
-              >
-                {editingPath === config.repo_path ? 'Cancel' : 'Edit'}
-              </button>
-            </div>
-          </div>
-
-          {editingPath === config.repo_path && (
-            <div className="mt-3 space-y-2">
-              {(['base_branch', 'test_command', 'format_command', 'lint_command'] as const).map((field) => (
-                <div key={field} className="flex items-center gap-2">
-                  <label className="w-32 text-xs text-[#6a6a6a]">{field.replace(/_/g, ' ')}</label>
-                  <input
-                    type="text"
-                    value={editForm[field] ?? ''}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, [field]: e.target.value }))}
-                    className="flex-1 border border-[#2f2f2f] bg-[#141414] px-2 py-1 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
-                  />
-                </div>
-              ))}
-              <div className="flex justify-end pt-1">
+      {!loading &&
+        !error &&
+        configs.map((config) => (
+          <div key={config.repo_path} className="border-b border-[#2f2f2f] py-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm font-bold">{repoName(config.repo_path)}</span>
+                <span className="ml-2 text-xs text-[#6a6a6a]">{config.repo_path}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                {config.base_branch && (
+                  <span className="bg-[#1a1a2e] px-2 py-0.5 text-xs text-[#8a8aff]">
+                    {config.base_branch}
+                  </span>
+                )}
                 <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+                  className="text-xs text-[#3B82F6] hover:text-[#60a5fa]"
+                  onClick={() =>
+                    editingPath === config.repo_path ? setEditingPath(null) : startEdit(config)
+                  }
                 >
-                  {saving ? 'Saving...' : 'Save'}
+                  {editingPath === config.repo_path ? 'Cancel' : 'Edit'}
                 </button>
               </div>
             </div>
-          )}
-        </div>
-      ))}
+
+            {editingPath === config.repo_path && (
+              <div className="mt-3 space-y-2">
+                {(['base_branch', 'test_command', 'format_command', 'lint_command'] as const).map(
+                  (field) => (
+                    <div key={field} className="flex items-center gap-2">
+                      <label className="w-32 text-xs text-[#6a6a6a]">
+                        {field.replace(/_/g, ' ')}
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm[field] ?? ''}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({ ...prev, [field]: e.target.value }))
+                        }
+                        className="flex-1 border border-[#2f2f2f] bg-[#141414] px-2 py-1 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+                      />
+                    </div>
+                  ),
+                )}
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
     </section>
   );
 }

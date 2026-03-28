@@ -145,12 +145,14 @@ reads the codebase and produces a structured implementation plan that becomes th
 agent's initial prompt.
 
 ### When to plan first
+
 - Jira tickets with multiple acceptance criteria
 - Changes likely spanning 3+ files
 - Unfamiliar repos or areas of the codebase
 - Any request where you'd need to explore the code to write a good prompt
 
 ### When to skip planning
+
 - Single-file fixes with clear instructions from the user
 - PR reviews (the reviewer agent handles its own scoping)
 - Tasks where the user already provided a detailed initial prompt
