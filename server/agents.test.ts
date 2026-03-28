@@ -3,14 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-import {
-  listAgents,
-  getAgent,
-  saveAgent,
-  resetAgent,
-  createAgent,
-  deleteAgent,
-} from './agents.js';
+import { listAgents, getAgent, saveAgent, resetAgent, deleteAgent } from './agents.js';
 
 describe('agents', () => {
   const tmpDir = path.join(os.tmpdir(), `octomux-agents-test-${Date.now()}`);
