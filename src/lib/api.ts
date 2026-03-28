@@ -77,6 +77,19 @@ export interface OrchestratorPromptData {
   isCustom: boolean;
 }
 
+export interface AgentDefinition {
+  name: string;
+  description: string;
+  isCustom: boolean;
+}
+
+export interface AgentDetail {
+  name: string;
+  content: string;
+  defaultContent: string;
+  isCustom: boolean;
+}
+
 export interface OctomuxSettings {
   editor: 'nvim' | 'vscode' | 'cursor';
 }
@@ -163,6 +176,21 @@ export const api = {
     }),
   deleteSkill: (name: string) =>
     request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // Agents
+  listAgents: () => request<AgentDefinition[]>('/agents'),
+  getAgent: (name: string) => request<AgentDetail>(`/agents/${encodeURIComponent(name)}`),
+  saveAgent: (name: string, content: string) =>
+    request<AgentDetail>(`/agents/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+  resetAgent: (name: string) =>
+    request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  createAgent: (data: { name: string; content: string }) =>
+    request<AgentDetail>('/agents', { method: 'POST', body: JSON.stringify(data) }),
+  deleteAgent: (name: string) =>
+    request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   // Repo Config
   listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),
