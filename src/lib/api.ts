@@ -81,6 +81,16 @@ export interface OctomuxSettings {
   editor: 'nvim' | 'vscode' | 'cursor';
 }
 
+export interface RepoConfig {
+  repo_path: string;
+  base_branch: string | null;
+  test_command: string;
+  format_command: string;
+  lint_command: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -153,4 +163,14 @@ export const api = {
     }),
   deleteSkill: (name: string) =>
     request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // Repo Config
+  listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),
+  getRepoConfig: (repoPath: string) =>
+    request<RepoConfig>(`/repo-config?repo_path=${encodeURIComponent(repoPath)}`),
+  updateRepoConfig: (repoPath: string, updates: Partial<RepoConfig>) =>
+    request<RepoConfig>('/repo-config', {
+      method: 'PATCH',
+      body: JSON.stringify({ repo_path: repoPath, ...updates }),
+    }),
 };
