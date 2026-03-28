@@ -7,6 +7,8 @@ import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
 import { getSettings } from './settings.js';
+import { getOrCreateRepoConfig } from './repo-config.js';
+import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal } from './types.js';
 
 export interface UserTerminalResult {
@@ -42,6 +44,34 @@ async function getLastWindowIndex(session: string): Promise<number> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function preflightWorktree(
+  worktreePath: string,
+  config: RepoConfig,
+): Promise<void> {
+  // Auto-fix formatting drift
+  try {
+    await execFile('sh', ['-c', config.format_command], { cwd: worktreePath });
+  } catch {
+    // Non-critical: repo may not have this script
+  }
+
+  // Auto-fix lint issues
+  try {
+    await execFile('sh', ['-c', config.lint_command], { cwd: worktreePath });
+  } catch {
+    // Non-critical
+  }
+
+  // Commit any auto-fixes as a clean baseline
+  const { stdout: diff } = await execFile('git', ['diff', '--name-only'], { cwd: worktreePath });
+  if (diff.trim()) {
+    await execFile('git', ['add', '-A'], { cwd: worktreePath });
+    await execFile('git', ['commit', '-m', 'chore: fix pre-existing formatting'], {
+      cwd: worktreePath,
+    });
+  }
+}
 
 /**
  * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
@@ -183,6 +213,12 @@ export async function startTask(task: Task): Promise<void> {
 
     // Install hook settings
     installHookSettings(worktreePath);
+
+    // Pre-flight: auto-fix formatting in fresh worktree (only for worktree tasks)
+    if (!isNoWorktree) {
+      const repoConfig = await getOrCreateRepoConfig(task.repo_path);
+      await preflightWorktree(worktreePath, repoConfig);
+    }
 
     // Create tmux session
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);

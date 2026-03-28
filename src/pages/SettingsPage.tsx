@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSkills } from '../lib/hooks';
+import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
-import type { OrchestratorPromptData } from '@/lib/api';
+import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -46,6 +46,122 @@ function SettingRow({
       </div>
       {children}
     </div>
+  );
+}
+
+function AgentsSection() {
+  const { agents, loading, error, refresh } = useAgents();
+  const navigate = useNavigate();
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = useCallback(async () => {
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
+      await api.createAgent({ name: newName.trim(), content });
+      showToast('success', 'AGENT CREATED', `Agent "${newName.trim()}" created`);
+      setShowCreate(false);
+      setNewName('');
+      navigate(`/agents/${encodeURIComponent(newName.trim())}`);
+    } catch (err) {
+      showToast('error', 'ERROR', (err as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  }, [newName, navigate]);
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between">
+        <SectionHeader label="AGENTS" />
+        <button
+          className="mb-4 text-xs text-[#3B82F6] hover:text-[#60a5fa]"
+          onClick={() => setShowCreate(true)}
+        >
+          + New Agent
+        </button>
+      </div>
+
+      {loading && (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]" />
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
+          <span className="text-sm text-red-400">{error}</span>
+          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>Retry</button>
+        </div>
+      )}
+
+      {!loading && !error && agents.length === 0 && (
+        <div className="py-8 text-center text-sm text-[#6a6a6a]">No agents found.</div>
+      )}
+
+      {!loading && !error && agents.length > 0 && (
+        <div className="space-y-0">
+          {agents.map((agent) => (
+            <div
+              key={agent.name}
+              className="flex items-center justify-between border-b border-[#2f2f2f] py-3 cursor-pointer hover:bg-[#141414]"
+              onClick={() => navigate(`/agents/${encodeURIComponent(agent.name)}`)}
+            >
+              <div>
+                <span className="text-sm font-mono">{agent.name}</span>
+                {agent.description && <p className="text-xs text-[#8a8a8a]">{agent.description}</p>}
+              </div>
+              <span className={`text-xs ${agent.isCustom ? 'text-[#FFB800]' : 'text-[#6a6a6a]'}`}>
+                {agent.isCustom ? 'Custom' : 'Default'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showCreate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowCreate(false)}
+        >
+          <div
+            className="w-full max-w-md rounded border border-[#2f2f2f] bg-[#0A0A0A] p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-4 text-sm font-bold">Create Agent</h3>
+            <input
+              type="text"
+              placeholder="Agent name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              className="mb-4 w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+                onClick={() => setShowCreate(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+                onClick={handleCreate}
+                disabled={creating || !newName.trim()}
+              >
+                {creating ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -236,6 +352,116 @@ function SkillsSection() {
   );
 }
 
+function RepoConfigsSection() {
+  const { configs, loading, error, refresh } = useRepoConfigs();
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = (config: RepoConfig) => {
+    setEditingPath(config.repo_path);
+    setEditForm({
+      base_branch: config.base_branch ?? '',
+      test_command: config.test_command,
+      format_command: config.format_command,
+      lint_command: config.lint_command,
+    });
+  };
+
+  const handleSave = async () => {
+    if (!editingPath || saving) return;
+    setSaving(true);
+    try {
+      await api.updateRepoConfig(editingPath, editForm);
+      showToast('success', 'SAVED', 'Repository config updated');
+      setEditingPath(null);
+      refresh();
+    } catch (err) {
+      showToast('error', 'ERROR', (err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const repoName = (p: string) => p.split('/').pop() || p;
+
+  return (
+    <section className="mb-8">
+      <SectionHeader label="REPOSITORIES" />
+
+      {loading && (
+        <div className="space-y-3">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]" />
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
+          <span className="text-sm text-red-400">{error}</span>
+          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>Retry</button>
+        </div>
+      )}
+
+      {!loading && !error && configs.length === 0 && (
+        <div className="py-8 text-center text-sm text-[#6a6a6a]">
+          No repositories configured yet. Repositories appear here automatically when you create tasks.
+        </div>
+      )}
+
+      {!loading && !error && configs.map((config) => (
+        <div key={config.repo_path} className="border-b border-[#2f2f2f] py-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm font-bold">{repoName(config.repo_path)}</span>
+              <span className="ml-2 text-xs text-[#6a6a6a]">{config.repo_path}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {config.base_branch && (
+                <span className="bg-[#1a1a2e] px-2 py-0.5 text-xs text-[#8a8aff]">
+                  {config.base_branch}
+                </span>
+              )}
+              <button
+                className="text-xs text-[#3B82F6] hover:text-[#60a5fa]"
+                onClick={() => editingPath === config.repo_path ? setEditingPath(null) : startEdit(config)}
+              >
+                {editingPath === config.repo_path ? 'Cancel' : 'Edit'}
+              </button>
+            </div>
+          </div>
+
+          {editingPath === config.repo_path && (
+            <div className="mt-3 space-y-2">
+              {(['base_branch', 'test_command', 'format_command', 'lint_command'] as const).map((field) => (
+                <div key={field} className="flex items-center gap-2">
+                  <label className="w-32 text-xs text-[#6a6a6a]">{field.replace(/_/g, ' ')}</label>
+                  <input
+                    type="text"
+                    value={editForm[field] ?? ''}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, [field]: e.target.value }))}
+                    className="flex-1 border border-[#2f2f2f] bg-[#141414] px-2 py-1 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+                  />
+                </div>
+              ))}
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function EditorSection() {
   const [editor, setEditor] = useState<string>('nvim');
   const [loading, setLoading] = useState(true);
@@ -421,6 +647,7 @@ export default function SettingsPage() {
         </section>
 
         <EditorSection />
+        <RepoConfigsSection />
 
         <section className="mb-8">
           <SectionHeader label="ORCHESTRATOR" />
@@ -449,6 +676,8 @@ export default function SettingsPage() {
             </button>
           </SettingRow>
         </section>
+
+        <AgentsSection />
 
         <SkillsSection />
       </div>
