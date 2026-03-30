@@ -16,6 +16,7 @@ import { checkTaskStatus } from './poller.js';
 import { resumeTask, cleanupOrphanedViewerSessions } from './task-runner.js';
 import { getDb } from './db.js';
 import { startOrchestrator } from './orchestrator.js';
+import { syncAgents } from './agents.js';
 import type { Task } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,11 @@ async function recoverTasks(): Promise<void> {
 
 await recoverTasks();
 await cleanupOrphanedViewerSessions();
+
+// Sync built-in agent definitions to .claude/agents/
+await syncAgents().catch((err) => {
+  console.error('[startup] Failed to sync agents:', err);
+});
 
 // Auto-start orchestrator
 startOrchestrator().catch((err) => {

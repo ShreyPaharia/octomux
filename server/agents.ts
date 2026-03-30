@@ -132,6 +132,21 @@ export async function createAgent(name: string, content: string): Promise<void> 
   await saveAgent(name, content);
 }
 
+/**
+ * Sync effective agent files (custom override or built-in default) to
+ * `.claude/agents/` in the working directory so `claude --agent <name>` works.
+ */
+export async function syncAgents(): Promise<void> {
+  const targetDir = path.join(process.cwd(), '.claude', 'agents');
+  await fs.promises.mkdir(targetDir, { recursive: true });
+
+  const agents = await listAgents();
+  for (const def of agents) {
+    const agent = await getAgent(def.name);
+    await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
+  }
+}
+
 export async function deleteAgent(name: string): Promise<void> {
   const builtInPath = path.join(builtInDir(), `${name}.md`);
   if (await exists(builtInPath)) {

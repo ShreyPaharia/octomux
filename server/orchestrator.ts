@@ -1,9 +1,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
-import { getAgent, saveAgent, resetAgent } from './agents.js';
+import { getAgent, saveAgent, resetAgent, syncAgents } from './agents.js';
+import { getSettings } from './settings.js';
 
 const execFile = promisify(execFileCb);
 
@@ -43,6 +41,10 @@ export async function isOrchestratorRunning(): Promise<boolean> {
 
 export async function startOrchestrator(cwd?: string, initialMessage?: string): Promise<void> {
   if (await isOrchestratorRunning()) return;
+
+  // Sync agent files to .claude/agents/ so `claude --agent` can find them
+  await syncAgents();
+
   await execFile('tmux', [
     'new-session',
     '-d',
@@ -52,17 +54,15 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
     cwd || process.cwd(),
   ]);
 
-  const customPrompt = await getCustomPrompt();
+  const settings = await getSettings();
 
   let claudeCmd: string;
-  if (customPrompt) {
-    // Custom prompt: write to temp file and use --system-prompt
-    const tmpPrompt = path.join(os.tmpdir(), 'octomux-orchestrator-prompt.md');
-    await fs.promises.writeFile(tmpPrompt, customPrompt, 'utf-8');
-    claudeCmd = `claude --system-prompt "$(cat ${tmpPrompt})"`;
-  } else {
-    // Default: use the agent definition
+  if (settings.useOrchestratorAgent) {
+    // Use the orchestrator agent definition from .claude/agents/
     claudeCmd = 'claude --agent orchestrator';
+  } else {
+    // Plain claude with no agent
+    claudeCmd = 'claude';
   }
 
   // Use single quotes for the user message to prevent shell interpretation of $, `, etc.

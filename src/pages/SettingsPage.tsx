@@ -540,6 +540,53 @@ function EditorSection() {
   );
 }
 
+function OrchestratorAgentToggle() {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSettings()
+      .then((s) => {
+        if (!cancelled) setEnabled(s.useOrchestratorAgent);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleChange = async (value: boolean) => {
+    const prev = enabled;
+    setEnabled(value);
+    try {
+      await api.updateSettings({ useOrchestratorAgent: value });
+      showToast(
+        'success',
+        'ORCHESTRATOR',
+        value ? 'Using orchestrator agent' : 'Using plain claude',
+      );
+    } catch (err) {
+      setEnabled(prev);
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <SettingRow
+      label="Use orchestrator agent"
+      description="When enabled, starts the orchestrator with --agent orchestrator instead of plain claude"
+    >
+      <ToggleSwitch checked={enabled} onChange={handleChange} />
+    </SettingRow>
+  );
+}
+
 function OrchestratorPromptSection() {
   const [data, setData] = useState<OrchestratorPromptData | null>(null);
   const [content, setContent] = useState('');
@@ -690,6 +737,7 @@ export default function SettingsPage() {
 
         <section className="mb-8">
           <SectionHeader label="ORCHESTRATOR" />
+          <OrchestratorAgentToggle />
           <OrchestratorPromptSection />
           <SettingRow
             label="Restart Orchestrator"

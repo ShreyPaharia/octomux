@@ -114,8 +114,14 @@ vi.mock('./skills.js', () => ({
 }));
 
 vi.mock('./settings.js', () => ({
-  getSettings: vi.fn(async () => ({ editor: 'nvim' })),
-  updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({ editor: 'nvim', ...patch })),
+  getSettings: vi.fn(async () => ({ editor: 'nvim', useOrchestratorAgent: false })),
+  updateSettings: vi.fn(
+    async (patch: Record<string, unknown>) => ({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      ...patch,
+    }),
+  ),
 }));
 
 const fs = (await import('fs')).default;
@@ -1310,13 +1316,16 @@ describe('GET /api/settings', () => {
   it('returns default settings', async () => {
     const res = await request(app).get('/api/settings');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ editor: 'nvim' });
+    expect(res.body).toEqual({ editor: 'nvim', useOrchestratorAgent: false });
   });
 });
 
 describe('PATCH /api/settings', () => {
   it('updates editor setting', async () => {
-    vi.mocked(updateSettings).mockResolvedValue({ editor: 'cursor' });
+    vi.mocked(updateSettings).mockResolvedValue({
+      editor: 'cursor',
+      useOrchestratorAgent: false,
+    });
     const res = await request(app).patch('/api/settings').send({ editor: 'cursor' });
     expect(res.status).toBe(200);
     expect(res.body.editor).toBe('cursor');
