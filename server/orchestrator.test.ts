@@ -22,6 +22,11 @@ vi.mock('./agents.js', () => ({
   getAgent: vi.fn(),
   saveAgent: vi.fn(),
   resetAgent: vi.fn(),
+  syncAgents: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('./settings.js', () => ({
+  getSettings: vi.fn().mockResolvedValue({ editor: 'nvim', useOrchestratorAgent: false }),
 }));
 
 const {
@@ -38,6 +43,7 @@ const {
 } = await import('./orchestrator.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
+const settings = await import('./settings.js');
 const os = await import('os');
 const agents = await import('./agents.js');
 
@@ -195,14 +201,8 @@ describe('startOrchestrator', () => {
     return sendKeysArgs[sendKeysArgs.indexOf('-t') + 2];
   }
 
-  it('uses --agent orchestrator when no custom prompt exists', async () => {
+  it('uses plain claude when useOrchestratorAgent is disabled', async () => {
     mockSessionNotRunning();
-    vi.mocked(agents.getAgent).mockResolvedValue({
-      name: 'orchestrator',
-      content: 'default content',
-      defaultContent: 'default content',
-      isCustom: false,
-    });
 
     await startOrchestrator('/test/cwd');
 
@@ -211,34 +211,24 @@ describe('startOrchestrator', () => {
     expect(calls[1][1]).toContain('new-session');
     expect(calls[2][1]).toContain('send-keys');
     const claudeCmd = getClaudeCmd();
-    expect(claudeCmd).toBe('claude --agent orchestrator');
-    expect(claudeCmd).not.toContain('--system-prompt');
+    expect(claudeCmd).toBe('claude');
   });
 
-  it('falls back to --system-prompt when custom prompt exists', async () => {
+  it('uses --agent orchestrator when useOrchestratorAgent is enabled', async () => {
     mockSessionNotRunning();
-    vi.mocked(agents.getAgent).mockResolvedValue({
-      name: 'orchestrator',
-      content: 'custom prompt content',
-      defaultContent: 'default content',
-      isCustom: true,
+    vi.mocked(settings.getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: true,
     });
 
     await startOrchestrator('/test/cwd');
 
     const claudeCmd = getClaudeCmd();
-    expect(claudeCmd).toContain('claude --system-prompt');
-    expect(claudeCmd).toContain('octomux-orchestrator-prompt.md');
+    expect(claudeCmd).toBe('claude --agent orchestrator');
   });
 
   it('bakes initial message into claude launch command', async () => {
     mockSessionNotRunning();
-    vi.mocked(agents.getAgent).mockResolvedValue({
-      name: 'orchestrator',
-      content: 'default content',
-      defaultContent: 'default content',
-      isCustom: false,
-    });
 
     await startOrchestrator('/test/cwd', 'Create a task to fix bugs');
 
@@ -248,12 +238,6 @@ describe('startOrchestrator', () => {
 
   it('escapes shell metacharacters in initial message with single quotes', async () => {
     mockSessionNotRunning();
-    vi.mocked(agents.getAgent).mockResolvedValue({
-      name: 'orchestrator',
-      content: 'default content',
-      defaultContent: 'default content',
-      isCustom: false,
-    });
 
     await startOrchestrator('/test/cwd', 'Fix the $HOME bug; rm -rf / && echo `whoami`');
 
@@ -275,12 +259,6 @@ describe('startOrchestrator', () => {
 
   it('uses cwd when provided', async () => {
     mockSessionNotRunning();
-    vi.mocked(agents.getAgent).mockResolvedValue({
-      name: 'orchestrator',
-      content: 'default content',
-      defaultContent: 'default content',
-      isCustom: false,
-    });
 
     await startOrchestrator('/my/project');
 

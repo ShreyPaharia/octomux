@@ -92,6 +92,7 @@ export interface AgentDetail {
 
 export interface OctomuxSettings {
   editor: 'nvim' | 'vscode' | 'cursor';
+  useOrchestratorAgent: boolean;
 }
 
 export interface RepoConfig {

@@ -39,7 +39,7 @@ vi.mock('./hook-settings.js', () => ({
 }));
 
 vi.mock('./settings.js', () => ({
-  getSettings: vi.fn().mockResolvedValue({ editor: 'nvim' }),
+  getSettings: vi.fn().mockResolvedValue({ editor: 'nvim', useOrchestratorAgent: false }),
 }));
 
 vi.mock('./repo-config.js', () => ({
@@ -952,7 +952,7 @@ describe('createUserTerminal', () => {
   });
 
   it('opens vscode when editor setting is vscode', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ editor: 'vscode' });
+    vi.mocked(getSettings).mockResolvedValue({ editor: 'vscode', useOrchestratorAgent: false });
     insertTask(db, { ...DEFAULTS.runningTask });
     const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
     const result = await createUserTerminal(task);
@@ -963,7 +963,7 @@ describe('createUserTerminal', () => {
   });
 
   it('opens cursor when editor setting is cursor', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ editor: 'cursor' });
+    vi.mocked(getSettings).mockResolvedValue({ editor: 'cursor', useOrchestratorAgent: false });
     insertTask(db, { ...DEFAULTS.runningTask });
     const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
     const result = await createUserTerminal(task);
@@ -974,7 +974,7 @@ describe('createUserTerminal', () => {
   });
 
   it('creates tmux window with nvim when editor setting is nvim', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ editor: 'nvim' });
+    vi.mocked(getSettings).mockResolvedValue({ editor: 'nvim', useOrchestratorAgent: false });
     insertTask(db, { ...DEFAULTS.runningTask });
     const result = await createUserTerminal(runningTask);
     expect(result).toEqual({ editor: 'nvim', windowIndex: expect.any(Number) });

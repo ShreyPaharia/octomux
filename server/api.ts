@@ -41,6 +41,7 @@ import {
   createAgent,
   deleteAgent,
   isBuiltInAgent,
+  syncAgents,
 } from './agents.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
@@ -888,6 +889,7 @@ export function setupRoutes(app: Express): void {
     }
     try {
       await saveAgent(req.params.name as string, content);
+      await syncAgents();
       const agent = await getAgent(req.params.name as string);
       if (req.params.name === 'orchestrator' && (await isOrchestratorRunning())) {
         await stopOrchestrator();
@@ -907,6 +909,7 @@ export function setupRoutes(app: Express): void {
       } else {
         await deleteAgent(name);
       }
+      await syncAgents();
       if (name === 'orchestrator' && (await isOrchestratorRunning())) {
         await stopOrchestrator();
         await startOrchestrator();
@@ -926,6 +929,7 @@ export function setupRoutes(app: Express): void {
     }
     try {
       await createAgent(name, content);
+      await syncAgents();
       const agent = await getAgent(name);
       res.status(201).json(agent);
     } catch (err) {
