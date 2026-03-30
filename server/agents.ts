@@ -19,7 +19,7 @@ export interface AgentDetail {
 }
 
 function builtInDir(): string {
-  return path.resolve(__dirname, '..', '.claude', 'agents');
+  return path.resolve(__dirname, '..', 'agents');
 }
 
 function customDir(): string {
@@ -36,6 +36,10 @@ function parseFrontmatter(content: string): { name: string; description: string 
     name: nameMatch ? nameMatch[1].trim() : '',
     description: descMatch ? descMatch[1].trim() : '',
   };
+}
+
+export function isBuiltInAgent(name: string): boolean {
+  return fs.existsSync(path.join(builtInDir(), `${name}.md`));
 }
 
 async function exists(p: string): Promise<boolean> {

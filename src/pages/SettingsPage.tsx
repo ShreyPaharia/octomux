@@ -488,13 +488,21 @@ function EditorSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     api
       .getSettings()
       .then((s) => {
-        setEditor(s.editor);
+        if (!cancelled) setEditor(s.editor);
       })
-      .catch((err) => showToast('error', 'ERROR', err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) showToast('error', 'ERROR', err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleChange = async (value: string) => {
@@ -541,15 +549,25 @@ function OrchestratorPromptSection() {
   const isDirty = content !== savedContentRef.current;
 
   useEffect(() => {
+    let cancelled = false;
     api
       .getOrchestratorPrompt()
       .then((result) => {
-        setData(result);
-        setContent(result.content);
-        savedContentRef.current = result.content;
+        if (!cancelled) {
+          setData(result);
+          setContent(result.content);
+          savedContentRef.current = result.content;
+        }
       })
-      .catch((err) => showToast('error', 'ERROR', err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) showToast('error', 'ERROR', err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const save = useCallback(async () => {

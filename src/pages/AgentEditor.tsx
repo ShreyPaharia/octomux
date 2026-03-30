@@ -17,16 +17,26 @@ export default function AgentEditor() {
 
   useEffect(() => {
     if (!name) return;
+    let cancelled = false;
     api
       .getAgent(name)
       .then((agent) => {
-        setContent(agent.content);
-        setDefaultContent(agent.defaultContent);
-        setIsCustom(agent.isCustom);
-        savedContentRef.current = agent.content;
+        if (!cancelled) {
+          setContent(agent.content);
+          setDefaultContent(agent.defaultContent);
+          setIsCustom(agent.isCustom);
+          savedContentRef.current = agent.content;
+        }
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [name]);
 
   const save = useCallback(async () => {
