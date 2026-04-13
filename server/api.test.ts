@@ -115,13 +115,11 @@ vi.mock('./skills.js', () => ({
 
 vi.mock('./settings.js', () => ({
   getSettings: vi.fn(async () => ({ editor: 'nvim', useOrchestratorAgent: false })),
-  updateSettings: vi.fn(
-    async (patch: Record<string, unknown>) => ({
-      editor: 'nvim',
-      useOrchestratorAgent: false,
-      ...patch,
-    }),
-  ),
+  updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({
+    editor: 'nvim',
+    useOrchestratorAgent: false,
+    ...patch,
+  })),
 }));
 
 const fs = (await import('fs')).default;

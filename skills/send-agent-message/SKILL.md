@@ -26,9 +26,11 @@ Send a message or instruction to a specific agent within a running task via `oct
 
 2. **Resolve agent number to agent ID:**
    The `send-message` command requires the agent's nanoid, not its label. Get task details to map "Agent N" to the actual ID:
+
    ```bash
    octomux get-task <task-id> --json
    ```
+
    Parse the `agents` array. Each agent has:
    - `id` — the nanoid (use this for the `--agent` flag)
    - `label` — display name like "Agent 1", "Agent 2"
@@ -44,6 +46,7 @@ Send a message or instruction to a specific agent within a running task via `oct
    - Only send messages to agents with `status: "running"`.
 
 4. **Send the message:**
+
    ```bash
    octomux send-message "<message>" --task <task-id> --agent <agent-id>
    ```
@@ -56,6 +59,7 @@ Send a message or instruction to a specific agent within a running task via `oct
 ## Examples
 
 **Direct agent reference:**
+
 > "Send a message to Agent 2 of task abc123def456"
 
 ```bash
@@ -65,6 +69,7 @@ octomux send-message "Focus on the API routes first, skip the UI for now" --task
 ```
 
 **Task by title:**
+
 > "Nudge the stuck agent on the login bug task"
 
 ```bash
