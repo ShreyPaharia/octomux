@@ -3,6 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
 import type { Task } from '../../../server/types';
+import { ChevronDownIcon } from '@/components/icons';
 
 interface TaskPickerFieldProps {
   value: string; // task ID
@@ -51,20 +52,7 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
             <span className={selected ? '' : 'text-muted-foreground'}>
               {selected ? selected.title : 'Select task...'}
             </span>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="ml-2 shrink-0 text-muted-foreground"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
+            <ChevronDownIcon className="ml-2 shrink-0 text-muted-foreground" />
           </button>
         }
       />

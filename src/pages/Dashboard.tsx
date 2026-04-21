@@ -7,25 +7,12 @@ import { TaskFilterBar } from '@/components/TaskFilterBar';
 import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { PlusIcon } from '@/components/icons';
 
 function NewTaskButton({ onClick }: { onClick: () => void }) {
   return (
     <Button onClick={onClick}>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        data-icon="inline-start"
-      >
-        <path d="M12 5v14" />
-        <path d="M5 12h14" />
-      </svg>
+      <PlusIcon data-icon="inline-start" />
       NEW TASK
     </Button>
   );

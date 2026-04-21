@@ -1,6 +1,7 @@
 import type { Task } from '../../server/types';
 import { TaskCard } from './TaskCard';
 import { EmptyState } from './EmptyState';
+import { TerminalRectIcon } from './icons';
 
 interface TaskListProps {
   tasks: Task[];
@@ -45,23 +46,7 @@ export function TaskList({
       />
     ) : (
       <EmptyState
-        icon={
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="48"
-            height="48"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect width="18" height="18" x="3" y="3" rx="2" />
-            <path d="m7 8 4 4-4 4" />
-            <path d="M13 16h4" />
-          </svg>
-        }
+        icon={<TerminalRectIcon />}
         heading="No tasks yet"
         subtext="Create your first task to start running agents"
         action={emptyAction}
