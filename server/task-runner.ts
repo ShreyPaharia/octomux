@@ -186,6 +186,8 @@ export async function cleanupOrphanedViewerSessions(): Promise<void> {
 /** Generate a git-safe branch slug from a title + task ID suffix. */
 export function slugifyTitle(title: string, id: string): string {
   const slug = title
+    .normalize('NFKD') // decompose accents so they can be stripped
+    .replace(/[̀-ͯ]/g, '') // strip combining diacritical marks
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-') // replace non-alphanumeric with hyphens
     .replace(/-{2,}/g, '-') // collapse consecutive hyphens
