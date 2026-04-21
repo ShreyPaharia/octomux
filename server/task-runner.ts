@@ -113,13 +113,19 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
  * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
  * This prevents the classic tmux race condition where send-keys fires before
  * the shell has initialized, causing the first character(s) to be swallowed.
+ *
+ * Starts with a short warm-up sleep (most shells render their prompt within
+ * a couple hundred ms) so we don't burn a subprocess on the guaranteed miss,
+ * then polls at 250ms intervals up to the timeout.
  */
 async function waitForShellReady(
   target: string,
   timeoutMs = 5000,
-  intervalMs = 100,
+  intervalMs = 250,
+  initialDelayMs = 200,
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
+  await sleep(initialDelayMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
