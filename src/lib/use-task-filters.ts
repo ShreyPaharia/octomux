@@ -14,9 +14,18 @@ export interface TaskFilters {
 
 const OPEN_STATUSES = ['setting_up', 'running', 'error'];
 
+const STATUS_TABS: readonly StatusTab[] = ['open', 'closed', 'backlog'];
+
+function readStatusTab(): StatusTab {
+  const stored = localStorage.getItem(STATUS_FILTER_KEY);
+  return stored && (STATUS_TABS as readonly string[]).includes(stored)
+    ? (stored as StatusTab)
+    : 'open';
+}
+
 export function useTaskFilters(tasks: Task[]) {
   const [filters, setFilters] = useState<TaskFilters>({
-    status: (localStorage.getItem(STATUS_FILTER_KEY) as StatusTab) ?? 'open',
+    status: readStatusTab(),
     repo: localStorage.getItem(REPO_FILTER_KEY) ?? '',
   });
 
