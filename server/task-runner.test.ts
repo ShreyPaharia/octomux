@@ -514,9 +514,8 @@ describe('addAgent', () => {
       ),
     );
 
-    let agent;
     try {
-      agent = await addAgent(runningTask);
+      const agent = await addAgent(runningTask);
       // Flush the fire-and-forget async IIFE
       await new Promise((r) => setTimeout(r, 0));
 
