@@ -8,8 +8,11 @@ import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
 import { getSettings } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
+import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal } from './types.js';
+
+const logger = childLogger('task-runner');
 
 export interface UserTerminalResult {
   editor: 'nvim' | 'vscode' | 'cursor';
@@ -335,7 +338,16 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
         agentId,
       });
     } catch (err) {
-      console.error(`[addAgent] Failed to launch claude in window ${windowIndex}:`, err);
+      logger.error(
+        {
+          task_id: task.id,
+          agent_id: agentId,
+          window_index: windowIndex,
+          operation: 'addAgent',
+          err,
+        },
+        'addAgent: failed to launch claude',
+      );
       try {
         getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
       } catch {
