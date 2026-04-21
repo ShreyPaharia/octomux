@@ -119,42 +119,39 @@ export function initDb(instance: Database.Database): void {
   instance.pragma('foreign_keys = ON');
   instance.exec(SCHEMA);
 
-  // Migrations
-  const cols = instance.pragma('table_info(tasks)') as Array<{ name: string }>;
-  const colNames = cols.map((c) => c.name);
-  if (!colNames.includes('initial_prompt')) {
-    instance.exec('ALTER TABLE tasks ADD COLUMN initial_prompt TEXT');
-  }
+  const columnsOf = (table: string): Set<string> => {
+    const rows = instance.pragma(`table_info(${table})`) as Array<{ name: string }>;
+    return new Set(rows.map((c) => c.name));
+  };
+  const addColumn = (table: string, name: string, ddl: string, cols: Set<string>): void => {
+    if (!cols.has(name)) {
+      instance.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+      cols.add(name);
+    }
+  };
 
-  // Add claude_session_id to agents table (for existing DBs)
-  const agentCols = instance.pragma('table_info(agents)') as Array<{ name: string }>;
-  const agentColNames = agentCols.map((c) => c.name);
-  if (!agentColNames.includes('claude_session_id')) {
-    instance.exec('ALTER TABLE agents ADD COLUMN claude_session_id TEXT');
-  }
-  if (!colNames.includes('base_branch')) {
-    instance.exec('ALTER TABLE tasks ADD COLUMN base_branch TEXT');
-  }
-  if (!colNames.includes('user_window_index')) {
-    instance.exec('ALTER TABLE tasks ADD COLUMN user_window_index INTEGER');
-  }
-  if (!colNames.includes('no_worktree')) {
-    instance.exec('ALTER TABLE tasks ADD COLUMN no_worktree INTEGER NOT NULL DEFAULT 0');
-  }
+  // Additive migrations — idempotent, one read per table
+  const taskCols = columnsOf('tasks');
+  addColumn('tasks', 'initial_prompt', 'initial_prompt TEXT', taskCols);
+  addColumn('tasks', 'base_branch', 'base_branch TEXT', taskCols);
+  addColumn('tasks', 'user_window_index', 'user_window_index INTEGER', taskCols);
+  addColumn('tasks', 'no_worktree', 'no_worktree INTEGER NOT NULL DEFAULT 0', taskCols);
 
-  // Add hook_activity columns to agents table (for existing DBs)
-  const agentCols2 = instance.pragma('table_info(agents)') as Array<{ name: string }>;
-  const agentColNames2 = agentCols2.map((c) => c.name);
-  if (!agentColNames2.includes('hook_activity')) {
-    instance.exec("ALTER TABLE agents ADD COLUMN hook_activity TEXT NOT NULL DEFAULT 'active'");
-    instance.exec('ALTER TABLE agents ADD COLUMN hook_activity_updated_at TEXT');
-  }
+  const agentCols = columnsOf('agents');
+  addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);
+  addColumn(
+    'agents',
+    'hook_activity',
+    "hook_activity TEXT NOT NULL DEFAULT 'active'",
+    agentCols,
+  );
+  addColumn('agents', 'hook_activity_updated_at', 'hook_activity_updated_at TEXT', agentCols);
 
-  // Migrate any legacy 'created' status to 'draft' (old schema default)
+  // Data migrations
   instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);
 
-  // Resolve any stale pending permission prompts from previous run
-  // and reset agents stuck in 'waiting' state (hooks lost during restart)
+  // Resolve stale pending prompts and reset agents stuck in 'waiting'
+  // (hook callbacks lost during the previous run's shutdown)
   instance.exec(
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now') WHERE status = 'pending'`,
   );
