@@ -73,6 +73,17 @@ function loadTaskOrFail(req: Request, res: Response): Task | null {
   return task;
 }
 
+/** Reload a task with its related agents and user_terminals. */
+function fetchTaskBundle(taskId: string): Task {
+  const db = getDb();
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task;
+  task.agents = db
+    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+    .all(taskId) as Agent[];
+  task.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(taskId) as UserTerminal[];
+  return task;
+}
+
 function derivedStatus(task: {
   status: string;
   agents: Array<{ status: string; hook_activity: string }>;
@@ -439,11 +450,7 @@ export function setupRoutes(app: Express): void {
       await closeTask(task);
     }
 
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
-    updated.agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(task.id) as Agent[];
-    updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
+    const updated = fetchTaskBundle(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
   });
@@ -464,11 +471,7 @@ export function setupRoutes(app: Express): void {
       `UPDATE tasks SET status = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
-    updated.agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(task.id) as Agent[];
-    updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
+    const updated = fetchTaskBundle(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
 
