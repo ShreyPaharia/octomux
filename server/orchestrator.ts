@@ -55,9 +55,10 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
   const customPrompt = await getCustomPrompt();
 
   let claudeCmd: string;
+  let tmpPrompt: string | null = null;
   if (customPrompt) {
     // Custom prompt: write to temp file and use --system-prompt
-    const tmpPrompt = path.join(os.tmpdir(), 'octomux-orchestrator-prompt.md');
+    tmpPrompt = path.join(os.tmpdir(), 'octomux-orchestrator-prompt.md');
     await fs.promises.writeFile(tmpPrompt, customPrompt, 'utf-8');
     claudeCmd = `claude --system-prompt "$(cat ${tmpPrompt})"`;
   } else {
@@ -70,6 +71,13 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
   claudeCmd += messagePart;
 
   await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, claudeCmd, 'Enter']);
+
+  if (tmpPrompt) {
+    const pf = tmpPrompt;
+    setTimeout(() => {
+      fs.promises.unlink(pf).catch(() => {});
+    }, 5000);
+  }
 }
 
 export async function sendToOrchestrator(message: string): Promise<void> {
