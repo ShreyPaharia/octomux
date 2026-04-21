@@ -263,16 +263,35 @@ export function getAgentActivity(
   };
 }
 
-// ─── Dead Session Mock ──────────────────────────────────────────────────────
+// ─── execFile Callback Mocks ────────────────────────────────────────────────
+
+/**
+ * Creates an execFile mock implementation that calls back with (null, { stdout, stderr }).
+ */
+export function execFileOk(stdout = '', stderr = ''): (...args: any[]) => any {
+  return (...args: any[]) => {
+    const cb = findCallback(...args);
+    if (cb) cb(null, { stdout, stderr });
+    return undefined as any;
+  };
+}
+
+/**
+ * Creates an execFile mock implementation that calls back with an error.
+ */
+export function execFileFail(err: Error | string = 'exec failed'): (...args: any[]) => any {
+  const error = typeof err === 'string' ? new Error(err) : err;
+  return (...args: any[]) => {
+    const cb = findCallback(...args);
+    if (cb) cb(error);
+    return undefined as any;
+  };
+}
 
 /**
  * Creates an execFile mock implementation that simulates a dead tmux session.
  */
-export function deadSessionMock(...args: any[]): any {
-  const cb = findCallback(...args);
-  if (cb) cb(new Error('session not found'));
-  return undefined as any;
-}
+export const deadSessionMock = execFileFail('session not found');
 
 // ─── Table-Driven Helpers ────────────────────────────────────────────────────
 
