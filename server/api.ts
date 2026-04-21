@@ -73,6 +73,21 @@ function loadTaskOrFail(req: Request, res: Response): Task | null {
   return task;
 }
 
+/** Map a thrown domain error to an HTTP response. */
+function sendDomainError(res: Response, err: unknown): void {
+  const e = err as NodeJS.ErrnoException;
+  const msg = e.message || 'Unknown error';
+  if (e.code === 'ENOENT' || msg.includes('not found') || msg.includes('does not exist')) {
+    res.status(404).json({ error: msg });
+  } else if (msg.includes('already exists')) {
+    res.status(409).json({ error: msg });
+  } else if (msg.startsWith('Invalid') || msg.includes('required')) {
+    res.status(400).json({ error: msg });
+  } else {
+    res.status(500).json({ error: msg });
+  }
+}
+
 /** Reload a task with its related agents and user_terminals. */
 function fetchTaskBundle(taskId: string): Task {
   const db = getDb();
@@ -823,8 +838,7 @@ export function setupRoutes(app: Express): void {
       const agent = await getAgent(req.params.name as string);
       res.json(agent);
     } catch (err) {
-      const status = (err as Error).message.includes('not found') ? 404 : 500;
-      res.status(status).json({ error: (err as Error).message });
+      sendDomainError(res, err);
     }
   });
 
@@ -862,8 +876,7 @@ export function setupRoutes(app: Express): void {
       }
       res.json({ ok: true });
     } catch (err) {
-      const status = (err as Error).message.includes('not found') ? 404 : 500;
-      res.status(status).json({ error: (err as Error).message });
+      sendDomainError(res, err);
     }
   });
 
@@ -878,8 +891,7 @@ export function setupRoutes(app: Express): void {
       const agent = await getAgent(name);
       res.status(201).json(agent);
     } catch (err) {
-      const status = (err as Error).message.includes('already exists') ? 409 : 500;
-      res.status(status).json({ error: (err as Error).message });
+      sendDomainError(res, err);
     }
   });
 
@@ -899,18 +911,7 @@ export function setupRoutes(app: Express): void {
       const skill = await getSkill(req.params.name as string);
       res.json(skill);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (
-        e.code === 'ENOENT' ||
-        e.message.includes('not found') ||
-        e.message.includes('does not exist')
-      ) {
-        res.status(404).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 
@@ -924,14 +925,7 @@ export function setupRoutes(app: Express): void {
       const skill = await createSkill(name, content || '');
       res.status(201).json(skill);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.message.includes('already exists')) {
-        res.status(409).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 
@@ -945,18 +939,7 @@ export function setupRoutes(app: Express): void {
       const skill = await updateSkill(req.params.name as string, content);
       res.json(skill);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (
-        e.code === 'ENOENT' ||
-        e.message.includes('not found') ||
-        e.message.includes('does not exist')
-      ) {
-        res.status(404).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 
@@ -965,18 +948,7 @@ export function setupRoutes(app: Express): void {
       await deleteSkill(req.params.name as string);
       res.status(204).send();
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (
-        e.code === 'ENOENT' ||
-        e.message.includes('not found') ||
-        e.message.includes('does not exist')
-      ) {
-        res.status(404).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 }
