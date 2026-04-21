@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
@@ -17,7 +17,8 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
+  const fetchTasks = useCallback(() => {
+    setLoading(true);
     api
       .listTasks()
       .then((all) => setTasks(all.filter((t) => ALLOWED_STATUSES.has(t.status))))
@@ -25,11 +26,22 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
       .finally(() => setLoading(false));
   }, []);
 
+  // Initial fetch + refetch on each popover open so newly created or status-
+  // changed tasks show up without a full page reload.
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
   const filtered = tasks.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()));
   const selected = tasks.find((t) => t.id === value);
 
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) fetchTasks();
+  };
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={
           <button
