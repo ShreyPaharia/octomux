@@ -8,10 +8,7 @@ import { StatusBadge } from './StatusBadge';
 import { AgentActivitySummary } from './AgentActivitySummary';
 import { PermissionPromptRow } from './PermissionPromptRow';
 import { timeAgo } from '@/lib/time';
-
-function repoName(repoPath: string): string {
-  return repoPath.split('/').pop() || repoPath;
-}
+import { repoName } from '@/lib/utils';
 
 interface TaskCardProps {
   task: Task;

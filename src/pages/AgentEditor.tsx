@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { showToast } from '@/components/CustomToast';
+import { useSaveShortcut, useUnsavedWarning } from '@/lib/use-editor-shortcuts';
 
 export default function AgentEditor() {
   const { name } = useParams<{ name: string }>();
@@ -17,16 +18,26 @@ export default function AgentEditor() {
 
   useEffect(() => {
     if (!name) return;
+    let cancelled = false;
     api
       .getAgent(name)
       .then((agent) => {
-        setContent(agent.content);
-        setDefaultContent(agent.defaultContent);
-        setIsCustom(agent.isCustom);
-        savedContentRef.current = agent.content;
+        if (!cancelled) {
+          setContent(agent.content);
+          setDefaultContent(agent.defaultContent);
+          setIsCustom(agent.isCustom);
+          savedContentRef.current = agent.content;
+        }
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [name]);
 
   const save = useCallback(async () => {
@@ -58,16 +69,8 @@ export default function AgentEditor() {
     }
   }, [name, defaultContent]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        save();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [save]);
+  useSaveShortcut(save);
+  useUnsavedWarning(isDirty);
 
   const handleBack = useCallback(() => {
     if (isDirty) {
@@ -76,14 +79,6 @@ export default function AgentEditor() {
     }
     navigate('/settings');
   }, [isDirty, navigate]);
-
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) e.preventDefault();
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isDirty]);
 
   if (loading) {
     return (

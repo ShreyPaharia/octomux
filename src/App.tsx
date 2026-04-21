@@ -1,11 +1,11 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { useTasks } from './lib/hooks';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import Dashboard from './pages/Dashboard';
 import { OrchestratorProvider } from './lib/orchestrator-context';
+import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
 
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
@@ -16,7 +16,7 @@ const AgentEditor = lazy(() => import('./pages/AgentEditor'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
-  const { tasks } = useTasks();
+  const { tasks } = useTasksContext();
   const navigate = useNavigate();
   useAttentionIndicator(tasks);
   useNotifications(tasks, navigate);
@@ -57,37 +57,45 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 export default function App() {
   return (
     <ErrorBoundary>
-      <OrchestratorProvider>
-        <div className="flex h-screen bg-background text-foreground">
-          <Toaster
-            theme="dark"
-            position="bottom-right"
-            toastOptions={{
-              unstyled: true,
-            }}
-          />
-          <GlobalNotifications />
-          <UniversalSidebar />
-          <main className="min-h-0 min-w-0 flex-1">
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Loading...
-                </div>
-              }
-            >
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/tasks/:id" element={<TaskDetail />} />
-                <Route path="/orchestrator" element={<OrchestratorPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/skills/:name" element={<SkillEditor />} />
-                <Route path="/agents/:name" element={<AgentEditor />} />
-              </Routes>
-            </Suspense>
-          </main>
-        </div>
-      </OrchestratorProvider>
+      <TasksProvider>
+        <OrchestratorProvider>
+          <AppShell />
+        </OrchestratorProvider>
+      </TasksProvider>
     </ErrorBoundary>
+  );
+}
+
+function AppShell() {
+  return (
+    <div className="flex h-screen bg-background text-foreground">
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        toastOptions={{
+          unstyled: true,
+        }}
+      />
+      <GlobalNotifications />
+      <UniversalSidebar />
+      <main className="min-h-0 min-w-0 flex-1">
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              Loading...
+            </div>
+          }
+        >
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/tasks/:id" element={<TaskDetail />} />
+            <Route path="/orchestrator" element={<OrchestratorPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/skills/:name" element={<SkillEditor />} />
+            <Route path="/agents/:name" element={<AgentEditor />} />
+          </Routes>
+        </Suspense>
+      </main>
+    </div>
   );
 }

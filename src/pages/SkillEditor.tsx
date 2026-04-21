@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
+import { useSaveShortcut, useUnsavedWarning } from '@/lib/use-editor-shortcuts';
 
 export default function SkillEditor() {
   const { name } = useParams<{ name: string }>();
@@ -39,16 +40,8 @@ export default function SkillEditor() {
     }
   }, [name, content, isDirty, saving]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        save();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [save]);
+  useSaveShortcut(save);
+  useUnsavedWarning(isDirty);
 
   const handleBack = useCallback(() => {
     if (isDirty) {
@@ -57,16 +50,6 @@ export default function SkillEditor() {
     }
     navigate('/settings');
   }, [isDirty, navigate]);
-
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (isDirty) {
-        e.preventDefault();
-      }
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isDirty]);
 
   if (loading) {
     return (

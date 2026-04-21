@@ -40,7 +40,7 @@ describe('settings', () => {
     });
 
     it('returns saved settings when file exists', async () => {
-      const saved: OctomuxSettings = { editor: 'cursor' };
+      const saved: OctomuxSettings = { editor: 'cursor', useOrchestratorAgent: false };
       mockFs.readFile.mockResolvedValue(JSON.stringify(saved));
       const settings = await getSettings();
       expect(settings).toEqual({ ...DEFAULT_SETTINGS, ...saved });
@@ -63,7 +63,7 @@ describe('settings', () => {
       expect(result.editor).toBe('vscode');
       expect(mockFs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('settings.json'),
-        JSON.stringify({ editor: 'vscode' }, null, 2),
+        JSON.stringify({ editor: 'vscode', useOrchestratorAgent: false }, null, 2),
         'utf-8',
       );
     });

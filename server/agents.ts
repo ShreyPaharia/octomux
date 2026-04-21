@@ -19,7 +19,7 @@ export interface AgentDetail {
 }
 
 function builtInDir(): string {
-  return path.resolve(__dirname, '..', '.claude', 'agents');
+  return path.resolve(__dirname, '..', 'agents');
 }
 
 function customDir(): string {
@@ -36,6 +36,10 @@ function parseFrontmatter(content: string): { name: string; description: string 
     name: nameMatch ? nameMatch[1].trim() : '',
     description: descMatch ? descMatch[1].trim() : '',
   };
+}
+
+export function isBuiltInAgent(name: string): boolean {
+  return fs.existsSync(path.join(builtInDir(), `${name}.md`));
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -114,8 +118,8 @@ export async function resetAgent(name: string): Promise<void> {
   const customPath = path.join(customDir(), `${name}.md`);
   try {
     await fs.promises.unlink(customPath);
-  } catch (err: any) {
-    if (err.code === 'ENOENT') return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw err;
   }
 }
@@ -126,6 +130,21 @@ export async function createAgent(name: string, content: string): Promise<void> 
     throw new Error(`Agent already exists: ${name}`);
   }
   await saveAgent(name, content);
+}
+
+/**
+ * Sync effective agent files (custom override or built-in default) to
+ * `.claude/agents/` in the working directory so `claude --agent <name>` works.
+ */
+export async function syncAgents(): Promise<void> {
+  const targetDir = path.join(process.cwd(), '.claude', 'agents');
+  await fs.promises.mkdir(targetDir, { recursive: true });
+
+  const agents = await listAgents();
+  for (const def of agents) {
+    const agent = await getAgent(def.name);
+    await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
+  }
 }
 
 export async function deleteAgent(name: string): Promise<void> {

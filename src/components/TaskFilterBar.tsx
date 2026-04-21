@@ -2,6 +2,8 @@ import { memo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import type { StatusTab } from '@/lib/use-task-filters';
+import { repoName } from '@/lib/utils';
+import { ChevronDownIcon } from '@/components/icons';
 
 interface TaskFilterBarProps {
   activeStatus: StatusTab;
@@ -12,9 +14,11 @@ interface TaskFilterBarProps {
   onRepoChange: (repo: string) => void;
 }
 
-function repoName(repoPath: string): string {
-  return repoPath.split('/').pop() || repoPath;
-}
+const STATUS_TABS: ReadonlyArray<{ key: StatusTab; label: string }> = [
+  { key: 'open', label: 'Open' },
+  { key: 'backlog', label: 'Backlog' },
+  { key: 'closed', label: 'Closed' },
+];
 
 function RepoFilterDropdown({
   repos,
@@ -42,20 +46,7 @@ function RepoFilterDropdown({
             ) : (
               <span>ALL REPOS</span>
             )}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-[#8a8a8a]"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
+            <ChevronDownIcon size={12} className="text-[#8a8a8a]" />
           </button>
         }
       />
@@ -100,16 +91,10 @@ export const TaskFilterBar = memo(function TaskFilterBar({
   activeRepo,
   onRepoChange,
 }: TaskFilterBarProps) {
-  const tabs = [
-    { key: 'open' as const, label: 'Open', count: counts.open },
-    { key: 'backlog' as const, label: 'Backlog', count: counts.backlog },
-    { key: 'closed' as const, label: 'Closed', count: counts.closed },
-  ];
-
   return (
     <div className="mb-3 flex items-center justify-between border-b border-border">
       <div className="flex gap-1">
-        {tabs.map((tab) => (
+        {STATUS_TABS.map((tab) => (
           <button
             key={tab.key}
             className={`px-[16px] py-[10px] text-xs tracking-wider uppercase ${
@@ -123,7 +108,7 @@ export const TaskFilterBar = memo(function TaskFilterBar({
             <span
               className={`tabular-nums ${activeStatus === tab.key ? 'text-[#3B82F6]' : 'text-[#6a6a6a]'}`}
             >
-              ({tab.count})
+              ({counts[tab.key]})
             </span>
           </button>
         ))}

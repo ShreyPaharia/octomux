@@ -21,9 +21,11 @@ export function useOrchestrator() {
     }
   }, []);
 
+  // Fetch once on mount. Orchestrator status only changes on user action
+  // (start / stop / restart) so the explicit refresh in those handlers
+  // is sufficient — no need to poll on every task:* websocket event.
   useEffect(() => {
     refresh();
-    return subscribe(() => refresh());
   }, [refresh]);
 
   const start = useCallback(async () => {
