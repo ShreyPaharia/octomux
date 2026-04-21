@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useTasks } from '@/lib/hooks';
+import { useTasksContext } from '@/lib/tasks-context';
 import { useTaskFilters } from '@/lib/use-task-filters';
 import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
 export default function Dashboard() {
-  const { tasks, loading, error, refresh } = useTasks();
+  const { tasks, loading, error, refresh } = useTasksContext();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
 
   const handleClose = useCallback(

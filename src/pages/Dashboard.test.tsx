@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Dashboard from './Dashboard';
 import { renderWithRouter, makeTask, mockApi } from '../test-helpers';
+import { TasksProvider } from '../lib/tasks-context';
 
 const apiMock = mockApi();
 
@@ -15,6 +16,10 @@ vi.mock('@/lib/api', () => ({
   ),
 }));
 
+vi.mock('@/lib/event-source', () => ({
+  subscribe: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/lib/orchestrator-context', () => ({
   useOrchestratorContext: () => ({
     running: false,
@@ -25,6 +30,14 @@ vi.mock('@/lib/orchestrator-context', () => ({
     refresh: vi.fn(),
   }),
 }));
+
+function renderDashboard() {
+  return renderWithRouter(
+    <TasksProvider>
+      <Dashboard />
+    </TasksProvider>,
+  );
+}
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -43,13 +56,13 @@ describe('Dashboard', () => {
 
   it('shows loading state initially', () => {
     apiMock.listTasks.mockReturnValue(new Promise(() => {})); // never resolves
-    const { container } = renderWithRouter(<Dashboard />);
+    const { container } = renderDashboard();
     // Loading state now shows skeleton cards instead of text
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
   it('renders new task button', async () => {
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getAllByText('NEW TASK').length).toBeGreaterThan(0);
     });
@@ -58,7 +71,7 @@ describe('Dashboard', () => {
   // ─── Header ────────────────────────────────────────────────────────────────
 
   it('renders COMMAND CENTER heading', async () => {
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('COMMAND CENTER')).toBeInTheDocument();
     });
@@ -67,7 +80,7 @@ describe('Dashboard', () => {
   // ─── Task list rendering ──────────────────────────────────────────────────
 
   it('shows empty state when no tasks', async () => {
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('No tasks yet')).toBeInTheDocument();
     });
@@ -78,7 +91,7 @@ describe('Dashboard', () => {
       makeTask({ id: 't1', title: 'Task Alpha' }),
       makeTask({ id: 't2', title: 'Task Beta' }),
     ]);
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('Task Alpha')).toBeInTheDocument();
       expect(screen.getByText('Task Beta')).toBeInTheDocument();
@@ -89,7 +102,7 @@ describe('Dashboard', () => {
 
   it('shows error message when listTasks fails', async () => {
     apiMock.listTasks.mockRejectedValue(new Error('Network error'));
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText(/Network error/)).toBeInTheDocument();
     });
@@ -98,7 +111,7 @@ describe('Dashboard', () => {
   // ─── Filter bar ─────────────────────────────────────────────────────────
 
   it('shows Open and Closed filter tabs', async () => {
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText(/^Open/)).toBeInTheDocument();
       expect(screen.getByText(/^Closed/)).toBeInTheDocument();
@@ -110,7 +123,7 @@ describe('Dashboard', () => {
       makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
       makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
     ]);
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('Running Task')).toBeInTheDocument();
     });
@@ -123,7 +136,7 @@ describe('Dashboard', () => {
       makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
       makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
     ]);
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('Running Task')).toBeInTheDocument();
     });
@@ -139,7 +152,7 @@ describe('Dashboard', () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({ id: 't1', title: 'Draft Task', status: 'draft' }),
     ]);
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
     // Default filter is 'open', so draft should NOT appear
     await waitFor(() => {
       expect(screen.getByText(/^Backlog/)).toBeInTheDocument();
@@ -157,7 +170,7 @@ describe('Dashboard', () => {
   it('calls updateTask to close when close button is clicked on running task', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([makeTask({ status: 'running' })]);
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByText('Fix order validation')).toBeInTheDocument();
@@ -175,7 +188,7 @@ describe('Dashboard', () => {
   it('calls deleteTask when delete button is clicked on closed task', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([makeTask({ status: 'closed' })]);
-    renderWithRouter(<Dashboard />);
+    renderDashboard();
 
     // Switch to Closed filter to see closed tasks
     await waitFor(() => {

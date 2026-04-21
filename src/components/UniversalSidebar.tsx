@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useTasks } from '@/lib/hooks';
+import { useTasksContext } from '@/lib/tasks-context';
 import { groupTasksForSidebar, type SidebarItem } from '@/lib/sidebar-utils';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
 
@@ -145,7 +145,7 @@ function SettingsIcon({ color }: { color: string }) {
 
 export function UniversalSidebar() {
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
-  const { tasks } = useTasks();
+  const { tasks } = useTasksContext();
   const location = useLocation();
   const { running: orchestratorRunning } = useOrchestratorContext();
 
