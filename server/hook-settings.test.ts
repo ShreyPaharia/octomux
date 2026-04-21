@@ -169,4 +169,19 @@ describe('installHookSettings', () => {
     );
     expect(settings.hooks).toBeDefined();
   });
+
+  it('honors OCTOMUX_PORT env var for hook URLs', () => {
+    const prev = process.env.OCTOMUX_PORT;
+    process.env.OCTOMUX_PORT = '8080';
+    try {
+      installHookSettings(tmpDir);
+      const settings = JSON.parse(
+        fs.readFileSync(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf-8'),
+      );
+      expect(settings.hooks.Stop[0].hooks[0].url).toBe('http://localhost:8080/api/hooks/stop');
+    } finally {
+      if (prev === undefined) delete process.env.OCTOMUX_PORT;
+      else process.env.OCTOMUX_PORT = prev;
+    }
+  });
 });

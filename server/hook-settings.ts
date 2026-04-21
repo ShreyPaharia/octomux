@@ -118,52 +118,24 @@ const ALLOWED_TOOLS = [
   'mcp__plugin_playwright_playwright__browser_type',
 ];
 
-const HOOK_EVENTS = {
-  UserPromptSubmit: [
-    {
-      hooks: [
-        {
-          type: 'http',
-          url: 'http://localhost:7777/api/hooks/user-prompt-submit',
-          timeout: 5,
-        },
-      ],
-    },
-  ],
-  PermissionRequest: [
-    {
-      hooks: [
-        {
-          type: 'http',
-          url: 'http://localhost:7777/api/hooks/permission-request',
-          timeout: 5,
-        },
-      ],
-    },
-  ],
-  PostToolUse: [
-    {
-      hooks: [
-        {
-          type: 'http',
-          url: 'http://localhost:7777/api/hooks/post-tool-use',
-          timeout: 5,
-        },
-      ],
-    },
-  ],
-  Stop: [
-    {
-      hooks: [
-        {
-          type: 'http',
-          url: 'http://localhost:7777/api/hooks/stop',
-          timeout: 5,
-        },
-      ],
-    },
-  ],
-};
+/** Port the server listens on. Honors OCTOMUX_PORT / PORT with a 7777 default. */
+function hookPort(): string | number {
+  return process.env.OCTOMUX_PORT || process.env.PORT || 7777;
+}
+
+function buildHookEvents(port: string | number) {
+  const base = `http://localhost:${port}/api/hooks`;
+  return {
+    UserPromptSubmit: [
+      { hooks: [{ type: 'http', url: `${base}/user-prompt-submit`, timeout: 5 }] },
+    ],
+    PermissionRequest: [
+      { hooks: [{ type: 'http', url: `${base}/permission-request`, timeout: 5 }] },
+    ],
+    PostToolUse: [{ hooks: [{ type: 'http', url: `${base}/post-tool-use`, timeout: 5 }] }],
+    Stop: [{ hooks: [{ type: 'http', url: `${base}/stop`, timeout: 5 }] }],
+  };
+}
 
 /**
  * Install Claude Code hook settings into a worktree's `.claude/settings.local.json`.
@@ -195,7 +167,7 @@ export function installHookSettings(worktreePath: string): void {
       ? (existing.hooks as Record<string, unknown>)
       : {};
 
-  const mergedHooks = { ...existingHooks, ...HOOK_EVENTS };
+  const mergedHooks = { ...existingHooks, ...buildHookEvents(hookPort()) };
 
   // Merge permissions: combine our allowed tools with any existing ones (deduplicated)
   const existingPerms =
