@@ -13,6 +13,12 @@ interface TaskFilterBarProps {
   onRepoChange: (repo: string) => void;
 }
 
+const STATUS_TABS: ReadonlyArray<{ key: StatusTab; label: string }> = [
+  { key: 'open', label: 'Open' },
+  { key: 'backlog', label: 'Backlog' },
+  { key: 'closed', label: 'Closed' },
+];
+
 function RepoFilterDropdown({
   repos,
   activeRepo,
@@ -97,16 +103,10 @@ export const TaskFilterBar = memo(function TaskFilterBar({
   activeRepo,
   onRepoChange,
 }: TaskFilterBarProps) {
-  const tabs = [
-    { key: 'open' as const, label: 'Open', count: counts.open },
-    { key: 'backlog' as const, label: 'Backlog', count: counts.backlog },
-    { key: 'closed' as const, label: 'Closed', count: counts.closed },
-  ];
-
   return (
     <div className="mb-3 flex items-center justify-between border-b border-border">
       <div className="flex gap-1">
-        {tabs.map((tab) => (
+        {STATUS_TABS.map((tab) => (
           <button
             key={tab.key}
             className={`px-[16px] py-[10px] text-xs tracking-wider uppercase ${
@@ -120,7 +120,7 @@ export const TaskFilterBar = memo(function TaskFilterBar({
             <span
               className={`tabular-nums ${activeStatus === tab.key ? 'text-[#3B82F6]' : 'text-[#6a6a6a]'}`}
             >
-              ({tab.count})
+              ({counts[tab.key]})
             </span>
           </button>
         ))}
