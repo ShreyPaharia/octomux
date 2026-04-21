@@ -118,8 +118,8 @@ export async function resetAgent(name: string): Promise<void> {
   const customPath = path.join(customDir(), `${name}.md`);
   try {
     await fs.promises.unlink(customPath);
-  } catch (err: any) {
-    if (err.code === 'ENOENT') return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw err;
   }
 }

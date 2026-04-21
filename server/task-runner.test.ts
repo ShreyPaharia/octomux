@@ -115,6 +115,8 @@ describe('slugifyTitle', () => {
     { title: '---leading---trailing---', id: 'xyz789', expected: 'leading-trailing-xyz789' },
     { title: 'a'.repeat(60), id: 'id1234', expected: 'a'.repeat(50) + '-id1234' },
     { title: 'Hello   World', id: '123456', expected: 'hello-world-123456' },
+    { title: 'Café Résumé', id: 'abc789', expected: 'cafe-resume-abc789' },
+    { title: '日本語タイトル only ascii kept', id: 'uni123', expected: 'only-ascii-kept-uni123' },
   ];
 
   it.each(cases)('slugifies "$title" → "$expected"', ({ title, id, expected }) => {

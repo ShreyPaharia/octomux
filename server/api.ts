@@ -70,6 +70,44 @@ function safeParseJson(s: string): Record<string, unknown> {
   }
 }
 
+/** Load a task by :id param; respond 404 and return null if missing. */
+function loadTaskOrFail(req: Request, res: Response): Task | null {
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+    | Task
+    | undefined;
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return null;
+  }
+  return task;
+}
+
+/** Map a thrown domain error to an HTTP response. */
+function sendDomainError(res: Response, err: unknown): void {
+  const e = err as NodeJS.ErrnoException;
+  const msg = e.message || 'Unknown error';
+  if (e.code === 'ENOENT' || msg.includes('not found') || msg.includes('does not exist')) {
+    res.status(404).json({ error: msg });
+  } else if (msg.includes('already exists')) {
+    res.status(409).json({ error: msg });
+  } else if (msg.startsWith('Invalid') || msg.includes('required')) {
+    res.status(400).json({ error: msg });
+  } else {
+    res.status(500).json({ error: msg });
+  }
+}
+
+/** Reload a task with its related agents and user_terminals. */
+function fetchTaskBundle(taskId: string): Task {
+  const db = getDb();
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task;
+  task.agents = db
+    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+    .all(taskId) as Agent[];
+  task.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(taskId) as UserTerminal[];
+  return task;
+}
+
 function derivedStatus(task: {
   status: string;
   agents: Array<{ status: string; hook_activity: string }>;
@@ -101,25 +139,23 @@ export function setupRoutes(app: Express): void {
     }
 
     const dirEntries = await fs.promises.readdir(dirPath);
-    const entries: Array<{ name: string; path: string; isGit: boolean }> = [];
-
-    for (const name of dirEntries) {
-      const fullPath = path.join(dirPath, name);
-      try {
-        const stat = await fs.promises.stat(fullPath);
-        if (!stat.isDirectory()) continue;
-        let isGit = false;
+    const resolved = await Promise.all(
+      dirEntries.map(async (name): Promise<{ name: string; path: string; isGit: boolean } | null> => {
+        const fullPath = path.join(dirPath, name);
         try {
-          await fs.promises.access(path.join(fullPath, '.git'));
-          isGit = true;
+          const stat = await fs.promises.stat(fullPath);
+          if (!stat.isDirectory()) return null;
+          const isGit = await fs.promises
+            .access(path.join(fullPath, '.git'))
+            .then(() => true)
+            .catch(() => false);
+          return { name, path: fullPath, isGit };
         } catch {
-          // not a git repo
+          return null;
         }
-        entries.push({ name, path: fullPath, isGit });
-      } catch {
-        // skip unreadable entries
-      }
-    }
+      }),
+    );
+    const entries = resolved.filter((e): e is { name: string; path: string; isGit: boolean } => e !== null);
 
     entries.sort((a, b) => {
       if (a.isGit !== b.isGit) return a.isGit ? -1 : 1;
@@ -282,14 +318,9 @@ export function setupRoutes(app: Express): void {
 
   // Get single task with agents
   app.get('/api/tasks/:id', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
     const agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
@@ -366,15 +397,9 @@ export function setupRoutes(app: Express): void {
   // Update task status
   app.patch('/api/tasks/:id', async (req: Request, res: Response) => {
     const body = req.body as UpdateTaskRequest;
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
 
     // Draft field updates (title, description, repo_path, branch, base_branch, initial_prompt)
     const hasDraftFields = [
@@ -447,26 +472,16 @@ export function setupRoutes(app: Express): void {
       await closeTask(task);
     }
 
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
-    updated.agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(task.id) as Agent[];
-    updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
+    const updated = fetchTaskBundle(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
   });
 
   // Start a draft task
   app.post('/api/tasks/:id/start', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
 
     if (task.status !== 'draft') {
       res.status(400).json({ error: 'Only draft tasks can be started' });
@@ -478,11 +493,7 @@ export function setupRoutes(app: Express): void {
       `UPDATE tasks SET status = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
-    updated.agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(task.id) as Agent[];
-    updated.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
+    const updated = fetchTaskBundle(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(updated);
 
@@ -498,19 +509,13 @@ export function setupRoutes(app: Express): void {
 
   // Delete task
   app.delete('/api/tasks/:id', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
 
     const taskId = task.id;
     await deleteTask(task);
-    db.prepare('DELETE FROM agents WHERE task_id = ?').run(taskId);
+    // ON DELETE CASCADE removes agents, permission_prompts, user_terminals
     db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
     broadcast({ type: 'task:deleted', payload: { taskId } });
     res.status(204).send();
@@ -518,15 +523,8 @@ export function setupRoutes(app: Express): void {
 
   // Add agent to task
   app.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Can only add agents to running tasks' });
@@ -541,15 +539,13 @@ export function setupRoutes(app: Express): void {
 
   // Stop agent
   app.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-    const agent = db
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const agent = getDb()
       .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
       .get(req.params.agentId, req.params.id) as Agent | undefined;
 
-    if (!task || !agent) {
+    if (!agent) {
       res.status(404).json({ error: 'Task or agent not found' });
       return;
     }
@@ -561,15 +557,8 @@ export function setupRoutes(app: Express): void {
 
   // Create user terminal (lazily creates tmux window with nvim)
   app.post('/api/tasks/:id/user-terminal', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Can only create user terminal for running tasks' });
@@ -592,15 +581,9 @@ export function setupRoutes(app: Express): void {
 
   // Create shell terminal
   app.post('/api/tasks/:id/terminals', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Can only create terminals for running tasks' });
       return;
@@ -621,17 +604,10 @@ export function setupRoutes(app: Express): void {
 
   // Close shell terminal
   app.delete('/api/tasks/:id/terminals/:terminalId', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
-
-    const terminal = db
+    const terminal = getDb()
       .prepare('SELECT * FROM user_terminals WHERE id = ? AND task_id = ?')
       .get(req.params.terminalId, req.params.id) as UserTerminal | undefined;
 
@@ -651,22 +627,15 @@ export function setupRoutes(app: Express): void {
 
   // Send message to agent via tmux send-keys
   app.post('/api/tasks/:id/agents/:agentId/message', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Task is not running' });
       return;
     }
 
-    const agent = db
+    const agent = getDb()
       .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
       .get(req.params.agentId, req.params.id) as Agent | undefined;
 
@@ -876,8 +845,7 @@ export function setupRoutes(app: Express): void {
       const agent = await getAgent(req.params.name as string);
       res.json(agent);
     } catch (err) {
-      const status = (err as Error).message.includes('not found') ? 404 : 500;
-      res.status(status).json({ error: (err as Error).message });
+      sendDomainError(res, err);
     }
   });
 
@@ -916,8 +884,7 @@ export function setupRoutes(app: Express): void {
       }
       res.json({ ok: true });
     } catch (err) {
-      const status = (err as Error).message.includes('not found') ? 404 : 500;
-      res.status(status).json({ error: (err as Error).message });
+      sendDomainError(res, err);
     }
   });
 
@@ -933,8 +900,7 @@ export function setupRoutes(app: Express): void {
       const agent = await getAgent(name);
       res.status(201).json(agent);
     } catch (err) {
-      const status = (err as Error).message.includes('already exists') ? 409 : 500;
-      res.status(status).json({ error: (err as Error).message });
+      sendDomainError(res, err);
     }
   });
 
@@ -954,18 +920,7 @@ export function setupRoutes(app: Express): void {
       const skill = await getSkill(req.params.name as string);
       res.json(skill);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (
-        e.code === 'ENOENT' ||
-        e.message.includes('not found') ||
-        e.message.includes('does not exist')
-      ) {
-        res.status(404).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 
@@ -979,14 +934,7 @@ export function setupRoutes(app: Express): void {
       const skill = await createSkill(name, content || '');
       res.status(201).json(skill);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (e.message.includes('already exists')) {
-        res.status(409).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 
@@ -1000,18 +948,7 @@ export function setupRoutes(app: Express): void {
       const skill = await updateSkill(req.params.name as string, content);
       res.json(skill);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (
-        e.code === 'ENOENT' ||
-        e.message.includes('not found') ||
-        e.message.includes('does not exist')
-      ) {
-        res.status(404).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 
@@ -1020,18 +957,7 @@ export function setupRoutes(app: Express): void {
       await deleteSkill(req.params.name as string);
       res.status(204).send();
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (
-        e.code === 'ENOENT' ||
-        e.message.includes('not found') ||
-        e.message.includes('does not exist')
-      ) {
-        res.status(404).json({ error: e.message });
-      } else if (e.message.includes('Invalid skill name')) {
-        res.status(400).json({ error: e.message });
-      } else {
-        res.status(500).json({ error: e.message });
-      }
+      sendDomainError(res, err);
     }
   });
 }

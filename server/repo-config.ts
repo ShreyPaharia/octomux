@@ -32,23 +32,22 @@ export async function getOrCreateRepoConfig(repoPath: string): Promise<RepoConfi
     ]);
     baseBranch = stdout.trim().replace('refs/remotes/origin/', '');
   } catch {
-    for (const candidate of ['main', 'master', 'staging']) {
-      try {
-        await execFile('git', ['-C', repoPath, 'rev-parse', '--verify', candidate]);
-        baseBranch = candidate;
-        break;
-      } catch {
-        // Try next
-      }
-    }
+    // Parallel probe; pick the first matching candidate in preference order
+    const candidates = ['main', 'master', 'staging'];
+    const results = await Promise.all(
+      candidates.map((c) =>
+        execFile('git', ['-C', repoPath, 'rev-parse', '--verify', c])
+          .then(() => true)
+          .catch(() => false),
+      ),
+    );
+    const hit = results.findIndex((ok) => ok);
+    if (hit >= 0) baseBranch = candidates[hit];
   }
 
-  db.prepare(`INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?)`).run(
-    repoPath,
-    baseBranch,
-  );
-
-  return db.prepare('SELECT * FROM repo_configs WHERE repo_path = ?').get(repoPath) as RepoConfig;
+  return db
+    .prepare(`INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?) RETURNING *`)
+    .get(repoPath, baseBranch) as RepoConfig;
 }
 
 export function updateRepoConfig(
@@ -79,10 +78,12 @@ export function updateRepoConfig(
   if (fields.length > 0) {
     fields.push(`updated_at = datetime('now')`);
     values.push(repoPath);
-    db.prepare(`UPDATE repo_configs SET ${fields.join(', ')} WHERE repo_path = ?`).run(...values);
+    return db
+      .prepare(`UPDATE repo_configs SET ${fields.join(', ')} WHERE repo_path = ? RETURNING *`)
+      .get(...values) as RepoConfig;
   }
 
-  return db.prepare('SELECT * FROM repo_configs WHERE repo_path = ?').get(repoPath) as RepoConfig;
+  return existing;
 }
 
 export function listRepoConfigs(): RepoConfig[] {
