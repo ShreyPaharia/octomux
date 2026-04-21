@@ -5,8 +5,8 @@ import Dashboard from './Dashboard';
 import { renderWithRouter, makeTask } from '../test-helpers';
 import { TasksProvider } from '../lib/tasks-context';
 
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
@@ -26,8 +26,8 @@ vi.mock('@/lib/orchestrator-context', () => ({
   }),
 }));
 
-const { routerMockFactory } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+const { routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
 

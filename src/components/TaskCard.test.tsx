@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { TaskCard } from './TaskCard';
 import { renderWithRouter, makeTask } from '../test-helpers';
 
-const { mockNavigate, routerMockFactory } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
 

@@ -76,7 +76,11 @@ export function TerminalView({
       };
 
       ws.onclose = (event) => {
-        if (unmounted.current) return;
+        // Skip reconnect if we unmounted OR if this ws has already been replaced.
+        // A replaced ws (via prop change or explicit reconnect) must not trigger
+        // a reconnect via its now-stale closure — that closure captures the old
+        // taskId/windowIndex and would route input to the wrong agent.
+        if (unmounted.current || wsRef.current !== ws) return;
         if (event.code !== 1000 && event.code !== 1001) {
           term.write('\r\n\x1b[31m[Terminal disconnected — reconnecting...]\x1b[0m\r\n');
           // Exponential backoff reconnection
