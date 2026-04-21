@@ -47,7 +47,9 @@ async function recoverTasks(): Promise<void> {
     // Session is dead
     if (task.worktree && fs.existsSync(task.worktree)) {
       console.warn(`[recovery] Resuming task ${task.id}: ${task.title}`);
-      resumeTask(task);
+      resumeTask(task).catch((err) => {
+        console.error(`[recovery] resumeTask failed for ${task.id}:`, err);
+      });
     } else if (task.status === 'setting_up') {
       console.warn(`[recovery] Setup interrupted for task ${task.id}: ${task.title}`);
       db.prepare(
