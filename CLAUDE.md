@@ -33,10 +33,26 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
   - `app.ts` — extracted `createApp()` for testability
   - `task-runner.ts` — worktree + tmux + claude lifecycle (closeTask, deleteTask)
   - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
+  - `logger.ts` — pino root + `childLogger('<module>')` helper
   - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
 - `src/` — React SPA (pages, components, lib/api.ts)
 - `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
 - `e2e/` — Playwright E2E tests
+
+## Logging
+
+- All server-side logs go through `server/logger.ts` (pino). Use
+  `const logger = childLogger('<module>');` at the top of each `server/` file and
+  emit structured events — `logger.info({ task_id, operation, ... }, 'message')`.
+  Never use `console.*` in `server/`.
+- Every task/agent lifecycle log line must include `task_id` (and `agent_id`
+  where relevant) so grep can reconstruct a timeline:
+  `grep '"task_id":"<id>"' ~/.octomux/logs/octomux.log`.
+- Output: dev = pretty stdout + rotated JSON at `./data/logs/octomux.log`,
+  prod = rotated JSON at `~/.octomux/logs/octomux.log`, test = silent.
+- Rotation: daily or 10MB, 7 files kept (pino-roll).
+- Default level: `info` in prod, `debug` in dev; override with `LOG_LEVEL`.
+- Tests assert log output by piping pino into a buffer via `setLogger(pino({level:'trace'}, stream))`.
 
 ## Task Lifecycle
 
@@ -85,3 +101,5 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - vitest projects: put `globals: true` in each project config individually, not just top-level
 - Frontend test helpers in `src/test-helpers.tsx`: `makeTask()`, `renderWithRouter()`, `mockApi()`
 - poller tests: use `findCallback(...args)` to find callback in promisified execFile mocks
+- logger path resolution is lazy — tests that stub `os`/`fs` must not expect the log
+  dir to exist at module-load time (pino is silent in NODE_ENV=test anyway)
