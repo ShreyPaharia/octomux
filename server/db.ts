@@ -3,8 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { childLogger } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const logger = childLogger('db');
 const isProduction = process.env.NODE_ENV === 'production';
 
 const PROD_DB_DIR = path.join(os.homedir(), '.octomux', 'data');
@@ -96,9 +98,9 @@ export function getDb(): Database.Database {
 
     // In production, check for database at old package-relative location
     if (isProduction && OLD_DB_PATH !== DB_PATH && fs.existsSync(OLD_DB_PATH)) {
-      console.log(
-        `Found database at old location: ${OLD_DB_PATH}\n` +
-          `Copy to ${DB_PATH} to migrate your data.`,
+      logger.info(
+        { old_path: OLD_DB_PATH, new_path: DB_PATH },
+        'Found database at old location — copy to new location to migrate',
       );
     }
 
