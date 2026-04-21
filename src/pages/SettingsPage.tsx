@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
+import { useSaveShortcut } from '@/lib/use-editor-shortcuts';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -580,16 +581,7 @@ function OrchestratorPromptSection() {
     }
   }, []);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        save();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [save]);
+  useSaveShortcut(save);
 
   if (loading) {
     return <p className="py-3 text-xs text-[#6a6a6a]">Loading prompt...</p>;
