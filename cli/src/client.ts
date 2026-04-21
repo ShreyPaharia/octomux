@@ -62,6 +62,12 @@ export interface OctomuxClient {
   }>;
 }
 
+function qs(params: Record<string, string | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][];
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+}
+
 async function request<T>(baseUrl: string, path: string, options?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -96,8 +102,7 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<Task>(baseUrl, '/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
     listTasks(params) {
-      const query = params?.repo_path ? `?repo_path=${encodeURIComponent(params.repo_path)}` : '';
-      return request<Task[]>(baseUrl, `/tasks${query}`);
+      return request<Task[]>(baseUrl, `/tasks${qs({ repo_path: params?.repo_path })}`);
     },
     getTask(id) {
       return request<Task>(baseUrl, `/tasks/${encodeURIComponent(id)}`);
@@ -153,13 +158,10 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<{ repo_path: string; last_used: string }[]>(baseUrl, '/recent-repos');
     },
     defaultBranch(repoPath) {
-      return request<{ branch: string }>(
-        baseUrl,
-        `/default-branch?repo_path=${encodeURIComponent(repoPath)}`,
-      );
+      return request<{ branch: string }>(baseUrl, `/default-branch${qs({ repo_path: repoPath })}`);
     },
     getRepoConfig(repoPath) {
-      return request(baseUrl, `/repo-config?repo_path=${encodeURIComponent(repoPath)}`);
+      return request(baseUrl, `/repo-config${qs({ repo_path: repoPath })}`);
     },
   };
 }
