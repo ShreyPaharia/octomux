@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { CreateTaskDialog } from './CreateTaskDialog';
 import { renderWithRouter } from '../test-helpers';
 
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
