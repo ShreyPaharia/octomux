@@ -4,6 +4,15 @@ import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
+import { repoName } from '@/lib/utils';
+import { useSaveShortcut } from '@/lib/use-editor-shortcuts';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -129,43 +138,37 @@ function AgentsSection() {
         </div>
       )}
 
-      {showCreate && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setShowCreate(false)}
-        >
-          <div
-            className="w-full max-w-md rounded border border-[#2f2f2f] bg-[#0A0A0A] p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="mb-4 text-sm font-bold">Create Agent</h3>
-            <input
-              type="text"
-              placeholder="Agent name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-              className="mb-4 w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-              autoFocus
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
-                onClick={() => setShowCreate(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
-                onClick={handleCreate}
-                disabled={creating || !newName.trim()}
-              >
-                {creating ? 'Creating...' : 'Create'}
-              </button>
-            </div>
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold">Create Agent</DialogTitle>
+          </DialogHeader>
+          <input
+            type="text"
+            placeholder="Agent name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            className="w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+              onClick={() => setShowCreate(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+              onClick={handleCreate}
+              disabled={creating || !newName.trim()}
+            >
+              {creating ? 'Creating...' : 'Create'}
+            </button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -281,78 +284,69 @@ function SkillsSection() {
         </div>
       )}
 
-      {/* Create Dialog */}
-      {showCreate && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setShowCreate(false)}
-        >
-          <div
-            className="w-full max-w-md rounded border border-[#2f2f2f] bg-[#0A0A0A] p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="mb-4 text-sm font-bold">Create Skill</h3>
-            <input
-              type="text"
-              placeholder="Skill name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-              className="mb-4 w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-              autoFocus
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
-                onClick={() => setShowCreate(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
-                onClick={handleCreate}
-                disabled={creating || !newName.trim()}
-              >
-                {creating ? 'Creating…' : 'Create'}
-              </button>
-            </div>
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold">Create Skill</DialogTitle>
+          </DialogHeader>
+          <input
+            type="text"
+            placeholder="Skill name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            className="w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+              onClick={() => setShowCreate(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+              onClick={handleCreate}
+              disabled={creating || !newName.trim()}
+            >
+              {creating ? 'Creating…' : 'Create'}
+            </button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setDeleteTarget(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded border border-[#2f2f2f] bg-[#0A0A0A] p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="mb-2 text-sm font-bold">Delete Skill</h3>
-            <p className="mb-4 text-xs text-[#8a8a8a]">
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold">Delete Skill</DialogTitle>
+            <DialogDescription className="text-xs text-[#8a8a8a]">
               Are you sure you want to delete{' '}
               <span className="font-mono text-white">{deleteTarget}</span>? This cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </button>
-              <button
-                className="rounded bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
-                onClick={handleDelete}
-                disabled={deleting}
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <button
+              className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -387,8 +381,6 @@ function RepoConfigsSection() {
       setSaving(false);
     }
   };
-
-  const repoName = (p: string) => p.split('/').pop() || p;
 
   return (
     <section className="mb-8">
@@ -488,13 +480,21 @@ function EditorSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     api
       .getSettings()
       .then((s) => {
-        setEditor(s.editor);
+        if (!cancelled) setEditor(s.editor);
       })
-      .catch((err) => showToast('error', 'ERROR', err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) showToast('error', 'ERROR', err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleChange = async (value: string) => {
@@ -532,6 +532,53 @@ function EditorSection() {
   );
 }
 
+function OrchestratorAgentToggle() {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSettings()
+      .then((s) => {
+        if (!cancelled) setEnabled(s.useOrchestratorAgent);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleChange = async (value: boolean) => {
+    const prev = enabled;
+    setEnabled(value);
+    try {
+      await api.updateSettings({ useOrchestratorAgent: value });
+      showToast(
+        'success',
+        'ORCHESTRATOR',
+        value ? 'Using orchestrator agent' : 'Using plain claude',
+      );
+    } catch (err) {
+      setEnabled(prev);
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  if (loading) return null;
+
+  return (
+    <SettingRow
+      label="Use orchestrator agent"
+      description="When enabled, starts the orchestrator with --agent orchestrator instead of plain claude"
+    >
+      <ToggleSwitch checked={enabled} onChange={handleChange} />
+    </SettingRow>
+  );
+}
+
 function OrchestratorPromptSection() {
   const [data, setData] = useState<OrchestratorPromptData | null>(null);
   const [content, setContent] = useState('');
@@ -541,15 +588,25 @@ function OrchestratorPromptSection() {
   const isDirty = content !== savedContentRef.current;
 
   useEffect(() => {
+    let cancelled = false;
     api
       .getOrchestratorPrompt()
       .then((result) => {
-        setData(result);
-        setContent(result.content);
-        savedContentRef.current = result.content;
+        if (!cancelled) {
+          setData(result);
+          setContent(result.content);
+          savedContentRef.current = result.content;
+        }
       })
-      .catch((err) => showToast('error', 'ERROR', err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) showToast('error', 'ERROR', err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const save = useCallback(async () => {
@@ -581,16 +638,7 @@ function OrchestratorPromptSection() {
     }
   }, []);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        save();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [save]);
+  useSaveShortcut(save);
 
   if (loading) {
     return <p className="py-3 text-xs text-[#6a6a6a]">Loading prompt...</p>;
@@ -672,6 +720,7 @@ export default function SettingsPage() {
 
         <section className="mb-8">
           <SectionHeader label="ORCHESTRATOR" />
+          <OrchestratorAgentToggle />
           <OrchestratorPromptSection />
           <SettingRow
             label="Restart Orchestrator"

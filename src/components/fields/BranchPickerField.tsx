@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { api } from '@/lib/api';
+import { ChevronDownIcon } from '@/components/icons';
 
 interface BranchPickerFieldProps {
   repoPath: string;
@@ -75,20 +76,7 @@ export function BranchPickerField({
               <span className={value ? 'font-mono text-xs' : 'text-muted-foreground'}>
                 {value || 'Select base branch...'}
               </span>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-muted-foreground"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
+              <ChevronDownIcon className="text-muted-foreground" />
             </button>
           }
         />

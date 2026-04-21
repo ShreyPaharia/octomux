@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useTasks } from '@/lib/hooks';
+import { useTasksContext } from '@/lib/tasks-context';
 import { groupTasksForSidebar, type SidebarItem } from '@/lib/sidebar-utils';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
 
@@ -141,11 +141,19 @@ function SettingsIcon({ color }: { color: string }) {
   );
 }
 
+// ─── Static config ──────────────────────────────────────────────────────────
+
+const NAV_ITEMS = [
+  { key: 'dashboard', label: 'DASHBOARD', to: '/', Icon: DashboardIcon },
+  { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/orchestrator', Icon: TerminalIcon },
+  { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
+] as const;
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function UniversalSidebar() {
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
-  const { tasks } = useTasks();
+  const { tasks } = useTasksContext();
   const location = useLocation();
   const { running: orchestratorRunning } = useOrchestratorContext();
 
@@ -188,12 +196,6 @@ export function UniversalSidebar() {
     if (activeTaskId) return null; // on /tasks/:id — task item highlights instead
     return 'dashboard';
   }, [location.pathname, activeTaskId]);
-
-  const navItems = [
-    { key: 'dashboard', label: 'DASHBOARD', to: '/', Icon: DashboardIcon },
-    { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/orchestrator', Icon: TerminalIcon },
-    { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
-  ] as const;
 
   return (
     <nav
@@ -279,7 +281,7 @@ export function UniversalSidebar() {
             {'// NAVIGATION'}
           </div>
         )}
-        {navItems.map(({ key, label, to, Icon }) => {
+        {NAV_ITEMS.map(({ key, label, to, Icon }) => {
           const isActive = activeNav === key;
           const color = isActive ? '#3B82F6' : '#8a8a8a';
           return (

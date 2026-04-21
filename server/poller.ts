@@ -41,27 +41,27 @@ export async function pollStatuses(): Promise<void> {
     }),
   );
 
+  const stopAgentsSql = db.prepare(
+    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
+  );
   for (const result of results) {
     if (result.status !== 'fulfilled') continue;
     const { task, status } = result.value;
+    if (status !== 'dead') continue;
 
-    if (status === 'dead' && task.status === 'running') {
+    if (task.status === 'running') {
       db.prepare(
         `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(
-        `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
-      ).run(task.id);
-      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-    } else if (status === 'dead' && task.status === 'setting_up') {
+    } else if (task.status === 'setting_up') {
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(
-        `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
-      ).run(task.id);
-      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    } else {
+      continue;
     }
+    stopAgentsSql.run(task.id);
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
   }
 
   await pollTerminalActivity();
@@ -187,43 +187,43 @@ export async function pollMergedPRs(): Promise<void> {
 
 const SHELL_COMMANDS = new Set(['zsh', 'bash', 'sh', 'fish', 'dash']);
 
+interface TerminalRow extends UserTerminal {
+  tmux_session: string;
+}
+
 export async function pollTerminalActivity(): Promise<void> {
   const db = getDb();
-  const runningTasks = db
-    .prepare("SELECT * FROM tasks WHERE status = 'running' AND tmux_session IS NOT NULL")
-    .all() as Task[];
+  const rows = db
+    .prepare(
+      `SELECT ut.*, t.tmux_session
+       FROM user_terminals ut
+       JOIN tasks t ON t.id = ut.task_id
+       WHERE t.status = 'running' AND t.tmux_session IS NOT NULL`,
+    )
+    .all() as TerminalRow[];
 
-  for (const task of runningTasks) {
-    const terminals = db
-      .prepare('SELECT * FROM user_terminals WHERE task_id = ?')
-      .all(task.id) as UserTerminal[];
-
-    let changed = false;
-    for (const terminal of terminals) {
-      try {
-        const { stdout } = await execFile('tmux', [
-          'list-panes',
-          '-t',
-          `${task.tmux_session}:${terminal.window_index}`,
-          '-F',
-          '#{pane_current_command}',
-        ]);
-        const command = stdout.trim().split('\n')[0];
-        const newStatus = SHELL_COMMANDS.has(command) ? 'idle' : 'working';
-        if (newStatus !== terminal.status) {
-          db.prepare('UPDATE user_terminals SET status = ? WHERE id = ?').run(
-            newStatus,
-            terminal.id,
-          );
-          changed = true;
-        }
-      } catch {
-        // Window may have been killed — ignore
+  const changedTasks = new Set<string>();
+  for (const row of rows) {
+    try {
+      const { stdout } = await execFile('tmux', [
+        'list-panes',
+        '-t',
+        `${row.tmux_session}:${row.window_index}`,
+        '-F',
+        '#{pane_current_command}',
+      ]);
+      const command = stdout.trim().split('\n')[0];
+      const newStatus = SHELL_COMMANDS.has(command) ? 'idle' : 'working';
+      if (newStatus !== row.status) {
+        db.prepare('UPDATE user_terminals SET status = ? WHERE id = ?').run(newStatus, row.id);
+        changedTasks.add(row.task_id);
       }
+    } catch {
+      // Window may have been killed — ignore
     }
-    if (changed) {
-      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-    }
+  }
+  for (const taskId of changedTasks) {
+    broadcast({ type: 'task:updated', payload: { taskId } });
   }
 }
 

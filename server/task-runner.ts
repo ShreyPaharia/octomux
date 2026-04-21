@@ -45,6 +45,45 @@ async function getLastWindowIndex(session: string): Promise<number> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const PROMPT_FILE_CLEANUP_MS = 5000;
+
+function shellQuoteSingle(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Write `prompt` to a temp file inside `worktreePath`, send `baseCmd "$(cat <file>)"`
+ * as a tmux send-keys to `target`, then clean up the file after a delay. If `prompt`
+ * is absent, sends `baseCmd` as-is.
+ */
+async function sendClaudeCommand(args: {
+  target: string;
+  baseCmd: string;
+  prompt?: string | null;
+  worktreePath?: string;
+  agentId?: string;
+}): Promise<void> {
+  let cmd = args.baseCmd;
+  let promptFile: string | null = null;
+  if (args.prompt && args.worktreePath && args.agentId) {
+    promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
+    fs.writeFileSync(promptFile, args.prompt);
+    cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
+  }
+  await waitForShellReady(args.target);
+  await execFile('tmux', ['send-keys', '-t', args.target, cmd, 'Enter']);
+  if (promptFile) {
+    const pf = promptFile;
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(pf);
+      } catch {
+        // already removed or never existed
+      }
+    }, PROMPT_FILE_CLEANUP_MS);
+  }
+}
+
 export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
   // Auto-fix formatting drift
   try {
@@ -74,13 +113,19 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
  * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
  * This prevents the classic tmux race condition where send-keys fires before
  * the shell has initialized, causing the first character(s) to be swallowed.
+ *
+ * Starts with a short warm-up sleep (most shells render their prompt within
+ * a couple hundred ms) so we don't burn a subprocess on the guaranteed miss,
+ * then polls at 250ms intervals up to the timeout.
  */
 async function waitForShellReady(
   target: string,
   timeoutMs = 5000,
-  intervalMs = 100,
+  intervalMs = 250,
+  initialDelayMs = 200,
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
+  await sleep(initialDelayMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -147,6 +192,8 @@ export async function cleanupOrphanedViewerSessions(): Promise<void> {
 /** Generate a git-safe branch slug from a title + task ID suffix. */
 export function slugifyTitle(title: string, id: string): string {
   const slug = title
+    .normalize('NFKD') // decompose accents so they can be stripped
+    .replace(/[̀-ͯ]/g, '') // strip combining diacritical marks
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-') // replace non-alphanumeric with hyphens
     .replace(/-{2,}/g, '-') // collapse consecutive hyphens
@@ -232,25 +279,15 @@ export async function startTask(task: Task): Promise<void> {
       'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
     ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId);
 
-    // 9. Launch claude in the window, passing initial prompt as a CLI argument
-    //    so it is submitted at startup without needing readiness polling.
-    //    The prompt is written to a temp file to avoid shell-escaping issues.
-    let claudeCmd = `claude --session-id ${claudeSessionId}`;
-    let promptFile: string | null = null;
-    if (task.initial_prompt) {
-      promptFile = path.join(worktreePath, `.claude-prompt-${agentId}`);
-      fs.writeFileSync(promptFile, task.initial_prompt);
-      claudeCmd += ` "$(cat ${promptFile})"`;
-    }
-    // Wait for shell to be ready before sending keys (prevents first char being swallowed)
-    const target = `${session}:${windowIndex}`;
-    await waitForShellReady(target);
-    await execFile('tmux', ['send-keys', '-t', target, claudeCmd, 'Enter']);
-    // Clean up the temp prompt file after a short delay (shell has read it)
-    if (promptFile) {
-      const pf = promptFile;
-      setTimeout(() => fs.unlinkSync(pf), 5000);
-    }
+    // Launch claude in the window. Prompt (if any) goes via a tempfile to avoid
+    // shell-escape hazards in the user-supplied prompt content.
+    await sendClaudeCommand({
+      target: `${session}:${windowIndex}`,
+      baseCmd: `claude --session-id ${claudeSessionId}`,
+      prompt: task.initial_prompt,
+      worktreePath,
+      agentId,
+    });
 
     // 12. Mark as running
     db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
@@ -290,19 +327,13 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   const addTarget = `${task.tmux_session}:${windowIndex}`;
   (async () => {
     try {
-      let promptFile: string | null = null;
-      let claudeCmd = `claude --session-id ${claudeSessionId}`;
-      if (prompt) {
-        promptFile = path.join(task.worktree!, `.claude-prompt-${agentId}`);
-        fs.writeFileSync(promptFile, prompt);
-        claudeCmd += ` "$(cat ${promptFile})"`;
-      }
-      await waitForShellReady(addTarget);
-      await execFile('tmux', ['send-keys', '-t', addTarget, claudeCmd, 'Enter']);
-      if (promptFile) {
-        const pf = promptFile;
-        setTimeout(() => fs.unlinkSync(pf), 5000);
-      }
+      await sendClaudeCommand({
+        target: addTarget,
+        baseCmd: `claude --session-id ${claudeSessionId}`,
+        prompt,
+        worktreePath: task.worktree!,
+        agentId,
+      });
     } catch (err) {
       console.error(`[addAgent] Failed to launch claude in window ${windowIndex}:`, err);
       try {
@@ -526,20 +557,19 @@ export async function resumeTask(task: Task): Promise<void> {
     // Phase 2: Launch claude in all windows concurrently (slow part — waitForShellReady)
     await Promise.all(
       agentTargets.map(async ({ agent, windowIndex, target }) => {
-        let claudeCmd: string;
+        let baseCmd: string;
         if (agent.claude_session_id) {
-          claudeCmd = `claude --resume ${agent.claude_session_id}`;
+          baseCmd = `claude --resume ${agent.claude_session_id}`;
         } else {
           const newSessionId = crypto.randomUUID();
-          claudeCmd = `claude --continue --session-id ${newSessionId}`;
+          baseCmd = `claude --continue --session-id ${newSessionId}`;
           db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
             newSessionId,
             agent.id,
           );
         }
 
-        await waitForShellReady(target);
-        await execFile('tmux', ['send-keys', '-t', target, claudeCmd, 'Enter']);
+        await sendClaudeCommand({ target, baseCmd });
 
         db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
           windowIndex,
