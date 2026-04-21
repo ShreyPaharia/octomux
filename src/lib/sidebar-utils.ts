@@ -1,4 +1,5 @@
 import type { Task, TaskStatus, DerivedTaskStatus } from '../../server/types';
+import { repoName } from './utils';
 
 export interface SidebarItem {
   id: string;
@@ -27,7 +28,7 @@ export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
 
   const grouped = new Map<string, { items: SidebarItem[]; tasks: Task[] }>();
   for (const task of active) {
-    const repo = task.repo_path.split('/').pop() || task.repo_path;
+    const repo = repoName(task.repo_path);
     const item: SidebarItem = {
       id: task.id,
       title: task.title,

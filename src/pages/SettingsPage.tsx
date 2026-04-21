@@ -4,6 +4,7 @@ import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
+import { repoName } from '@/lib/utils';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -387,8 +388,6 @@ function RepoConfigsSection() {
       setSaving(false);
     }
   };
-
-  const repoName = (p: string) => p.split('/').pop() || p;
 
   return (
     <section className="mb-8">

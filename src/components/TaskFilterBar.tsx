@@ -2,6 +2,7 @@ import { memo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import type { StatusTab } from '@/lib/use-task-filters';
+import { repoName } from '@/lib/utils';
 
 interface TaskFilterBarProps {
   activeStatus: StatusTab;
@@ -10,10 +11,6 @@ interface TaskFilterBarProps {
   repos: string[];
   activeRepo: string;
   onRepoChange: (repo: string) => void;
-}
-
-function repoName(repoPath: string): string {
-  return repoPath.split('/').pop() || repoPath;
 }
 
 function RepoFilterDropdown({
