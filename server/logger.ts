@@ -8,10 +8,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
 const isTest = process.env.NODE_ENV === 'test';
 
-export const PROD_LOG_DIR = path.join(os.homedir(), '.octomux', 'logs');
-export const DEV_LOG_DIR = path.join(__dirname, '..', 'data', 'logs');
-export const LOG_DIR = isProduction ? PROD_LOG_DIR : DEV_LOG_DIR;
-export const LOG_FILE = path.join(LOG_DIR, 'octomux.log');
+/** Resolve the log directory lazily so mocked fs/os in tests don't fail at module load. */
+function resolveLogDir(): string {
+  return isProduction
+    ? path.join(os.homedir(), '.octomux', 'logs')
+    : path.join(__dirname, '..', 'data', 'logs');
+}
+
+function resolveLogFile(): string {
+  return path.join(resolveLogDir(), 'octomux.log');
+}
 
 function defaultLevel(): string {
   if (process.env.LOG_LEVEL) return process.env.LOG_LEVEL;
@@ -24,7 +30,7 @@ function rollTarget(level: string): TransportTargetOptions {
     target: 'pino-roll',
     level,
     options: {
-      file: LOG_FILE,
+      file: resolveLogFile(),
       frequency: 'daily',
       size: '10m',
       mkdir: true,
@@ -39,7 +45,7 @@ function buildLogger(): Logger {
   // Tests: no file I/O, no transport workers
   if (isTest) return pino({ level });
 
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+  fs.mkdirSync(resolveLogDir(), { recursive: true });
 
   if (isProduction) {
     // Prod: JSON to file only
