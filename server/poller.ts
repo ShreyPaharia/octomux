@@ -41,27 +41,27 @@ export async function pollStatuses(): Promise<void> {
     }),
   );
 
+  const stopAgentsSql = db.prepare(
+    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
+  );
   for (const result of results) {
     if (result.status !== 'fulfilled') continue;
     const { task, status } = result.value;
+    if (status !== 'dead') continue;
 
-    if (status === 'dead' && task.status === 'running') {
+    if (task.status === 'running') {
       db.prepare(
         `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(
-        `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
-      ).run(task.id);
-      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-    } else if (status === 'dead' && task.status === 'setting_up') {
+    } else if (task.status === 'setting_up') {
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(
-        `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
-      ).run(task.id);
-      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    } else {
+      continue;
     }
+    stopAgentsSql.run(task.id);
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
   }
 
   await pollTerminalActivity();
