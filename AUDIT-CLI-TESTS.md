@@ -4,241 +4,137 @@ Audit date: 2026-04-21
 Scope: `cli/src/**`, `server/test-helpers.ts`, `src/test-helpers.tsx`, `src/test-setup.ts`,
 representative `*.test.ts` / `*.test.tsx` files, and `e2e/helpers.ts`.
 
+Status legend: ✅ addressed · ⏭️ declined (with reason).
+
 ---
 
 ## HIGH impact
 
-### H1. CLI command-action boilerplate is copy-pasted across all 15 handlers
+### H1. CLI command-action boilerplate (✅ addressed)
 
-Every command under `cli/src/commands/*.ts` repeats the same 3-line preamble and the
-same "if JSON return early, else human-format" branch. Typical shape:
+Every command under `cli/src/commands/*.ts` repeated the same 3-line preamble and the
+same "if JSON return early, else human-format" branch:
 
 ```ts
 .action(async (..., cmd) => {
   const globals = cmd.optsWithGlobals();
   const client: OctomuxClient = globals._client;
-
   const result = await client.someCall(...);
-
-  if (isJsonMode(globals.json)) {
-    outputJson(result);
-    return;
-  }
+  if (isJsonMode(globals.json)) { outputJson(result); return; }
   // ... human-formatted output ...
 });
 ```
 
-- `globals` + `_client` extraction: 15/15 files, byte-identical.
-- `isJsonMode` + `outputJson` + `return`: 13/15 files.
-- 3 files (`delete-task`, `delete-skill`, `stop-agent`) bypass `outputJson()` and use
-  `console.log(JSON.stringify(...))` inline — inconsistent with `outputJson` which adds
-  2-space indent. This is a subtle output-shape bug for piped consumers.
+Extracted `getContext(cmd)` in `cli/src/action.ts`. All 15 handlers migrated.
 
-**Proposed helper** (in `cli/src/action.ts`):
+### H2. Three list commands duplicated a table template (✅ addressed)
 
-```ts
-export function defineAction<A extends any[]>(
-  handler: (ctx: { client: OctomuxClient; json: boolean }, ...args: A) => Promise<void>,
-) {
-  return async (...args: A) => {
-    const cmd = args[args.length - 1] as Command;
-    const globals = cmd.optsWithGlobals();
-    await handler({ client: globals._client, json: isJsonMode(globals.json) }, ...args);
-  };
-}
-```
+`list-tasks`, `list-skills`, `recent-repos` all open-coded `heading` + dim separator + a
+padEnd loop. `get-task` had a similar pattern for its agents sub-list.
 
-Or equivalently a tiny `actionContext(cmd)` helper. Per command, saves ~3 LoC and a cast,
-and centralizes JSON-mode detection.
+Added `printTable` to `cli/src/format.ts` (ANSI-aware — pads by visible length, which
+also drops the hand-rolled `+10` chalk-escape-code fudge factor). Migrated the three
+list commands. `get-task` agent block left inline — it isn't a proper headered table.
 
-### H2. Three list commands share the same "heading + rule + padEnd rows" template
+### H3. Five tests duplicated the `api` Proxy mock (✅ addressed via `vi.hoisted`)
 
-`list-tasks.ts`, `list-skills.ts`, `recent-repos.ts` all open-code:
+The first attempt (a plain helper import) failed because `vi.mock` factories run during
+the import chain, before the test file's own imports bind their shims — any imported
+helper hits a `Cannot access '__vi_import_N__' before initialization` TDZ.
+
+**Fix:** `vi.hoisted()` is specifically designed for this. Its callback runs before
+any imports and before any `vi.mock` factory, and its return value is guaranteed
+available to the factories. Used async form so the callback itself can dynamic-`import`
+`test-helpers`:
 
 ```ts
-heading(`${LABEL.padEnd(N)}...`);
-console.log(chalk.dim('─'.repeat(60)));
-for (const r of rows) console.log(`${a.padEnd(N)}${b}`);
+const { apiMock, apiProxy } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupApiMock(),
+);
+vi.mock('@/lib/api', () => ({ api: apiProxy }));
 ```
 
-Plus `get-task.ts` duplicates it for its agents sub-table. A single `printTable(columns, rows)`
-helper in `cli/src/format.ts` absorbs all four, with consistent separator width and
-ANSI-aware padding (current code double-counts chalk color codes when computing pad for
-`colorStatus` — it pads the colored string, not the visible length, so alignment is off
-by ~10 chars for non-default statuses).
-
-### H3. Five component tests duplicate the `api` Proxy mock — *NOT REFACTORABLE*
-
-`src/pages/Dashboard.test.tsx`, `src/pages/TaskDetail.test.tsx`,
-`src/pages/SkillEditor.test.tsx`, `src/components/CreateTaskDialog.test.tsx`,
-`src/lib/hooks.test.tsx` all contain an identical block:
-
-```ts
-const apiMock = mockApi();
-vi.mock('@/lib/api', () => ({
-  api: new Proxy({}, {
-    get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock],
-  }),
-}));
-```
-
-**Attempted extraction; reverted.** Any helper imported from `test-helpers` and called
-inside the `vi.mock` factory hits a TDZ on `__vi_import_N__` because `vi.mock` factories
-execute during the import chain, before the test file's own imports have bound their
-shims. The original pattern works specifically because:
-
-1. `Proxy` is a JS global (no import needed).
-2. `apiMock` is only *captured in the closure* of the `get` trap, not accessed at
-   factory-call time (the `new Proxy({}, ...)` constructor doesn't read its handler
-   properties eagerly).
-
-A thunk-based helper (`makeApiProxy(() => apiMock)`) still fails because it requires
-importing `makeApiProxy` — which vitest hasn't initialized by the time the factory runs.
-`vi.hoisted()` could theoretically work but is uglier than the status-quo duplication.
-
-Leaving as-is.
+Added `setupApiMock()` to `src/test-helpers.tsx`. Migrated: `Dashboard.test.tsx`,
+`TaskDetail.test.tsx`, `SkillEditor.test.tsx`, `CreateTaskDialog.test.tsx`,
+`hooks.test.tsx`.
 
 ---
 
 ## MEDIUM impact
 
-### M1. `useNavigate` mock is duplicated in 4 files verbatim
+### M1. `useNavigate` mock duplicated in 4 files (✅ addressed via `vi.hoisted`)
 
-`TaskDetail.test.tsx`, `Dashboard.test.tsx`, `TaskCard.test.tsx`, `TaskList.test.tsx`:
+Same `vi.hoisted` pattern as H3. Added `setupRouterNavigateMock()` returning
+`{ mockNavigate, routerMockFactory }`. Migrated: `TaskCard`, `TaskList`, `Dashboard`,
+`TaskDetail`.
 
-```ts
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return { ...actual, useNavigate: () => mockNavigate /* or vi.fn() */ };
-});
-```
+### M2. Inline `execFile`-with-callback mock pattern (✅ addressed)
 
-A helper `mockRouterNavigate()` that returns `{ mockNavigate }` and installs the mock
-would cut this down. (Note: `vi.mock` is hoisted, so a raw function call won't work —
-the helper has to be a macro-like factory that returns the mock config, or each file
-keeps the `vi.mock` call but delegates the factory fn.)
+Added `execFileOk(stdout?, stderr?)` / `execFileFail(err?)` factories in
+`server/test-helpers.ts`. Re-expressed `deadSessionMock` in terms of `execFileFail`.
+Migrated `poller.test.ts` and `repo-config.test.ts` direct sites. Sites inside `vi.mock`
+factory bodies kept their inline shape (same hoisting constraint — but no
+vi.hoisted equivalent is needed since the inline form is short).
 
-**Viable form:**
-```ts
-// src/test-helpers.tsx
-export function routerNavigateMockFactory() {
-  const mockNavigate = vi.fn();
-  return {
-    mockNavigate,
-    factory: async (importOriginal: any) => {
-      const actual = await importOriginal();
-      return { ...actual, useNavigate: () => mockNavigate };
-    },
-  };
-}
-```
+### M3. `runningTask` inline agent fixtures (✅ addressed)
 
-### M2. Inline `execFile`-with-callback mock pattern reinvented in 3 places
+Two agent literals in `TaskDetail.test.tsx` collapsed to `makeAgent({ id: 'a1' })`.
 
-`server/test-helpers.ts` exports `findCallback` and `deadSessionMock`. But these test
-files re-implement the same shape inline:
+### M4. `api.test.tsx` table-driven (⏭️ already in spec's spirit)
 
-- `server/api.test.ts:100-106` (generic success)
-- `server/repo-config.test.ts:28-33, 57-62` (custom stdout/err)
-- `server/task-runner.test.ts:57-73` (arg-based dispatch)
-- `server/poller.test.ts:20-25, 62-67` (default stdout)
+The file already uses a cases array + iteration loop. No change needed.
 
-**Proposed helpers** in `server/test-helpers.ts`:
+### M5. `test-helpers.tsx` `vi` global ref-types (⏭️ not worth it)
 
-```ts
-export function execFileOk(stdout = '', stderr = '') {
-  return (...args: any[]) => { const cb = findCallback(...args); cb?.(null, { stdout, stderr }); };
-}
-export function execFileFail(err: Error | string = 'exec failed') {
-  return (...args: any[]) => {
-    const cb = findCallback(...args);
-    cb?.(typeof err === 'string' ? new Error(err) : err);
-  };
-}
-```
-
-Sits next to the existing `deadSessionMock` and is a straight extension of it.
-
-### M3. `runningTask` + inline agent fixtures duplicate `DEFAULTS`
-
-`src/pages/TaskDetail.test.tsx:62-78` defines a `runningTask` with an inline agent array.
-The agent object is 10 lines of literal properties already available via `makeAgent()` —
-so a `makeTaskWithAgents({ count: 1 })` helper (or just `makeTask({ agents: [makeAgent()] })`)
-saves the duplication. Today `makeTask()` doesn't fill `agents`, so it silently forces
-callers to hand-roll.
-
-### M4. `api.test.ts` could switch to `it.each()` for the large `apiCases` array
-
-`src/lib/api.test.tsx:24-…` already defines a `apiCases` table but then iterates with
-a custom `describe.each`-style block. This is a minor tidy — verify the existing pattern
-matches the project's `it.each()` convention.
-
-### M5. `src/test-setup.ts` is not importing `vi` for `matchMedia`
-
-`vi` is globally available via `globals: true` in `vitest.config.ts`, so this is fine,
-but `src/test-helpers.tsx` references `vi` without importing it — works because of the
-same global. Add `/// <reference types="vitest/globals" />` to `test-helpers.tsx` to make
-TypeScript happy without requiring an import.
+Works fine today via `globals: true` in vitest config. Cosmetic only.
 
 ---
 
 ## LOW impact
 
-### L1. `client.ts` query-param building is repeated 4 times
+### L1. `client.ts` query-param building (✅ addressed)
 
-Lines 99-100, 155-158, 162-163: each call manually builds
-`?key=${encodeURIComponent(value)}`. A small `q({ key: value })` builder would dedupe.
-Low value — 4 call sites, 1 line each.
+Added `qs()` helper. Three call sites migrated (`listTasks`, `defaultBranch`,
+`getRepoConfig`).
 
-### L2. `DEFAULTS.task` / `TASK_DEFAULTS` exist in both `server/test-helpers.ts` and
-`src/test-helpers.tsx`
+### L2. `DEFAULTS.task` / `TASK_DEFAULTS` split between server and frontend (⏭️ kept)
 
-Different shapes (server has `tmux_session`, frontend uses `Task` from `server/types`).
-Because the server uses the DB schema as source of truth and the frontend uses the API
-shape, merging them is risky; leave as-is. Noted for awareness.
+Different shapes (server is DB-schema-shaped, frontend is API-shape-shaped). Unifying
+is risky and low-value. Noted for awareness.
 
-### L3. `e2e/helpers.ts` `API` base URL is a bare constant
+### L3. `e2e/helpers.ts` hardcoded base URL (✅ addressed)
 
-Small improvement: allow `OCTOMUX_URL` override for running tests against a non-default
-port. Low priority since playwright.config.ts pins the port.
+Respects `OCTOMUX_URL` env var now, matching the CLI's own convention.
 
-### L4. `cli/src/index.ts` — 14 import + 14 register lines
+### L4. `cli/src/index.ts` imports + register lines (⏭️ kept)
 
-Could be reduced with a registrar array, but the explicit listing makes it trivial to
-scan what commands exist. Keep as-is unless more commands are added.
+Explicit listing wins on readability vs a registrar array. 15 lines is fine.
 
-### L5. Missing `format.ts` helper: `outputJsonTerse()`
+### L5. Missing `outputJsonTerse()` (⏭️ kept inline)
 
-`delete-task.ts` does `console.log(JSON.stringify({ deleted: id }))` (no indent).
-`delete-skill.ts` and `stop-agent.ts` do the same. These three callers want
-machine-readable single-line output; a terse variant of `outputJson` would unify this.
-(Alternative: just route everything through `outputJson` which already does 2-space
-indent and is fine for pipe consumers — this is the cleaner fix and is subsumed by H1.)
+Three callers use `console.log(JSON.stringify(...))` for single-line JSON. Migrating
+to `outputJson` would change output shape (2-space indent) — constraint forbids.
+Preserved as-is.
 
 ---
 
-## Out-of-scope / deferred
+## Out-of-scope / deferred at brief level
 
-- Playwright specs under `e2e/*.spec.ts` — user asked only for helpers.
-- `server/types.ts` — explicitly not to be modified.
-- CLI command surface (flags, names, output shape) — constraint from brief.
-- Integration of `orchestrator-context` mocks — only used in one test.
+- Playwright specs under `e2e/*.spec.ts` — brief said helpers only.
+- `server/types.ts` — explicitly off limits.
+- CLI public surface (names, flags, output shape).
 
 ---
 
-## Execution plan
+## Final commit log
 
-In order, with a conventional-commit per step and tests passing after each:
+1. `refactor(cli): extract getContext helper from command actions` (H1)
+2. `refactor(cli): add printTable helper and migrate list commands` (H2)
+3. `refactor(test): add execFileOk/execFileFail helpers` (M2)
+4. `refactor(test): use makeAgent for inline agent fixtures in TaskDetail` (M3)
+5. `refactor(cli): consolidate query-string building into qs() helper` (L1)
+6. `docs: add CLI and test-infrastructure audit` (this file)
+7. `refactor(test): dedupe api + router-navigate mocks via vi.hoisted` (H3 + M1)
+8. `refactor(e2e): honor OCTOMUX_URL env var in helpers` (L3)
 
-1. **H1** — Add `cli/src/action.ts` with `defineAction` + `actionContext`, migrate all
-   15 commands. Also fix the 3 inconsistent inline `JSON.stringify` callers to route
-   through `outputJson`.
-2. **H2** — Add `printTable` to `cli/src/format.ts`, migrate `list-tasks`, `list-skills`,
-   `recent-repos`, and `get-task`'s agents block.
-3. **H3** — Add `createApiMockProxy` to `src/test-helpers.tsx`, migrate the 5 callers.
-4. **M1** — Add `mockUseNavigate` factory helper, migrate 4 callers.
-5. **M2** — Add `execFileOk`/`execFileFail` to `server/test-helpers.ts`, migrate
-   4 callers.
-6. **M3** — Update `makeTask`/`makeAgent` composition; migrate `TaskDetail.test.tsx`.
-
-Stop after HIGH + MEDIUM (6 commits). Remaining LOW items are noted but deferred.
+All passes: typecheck clean · lint clean · 715/715 unit tests green.

@@ -1,6 +1,7 @@
 import { type Page, expect } from '@playwright/test';
 
-const API = 'http://localhost:7777/api';
+const SERVER_URL = (process.env.OCTOMUX_URL || 'http://localhost:7777').replace(/\/$/, '');
+const API = `${SERVER_URL}/api`;
 
 /** Create a task via the API and wait for it to reach running state. */
 export async function createTaskViaAPI(
