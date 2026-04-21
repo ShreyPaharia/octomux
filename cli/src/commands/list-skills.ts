@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import { outputJson, heading } from '../format.js';
+import { outputJson, printTable } from '../format.js';
 
 export function registerListSkills(program: Command): void {
   program
@@ -18,10 +18,12 @@ export function registerListSkills(program: Command): void {
         console.log('No skills installed.');
         return;
       }
-      heading(`${'NAME'.padEnd(30)}DESCRIPTION`);
-      console.log(chalk.dim('─'.repeat(60)));
-      for (const s of skills) {
-        console.log(`${s.name.padEnd(30)}${chalk.dim(s.description || '—')}`);
-      }
+      printTable(
+        [
+          { header: 'NAME', width: 30, get: (s) => s.name },
+          { header: 'DESCRIPTION', get: (s) => chalk.dim(s.description || '—') },
+        ],
+        skills,
+      );
     });
 }

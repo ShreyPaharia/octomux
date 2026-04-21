@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import { outputJson, heading } from '../format.js';
+import { outputJson, printTable } from '../format.js';
 
 export function registerRecentRepos(program: Command): void {
   program
@@ -18,10 +18,13 @@ export function registerRecentRepos(program: Command): void {
         console.log('No recent repos.');
         return;
       }
-      heading(`${'REPO PATH'.padEnd(50)}LAST USED`);
-      console.log(chalk.dim('─'.repeat(70)));
-      for (const r of repos) {
-        console.log(`${r.repo_path.padEnd(50)}${chalk.dim(r.last_used)}`);
-      }
+      printTable(
+        [
+          { header: 'REPO PATH', width: 50, get: (r) => r.repo_path },
+          { header: 'LAST USED', get: (r) => chalk.dim(r.last_used) },
+        ],
+        repos,
+        { separatorWidth: 70 },
+      );
     });
 }

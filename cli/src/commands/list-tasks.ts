@@ -1,7 +1,6 @@
-import chalk from 'chalk';
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import { outputJson, colorStatus, heading } from '../format.js';
+import { outputJson, colorStatus, printTable } from '../format.js';
 
 export function registerListTasks(program: Command): void {
   program
@@ -29,10 +28,13 @@ export function registerListTasks(program: Command): void {
         return;
       }
 
-      heading(`${'ID'.padEnd(14)}${'STATUS'.padEnd(14)}TITLE`);
-      console.log(chalk.dim('─'.repeat(60)));
-      for (const t of tasks) {
-        console.log(`${t.id.padEnd(14)}${colorStatus(t.status).padEnd(14 + 10)}${t.title}`);
-      }
+      printTable(
+        [
+          { header: 'ID', width: 14, get: (t) => t.id },
+          { header: 'STATUS', width: 14, get: (t) => colorStatus(t.status) },
+          { header: 'TITLE', get: (t) => t.title },
+        ],
+        tasks,
+      );
     });
 }
