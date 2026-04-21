@@ -1,6 +1,9 @@
 import { execFileSync } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
 import path from 'path';
+import { childLogger } from './logger.js';
+
+const logger = childLogger('startup');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,12 +36,12 @@ export function ensureBinary({ cmd, checkArgs, name, brewPkg, installUrl }: Bina
     }
 
     if (hasBrew) {
-      console.log(`📦 Installing ${label} via Homebrew...`);
+      logger.info({ label, brew_pkg: brewPkg }, `Installing ${label} via Homebrew`);
       try {
         execFileSync('brew', ['install', brewPkg], { stdio: 'inherit' });
         return;
-      } catch {
-        console.error(`❌ Failed to install ${label} via Homebrew.`);
+      } catch (err) {
+        logger.error({ label, brew_pkg: brewPkg, err }, `Failed to install ${label} via Homebrew`);
         process.exit(1);
       }
     }
@@ -46,7 +49,7 @@ export function ensureBinary({ cmd, checkArgs, name, brewPkg, installUrl }: Bina
 
   // Can't auto-install — show manual instructions
   const url = installUrl || `https://formulae.brew.sh/formula/${brewPkg || cmd}`;
-  console.error(`❌ ${label} not found. Install it manually: ${url}`);
+  logger.error({ label, install_url: url }, `${label} not found — install it manually`);
   process.exit(1);
 }
 
@@ -65,13 +68,14 @@ export function checkNeovimVersion(): void {
   }
 
   if (!nvimVersion) {
-    console.error('❌ Could not determine neovim version.');
+    logger.error('Could not determine neovim version');
     process.exit(1);
   }
 
   if (nvimVersion.major === 0 && nvimVersion.minor < 10) {
-    console.error(
-      `❌ Neovim >= 0.10.0 required (found ${nvimVersion.raw}). Upgrade with: brew upgrade neovim`,
+    logger.error(
+      { found: nvimVersion.raw, required: '>=0.10.0' },
+      'Neovim version too old — upgrade with: brew upgrade neovim',
     );
     process.exit(1);
   }
@@ -85,7 +89,7 @@ export function syncLazyVimPlugins(repoRoot: string): void {
 
   if (!needsSync) return;
 
-  console.log('🔌 Syncing LazyVim plugins (first run — this may take a minute)...');
+  logger.info('Syncing LazyVim plugins (first run — this may take a minute)');
   try {
     execFileSync('nvim', ['--headless', '+Lazy! sync', '+qa'], {
       stdio: 'inherit',
@@ -97,7 +101,7 @@ export function syncLazyVimPlugins(repoRoot: string): void {
         XDG_CACHE_HOME: path.join(repoRoot, '.local', 'cache'),
       },
     });
-  } catch {
-    console.warn('⚠️  LazyVim plugin sync failed. Editor may not work correctly.');
+  } catch (err) {
+    logger.warn({ err }, 'LazyVim plugin sync failed — editor may not work correctly');
   }
 }
