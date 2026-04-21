@@ -3,8 +3,8 @@ import { screen } from '@testing-library/react';
 import { TaskList } from './TaskList';
 import { renderWithRouter, makeTask } from '../test-helpers';
 
-const { routerMockFactory } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+const { routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
 

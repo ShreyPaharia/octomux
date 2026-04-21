@@ -4,8 +4,8 @@ import { useTasks, useTask } from './hooks';
 
 // ─── Mock API ────────────────────────────────────────────────────────────────
 
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('./api', () => ({ api: apiProxy }));
