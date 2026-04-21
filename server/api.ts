@@ -140,22 +140,26 @@ export function setupRoutes(app: Express): void {
 
     const dirEntries = await fs.promises.readdir(dirPath);
     const resolved = await Promise.all(
-      dirEntries.map(async (name): Promise<{ name: string; path: string; isGit: boolean } | null> => {
-        const fullPath = path.join(dirPath, name);
-        try {
-          const stat = await fs.promises.stat(fullPath);
-          if (!stat.isDirectory()) return null;
-          const isGit = await fs.promises
-            .access(path.join(fullPath, '.git'))
-            .then(() => true)
-            .catch(() => false);
-          return { name, path: fullPath, isGit };
-        } catch {
-          return null;
-        }
-      }),
+      dirEntries.map(
+        async (name): Promise<{ name: string; path: string; isGit: boolean } | null> => {
+          const fullPath = path.join(dirPath, name);
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            if (!stat.isDirectory()) return null;
+            const isGit = await fs.promises
+              .access(path.join(fullPath, '.git'))
+              .then(() => true)
+              .catch(() => false);
+            return { name, path: fullPath, isGit };
+          } catch {
+            return null;
+          }
+        },
+      ),
     );
-    const entries = resolved.filter((e): e is { name: string; path: string; isGit: boolean } => e !== null);
+    const entries = resolved.filter(
+      (e): e is { name: string; path: string; isGit: boolean } => e !== null,
+    );
 
     entries.sort((a, b) => {
       if (a.isGit !== b.isGit) return a.isGit ? -1 : 1;

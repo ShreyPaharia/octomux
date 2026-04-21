@@ -139,12 +139,7 @@ export function initDb(instance: Database.Database): void {
 
   const agentCols = columnsOf('agents');
   addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);
-  addColumn(
-    'agents',
-    'hook_activity',
-    "hook_activity TEXT NOT NULL DEFAULT 'active'",
-    agentCols,
-  );
+  addColumn('agents', 'hook_activity', "hook_activity TEXT NOT NULL DEFAULT 'active'", agentCols);
   addColumn('agents', 'hook_activity_updated_at', 'hook_activity_updated_at TEXT', agentCols);
 
   // Data migrations
