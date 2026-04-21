@@ -32,14 +32,6 @@ function parseDescription(content: string): string {
   return descMatch ? descMatch[1].trim() : '';
 }
 
-async function ensureDir(dir: string): Promise<void> {
-  try {
-    await fs.promises.access(dir);
-  } catch {
-    await fs.promises.mkdir(dir, { recursive: true });
-  }
-}
-
 async function exists(p: string): Promise<boolean> {
   try {
     await fs.promises.access(p);
@@ -52,7 +44,7 @@ async function exists(p: string): Promise<boolean> {
 export async function listSkills(): Promise<Skill[]> {
   const dir = skillsDir();
 
-  await ensureDir(dir);
+  await fs.promises.mkdir(dir, { recursive: true });
 
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   const skills: Skill[] = [];
