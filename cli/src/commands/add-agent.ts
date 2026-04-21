@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, success, label } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, success, label } from '../format.js';
 
 export function registerAddAgent(program: Command): void {
   program
@@ -8,15 +8,14 @@ export function registerAddAgent(program: Command): void {
     .description('Add a new agent to a running task')
     .option('-p, --prompt <prompt>', 'initial prompt for the agent')
     .action(async (taskId: string, opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       const agent = await client.addAgent(
         taskId,
         opts.prompt ? { prompt: opts.prompt } : undefined,
       );
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(agent);
         return;
       }

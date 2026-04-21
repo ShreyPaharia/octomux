@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
-import { renderWithRouter, makeTask, mockApi } from '../test-helpers';
+import { renderWithRouter, makeTask, makeAgent } from '../test-helpers';
 import type { Task } from '../../server/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -20,22 +20,16 @@ function simulateEvent(taskId = 'test-task-01') {
   for (const cb of eventCallbacks) cb(event);
 }
 
-const apiMock = mockApi();
+const { apiMock, apiProxy } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupApiMock(),
+);
 
-vi.mock('@/lib/api', () => ({
-  api: new Proxy(
-    {},
-    {
-      get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock],
-    },
-  ),
-}));
+vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return { ...actual, useNavigate: () => mockNavigate };
-});
+const { routerMockFactory } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+);
+vi.mock('react-router-dom', routerMockFactory);
 
 // Mock TerminalView — it needs xterm.js which isn't available in jsdom
 vi.mock('@/components/TerminalView', () => ({
@@ -62,19 +56,7 @@ vi.mock('@/components/TerminalView', () => ({
 const runningTask: Task = makeTask({
   status: 'running',
   tmux_session: 'octomux-agent-test-task-01',
-  agents: [
-    {
-      id: 'a1',
-      task_id: 'test-task-01',
-      window_index: 0,
-      label: 'Agent 1',
-      status: 'running',
-      claude_session_id: null,
-      hook_activity: 'active' as const,
-      hook_activity_updated_at: null,
-      created_at: '2026-01-01 00:00:00',
-    },
-  ],
+  agents: [makeAgent({ id: 'a1' })],
 });
 
 describe('TaskDetail', () => {
@@ -486,19 +468,7 @@ describe('TaskDetail', () => {
     const taskWithTerminals = makeTask({
       status: 'running',
       tmux_session: 'octomux-agent-test-task-01',
-      agents: [
-        {
-          id: 'a1',
-          task_id: 'test-task-01',
-          window_index: 0,
-          label: 'Agent 1',
-          status: 'running',
-          claude_session_id: null,
-          hook_activity: 'active' as const,
-          hook_activity_updated_at: null,
-          created_at: '2026-01-01 00:00:00',
-        },
-      ],
+      agents: [makeAgent({ id: 'a1' })],
       user_terminals: [
         {
           id: 'term-1',

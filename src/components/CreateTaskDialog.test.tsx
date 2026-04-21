@@ -2,18 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateTaskDialog } from './CreateTaskDialog';
-import { renderWithRouter, mockApi } from '../test-helpers';
+import { renderWithRouter } from '../test-helpers';
 
-const apiMock = mockApi();
+const { apiMock, apiProxy } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupApiMock(),
+);
 
-vi.mock('@/lib/api', () => ({
-  api: new Proxy(
-    {},
-    {
-      get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock],
-    },
-  ),
-}));
+vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
 describe('CreateTaskDialog', () => {
   const onCreated = vi.fn();

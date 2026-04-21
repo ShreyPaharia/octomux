@@ -1,7 +1,6 @@
-import chalk from 'chalk';
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, colorStatus, heading } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, colorStatus, printTable } from '../format.js';
 
 export function registerListTasks(program: Command): void {
   program
@@ -11,8 +10,7 @@ export function registerListTasks(program: Command): void {
     .option('--status <status>', 'filter by status (draft, setting_up, running, closed, error)')
     .option('--repo-path <path>', 'filter by repository path')
     .action(async (opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       let tasks = await client.listTasks(opts.repoPath ? { repo_path: opts.repoPath } : undefined);
 
@@ -20,7 +18,7 @@ export function registerListTasks(program: Command): void {
         tasks = tasks.filter((t) => t.status === opts.status);
       }
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(tasks);
         return;
       }
@@ -30,10 +28,13 @@ export function registerListTasks(program: Command): void {
         return;
       }
 
-      heading(`${'ID'.padEnd(14)}${'STATUS'.padEnd(14)}TITLE`);
-      console.log(chalk.dim('─'.repeat(60)));
-      for (const t of tasks) {
-        console.log(`${t.id.padEnd(14)}${colorStatus(t.status).padEnd(14 + 10)}${t.title}`);
-      }
+      printTable(
+        [
+          { header: 'ID', width: 14, get: (t) => t.id },
+          { header: 'STATUS', width: 14, get: (t) => colorStatus(t.status) },
+          { header: 'TITLE', get: (t) => t.title },
+        ],
+        tasks,
+      );
     });
 }

@@ -4,19 +4,11 @@ import { useTasks, useTask } from './hooks';
 
 // ─── Mock API ────────────────────────────────────────────────────────────────
 
-const apiMock = {
-  listTasks: vi.fn(),
-  getTask: vi.fn(),
-};
+const { apiMock, apiProxy } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupApiMock(),
+);
 
-vi.mock('./api', () => ({
-  api: new Proxy(
-    {},
-    {
-      get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock],
-    },
-  ),
-}));
+vi.mock('./api', () => ({ api: apiProxy }));
 
 // ─── Mock event-source ──────────────────────────────────────────────────────
 
