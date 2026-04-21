@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, success } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, success } from '../format.js';
 
 export function registerCreateSkill(program: Command): void {
   program
@@ -9,11 +9,10 @@ export function registerCreateSkill(program: Command): void {
     .requiredOption('-n, --name <name>', 'skill name (lowercase, hyphens)')
     .option('-c, --content <content>', 'initial content', '')
     .action(async (opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
       const content = opts.content || `---\nname: ${opts.name}\ndescription: \n---\n\n`;
       const skill = await client.createSkill({ name: opts.name, content });
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(skill);
         return;
       }

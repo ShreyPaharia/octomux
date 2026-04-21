@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson } from '../format.js';
 
 export function registerDefaultBranch(program: Command): void {
   program
@@ -8,10 +8,9 @@ export function registerDefaultBranch(program: Command): void {
     .description('Get default branch for a repository')
     .requiredOption('-r, --repo-path <path>', 'path to the git repository')
     .action(async (opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
       const result = await client.defaultBranch(opts.repoPath);
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(result);
         return;
       }

@@ -1,17 +1,16 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, heading } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, printTable } from '../format.js';
 
 export function registerRecentRepos(program: Command): void {
   program
     .command('recent-repos')
     .description('List recently used repositories')
     .action(async (_opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
       const repos = await client.recentRepos();
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(repos);
         return;
       }
@@ -19,10 +18,13 @@ export function registerRecentRepos(program: Command): void {
         console.log('No recent repos.');
         return;
       }
-      heading(`${'REPO PATH'.padEnd(50)}LAST USED`);
-      console.log(chalk.dim('─'.repeat(70)));
-      for (const r of repos) {
-        console.log(`${r.repo_path.padEnd(50)}${chalk.dim(r.last_used)}`);
-      }
+      printTable(
+        [
+          { header: 'REPO PATH', width: 50, get: (r) => r.repo_path },
+          { header: 'LAST USED', get: (r) => chalk.dim(r.last_used) },
+        ],
+        repos,
+        { separatorWidth: 70 },
+      );
     });
 }

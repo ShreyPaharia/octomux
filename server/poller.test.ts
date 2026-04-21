@@ -10,6 +10,8 @@ import {
   getUserTerminals,
   findCallback,
   deadSessionMock,
+  execFileOk,
+  execFileFail,
   DEFAULTS,
 } from './test-helpers.js';
 import type { Task } from './types.js';
@@ -23,6 +25,8 @@ vi.mock('child_process', () => ({
     return undefined as any;
   }),
 }));
+// Note: the vi.mock factory above runs during import hoisting, so it can't use
+// imported helpers. Everything below (after imports resolve) can use execFileOk.
 
 vi.mock('./task-runner.js', () => ({
   closeTask: vi.fn(),
@@ -60,11 +64,7 @@ beforeEach(() => {
   db = createTestDb();
   vi.clearAllMocks();
   // Re-set default mock (clearAllMocks removes implementations)
-  vi.mocked(execFile).mockImplementation((...args: any[]) => {
-    const cb = findCallback(...args);
-    if (cb) cb(null, { stdout: '[]', stderr: '' });
-    return undefined as any;
-  });
+  vi.mocked(execFile).mockImplementation(execFileOk('[]') as any);
 });
 
 afterEach(() => {
@@ -81,11 +81,7 @@ describe('checkTaskStatus', () => {
   });
 
   it('returns "dead" when tmux has-session fails', async () => {
-    vi.mocked(execFile).mockImplementationOnce((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(new Error('session not found'));
-      return undefined as any;
-    });
+    vi.mocked(execFile).mockImplementationOnce(deadSessionMock as any);
     const result = await checkTaskStatus({ ...DEFAULTS.runningTask } as Task);
     expect(result).toBe('dead');
   });
@@ -259,16 +255,11 @@ describe('ensureHooksInstalled', () => {
 
 describe('detectPR', () => {
   it('returns PR data when gh pr list finds a PR', async () => {
-    vi.mocked(execFile).mockImplementationOnce((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) {
-        cb(null, {
-          stdout: JSON.stringify([{ url: 'https://github.com/org/repo/pull/42', number: 42 }]),
-          stderr: '',
-        });
-      }
-      return undefined as any;
-    });
+    vi.mocked(execFile).mockImplementationOnce(
+      execFileOk(
+        JSON.stringify([{ url: 'https://github.com/org/repo/pull/42', number: 42 }]),
+      ) as any,
+    );
 
     const result = await detectPR({ ...DEFAULTS.runningTask } as Task);
     expect(result).toEqual({ url: 'https://github.com/org/repo/pull/42', number: 42 });
@@ -279,11 +270,7 @@ describe('detectPR', () => {
     {
       name: 'gh command fails',
       setup: () => {
-        vi.mocked(execFile).mockImplementationOnce((...args: any[]) => {
-          const cb = findCallback(...args);
-          if (cb) cb(new Error('gh not found'));
-          return undefined as any;
-        });
+        vi.mocked(execFile).mockImplementationOnce(execFileFail('gh not found') as any);
       },
     },
     { name: 'branch is null', setup: () => {}, overrides: { branch: null } },

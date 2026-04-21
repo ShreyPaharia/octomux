@@ -68,6 +68,46 @@ export function renderWithRouter(
 
 // ─── API Mock Helpers ────────────────────────────────────────────────────────
 
+/**
+ * Builds an `apiMock` (vi.fn stubs with sensible defaults) and an `apiProxy` that
+ * forwards property reads to it. Intended to be called from inside `vi.hoisted()`:
+ *
+ *   const { apiMock, apiProxy } = await vi.hoisted(
+ *     async () => (await import('../test-helpers')).setupApiMock(),
+ *   );
+ *   vi.mock('@/lib/api', () => ({ api: apiProxy }));
+ *
+ * `vi.hoisted()` runs before any imports or `vi.mock` factories, so both `apiMock`
+ * and `apiProxy` are initialized by the time the `vi.mock` factory is invoked —
+ * avoiding the TDZ that a plain top-level `const apiMock = mockApi()` hits.
+ */
+/**
+ * Builds a `mockNavigate` vi.fn() and returns a `react-router-dom` factory suitable
+ * for passing directly to `vi.mock`. Use inside `vi.hoisted()`:
+ *
+ *   const { mockNavigate, routerMockFactory } = await vi.hoisted(
+ *     async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+ *   );
+ *   vi.mock('react-router-dom', routerMockFactory);
+ */
+export function setupRouterNavigateMock() {
+  const mockNavigate = vi.fn();
+  const routerMockFactory = async (importOriginal: () => Promise<unknown>) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return { ...actual, useNavigate: () => mockNavigate };
+  };
+  return { mockNavigate, routerMockFactory };
+}
+
+export function setupApiMock(overrides: Record<string, unknown> = {}) {
+  const apiMock = mockApi(overrides);
+  const apiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock] },
+  );
+  return { apiMock, apiProxy };
+}
+
 export function mockApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listTasks: vi.fn().mockResolvedValue([]),

@@ -4,11 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { TaskCard } from './TaskCard';
 import { renderWithRouter, makeTask } from '../test-helpers';
 
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return { ...actual, useNavigate: () => mockNavigate };
-});
+const { mockNavigate, routerMockFactory } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+);
+vi.mock('react-router-dom', routerMockFactory);
 
 describe('TaskCard', () => {
   const onClose = vi.fn();
