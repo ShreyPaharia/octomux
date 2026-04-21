@@ -77,7 +77,25 @@ export function setLogger(logger: Logger): void {
   rootLogger = logger;
 }
 
-/** Create a child logger tagged with `module`. */
+/**
+ * Child logger tagged with `module`. Returns a proxy that re-resolves against
+ * the current singleton on every access so tests can swap the root via
+ * `setLogger` without rebinding every captured reference.
+ */
 export function childLogger(module: string): Logger {
-  return getLogger().child({ module });
+  let cached: { root: Logger; child: Logger } | null = null;
+  const resolve = (): Logger => {
+    const root = getLogger();
+    if (!cached || cached.root !== root) {
+      cached = { root, child: root.child({ module }) };
+    }
+    return cached.child;
+  };
+  return new Proxy({} as Logger, {
+    get(_target, prop: string | symbol): unknown {
+      const current = resolve();
+      const val = Reflect.get(current, prop);
+      return typeof val === 'function' ? val.bind(current) : val;
+    },
+  });
 }
