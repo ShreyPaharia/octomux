@@ -221,9 +221,7 @@ describe('TerminalView', () => {
     // Must NOT have created a 3rd WebSocket — especially not one pointing
     // back at the old windowIndex=0.
     expect(MockWebSocket.instances).toHaveLength(2);
-    const stale = MockWebSocket.instances.find(
-      (ws, idx) => idx >= 2 && ws.url.endsWith('/0'),
-    );
+    const stale = MockWebSocket.instances.find((ws, idx) => idx >= 2 && ws.url.endsWith('/0'));
     expect(stale).toBeUndefined();
   });
 });
