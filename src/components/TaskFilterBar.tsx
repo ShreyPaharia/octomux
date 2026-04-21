@@ -3,6 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Badge } from '@/components/ui/badge';
 import type { StatusTab } from '@/lib/use-task-filters';
 import { repoName } from '@/lib/utils';
+import { ChevronDownIcon } from '@/components/icons';
 
 interface TaskFilterBarProps {
   activeStatus: StatusTab;
@@ -45,20 +46,7 @@ function RepoFilterDropdown({
             ) : (
               <span>ALL REPOS</span>
             )}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-[#8a8a8a]"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
+            <ChevronDownIcon size={12} className="text-[#8a8a8a]" />
           </button>
         }
       />

@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
 import { repoName } from '@/lib/utils';
+import { TerminalRectIcon } from '@/components/icons';
 
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).
 interface PerTaskUiState {
@@ -381,22 +382,7 @@ export default function TaskDetail() {
             'Setting up terminal...'
           ) : task.status === 'closed' || task.status === 'error' ? (
             <>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-muted-foreground/50"
-              >
-                <rect width="18" height="18" x="3" y="3" rx="2" />
-                <path d="m7 8 4 4-4 4" />
-                <path d="M13 16h4" />
-              </svg>
+              <TerminalRectIcon size={32} className="text-muted-foreground/50" />
               <span className="text-sm">Terminal session ended</span>
               {canResume && (
                 <Button variant="default" size="sm" disabled={resuming} onClick={handleResume}>
@@ -406,23 +392,7 @@ export default function TaskDetail() {
             </>
           ) : (
             <EmptyState
-              icon={
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="48"
-                  height="48"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect width="18" height="18" x="3" y="3" rx="2" />
-                  <path d="m7 8 4 4-4 4" />
-                  <path d="M13 16h4" />
-                </svg>
-              }
+              icon={<TerminalRectIcon />}
               heading="No agents running"
               subtext="Add an agent to start working on this task"
               action={
