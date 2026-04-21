@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useTasksContext } from '@/lib/tasks-context';
 import { useTaskFilters } from '@/lib/use-task-filters';
 import { TaskList } from '@/components/TaskList';
@@ -8,9 +8,34 @@ import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 
+function NewTaskButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button onClick={onClick}>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        data-icon="inline-start"
+      >
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+      </svg>
+      NEW TASK
+    </Button>
+  );
+}
+
 export default function Dashboard() {
   const { tasks, loading, error, refresh } = useTasksContext();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
+  const [createOpen, setCreateOpen] = useState(false);
+  const openCreate = useCallback(() => setCreateOpen(true), []);
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -109,7 +134,7 @@ export default function Dashboard() {
                 </h1>
                 <span className="text-sm text-[#8a8a8a]">// autonomous agent orchestration</span>
               </div>
-              <CreateTaskDialog onCreated={refresh} />
+              <NewTaskButton onClick={openCreate} />
             </div>
             <TaskFilterBar
               activeStatus={filters.status}
@@ -122,10 +147,15 @@ export default function Dashboard() {
             <TaskList
               tasks={filtered}
               totalCount={tasks.length}
-              emptyAction={<CreateTaskDialog onCreated={refresh} />}
+              emptyAction={<NewTaskButton onClick={openCreate} />}
               onClose={handleClose}
               onDelete={handleDelete}
               onResume={handleResume}
+            />
+            <CreateTaskDialog
+              open={createOpen}
+              onOpenChange={setCreateOpen}
+              onCreated={refresh}
             />
           </>
         )}
