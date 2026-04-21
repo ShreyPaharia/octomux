@@ -19,11 +19,29 @@ if [ -d "$ROOT_DIR/cli" ] && [ -f "$ROOT_DIR/cli/package.json" ]; then
   fi
 fi
 
-# ─── 2. Fix node-pty spawn-helper permissions (macOS) ────────────────────────
+# ─── 2. Install skills to ~/.claude/skills/ ──────────────────────────────────
+
+SKILLS_SRC="$ROOT_DIR/skills"
+SKILLS_DST="$HOME/.claude/skills"
+
+if [ -d "$SKILLS_SRC" ]; then
+  mkdir -p "$SKILLS_DST"
+  for skill_dir in "$SKILLS_SRC"/*/; do
+    skill_name="$(basename "$skill_dir")"
+    if [ -f "$skill_dir/SKILL.md" ]; then
+      mkdir -p "$SKILLS_DST/$skill_name"
+      cp "$skill_dir/SKILL.md" "$SKILLS_DST/$skill_name/SKILL.md" 2>/dev/null && \
+        echo "✓ Installed skill: $skill_name" || \
+        echo "⚠  Could not install skill: $skill_name"
+    fi
+  done
+fi
+
+# ─── 3. Fix node-pty spawn-helper permissions (macOS) ────────────────────────
 
 chmod +x "$ROOT_DIR/node_modules/node-pty/prebuilds/darwin-"*/spawn-helper 2>/dev/null || true
 
-# ─── 3. Install missing system dependencies ──────────────────────────────────
+# ─── 4. Install missing system dependencies ──────────────────────────────────
 
 install_with_brew() {
   local pkg="$1"

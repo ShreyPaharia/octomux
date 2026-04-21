@@ -33,7 +33,16 @@ import {
   resetCustomPrompt,
 } from './orchestrator.js';
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
-import { listAgents, getAgent, saveAgent, resetAgent, createAgent, deleteAgent } from './agents.js';
+import {
+  listAgents,
+  getAgent,
+  saveAgent,
+  resetAgent,
+  createAgent,
+  deleteAgent,
+  isBuiltInAgent,
+  syncAgents,
+} from './agents.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
 import { hookRoutes } from './hooks.js';
@@ -850,6 +859,7 @@ export function setupRoutes(app: Express): void {
     }
     try {
       await saveAgent(req.params.name as string, content);
+      await syncAgents();
       const agent = await getAgent(req.params.name as string);
       if (req.params.name === 'orchestrator' && (await isOrchestratorRunning())) {
         await stopOrchestrator();
@@ -864,12 +874,12 @@ export function setupRoutes(app: Express): void {
   app.delete('/api/agents/:name', async (req: Request, res: Response) => {
     try {
       const name = req.params.name as string;
-      const builtInPath = path.join(__dirname, '..', '.claude', 'agents', `${name}.md`);
-      if (fs.existsSync(builtInPath)) {
+      if (isBuiltInAgent(name)) {
         await resetAgent(name);
       } else {
         await deleteAgent(name);
       }
+      await syncAgents();
       if (name === 'orchestrator' && (await isOrchestratorRunning())) {
         await stopOrchestrator();
         await startOrchestrator();
@@ -888,6 +898,7 @@ export function setupRoutes(app: Express): void {
     }
     try {
       await createAgent(name, content);
+      await syncAgents();
       const agent = await getAgent(name);
       res.status(201).json(agent);
     } catch (err) {
