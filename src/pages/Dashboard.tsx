@@ -139,11 +139,7 @@ export default function Dashboard() {
               onDelete={handleDelete}
               onResume={handleResume}
             />
-            <CreateTaskDialog
-              open={createOpen}
-              onOpenChange={setCreateOpen}
-              onCreated={refresh}
-            />
+            <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refresh} />
           </>
         )}
       </div>

@@ -85,7 +85,9 @@ export function printTable<T>(
     cells
       .map((cell, i) => {
         const col = columns[i];
-        return i === columns.length - 1 || col.width == null ? cell : padEndVisible(cell, col.width);
+        return i === columns.length - 1 || col.width == null
+          ? cell
+          : padEndVisible(cell, col.width);
       })
       .join('');
 
