@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { Agent, UserTerminal } from '../../server/types';
+import { CloseIcon } from '@/components/icons';
 
 interface AgentTabsProps {
   agents: Agent[];
@@ -72,20 +73,7 @@ export function AgentTabs({
                 }}
                 title="Stop agent"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
+                <CloseIcon />
               </button>
             )}
           </div>
@@ -121,20 +109,7 @@ export function AgentTabs({
               }}
               title="Close terminal"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
-              </svg>
+              <CloseIcon />
             </button>
           )}
         </div>
