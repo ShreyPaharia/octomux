@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
-import { renderWithRouter, makeTask, mockApi } from '../test-helpers';
+import { renderWithRouter, makeTask, makeAgent, mockApi } from '../test-helpers';
 import type { Task } from '../../server/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -62,19 +62,7 @@ vi.mock('@/components/TerminalView', () => ({
 const runningTask: Task = makeTask({
   status: 'running',
   tmux_session: 'octomux-agent-test-task-01',
-  agents: [
-    {
-      id: 'a1',
-      task_id: 'test-task-01',
-      window_index: 0,
-      label: 'Agent 1',
-      status: 'running',
-      claude_session_id: null,
-      hook_activity: 'active' as const,
-      hook_activity_updated_at: null,
-      created_at: '2026-01-01 00:00:00',
-    },
-  ],
+  agents: [makeAgent({ id: 'a1' })],
 });
 
 describe('TaskDetail', () => {
@@ -486,19 +474,7 @@ describe('TaskDetail', () => {
     const taskWithTerminals = makeTask({
       status: 'running',
       tmux_session: 'octomux-agent-test-task-01',
-      agents: [
-        {
-          id: 'a1',
-          task_id: 'test-task-01',
-          window_index: 0,
-          label: 'Agent 1',
-          status: 'running',
-          claude_session_id: null,
-          hook_activity: 'active' as const,
-          hook_activity_updated_at: null,
-          created_at: '2026-01-01 00:00:00',
-        },
-      ],
+      agents: [makeAgent({ id: 'a1' })],
       user_terminals: [
         {
           id: 'term-1',
