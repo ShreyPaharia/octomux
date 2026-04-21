@@ -3,10 +3,10 @@ import { screen } from '@testing-library/react';
 import { TaskList } from './TaskList';
 import { renderWithRouter, makeTask } from '../test-helpers';
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return { ...actual, useNavigate: () => vi.fn() };
-});
+const { routerMockFactory } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+);
+vi.mock('react-router-dom', routerMockFactory);
 
 describe('TaskList', () => {
   const onClose = vi.fn();

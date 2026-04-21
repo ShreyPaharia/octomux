@@ -2,18 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Dashboard from './Dashboard';
-import { renderWithRouter, makeTask, mockApi } from '../test-helpers';
+import { renderWithRouter, makeTask } from '../test-helpers';
 
-const apiMock = mockApi();
+const { apiMock, apiProxy } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupApiMock(),
+);
 
-vi.mock('@/lib/api', () => ({
-  api: new Proxy(
-    {},
-    {
-      get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock],
-    },
-  ),
-}));
+vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
 vi.mock('@/lib/orchestrator-context', () => ({
   useOrchestratorContext: () => ({
@@ -26,10 +21,10 @@ vi.mock('@/lib/orchestrator-context', () => ({
   }),
 }));
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return { ...actual, useNavigate: () => vi.fn() };
-});
+const { routerMockFactory } = await vi.hoisted(
+  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+);
+vi.mock('react-router-dom', routerMockFactory);
 
 describe('Dashboard', () => {
   beforeEach(() => {

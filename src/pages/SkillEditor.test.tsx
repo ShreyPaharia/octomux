@@ -2,21 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SkillEditor from './SkillEditor';
-import { renderWithRouter, mockApi } from '../test-helpers';
+import { renderWithRouter } from '../test-helpers';
 
-const apiMock = mockApi({
-  getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test Skill' }),
-  updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: 'Updated' }),
-});
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock({
+    getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test Skill' }),
+    updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: 'Updated' }),
+  }),
+);
 
-vi.mock('@/lib/api', () => ({
-  api: new Proxy(
-    {},
-    {
-      get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock],
-    },
-  ),
-}));
+vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
