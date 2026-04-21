@@ -32,15 +32,17 @@ export async function getOrCreateRepoConfig(repoPath: string): Promise<RepoConfi
     ]);
     baseBranch = stdout.trim().replace('refs/remotes/origin/', '');
   } catch {
-    for (const candidate of ['main', 'master', 'staging']) {
-      try {
-        await execFile('git', ['-C', repoPath, 'rev-parse', '--verify', candidate]);
-        baseBranch = candidate;
-        break;
-      } catch {
-        // Try next
-      }
-    }
+    // Parallel probe; pick the first matching candidate in preference order
+    const candidates = ['main', 'master', 'staging'];
+    const results = await Promise.all(
+      candidates.map((c) =>
+        execFile('git', ['-C', repoPath, 'rev-parse', '--verify', c])
+          .then(() => true)
+          .catch(() => false),
+      ),
+    );
+    const hit = results.findIndex((ok) => ok);
+    if (hit >= 0) baseBranch = candidates[hit];
   }
 
   return db
