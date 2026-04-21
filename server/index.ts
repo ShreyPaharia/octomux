@@ -17,9 +17,11 @@ import { resumeTask, cleanupOrphanedViewerSessions } from './task-runner.js';
 import { getDb } from './db.js';
 import { startOrchestrator } from './orchestrator.js';
 import { syncAgents } from './agents.js';
+import { childLogger } from './logger.js';
 import type { Task } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const logger = childLogger('index');
 const app = createApp();
 const server = createServer(app);
 const PORT = process.env.PORT || 7777;
@@ -47,17 +49,17 @@ async function recoverTasks(): Promise<void> {
 
     // Session is dead
     if (task.worktree && fs.existsSync(task.worktree)) {
-      console.warn(`[recovery] Resuming task ${task.id}: ${task.title}`);
+      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: resuming task');
       resumeTask(task).catch((err) => {
-        console.error(`[recovery] resumeTask failed for ${task.id}:`, err);
+        logger.error({ task_id: task.id, err }, 'Recovery: resumeTask failed');
       });
     } else if (task.status === 'setting_up') {
-      console.warn(`[recovery] Setup interrupted for task ${task.id}: ${task.title}`);
+      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: setup was interrupted');
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
     } else {
-      console.warn(`[recovery] Worktree missing for task ${task.id}: ${task.title}`);
+      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: worktree missing');
       db.prepare(
         `UPDATE tasks SET status = 'error', error = 'Worktree missing after restart', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
@@ -70,12 +72,12 @@ await cleanupOrphanedViewerSessions();
 
 // Sync built-in agent definitions to .claude/agents/
 await syncAgents().catch((err) => {
-  console.error('[startup] Failed to sync agents:', err);
+  logger.error({ err }, 'Failed to sync agents');
 });
 
 // Auto-start orchestrator
 startOrchestrator().catch((err) => {
-  console.error('[startup] Failed to auto-start orchestrator:', err);
+  logger.error({ err }, 'Failed to auto-start orchestrator');
 });
 
 // Background status + PR polling
@@ -92,26 +94,26 @@ if (process.env.NODE_ENV === 'production') {
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\nPort ${PORT} is in use. Try: octomux start --port 8080`);
+    logger.error({ port: PORT }, `Port ${PORT} is in use — try: octomux start --port 8080`);
     process.exit(1);
   }
   throw err;
 });
 
 server.listen(PORT, () => {
-  console.warn(`octomux running at http://localhost:${PORT}`);
+  logger.info({ port: PORT }, `octomux running at http://localhost:${PORT}`);
 });
 
 // ─── Graceful Shutdown ──────────────────────────────────────────────────────
 function shutdown() {
-  console.warn('[shutdown] Stopping pollers...');
+  logger.info('Shutdown: stopping pollers');
   stopPolling();
-  console.warn('[shutdown] Cleaning up connections...');
+  logger.info('Shutdown: cleaning up connections');
   cleanupAllConnections();
   cleanupEventClients();
-  console.warn('[shutdown] Closing HTTP server...');
+  logger.info('Shutdown: closing HTTP server');
   server.close(() => {
-    console.warn('[shutdown] Done.');
+    logger.info('Shutdown: done');
     process.exit(0);
   });
   // Force exit after 5s if graceful shutdown stalls
