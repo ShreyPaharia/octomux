@@ -43,12 +43,9 @@ export async function getOrCreateRepoConfig(repoPath: string): Promise<RepoConfi
     }
   }
 
-  db.prepare(`INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?)`).run(
-    repoPath,
-    baseBranch,
-  );
-
-  return db.prepare('SELECT * FROM repo_configs WHERE repo_path = ?').get(repoPath) as RepoConfig;
+  return db
+    .prepare(`INSERT INTO repo_configs (repo_path, base_branch) VALUES (?, ?) RETURNING *`)
+    .get(repoPath, baseBranch) as RepoConfig;
 }
 
 export function updateRepoConfig(
@@ -79,10 +76,12 @@ export function updateRepoConfig(
   if (fields.length > 0) {
     fields.push(`updated_at = datetime('now')`);
     values.push(repoPath);
-    db.prepare(`UPDATE repo_configs SET ${fields.join(', ')} WHERE repo_path = ?`).run(...values);
+    return db
+      .prepare(`UPDATE repo_configs SET ${fields.join(', ')} WHERE repo_path = ? RETURNING *`)
+      .get(...values) as RepoConfig;
   }
 
-  return db.prepare('SELECT * FROM repo_configs WHERE repo_path = ?').get(repoPath) as RepoConfig;
+  return existing;
 }
 
 export function listRepoConfigs(): RepoConfig[] {
