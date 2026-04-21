@@ -61,6 +61,18 @@ function safeParseJson(s: string): Record<string, unknown> {
   }
 }
 
+/** Load a task by :id param; respond 404 and return null if missing. */
+function loadTaskOrFail(req: Request, res: Response): Task | null {
+  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+    | Task
+    | undefined;
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return null;
+  }
+  return task;
+}
+
 function derivedStatus(task: {
   status: string;
   agents: Array<{ status: string; hook_activity: string }>;
@@ -273,14 +285,9 @@ export function setupRoutes(app: Express): void {
 
   // Get single task with agents
   app.get('/api/tasks/:id', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
     const agents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
@@ -357,15 +364,9 @@ export function setupRoutes(app: Express): void {
   // Update task status
   app.patch('/api/tasks/:id', async (req: Request, res: Response) => {
     const body = req.body as UpdateTaskRequest;
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
 
     // Draft field updates (title, description, repo_path, branch, base_branch, initial_prompt)
     const hasDraftFields = [
@@ -449,15 +450,9 @@ export function setupRoutes(app: Express): void {
 
   // Start a draft task
   app.post('/api/tasks/:id/start', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
 
     if (task.status !== 'draft') {
       res.status(400).json({ error: 'Only draft tasks can be started' });
@@ -489,15 +484,9 @@ export function setupRoutes(app: Express): void {
 
   // Delete task
   app.delete('/api/tasks/:id', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
     const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
 
     const taskId = task.id;
     await deleteTask(task);
@@ -509,15 +498,8 @@ export function setupRoutes(app: Express): void {
 
   // Add agent to task
   app.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Can only add agents to running tasks' });
@@ -532,15 +514,13 @@ export function setupRoutes(app: Express): void {
 
   // Stop agent
   app.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-    const agent = db
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const agent = getDb()
       .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
       .get(req.params.agentId, req.params.id) as Agent | undefined;
 
-    if (!task || !agent) {
+    if (!agent) {
       res.status(404).json({ error: 'Task or agent not found' });
       return;
     }
@@ -552,15 +532,8 @@ export function setupRoutes(app: Express): void {
 
   // Create user terminal (lazily creates tmux window with nvim)
   app.post('/api/tasks/:id/user-terminal', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Can only create user terminal for running tasks' });
@@ -583,15 +556,9 @@ export function setupRoutes(app: Express): void {
 
   // Create shell terminal
   app.post('/api/tasks/:id/terminals', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Can only create terminals for running tasks' });
       return;
@@ -612,17 +579,10 @@ export function setupRoutes(app: Express): void {
 
   // Close shell terminal
   app.delete('/api/tasks/:id/terminals/:terminalId', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
-
-    const terminal = db
+    const terminal = getDb()
       .prepare('SELECT * FROM user_terminals WHERE id = ? AND task_id = ?')
       .get(req.params.terminalId, req.params.id) as UserTerminal | undefined;
 
@@ -642,22 +602,15 @@ export function setupRoutes(app: Express): void {
 
   // Send message to agent via tmux send-keys
   app.post('/api/tasks/:id/agents/:agentId/message', async (req: Request, res: Response) => {
-    const db = getDb();
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
-      | Task
-      | undefined;
-
-    if (!task) {
-      res.status(404).json({ error: 'Task not found' });
-      return;
-    }
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
 
     if (task.status !== 'running') {
       res.status(400).json({ error: 'Task is not running' });
       return;
     }
 
-    const agent = db
+    const agent = getDb()
       .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
       .get(req.params.agentId, req.params.id) as Agent | undefined;
 
