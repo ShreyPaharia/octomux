@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, success } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, success } from '../format.js';
 
 export function registerSendMessage(program: Command): void {
   program
@@ -9,12 +9,11 @@ export function registerSendMessage(program: Command): void {
     .requiredOption('-t, --task <task-id>', 'task ID')
     .requiredOption('-a, --agent <agent-id>', 'agent ID')
     .action(async (message: string, opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       const result = await client.sendMessage(opts.task, opts.agent, message);
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(result);
         return;
       }

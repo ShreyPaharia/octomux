@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, colorStatus, heading } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, colorStatus, heading } from '../format.js';
 
 export function registerListTasks(program: Command): void {
   program
@@ -11,8 +11,7 @@ export function registerListTasks(program: Command): void {
     .option('--status <status>', 'filter by status (draft, setting_up, running, closed, error)')
     .option('--repo-path <path>', 'filter by repository path')
     .action(async (opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       let tasks = await client.listTasks(opts.repoPath ? { repo_path: opts.repoPath } : undefined);
 
@@ -20,7 +19,7 @@ export function registerListTasks(program: Command): void {
         tasks = tasks.filter((t) => t.status === opts.status);
       }
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(tasks);
         return;
       }

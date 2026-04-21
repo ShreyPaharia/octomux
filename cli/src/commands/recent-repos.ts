@@ -1,17 +1,16 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, heading } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, heading } from '../format.js';
 
 export function registerRecentRepos(program: Command): void {
   program
     .command('recent-repos')
     .description('List recently used repositories')
     .action(async (_opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
       const repos = await client.recentRepos();
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(repos);
         return;
       }

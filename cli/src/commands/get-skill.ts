@@ -1,16 +1,15 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, heading } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, heading } from '../format.js';
 
 export function registerGetSkill(program: Command): void {
   program
     .command('get-skill <name>')
     .description('Get skill content')
     .action(async (name: string, _opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
       const skill = await client.getSkill(name);
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(skill);
         return;
       }
