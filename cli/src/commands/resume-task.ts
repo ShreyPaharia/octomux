@@ -1,18 +1,17 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, success, colorStatus, label } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, success, colorStatus, label } from '../format.js';
 
 export function registerResumeTask(program: Command): void {
   program
     .command('resume-task <id>')
     .description('Resume a closed or errored task')
     .action(async (id: string, _opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       const task = await client.updateTask(id, { status: 'running' });
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(task);
         return;
       }

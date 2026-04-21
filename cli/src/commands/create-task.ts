@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, outputJson, label, success, colorStatus } from '../format.js';
+import { getContext } from '../action.js';
+import { outputJson, label, success, colorStatus } from '../format.js';
 
 export function registerCreateTask(program: Command): void {
   program
@@ -15,8 +15,7 @@ export function registerCreateTask(program: Command): void {
     .option('--draft', 'create as draft without starting')
     .option('--no-worktree', 'run agent in the repo directory without creating a worktree')
     .action(async (opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       // Auto-fill base branch from repo config if not specified
       if (!opts.baseBranch) {
@@ -41,7 +40,7 @@ export function registerCreateTask(program: Command): void {
         no_worktree: opts.noWorktree,
       });
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         outputJson(task);
         return;
       }

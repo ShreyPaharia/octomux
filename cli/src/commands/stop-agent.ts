@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import type { OctomuxClient } from '../client.js';
-import { isJsonMode, success } from '../format.js';
+import { getContext } from '../action.js';
+import { success } from '../format.js';
 
 export function registerStopAgent(program: Command): void {
   program
@@ -8,12 +8,11 @@ export function registerStopAgent(program: Command): void {
     .description('Stop a specific agent on a task')
     .requiredOption('-t, --task <task-id>', 'task ID')
     .action(async (agentId: string, opts, cmd) => {
-      const globals = cmd.optsWithGlobals();
-      const client: OctomuxClient = globals._client;
+      const { client, json } = getContext(cmd);
 
       await client.stopAgent(opts.task, agentId);
 
-      if (isJsonMode(globals.json)) {
+      if (json) {
         console.log(JSON.stringify({ stopped: agentId, task: opts.task }));
         return;
       }
