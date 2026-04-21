@@ -92,12 +92,6 @@ export function TerminalView({
       };
 
       wsRef.current = ws;
-
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
     },
     [getWsUrl],
   );
@@ -149,6 +143,15 @@ export function TerminalView({
     termRef.current = term;
     fitRef.current = fitAddon;
     reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+
+    // Register input handler once per terminal lifetime — always forwards to
+    // the latest WebSocket via wsRef, so reconnects don't accumulate listeners.
+    term.onData((data) => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
 
     // Defer initial fit to next frame so the browser has completed flex layout.
     // Without this, fit() can measure a not-yet-expanded container and set xterm
