@@ -1,19 +1,19 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useOrchestrator } from './hooks';
 
-function useOrchestratorPanel() {
-  const orchestrator = useOrchestrator();
-
-  return { ...orchestrator };
-}
-
-export type OrchestratorState = ReturnType<typeof useOrchestratorPanel>;
+export type OrchestratorState = ReturnType<typeof useOrchestrator>;
 
 const OrchestratorContext = createContext<OrchestratorState | null>(null);
 
 export function OrchestratorProvider({ children }: { children: ReactNode }) {
-  const state = useOrchestratorPanel();
-  return <OrchestratorContext.Provider value={state}>{children}</OrchestratorContext.Provider>;
+  const { running, loading, error, start, stop, restart, refresh } = useOrchestrator();
+  // Memoize so consumers (UniversalSidebar, OrchestratorPage, etc.) don't
+  // re-render every time this provider renders — only when a field changes.
+  const value = useMemo<OrchestratorState>(
+    () => ({ running, loading, error, start, stop, restart, refresh }),
+    [running, loading, error, start, stop, restart, refresh],
+  );
+  return <OrchestratorContext.Provider value={value}>{children}</OrchestratorContext.Provider>;
 }
 
 export function useOrchestratorContext(): OrchestratorState {

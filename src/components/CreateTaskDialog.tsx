@@ -14,9 +14,13 @@ import { api } from '@/lib/api';
 import { RepoPickerField } from './fields/RepoPickerField';
 import { BranchPickerField } from './fields/BranchPickerField';
 import type { RepoValidation } from './fields/RepoPickerField';
+import { PlusIcon } from '@/components/icons';
 
 interface CreateTaskDialogProps {
   onCreated?: () => void;
+  /** When provided, dialog is fully controlled and the built-in trigger is hidden. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 function ZapIcon({ size = 14 }: { size?: number }) {
@@ -37,8 +41,15 @@ function ZapIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
-  const [open, setOpen] = useState(false);
+export function CreateTaskDialog({
+  onCreated,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+}: CreateTaskDialogProps) {
+  const isControlled = controlledOpen !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = isControlled ? (controlledOnOpenChange ?? (() => {})) : setUncontrolledOpen;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [repoPath, setRepoPath] = useState('');
@@ -122,24 +133,12 @@ export function CreateTaskDialog({ onCreated }: CreateTaskDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button />}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          data-icon="inline-start"
-        >
-          <path d="M12 5v14" />
-          <path d="M5 12h14" />
-        </svg>
-        NEW TASK
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger render={<Button />}>
+          <PlusIcon data-icon="inline-start" />
+          NEW TASK
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="font-mono font-bold text-sm tracking-wide">
