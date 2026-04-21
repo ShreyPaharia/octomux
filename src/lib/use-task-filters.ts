@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { Task } from '../../server/types';
+import { repoName } from './utils';
 
 const REPO_FILTER_KEY = 'octomux-repo-filter';
 const STATUS_FILTER_KEY = 'octomux-status-filter';
@@ -21,11 +22,7 @@ export function useTaskFilters(tasks: Task[]) {
 
   const repos = useMemo(() => {
     const paths = new Set(tasks.map((t) => t.repo_path));
-    return [...paths].sort((a, b) => {
-      const nameA = a.split('/').pop() || a;
-      const nameB = b.split('/').pop() || b;
-      return nameA.localeCompare(nameB);
-    });
+    return [...paths].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   }, [tasks]);
 
   const counts = useMemo(() => {

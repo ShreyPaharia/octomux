@@ -9,12 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
-
-/** Extract the last path segment (repo name) from a full path. */
-function repoName(path?: string | null): string {
-  if (!path) return '—';
-  return path.split('/').filter(Boolean).pop() || path;
-}
+import { repoName } from '@/lib/utils';
 
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).
 interface PerTaskUiState {
