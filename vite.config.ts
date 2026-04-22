@@ -46,6 +46,12 @@ export default defineConfig({
           if (id.includes('node_modules/@base-ui/')) {
             return 'vendor-ui';
           }
+          if (
+            id.includes('node_modules/monaco-editor/') ||
+            id.includes('node_modules/@monaco-editor/')
+          ) {
+            return 'vendor-monaco';
+          }
         },
       },
     },
