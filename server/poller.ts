@@ -280,18 +280,62 @@ function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): 
   return `${prompt}\n\nUpdated: head advanced to ${newSha} at ${timestamp}`;
 }
 
+function buildReReviewNudge(pr: OpenReviewPR): string {
+  return (
+    `Re-review requested for PR #${pr.number}. ` +
+    `Head advanced to ${pr.headRefOid}. ` +
+    `Please pull the latest and re-run the /review-pr flow on ${pr.url}.`
+  );
+}
+
+/** Pick the first non-stopped agent in a running task, lowest window_index. */
+function firstActiveAgent(taskId: string): { id: string; window_index: number } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, window_index FROM agents
+       WHERE task_id = ? AND status != 'stopped'
+       ORDER BY window_index ASC LIMIT 1`,
+    )
+    .get(taskId) as { id: string; window_index: number } | undefined;
+}
+
 /**
- * Create or update a draft review task for a PR where the owner is the requested
+ * Nudge the first active agent in a running review task via tmux send-keys.
+ * Returns true if the message was delivered.
+ */
+async function nudgeAgentForReReview(
+  taskId: string,
+  tmuxSession: string,
+  pr: OpenReviewPR,
+): Promise<boolean> {
+  const agent = firstActiveAgent(taskId);
+  if (!agent) return false;
+  try {
+    const target = `${tmuxSession}:${agent.window_index}`;
+    const message = buildReReviewNudge(pr);
+    await execFile('tmux', ['send-keys', '-t', target, message, 'Enter']);
+    return true;
+  } catch (err) {
+    logger.warn(
+      { task_id: taskId, err: (err as Error).message },
+      'failed to nudge agent for re-review (session may be gone)',
+    );
+    return false;
+  }
+}
+
+/**
+ * Create or update an auto-review task for a PR where the owner is the requested
  * reviewer. Returns the action taken so the caller can broadcast + log.
  */
-function upsertReviewTask(
+async function upsertReviewTask(
   repoPath: string,
   pr: OpenReviewPR,
-): { action: 'created' | 'updated' | 'skipped'; taskId?: string } {
+): Promise<{ action: 'created' | 'updated' | 'nudged' | 'skipped'; taskId?: string }> {
   const db = getDb();
   const existing = db
     .prepare(
-      `SELECT id, status, source, pr_head_sha, initial_prompt
+      `SELECT id, status, source, pr_head_sha, initial_prompt, tmux_session
        FROM tasks
        WHERE repo_path = ? AND pr_number = ? AND status NOT IN ('closed', 'error')
        ORDER BY created_at DESC LIMIT 1`,
@@ -303,25 +347,42 @@ function upsertReviewTask(
         source: string | null;
         pr_head_sha: string | null;
         initial_prompt: string | null;
+        tmux_session: string | null;
       }
     | undefined;
 
   if (existing) {
     // Only update rows we created; never touch owner's manual tasks.
     if (existing.source !== 'auto_review') return { action: 'skipped' };
-    if (existing.status !== 'draft') return { action: 'skipped' };
     if (existing.pr_head_sha === pr.headRefOid) return { action: 'skipped' };
 
-    const updatedPrompt = buildShaUpdateNote(
-      existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString()),
-      pr.headRefOid,
-      new Date().toISOString(),
-    );
-    db.prepare(
-      `UPDATE tasks SET pr_head_sha = ?, initial_prompt = ?, updated_at = datetime('now')
-       WHERE id = ?`,
-    ).run(pr.headRefOid, updatedPrompt, existing.id);
-    return { action: 'updated', taskId: existing.id };
+    if (existing.status === 'draft') {
+      const updatedPrompt = buildShaUpdateNote(
+        existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString()),
+        pr.headRefOid,
+        new Date().toISOString(),
+      );
+      db.prepare(
+        `UPDATE tasks SET pr_head_sha = ?, initial_prompt = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      ).run(pr.headRefOid, updatedPrompt, existing.id);
+      return { action: 'updated', taskId: existing.id };
+    }
+
+    // Task is running (or setting_up) — nudge the existing agent rather than
+    // creating a duplicate. Record the new SHA so we don't re-nudge on every tick.
+    if (existing.status === 'running' || existing.status === 'setting_up') {
+      if (!existing.tmux_session) return { action: 'skipped' };
+      const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
+      if (!delivered) return { action: 'skipped' };
+      db.prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`).run(
+        pr.headRefOid,
+        existing.id,
+      );
+      return { action: 'nudged', taskId: existing.id };
+    }
+
+    return { action: 'skipped' };
   }
 
   const id = nanoid(12);
@@ -386,7 +447,7 @@ export async function pollReviewerRequests(): Promise<void> {
       if (!isOwnerStillRequested(pr, ownerLogin)) continue;
       activePrNumbers.add(pr.number);
 
-      const result = upsertReviewTask(repoPath, pr);
+      const result = await upsertReviewTask(repoPath, pr);
       if (result.action === 'created') {
         logger.info(
           { task_id: result.taskId, pr_number: pr.number, repo_path: repoPath },
@@ -402,6 +463,17 @@ export async function pollReviewerRequests(): Promise<void> {
             head: pr.headRefOid,
           },
           'updated auto-review task for new PR head',
+        );
+        broadcast({ type: 'task:updated', payload: { taskId: result.taskId! } });
+      } else if (result.action === 'nudged') {
+        logger.info(
+          {
+            task_id: result.taskId,
+            pr_number: pr.number,
+            repo_path: repoPath,
+            head: pr.headRefOid,
+          },
+          'nudged running agent for PR re-review',
         );
         broadcast({ type: 'task:updated', payload: { taskId: result.taskId! } });
       }
