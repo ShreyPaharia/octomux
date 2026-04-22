@@ -30,9 +30,20 @@ export interface FileDiff {
   binary: boolean;
 }
 
+// Strip GIT_* env vars so our git calls target the worktree we pass via -C,
+// not whatever repo an outer caller (e.g. a git hook) happens to be in.
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!k.startsWith('GIT_')) env[k] = v;
+  }
+  return env;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFile('git', ['-C', cwd, ...args], {
     maxBuffer: 64 * 1024 * 1024,
+    env: gitEnv(),
   });
   return stdout;
 }

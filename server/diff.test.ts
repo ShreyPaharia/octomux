@@ -6,7 +6,23 @@ import os from 'os';
 import path from 'path';
 import { getDiffSummary, getFileDiff, safeResolvePath } from './diff.js';
 
-const execFile = promisify(execFileCb);
+const execFileRaw = promisify(execFileCb);
+
+// Strip GIT_* env vars so temp-repo git calls aren't hijacked by an outer
+// git operation (e.g. the husky pre-push hook exports GIT_DIR / GIT_INDEX_FILE
+// pointing at the main repo, which would otherwise make `git -C /tmp/... commit`
+// target the main repo instead of the temp dir).
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!k.startsWith('GIT_')) env[k] = v;
+  }
+  return env;
+}
+
+async function execFile(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return execFileRaw(cmd, args, { env: gitEnv() });
+}
 
 async function makeRepo(): Promise<string> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'diff-test-'));
