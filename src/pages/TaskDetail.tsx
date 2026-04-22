@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
+import { DiffViewer } from '@/components/DiffViewer';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
 
@@ -15,7 +16,7 @@ import { TerminalRectIcon } from '@/components/icons';
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).
 interface PerTaskUiState {
   activeWindow: number | null;
-  mode: 'agents' | 'editor';
+  mode: 'agents' | 'editor' | 'diff';
 }
 const perTaskUiState = new Map<string, PerTaskUiState>();
 
@@ -32,7 +33,7 @@ export default function TaskDetail() {
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
 
   const [resuming, setResuming] = useState(false);
-  const [mode, setMode] = useState<'agents' | 'editor'>('agents');
+  const [mode, setMode] = useState<'agents' | 'editor' | 'diff'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
   const [searchParams] = useSearchParams();
   const agentParam = searchParams.get('agent');
@@ -91,10 +92,11 @@ export default function TaskDetail() {
     }
   }, [firstAgentWindow, activeWindow, agentParam, task?.agents]);
 
-  // Auto-switch back to agents when task enters non-running state
+  // Auto-switch back to agents when task enters non-running state.
+  // Diff mode is allowed to persist so users can keep reviewing a closed task's diff.
   useEffect(() => {
     if (task && task.status !== 'running') {
-      setMode('agents');
+      setMode((m) => (m === 'editor' ? 'agents' : m));
       setLocalUserWindowIndex(null);
     }
   }, [task?.status]);
@@ -283,6 +285,20 @@ export default function TaskDetail() {
               &lt;&gt; EDITOR
             </Button>
           )}
+          {task.worktree && task.base_branch && (
+            <Button
+              variant="outline"
+              size="sm"
+              className={
+                mode === 'diff'
+                  ? 'border-[#2f2f2f] text-[#3B82F6]'
+                  : 'border-[#2f2f2f] text-[#8a8a8a]'
+              }
+              onClick={() => setMode(mode === 'diff' ? 'agents' : 'diff')}
+            >
+              DIFF
+            </Button>
+          )}
           {isDraft && (
             <Button variant="default" size="sm" onClick={handleStart}>
               Start
@@ -367,7 +383,7 @@ export default function TaskDetail() {
           </div>
         </div>
       ) : isDraft ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className={mode === 'agents' ? 'min-h-0 flex-1 overflow-y-auto' : 'hidden'}>
           <DraftEditForm task={task} onSaved={refresh} onStart={handleStart} />
         </div>
       ) : (
@@ -404,6 +420,13 @@ export default function TaskDetail() {
               }
             />
           )}
+        </div>
+      )}
+
+      {/* Diff view */}
+      {mode === 'diff' && task.worktree && task.base_branch && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <DiffViewer taskId={task.id} isRunning={task.status === 'running'} />
         </div>
       )}
 
