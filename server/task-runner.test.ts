@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import pino from 'pino';
 import Database from 'better-sqlite3';
 import {
   createTestDb,
@@ -90,6 +91,7 @@ const {
 const { execFile } = await import('child_process');
 const fs = await import('fs');
 const { installHookSettings } = await import('./hook-settings.js');
+const { setLogger, getLogger } = await import('./logger.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -499,20 +501,34 @@ describe('addAgent', () => {
       }
     }) as any);
 
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const agent = await addAgent(runningTask);
-    // Flush the fire-and-forget async IIFE
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Agent should be marked as stopped in DB
-    const agents = getAgents(db, DEFAULTS.task.id);
-    const dbAgent = agents.find((a) => a.id === agent.id)!;
-    expect(dbAgent.status).toBe('stopped');
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[addAgent]'),
-      expect.any(Error),
+    const chunks: string[] = [];
+    const originalLogger = getLogger();
+    setLogger(
+      pino(
+        { level: 'trace' },
+        {
+          write(chunk: string) {
+            chunks.push(chunk);
+          },
+        },
+      ),
     );
-    consoleSpy.mockRestore();
+
+    try {
+      const agent = await addAgent(runningTask);
+      // Flush the fire-and-forget async IIFE
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Agent should be marked as stopped in DB
+      const agents = getAgents(db, DEFAULTS.task.id);
+      const dbAgent = agents.find((a) => a.id === agent.id)!;
+      expect(dbAgent.status).toBe('stopped');
+      const logged = chunks.join('');
+      expect(logged).toContain('addAgent');
+      expect(logged).toContain('tmux send-keys failed');
+    } finally {
+      setLogger(originalLogger);
+    }
     // Restore default execFile implementation for subsequent tests
     vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
       if (args.includes('display-message')) {

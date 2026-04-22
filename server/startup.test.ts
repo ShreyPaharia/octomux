@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import pino from 'pino';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ vi.mock('child_process', () => ({
 const { execFileSync } = await import('child_process');
 const fs = await import('fs');
 const { ensureBinary, checkNeovimVersion, syncLazyVimPlugins } = await import('./startup.js');
+const { setLogger, getLogger } = await import('./logger.js');
 
 const mockExecFileSync = vi.mocked(execFileSync);
 const mockExistsSync = vi.mocked(fs.existsSync);
@@ -27,12 +29,35 @@ const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
   throw new Error('process.exit');
 });
 
+/** Pipe pino output to an in-memory buffer so we can assert log content. */
+function captureLogs() {
+  const chunks: string[] = [];
+  const stream = {
+    write(chunk: string) {
+      chunks.push(chunk);
+    },
+  };
+  const original = getLogger();
+  setLogger(pino({ level: 'trace' }, stream));
+  return {
+    text: () => chunks.join(''),
+    restore: () => setLogger(original),
+  };
+}
+
 // ─── Setup ───────────────────────────────────────────────────────────────────
+
+let logs: ReturnType<typeof captureLogs>;
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockExistsSync.mockReturnValue(true);
   mockReaddirSync.mockReturnValue(['some-plugin'] as unknown as ReturnType<typeof fs.readdirSync>);
+  logs = captureLogs();
+});
+
+afterEach(() => {
+  logs.restore();
 });
 
 // ─── ensureBinary ────────────────────────────────────────────────────────────
@@ -109,7 +134,6 @@ describe('ensureBinary', () => {
   it('uses installUrl when provided instead of brew formula URL', () => {
     const originalPlatform = process.platform;
     Object.defineProperty(process, 'platform', { value: 'linux' });
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mockExecFileSync.mockImplementation(() => {
       throw new Error('not found');
@@ -124,12 +148,9 @@ describe('ensureBinary', () => {
       }),
     ).toThrow('process.exit');
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('https://docs.anthropic.com/en/docs/claude-code'),
-    );
+    expect(logs.text()).toContain('https://docs.anthropic.com/en/docs/claude-code');
 
     Object.defineProperty(process, 'platform', { value: originalPlatform });
-    errorSpy.mockRestore();
   });
 
   it('exits when brew install fails', () => {
@@ -232,7 +253,6 @@ describe('syncLazyVimPlugins', () => {
   });
 
   it('warns but does not exit when sync fails', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockExistsSync.mockReturnValue(false);
     mockExecFileSync.mockImplementation(() => {
       throw new Error('sync failed');
@@ -240,8 +260,7 @@ describe('syncLazyVimPlugins', () => {
 
     syncLazyVimPlugins('/repo');
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('plugin sync failed'));
+    expect(logs.text()).toContain('plugin sync failed');
     expect(mockExit).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
   });
 });

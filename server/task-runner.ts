@@ -8,8 +8,11 @@ import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
 import { getSettings } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
+import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal } from './types.js';
+
+const logger = childLogger('task-runner');
 
 export interface UserTerminalResult {
   editor: 'nvim' | 'vscode' | 'cursor';
@@ -209,6 +212,12 @@ export async function startTask(task: Task): Promise<void> {
   const session = `octomux-agent-${id}`;
   const isNoWorktree = !!task.no_worktree;
 
+  logger.info(
+    { task_id: id, operation: 'createTask', no_worktree: isNoWorktree, repo_path: task.repo_path },
+    'createTask: start',
+  );
+
+  let stage = 'validate_repo';
   try {
     // 1. Validate repo path
     if (!fs.existsSync(task.repo_path)) {
@@ -217,6 +226,10 @@ export async function startTask(task: Task): Promise<void> {
     await execFile('git', ['-C', task.repo_path, 'rev-parse', '--is-inside-work-tree']);
 
     let worktreePath: string;
+    let branch: string | null = null;
+
+    stage = 'worktree_setup';
+    logger.info({ task_id: id, operation: 'createTask', stage }, 'createTask: setting up worktree');
 
     if (isNoWorktree) {
       // No-worktree mode: run directly in repo
@@ -227,7 +240,7 @@ export async function startTask(task: Task): Promise<void> {
     } else {
       // Standard mode: create worktree and branch
       const slug = slugifyTitle(task.title, id);
-      const branch = task.branch || `agents/${slug}`;
+      branch = task.branch || `agents/${slug}`;
       const worktreeDir = task.branch || slug;
       worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
 
@@ -245,6 +258,10 @@ export async function startTask(task: Task): Promise<void> {
         worktreeArgs.push(task.base_branch);
       }
       await execFile('git', worktreeArgs);
+      logger.info(
+        { task_id: id, operation: 'createTask', branch, worktree: worktreePath },
+        'createTask: branch created',
+      );
 
       // Copy .claude/settings.local.json if it exists
       const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
@@ -260,19 +277,26 @@ export async function startTask(task: Task): Promise<void> {
 
     // Pre-flight: auto-fix formatting in fresh worktree (only for worktree tasks)
     if (!isNoWorktree) {
+      stage = 'preflight';
       const repoConfig = await getOrCreateRepoConfig(task.repo_path);
       await preflightWorktree(worktreePath, repoConfig);
     }
 
     // Create tmux session
+    stage = 'tmux_session';
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
     // Prevent grouped viewer sessions from constraining window size
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    logger.info(
+      { task_id: id, operation: 'createTask', tmux_session: session },
+      'createTask: tmux session created',
+    );
 
     // 7. Query the actual window index (respects tmux base-index)
     const windowIndex = await getActiveWindowIndex(session);
 
     // 8. Create first agent record with session ID
+    stage = 'launch_agent';
     const agentId = nanoid(12);
     const claudeSessionId = crypto.randomUUID();
     db.prepare(
@@ -288,13 +312,28 @@ export async function startTask(task: Task): Promise<void> {
       worktreePath,
       agentId,
     });
+    logger.info(
+      {
+        task_id: id,
+        agent_id: agentId,
+        operation: 'createTask',
+        window_index: windowIndex,
+        claude_session_id: claudeSessionId,
+      },
+      'createTask: first agent launched',
+    );
 
     // 12. Mark as running
     db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
       'running',
       id,
     );
+    logger.info({ task_id: id, operation: 'createTask' }, 'createTask: complete');
   } catch (err) {
+    logger.error(
+      { task_id: id, operation: 'createTask', stage, err },
+      'createTask: failed during setup stage',
+    );
     db.prepare(
       `UPDATE tasks SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run('error', (err as Error).message, id);
@@ -303,6 +342,8 @@ export async function startTask(task: Task): Promise<void> {
 
 export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
   const db = getDb();
+
+  logger.info({ task_id: task.id, operation: 'addAgent' }, 'addAgent: start');
 
   // Determine label from active (non-stopped) agent count
   const activeAgents = db
@@ -315,6 +356,10 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 
   // Query the actual window index of the newly created window
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
+  logger.info(
+    { task_id: task.id, operation: 'addAgent', window_index: windowIndex, label },
+    'addAgent: tmux window created',
+  );
 
   // Create agent record with session ID
   const agentId = nanoid(12);
@@ -334,8 +379,27 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
         worktreePath: task.worktree!,
         agentId,
       });
+      logger.info(
+        {
+          task_id: task.id,
+          agent_id: agentId,
+          operation: 'addAgent',
+          window_index: windowIndex,
+          claude_session_id: claudeSessionId,
+        },
+        'addAgent: claude launched',
+      );
     } catch (err) {
-      console.error(`[addAgent] Failed to launch claude in window ${windowIndex}:`, err);
+      logger.error(
+        {
+          task_id: task.id,
+          agent_id: agentId,
+          window_index: windowIndex,
+          operation: 'addAgent',
+          err,
+        },
+        'addAgent: failed to launch claude',
+      );
       try {
         getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
       } catch {
@@ -360,6 +424,8 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 export async function closeTask(task: Task): Promise<void> {
   const db = getDb();
 
+  logger.info({ task_id: task.id, operation: 'closeTask' }, 'closeTask: start');
+
   // Resolve all pending permission prompts for this task
   db.prepare(
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
@@ -376,44 +442,110 @@ export async function closeTask(task: Task): Promise<void> {
   db.prepare(
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
   ).run(task.id);
+  logger.info(
+    { task_id: task.id, operation: 'closeTask' },
+    'closeTask: DB marked task closed + agents stopped',
+  );
 
   // Kill linked viewer sessions, then main tmux session — worktree and branch are preserved for resume
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
-    await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
+    try {
+      await execFile('tmux', ['kill-session', '-t', task.tmux_session]);
+      logger.info(
+        { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session },
+        'closeTask: tmux session killed',
+      );
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session, err },
+        'closeTask: tmux kill-session failed (session may already be gone)',
+      );
+    }
   }
+
+  logger.info({ task_id: task.id, operation: 'closeTask' }, 'closeTask: complete');
 }
 
 export async function deleteTask(task: Task): Promise<void> {
+  logger.info(
+    { task_id: task.id, operation: 'deleteTask', no_worktree: !!task.no_worktree },
+    'deleteTask: start',
+  );
+
   // Kill linked viewer sessions, then main tmux session
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
-    await execFile('tmux', ['kill-session', '-t', task.tmux_session]).catch(() => {});
+    try {
+      await execFile('tmux', ['kill-session', '-t', task.tmux_session]);
+      logger.info(
+        { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session },
+        'deleteTask: tmux session killed',
+      );
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session, err },
+        'deleteTask: tmux kill-session failed (session may already be gone)',
+      );
+    }
   }
 
   // Skip worktree and branch cleanup for no-worktree tasks
-  if (task.no_worktree) return;
+  if (task.no_worktree) {
+    logger.info(
+      { task_id: task.id, operation: 'deleteTask' },
+      'deleteTask: complete (no_worktree mode — skipped worktree/branch cleanup)',
+    );
+    return;
+  }
 
   // Remove worktree
   if (task.worktree) {
-    await execFile('git', [
-      '-C',
-      task.repo_path,
-      'worktree',
-      'remove',
-      task.worktree,
-      '--force',
-    ]).catch(() => {});
+    try {
+      await execFile('git', ['-C', task.repo_path, 'worktree', 'remove', task.worktree, '--force']);
+      logger.info(
+        { task_id: task.id, operation: 'deleteTask', worktree: task.worktree },
+        'deleteTask: worktree removed',
+      );
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, operation: 'deleteTask', worktree: task.worktree, err },
+        'deleteTask: worktree remove failed (may already be gone)',
+      );
+    }
   }
 
   // Delete branch
   if (task.branch) {
-    await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]).catch(() => {});
+    try {
+      await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]);
+      logger.info(
+        { task_id: task.id, operation: 'deleteTask', branch: task.branch },
+        'deleteTask: branch deleted',
+      );
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, operation: 'deleteTask', branch: task.branch, err },
+        'deleteTask: branch delete failed (may already be gone)',
+      );
+    }
   }
+
+  logger.info({ task_id: task.id, operation: 'deleteTask' }, 'deleteTask: complete');
 }
 
 export async function stopAgent(task: Task, agent: Agent): Promise<void> {
   const db = getDb();
+
+  logger.info(
+    {
+      task_id: task.id,
+      agent_id: agent.id,
+      operation: 'stopAgent',
+      window_index: agent.window_index,
+    },
+    'stopAgent: start',
+  );
 
   // Resolve pending permission prompts for this agent
   db.prepare(
@@ -423,13 +555,23 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
 
   // Kill the specific tmux window
   await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
-    () => {},
+    (err) => {
+      logger.warn(
+        { task_id: task.id, agent_id: agent.id, operation: 'stopAgent', err },
+        'stopAgent: kill-window failed (window may already be gone)',
+      );
+    },
   );
 
   // Mark agent as stopped and idle
   db.prepare(
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE id = ?`,
   ).run(agent.id);
+
+  logger.info(
+    { task_id: task.id, agent_id: agent.id, operation: 'stopAgent' },
+    'stopAgent: complete',
+  );
 }
 
 export async function createUserTerminal(task: Task): Promise<UserTerminalResult> {
@@ -506,6 +648,11 @@ export async function resumeTask(task: Task): Promise<void> {
   const db = getDb();
   const session = task.tmux_session!;
 
+  logger.info(
+    { task_id: task.id, operation: 'resumeTask', tmux_session: session, worktree: task.worktree },
+    'resumeTask: start',
+  );
+
   try {
     // 1. Set status synchronously to prevent poller race
     db.prepare(
@@ -575,6 +722,16 @@ export async function resumeTask(task: Task): Promise<void> {
           windowIndex,
           agent.id,
         );
+        logger.info(
+          {
+            task_id: task.id,
+            agent_id: agent.id,
+            operation: 'resumeTask',
+            window_index: windowIndex,
+            claude_session_id: agent.claude_session_id,
+          },
+          'resumeTask: agent recovered',
+        );
       }),
     );
 
@@ -582,7 +739,13 @@ export async function resumeTask(task: Task): Promise<void> {
     db.prepare(
       `UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
+
+    logger.info(
+      { task_id: task.id, operation: 'resumeTask', recovered_agents: agents.length },
+      'resumeTask: complete',
+    );
   } catch (err) {
+    logger.error({ task_id: task.id, operation: 'resumeTask', err }, 'resumeTask: failed');
     db.prepare(
       `UPDATE tasks SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run((err as Error).message, task.id);
