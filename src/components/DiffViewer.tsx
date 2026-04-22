@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
 import { DiffFileTree } from './DiffFileTree';
 
@@ -43,13 +43,19 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
 
+  const selectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
   const loadSummary = useCallback(async () => {
     try {
       const s = await api.getTaskDiffSummary(taskId);
       setFiles(s.files);
       setError(null);
-      if (!selected && s.files.length > 0) setSelected(s.files[0].path);
-      if (selected && !s.files.find((f) => f.path === selected)) {
+      const cur = selectedRef.current;
+      if (!cur && s.files.length > 0) setSelected(s.files[0].path);
+      else if (cur && !s.files.find((f) => f.path === cur)) {
         setSelected(s.files[0]?.path ?? null);
       }
     } catch (err) {
@@ -57,7 +63,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
     } finally {
       setSummaryLoading(false);
     }
-  }, [taskId, selected]);
+  }, [taskId]);
 
   useEffect(() => {
     loadSummary();
@@ -73,6 +79,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
     }
     let cancelled = false;
     setFileLoading(true);
+    setError(null); // clear stale error on new selection
     api
       .getTaskDiffFile(taskId, selected)
       .then((d) => {
@@ -107,7 +114,11 @@ export function DiffViewer({ taskId, isRunning }: Props) {
         )}
       </aside>
       <main className="min-w-0 flex-1">
-        {!selected ? (
+        {error && selected ? (
+          <div className="flex h-full items-center justify-center text-sm text-destructive">
+            {error}
+          </div>
+        ) : !selected ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Select a file to view its diff
           </div>

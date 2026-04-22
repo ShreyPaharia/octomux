@@ -102,4 +102,43 @@ describe('DiffViewer', () => {
     await user.click(screen.getByText('b.ts'));
     await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
   });
+
+  it('falls back to first file when the selected file disappears on poll', async () => {
+    // First summary: has a.ts (selected) and b.ts
+    apiMock.getTaskDiffSummary
+      .mockResolvedValueOnce({
+        files: [
+          { path: 'a.ts', status: 'M', additions: 1, deletions: 0 },
+          { path: 'b.ts', status: 'A', additions: 5, deletions: 0 },
+        ],
+      })
+      // Second summary (after poll): a.ts is gone, only b.ts remains
+      .mockResolvedValueOnce({
+        files: [{ path: 'b.ts', status: 'A', additions: 5, deletions: 0 }],
+      });
+
+    apiMock.getTaskDiffFile
+      .mockResolvedValueOnce({
+        oldContent: 'a-old',
+        newContent: 'a-new',
+        status: 'M',
+        tooLarge: false,
+        binary: false,
+      })
+      .mockResolvedValueOnce({
+        oldContent: '',
+        newContent: 'b-new',
+        status: 'A',
+        tooLarge: false,
+        binary: false,
+      });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<DiffViewer taskId="t1" isRunning={true} />);
+    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('a-new'));
+    // Advance past one poll interval
+    await vi.advanceTimersByTimeAsync(2500);
+    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
+    vi.useRealTimers();
+  });
 });
