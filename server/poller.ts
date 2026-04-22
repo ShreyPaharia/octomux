@@ -4,7 +4,10 @@ import { getDb } from './db.js';
 import { closeTask } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
+import { childLogger } from './logger.js';
 import type { Task, UserTerminal } from './types.js';
+
+const logger = childLogger('poller');
 
 const execFile = promisify(execFileCb);
 
@@ -179,7 +182,7 @@ export async function pollMergedPRs(): Promise<void> {
   try {
     await checkMergedPRs();
   } catch (err) {
-    console.error('pollMergedPRs error:', err);
+    logger.error({ err, operation: 'pollMergedPRs' }, 'pollMergedPRs failed');
   }
 }
 
