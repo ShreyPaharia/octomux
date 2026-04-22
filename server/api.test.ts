@@ -122,7 +122,18 @@ vi.mock('./settings.js', () => ({
   })),
 }));
 
+vi.mock('./diff.js', () => ({
+  getDiffSummary: vi.fn(),
+  getFileDiff: vi.fn(),
+  safeResolvePath: (wt: string, p: string) => {
+    if (!p || p.includes('..') || p.startsWith('/')) throw new Error('Invalid path');
+    return `${wt}/${p}`;
+  },
+  MAX_FILE_BYTES: 1_048_576,
+}));
+
 const fs = (await import('fs')).default;
+const diffModule = await import('./diff.js');
 
 const { createApp } = await import('./app.js');
 const {
@@ -629,6 +640,95 @@ describe('DELETE /api/tasks/:id', () => {
     expect(db.prepare('SELECT * FROM agents WHERE task_id = ?').all(DEFAULTS.task.id)).toHaveLength(
       0,
     );
+  });
+});
+
+// ─── GET /api/tasks/:id/diff ─────────────────────────────────────────────────
+
+describe('GET /api/tasks/:id/diff', () => {
+  beforeEach(() => {
+    (fs.existsSync as any).mockReturnValue(true);
+    (diffModule.getDiffSummary as any).mockReset();
+    (diffModule.getFileDiff as any).mockReset();
+  });
+
+  it('returns 404 when task does not exist', async () => {
+    const res = await request(app).get('/api/tasks/missing/diff');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when task has no worktree', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, worktree: null });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/worktree/i);
+  });
+
+  it('returns 400 when worktree dir no longer exists', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    (fs.existsSync as any).mockReturnValue(false);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when task has no base_branch', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_branch: null });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/base/i);
+  });
+
+  it('returns a diff summary', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    (diffModule.getDiffSummary as any).mockResolvedValue({
+      files: [{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }],
+    });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    expect(res.status).toBe(200);
+    expect(res.body.files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+  });
+});
+
+// ─── GET /api/tasks/:id/diff/:path ───────────────────────────────────────────
+
+describe('GET /api/tasks/:id/diff/:path', () => {
+  beforeEach(() => {
+    (fs.existsSync as any).mockReturnValue(true);
+    (diffModule.getDiffSummary as any).mockReset();
+    (diffModule.getFileDiff as any).mockReset();
+  });
+
+  it('returns 404 when task does not exist', async () => {
+    const res = await request(app).get('/api/tasks/missing/diff/a.txt');
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects path traversal', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/diff/..%2Fetc%2Fpasswd`,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('returns old/new content for a file', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    (diffModule.getFileDiff as any).mockResolvedValue({
+      oldContent: 'old\n',
+      newContent: 'new\n',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      oldContent: 'old\n',
+      newContent: 'new\n',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    });
   });
 });
 

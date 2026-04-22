@@ -19,6 +19,7 @@ import {
   createShellTerminal,
   closeShellTerminal,
 } from './task-runner.js';
+import * as diffMod from './diff.js';
 
 import {
   isOrchestratorRunning,
@@ -663,6 +664,70 @@ export function setupRoutes(app: Express): void {
     ]);
 
     res.json({ success: true });
+  });
+
+  // ─── Diff ──────────────────────────────────────────────────────────────────
+
+  app.get('/api/tasks/:id/diff', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (!task.worktree) {
+      res.status(400).json({ error: 'Task has no worktree' });
+      return;
+    }
+    if (!task.base_branch) {
+      res.status(400).json({ error: 'Task has no base_branch' });
+      return;
+    }
+    if (!fs.existsSync(task.worktree)) {
+      res.status(400).json({ error: 'Worktree no longer exists on disk' });
+      return;
+    }
+    try {
+      const summary = await diffMod.getDiffSummary({
+        worktree: task.worktree,
+        base: task.base_branch,
+      });
+      res.json(summary);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/tasks/:id/diff/*path', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (!task.worktree) {
+      res.status(400).json({ error: 'Task has no worktree' });
+      return;
+    }
+    if (!task.base_branch) {
+      res.status(400).json({ error: 'Task has no base_branch' });
+      return;
+    }
+    if (!fs.existsSync(task.worktree)) {
+      res.status(400).json({ error: 'Worktree no longer exists on disk' });
+      return;
+    }
+    const params = req.params as Record<string, string | string[]>;
+    const rawPath = params.path ?? params['0'] ?? '';
+    const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
+    try {
+      diffMod.safeResolvePath(task.worktree, relPath);
+    } catch {
+      res.status(400).json({ error: 'Invalid path' });
+      return;
+    }
+    try {
+      const diff = await diffMod.getFileDiff({
+        worktree: task.worktree,
+        base: task.base_branch,
+        relPath,
+      });
+      res.json(diff);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // ─── Settings ──────────────────────────────────────────────────────────────
