@@ -40,6 +40,10 @@ vi.mock('./events.js', () => ({
   broadcast: vi.fn(),
 }));
 
+vi.mock('./github-login.js', () => ({
+  readGithubLogin: vi.fn(() => 'owner-login'),
+}));
+
 const {
   checkTaskStatus,
   pollStatuses,
@@ -48,6 +52,7 @@ const {
   detectPR,
   pollPRs,
   checkMergedPRs,
+  pollReviewerRequests,
   startPolling,
   stopPolling,
 } = await import('./poller.js');
@@ -55,6 +60,7 @@ const { execFile } = await import('child_process');
 const { closeTask } = await import('./task-runner.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
+const { readGithubLogin } = await import('./github-login.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -565,6 +571,346 @@ describe('pollTerminalActivity', () => {
 
     await pollTerminalActivity();
     expect(broadcast).not.toHaveBeenCalled();
+  });
+});
+
+// ─── pollReviewerRequests ───────────────────────────────────────────────────
+
+describe('pollReviewerRequests', () => {
+  const REPO = '/tmp/test-repo';
+  const OWNER = 'owner-login';
+
+  const makePR = (overrides: Record<string, unknown> = {}) => ({
+    number: 42,
+    title: 'Add thing',
+    url: 'https://github.com/org/repo/pull/42',
+    author: { login: 'teammate' },
+    headRefOid: 'sha-aaa',
+    headRefName: 'feat/thing',
+    baseRefName: 'main',
+    reviewRequests: [{ login: OWNER }],
+    ...overrides,
+  });
+
+  /** Install an execFile mock that returns the given PR list for gh pr list calls. */
+  function mockPrList(prs: Array<Record<string, unknown>>) {
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args)!;
+      const cmdArgs = args[1] as string[];
+      if (cmdArgs?.[0] === 'pr' && cmdArgs?.[1] === 'list') {
+        cb(null, { stdout: JSON.stringify(prs), stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(readGithubLogin).mockReturnValue(OWNER);
+  });
+
+  it('skips polling when owner login is not resolved', async () => {
+    vi.mocked(readGithubLogin).mockReturnValue(null);
+    // Seed a tracked repo via a task row
+    insertTask(db, { id: 'seed', repo_path: REPO });
+
+    await pollReviewerRequests();
+
+    // Should not have shelled out
+    const prListCall = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'pr' && args?.[1] === 'list';
+    });
+    expect(prListCall).toBeUndefined();
+  });
+
+  it('creates a draft auto-review task when owner is a reviewer', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    mockPrList([makePR()]);
+
+    await pollReviewerRequests();
+
+    const created = db.prepare(`SELECT * FROM tasks WHERE source = 'auto_review'`).get() as
+      | Record<string, unknown>
+      | undefined;
+    expect(created).toBeDefined();
+    expect(created!.status).toBe('draft');
+    expect(created!.pr_number).toBe(42);
+    expect(created!.pr_head_sha).toBe('sha-aaa');
+    expect(created!.base_branch).toBe('main');
+    expect((created!.branch as string).startsWith('review/')).toBe(true);
+    expect(created!.branch).toContain('pr-42');
+    expect(created!.title).toContain('#42');
+    expect((created!.initial_prompt as string).startsWith('/review-pr https://github.com')).toBe(
+      true,
+    );
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:created',
+      payload: { taskId: created!.id },
+    });
+  });
+
+  it('skips when owner is not in reviewRequests (e.g. already reviewed)', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    mockPrList([makePR({ reviewRequests: [{ login: 'someone-else' }] })]);
+
+    await pollReviewerRequests();
+
+    const created = db.prepare(`SELECT * FROM tasks WHERE source = 'auto_review'`).get();
+    expect(created).toBeUndefined();
+  });
+
+  it('dedupes: does not create a second task when one already exists for same PR', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'existing-review',
+      repo_path: REPO,
+      status: 'draft',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    mockPrList([makePR()]);
+
+    await pollReviewerRequests();
+
+    const autoReviews = db
+      .prepare(`SELECT id FROM tasks WHERE source = 'auto_review' AND pr_number = 42`)
+      .all();
+    expect(autoReviews).toHaveLength(1);
+  });
+
+  it('updates the draft prompt when head SHA advances', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'existing-review',
+      repo_path: REPO,
+      status: 'draft',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      initial_prompt: '/review-pr https://github.com/org/repo/pull/42\n\nold body',
+      source: 'auto_review',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const updated = getTask(db, 'existing-review')!;
+    expect(updated.pr_head_sha).toBe('sha-new');
+    expect(updated.initial_prompt).toContain('head advanced to sha-new');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:updated',
+      payload: { taskId: 'existing-review' },
+    });
+  });
+
+  it('does not modify owner-created tasks even on a matching dedupe key', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'manual',
+      repo_path: REPO,
+      status: 'draft',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      initial_prompt: 'manual-prompt',
+      source: null, // owner-created
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const manual = getTask(db, 'manual')!;
+    expect(manual.initial_prompt).toBe('manual-prompt');
+    expect(manual.pr_head_sha).toBe('sha-old');
+    // And no new auto-review row was created for that PR either
+    const autos = db
+      .prepare(`SELECT id FROM tasks WHERE source = 'auto_review' AND pr_number = 42`)
+      .all();
+    expect(autos).toHaveLength(0);
+  });
+
+  it('nudges the running agent via tmux send-keys when PR head advances mid-review', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'send-keys';
+    });
+    expect(sendKeys).toBeDefined();
+    const args = sendKeys![1] as string[];
+    expect(args).toContain('-t');
+    expect(args).toContain('octomux-agent-running-review:0');
+    const message = args.find((a) => a.includes('Re-review requested'));
+    expect(message).toBeDefined();
+    expect(message).toContain('sha-new');
+    expect(message).toContain('#42');
+
+    // SHA recorded so we don't re-nudge on the next tick
+    const task = getTask(db, 'running-review')!;
+    expect(task.pr_head_sha).toBe('sha-new');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:updated',
+      payload: { taskId: 'running-review' },
+    });
+  });
+
+  it('does not re-nudge a running review when head SHA is unchanged', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-aaa' })]);
+
+    await pollReviewerRequests();
+
+    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'send-keys';
+    });
+    expect(sendKeys).toBeUndefined();
+  });
+
+  it('does not nudge owner-created running tasks', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'manual-running',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-manual-running',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      source: null,
+    });
+    insertAgent(db, {
+      id: 'agent-m',
+      task_id: 'manual-running',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'send-keys';
+    });
+    expect(sendKeys).toBeUndefined();
+    // SHA untouched
+    expect(getTask(db, 'manual-running')!.pr_head_sha).toBe('sha-old');
+  });
+
+  it('deletes draft auto-review tasks when the reviewer request is resolved', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'stale-review',
+      repo_path: REPO,
+      status: 'draft',
+      pr_number: 99,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    // gh returns no PRs — i.e. owner no longer requested / PR merged / closed
+    mockPrList([]);
+
+    await pollReviewerRequests();
+
+    expect(getTask(db, 'stale-review')).toBeUndefined();
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:deleted',
+      payload: { taskId: 'stale-review' },
+    });
+  });
+
+  it('leaves non-draft auto-review tasks alone when PR resolves', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 99,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    mockPrList([]);
+
+    await pollReviewerRequests();
+
+    // Still there — owner took ownership by running it
+    expect(getTask(db, 'running-review')).toBeDefined();
+  });
+
+  it('does nothing when there are no tracked repos', async () => {
+    mockPrList([]);
+
+    await pollReviewerRequests();
+
+    const prListCall = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'pr' && args?.[1] === 'list';
+    });
+    expect(prListCall).toBeUndefined();
+  });
+
+  it('tolerates gh failures per-repo without crashing', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    vi.mocked(execFile).mockImplementation(execFileFail('gh not found') as any);
+
+    await expect(pollReviewerRequests()).resolves.not.toThrow();
+    const autos = db.prepare(`SELECT id FROM tasks WHERE source = 'auto_review'`).all();
+    expect(autos).toHaveLength(0);
+  });
+
+  it('uses --search review-requested:@me with --state open and cwd=repo', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    mockPrList([]);
+
+    await pollReviewerRequests();
+
+    const prListCall = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'pr' && args?.[1] === 'list';
+    });
+    expect(prListCall).toBeDefined();
+    const callArgs = prListCall![1] as string[];
+    expect(callArgs).toContain('--search');
+    expect(callArgs).toContain('review-requested:@me');
+    expect(callArgs).toContain('--state');
+    expect(callArgs).toContain('open');
+    const opts = prListCall![2] as { cwd: string };
+    expect(opts.cwd).toBe(REPO);
   });
 });
 
