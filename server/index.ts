@@ -17,6 +17,7 @@ import { resumeTask, cleanupOrphanedViewerSessions } from './task-runner.js';
 import { getDb } from './db.js';
 import { startOrchestrator } from './orchestrator.js';
 import { syncAgents } from './agents.js';
+import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
 import type { Task } from './types.js';
 
@@ -78,6 +79,11 @@ await syncAgents().catch((err) => {
 // Auto-start orchestrator
 startOrchestrator().catch((err) => {
   logger.error({ err }, 'Failed to auto-start orchestrator');
+});
+
+// Resolve owner's GitHub login for reviewer-request polling (non-blocking)
+ensureGithubLogin().catch((err) => {
+  logger.warn({ err }, 'ensureGithubLogin failed — reviewer polling disabled');
 });
 
 // Background status + PR polling

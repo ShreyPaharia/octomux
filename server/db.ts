@@ -88,6 +88,12 @@ CREATE TABLE IF NOT EXISTS repo_configs (
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS config (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    github_login    TEXT,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 let db: Database.Database;
@@ -138,6 +144,8 @@ export function initDb(instance: Database.Database): void {
   addColumn('tasks', 'base_branch', 'base_branch TEXT', taskCols);
   addColumn('tasks', 'user_window_index', 'user_window_index INTEGER', taskCols);
   addColumn('tasks', 'no_worktree', 'no_worktree INTEGER NOT NULL DEFAULT 0', taskCols);
+  addColumn('tasks', 'source', 'source TEXT', taskCols);
+  addColumn('tasks', 'pr_head_sha', 'pr_head_sha TEXT', taskCols);
 
   const agentCols = columnsOf('agents');
   addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);

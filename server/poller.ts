@@ -1,10 +1,13 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { closeTask } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
+import { readGithubLogin } from './github-login.js';
 import type { Task, UserTerminal } from './types.js';
 
 const logger = childLogger('poller');
@@ -186,6 +189,304 @@ export async function pollMergedPRs(): Promise<void> {
   }
 }
 
+// ─── Reviewer-Request Polling ───────────────────────────────────────────────
+
+interface ReviewRequestEntity {
+  login?: string;
+}
+
+interface OpenReviewPR {
+  number: number;
+  title: string;
+  url: string;
+  author: { login: string } | null;
+  headRefOid: string;
+  headRefName: string;
+  baseRefName: string;
+  reviewRequests: ReviewRequestEntity[];
+}
+
+/** List tracked repos — same derivation as GET /api/recent-repos. */
+function listTrackedRepos(): string[] {
+  const rows = getDb()
+    .prepare(`SELECT repo_path FROM tasks GROUP BY repo_path ORDER BY MAX(created_at) DESC`)
+    .all() as Array<{ repo_path: string }>;
+  return rows.map((r) => r.repo_path);
+}
+
+/** Query `gh` for PRs in a repo where the owner is still a requested reviewer. */
+async function fetchReviewRequestedPRs(repoPath: string): Promise<OpenReviewPR[]> {
+  try {
+    const { stdout } = await execFile(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--search',
+        'review-requested:@me',
+        '--state',
+        'open',
+        '--json',
+        'number,title,author,headRefOid,headRefName,baseRefName,url,reviewRequests',
+      ],
+      { cwd: repoPath },
+    );
+    const prs = JSON.parse(stdout.trim() || '[]') as OpenReviewPR[];
+    return Array.isArray(prs) ? prs : [];
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (/rate limit/i.test(msg)) {
+      logger.warn({ repo_path: repoPath }, 'gh rate limit hit — backing off until next cycle');
+    } else {
+      logger.debug(
+        { repo_path: repoPath, err: msg },
+        'gh pr list failed for tracked repo (no GitHub remote?)',
+      );
+    }
+    return [];
+  }
+}
+
+/** Does any reviewRequests entity match the owner login? */
+function isOwnerStillRequested(pr: OpenReviewPR, ownerLogin: string): boolean {
+  return pr.reviewRequests.some(
+    (rr) => typeof rr.login === 'string' && rr.login.toLowerCase() === ownerLogin.toLowerCase(),
+  );
+}
+
+function repoShortName(repoPath: string): string {
+  return (
+    path
+      .basename(repoPath)
+      .replace(/[^a-zA-Z0-9-]+/g, '-')
+      .toLowerCase() || 'repo'
+  );
+}
+
+function buildReviewPrompt(pr: OpenReviewPR, requestedAt: string): string {
+  const author = pr.author?.login ?? 'unknown';
+  return [
+    `/review-pr ${pr.url}`,
+    '',
+    `PR: ${pr.title} (#${pr.number}) by @${author}`,
+    `Head: ${pr.headRefOid}`,
+    `Review requested: ${requestedAt}`,
+    '',
+    'Use the review-pr skill to post inline comments on GitHub. Keep feedback grounded in the diff.',
+  ].join('\n');
+}
+
+function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): string {
+  return `${prompt}\n\nUpdated: head advanced to ${newSha} at ${timestamp}`;
+}
+
+function buildReReviewNudge(pr: OpenReviewPR): string {
+  return (
+    `Re-review requested for PR #${pr.number}. ` +
+    `Head advanced to ${pr.headRefOid}. ` +
+    `Please pull the latest and re-run the /review-pr flow on ${pr.url}.`
+  );
+}
+
+/** Pick the first non-stopped agent in a running task, lowest window_index. */
+function firstActiveAgent(taskId: string): { id: string; window_index: number } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, window_index FROM agents
+       WHERE task_id = ? AND status != 'stopped'
+       ORDER BY window_index ASC LIMIT 1`,
+    )
+    .get(taskId) as { id: string; window_index: number } | undefined;
+}
+
+/**
+ * Nudge the first active agent in a running review task via tmux send-keys.
+ * Returns true if the message was delivered.
+ */
+async function nudgeAgentForReReview(
+  taskId: string,
+  tmuxSession: string,
+  pr: OpenReviewPR,
+): Promise<boolean> {
+  const agent = firstActiveAgent(taskId);
+  if (!agent) return false;
+  try {
+    const target = `${tmuxSession}:${agent.window_index}`;
+    const message = buildReReviewNudge(pr);
+    await execFile('tmux', ['send-keys', '-t', target, message, 'Enter']);
+    return true;
+  } catch (err) {
+    logger.warn(
+      { task_id: taskId, err: (err as Error).message },
+      'failed to nudge agent for re-review (session may be gone)',
+    );
+    return false;
+  }
+}
+
+/**
+ * Create or update an auto-review task for a PR where the owner is the requested
+ * reviewer. Returns the action taken so the caller can broadcast + log.
+ */
+async function upsertReviewTask(
+  repoPath: string,
+  pr: OpenReviewPR,
+): Promise<{ action: 'created' | 'updated' | 'nudged' | 'skipped'; taskId?: string }> {
+  const db = getDb();
+  const existing = db
+    .prepare(
+      `SELECT id, status, source, pr_head_sha, initial_prompt, tmux_session
+       FROM tasks
+       WHERE repo_path = ? AND pr_number = ? AND status NOT IN ('closed', 'error')
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(repoPath, pr.number) as
+    | {
+        id: string;
+        status: string;
+        source: string | null;
+        pr_head_sha: string | null;
+        initial_prompt: string | null;
+        tmux_session: string | null;
+      }
+    | undefined;
+
+  if (existing) {
+    // Only update rows we created; never touch owner's manual tasks.
+    if (existing.source !== 'auto_review') return { action: 'skipped' };
+    if (existing.pr_head_sha === pr.headRefOid) return { action: 'skipped' };
+
+    if (existing.status === 'draft') {
+      const updatedPrompt = buildShaUpdateNote(
+        existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString()),
+        pr.headRefOid,
+        new Date().toISOString(),
+      );
+      db.prepare(
+        `UPDATE tasks SET pr_head_sha = ?, initial_prompt = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      ).run(pr.headRefOid, updatedPrompt, existing.id);
+      return { action: 'updated', taskId: existing.id };
+    }
+
+    // Task is running (or setting_up) — nudge the existing agent rather than
+    // creating a duplicate. Record the new SHA so we don't re-nudge on every tick.
+    if (existing.status === 'running' || existing.status === 'setting_up') {
+      if (!existing.tmux_session) return { action: 'skipped' };
+      const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
+      if (!delivered) return { action: 'skipped' };
+      db.prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`).run(
+        pr.headRefOid,
+        existing.id,
+      );
+      return { action: 'nudged', taskId: existing.id };
+    }
+
+    return { action: 'skipped' };
+  }
+
+  const id = nanoid(12);
+  const short = repoShortName(repoPath);
+  const branch = `review/${short}-pr-${pr.number}`;
+  const title = `Review: ${pr.title} (#${pr.number})`;
+  const description = `Auto-created review task for PR #${pr.number} in ${short}`;
+  const prompt = buildReviewPrompt(pr, new Date().toISOString());
+
+  db.prepare(
+    `INSERT INTO tasks
+       (id, title, description, repo_path, status, branch, base_branch, pr_url, pr_number,
+        pr_head_sha, initial_prompt, source)
+     VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, 'auto_review')`,
+  ).run(
+    id,
+    title,
+    description,
+    repoPath,
+    branch,
+    pr.baseRefName,
+    pr.url,
+    pr.number,
+    pr.headRefOid,
+    prompt,
+  );
+  return { action: 'created', taskId: id };
+}
+
+/** Delete auto-review drafts whose triggering PR is no longer awaiting the owner. */
+function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<number>): string[] {
+  const db = getDb();
+  const drafts = db
+    .prepare(
+      `SELECT id, pr_number FROM tasks
+       WHERE repo_path = ? AND source = 'auto_review' AND status = 'draft'`,
+    )
+    .all(repoPath) as Array<{ id: string; pr_number: number | null }>;
+
+  const deletedIds: string[] = [];
+  for (const draft of drafts) {
+    if (draft.pr_number === null) continue;
+    if (activePrNumbers.has(draft.pr_number)) continue;
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(draft.id);
+    deletedIds.push(draft.id);
+  }
+  return deletedIds;
+}
+
+export async function pollReviewerRequests(): Promise<void> {
+  const ownerLogin = readGithubLogin();
+  if (!ownerLogin) return;
+
+  const repos = listTrackedRepos();
+  if (repos.length === 0) return;
+
+  for (const repoPath of repos) {
+    const prs = await fetchReviewRequestedPRs(repoPath);
+    const activePrNumbers = new Set<number>();
+
+    for (const pr of prs) {
+      if (!isOwnerStillRequested(pr, ownerLogin)) continue;
+      activePrNumbers.add(pr.number);
+
+      const result = await upsertReviewTask(repoPath, pr);
+      if (result.action === 'created') {
+        logger.info(
+          { task_id: result.taskId, pr_number: pr.number, repo_path: repoPath },
+          'auto-created review task for reviewer request',
+        );
+        broadcast({ type: 'task:created', payload: { taskId: result.taskId! } });
+      } else if (result.action === 'updated') {
+        logger.info(
+          {
+            task_id: result.taskId,
+            pr_number: pr.number,
+            repo_path: repoPath,
+            head: pr.headRefOid,
+          },
+          'updated auto-review task for new PR head',
+        );
+        broadcast({ type: 'task:updated', payload: { taskId: result.taskId! } });
+      } else if (result.action === 'nudged') {
+        logger.info(
+          {
+            task_id: result.taskId,
+            pr_number: pr.number,
+            repo_path: repoPath,
+            head: pr.headRefOid,
+          },
+          'nudged running agent for PR re-review',
+        );
+        broadcast({ type: 'task:updated', payload: { taskId: result.taskId! } });
+      }
+    }
+
+    const deletedIds = cleanupResolvedReviewDrafts(repoPath, activePrNumbers);
+    for (const taskId of deletedIds) {
+      logger.info({ task_id: taskId, repo_path: repoPath }, 'removed auto-review draft (resolved)');
+      broadcast({ type: 'task:deleted', payload: { taskId } });
+    }
+  }
+}
+
 // ─── Terminal Activity Polling ───────────────────────────────────────────────
 
 const SHELL_COMMANDS = new Set(['zsh', 'bash', 'sh', 'fish', 'dash']);
@@ -232,6 +533,20 @@ export async function pollTerminalActivity(): Promise<void> {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
+/** Fire both PR-related GitHub polls together to avoid doubling `gh` usage. */
+async function pollPRsAndReviewers(): Promise<void> {
+  try {
+    await pollPRs();
+  } catch (err) {
+    logger.error({ err, operation: 'pollPRs' }, 'pollPRs failed');
+  }
+  try {
+    await pollReviewerRequests();
+  } catch (err) {
+    logger.error({ err, operation: 'pollReviewerRequests' }, 'pollReviewerRequests failed');
+  }
+}
+
 export function startPolling(): void {
   // Install hooks in any running worktrees that might be missing them
   ensureHooksInstalled();
@@ -240,7 +555,7 @@ export function startPolling(): void {
     statusTimer = setInterval(pollStatuses, STATUS_INTERVAL);
   }
   if (PR_INTERVAL > 0) {
-    prTimer = setInterval(pollPRs, PR_INTERVAL);
+    prTimer = setInterval(pollPRsAndReviewers, PR_INTERVAL);
   }
   if (MERGED_PR_INTERVAL > 0) {
     mergedPrTimer = setInterval(pollMergedPRs, MERGED_PR_INTERVAL);
