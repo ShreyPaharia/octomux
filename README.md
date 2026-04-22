@@ -40,6 +40,17 @@ Wire it to Jira MCP, GitHub CLI, or any source — the orchestrator pulls contex
 - Auto-generates task names and initial prompts from ticket context
 - Draft tasks: create in draft mode, edit title/prompt/branch before starting
 
+### Auto-review from reviewer requests
+
+- When you're added as a reviewer on a PR in any tracked repo (any repo that
+  appears in `octomux recent-repos`), octomux stages a **draft** review task
+  prefilled with `/review-pr <url>` and PR context
+- Tasks stay in draft until you approve — no agents start automatically
+- If you haven't approved and the request is withdrawn (review submitted / PR
+  closed / reviewer removed), the draft is cleaned up on the next poll
+- Owner identity is resolved once via `gh api user` and cached; override with
+  `OCTOMUX_GITHUB_LOGIN` if you want octomux to watch a different account
+
 ### Isolated execution
 
 - Each task gets its own git worktree, branch, and tmux session
