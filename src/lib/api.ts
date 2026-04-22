@@ -105,6 +105,27 @@ export interface RepoConfig {
   updated_at: string;
 }
 
+export type DiffFileStatus = 'A' | 'M' | 'D' | 'B';
+
+export interface DiffFileEntry {
+  path: string;
+  status: DiffFileStatus;
+  additions: number;
+  deletions: number;
+}
+
+export interface DiffSummaryResponse {
+  files: DiffFileEntry[];
+}
+
+export interface FileDiffResponse {
+  oldContent: string;
+  newContent: string;
+  status: DiffFileStatus;
+  tooLarge: boolean;
+  binary: boolean;
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -121,6 +142,11 @@ export const api = {
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   startTask: (id: string) => request<Task>(`/tasks/${id}/start`, { method: 'POST' }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  getTaskDiffSummary: (id: string) => request<DiffSummaryResponse>(`/tasks/${id}/diff`),
+  getTaskDiffFile: (id: string, relPath: string) =>
+    request<FileDiffResponse>(
+      `/tasks/${id}/diff/${relPath.split('/').map(encodeURIComponent).join('/')}`,
+    ),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
     request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
   stopAgent: (taskId: string, agentId: string) =>
