@@ -740,9 +740,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
       tooLarge: false,
       binary: false,
     });
-    const res = await request(app).get(
-      `/api/tasks/${DEFAULTS.runningTask.id}/diff/src/lib/foo.ts`,
-    );
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff/src/lib/foo.ts`);
     expect(res.status).toBe(200);
     expect(diffModule.getFileDiff).toHaveBeenCalledWith(
       expect.objectContaining({ relPath: 'src/lib/foo.ts' }),
