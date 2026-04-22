@@ -51,6 +51,11 @@ vi.mock('@/components/TerminalView', () => ({
   ),
 }));
 
+// Monaco relies on browser APIs not available in jsdom — stub it.
+vi.mock('@monaco-editor/react', () => ({
+  DiffEditor: () => <div data-testid="monaco-diff" />,
+}));
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const runningTask: Task = makeTask({
@@ -516,6 +521,28 @@ describe('TaskDetail', () => {
       await waitFor(() => {
         expect(apiMock.closeTerminal).toHaveBeenCalledWith('test-task-01', 'term-1');
       });
+    });
+  });
+
+  // ─── Diff toggle ──────────────────────────────────────────────────────────
+
+  describe('diff toggle', () => {
+    it('shows DIFF button and renders DiffViewer when clicked', async () => {
+      const user = userEvent.setup();
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          status: 'running',
+          worktree: '/tmp/wt',
+          base_branch: 'main',
+        }),
+      );
+      apiMock.getTaskDiffSummary.mockResolvedValue({ files: [] });
+      renderWithRouter(<TaskDetail />, { route: '/tasks/test-task-01', path: '/tasks/:id' });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /diff/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /diff/i }));
+      await waitFor(() => expect(screen.getByText(/no changes/i)).toBeInTheDocument());
     });
   });
 });
