@@ -3,6 +3,8 @@ export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
 export type HookActivity = 'active' | 'idle' | 'waiting';
 export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
 
+export type TaskSource = 'auto_review' | null;
+
 export interface Task {
   id: string;
   title: string;
@@ -15,9 +17,11 @@ export interface Task {
   tmux_session: string | null;
   pr_url: string | null;
   pr_number: number | null;
+  pr_head_sha: string | null;
   user_window_index: number | null;
   initial_prompt: string | null;
   no_worktree: number;
+  source: TaskSource;
   error: string | null;
   created_at: string;
   updated_at: string;

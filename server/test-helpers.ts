@@ -18,9 +18,11 @@ export const DEFAULTS = {
     tmux_session: null,
     pr_url: null,
     pr_number: null,
+    pr_head_sha: null,
     user_window_index: null,
     initial_prompt: null,
     no_worktree: 0,
+    source: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -38,9 +40,11 @@ export const DEFAULTS = {
     tmux_session: 'octomux-agent-test-task-01',
     pr_url: null,
     pr_number: null,
+    pr_head_sha: null,
     user_window_index: null,
     initial_prompt: null,
     no_worktree: 0,
+    source: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -103,8 +107,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   } as Task;
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, user_window_index, initial_prompt, no_worktree, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, no_worktree, source, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -117,9 +121,11 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.tmux_session,
     task.pr_url,
     task.pr_number,
+    task.pr_head_sha ?? null,
     task.user_window_index,
     task.initial_prompt,
     task.no_worktree ?? 0,
+    task.source ?? null,
     task.error,
     task.created_at,
     task.updated_at,
@@ -307,9 +313,11 @@ export const TASKS_TABLE_COLUMNS = [
   'tmux_session',
   'pr_url',
   'pr_number',
+  'pr_head_sha',
   'user_window_index',
   'initial_prompt',
   'no_worktree',
+  'source',
   'error',
   'created_at',
   'updated_at',
