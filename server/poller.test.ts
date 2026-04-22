@@ -730,6 +730,107 @@ describe('pollReviewerRequests', () => {
     expect(autos).toHaveLength(0);
   });
 
+  it('nudges the running agent via tmux send-keys when PR head advances mid-review', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'send-keys';
+    });
+    expect(sendKeys).toBeDefined();
+    const args = sendKeys![1] as string[];
+    expect(args).toContain('-t');
+    expect(args).toContain('octomux-agent-running-review:0');
+    const message = args.find((a) => a.includes('Re-review requested'));
+    expect(message).toBeDefined();
+    expect(message).toContain('sha-new');
+    expect(message).toContain('#42');
+
+    // SHA recorded so we don't re-nudge on the next tick
+    const task = getTask(db, 'running-review')!;
+    expect(task.pr_head_sha).toBe('sha-new');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:updated',
+      payload: { taskId: 'running-review' },
+    });
+  });
+
+  it('does not re-nudge a running review when head SHA is unchanged', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-aaa' })]);
+
+    await pollReviewerRequests();
+
+    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'send-keys';
+    });
+    expect(sendKeys).toBeUndefined();
+  });
+
+  it('does not nudge owner-created running tasks', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'manual-running',
+      repo_path: REPO,
+      status: 'running',
+      tmux_session: 'octomux-agent-manual-running',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      source: null,
+    });
+    insertAgent(db, {
+      id: 'agent-m',
+      task_id: 'manual-running',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
+      const args = c[1] as string[];
+      return args?.[0] === 'send-keys';
+    });
+    expect(sendKeys).toBeUndefined();
+    // SHA untouched
+    expect(getTask(db, 'manual-running')!.pr_head_sha).toBe('sha-old');
+  });
+
   it('deletes draft auto-review tasks when the reviewer request is resolved', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     insertTask(db, {

@@ -48,6 +48,8 @@ Wire it to Jira MCP, GitHub CLI, or any source — the orchestrator pulls contex
 - Tasks stay in draft until you approve — no agents start automatically
 - If you haven't approved and the request is withdrawn (review submitted / PR
   closed / reviewer removed), the draft is cleaned up on the next poll
+- If the review is already running when new commits arrive, the existing agent
+  is nudged via a tmux message — no duplicate task is created
 - Owner identity is resolved once via `gh api user` and cached; override with
   `OCTOMUX_GITHUB_LOGIN` if you want octomux to watch a different account
 
