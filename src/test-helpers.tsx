@@ -116,6 +116,14 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     updateTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     startTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     deleteTask: vi.fn().mockResolvedValue(undefined),
+    getTaskDiffSummary: vi.fn().mockResolvedValue({ files: [] }),
+    getTaskDiffFile: vi.fn().mockResolvedValue({
+      oldContent: '',
+      newContent: '',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    }),
     addAgent: vi.fn().mockResolvedValue({
       id: 'a1',
       task_id: 'test-task-01',
