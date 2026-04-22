@@ -730,6 +730,24 @@ describe('GET /api/tasks/:id/diff/:path', () => {
       binary: false,
     });
   });
+
+  it('passes a nested path correctly to getFileDiff', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    (diffModule.getFileDiff as any).mockResolvedValue({
+      oldContent: '',
+      newContent: 'export const x = 1;\n',
+      status: 'A',
+      tooLarge: false,
+      binary: false,
+    });
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/diff/src/lib/foo.ts`,
+    );
+    expect(res.status).toBe(200);
+    expect(diffModule.getFileDiff).toHaveBeenCalledWith(
+      expect.objectContaining({ relPath: 'src/lib/foo.ts' }),
+    );
+  });
 });
 
 // ─── POST /api/tasks/:id/agents ──────────────────────────────────────────────
