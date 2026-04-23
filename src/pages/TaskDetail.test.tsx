@@ -524,6 +524,131 @@ describe('TaskDetail', () => {
     });
   });
 
+  // ─── Run mode rendering ───────────────────────────────────────────────────
+
+  describe('run mode', () => {
+    const modeCases = [
+      {
+        mode: 'new' as const,
+        badge: 'N',
+        tooltip: 'new worktree',
+        showsDiff: true,
+        showsBranchInfo: true,
+      },
+      {
+        mode: 'existing' as const,
+        badge: 'E',
+        tooltip: 'attached existing',
+        showsDiff: true,
+        showsBranchInfo: true,
+      },
+      {
+        mode: 'none' as const,
+        badge: 'Ø',
+        tooltip: 'in-place (no worktree)',
+        showsDiff: true,
+        showsBranchInfo: true,
+      },
+      {
+        mode: 'scratch' as const,
+        badge: 'S',
+        tooltip: 'scratch',
+        showsDiff: false,
+        showsBranchInfo: false,
+      },
+    ];
+
+    it.each(modeCases)(
+      '$mode mode: badge=$badge, showsDiff=$showsDiff, showsBranchInfo=$showsBranchInfo',
+      async ({ mode, badge, tooltip, showsDiff, showsBranchInfo }) => {
+        apiMock.getTask.mockResolvedValue(
+          makeTask({
+            run_mode: mode,
+            status: 'running',
+            agents: [makeAgent({ id: 'a1' })],
+            branch: mode === 'scratch' ? null : 'agents/test-task-01',
+            repo_path: mode === 'scratch' ? '' : '/Users/dev/projects/my-repo',
+          }),
+        );
+        renderDetail();
+        await waitFor(() => {
+          const b = screen.getByTestId('mode-badge');
+          expect(b).toHaveTextContent(badge);
+          expect(b).toHaveAttribute('title', tooltip);
+        });
+
+        const diffBtn = screen.queryByRole('button', { name: /^diff$/i });
+        if (showsDiff) expect(diffBtn).toBeInTheDocument();
+        else expect(diffBtn).not.toBeInTheDocument();
+
+        const repoLabel = screen.queryByText('REPO');
+        if (showsBranchInfo) expect(repoLabel).toBeInTheDocument();
+        else expect(repoLabel).not.toBeInTheDocument();
+      },
+    );
+
+    it('none mode renders branch with "(working tree)" suffix', async () => {
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          run_mode: 'none',
+          status: 'running',
+          branch: 'feat/inplace',
+          agents: [makeAgent({ id: 'a1' })],
+        }),
+      );
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByText('feat/inplace (working tree)')).toBeInTheDocument();
+      });
+    });
+
+    it('existing mode uses "WORKTREE HEAD" label', async () => {
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          run_mode: 'existing',
+          status: 'running',
+          branch: 'feat/existing',
+          agents: [makeAgent({ id: 'a1' })],
+        }),
+      );
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByText('WORKTREE HEAD')).toBeInTheDocument();
+      });
+    });
+
+    it('scratch mode hides PR link even when pr_url is set', async () => {
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          run_mode: 'scratch',
+          status: 'running',
+          agents: [makeAgent({ id: 'a1' })],
+          pr_url: 'https://github.com/org/repo/pull/99',
+          pr_number: 99,
+        }),
+      );
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByTestId('mode-badge')).toHaveTextContent('S');
+      });
+      expect(screen.queryByText('#99')).not.toBeInTheDocument();
+    });
+
+    it('falls back to "new" badge when run_mode is undefined', async () => {
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          run_mode: undefined as unknown as 'new',
+          status: 'running',
+          agents: [makeAgent({ id: 'a1' })],
+        }),
+      );
+      renderDetail();
+      await waitFor(() => {
+        expect(screen.getByTestId('mode-badge')).toHaveTextContent('N');
+      });
+    });
+  });
+
   // ─── Diff toggle ──────────────────────────────────────────────────────────
 
   describe('diff toggle', () => {

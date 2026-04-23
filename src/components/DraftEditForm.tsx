@@ -27,8 +27,11 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const isScratch = task.run_mode === 'scratch';
+
   async function handleSave() {
-    if (!title.trim() || !description.trim() || !repoPath.trim()) return;
+    if (!title.trim() || !description.trim()) return;
+    if (!isScratch && !repoPath.trim()) return;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -36,9 +39,9 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
       await api.updateTask(task.id, {
         title: title.trim(),
         description: description.trim(),
-        repo_path: repoPath.trim(),
-        branch: branch.trim() || undefined,
-        base_branch: baseBranch.trim() || undefined,
+        repo_path: isScratch ? undefined : repoPath.trim(),
+        branch: isScratch ? undefined : branch.trim() || undefined,
+        base_branch: isScratch ? undefined : baseBranch.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
       });
       setSaved(true);
@@ -51,7 +54,11 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
     }
   }
 
-  const canSave = title.trim() && description.trim() && repoPath.trim() && !saving;
+  const canSave =
+    title.trim().length > 0 &&
+    description.trim().length > 0 &&
+    (isScratch || repoPath.trim().length > 0) &&
+    !saving;
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -77,35 +84,39 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
           />
         </div>
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="repo-path">Repository Path</Label>
-          <RepoPickerField value={repoPath} onChange={setRepoPath} />
-        </div>
+        {!isScratch && (
+          <>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-path">Repository Path</Label>
+              <RepoPickerField value={repoPath} onChange={setRepoPath} />
+            </div>
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="edit-branch">Branch Name</Label>
-          <Input
-            id="edit-branch"
-            className="font-mono text-sm"
-            value={branch}
-            onChange={(e) => setBranch(e.target.value)}
-            placeholder="feat/my-feature"
-          />
-        </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="edit-branch">Branch Name</Label>
+              <Input
+                id="edit-branch"
+                className="font-mono text-sm"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder="feat/my-feature"
+              />
+            </div>
 
-        <div className="flex flex-col gap-2">
-          <Label>Base Branch</Label>
-          <BranchPickerField
-            repoPath={repoPath}
-            value={baseBranch}
-            onChange={setBaseBranch}
-            onBranchesLoaded={(_branches, defaultBranch) => {
-              // Only auto-fill when empty so we don't clobber a saved draft.
-              setBaseBranch((current) => current || defaultBranch);
-            }}
-            disabled={!repoPath.trim()}
-          />
-        </div>
+            <div className="flex flex-col gap-2">
+              <Label>Base Branch</Label>
+              <BranchPickerField
+                repoPath={repoPath}
+                value={baseBranch}
+                onChange={setBaseBranch}
+                onBranchesLoaded={(_branches, defaultBranch) => {
+                  // Only auto-fill when empty so we don't clobber a saved draft.
+                  setBaseBranch((current) => current || defaultBranch);
+                }}
+                disabled={!repoPath.trim()}
+              />
+            </div>
+          </>
+        )}
 
         <div className="flex flex-col gap-2">
           <button
