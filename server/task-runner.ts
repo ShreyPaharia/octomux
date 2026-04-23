@@ -39,6 +39,16 @@ async function getClaudeFlags(): Promise<string> {
   return resolveClaudeFlags(await getSettings());
 }
 
+/**
+ * True when an execFile error stems from tmux reporting that a target
+ * session/window/pane does not exist — which happens routinely during cleanup
+ * (session already killed, window already closed) and is not worth a warn.
+ */
+function isTmuxTargetMissing(err: unknown): boolean {
+  const stderr = (err as { stderr?: string } | null)?.stderr ?? '';
+  return /can't find (?:session|window|pane):/i.test(stderr);
+}
+
 /** Get the active window index of a tmux session. */
 async function getActiveWindowIndex(session: string): Promise<number> {
   const { stdout } = await execFile('tmux', [
@@ -476,20 +486,16 @@ export async function startTask(task: Task): Promise<void> {
         throw new Error(`unknown run_mode: ${String(runMode)}`);
     }
 
+    // Persist status + setup results, but NOT tmux_session — that column is
+    // written after tmux new-session succeeds below. Otherwise pollStatuses
+    // can run a has-session check on the not-yet-created session, mark it
+    // dead, and stamp error='Setup interrupted' before the session exists.
     db.prepare(
       `UPDATE tasks
-         SET status = ?, tmux_session = ?, branch = ?, base_branch = ?, worktree = ?,
+         SET status = ?, branch = ?, base_branch = ?, worktree = ?,
              base_sha = ?, updated_at = datetime('now')
          WHERE id = ?`,
-    ).run(
-      'setting_up',
-      session,
-      setup.branch,
-      setup.baseBranch,
-      setup.worktreePath,
-      setup.baseSha,
-      id,
-    );
+    ).run('setting_up', setup.branch, setup.baseBranch, setup.worktreePath, setup.baseSha, id);
 
     logger.info(
       {
@@ -514,6 +520,11 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'tmux_session';
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', setup.worktreePath]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    // Session exists now — persist the column. See race-avoidance comment above.
+    db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      session,
+      id,
+    );
     logger.info(
       { task_id: id, operation: 'createTask', tmux_session: session },
       'createTask: tmux session created',
@@ -547,10 +558,12 @@ export async function startTask(task: Task): Promise<void> {
       'createTask: first agent launched',
     );
 
-    db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      'running',
-      id,
-    );
+    // Mark as running. Clear error too — a transient error value (e.g.
+    // stamped by the poller during a pre-fix race, or a prior failed setup
+    // attempt) would otherwise linger on a successfully running task.
+    db.prepare(
+      `UPDATE tasks SET status = ?, error = NULL, updated_at = datetime('now') WHERE id = ?`,
+    ).run('running', id);
     logger.info({ task_id: id, operation: 'createTask' }, 'createTask: complete');
   } catch (err) {
     logger.error(
@@ -675,10 +688,17 @@ export async function closeTask(task: Task): Promise<void> {
         'closeTask: tmux session killed',
       );
     } catch (err) {
-      logger.warn(
-        { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session, err },
-        'closeTask: tmux kill-session failed (session may already be gone)',
-      );
+      if (isTmuxTargetMissing(err)) {
+        logger.debug(
+          { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session },
+          'closeTask: tmux session already gone',
+        );
+      } else {
+        logger.warn(
+          { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session, err },
+          'closeTask: tmux kill-session failed',
+        );
+      }
     }
   }
 
@@ -701,10 +721,17 @@ export async function deleteTask(task: Task): Promise<void> {
         'deleteTask: tmux session killed',
       );
     } catch (err) {
-      logger.warn(
-        { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session, err },
-        'deleteTask: tmux kill-session failed (session may already be gone)',
-      );
+      if (isTmuxTargetMissing(err)) {
+        logger.debug(
+          { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session },
+          'deleteTask: tmux session already gone',
+        );
+      } else {
+        logger.warn(
+          { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session, err },
+          'deleteTask: tmux kill-session failed',
+        );
+      }
     }
   }
 
@@ -796,10 +823,17 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
 
   await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
     (err) => {
-      logger.warn(
-        { task_id: task.id, agent_id: agent.id, operation: 'stopAgent', err },
-        'stopAgent: kill-window failed (window may already be gone)',
-      );
+      if (isTmuxTargetMissing(err)) {
+        logger.debug(
+          { task_id: task.id, agent_id: agent.id, operation: 'stopAgent' },
+          'stopAgent: tmux window already gone',
+        );
+      } else {
+        logger.warn(
+          { task_id: task.id, agent_id: agent.id, operation: 'stopAgent', err },
+          'stopAgent: kill-window failed',
+        );
+      }
     },
   );
 
