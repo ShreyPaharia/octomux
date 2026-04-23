@@ -142,7 +142,7 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
     }
 
     case 'clearIntent': {
-      if (state.mode === 'add-agent') return { mode: 'empty' };
+      if (state.mode === 'add-agent') return { mode: 'scratch', isDraft: false };
       if (state.mode === 'new' && state.forkOf) {
         const { forkOf: _forkOf, ...rest } = state;
         return rest;
@@ -186,10 +186,7 @@ export function hydrateFromUrl(params: URLSearchParams): ComposerState {
   const existingPath = params.get('worktree_path') ?? params.get('attach');
 
   if (!repo) {
-    if (modeParam === 'scratch') {
-      return { mode: 'scratch', isDraft: false };
-    }
-    return { mode: 'empty' };
+    return { mode: 'scratch', isDraft: false };
   }
 
   if (existingPath || modeParam === 'existing') {
