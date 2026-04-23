@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import Dashboard from './Dashboard';
+import TasksPage from './TasksPage';
 import { renderWithRouter, makeTask } from '../test-helpers';
 import { TasksProvider } from '../lib/tasks-context';
 
@@ -34,12 +34,12 @@ vi.mock('react-router-dom', routerMockFactory);
 function renderDashboard() {
   return renderWithRouter(
     <TasksProvider>
-      <Dashboard />
+      <TasksPage />
     </TasksProvider>,
   );
 }
 
-describe('Dashboard', () => {
+describe('TasksPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
