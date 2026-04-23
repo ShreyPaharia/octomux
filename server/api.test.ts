@@ -284,6 +284,67 @@ describe('GET /api/tasks', () => {
   });
 });
 
+// ─── Inbox ──────────────────────────────────────────────────────────────────
+
+describe('GET /api/tasks/inbox', () => {
+  it('returns both buckets', async () => {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    insertTask(db, { id: 'err', status: 'error', last_viewed_at: null, updated_at: now });
+    insertTask(db, { id: 'closed', status: 'closed', last_viewed_at: null, updated_at: now });
+
+    const res = await request(app).get('/api/tasks/inbox');
+    expect(res.status).toBe(200);
+    expect(res.body.needs_you.map((t: Task) => t.id)).toEqual(['err']);
+    expect(res.body.activity.map((t: Task) => t.id)).toEqual(['closed']);
+  });
+
+  it('returns empty arrays when no tasks match', async () => {
+    const res = await request(app).get('/api/tasks/inbox');
+    expect(res.body).toEqual({ needs_you: [], activity: [] });
+  });
+});
+
+describe('PATCH /api/tasks/:id/viewed', () => {
+  it('sets last_viewed_at on the task', async () => {
+    insertTask(db);
+    const before = getTask(db, DEFAULTS.task.id);
+    expect(before?.last_viewed_at).toBeNull();
+
+    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}/viewed`);
+    expect(res.status).toBe(200);
+    expect(res.body.last_viewed_at).toBeTruthy();
+
+    const after = getTask(db, DEFAULTS.task.id);
+    expect(after?.last_viewed_at).toBeTruthy();
+  });
+
+  it('returns 404 for missing task', async () => {
+    const res = await request(app).patch('/api/tasks/nope/viewed');
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /api/tasks/viewed-all', () => {
+  it('marks every task as viewed and reports count', async () => {
+    insertTask(db, { id: 'a' });
+    insertTask(db, { id: 'b' });
+    insertTask(db, { id: 'c' });
+
+    const res = await request(app).post('/api/tasks/viewed-all');
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toBe(3);
+
+    for (const id of ['a', 'b', 'c']) {
+      expect(getTask(db, id)?.last_viewed_at).toBeTruthy();
+    }
+  });
+
+  it('returns 0 when no tasks', async () => {
+    const res = await request(app).post('/api/tasks/viewed-all');
+    expect(res.body.updated).toBe(0);
+  });
+});
+
 // ─── GET /api/tasks/:id ──────────────────────────────────────────────────────
 
 describe('GET /api/tasks/:id', () => {

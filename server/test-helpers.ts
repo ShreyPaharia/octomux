@@ -171,7 +171,9 @@ export function getAgents(db: Database.Database, taskId: string): Agent[] {
 
 export function insertPermissionPrompt(
   db: Database.Database,
-  overrides: Partial<typeof DEFAULTS.permissionPrompt> = {},
+  overrides: Partial<Omit<typeof DEFAULTS.permissionPrompt, 'agent_id'>> & {
+    agent_id?: string | null;
+  } = {},
 ) {
   const pp = { ...DEFAULTS.permissionPrompt, ...overrides };
   db.prepare(

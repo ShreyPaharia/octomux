@@ -6,6 +6,8 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { getDb } from './db.js';
+import { childLogger } from './logger.js';
+import { getNeedsYou, getActivity } from './inbox.js';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import {
@@ -61,6 +63,7 @@ import type {
 import { RUN_MODES } from './types.js';
 
 const execFile = promisify(execFileCb);
+const apiLogger = childLogger('api');
 
 const TERMINALS_BY_TASK_SQL =
   'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index';
@@ -321,6 +324,33 @@ export function setupRoutes(app: Express): void {
     });
 
     res.json(result);
+  });
+
+  // Inbox: tasks needing attention + recent activity
+  app.get('/api/tasks/inbox', (_req: Request, res: Response) => {
+    res.json({ needs_you: getNeedsYou(), activity: getActivity() });
+  });
+
+  // Mark all tasks viewed
+  app.post('/api/tasks/viewed-all', (_req: Request, res: Response) => {
+    const db = getDb();
+    const info = db.prepare(`UPDATE tasks SET last_viewed_at = datetime('now')`).run();
+    apiLogger.info(
+      { operation: 'marked_all_viewed', updated: info.changes },
+      'marked all tasks viewed',
+    );
+    res.json({ updated: info.changes });
+  });
+
+  // Mark a single task viewed
+  app.patch('/api/tasks/:id/viewed', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    db.prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`).run(task.id);
+    apiLogger.info({ task_id: task.id, operation: 'marked_viewed' }, 'marked task viewed');
+    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
+    res.json(updated);
   });
 
   // Get single task with agents

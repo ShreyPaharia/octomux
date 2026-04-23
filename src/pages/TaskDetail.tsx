@@ -107,6 +107,15 @@ export default function TaskDetail() {
     }
   }, [firstAgentWindow, activeWindow, agentParam, task?.agents]);
 
+  // Mark the task as viewed once when the page opens for this task id.
+  // Fire-and-forget — no loading state, no error toast.
+  useEffect(() => {
+    if (!taskId) return;
+    api.markTaskViewed(taskId).catch((err) => {
+      console.warn('Failed to mark task viewed:', err);
+    });
+  }, [taskId]);
+
   // Auto-switch back to agents when task enters non-running state.
   // Diff mode is allowed to persist so users can keep reviewing a closed task's diff.
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { Composer } from '@/components/Composer';
+import { SessionsInbox } from '@/components/SessionsInbox';
 
 export default function HomePage() {
   return (
@@ -11,11 +12,9 @@ export default function HomePage() {
           >
             ✦ WELCOME BACK
           </h1>
-          {/*
-           * Sessions inbox slot — filled by a sibling task. Keep the id stable so
-           * that task can portal or mount into it without touching this file.
-           */}
-          <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot" className="mt-8" />
+          <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot" className="mt-8">
+            <SessionsInbox />
+          </div>
         </div>
       </div>
       <Composer />
