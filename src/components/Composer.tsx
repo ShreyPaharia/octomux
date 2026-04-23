@@ -57,6 +57,7 @@ export function Composer({ onSubmitted }: Props = {}) {
     message: string;
     conflictTaskId?: string | null;
   } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Re-hydrate when the URL is changed externally (e.g. sidebar click navigating
   // to a new `?repo=...` URL while the Composer is already mounted).
@@ -194,6 +195,28 @@ export function Composer({ onSubmitted }: Props = {}) {
     [handleSubmit],
   );
 
+  // Auto-focus on mount so the composer is immediately typeable — also gives
+  // ⌘⇧N (navigate to /) a predictable focus target on remount.
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  // Listen for global shortcut bridges (⌘⇧N → focus, ⌘Enter → submit).
+  const submitRef = useRef(handleSubmit);
+  submitRef.current = handleSubmit;
+  useEffect(() => {
+    const onFocus = () => textareaRef.current?.focus();
+    const onSubmit = () => {
+      void submitRef.current();
+    };
+    window.addEventListener('focus-composer', onFocus);
+    window.addEventListener('submit-composer', onSubmit);
+    return () => {
+      window.removeEventListener('focus-composer', onFocus);
+      window.removeEventListener('submit-composer', onSubmit);
+    };
+  }, []);
+
   // ─── Render helpers ──────────────────────────────────────────────────
 
   const derivedLabel = useDerivedModeLabel(state, sourceTask);
@@ -283,6 +306,7 @@ export function Composer({ onSubmitted }: Props = {}) {
       {/* ─── Prompt + submit ─────────────────────────────────────────── */}
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <textarea
+          ref={textareaRef}
           data-testid="composer-prompt"
           className="min-h-[72px] resize-y border border-input bg-transparent px-3 py-2 text-sm font-mono outline-none focus:border-ring"
           placeholder={promptPlaceholder(state)}
