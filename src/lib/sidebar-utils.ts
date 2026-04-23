@@ -52,10 +52,7 @@ function groupKeyFor(task: Task): { key: string; label: string } {
 export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
   const active = tasks.filter((t) => ACTIVE_STATUSES.includes(t.status));
 
-  const grouped = new Map<
-    string,
-    { label: string; items: SidebarItem[]; tasks: Task[] }
-  >();
+  const grouped = new Map<string, { label: string; items: SidebarItem[]; tasks: Task[] }>();
 
   for (const task of active) {
     const { key, label } = groupKeyFor(task);

@@ -1,11 +1,4 @@
-import {
-  useState,
-  useMemo,
-  useEffect,
-  useCallback,
-  useRef,
-  type KeyboardEvent,
-} from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import {
@@ -270,7 +263,8 @@ const NAV_ITEMS = [
 
 export function forkDisabledReason(item: SidebarItem): string | null {
   if (item.runMode === 'scratch') return 'Cannot fork a scratch task (no repo).';
-  if (item.runMode === 'none') return 'Cannot fork a task that runs on the working tree (no branch).';
+  if (item.runMode === 'none')
+    return 'Cannot fork a task that runs on the working tree (no branch).';
   if (item.status === 'draft') return 'Cannot fork a draft task (no branch yet).';
   return null;
 }
@@ -379,11 +373,7 @@ function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete
           <MenuItemRow onClick={() => choose(onAddAgent)} label="Add agent…" />
           <div className="my-1 h-px bg-[#2f2f2f]" />
           <MenuItemRow onClick={() => choose(onRename)} label="Rename" />
-          <MenuItemRow
-            onClick={() => choose(onClose)}
-            disabled={closeDisabled}
-            label="Close"
-          />
+          <MenuItemRow onClick={() => choose(onClose)} disabled={closeDisabled} label="Close" />
           <MenuItemRow onClick={() => choose(onDelete)} label="Delete" destructive />
         </div>
       )}
@@ -495,23 +485,15 @@ export function UniversalSidebar() {
         toggleCollapsed();
       }
     }
-    window.addEventListener(
-      'keydown',
-      handleKeyDown as unknown as EventListener,
-    );
-    return () =>
-      window.removeEventListener(
-        'keydown',
-        handleKeyDown as unknown as EventListener,
-      );
+    window.addEventListener('keydown', handleKeyDown as unknown as EventListener);
+    return () => window.removeEventListener('keydown', handleKeyDown as unknown as EventListener);
   }, [toggleCollapsed]);
 
   // Active nav detection
   const activeNav = useMemo(() => {
     if (location.pathname === '/orchestrator') return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
-    if (location.pathname === '/tasks' || location.pathname.startsWith('/tasks/'))
-      return 'tasks';
+    if (location.pathname === '/tasks' || location.pathname.startsWith('/tasks/')) return 'tasks';
     if (activeTaskId) return null;
     if (location.pathname === '/') return 'home';
     return null;
@@ -913,11 +895,7 @@ function SessionRow({
       <StatusIcon item={item} />
       <RunModeBadge mode={item.runMode} />
       {isRenaming ? (
-        <RenameInput
-          initial={item.title}
-          onSubmit={onSubmitRename}
-          onCancel={onCancelRename}
-        />
+        <RenameInput initial={item.title} onSubmit={onSubmitRename} onCancel={onCancelRename} />
       ) : (
         <Link
           to={`/tasks/${item.id}`}
