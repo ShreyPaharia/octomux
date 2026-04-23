@@ -85,13 +85,12 @@ export function registerCreateTask(program: Command): void {
     .option('-p, --initial-prompt <prompt>', 'initial prompt for the agent')
     .option('-b, --branch <name>', 'branch name (new mode only)')
     .option('--base-branch <name>', 'base branch name (new mode only)')
-    .option(
-      '--mode <mode>',
-      `run mode: ${VALID_MODES.join(' | ')} (default: new)`,
-      'new',
-    )
+    .option('--mode <mode>', `run mode: ${VALID_MODES.join(' | ')} (default: new)`, 'new')
     .option('--worktree-path <path>', 'existing worktree path (required for existing mode)')
-    .option('--fork-from <task-id>', 'fork from an existing new-mode task (sets base_branch to agents/<id>)')
+    .option(
+      '--fork-from <task-id>',
+      'fork from an existing new-mode task (sets base_branch to agents/<id>)',
+    )
     .option('--draft', 'create as draft without starting')
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);

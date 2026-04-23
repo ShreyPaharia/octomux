@@ -38,7 +38,6 @@ If you want another voice in the task, use `add-agent`. If you want to talk to t
    ```
 
    Optional flags:
-
    - `--agent <agent-type>` — use a Claude Code agent type (e.g. `code-reviewer`). Default: plain `claude` with no specific agent type.
    - `--label <label>` — custom label for the new agent. Default: server-assigned `"Agent N"`.
 
