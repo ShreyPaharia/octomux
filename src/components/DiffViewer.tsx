@@ -41,6 +41,7 @@ function extToLanguage(p: string): string {
 
 export function DiffViewer({ taskId, isRunning }: Props) {
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
+  const [ignoredTruncated, setIgnoredTruncated] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [fileDiff, setFileDiff] = useState<FileDiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +100,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
     try {
       const s = await api.getTaskDiffSummary(taskId);
       setFiles(s.files);
+      setIgnoredTruncated(s.ignoredTruncated ?? false);
       setError(null);
       const cur = selectedRef.current;
       if (!cur && s.files.length > 0) setSelected(s.files[0].path);
@@ -181,7 +183,13 @@ export function DiffViewer({ taskId, isRunning }: Props) {
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
         ) : (
-          <DiffFileTree files={files} selected={selected} onSelect={handleSelect} />
+          <DiffFileTree
+            files={files}
+            selected={selected}
+            onSelect={handleSelect}
+            taskId={taskId}
+            ignoredTruncated={ignoredTruncated}
+          />
         )}
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
@@ -199,52 +207,52 @@ export function DiffViewer({ taskId, isRunning }: Props) {
           </div>
         ) : null}
         <div className="min-h-0 flex-1">
-        {error && selected ? (
-          <div className="flex h-full items-center justify-center text-sm text-destructive">
-            {error}
-          </div>
-        ) : !selected ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Select a file to view its diff
-          </div>
-        ) : fileLoading && !fileDiff ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Loading {selected}...
-          </div>
-        ) : fileDiff?.tooLarge ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {selected} is too large to display (&gt;1 MiB). Open the worktree directly.
-          </div>
-        ) : fileDiff?.binary ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {selected} is a binary file.
-          </div>
-        ) : fileDiff ? (
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Loading editor...
-              </div>
-            }
-          >
-            <MonacoDiff
-              key={`${selected}:${expandedAll ? 'expanded' : 'collapsed'}`}
-              height="100%"
-              original={fileDiff.oldContent}
-              modified={fileDiff.newContent}
-              language={extToLanguage(selected)}
-              theme="vs-dark"
-              onMount={handleEditorMount}
-              options={{
-                readOnly: true,
-                renderSideBySide: true,
-                minimap: { enabled: true },
-                hideUnchangedRegions: { enabled: !expandedAll },
-                scrollBeyondLastLine: false,
-              }}
-            />
-          </Suspense>
-        ) : null}
+          {error && selected ? (
+            <div className="flex h-full items-center justify-center text-sm text-destructive">
+              {error}
+            </div>
+          ) : !selected ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Select a file to view its diff
+            </div>
+          ) : fileLoading && !fileDiff ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Loading {selected}...
+            </div>
+          ) : fileDiff?.tooLarge ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {selected} is too large to display (&gt;1 MiB). Open the worktree directly.
+            </div>
+          ) : fileDiff?.binary ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {selected} is a binary file.
+            </div>
+          ) : fileDiff ? (
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Loading editor...
+                </div>
+              }
+            >
+              <MonacoDiff
+                key={`${selected}:${expandedAll ? 'expanded' : 'collapsed'}`}
+                height="100%"
+                original={fileDiff.oldContent}
+                modified={fileDiff.newContent}
+                language={extToLanguage(selected)}
+                theme="vs-dark"
+                onMount={handleEditorMount}
+                options={{
+                  readOnly: true,
+                  renderSideBySide: true,
+                  minimap: { enabled: true },
+                  hideUnchangedRegions: { enabled: !expandedAll },
+                  scrollBeyondLastLine: false,
+                }}
+              />
+            </Suspense>
+          ) : null}
         </div>
       </main>
     </div>
