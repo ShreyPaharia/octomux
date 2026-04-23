@@ -12,6 +12,21 @@ import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
 import { repoName } from '@/lib/utils';
 import { TerminalRectIcon } from '@/components/icons';
+import type { RunMode } from '../../server/types';
+
+const MODE_LABEL: Record<RunMode, string> = {
+  new: 'N',
+  existing: 'E',
+  none: 'Ø',
+  scratch: 'S',
+};
+
+const MODE_TOOLTIP: Record<RunMode, string> = {
+  new: 'new worktree',
+  existing: 'attached existing',
+  none: 'in-place (no worktree)',
+  scratch: 'scratch',
+};
 
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).
 interface PerTaskUiState {
@@ -248,6 +263,9 @@ export default function TaskDetail() {
   const isRunning = task.status === 'running';
   const isDraft = task.status === 'draft';
   const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
+  const runMode: RunMode = task.run_mode ?? 'new';
+  const isScratch = runMode === 'scratch';
+  const canShowDiff = !isScratch && task.status !== 'draft';
 
   const isTerminalAlive = task.status === 'running' || task.status === 'setting_up';
   const hasTerminal =
@@ -261,6 +279,14 @@ export default function TaskDetail() {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-base font-semibold sm:text-lg">{task.title}</h1>
+              <span
+                data-testid="mode-badge"
+                title={MODE_TOOLTIP[runMode]}
+                aria-label={`run mode: ${MODE_TOOLTIP[runMode]}`}
+                className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-[#2f2f2f] bg-[#1a1a1a] px-1.5 font-mono text-[10px] font-bold text-[#8a8a8a]"
+              >
+                {MODE_LABEL[runMode]}
+              </span>
               <StatusBadge status={task.derived_status || task.status} />
             </div>
             <p className="hidden max-w-xl truncate text-xs text-muted-foreground sm:block">
@@ -285,7 +311,7 @@ export default function TaskDetail() {
               &lt;&gt; EDITOR
             </Button>
           )}
-          {task.worktree && task.base_branch && (
+          {canShowDiff && (
             <Button
               variant="outline"
               size="sm"
@@ -324,41 +350,55 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Metadata bar — always visible */}
-      <div className="flex items-center gap-5 border-b border-border bg-[#141414] px-6 py-2">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">REPO</span>
-        <span className="text-[11px] text-[#8a8a8a]">{repoName(task.repo_path)}</span>
-        <span className="text-[11px] text-[#2f2f2f]">|</span>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-          BRANCH
-        </span>
-        <span className="text-[11px] font-medium text-[#3B82F6]">{task.branch}</span>
-        {task.base_branch && (
-          <>
-            <span className="text-[11px] text-[#2f2f2f]">|</span>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-              BASE
-            </span>
-            <span className="text-[11px] text-[#8a8a8a]">{task.base_branch}</span>
-          </>
-        )}
-        {task.pr_url && (
-          <>
-            <span className="text-[11px] text-[#2f2f2f]">|</span>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-              PR
-            </span>
-            <a
-              href={task.pr_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[11px] font-medium text-[#3B82F6] hover:underline"
-            >
-              #{task.pr_number}
-            </a>
-          </>
-        )}
-      </div>
+      {/* Metadata bar — hidden for scratch tasks which have no repo/branch */}
+      {!isScratch && (
+        <div className="flex items-center gap-5 border-b border-border bg-[#141414] px-6 py-2">
+          {task.repo_path && (
+            <>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+                REPO
+              </span>
+              <span className="text-[11px] text-[#8a8a8a]">{repoName(task.repo_path)}</span>
+            </>
+          )}
+          {task.branch && (
+            <>
+              {task.repo_path && <span className="text-[11px] text-[#2f2f2f]">|</span>}
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+                {runMode === 'existing' ? 'WORKTREE HEAD' : 'BRANCH'}
+              </span>
+              <span className="text-[11px] font-medium text-[#3B82F6]">
+                {runMode === 'none' ? `${task.branch} (working tree)` : task.branch}
+              </span>
+            </>
+          )}
+          {task.base_branch && (
+            <>
+              <span className="text-[11px] text-[#2f2f2f]">|</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+                BASE
+              </span>
+              <span className="text-[11px] text-[#8a8a8a]">{task.base_branch}</span>
+            </>
+          )}
+          {task.pr_url && (
+            <>
+              <span className="text-[11px] text-[#2f2f2f]">|</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+                PR
+              </span>
+              <a
+                href={task.pr_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-medium text-[#3B82F6] hover:underline"
+              >
+                #{task.pr_number}
+              </a>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Agent view — shown in agents mode */}
       {hasTerminal ? (
@@ -424,7 +464,7 @@ export default function TaskDetail() {
       )}
 
       {/* Diff view */}
-      {mode === 'diff' && task.worktree && task.base_branch && (
+      {mode === 'diff' && canShowDiff && (
         <div className="flex min-h-0 flex-1 flex-col">
           <DiffViewer taskId={task.id} isRunning={task.status === 'running'} />
         </div>

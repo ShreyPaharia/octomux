@@ -45,6 +45,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [fileDiff, setFileDiff] = useState<FileDiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [baseShaUnavailable, setBaseShaUnavailable] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
   const [expandedAll, setExpandedAll] = useState(false);
@@ -102,13 +103,21 @@ export function DiffViewer({ taskId, isRunning }: Props) {
       setFiles(s.files);
       setIgnoredTruncated(s.ignoredTruncated ?? false);
       setError(null);
+      setBaseShaUnavailable(false);
       const cur = selectedRef.current;
       if (!cur && s.files.length > 0) setSelected(s.files[0].path);
       else if (cur && !s.files.find((f) => f.path === cur)) {
         setSelected(s.files[0]?.path ?? null);
       }
     } catch (err) {
-      setError((err as Error).message);
+      const msg = (err as Error).message;
+      if (msg.includes('base_sha not available')) {
+        setFiles([]);
+        setBaseShaUnavailable(true);
+        setError(null);
+      } else {
+        setError(msg);
+      }
     } finally {
       setSummaryLoading(false);
     }
@@ -168,6 +177,14 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   const showToolbar = Boolean(
     selected && fileDiff && !fileDiff.tooLarge && !fileDiff.binary && !error,
   );
+
+  if (baseShaUnavailable) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Diff unavailable (base_sha not captured)
+      </div>
+    );
+  }
 
   if (error && !files.length) {
     return (
