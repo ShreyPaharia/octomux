@@ -68,8 +68,20 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const PROMPT_FILE_CLEANUP_MS = 5000;
 
+const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
+
 function shellQuoteSingle(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function writeAgentLocalSettings(worktreePath: string): void {
+  const claudeDir = path.join(worktreePath, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const settingsPath = path.join(claudeDir, 'settings.local.json');
+  if (fs.existsSync(settingsPath)) return;
+  const plugins: Record<string, boolean> = {};
+  for (const p of DISABLED_PLUGINS_IN_WORKTREES) plugins[p] = false;
+  fs.writeFileSync(settingsPath, JSON.stringify({ plugins }, null, 2));
 }
 
 /**
@@ -342,6 +354,17 @@ async function setupNew(task: Task): Promise<SetupResult> {
     fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
     fs.copyFileSync(settingsSrc, settingsDst);
   }
+
+  writeAgentLocalSettings(worktreePath);
+  logger.info(
+    {
+      task_id: task.id,
+      operation: 'createTask',
+      settings_path: settingsDst,
+      disabled_plugins: DISABLED_PLUGINS_IN_WORKTREES.length,
+    },
+    'createTask: wrote agent-local settings',
+  );
 
   return {
     worktreePath,
