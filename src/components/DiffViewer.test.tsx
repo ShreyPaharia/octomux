@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useRef } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { diffExpandedKey } from '@/lib/diff-state';
 
 const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -8,14 +10,32 @@ const { apiMock, apiProxy } = await vi.hoisted(async () =>
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
 // Monaco's DiffEditor does real DOM work; replace with a stub that exposes
-// the original/modified content as testids.
+// the original/modified content, options, and a per-mount id so tests can
+// verify remounts on key change.
+let mountCounter = 0;
 vi.mock('@monaco-editor/react', () => ({
-  DiffEditor: ({ original, modified }: { original: string; modified: string }) => (
-    <div data-testid="monaco-diff">
-      <pre data-testid="orig">{original}</pre>
-      <pre data-testid="mod">{modified}</pre>
-    </div>
-  ),
+  DiffEditor: ({
+    original,
+    modified,
+    options,
+  }: {
+    original: string;
+    modified: string;
+    options?: unknown;
+  }) => {
+    const idRef = useRef<number | null>(null);
+    if (idRef.current === null) idRef.current = ++mountCounter;
+    return (
+      <div
+        data-testid="monaco-diff"
+        data-mount-id={String(idRef.current)}
+        data-options={JSON.stringify(options ?? {})}
+      >
+        <pre data-testid="orig">{original}</pre>
+        <pre data-testid="mod">{modified}</pre>
+      </div>
+    );
+  },
 }));
 
 import { DiffViewer } from './DiffViewer';
@@ -30,6 +50,8 @@ beforeEach(() => {
     tooLarge: false,
     binary: false,
   });
+  localStorage.clear();
+  mountCounter = 0;
 });
 
 describe('DiffViewer', () => {
@@ -140,5 +162,91 @@ describe('DiffViewer', () => {
     await vi.advanceTimersByTimeAsync(2500);
     await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
     vi.useRealTimers();
+  });
+
+  it('remounts MonacoDiff (new mount-id) when the selected file changes', async () => {
+    const user = userEvent.setup();
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: 'a.ts', status: 'M', additions: 1, deletions: 0 },
+        { path: 'b.ts', status: 'A', additions: 5, deletions: 0 },
+      ],
+    });
+    apiMock.getTaskDiffFile
+      .mockResolvedValueOnce({
+        oldContent: 'a-old',
+        newContent: 'a-new',
+        status: 'M',
+        tooLarge: false,
+        binary: false,
+      })
+      .mockResolvedValueOnce({
+        oldContent: '',
+        newContent: 'b-new',
+        status: 'A',
+        tooLarge: false,
+        binary: false,
+      });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('a-new'));
+    const firstId = screen.getByTestId('monaco-diff').getAttribute('data-mount-id');
+    expect(firstId).not.toBeNull();
+
+    await user.click(screen.getByText('b.ts'));
+    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
+    const secondId = screen.getByTestId('monaco-diff').getAttribute('data-mount-id');
+    expect(secondId).not.toBeNull();
+    expect(secondId).not.toBe(firstId);
+  });
+
+  it('toolbar flips label and persists expandedAll to localStorage', async () => {
+    const user = userEvent.setup();
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [{ path: 'src/a.ts', status: 'M', additions: 2, deletions: 1 }],
+    });
+    apiMock.getTaskDiffFile.mockResolvedValue({
+      oldContent: 'old',
+      newContent: 'new',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    const btn = await screen.findByRole('button', { name: 'Expand all' });
+    expect(localStorage.getItem(diffExpandedKey('t1', 'src/a.ts'))).toBeNull();
+
+    await user.click(btn);
+
+    await screen.findByRole('button', { name: 'Collapse all' });
+    expect(localStorage.getItem(diffExpandedKey('t1', 'src/a.ts'))).toBe('true');
+
+    await waitFor(() => {
+      const opts = JSON.parse(
+        screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}',
+      );
+      expect(opts.hideUnchangedRegions.enabled).toBe(false);
+    });
+  });
+
+  it('reads stored expandedAll on mount and passes hideUnchangedRegions=false', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [{ path: 'src/a.ts', status: 'M', additions: 2, deletions: 1 }],
+    });
+    apiMock.getTaskDiffFile.mockResolvedValue({
+      oldContent: 'old',
+      newContent: 'new',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    });
+    localStorage.setItem(diffExpandedKey('t1', 'src/a.ts'), 'true');
+
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+
+    await screen.findByRole('button', { name: 'Collapse all' });
+    const opts = JSON.parse(
+      screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}',
+    );
+    expect(opts.hideUnchangedRegions.enabled).toBe(false);
   });
 });
