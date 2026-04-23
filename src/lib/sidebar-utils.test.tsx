@@ -144,9 +144,7 @@ describe('groupTasksForSidebar', () => {
   });
 
   it('places repo-less non-scratch tasks in the Other group', () => {
-    const tasks = [
-      makeTask({ id: '1', status: 'running', repo_path: '', run_mode: 'new' }),
-    ];
+    const tasks = [makeTask({ id: '1', status: 'running', repo_path: '', run_mode: 'new' })];
     const groups = groupTasksForSidebar(tasks);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe('__other__');
