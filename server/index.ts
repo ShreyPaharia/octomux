@@ -48,8 +48,10 @@ async function recoverTasks(): Promise<void> {
     const status = await checkTaskStatus(task);
     if (status === 'alive') continue;
 
-    // Session is dead
-    if (task.worktree && fs.existsSync(task.worktree)) {
+    // Session is dead. Require tmux_session too — without it the task never
+    // reached the new-session step, so there's nothing for resumeTask to
+    // re-attach to; treat it as an interrupted setup instead.
+    if (task.worktree && fs.existsSync(task.worktree) && task.tmux_session) {
       logger.warn({ task_id: task.id, title: task.title }, 'Recovery: resuming task');
       resumeTask(task).catch((err) => {
         logger.error({ task_id: task.id, err }, 'Recovery: resumeTask failed');

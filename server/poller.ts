@@ -36,8 +36,13 @@ export async function checkTaskStatus(task: Task): Promise<'alive' | 'dead'> {
 
 export async function pollStatuses(): Promise<void> {
   const db = getDb();
+  // tmux_session IS NOT NULL: a task in 'setting_up' with no session yet is
+  // still mid-createTask — skip it so we don't race the setup writing the
+  // session column and mark the task 'Setup interrupted' prematurely.
   const runningTasks = db
-    .prepare("SELECT * FROM tasks WHERE status IN ('running', 'setting_up')")
+    .prepare(
+      "SELECT * FROM tasks WHERE status IN ('running', 'setting_up') AND tmux_session IS NOT NULL",
+    )
     .all() as Task[];
 
   const results = await Promise.allSettled(

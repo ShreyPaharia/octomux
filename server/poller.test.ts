@@ -208,6 +208,19 @@ describe('pollStatuses', () => {
     expect(getTask(db, DEFAULTS.task.id)!.status).toBe('running');
     expect(getTask(db, 'task-02')!.status).toBe('running');
   });
+
+  it('does not mark "setting_up" as Setup interrupted when tmux_session is null', async () => {
+    // Reproduces the race where startTask has written status='setting_up' but
+    // hasn't yet created the tmux session. Poller must leave the task alone.
+    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up', tmux_session: null });
+    vi.mocked(execFile).mockImplementation(deadSessionMock as any);
+
+    await pollStatuses();
+
+    const task = getTask(db, DEFAULTS.task.id)!;
+    expect(task.status).toBe('setting_up');
+    expect(task.error).toBeNull();
+  });
 });
 
 // ─── ensureHooksInstalled ───────────────────────────────────────────────────
