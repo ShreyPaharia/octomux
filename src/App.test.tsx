@@ -24,15 +24,18 @@ vi.mock('@/lib/orchestrator-context', () => ({
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 
-function renderAt(route: string) {
+async function renderAt(route: string) {
+  const { TasksProvider } = await import('./lib/tasks-context');
   return render(
     <MemoryRouter initialEntries={[route]}>
-      <Suspense fallback={<div>Loading...</div>}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/tasks" element={<TasksPage />} />
-        </Routes>
-      </Suspense>
+      <TasksProvider>
+        <Suspense fallback={<div>Loading...</div>}>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/tasks" element={<TasksPage />} />
+          </Routes>
+        </Suspense>
+      </TasksProvider>
     </MemoryRouter>,
   );
 }
@@ -40,7 +43,7 @@ function renderAt(route: string) {
 describe('App routing', () => {
   it('renders HomePage at /', async () => {
     apiMock.listTasks.mockResolvedValue([]);
-    renderAt('/');
+    await renderAt('/');
     await waitFor(() => {
       expect(screen.getByText(/welcome back/i)).toBeInTheDocument();
     });
