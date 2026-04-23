@@ -532,6 +532,129 @@ function EditorSection() {
   );
 }
 
+function ClaudeLaunchFlagsSection() {
+  const [dangerouslySkip, setDangerouslySkip] = useState(false);
+  const [savedFlags, setSavedFlags] = useState('');
+  const [flagsBuffer, setFlagsBuffer] = useState('');
+  const [envOverride, setEnvOverride] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setDangerouslySkip(s.dangerouslySkipPermissions);
+        setSavedFlags(s.claudeFlags);
+        setFlagsBuffer(s.claudeFlags);
+        setEnvOverride(s.envOverrides?.claudeFlags ?? null);
+      })
+      .catch((err) => {
+        if (!cancelled) showToast('error', 'ERROR', err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleToggle = async (value: boolean) => {
+    const prev = dangerouslySkip;
+    setDangerouslySkip(value);
+    try {
+      await api.updateSettings({ dangerouslySkipPermissions: value });
+      showToast(
+        'success',
+        'LAUNCH FLAGS',
+        value
+          ? '--dangerously-skip-permissions enabled'
+          : '--dangerously-skip-permissions disabled',
+      );
+    } catch (err) {
+      setDangerouslySkip(prev);
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  const isDirty = flagsBuffer !== savedFlags;
+  const saveFlags = useCallback(async () => {
+    if (!isDirty || saving) return;
+    setSaving(true);
+    try {
+      const result = await api.updateSettings({ claudeFlags: flagsBuffer });
+      setSavedFlags(result.claudeFlags);
+      setFlagsBuffer(result.claudeFlags);
+      showToast('success', 'LAUNCH FLAGS', 'Advanced flags saved');
+    } catch (err) {
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to save flags');
+    } finally {
+      setSaving(false);
+    }
+  }, [flagsBuffer, isDirty, saving]);
+
+  if (loading) return null;
+
+  return (
+    <section className="mb-8">
+      <SectionHeader label="AGENT LAUNCH FLAGS" />
+
+      {envOverride !== null && (
+        <div className="mb-3 border border-[#FFB800]/40 bg-[#FFB800]/5 px-3 py-2 text-xs text-[#FFB800]">
+          Overridden by OCTOMUX_CLAUDE_FLAGS env var:{' '}
+          <span className="font-mono text-[#FFB800]">{envOverride}</span>
+        </div>
+      )}
+
+      <SettingRow
+        label="--dangerously-skip-permissions"
+        description="Launch claude without permission prompts. Agents can run arbitrary shell commands without asking."
+      >
+        <ToggleSwitch checked={dangerouslySkip} onChange={handleToggle} />
+      </SettingRow>
+
+      {dangerouslySkip && (
+        <div className="mb-3 mt-3 border border-red-400/40 bg-red-400/5 px-3 py-2 text-xs text-red-400">
+          ⚠ DANGER: agents will execute shell commands without confirmation. Only enable in trusted
+          environments.
+        </div>
+      )}
+
+      <div className="border-b border-[#2f2f2f] py-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <span className="text-sm">Advanced flags</span>
+            <p className="text-xs text-[#6a6a6a]">
+              Extra flags appended to the claude launch command
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
+            <button
+              onClick={saveFlags}
+              disabled={!isDirty || saving}
+              className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+        <input
+          type="text"
+          value={flagsBuffer}
+          onChange={(e) => setFlagsBuffer(e.target.value)}
+          placeholder="--model opus --verbose"
+          className="w-full border border-[#2f2f2f] bg-[#0A0A0A] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+          spellCheck={false}
+        />
+      </div>
+    </section>
+  );
+}
+
 function OrchestratorAgentToggle() {
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -716,6 +839,7 @@ export default function SettingsPage() {
         </section>
 
         <EditorSection />
+        <ClaudeLaunchFlagsSection />
         <RepoConfigsSection />
 
         <section className="mb-8">
