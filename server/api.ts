@@ -735,7 +735,13 @@ export function setupRoutes(app: Express): void {
   app.get('/api/settings', async (_req: Request, res: Response) => {
     try {
       const settings = await getSettings();
-      res.json(settings);
+      const envClaudeFlags = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
+      res.json({
+        ...settings,
+        envOverrides: {
+          claudeFlags: envClaudeFlags ? envClaudeFlags : null,
+        },
+      });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -747,7 +753,7 @@ export function setupRoutes(app: Express): void {
       res.json(settings);
     } catch (err) {
       const message = (err as Error).message;
-      if (message.startsWith('Invalid editor')) {
+      if (message.startsWith('Invalid editor') || message.startsWith('Invalid claudeFlags')) {
         res.status(400).json({ error: message });
       } else {
         res.status(500).json({ error: message });
