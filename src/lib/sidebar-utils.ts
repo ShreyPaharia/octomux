@@ -1,14 +1,22 @@
-import type { Task, TaskStatus, DerivedTaskStatus } from '../../server/types';
+import type { Task, TaskStatus, DerivedTaskStatus, RunMode } from '../../server/types';
 import { repoName } from './utils';
+
+export const OTHER_GROUP_KEY = '__other__';
+export const OTHER_GROUP_LABEL = 'Other';
 
 export interface SidebarItem {
   id: string;
   title: string;
   status: TaskStatus;
   derivedStatus: DerivedTaskStatus | null;
+  runMode: RunMode;
+  repoPath: string | null;
 }
 
 export interface SidebarGroup {
+  /** Stable key — either the task's `repo_path` or `OTHER_GROUP_KEY` for scratch/repo-less tasks. */
+  key: string;
+  /** Display label for the group header. */
   repo: string;
   items: SidebarItem[];
 }
@@ -23,38 +31,60 @@ function sortPriority(item: SidebarItem): number {
   return 3;
 }
 
+function itemFromTask(task: Task): SidebarItem {
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    derivedStatus: task.derived_status ?? null,
+    runMode: task.run_mode,
+    repoPath: task.repo_path || null,
+  };
+}
+
+function groupKeyFor(task: Task): { key: string; label: string } {
+  if (task.run_mode === 'scratch' || !task.repo_path) {
+    return { key: OTHER_GROUP_KEY, label: OTHER_GROUP_LABEL };
+  }
+  return { key: task.repo_path, label: repoName(task.repo_path) };
+}
+
 export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
   const active = tasks.filter((t) => ACTIVE_STATUSES.includes(t.status));
 
-  const grouped = new Map<string, { items: SidebarItem[]; tasks: Task[] }>();
+  const grouped = new Map<
+    string,
+    { label: string; items: SidebarItem[]; tasks: Task[] }
+  >();
+
   for (const task of active) {
-    const repo = repoName(task.repo_path);
-    const item: SidebarItem = {
-      id: task.id,
-      title: task.title,
-      status: task.status,
-      derivedStatus: task.derived_status ?? null,
-    };
-    const existing = grouped.get(repo);
+    const { key, label } = groupKeyFor(task);
+    const item = itemFromTask(task);
+    const existing = grouped.get(key);
     if (existing) {
       existing.items.push(item);
       existing.tasks.push(task);
     } else {
-      grouped.set(repo, { items: [item], tasks: [task] });
+      grouped.set(key, { label, items: [item], tasks: [task] });
     }
   }
 
   const groups: SidebarGroup[] = [];
-  for (const [repo, { items, tasks: groupTasks }] of grouped) {
+  for (const [key, { label, items, tasks: groupTasks }] of grouped) {
     const createdAt = new Map(groupTasks.map((t) => [t.id, t.created_at]));
     items.sort((a, b) => {
       const priorityDiff = sortPriority(a) - sortPriority(b);
       if (priorityDiff !== 0) return priorityDiff;
       return (createdAt.get(b.id) ?? '').localeCompare(createdAt.get(a.id) ?? '');
     });
-    groups.push({ repo, items });
+    groups.push({ key, repo: label, items });
   }
 
-  groups.sort((a, b) => a.repo.localeCompare(b.repo));
+  groups.sort((a, b) => {
+    // "Other" always sorts last.
+    if (a.key === OTHER_GROUP_KEY) return 1;
+    if (b.key === OTHER_GROUP_KEY) return -1;
+    return a.repo.localeCompare(b.repo);
+  });
   return groups;
 }
