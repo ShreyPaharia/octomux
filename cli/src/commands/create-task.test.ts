@@ -16,6 +16,9 @@ function makeTask(partial: Partial<Task> = {}): Task {
     pr_url: null,
     pr_number: null,
     initial_prompt: null,
+    run_mode: 'new',
+    base_sha: null,
+    last_viewed_at: null,
     error: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -77,15 +80,15 @@ describe('resolveForkFrom', () => {
 
   it.each([
     ['draft status', { status: 'draft' }],
-    ['scratch run_mode', { run_mode: 'scratch' }],
-    ['none run_mode', { run_mode: 'none' }],
-    ['no_worktree legacy flag', { no_worktree: 1 }],
+    ['scratch run_mode', { run_mode: 'scratch' as const }],
+    ['none run_mode', { run_mode: 'none' as const }],
+    ['existing run_mode', { run_mode: 'existing' as const }],
   ])('refuses to fork from %s', async (_name, overrides) => {
     const client = makeClient({ getTask: vi.fn(async () => makeTask(overrides as Partial<Task>)) });
     const git = vi.fn(async () => ({ stdout: '' }));
 
     await expect(resolveForkFrom(client, 'abc123', undefined, git)).rejects.toThrow(
-      /cannot fork from abc123: source has no branch/,
+      /cannot fork from abc123: source has no/,
     );
   });
 

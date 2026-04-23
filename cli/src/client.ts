@@ -1,3 +1,5 @@
+export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
+
 export interface Task {
   id: string;
   title: string;
@@ -10,14 +12,15 @@ export interface Task {
   pr_url: string | null;
   pr_number: number | null;
   initial_prompt: string | null;
+  run_mode: RunMode;
+  base_sha: string | null;
+  last_viewed_at: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
   agents?: Agent[];
   pending_prompts?: unknown[];
   derived_status?: string | null;
-  run_mode?: string | null;
-  no_worktree?: number | boolean;
 }
 
 export interface Agent {
@@ -35,12 +38,13 @@ export interface OctomuxClient {
   createTask(data: {
     title: string;
     description: string;
-    repo_path: string;
+    repo_path?: string;
     initial_prompt?: string;
     branch?: string;
     base_branch?: string;
     draft?: boolean;
-    no_worktree?: boolean;
+    run_mode?: RunMode;
+    worktree_path?: string;
   }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
