@@ -5,6 +5,10 @@ export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
 
 export type TaskSource = 'auto_review' | null;
 
+export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
+
+export const RUN_MODES: readonly RunMode[] = ['new', 'existing', 'none', 'scratch'] as const;
+
 export interface Task {
   id: string;
   title: string;
@@ -20,7 +24,9 @@ export interface Task {
   pr_head_sha: string | null;
   user_window_index: number | null;
   initial_prompt: string | null;
-  no_worktree: number;
+  run_mode: RunMode;
+  base_sha: string | null;
+  last_viewed_at: string | null;
   source: TaskSource;
   error: string | null;
   created_at: string;
@@ -70,12 +76,13 @@ export interface PermissionPrompt {
 export interface CreateTaskRequest {
   title: string;
   description: string;
-  repo_path: string;
+  repo_path?: string;
   branch?: string;
   base_branch?: string;
   initial_prompt?: string;
   draft?: boolean;
-  no_worktree?: boolean;
+  run_mode?: RunMode;
+  worktree_path?: string;
 }
 
 export interface OrchestratorStatus {
@@ -95,5 +102,6 @@ export interface UpdateTaskRequest {
   branch?: string;
   base_branch?: string;
   initial_prompt?: string;
-  no_worktree?: boolean;
+  run_mode?: RunMode;
+  worktree_path?: string;
 }

@@ -143,14 +143,62 @@ export function initDb(instance: Database.Database): void {
   addColumn('tasks', 'initial_prompt', 'initial_prompt TEXT', taskCols);
   addColumn('tasks', 'base_branch', 'base_branch TEXT', taskCols);
   addColumn('tasks', 'user_window_index', 'user_window_index INTEGER', taskCols);
+  // Legacy column; dropped by run_mode migration below if present.
   addColumn('tasks', 'no_worktree', 'no_worktree INTEGER NOT NULL DEFAULT 0', taskCols);
   addColumn('tasks', 'source', 'source TEXT', taskCols);
   addColumn('tasks', 'pr_head_sha', 'pr_head_sha TEXT', taskCols);
+  addColumn('tasks', 'base_sha', 'base_sha TEXT', taskCols);
+  addColumn('tasks', 'last_viewed_at', 'last_viewed_at TEXT', taskCols);
 
   const agentCols = columnsOf('agents');
   addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);
   addColumn('agents', 'hook_activity', "hook_activity TEXT NOT NULL DEFAULT 'active'", agentCols);
   addColumn('agents', 'hook_activity_updated_at', 'hook_activity_updated_at TEXT', agentCols);
+
+  // ─── run_mode migration ───────────────────────────────────────────────
+  // Introduce run_mode, backfill from legacy no_worktree + repo_path, drop
+  // no_worktree. One transaction so a crash mid-migration can't leave a
+  // half-shaped schema.
+  if (taskCols.has('no_worktree') || !taskCols.has('run_mode')) {
+    instance
+      .transaction(() => {
+        if (!taskCols.has('run_mode')) {
+          instance.exec(`ALTER TABLE tasks ADD COLUMN run_mode TEXT`);
+          taskCols.add('run_mode');
+        }
+
+        if (taskCols.has('no_worktree')) {
+          instance.exec(`
+            UPDATE tasks SET run_mode = CASE
+              WHEN no_worktree = 1 AND (repo_path IS NULL OR repo_path = '') THEN 'scratch'
+              WHEN no_worktree = 1                                            THEN 'none'
+              ELSE                                                                 'new'
+            END
+            WHERE run_mode IS NULL
+          `);
+        } else {
+          instance.exec(`UPDATE tasks SET run_mode = 'new' WHERE run_mode IS NULL`);
+        }
+
+        if (taskCols.has('no_worktree')) {
+          instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
+          taskCols.delete('no_worktree');
+        }
+      })
+      .default();
+  }
+
+  // Partial unique indexes: DB-enforced safety matrix (prevents app-level TOCTOU).
+  instance.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_existing_path
+       ON tasks(worktree)
+       WHERE run_mode = 'existing' AND status IN ('setting_up','running')`,
+  );
+  instance.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_none_repo
+       ON tasks(repo_path)
+       WHERE run_mode = 'none' AND status IN ('setting_up','running')`,
+  );
 
   // Data migrations
   instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);
