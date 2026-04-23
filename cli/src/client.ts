@@ -16,6 +16,8 @@ export interface Task {
   agents?: Agent[];
   pending_prompts?: unknown[];
   derived_status?: string | null;
+  run_mode?: string | null;
+  no_worktree?: number | boolean;
 }
 
 export interface Agent {
@@ -44,7 +46,10 @@ export interface OctomuxClient {
   getTask(id: string): Promise<Task>;
   updateTask(id: string, data: { status: string }): Promise<Task>;
   deleteTask(id: string): Promise<void>;
-  addAgent(taskId: string, data?: { prompt?: string }): Promise<Agent>;
+  addAgent(
+    taskId: string,
+    data?: { prompt?: string; agent?: string; label?: string },
+  ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
