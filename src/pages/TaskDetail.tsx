@@ -252,8 +252,8 @@ export default function TaskDetail() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4">
         <p className="text-destructive">{error || 'Task not found'}</p>
-        <Button variant="outline" onClick={() => navigate('/')}>
-          Back to Dashboard
+        <Button variant="outline" onClick={() => navigate('/tasks')}>
+          Back to Tasks
         </Button>
       </div>
     );
