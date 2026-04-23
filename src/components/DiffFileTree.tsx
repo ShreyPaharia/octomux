@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DiffFileEntry } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -6,6 +6,12 @@ interface Props {
   files: DiffFileEntry[];
   selected: string | null;
   onSelect: (path: string) => void;
+  taskId?: string;
+  ignoredTruncated?: boolean;
+}
+
+export function ignoredGroupKey(taskId: string): string {
+  return `octomux:diff-ignored-open:${taskId}`;
 }
 
 interface Node {
@@ -115,14 +121,66 @@ function TreeRow({
   );
 }
 
-export function DiffFileTree({ files, selected, onSelect }: Props) {
-  const tree = useMemo(() => buildTree(files), [files]);
+export function DiffFileTree({ files, selected, onSelect, taskId, ignoredTruncated }: Props) {
+  const changed = useMemo(() => files.filter((f) => !f.ignored), [files]);
+  const ignored = useMemo(() => files.filter((f) => f.ignored), [files]);
+  const changedTree = useMemo(() => buildTree(changed), [changed]);
+  const ignoredTree = useMemo(() => buildTree(ignored), [ignored]);
+
+  const [ignoredOpen, setIgnoredOpen] = useState(false);
+  useEffect(() => {
+    if (!taskId) return;
+    try {
+      setIgnoredOpen(localStorage.getItem(ignoredGroupKey(taskId)) === 'true');
+    } catch {
+      // localStorage unavailable (SSR, privacy mode, etc.) — keep default closed.
+    }
+  }, [taskId]);
+
+  const toggleIgnored = () => {
+    setIgnoredOpen((prev) => {
+      const next = !prev;
+      if (taskId) {
+        try {
+          localStorage.setItem(ignoredGroupKey(taskId), String(next));
+        } catch {
+          // ignore
+        }
+      }
+      return next;
+    });
+  };
+
   if (files.length === 0) {
     return <div className="p-4 text-xs text-muted-foreground">No changes on this branch yet.</div>;
   }
+
   return (
     <div className="overflow-y-auto">
-      <TreeRow node={tree} depth={0} selected={selected} onSelect={onSelect} />
+      {changed.length > 0 ? (
+        <TreeRow node={changedTree} depth={0} selected={selected} onSelect={onSelect} />
+      ) : null}
+      {ignored.length > 0 ? (
+        <div className="border-t border-border">
+          <button
+            type="button"
+            onClick={toggleIgnored}
+            aria-expanded={ignoredOpen}
+            className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent"
+          >
+            <span aria-hidden className="inline-block w-3 font-mono">
+              {ignoredOpen ? '▾' : '▸'}
+            </span>
+            <span>Ignored files ({ignored.length})</span>
+            {ignoredTruncated ? (
+              <span className="ml-1 normal-case text-muted-foreground/70">(+more hidden)</span>
+            ) : null}
+          </button>
+          {ignoredOpen ? (
+            <TreeRow node={ignoredTree} depth={0} selected={selected} onSelect={onSelect} />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
