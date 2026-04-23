@@ -70,19 +70,18 @@ describe('add-agent command', () => {
     const addAgent = vi.fn(async () => makeAgent());
     const program = buildProgram(makeClient(addAgent));
 
-    await expect(
-      program.parseAsync(['add-agent'], { from: 'user' }),
-    ).rejects.toThrow(/required option/);
+    await expect(program.parseAsync(['add-agent'], { from: 'user' })).rejects.toThrow(
+      /required option/,
+    );
   });
 
   it('sends prompt only when --agent and --label are not passed', async () => {
     const addAgent = vi.fn(async () => makeAgent());
     const program = buildProgram(makeClient(addAgent));
 
-    await program.parseAsync(
-      ['add-agent', '--task', 'task-1', '--prompt', 'do the thing'],
-      { from: 'user' },
-    );
+    await program.parseAsync(['add-agent', '--task', 'task-1', '--prompt', 'do the thing'], {
+      from: 'user',
+    });
 
     expect(addAgent).toHaveBeenCalledWith('task-1', { prompt: 'do the thing' });
   });

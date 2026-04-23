@@ -367,7 +367,13 @@ async function setupExisting(task: Task): Promise<SetupResult> {
 
   let branch: string | null = null;
   try {
-    const { stdout } = await execFile('git', ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    const { stdout } = await execFile('git', [
+      '-C',
+      worktreePath,
+      'rev-parse',
+      '--abbrev-ref',
+      'HEAD',
+    ]);
     const name = stdout.trim();
     branch = name === 'HEAD' ? null : name;
   } catch {
@@ -407,9 +413,7 @@ async function setupNone(task: Task): Promise<SetupResult> {
   if (dirty.length > 0) {
     const preview = dirty.slice(0, 5).join(', ');
     const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
-    throw new Error(
-      `none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`,
-    );
+    throw new Error(`none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`);
   }
 
   const baseSha = await revParseHead(task.repo_path);
