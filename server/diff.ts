@@ -216,13 +216,7 @@ async function appendIgnoredFiles(
 
   let stdout = '';
   try {
-    stdout = await git(worktree, [
-      'ls-files',
-      '--others',
-      '--ignored',
-      '--exclude-standard',
-      '-z',
-    ]);
+    stdout = await git(worktree, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']);
   } catch (err) {
     logger.warn(
       { worktree, err: (err as Error).message },

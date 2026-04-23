@@ -173,9 +173,7 @@ export function DiffFileTree({ files, selected, onSelect, taskId, ignoredTruncat
             </span>
             <span>Ignored files ({ignored.length})</span>
             {ignoredTruncated ? (
-              <span className="ml-1 normal-case text-muted-foreground/70">
-                (+more hidden)
-              </span>
+              <span className="ml-1 normal-case text-muted-foreground/70">(+more hidden)</span>
             ) : null}
           </button>
           {ignoredOpen ? (
