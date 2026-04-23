@@ -116,6 +116,9 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listTasks: vi.fn().mockResolvedValue([]),
     getTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+    getInbox: vi.fn().mockResolvedValue({ needs_you: [], activity: [] }),
+    markTaskViewed: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+    markAllTasksViewed: vi.fn().mockResolvedValue({ updated: 0 }),
     createTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     updateTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     startTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
