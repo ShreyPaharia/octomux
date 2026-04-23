@@ -298,6 +298,56 @@ describe('startTask', () => {
     expect(vi.mocked(fs.copyFileSync)).not.toHaveBeenCalled();
   });
 
+  // ─── Agent-local settings ──────────────────────────────────────────────
+
+  describe('agent-local settings', () => {
+    it('writes settings.local.json disabling noisy plugins when none exists', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        // Repo path exists; settings.local.json (source or destination) does not
+        return !String(p).includes('settings.local.json');
+      });
+
+      insertTask(db);
+      await startTask({ ...DEFAULTS.task } as Task);
+
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeDefined();
+      expect(String(writeCall![0])).toBe(
+        `${DEFAULTS.task.repo_path}/.worktrees/fix-order-validation-test-t/.claude/settings.local.json`,
+      );
+      const parsed = JSON.parse(String(writeCall![1]));
+      expect(parsed.plugins['remember@claude-plugins-official']).toBe(false);
+    });
+
+    it('does not write settings.local.json in run_mode=none', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        return !String(p).includes('settings.local.json');
+      });
+
+      insertTask(db, { run_mode: 'none' });
+      await startTask({ ...DEFAULTS.task, run_mode: 'none' as const } as Task);
+
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeUndefined();
+    });
+
+    it('leaves an existing settings.local.json alone', async () => {
+      // Default existsSync returns true for all paths, so the destination is
+      // treated as already present.
+      insertTask(db);
+      await startTask({ ...DEFAULTS.task } as Task);
+
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeUndefined();
+    });
+  });
+
   // ─── Error cases (table-driven) ────────────────────────────────────────
 
   const errorCases = [
