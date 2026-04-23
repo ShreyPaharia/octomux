@@ -249,7 +249,7 @@ describe('CreateTaskDialog', () => {
       expect(screen.queryByText(/^Base Branch/)).not.toBeInTheDocument();
     });
 
-    it('passes no_worktree to API when checked', async () => {
+    it('passes run_mode=none to API when checked', async () => {
       await openDialog();
       await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
       await user.click(screen.getByLabelText(/NO WORKTREE/));
@@ -257,19 +257,19 @@ describe('CreateTaskDialog', () => {
 
       await waitFor(() => {
         expect(apiMock.createTask).toHaveBeenCalledWith(
-          expect.objectContaining({ no_worktree: true }),
+          expect.objectContaining({ run_mode: 'none' }),
         );
       });
     });
 
-    it('does not pass no_worktree when unchecked', async () => {
+    it('passes run_mode=new when unchecked', async () => {
       await openDialog();
       await fillForm({ title: 'Fix bug', description: 'Desc', repoPath: '/tmp/repo' });
       await user.click(screen.getByText('DISPATCH'));
 
       await waitFor(() => {
         expect(apiMock.createTask).toHaveBeenCalledWith(
-          expect.not.objectContaining({ no_worktree: true }),
+          expect.objectContaining({ run_mode: 'new' }),
         );
       });
     });
