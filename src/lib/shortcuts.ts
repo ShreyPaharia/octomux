@@ -26,10 +26,7 @@ export function matchShortcut(e: KeyboardEvent, keys: ShortcutKeys): boolean {
   return e.key.toLowerCase() === keys.key.toLowerCase();
 }
 
-export function useGlobalShortcut(
-  keys: ShortcutKeys,
-  handler: (e: KeyboardEvent) => void,
-): void {
+export function useGlobalShortcut(keys: ShortcutKeys, handler: (e: KeyboardEvent) => void): void {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
