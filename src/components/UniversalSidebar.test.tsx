@@ -70,12 +70,8 @@ describe('UniversalSidebar grouping', () => {
     ]);
     renderSidebar();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
-    expect(
-      screen.getByRole('button', { expanded: true, name: /nucleus/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { expanded: true, name: /^octomux$/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { expanded: true, name: /nucleus/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { expanded: true, name: /^octomux$/i })).toBeInTheDocument();
   });
 
   it('renders an Other group for scratch / repo-less tasks', async () => {
@@ -193,9 +189,7 @@ describe('UniversalSidebar group collapse persistence', () => {
     renderSidebar();
     // After rehydrate, the group should still be collapsed
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { expanded: false, name: /nucleus/i }),
-      ).toBeInTheDocument(),
+      expect(screen.getByRole('button', { expanded: false, name: /nucleus/i })).toBeInTheDocument(),
     );
     expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
   });
@@ -207,9 +201,7 @@ describe('UniversalSidebar row menu', () => {
       expect(screen.getByTestId(`task-row-menu-trigger-${id}`)).toBeInTheDocument(),
     );
     await user.click(screen.getByTestId(`task-row-menu-trigger-${id}`));
-    await waitFor(() =>
-      expect(screen.getByTestId(`task-row-menu-${id}`)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId(`task-row-menu-${id}`)).toBeInTheDocument());
     return screen.getByTestId(`task-row-menu-${id}`);
   }
 
@@ -294,9 +286,7 @@ describe('UniversalSidebar row menu', () => {
     renderSidebar();
     const menu = await openMenu(user, 't1');
     await user.click(within(menu).getByText('Rename'));
-    await waitFor(() =>
-      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument());
     const input = screen.getByTestId('sidebar-rename-input') as HTMLInputElement;
     await user.clear(input);
     await user.type(input, 'New Title');
