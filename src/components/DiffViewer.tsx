@@ -1,4 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import type { DiffOnMount } from '@monaco-editor/react';
+import type { editor } from 'monaco-editor';
 import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { Button } from '@/components/ui/button';
@@ -46,6 +48,47 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   const [fileLoading, setFileLoading] = useState(false);
   const [expandedAll, setExpandedAll] = useState(false);
   const expandedFallback = useRef<Record<string, boolean>>({});
+
+  const editorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
+  const editorKeyRef = useRef<string | null>(null);
+  const viewStates = useRef<Map<string, editor.IDiffEditorViewState>>(new Map());
+
+  const viewStateKey = useCallback(
+    (path: string, expanded: boolean) => `${taskId}::${path}::${expanded ? 'e' : 'c'}`,
+    [taskId],
+  );
+
+  const saveActiveViewState = useCallback(() => {
+    const ed = editorRef.current;
+    const k = editorKeyRef.current;
+    if (!ed || !k) return;
+    const s = ed.saveViewState();
+    if (s) viewStates.current.set(k, s);
+  }, []);
+
+  const handleSelect = useCallback(
+    (path: string) => {
+      saveActiveViewState();
+      setSelected(path);
+    },
+    [saveActiveViewState],
+  );
+
+  const handleEditorMount = useCallback<DiffOnMount>(
+    (ed) => {
+      editorRef.current = ed;
+      const k = selected ? viewStateKey(selected, expandedAll) : null;
+      editorKeyRef.current = k;
+      if (!k) return;
+      const saved = viewStates.current.get(k);
+      if (!saved) return;
+      const disposable = ed.onDidUpdateDiff(() => {
+        ed.restoreViewState(saved);
+        disposable.dispose();
+      });
+    },
+    [selected, expandedAll, viewStateKey],
+  );
 
   const selectedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -138,7 +181,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
         ) : (
-          <DiffFileTree files={files} selected={selected} onSelect={setSelected} />
+          <DiffFileTree files={files} selected={selected} onSelect={handleSelect} />
         )}
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
@@ -191,6 +234,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
               modified={fileDiff.newContent}
               language={extToLanguage(selected)}
               theme="vs-dark"
+              onMount={handleEditorMount}
               options={{
                 readOnly: true,
                 renderSideBySide: true,
