@@ -109,6 +109,42 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    - Tell the user to monitor via `octomux list-tasks` or the dashboard
    - Or via CLI: `octomux list-tasks`
 
+## Forking an existing task
+
+Use `--fork-from <task-id>` to start a new task from the branch of an existing task. The new task gets its own worktree and its own branch; the source task is left untouched.
+
+```bash
+octomux create-task \
+  --fork-from ABC123XYZ \
+  --title 'Try a different approach' \
+  --description 'Explore alternative implementation on top of ABC123XYZ' \
+  --branch 'feat/try-alt-approach' \
+  --initial-prompt 'Continue from the current state. Consider a simpler approach to ...'
+```
+
+**What it does:**
+
+- Sets `--base-branch` to `agents/<task-id>` — you MUST NOT pass `--base-branch` yourself (the two flags are mutually exclusive and the CLI will error).
+- Inherits `--repo-path` from the source task if you don't pass one.
+- All other flags (`--title`, `--description`, `--branch`, `--initial-prompt`, etc.) behave exactly as usual.
+
+**Dirty source warning:**
+
+If the source task's worktree has uncommitted changes, the CLI prints a warning to stderr like:
+
+```
+Warning: Source task ABC123XYZ has uncommitted changes; fork starts from last commit 1a2b3c4. Those changes will not be in the fork.
+```
+
+The fork proceeds anyway — but expect to re-apply any uncommitted work manually if you need it in the fork. If you want those changes in the fork, commit them in the source first.
+
+**Refusal cases (the CLI exits non-zero):**
+
+- Source task does not exist.
+- Source's `status` is `draft` (task was never started, so there's no branch yet).
+- Source's `run_mode` is `scratch` or `none` (task runs in the repo directory with no branch to fork from).
+- Both `--fork-from` and `--base-branch` are passed (mutually exclusive).
+
 ## Notes
 
 - The octomux server must be running (start with `octomux start`)
