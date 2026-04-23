@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { getAgent, saveAgent, resetAgent, syncAgents } from './agents.js';
-import { getSettings } from './settings.js';
+import { getSettings, resolveClaudeFlags } from './settings.js';
 import { childLogger } from './logger.js';
 
 const execFile = promisify(execFileCb);
@@ -82,6 +82,9 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
       // Plain claude with no agent
       claudeCmd = 'claude';
     }
+
+    // Append user-configured launch flags (env var > settings).
+    claudeCmd += resolveClaudeFlags(settings);
 
     // Use single quotes for the user message to prevent shell interpretation of $, `, etc.
     const messagePart = initialMessage ? ` '${initialMessage.replace(/'/g, "'\"'\"'")}'` : '';

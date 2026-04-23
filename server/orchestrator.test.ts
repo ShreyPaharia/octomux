@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], cb: Function) => {
@@ -25,9 +25,18 @@ vi.mock('./agents.js', () => ({
   syncAgents: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('./settings.js', () => ({
-  getSettings: vi.fn().mockResolvedValue({ editor: 'nvim', useOrchestratorAgent: false }),
-}));
+vi.mock('./settings.js', async () => {
+  const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
+  return {
+    ...actual,
+    getSettings: vi.fn().mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    }),
+  };
+});
 
 const {
   isOrchestratorRunning,
@@ -219,6 +228,8 @@ describe('startOrchestrator', () => {
     vi.mocked(settings.getSettings).mockResolvedValue({
       editor: 'nvim',
       useOrchestratorAgent: true,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
     });
 
     await startOrchestrator('/test/cwd');
@@ -264,6 +275,71 @@ describe('startOrchestrator', () => {
 
     const newSessionCall = vi.mocked(execFile).mock.calls[1];
     expect(newSessionCall[1]).toContain('/my/project');
+  });
+
+  describe('claude launch flags', () => {
+    afterEach(() => {
+      delete process.env.OCTOMUX_CLAUDE_FLAGS;
+    });
+
+    it('appends OCTOMUX_CLAUDE_FLAGS env var, ignoring settings', async () => {
+      process.env.OCTOMUX_CLAUDE_FLAGS = '--from-env';
+      mockSessionNotRunning();
+      vi.mocked(settings.getSettings).mockResolvedValue({
+        editor: 'nvim',
+        useOrchestratorAgent: false,
+        dangerouslySkipPermissions: true,
+        claudeFlags: '--from-settings',
+      });
+
+      await startOrchestrator('/test/cwd');
+
+      expect(getClaudeCmd()).toBe('claude --from-env');
+    });
+
+    it('appends --dangerously-skip-permissions from settings', async () => {
+      mockSessionNotRunning();
+      vi.mocked(settings.getSettings).mockResolvedValue({
+        editor: 'nvim',
+        useOrchestratorAgent: false,
+        dangerouslySkipPermissions: true,
+        claudeFlags: '',
+      });
+
+      await startOrchestrator('/test/cwd');
+
+      expect(getClaudeCmd()).toBe('claude --dangerously-skip-permissions');
+    });
+
+    it('appends claudeFlags from settings', async () => {
+      mockSessionNotRunning();
+      vi.mocked(settings.getSettings).mockResolvedValue({
+        editor: 'nvim',
+        useOrchestratorAgent: false,
+        dangerouslySkipPermissions: false,
+        claudeFlags: '--model opus',
+      });
+
+      await startOrchestrator('/test/cwd');
+
+      expect(getClaudeCmd()).toBe('claude --model opus');
+    });
+
+    it('composes flags after --agent orchestrator when agent enabled', async () => {
+      mockSessionNotRunning();
+      vi.mocked(settings.getSettings).mockResolvedValue({
+        editor: 'nvim',
+        useOrchestratorAgent: true,
+        dangerouslySkipPermissions: true,
+        claudeFlags: '--model opus',
+      });
+
+      await startOrchestrator('/test/cwd');
+
+      expect(getClaudeCmd()).toBe(
+        'claude --agent orchestrator --dangerously-skip-permissions --model opus',
+      );
+    });
   });
 });
 
