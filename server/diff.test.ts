@@ -4,7 +4,13 @@ import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { getDiffSummary, getFileDiff, safeResolvePath } from './diff.js';
+import {
+  getDiffSummary,
+  getFileDiff,
+  safeResolvePath,
+  MAX_IGNORED_FILES,
+  IGNORED_DENY_PREFIXES,
+} from './diff.js';
 
 const execFileRaw = promisify(execFileCb);
 
@@ -130,6 +136,118 @@ describe('diff module', () => {
       const diff = await getFileDiff({ worktree: repo, base: 'main', relPath: 'big.txt' });
       expect(diff.tooLarge).toBe(true);
       expect(diff.newContent).toBe('');
+    });
+  });
+
+  describe('ignored files', () => {
+    async function writeIgnoreAndFiles(files: Record<string, string>): Promise<void> {
+      for (const [p, content] of Object.entries(files)) {
+        const full = path.join(repo, p);
+        await fs.promises.mkdir(path.dirname(full), { recursive: true });
+        await fs.promises.writeFile(full, content);
+      }
+    }
+
+    it('includes gitignored files with ignored=true and status=A', async () => {
+      await writeIgnoreAndFiles({
+        '.gitignore': '*.log\n',
+        'debug.log': 'line1\nline2\n',
+      });
+      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const entry = files.find((f) => f.path === 'debug.log');
+      expect(entry).toBeDefined();
+      expect(entry).toMatchObject({
+        path: 'debug.log',
+        status: 'A',
+        additions: 2,
+        deletions: 0,
+        ignored: true,
+      });
+      // .gitignore itself is untracked (not ignored), must NOT carry ignored flag
+      const gi = files.find((f) => f.path === '.gitignore');
+      expect(gi?.ignored).toBeUndefined();
+    });
+
+    it('applies the deny-prefix list to filter out cache/build dirs', async () => {
+      // Include one entry per deny prefix, plus one legitimate ignored file.
+      const ignoreLines = ['*.log', ...IGNORED_DENY_PREFIXES.map((p) => p.replace(/\/$/, ''))];
+      await writeIgnoreAndFiles({
+        '.gitignore': ignoreLines.join('\n') + '\n',
+        'debug.log': 'x\n',
+        'node_modules/pkg/index.js': 'x\n',
+        'dist/bundle.js': 'x\n',
+        'coverage/lcov.info': 'x\n',
+        '.DS_Store': 'x',
+      });
+      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const ignoredPaths = files.filter((f) => f.ignored).map((f) => f.path);
+      expect(ignoredPaths).toContain('debug.log');
+      expect(ignoredPaths).not.toContain('node_modules/pkg/index.js');
+      expect(ignoredPaths).not.toContain('dist/bundle.js');
+      expect(ignoredPaths).not.toContain('coverage/lcov.info');
+      expect(ignoredPaths).not.toContain('.DS_Store');
+    });
+
+    it('flags oversized ignored files with tooLarge=true but still lists them', async () => {
+      await writeIgnoreAndFiles({
+        '.gitignore': '*.log\n',
+      });
+      const big = 'x'.repeat(1_048_577);
+      await fs.promises.writeFile(path.join(repo, 'big.log'), big);
+      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const entry = files.find((f) => f.path === 'big.log');
+      expect(entry).toBeDefined();
+      expect(entry?.ignored).toBe(true);
+      expect(entry?.tooLarge).toBe(true);
+      expect(entry?.additions).toBe(0);
+    });
+
+    it('marks binary ignored files with binary=true', async () => {
+      await writeIgnoreAndFiles({
+        '.gitignore': '*.bin\n',
+      });
+      await fs.promises.writeFile(
+        path.join(repo, 'blob.bin'),
+        Buffer.from([0, 1, 2, 3, 0, 255, 10]),
+      );
+      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const entry = files.find((f) => f.path === 'blob.bin');
+      expect(entry?.ignored).toBe(true);
+      expect(entry?.binary).toBe(true);
+      expect(entry?.additions).toBe(0);
+    });
+
+    it('truncates the ignored list at MAX_IGNORED_FILES and sets ignoredTruncated', async () => {
+      await writeIgnoreAndFiles({
+        '.gitignore': '*.log\n',
+      });
+      for (let i = 0; i < MAX_IGNORED_FILES + 5; i++) {
+        await fs.promises.writeFile(path.join(repo, `file${i}.log`), 'x\n');
+      }
+      const summary = await getDiffSummary({ worktree: repo, base: 'main' });
+      const ignored = summary.files.filter((f) => f.ignored);
+      expect(ignored).toHaveLength(MAX_IGNORED_FILES);
+      expect(summary.ignoredTruncated).toBe(true);
+    });
+
+    it('does NOT set ignoredTruncated when list fits under the cap', async () => {
+      await writeIgnoreAndFiles({
+        '.gitignore': '*.log\n',
+        'one.log': 'x\n',
+      });
+      const summary = await getDiffSummary({ worktree: repo, base: 'main' });
+      expect(summary.ignoredTruncated).toBeUndefined();
+    });
+  });
+
+  describe('getFileDiff for ignored files', () => {
+    it('returns oldContent="" and reads newContent from worktree', async () => {
+      await fs.promises.writeFile(path.join(repo, '.gitignore'), '*.log\n');
+      await fs.promises.writeFile(path.join(repo, 'debug.log'), 'log line\n');
+      const diff = await getFileDiff({ worktree: repo, base: 'main', relPath: 'debug.log' });
+      expect(diff.oldContent).toBe('');
+      expect(diff.newContent).toBe('log line\n');
+      expect(diff.status).toBe('A');
     });
   });
 

@@ -2,6 +2,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import path from 'path';
+import os from 'os';
 import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
@@ -10,7 +11,7 @@ import { getSettings, resolveClaudeFlags } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
 import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
-import type { Task, Agent, UserTerminal } from './types.js';
+import type { Task, Agent, UserTerminal, RunMode } from './types.js';
 
 const logger = childLogger('task-runner');
 
@@ -20,6 +21,15 @@ export interface UserTerminalResult {
 }
 
 const execFile = promisify(execFileCb);
+
+/** Root directory for scratch-mode task working dirs. */
+export function scratchRoot(): string {
+  return path.join(os.homedir(), '.octomux', 'scratch');
+}
+
+export function scratchDirFor(taskId: string): string {
+  return path.join(scratchRoot(), taskId);
+}
 
 /**
  * Resolve extra claude CLI flags from env var (if set) or settings.
@@ -132,12 +142,6 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
 
 /**
  * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
- * This prevents the classic tmux race condition where send-keys fires before
- * the shell has initialized, causing the first character(s) to be swallowed.
- *
- * Starts with a short warm-up sleep (most shells render their prompt within
- * a couple hundred ms) so we don't burn a subprocess on the guaranteed miss,
- * then polls at 250ms intervals up to the timeout.
  */
 async function waitForShellReady(
   target: string,
@@ -151,26 +155,23 @@ async function waitForShellReady(
   while (Date.now() < deadline) {
     try {
       const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      // Look for common shell prompts: $, %, >, ❯, or the user@host pattern
       if (/[$%>❯#]\s*$/m.test(stdout)) return;
     } catch {
       // pane may not exist yet
     }
     await sleep(intervalMs);
   }
-  // Best-effort: proceed after timeout even if prompt not detected
 }
 
 /**
  * Kill all linked viewer sessions (`<tmuxSession>-v-*`) for a specific task.
- * Safe to call even if no linked sessions exist.
  */
 export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> {
   let stdout: string;
   try {
     ({ stdout } = await execFile('tmux', ['list-sessions', '-F', '#{session_name}']));
   } catch {
-    return; // tmux server not running or no sessions
+    return;
   }
 
   const prefix = `${tmuxSession}-v-`;
@@ -186,7 +187,6 @@ export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> 
 
 /**
  * Clean up orphaned `-v-` viewer sessions from previous runs.
- * Only kills linked sessions whose parent session no longer exists.
  */
 export async function cleanupOrphanedViewerSessions(): Promise<void> {
   let stdout: string;
@@ -213,111 +213,312 @@ export async function cleanupOrphanedViewerSessions(): Promise<void> {
 /** Generate a git-safe branch slug from a title + task ID suffix. */
 export function slugifyTitle(title: string, id: string): string {
   const slug = title
-    .normalize('NFKD') // decompose accents so they can be stripped
-    .replace(/[̀-ͯ]/g, '') // strip combining diacritical marks
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-') // replace non-alphanumeric with hyphens
-    .replace(/-{2,}/g, '-') // collapse consecutive hyphens
-    .replace(/^-|-$/g, '') // trim leading/trailing hyphens
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
     .slice(0, 50);
   const suffix = id.slice(0, 6);
   return `${slug}-${suffix}`;
 }
 
+// ─── Boot-time reconciliation ────────────────────────────────────────────────
+
+/**
+ * Sweep setting_up tasks whose tmux session no longer exists. Transition each
+ * to status='error' with a clear error message. Intended to run once at boot.
+ */
+export async function reconcileOrphanSettingUp(): Promise<void> {
+  const db = getDb();
+  const rows = db
+    .prepare(`SELECT id, tmux_session FROM tasks WHERE status = 'setting_up'`)
+    .all() as Array<{ id: string; tmux_session: string | null }>;
+
+  for (const row of rows) {
+    let alive = false;
+    if (row.tmux_session) {
+      try {
+        await execFile('tmux', ['has-session', '-t', row.tmux_session]);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+    if (!alive) {
+      db.prepare(
+        `UPDATE tasks SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run('orphan setting_up on boot', row.id);
+      logger.warn(
+        { task_id: row.id, operation: 'reconcileOrphanSettingUp' },
+        'transitioned orphan setting_up task to error',
+      );
+    }
+  }
+}
+
+/**
+ * GC scratch dirs that have no matching active task row. A scratch dir is
+ * preserved only when a task row with run_mode='scratch' and status in
+ * ('draft','setting_up','running') references it.
+ */
+export async function gcScratchDirs(): Promise<void> {
+  const root = scratchRoot();
+  if (!fs.existsSync(root)) return;
+
+  const db = getDb();
+  const alive = new Set(
+    (
+      db
+        .prepare(
+          `SELECT id FROM tasks
+           WHERE run_mode = 'scratch' AND status IN ('draft','setting_up','running')`,
+        )
+        .all() as Array<{ id: string }>
+    ).map((r) => r.id),
+  );
+
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (alive.has(entry.name)) continue;
+    const dir = path.join(root, entry.name);
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      logger.info({ scratch_dir: dir, operation: 'scratch_gc_removed' }, 'scratch_gc_removed');
+    } catch (err) {
+      logger.warn(
+        { scratch_dir: dir, operation: 'scratch_gc_removed', err },
+        'scratch_gc_remove_failed',
+      );
+    }
+  }
+}
+
+// ─── Per-mode setup helpers ──────────────────────────────────────────────────
+
+async function validateRepo(repoPath: string): Promise<void> {
+  if (!fs.existsSync(repoPath)) {
+    throw new Error(`Repository path does not exist: ${repoPath}`);
+  }
+  await execFile('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree']);
+}
+
+async function revParseHead(cwd: string, ref = 'HEAD'): Promise<string> {
+  const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', `${ref}^{commit}`]);
+  return stdout.trim();
+}
+
+async function checkDirty(repoPath: string): Promise<string[]> {
+  const { stdout } = await execFile('git', ['-C', repoPath, 'status', '--porcelain=v1']);
+  return stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+interface SetupResult {
+  worktreePath: string;
+  branch: string | null;
+  baseBranch: string | null;
+  baseSha: string | null;
+  installHooksAt: string;
+  runPreflight: boolean;
+}
+
+async function setupNew(task: Task): Promise<SetupResult> {
+  await validateRepo(task.repo_path);
+
+  const slug = slugifyTitle(task.title, task.id);
+  const branch = task.branch || `agents/${slug}`;
+  const worktreeDir = task.branch || slug;
+  const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
+
+  const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
+  fs.mkdirSync(worktreeBaseDir, { recursive: true });
+
+  const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
+  if (task.base_branch) worktreeArgs.push(task.base_branch);
+  await execFile('git', worktreeArgs);
+
+  const baseRef = task.base_branch || 'HEAD';
+  const baseSha = await revParseHead(task.repo_path, baseRef);
+
+  // Copy .claude/settings.local.json if it exists
+  const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
+  const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
+  if (fs.existsSync(settingsSrc)) {
+    fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
+    fs.copyFileSync(settingsSrc, settingsDst);
+  }
+
+  return {
+    worktreePath,
+    branch,
+    baseBranch: task.base_branch,
+    baseSha,
+    installHooksAt: worktreePath,
+    runPreflight: true,
+  };
+}
+
+async function setupExisting(task: Task): Promise<SetupResult> {
+  const worktreePath = task.worktree;
+  if (!worktreePath) {
+    throw new Error('existing mode requires a worktree path');
+  }
+  if (!fs.existsSync(worktreePath)) {
+    throw new Error(`existing worktree does not exist: ${worktreePath}`);
+  }
+  await execFile('git', ['-C', worktreePath, 'rev-parse', '--is-inside-work-tree']);
+
+  const baseSha = await revParseHead(worktreePath);
+
+  let branch: string | null = null;
+  try {
+    const { stdout } = await execFile('git', [
+      '-C',
+      worktreePath,
+      'rev-parse',
+      '--abbrev-ref',
+      'HEAD',
+    ]);
+    const name = stdout.trim();
+    branch = name === 'HEAD' ? null : name;
+  } catch {
+    branch = null;
+  }
+
+  let baseBranch: string | null = null;
+  try {
+    const { stdout } = await execFile('git', [
+      '-C',
+      worktreePath,
+      'rev-parse',
+      '--abbrev-ref',
+      '--symbolic-full-name',
+      '@{upstream}',
+    ]);
+    const upstream = stdout.trim();
+    if (upstream) baseBranch = upstream.replace(/^origin\//, '');
+  } catch {
+    baseBranch = branch;
+  }
+
+  return {
+    worktreePath,
+    branch,
+    baseBranch,
+    baseSha,
+    installHooksAt: worktreePath,
+    runPreflight: false,
+  };
+}
+
+async function setupNone(task: Task): Promise<SetupResult> {
+  await validateRepo(task.repo_path);
+
+  const dirty = await checkDirty(task.repo_path);
+  if (dirty.length > 0) {
+    const preview = dirty.slice(0, 5).join(', ');
+    const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
+    throw new Error(`none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`);
+  }
+
+  const baseSha = await revParseHead(task.repo_path);
+
+  return {
+    worktreePath: task.repo_path,
+    branch: null,
+    baseBranch: null,
+    baseSha,
+    installHooksAt: task.repo_path,
+    runPreflight: false,
+  };
+}
+
+async function setupScratch(task: Task): Promise<SetupResult> {
+  const dir = scratchDirFor(task.id);
+  fs.mkdirSync(dir, { recursive: true });
+
+  return {
+    worktreePath: dir,
+    branch: null,
+    baseBranch: null,
+    baseSha: null,
+    installHooksAt: dir,
+    runPreflight: false,
+  };
+}
+
+// ─── Task lifecycle ──────────────────────────────────────────────────────────
+
 export async function startTask(task: Task): Promise<void> {
   const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
-  const isNoWorktree = !!task.no_worktree;
+  const runMode: RunMode = task.run_mode;
 
   logger.info(
-    { task_id: id, operation: 'createTask', no_worktree: isNoWorktree, repo_path: task.repo_path },
+    { task_id: id, operation: 'createTask', run_mode: runMode, repo_path: task.repo_path },
     'createTask: start',
   );
 
-  let stage = 'validate_repo';
+  let stage = 'validate';
   try {
-    // 1. Validate repo path
-    if (!fs.existsSync(task.repo_path)) {
-      throw new Error(`Repository path does not exist: ${task.repo_path}`);
-    }
-    await execFile('git', ['-C', task.repo_path, 'rev-parse', '--is-inside-work-tree']);
-
-    let worktreePath: string;
-    let branch: string | null = null;
-
-    stage = 'worktree_setup';
-    logger.info({ task_id: id, operation: 'createTask', stage }, 'createTask: setting up worktree');
-
-    if (isNoWorktree) {
-      // No-worktree mode: run directly in repo. repo_path already exists, so it's
-      // safe to persist worktree now. tmux_session is deferred to after new-session.
-      worktreePath = task.repo_path;
-      db.prepare(
-        `UPDATE tasks SET status = ?, branch = NULL, worktree = ?, updated_at = datetime('now') WHERE id = ?`,
-      ).run('setting_up', worktreePath, id);
-    } else {
-      // Standard mode: create worktree and branch. We intentionally do NOT
-      // persist worktree or tmux_session yet — pollStatuses treats any task in
-      // (running, setting_up) with a tmux_session as eligible for the
-      // has-session liveness check, so writing tmux_session before the session
-      // exists causes the poller to race with us and mark the task
-      // status='error', error='Setup interrupted'. Defer each column write
-      // until its resource actually exists on disk / in tmux.
-      const slug = slugifyTitle(task.title, id);
-      branch = task.branch || `agents/${slug}`;
-      const worktreeDir = task.branch || slug;
-      worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
-
-      db.prepare(
-        `UPDATE tasks SET status = ?, branch = ?, updated_at = datetime('now') WHERE id = ?`,
-      ).run('setting_up', branch, id);
-
-      // Ensure .worktrees directory exists
-      const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
-      fs.mkdirSync(worktreeBaseDir, { recursive: true });
-
-      // Create worktree (optionally from a base branch)
-      const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
-      if (task.base_branch) {
-        worktreeArgs.push(task.base_branch);
-      }
-      await execFile('git', worktreeArgs);
-
-      // Worktree exists on disk now — persist the column so recovery can see it.
-      db.prepare(`UPDATE tasks SET worktree = ?, updated_at = datetime('now') WHERE id = ?`).run(
-        worktreePath,
-        id,
-      );
-
-      logger.info(
-        { task_id: id, operation: 'createTask', branch, worktree: worktreePath },
-        'createTask: branch created',
-      );
-
-      // Copy .claude/settings.local.json if it exists
-      const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
-      const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
-      if (fs.existsSync(settingsSrc)) {
-        fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
-        fs.copyFileSync(settingsSrc, settingsDst);
-      }
+    stage = 'mode_setup';
+    let setup: SetupResult;
+    switch (runMode) {
+      case 'new':
+        setup = await setupNew(task);
+        break;
+      case 'existing':
+        setup = await setupExisting(task);
+        break;
+      case 'none':
+        setup = await setupNone(task);
+        break;
+      case 'scratch':
+        setup = await setupScratch(task);
+        break;
+      default:
+        throw new Error(`unknown run_mode: ${String(runMode)}`);
     }
 
-    // Install hook settings
-    installHookSettings(worktreePath);
+    // Persist status + setup results, but NOT tmux_session — that column is
+    // written after tmux new-session succeeds below. Otherwise pollStatuses
+    // can run a has-session check on the not-yet-created session, mark it
+    // dead, and stamp error='Setup interrupted' before the session exists.
+    db.prepare(
+      `UPDATE tasks
+         SET status = ?, branch = ?, base_branch = ?, worktree = ?,
+             base_sha = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+    ).run('setting_up', setup.branch, setup.baseBranch, setup.worktreePath, setup.baseSha, id);
 
-    // Pre-flight: auto-fix formatting in fresh worktree (only for worktree tasks)
-    if (!isNoWorktree) {
+    logger.info(
+      {
+        task_id: id,
+        operation: 'createTask',
+        run_mode: runMode,
+        branch: setup.branch,
+        worktree: setup.worktreePath,
+        base_sha: setup.baseSha,
+      },
+      'createTask: setup complete',
+    );
+
+    installHookSettings(setup.installHooksAt);
+
+    if (setup.runPreflight) {
       stage = 'preflight';
       const repoConfig = await getOrCreateRepoConfig(task.repo_path);
-      await preflightWorktree(worktreePath, repoConfig);
+      await preflightWorktree(setup.worktreePath, repoConfig);
     }
 
-    // Create tmux session
     stage = 'tmux_session';
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', worktreePath]);
-    // Prevent grouped viewer sessions from constraining window size
+    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', setup.worktreePath]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
     // Session exists now — persist the column. See race-avoidance comment above.
     db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
@@ -329,10 +530,8 @@ export async function startTask(task: Task): Promise<void> {
       'createTask: tmux session created',
     );
 
-    // 7. Query the actual window index (respects tmux base-index)
     const windowIndex = await getActiveWindowIndex(session);
 
-    // 8. Create first agent record with session ID
     stage = 'launch_agent';
     const agentId = nanoid(12);
     const claudeSessionId = crypto.randomUUID();
@@ -340,14 +539,12 @@ export async function startTask(task: Task): Promise<void> {
       'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
     ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId);
 
-    // Launch claude in the window. Prompt (if any) goes via a tempfile to avoid
-    // shell-escape hazards in the user-supplied prompt content.
     const flags = await getClaudeFlags();
     await sendClaudeCommand({
       target: `${session}:${windowIndex}`,
       baseCmd: `claude --session-id ${claudeSessionId}${flags}`,
       prompt: task.initial_prompt,
-      worktreePath,
+      worktreePath: setup.worktreePath,
       agentId,
     });
     logger.info(
@@ -361,16 +558,16 @@ export async function startTask(task: Task): Promise<void> {
       'createTask: first agent launched',
     );
 
-    // 12. Mark as running. Clear error too — otherwise a transient error value
-    // (e.g. written by the poller during a pre-fix race, or by a prior failed
-    // setup attempt) would linger on a successfully running task.
+    // Mark as running. Clear error too — a transient error value (e.g.
+    // stamped by the poller during a pre-fix race, or a prior failed setup
+    // attempt) would otherwise linger on a successfully running task.
     db.prepare(
       `UPDATE tasks SET status = ?, error = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run('running', id);
     logger.info({ task_id: id, operation: 'createTask' }, 'createTask: complete');
   } catch (err) {
     logger.error(
-      { task_id: id, operation: 'createTask', stage, err },
+      { task_id: id, operation: 'createTask', stage, run_mode: runMode, err },
       'createTask: failed during setup stage',
     );
     db.prepare(
@@ -384,30 +581,25 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 
   logger.info({ task_id: task.id, operation: 'addAgent' }, 'addAgent: start');
 
-  // Determine label from active (non-stopped) agent count
   const activeAgents = db
     .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
     .all(task.id) as Agent[];
   const label = `Agent ${activeAgents.length + 1}`;
 
-  // Create new tmux window
   await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
 
-  // Query the actual window index of the newly created window
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
   logger.info(
     { task_id: task.id, operation: 'addAgent', window_index: windowIndex, label },
     'addAgent: tmux window created',
   );
 
-  // Create agent record with session ID
   const agentId = nanoid(12);
   const claudeSessionId = crypto.randomUUID();
   db.prepare(
     'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
   ).run(agentId, task.id, windowIndex, label, claudeSessionId);
 
-  // Launch claude asynchronously — do not block the HTTP response
   const addTarget = `${task.tmux_session}:${windowIndex}`;
   const flags = await getClaudeFlags();
   (async () => {
@@ -446,7 +638,7 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
         /* DB may be closed in edge cases */
       }
     }
-  })().catch(() => {}); // inner try/catch handles all errors; this prevents unhandled rejection
+  })().catch(() => {});
 
   return {
     id: agentId,
@@ -464,18 +656,18 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 export async function closeTask(task: Task): Promise<void> {
   const db = getDb();
 
-  logger.info({ task_id: task.id, operation: 'closeTask' }, 'closeTask: start');
+  logger.info(
+    { task_id: task.id, operation: 'closeTask', run_mode: task.run_mode },
+    'closeTask: start',
+  );
 
-  // Resolve all pending permission prompts for this task
   db.prepare(
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
      WHERE task_id = ? AND status = 'pending'`,
   ).run(task.id);
 
-  // Delete user terminals for this task
   db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
 
-  // Mark task as closed and all agents as stopped
   db.prepare(`UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`).run(
     task.id,
   );
@@ -487,7 +679,6 @@ export async function closeTask(task: Task): Promise<void> {
     'closeTask: DB marked task closed + agents stopped',
   );
 
-  // Kill linked viewer sessions, then main tmux session — worktree and branch are preserved for resume
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
     try {
@@ -516,11 +707,11 @@ export async function closeTask(task: Task): Promise<void> {
 
 export async function deleteTask(task: Task): Promise<void> {
   logger.info(
-    { task_id: task.id, operation: 'deleteTask', no_worktree: !!task.no_worktree },
+    { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
     'deleteTask: start',
   );
 
-  // Kill linked viewer sessions, then main tmux session
+  // Kill tmux first — applies to every mode
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
     try {
@@ -544,44 +735,68 @@ export async function deleteTask(task: Task): Promise<void> {
     }
   }
 
-  // Skip worktree and branch cleanup for no-worktree tasks
-  if (task.no_worktree) {
-    logger.info(
-      { task_id: task.id, operation: 'deleteTask' },
-      'deleteTask: complete (no_worktree mode — skipped worktree/branch cleanup)',
-    );
-    return;
-  }
-
-  // Remove worktree
-  if (task.worktree) {
-    try {
-      await execFile('git', ['-C', task.repo_path, 'worktree', 'remove', task.worktree, '--force']);
-      logger.info(
-        { task_id: task.id, operation: 'deleteTask', worktree: task.worktree },
-        'deleteTask: worktree removed',
-      );
-    } catch (err) {
-      logger.warn(
-        { task_id: task.id, operation: 'deleteTask', worktree: task.worktree, err },
-        'deleteTask: worktree remove failed (may already be gone)',
-      );
+  switch (task.run_mode) {
+    case 'new': {
+      if (task.worktree) {
+        try {
+          await execFile('git', [
+            '-C',
+            task.repo_path,
+            'worktree',
+            'remove',
+            task.worktree,
+            '--force',
+          ]);
+          logger.info(
+            { task_id: task.id, operation: 'deleteTask', worktree: task.worktree },
+            'deleteTask: worktree removed',
+          );
+        } catch (err) {
+          logger.warn(
+            { task_id: task.id, operation: 'deleteTask', worktree: task.worktree, err },
+            'deleteTask: worktree remove failed (may already be gone)',
+          );
+        }
+      }
+      if (task.branch) {
+        try {
+          await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]);
+          logger.info(
+            { task_id: task.id, operation: 'deleteTask', branch: task.branch },
+            'deleteTask: branch deleted',
+          );
+        } catch (err) {
+          logger.warn(
+            { task_id: task.id, operation: 'deleteTask', branch: task.branch, err },
+            'deleteTask: branch delete failed (may already be gone)',
+          );
+        }
+      }
+      break;
     }
-  }
-
-  // Delete branch
-  if (task.branch) {
-    try {
-      await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]);
+    case 'existing':
+    case 'none':
+      // Intentionally do nothing — user's worktree/repo must never be touched.
       logger.info(
-        { task_id: task.id, operation: 'deleteTask', branch: task.branch },
-        'deleteTask: branch deleted',
+        { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
+        'deleteTask: skipped filesystem cleanup (user-owned path)',
       );
-    } catch (err) {
-      logger.warn(
-        { task_id: task.id, operation: 'deleteTask', branch: task.branch, err },
-        'deleteTask: branch delete failed (may already be gone)',
-      );
+      break;
+    case 'scratch': {
+      const dir = task.worktree || scratchDirFor(task.id);
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+        logger.info(
+          { task_id: task.id, operation: 'deleteTask', scratch_dir: dir },
+          'deleteTask: scratch dir removed',
+        );
+      } catch (err) {
+        logger.warn(
+          { task_id: task.id, operation: 'deleteTask', scratch_dir: dir, err },
+          'deleteTask: scratch dir remove failed (may already be gone)',
+        );
+      }
+      break;
     }
   }
 
@@ -601,13 +816,11 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
     'stopAgent: start',
   );
 
-  // Resolve pending permission prompts for this agent
   db.prepare(
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
      WHERE agent_id = ? AND status = 'pending'`,
   ).run(agent.id);
 
-  // Kill the specific tmux window
   await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
     (err) => {
       if (isTmuxTargetMissing(err)) {
@@ -624,7 +837,6 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
     },
   );
 
-  // Mark agent as stopped and idle
   db.prepare(
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE id = ?`,
   ).run(agent.id);
@@ -645,7 +857,6 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
     return { editor, windowIndex: null };
   }
 
-  // nvim: reuse existing tmux window if already created
   if (task.user_window_index !== null && task.user_window_index !== undefined) {
     return { editor, windowIndex: task.user_window_index };
   }
@@ -708,40 +919,64 @@ export async function closeShellTerminal(task: Task, terminal: UserTerminal): Pr
 export async function resumeTask(task: Task): Promise<void> {
   const db = getDb();
   const session = task.tmux_session!;
+  const runMode: RunMode = task.run_mode;
 
   logger.info(
-    { task_id: task.id, operation: 'resumeTask', tmux_session: session, worktree: task.worktree },
+    {
+      task_id: task.id,
+      operation: 'resumeTask',
+      run_mode: runMode,
+      tmux_session: session,
+      worktree: task.worktree,
+    },
     'resumeTask: start',
   );
 
   try {
-    // 1. Set status synchronously to prevent poller race
+    // Mode-specific pre-resume validation
+    if (runMode === 'existing') {
+      if (!task.worktree || !fs.existsSync(task.worktree)) {
+        throw new Error(`existing worktree no longer exists: ${task.worktree ?? '<null>'}`);
+      }
+    } else if (runMode === 'scratch') {
+      if (!task.worktree || !fs.existsSync(task.worktree)) {
+        throw new Error(`scratch dir no longer exists: ${task.worktree ?? '<null>'}`);
+      }
+    } else if (runMode === 'none') {
+      if (!fs.existsSync(task.repo_path)) {
+        throw new Error(`repo_path no longer exists: ${task.repo_path}`);
+      }
+      const dirty = await checkDirty(task.repo_path);
+      if (dirty.length > 0) {
+        const preview = dirty.slice(0, 5).join(', ');
+        const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
+        throw new Error(
+          `none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`,
+        );
+      }
+    }
+
     db.prepare(
       `UPDATE tasks SET status = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
-    // Delete user terminals for this task (fresh start on resume)
     db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
 
-    // 2. Kill any stale linked viewer sessions and tmux session
     await cleanupLinkedSessions(session);
     await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
 
-    // 3. Create fresh tmux session
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', task.worktree!]);
+    const cwd = task.worktree!;
+    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
-    // 3b. Install hook settings for permission tracking
-    installHookSettings(task.worktree!);
+    installHookSettings(cwd);
 
-    // 4. Get stopped agents
     const agents = db
       .prepare(
         `SELECT * FROM agents WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`,
       )
       .all(task.id) as Agent[];
 
-    // Phase 1: Create all tmux windows sequentially (fast, no shell wait)
     const agentTargets: Array<{ agent: Agent; windowIndex: number; target: string }> = [];
 
     for (let i = 0; i < agents.length; i++) {
@@ -751,7 +986,7 @@ export async function resumeTask(task: Task): Promise<void> {
       if (i === 0) {
         windowIndex = await getActiveWindowIndex(session);
       } else {
-        await execFile('tmux', ['new-window', '-t', session, '-c', task.worktree!]);
+        await execFile('tmux', ['new-window', '-t', session, '-c', cwd]);
         windowIndex = await getLastWindowIndex(session);
       }
 
@@ -762,7 +997,6 @@ export async function resumeTask(task: Task): Promise<void> {
       });
     }
 
-    // Phase 2: Launch claude in all windows concurrently (slow part — waitForShellReady)
     const flags = await getClaudeFlags();
     await Promise.all(
       agentTargets.map(async ({ agent, windowIndex, target }) => {
@@ -797,7 +1031,6 @@ export async function resumeTask(task: Task): Promise<void> {
       }),
     );
 
-    // 5. Mark task as running
     db.prepare(
       `UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);

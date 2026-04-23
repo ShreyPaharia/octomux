@@ -75,6 +75,10 @@ vi.mock('child_process', () => ({
       } else if (args.includes('new-window')) {
         nextWindowIndex++;
         cb(null, { stdout: '', stderr: '' });
+      } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
+        cb(null, { stdout: '', stderr: '' });
+      } else if (args.includes('rev-parse')) {
+        cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
       } else {
         cb(null, { stdout: 'true', stderr: '' });
       }
@@ -328,12 +332,12 @@ describe('startTask', () => {
 
   // ─── No-worktree mode ─────────────────────────────────────────────────
 
-  describe('no_worktree mode', () => {
-    const noWorktreeTask = { ...DEFAULTS.task, no_worktree: 1 } as Task;
+  describe('run_mode=none', () => {
+    const noneTask = { ...DEFAULTS.task, run_mode: 'none' as const } as Task;
 
     beforeEach(async () => {
-      insertTask(db, { no_worktree: 1 });
-      await startTask(noWorktreeTask);
+      insertTask(db, { run_mode: 'none' });
+      await startTask(noneTask);
     });
 
     it('sets worktree to repo_path', () => {
@@ -742,33 +746,58 @@ describe('deleteTask', () => {
     expect(findExecCall(vi.mocked(execFile), shouldNotCall)).toBeUndefined();
   });
 
-  describe('no_worktree mode', () => {
-    const noWorktreeRunningTask = {
+  describe('run_mode=none', () => {
+    const noneRunningTask = {
       ...DEFAULTS.runningTask,
-      no_worktree: 1,
+      run_mode: 'none' as const,
       worktree: DEFAULTS.runningTask.repo_path,
       branch: null,
     } as Task;
 
     it('kills tmux session', async () => {
-      insertTask(db, noWorktreeRunningTask);
-      await deleteTask(noWorktreeRunningTask);
+      insertTask(db, noneRunningTask);
+      await deleteTask(noneRunningTask);
       expect(
         findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
       ).toBeDefined();
     });
 
     it('does not remove worktree', async () => {
-      insertTask(db, noWorktreeRunningTask);
-      await deleteTask(noWorktreeRunningTask);
+      insertTask(db, noneRunningTask);
+      await deleteTask(noneRunningTask);
       expect(
         findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'remove'] }),
       ).toBeUndefined();
     });
 
     it('does not delete branch', async () => {
-      insertTask(db, noWorktreeRunningTask);
-      await deleteTask(noWorktreeRunningTask);
+      insertTask(db, noneRunningTask);
+      await deleteTask(noneRunningTask);
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
+      ).toBeUndefined();
+    });
+  });
+
+  describe('run_mode=existing (safety)', () => {
+    const existingTask = {
+      ...DEFAULTS.runningTask,
+      run_mode: 'existing' as const,
+      worktree: '/Users/someone/private-repo',
+      branch: 'feature/wip',
+    } as Task;
+
+    it('never removes the user-owned worktree', async () => {
+      insertTask(db, existingTask);
+      await deleteTask(existingTask);
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'remove'] }),
+      ).toBeUndefined();
+    });
+
+    it('never deletes the user-owned branch', async () => {
+      insertTask(db, existingTask);
+      await deleteTask(existingTask);
       expect(
         findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
       ).toBeUndefined();
@@ -943,23 +972,31 @@ describe('resumeTask', () => {
     expect(updated.user_window_index).toBeNull();
   });
 
-  describe('no_worktree mode', () => {
-    const noWorktreeClosedTask = {
+  describe('run_mode=none', () => {
+    const noneClosedTask = {
       ...DEFAULTS.runningTask,
       status: 'closed' as const,
-      no_worktree: 1,
+      run_mode: 'none' as const,
       worktree: DEFAULTS.runningTask.repo_path,
       branch: null,
     } as Task;
 
     beforeEach(() => {
-      vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
         if (args.includes('display-message')) {
           cb(null, { stdout: String(nextWindowIndex), stderr: '' });
         } else if (args.includes('list-windows')) {
           cb(null, { stdout: String(nextWindowIndex), stderr: '' });
         } else if (args.includes('new-window')) {
           nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
           cb(null, { stdout: '', stderr: '' });
         } else {
           cb(null, { stdout: 'true', stderr: '' });
@@ -968,20 +1005,20 @@ describe('resumeTask', () => {
     });
 
     it('resumes to running status', async () => {
-      insertTask(db, { ...noWorktreeClosedTask });
+      insertTask(db, { ...noneClosedTask });
       insertAgent(db, { status: 'stopped' });
 
-      await resumeTask(noWorktreeClosedTask);
+      await resumeTask(noneClosedTask);
 
       const updated = getTask(db, DEFAULTS.task.id)!;
       expect(updated.status).toBe('running');
     });
 
     it('creates tmux session with repo_path as cwd', async () => {
-      insertTask(db, { ...noWorktreeClosedTask });
+      insertTask(db, { ...noneClosedTask });
       insertAgent(db, { status: 'stopped' });
 
-      await resumeTask(noWorktreeClosedTask);
+      await resumeTask(noneClosedTask);
 
       const call = findExecCall(vi.mocked(execFile), {
         cmd: 'tmux',
@@ -992,10 +1029,10 @@ describe('resumeTask', () => {
     });
 
     it('marks stopped agents as running', async () => {
-      insertTask(db, { ...noWorktreeClosedTask });
+      insertTask(db, { ...noneClosedTask });
       insertAgent(db, { status: 'stopped' });
 
-      await resumeTask(noWorktreeClosedTask);
+      await resumeTask(noneClosedTask);
 
       const agents = getAgents(db, DEFAULTS.task.id);
       expect(agents[0].status).toBe('running');

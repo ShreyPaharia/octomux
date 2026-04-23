@@ -18,7 +18,7 @@ function NewTaskButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-export default function Dashboard() {
+export default function TasksPage() {
   const { tasks, loading, error, refresh } = useTasksContext();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
   const [createOpen, setCreateOpen] = useState(false);

@@ -56,7 +56,9 @@ import type {
   Agent,
   DerivedTaskStatus,
   UserTerminal,
+  RunMode,
 } from './types.js';
+import { RUN_MODES } from './types.js';
 
 const execFile = promisify(execFileCb);
 
@@ -355,29 +357,96 @@ export function setupRoutes(app: Express): void {
   // Create task
   app.post('/api/tasks', async (req: Request, res: Response) => {
     const body = req.body as CreateTaskRequest;
+    const runMode: RunMode = body.run_mode ?? 'new';
 
-    if (!body.title || !body.description || !body.repo_path) {
-      res.status(400).json({ error: 'title, description, and repo_path are required' });
+    if (!body.title || !body.description) {
+      res.status(400).json({ error: 'title and description are required' });
       return;
+    }
+    if (!RUN_MODES.includes(runMode)) {
+      res.status(400).json({ error: `invalid run_mode: ${String(runMode)}` });
+      return;
+    }
+
+    // Per-mode field requirements
+    if (runMode === 'new' || runMode === 'none') {
+      if (!body.repo_path) {
+        res.status(400).json({ error: `repo_path is required for run_mode=${runMode}` });
+        return;
+      }
+    }
+    if (runMode === 'existing') {
+      if (!body.worktree_path) {
+        res.status(400).json({ error: 'worktree_path is required for run_mode=existing' });
+        return;
+      }
+      if (body.base_branch) {
+        res.status(400).json({ error: 'base_branch is not allowed for run_mode=existing' });
+        return;
+      }
+    }
+    if (runMode === 'none') {
+      if (body.base_branch || body.branch || body.worktree_path) {
+        res.status(400).json({
+          error: 'base_branch, branch, and worktree_path are not allowed for run_mode=none',
+        });
+        return;
+      }
+    }
+    if (runMode === 'scratch') {
+      if (body.repo_path || body.base_branch || body.branch || body.worktree_path) {
+        res.status(400).json({
+          error:
+            'repo_path, base_branch, branch, worktree_path are not allowed for run_mode=scratch',
+        });
+        return;
+      }
+    }
+
+    // Derive stored repo_path / worktree
+    let storedRepoPath: string;
+    let storedWorktree: string | null;
+    if (runMode === 'scratch') {
+      storedRepoPath = '';
+      storedWorktree = null;
+    } else if (runMode === 'existing') {
+      storedRepoPath = body.repo_path ?? '';
+      storedWorktree = body.worktree_path!;
+    } else {
+      storedRepoPath = body.repo_path!;
+      storedWorktree = null;
     }
 
     const db = getDb();
     const id = nanoid(12);
     const isDraft = !!body.draft;
 
-    db.prepare(
-      'INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, initial_prompt, no_worktree) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(
-      id,
-      body.title,
-      body.description,
-      body.repo_path,
-      isDraft ? 'draft' : 'setting_up',
-      body.branch ?? null,
-      body.base_branch ?? null,
-      body.initial_prompt ?? null,
-      body.no_worktree ? 1 : 0,
-    );
+    try {
+      db.prepare(
+        `INSERT INTO tasks
+           (id, title, description, repo_path, status, branch, base_branch,
+            worktree, initial_prompt, run_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        body.title,
+        body.description,
+        storedRepoPath,
+        isDraft ? 'draft' : 'setting_up',
+        body.branch ?? null,
+        body.base_branch ?? null,
+        storedWorktree,
+        body.initial_prompt ?? null,
+        runMode,
+      );
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (String(e.message).includes('UNIQUE constraint')) {
+        res.status(409).json({ error: e.message });
+        return;
+      }
+      throw err;
+    }
 
     const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
     created.agents = [];
@@ -406,7 +475,7 @@ export function setupRoutes(app: Express): void {
     if (!task) return;
     const db = getDb();
 
-    // Draft field updates (title, description, repo_path, branch, base_branch, initial_prompt)
+    // Draft field updates
     const hasDraftFields = [
       'title',
       'description',
@@ -414,7 +483,8 @@ export function setupRoutes(app: Express): void {
       'branch',
       'base_branch',
       'initial_prompt',
-      'no_worktree',
+      'run_mode',
+      'worktree_path',
     ].some((k) => (body as Record<string, unknown>)[k] !== undefined);
 
     if (hasDraftFields) {
@@ -441,6 +511,11 @@ export function setupRoutes(app: Express): void {
         }
       }
 
+      if (body.run_mode !== undefined && !RUN_MODES.includes(body.run_mode)) {
+        res.status(400).json({ error: `invalid run_mode: ${String(body.run_mode)}` });
+        return;
+      }
+
       const fields: string[] = [];
       const values: unknown[] = [];
       for (const key of [
@@ -450,12 +525,16 @@ export function setupRoutes(app: Express): void {
         'branch',
         'base_branch',
         'initial_prompt',
-        'no_worktree',
+        'run_mode',
       ] as const) {
         if (body[key] !== undefined) {
           fields.push(`${key} = ?`);
-          values.push(key === 'no_worktree' ? (body[key] ? 1 : 0) : (body[key] ?? null));
+          values.push(body[key] ?? null);
         }
+      }
+      if (body.worktree_path !== undefined) {
+        fields.push('worktree = ?');
+        values.push(body.worktree_path ?? null);
       }
       if (fields.length > 0) {
         fields.push(`updated_at = datetime('now')`);
@@ -468,9 +547,16 @@ export function setupRoutes(app: Express): void {
         res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
         return;
       }
-      if (!task.no_worktree && (!task.worktree || !fs.existsSync(task.worktree))) {
-        res.status(400).json({ error: 'Worktree no longer exists on disk' });
-        return;
+      if (task.run_mode === 'new' || task.run_mode === 'existing' || task.run_mode === 'scratch') {
+        if (!task.worktree || !fs.existsSync(task.worktree)) {
+          res.status(400).json({ error: 'Worktree no longer exists on disk' });
+          return;
+        }
+      } else if (task.run_mode === 'none') {
+        if (!fs.existsSync(task.repo_path)) {
+          res.status(400).json({ error: 'repo_path no longer exists on disk' });
+          return;
+        }
       }
       await resumeTask(task);
     } else if (body.status === 'closed') {
@@ -671,23 +757,25 @@ export function setupRoutes(app: Express): void {
   app.get('/api/tasks/:id/diff', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    if (!task.worktree) {
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
     }
-    if (!task.base_branch) {
-      res.status(400).json({ error: 'Task has no base_branch' });
+    if (!task.base_sha) {
+      res.status(400).json({ error: 'base_sha not available for this task' });
       return;
     }
-    if (!fs.existsSync(task.worktree)) {
+    if (!fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Worktree no longer exists on disk' });
       return;
     }
     try {
-      const summary = await diffMod.getDiffSummary({
-        worktree: task.worktree,
-        base: task.base_branch,
-      });
+      const summary = await diffMod.getDiffSummary({ worktree: cwd, base: task.base_sha });
       res.json(summary);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -697,15 +785,20 @@ export function setupRoutes(app: Express): void {
   app.get('/api/tasks/:id/diff/*path', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    if (!task.worktree) {
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
     }
-    if (!task.base_branch) {
-      res.status(400).json({ error: 'Task has no base_branch' });
+    if (!task.base_sha) {
+      res.status(400).json({ error: 'base_sha not available for this task' });
       return;
     }
-    if (!fs.existsSync(task.worktree)) {
+    if (!fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Worktree no longer exists on disk' });
       return;
     }
@@ -713,17 +806,13 @@ export function setupRoutes(app: Express): void {
     const rawPath = params.path ?? params['0'] ?? '';
     const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
     try {
-      diffMod.safeResolvePath(task.worktree, relPath);
+      diffMod.safeResolvePath(cwd, relPath);
     } catch {
       res.status(400).json({ error: 'Invalid path' });
       return;
     }
     try {
-      const diff = await diffMod.getFileDiff({
-        worktree: task.worktree,
-        base: task.base_branch,
-        relPath,
-      });
+      const diff = await diffMod.getFileDiff({ worktree: cwd, base: task.base_sha, relPath });
       res.json(diff);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
