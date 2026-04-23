@@ -1,0 +1,362 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { UniversalSidebar, forkDisabledReason } from './UniversalSidebar';
+import { renderWithRouter, makeTask } from '../test-helpers';
+import { TasksProvider } from '../lib/tasks-context';
+import type { RunMode } from '../../server/types';
+import type { SidebarItem } from '@/lib/sidebar-utils';
+
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
+
+vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/event-source', () => ({ subscribe: vi.fn(() => () => {}) }));
+vi.mock('@/lib/orchestrator-context', () => ({
+  useOrchestratorContext: () => ({
+    running: false,
+    loading: false,
+    start: vi.fn(),
+    stop: vi.fn(),
+    error: null,
+    refresh: vi.fn(),
+  }),
+}));
+
+const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
+);
+vi.mock('react-router-dom', routerMockFactory);
+
+function renderSidebar(route: string = '/') {
+  return renderWithRouter(
+    <TasksProvider>
+      <UniversalSidebar />
+    </TasksProvider>,
+    { route },
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  apiMock.listTasks.mockResolvedValue([]);
+});
+
+describe('UniversalSidebar nav', () => {
+  it('renders Home, Tasks, Orchestrator, Settings nav items', async () => {
+    renderSidebar('/');
+    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
+    expect(screen.getByText('TASKS')).toBeInTheDocument();
+    expect(screen.getByText('ORCHESTRATOR')).toBeInTheDocument();
+    expect(screen.getByText('SETTINGS')).toBeInTheDocument();
+  });
+
+  it('points Tasks to /tasks and Home to /', async () => {
+    renderSidebar('/');
+    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
+    expect(screen.getByText('HOME').closest('a')).toHaveAttribute('href', '/');
+    expect(screen.getByText('TASKS').closest('a')).toHaveAttribute('href', '/tasks');
+  });
+});
+
+describe('UniversalSidebar grouping', () => {
+  it('groups sessions by repo basename', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/nucleus', title: 'Alpha' }),
+      makeTask({ id: 't2', status: 'running', repo_path: '/dev/octomux', title: 'Beta' }),
+      makeTask({ id: 't3', status: 'running', repo_path: '/dev/nucleus', title: 'Gamma' }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
+    expect(
+      screen.getByRole('button', { expanded: true, name: /nucleus/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { expanded: true, name: /^octomux$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders an Other group for scratch / repo-less tasks', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+      makeTask({
+        id: 'scratch-1',
+        status: 'running',
+        repo_path: '',
+        run_mode: 'scratch',
+        title: 'Scratchwork',
+      }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText('Scratchwork')).toBeInTheDocument());
+    expect(screen.getByText('OTHER')).toBeInTheDocument();
+  });
+
+  it('does not render a + button on the Other group', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({
+        id: 'scratch-1',
+        status: 'running',
+        repo_path: '',
+        run_mode: 'scratch',
+        title: 'Scratchwork',
+      }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText('OTHER')).toBeInTheDocument());
+    expect(screen.queryByTestId('sidebar-group-add-__other__')).toBeNull();
+  });
+
+  it('navigates to the composer with repo + mode on + click', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/nucleus' }),
+    ]);
+    renderSidebar();
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-group-add-/dev/nucleus')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId('sidebar-group-add-/dev/nucleus'));
+    expect(mockNavigate).toHaveBeenCalledWith('/?repo=%2Fdev%2Fnucleus&mode=new');
+  });
+});
+
+describe('UniversalSidebar status glyph + run-mode badge', () => {
+  const rowFor = (id: string) => screen.getByTestId(`sidebar-row-${id}`);
+
+  it.each<{ mode: RunMode; letter: string }>([
+    { mode: 'new', letter: 'N' },
+    { mode: 'existing', letter: 'E' },
+    { mode: 'none', letter: 'Ø' },
+    { mode: 'scratch', letter: 'S' },
+  ])('renders the $letter badge for run_mode=$mode', async ({ mode, letter }) => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({
+        id: `t-${mode}`,
+        status: 'running',
+        run_mode: mode,
+        repo_path: mode === 'scratch' ? '' : '/dev/alpha',
+      }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(rowFor(`t-${mode}`)).toBeInTheDocument());
+    const row = rowFor(`t-${mode}`);
+    const badge = row.querySelector('[data-run-mode]') as HTMLElement;
+    expect(badge).toBeTruthy();
+    expect(badge.textContent).toBe(letter);
+  });
+
+  it.each([
+    { name: 'running', status: 'running' as const, derived: null, glyph: 'running' },
+    {
+      name: 'needs_attention',
+      status: 'running' as const,
+      derived: 'needs_attention' as const,
+      glyph: 'needs-you',
+    },
+    { name: 'error', status: 'error' as const, derived: null, glyph: 'error' },
+    {
+      name: 'setting_up',
+      status: 'setting_up' as const,
+      derived: null,
+      glyph: 'setting_up',
+    },
+  ])('maps $name → glyph=$glyph', async ({ status, derived, glyph }) => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status, derived_status: derived, repo_path: '/dev/alpha' }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(rowFor('t1')).toBeInTheDocument());
+    expect(rowFor('t1').querySelector(`[data-status-glyph="${glyph}"]`)).toBeTruthy();
+  });
+});
+
+describe('UniversalSidebar group collapse persistence', () => {
+  it('persists collapsed state per-group and rehydrates on re-render', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/nucleus', title: 'Alpha' }),
+    ]);
+    const { unmount } = renderSidebar();
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
+
+    // The group header button exposes aria-expanded; target it specifically.
+    await user.click(screen.getByRole('button', { expanded: true, name: /nucleus/i }));
+    await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument());
+
+    expect(localStorage.getItem('octomux:sidebar:collapsed:/dev/nucleus')).toBe('true');
+
+    unmount();
+
+    renderSidebar();
+    // After rehydrate, the group should still be collapsed
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { expanded: false, name: /nucleus/i }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
+  });
+});
+
+describe('UniversalSidebar row menu', () => {
+  async function openMenu(user: ReturnType<typeof userEvent.setup>, id: string) {
+    await waitFor(() =>
+      expect(screen.getByTestId(`task-row-menu-trigger-${id}`)).toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId(`task-row-menu-trigger-${id}`));
+    await waitFor(() =>
+      expect(screen.getByTestId(`task-row-menu-${id}`)).toBeInTheDocument(),
+    );
+    return screen.getByTestId(`task-row-menu-${id}`);
+  }
+
+  it('Open navigates to /tasks/<id>', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    await user.click(within(menu).getByText('Open'));
+    expect(mockNavigate).toHaveBeenCalledWith('/tasks/t1');
+  });
+
+  it('Fork navigates to Home with repo/base_branch/mode/fork_of', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({
+        id: 't1',
+        status: 'running',
+        run_mode: 'new',
+        repo_path: '/dev/nucleus',
+      }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    await user.click(within(menu).getByText('Fork into new task'));
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    const url = mockNavigate.mock.calls[0][0] as string;
+    expect(url).toContain('/?');
+    expect(url).toContain('repo=%2Fdev%2Fnucleus');
+    expect(url).toContain('base_branch=agents%2Ft1');
+    expect(url).toContain('mode=new');
+    expect(url).toContain('fork_of=t1');
+  });
+
+  it('Add agent navigates to Home with add_agent=<id>', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    await user.click(within(menu).getByText('Add agent…'));
+    expect(mockNavigate).toHaveBeenCalledWith('/?add_agent=t1');
+  });
+
+  it('Close calls updateTask({status:closed})', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    await user.click(within(menu).getByText('Close'));
+    await waitFor(() =>
+      expect(apiMock.updateTask).toHaveBeenCalledWith('t1', { status: 'closed' }),
+    );
+  });
+
+  it('Delete calls deleteTask', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    await user.click(within(menu).getByText('Delete'));
+    await waitFor(() => expect(apiMock.deleteTask).toHaveBeenCalledWith('t1'));
+  });
+
+  it('Rename shows an input and calls updateTask({title}) on submit', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({
+        id: 't1',
+        status: 'running',
+        repo_path: '/dev/alpha',
+        title: 'Old Title',
+      }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    await user.click(within(menu).getByText('Rename'));
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+    const input = screen.getByTestId('sidebar-rename-input') as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, 'New Title');
+    await user.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(apiMock.updateTask).toHaveBeenCalledWith('t1', { title: 'New Title' }),
+    );
+  });
+});
+
+describe('forkDisabledReason', () => {
+  function item(overrides: Partial<SidebarItem> = {}): SidebarItem {
+    return {
+      id: 'x',
+      title: 'T',
+      status: 'running',
+      derivedStatus: null,
+      runMode: 'new',
+      repoPath: '/r',
+      ...overrides,
+    };
+  }
+
+  it.each<{ name: string; item: Partial<SidebarItem>; expected: string | null }>([
+    { name: 'allows new', item: { runMode: 'new' }, expected: null },
+    { name: 'allows existing', item: { runMode: 'existing' }, expected: null },
+    { name: 'disallows scratch', item: { runMode: 'scratch' }, expected: 'scratch' },
+    { name: 'disallows none', item: { runMode: 'none' }, expected: 'working tree' },
+    { name: 'disallows draft', item: { status: 'draft' }, expected: 'draft' },
+  ])('$name', ({ item: overrides, expected }) => {
+    const reason = forkDisabledReason(item(overrides));
+    if (expected === null) expect(reason).toBeNull();
+    else expect(reason).toMatch(new RegExp(expected, 'i'));
+  });
+});
+
+describe('UniversalSidebar row menu — Fork refusal', () => {
+  async function openMenu(user: ReturnType<typeof userEvent.setup>, id: string) {
+    await waitFor(() =>
+      expect(screen.getByTestId(`task-row-menu-trigger-${id}`)).toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId(`task-row-menu-trigger-${id}`));
+    return screen.getByTestId(`task-row-menu-${id}`);
+  }
+
+  it.each<{ name: string; runMode: RunMode; repoPath: string }>([
+    { name: 'scratch', runMode: 'scratch', repoPath: '' },
+    { name: 'none', runMode: 'none', repoPath: '/dev/alpha' },
+  ])('disables Fork for run_mode=$name', async ({ runMode, repoPath }) => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', status: 'running', run_mode: runMode, repo_path: repoPath }),
+    ]);
+    renderSidebar();
+    const menu = await openMenu(user, 't1');
+    const forkItem = within(menu).getByText('Fork into new task');
+    expect(forkItem.closest('button')).toBeDisabled();
+    // Click should not navigate
+    mockNavigate.mockClear();
+    await user.click(forkItem);
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+});

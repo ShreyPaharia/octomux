@@ -108,11 +108,11 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('shows back to dashboard button on error', async () => {
+  it('shows back to tasks button on error', async () => {
     apiMock.getTask.mockRejectedValue(new Error('fail'));
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Back to Dashboard')).toBeInTheDocument();
+      expect(screen.getByText('Back to Tasks')).toBeInTheDocument();
     });
   });
 
