@@ -298,6 +298,56 @@ describe('startTask', () => {
     expect(vi.mocked(fs.copyFileSync)).not.toHaveBeenCalled();
   });
 
+  // ─── Agent-local settings ──────────────────────────────────────────────
+
+  describe('agent-local settings', () => {
+    it('writes settings.local.json disabling noisy plugins when none exists', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        // Repo path exists; settings.local.json (source or destination) does not
+        return !String(p).includes('settings.local.json');
+      });
+
+      insertTask(db);
+      await startTask({ ...DEFAULTS.task } as Task);
+
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeDefined();
+      expect(String(writeCall![0])).toBe(
+        `${DEFAULTS.task.repo_path}/.worktrees/fix-order-validation-test-t/.claude/settings.local.json`,
+      );
+      const parsed = JSON.parse(String(writeCall![1]));
+      expect(parsed.plugins['remember@claude-plugins-official']).toBe(false);
+    });
+
+    it('does not write settings.local.json in run_mode=none', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        return !String(p).includes('settings.local.json');
+      });
+
+      insertTask(db, { run_mode: 'none' });
+      await startTask({ ...DEFAULTS.task, run_mode: 'none' as const } as Task);
+
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeUndefined();
+    });
+
+    it('leaves an existing settings.local.json alone', async () => {
+      // Default existsSync returns true for all paths, so the destination is
+      // treated as already present.
+      insertTask(db);
+      await startTask({ ...DEFAULTS.task } as Task);
+
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeUndefined();
+    });
+  });
+
   // ─── Error cases (table-driven) ────────────────────────────────────────
 
   const errorCases = [
@@ -386,6 +436,40 @@ describe('startTask', () => {
     it('installs hook settings in repo_path', () => {
       expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.task.repo_path);
     });
+  });
+
+  // ─── Race-avoidance guarantees (regression for 'Setup interrupted' ghost) ──
+
+  it('clears stale error column when setup completes successfully', async () => {
+    insertTask(db, { error: 'Setup interrupted' });
+    await startTask({ ...DEFAULTS.task } as Task);
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.status).toBe('running');
+    expect(updated.error).toBeNull();
+  });
+
+  it('does not persist tmux_session until after tmux new-session succeeds', async () => {
+    // Fail git worktree add so we bail before reaching tmux new-session.
+    vi.mocked(execFile).mockImplementationOnce(((_cmd: string, _args: string[], cb: Function) => {
+      cb(null, { stdout: '', stderr: '' }); // rev-parse
+    }) as any);
+    vi.mocked(execFile).mockImplementationOnce(((_cmd: string, args: string[], cb: Function) => {
+      if (args.includes('worktree') && args.includes('add')) {
+        cb(new Error('git worktree add failed'), null);
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    const updated = getTask(db, DEFAULTS.task.id)!;
+    expect(updated.status).toBe('error');
+    // Crucial: pollStatuses would misread this as a live-but-dead session
+    // and stamp 'Setup interrupted' on top — keep it NULL until the session
+    // is actually created.
+    expect(updated.tmux_session).toBeNull();
   });
 });
 
@@ -615,6 +699,60 @@ describe('closeTask', () => {
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+  });
+
+  it('logs tmux "session not found" at debug, not warn', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      if (
+        args.includes('kill-session') &&
+        args.includes(DEFAULTS.runningTask.tmux_session as string)
+      ) {
+        const err = Object.assign(new Error('Command failed'), {
+          code: 1,
+          stderr: `can't find session: ${DEFAULTS.runningTask.tmux_session}\n`,
+          stdout: '',
+        });
+        cb(err, null);
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    const chunks: string[] = [];
+    const originalLogger = getLogger();
+    setLogger(
+      pino(
+        { level: 'trace' },
+        {
+          write(chunk: string) {
+            chunks.push(chunk);
+          },
+        },
+      ),
+    );
+    try {
+      await closeTask({ ...DEFAULTS.runningTask } as Task);
+      const logged = chunks.join('');
+      expect(logged).toContain('closeTask: tmux session already gone');
+      expect(logged).not.toContain('closeTask: tmux kill-session failed');
+    } finally {
+      setLogger(originalLogger);
+      // Restore default execFile mock for subsequent tests (mirrors the
+      // addAgent send-keys-failure test).
+      vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+        if (args.includes('display-message')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('list-windows')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('new-window')) {
+          nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else {
+          cb(null, { stdout: 'true', stderr: '' });
+        }
+      }) as any);
+    }
   });
 });
 
