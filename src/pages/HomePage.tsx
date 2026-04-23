@@ -13,9 +13,7 @@ export default function HomePage() {
         >
           ✦ WELCOME BACK
         </h1>
-        <p className="mt-4 text-sm text-[#8a8a8a]">
-          Composer and sessions inbox coming soon.
-        </p>
+        <p className="mt-4 text-sm text-[#8a8a8a]">Composer and sessions inbox coming soon.</p>
       </div>
     </div>
   );
