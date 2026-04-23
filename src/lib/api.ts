@@ -135,10 +135,18 @@ export interface FileDiffResponse {
   binary: boolean;
 }
 
+export interface InboxResponse {
+  needs_you: Task[];
+  activity: Task[];
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   recentRepos: () => request<RecentRepo[]>('/recent-repos'),
+  getInbox: () => request<InboxResponse>('/tasks/inbox'),
+  markTaskViewed: (id: string) => request<Task>(`/tasks/${id}/viewed`, { method: 'PATCH' }),
+  markAllTasksViewed: () => request<{ updated: number }>('/tasks/viewed-all', { method: 'POST' }),
   listBranches: (repoPath: string) =>
     request<string[]>(`/branches?repo_path=${encodeURIComponent(repoPath)}`),
   getDefaultBranch: (repoPath: string) =>
