@@ -1,5 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
+import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
+import { Button } from '@/components/ui/button';
 import { DiffFileTree } from './DiffFileTree';
 
 const MonacoDiff = lazy(() =>
@@ -42,6 +44,8 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
+  const [expandedAll, setExpandedAll] = useState(false);
+  const expandedFallback = useRef<Record<string, boolean>>({});
 
   const selectedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -75,8 +79,17 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   useEffect(() => {
     if (!selected) {
       setFileDiff(null);
+      setExpandedAll(false);
       return;
     }
+    const stored = (() => {
+      try {
+        return getDiffExpanded(taskId, selected);
+      } catch {
+        return expandedFallback.current[selected] ?? false;
+      }
+    })();
+    setExpandedAll(stored);
     let cancelled = false;
     setFileLoading(true);
     setError(null); // clear stale error on new selection
@@ -96,6 +109,21 @@ export function DiffViewer({ taskId, isRunning }: Props) {
     };
   }, [taskId, selected]);
 
+  const toggleExpandedAll = useCallback(() => {
+    if (!selected) return;
+    const next = !expandedAll;
+    setExpandedAll(next);
+    try {
+      setDiffExpanded(taskId, selected, next);
+    } catch {
+      expandedFallback.current[selected] = next;
+    }
+  }, [taskId, selected, expandedAll]);
+
+  const showToolbar = Boolean(
+    selected && fileDiff && !fileDiff.tooLarge && !fileDiff.binary && !error,
+  );
+
   if (error && !files.length) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-destructive">
@@ -113,7 +141,21 @@ export function DiffViewer({ taskId, isRunning }: Props) {
           <DiffFileTree files={files} selected={selected} onSelect={setSelected} />
         )}
       </aside>
-      <main className="min-w-0 flex-1">
+      <main className="flex min-w-0 flex-1 flex-col">
+        {showToolbar && selected ? (
+          <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+            <span className="truncate text-xs text-muted-foreground">{selected}</span>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={toggleExpandedAll}
+              aria-label={expandedAll ? 'Collapse all' : 'Expand all'}
+            >
+              {expandedAll ? 'Collapse all' : 'Expand all'}
+            </Button>
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1">
         {error && selected ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
             {error}
@@ -143,6 +185,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
             }
           >
             <MonacoDiff
+              key={`${selected}:${expandedAll ? 'expanded' : 'collapsed'}`}
               height="100%"
               original={fileDiff.oldContent}
               modified={fileDiff.newContent}
@@ -152,12 +195,13 @@ export function DiffViewer({ taskId, isRunning }: Props) {
                 readOnly: true,
                 renderSideBySide: true,
                 minimap: { enabled: true },
-                hideUnchangedRegions: { enabled: true },
+                hideUnchangedRegions: { enabled: !expandedAll },
                 scrollBeyondLastLine: false,
               }}
             />
           </Suspense>
         ) : null}
+        </div>
       </main>
     </div>
   );
