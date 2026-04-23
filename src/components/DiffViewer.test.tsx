@@ -244,9 +244,7 @@ describe('DiffViewer', () => {
     render(<DiffViewer taskId="t1" isRunning={false} />);
 
     await screen.findByRole('button', { name: 'Collapse all' });
-    const opts = JSON.parse(
-      screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}',
-    );
+    const opts = JSON.parse(screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}');
     expect(opts.hideUnchangedRegions.enabled).toBe(false);
   });
 });
