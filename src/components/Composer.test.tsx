@@ -55,10 +55,10 @@ beforeEach(() => {
 // ─── URL hydration ────────────────────────────────────────────────────────
 
 describe('Composer / URL hydration', () => {
-  it('empty URL → empty state (no intent header, no chips with values)', () => {
+  it('empty URL → scratch state (scratch intent, submittable with prompt only)', () => {
     renderComposer('/');
-    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/pick a repo/i);
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
+    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
   });
 
   it('?mode=scratch → scratch intent', () => {
@@ -125,6 +125,24 @@ describe('Composer / submit', () => {
       );
     });
     expect(mockNavigate).toHaveBeenLastCalledWith('/tasks/new-1');
+  });
+
+  it('bare `/` URL → typing + Enter dispatches a scratch task (no repo_path/base_branch)', async () => {
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'scratch-default', title: 'hello' }));
+    renderComposer('/');
+    const textarea = screen.getByTestId('composer-prompt');
+    await user.type(textarea, 'hello world{Enter}');
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          run_mode: 'scratch',
+          initial_prompt: 'hello world',
+        }),
+      );
+    });
+    const payload = apiMock.createTask.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('repo_path');
+    expect(payload).not.toHaveProperty('base_branch');
   });
 
   it('new mode → POST /tasks with run_mode=new, repo_path, base_branch', async () => {
@@ -254,11 +272,11 @@ describe('Composer / submit', () => {
 describe('Composer / intent dismiss', () => {
   const user = userEvent.setup();
 
-  it('dismissing add-agent returns to empty', async () => {
-    renderComposer('/?add_agent=t1', { tasks: [makeTask({ id: 't1' })] });
-    expect(screen.getByTestId('intent-header')).toBeInTheDocument();
+  it('dismissing add-agent returns to scratch', async () => {
+    renderComposer('/?add_agent=t1', { tasks: [makeTask({ id: 't1', title: 'Parent' })] });
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/adding agent to parent/i);
     await user.click(screen.getByRole('button', { name: /dismiss intent/i }));
-    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
   });
 
   it('dismissing fork-of returns to plain new mode', async () => {
