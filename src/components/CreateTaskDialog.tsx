@@ -107,7 +107,7 @@ export function CreateTaskDialog({
         branch: branch.trim() || undefined,
         base_branch: baseBranch.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
-        no_worktree: noWorktree || undefined,
+        run_mode: noWorktree ? 'none' : 'new',
         draft: draft || undefined,
       });
       setTitle('');

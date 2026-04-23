@@ -13,7 +13,12 @@ import {
 import { setupEventWebSocket, handleEventUpgrade, cleanupEventClients } from './events.js';
 import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
-import { resumeTask, cleanupOrphanedViewerSessions } from './task-runner.js';
+import {
+  resumeTask,
+  cleanupOrphanedViewerSessions,
+  reconcileOrphanSettingUp,
+  gcScratchDirs,
+} from './task-runner.js';
 import { getDb } from './db.js';
 import { startOrchestrator } from './orchestrator.js';
 import { syncAgents } from './agents.js';
@@ -70,8 +75,10 @@ async function recoverTasks(): Promise<void> {
   }
 }
 
+await reconcileOrphanSettingUp();
 await recoverTasks();
 await cleanupOrphanedViewerSessions();
+await gcScratchDirs();
 
 // Sync built-in agent definitions to .claude/agents/
 await syncAgents().catch((err) => {

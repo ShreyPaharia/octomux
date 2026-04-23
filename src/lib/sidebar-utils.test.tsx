@@ -96,6 +96,8 @@ describe('groupTasksForSidebar', () => {
       title: 'My Task',
       status: 'running',
       derivedStatus: 'needs_attention',
+      runMode: 'new',
+      repoPath: '/home/dev/repo',
     });
   });
 
@@ -116,8 +118,47 @@ describe('groupTasksForSidebar', () => {
       title: 'T',
       status: 'running',
       derivedStatus: null,
+      runMode: 'new',
+      repoPath: '/r',
     };
-    const group: SidebarGroup = { repo: 'r', items: [item] };
+    const group: SidebarGroup = { key: '/r', repo: 'r', items: [item] };
     expect(group.repo).toBe('r');
+  });
+
+  it('places scratch-mode tasks in the Other group (sorted last)', () => {
+    const tasks = [
+      makeTask({ id: '1', status: 'running', repo_path: '/home/dev/alpha' }),
+      makeTask({
+        id: '2',
+        status: 'running',
+        repo_path: '',
+        run_mode: 'scratch',
+        title: 'Scratch work',
+      }),
+    ];
+    const groups = groupTasksForSidebar(tasks);
+    expect(groups.map((g) => g.repo)).toEqual(['alpha', 'Other']);
+    expect(groups[1].key).toBe('__other__');
+    expect(groups[1].items).toHaveLength(1);
+    expect(groups[1].items[0].id).toBe('2');
+  });
+
+  it('places repo-less non-scratch tasks in the Other group', () => {
+    const tasks = [
+      makeTask({ id: '1', status: 'running', repo_path: '', run_mode: 'new' }),
+    ];
+    const groups = groupTasksForSidebar(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('__other__');
+  });
+
+  it('surfaces runMode on each item', () => {
+    const tasks = [
+      makeTask({ id: '1', status: 'running', run_mode: 'existing' }),
+      makeTask({ id: '2', status: 'running', run_mode: 'none' }),
+    ];
+    const items = groupTasksForSidebar(tasks).flatMap((g) => g.items);
+    const modes = Object.fromEntries(items.map((i) => [i.id, i.runMode]));
+    expect(modes).toEqual({ '1': 'existing', '2': 'none' });
   });
 });

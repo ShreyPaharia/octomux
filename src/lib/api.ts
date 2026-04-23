@@ -117,10 +117,14 @@ export interface DiffFileEntry {
   status: DiffFileStatus;
   additions: number;
   deletions: number;
+  ignored?: boolean;
+  tooLarge?: boolean;
+  binary?: boolean;
 }
 
 export interface DiffSummaryResponse {
   files: DiffFileEntry[];
+  ignoredTruncated?: boolean;
 }
 
 export interface FileDiffResponse {

@@ -418,22 +418,22 @@ describe('POST /api/tasks', () => {
     expect(task?.initial_prompt).toBe('Fix the bug in orders.ts');
   });
 
-  it('stores no_worktree when provided', async () => {
+  it('stores run_mode=none when provided', async () => {
     const res = await request(app)
       .post('/api/tasks')
-      .send({ ...validPayload, no_worktree: true });
+      .send({ ...validPayload, run_mode: 'none' });
 
     expect(res.status).toBe(201);
     const task = getTask(db, res.body.id);
-    expect(task?.no_worktree).toBe(1);
+    expect(task?.run_mode).toBe('none');
   });
 
-  it('defaults no_worktree to 0 when not provided', async () => {
+  it('defaults run_mode to new when not provided', async () => {
     const res = await request(app).post('/api/tasks').send(validPayload);
 
     expect(res.status).toBe(201);
     const task = getTask(db, res.body.id);
-    expect(task?.no_worktree).toBe(0);
+    expect(task?.run_mode).toBe('new');
   });
 });
 
@@ -543,15 +543,27 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it.each(resumableStatuses)(
-    'allows resume of no_worktree %s task without worktree check',
+    'resumes run_mode=none %s task when repo_path exists',
     async (status) => {
-      vi.mocked(fs.existsSync).mockReturnValue(false); // no worktree on disk
-      insertTask(db, { ...DEFAULTS.runningTask, status, no_worktree: 1 });
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      insertTask(db, { ...DEFAULTS.runningTask, status, run_mode: 'none', worktree: null });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
         .send({ status: 'running' });
       expect(res.status).toBe(200);
       expect(resumeTask).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(resumableStatuses)(
+    'refuses resume of run_mode=none %s task when repo_path missing',
+    async (status) => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      insertTask(db, { ...DEFAULTS.runningTask, status, run_mode: 'none', worktree: null });
+      const res = await request(app)
+        .patch(`/api/tasks/${DEFAULTS.task.id}`)
+        .send({ status: 'running' });
+      expect(res.status).toBe(400);
     },
   );
 
@@ -613,14 +625,14 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
   });
 
-  it('updates no_worktree on draft task', async () => {
+  it('updates run_mode on draft task', async () => {
     insertTask(db);
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ no_worktree: true });
+      .send({ run_mode: 'none' });
     expect(res.status).toBe(200);
     const task = getTask(db, res.body.id);
-    expect(task?.no_worktree).toBe(1);
+    expect(task?.run_mode).toBe('none');
   });
 });
 
@@ -672,21 +684,33 @@ describe('GET /api/tasks/:id/diff', () => {
   });
 
   it('returns 400 when worktree dir no longer exists', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    insertTask(db, { ...DEFAULTS.runningTask });
     (fs.existsSync as any).mockReturnValue(false);
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 when task has no base_branch', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, base_branch: null });
+  it('returns 400 when task has no base_sha', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, base_sha: null });
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/base/i);
+    expect(res.body.error).toMatch(/base_sha/i);
+  });
+
+  it('returns 400 for scratch task', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      run_mode: 'scratch',
+      base_sha: null,
+      worktree: '/scratch/x',
+    });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/scratch/i);
   });
 
   it('returns a diff summary', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    insertTask(db, { ...DEFAULTS.runningTask });
     (diffModule.getDiffSummary as any).mockResolvedValue({
       files: [{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }],
     });
@@ -711,7 +735,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
   });
 
   it('rejects path traversal', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    insertTask(db, { ...DEFAULTS.runningTask });
     const res = await request(app).get(
       `/api/tasks/${DEFAULTS.runningTask.id}/diff/..%2Fetc%2Fpasswd`,
     );
@@ -719,7 +743,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
   });
 
   it('returns old/new content for a file', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    insertTask(db, { ...DEFAULTS.runningTask });
     (diffModule.getFileDiff as any).mockResolvedValue({
       oldContent: 'old\n',
       newContent: 'new\n',
@@ -739,7 +763,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
   });
 
   it('passes a nested path correctly to getFileDiff', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, base_branch: 'main' });
+    insertTask(db, { ...DEFAULTS.runningTask });
     (diffModule.getFileDiff as any).mockResolvedValue({
       oldContent: '',
       newContent: 'export const x = 1;\n',

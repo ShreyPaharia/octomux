@@ -3,11 +3,12 @@ import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
-import Dashboard from './pages/Dashboard';
+import HomePage from './pages/HomePage';
 import { OrchestratorProvider } from './lib/orchestrator-context';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
 
+const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -87,7 +88,8 @@ function AppShell() {
           }
         >
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<HomePage />} />
+            <Route path="/tasks" element={<TasksPage />} />
             <Route path="/tasks/:id" element={<TaskDetail />} />
             <Route path="/orchestrator" element={<OrchestratorPage />} />
             <Route path="/settings" element={<SettingsPage />} />

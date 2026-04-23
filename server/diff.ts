@@ -8,6 +8,30 @@ const execFile = promisify(execFileCb);
 const logger = childLogger('diff');
 
 export const MAX_FILE_BYTES = 1_048_576; // 1 MiB
+export const MAX_IGNORED_FILES = 200;
+
+// Paths starting with any of these are filtered out of the ignored-files list
+// entirely — they're always-huge caches/builds that provide no useful review signal.
+export const IGNORED_DENY_PREFIXES = [
+  'node_modules/',
+  '.git/',
+  '.next/',
+  'dist/',
+  'dist-server/',
+  'coverage/',
+  '.cache/',
+  '.vite/',
+  '.pnp/',
+  '.yarn/',
+  '.turbo/',
+  '.parcel-cache/',
+  '__pycache__/',
+  '.pytest_cache/',
+  'target/',
+  'build/',
+  'out/',
+  '.DS_Store',
+];
 
 export type FileStatus = 'A' | 'M' | 'D' | 'B';
 
@@ -16,10 +40,14 @@ export interface DiffFileEntry {
   status: FileStatus;
   additions: number;
   deletions: number;
+  ignored?: boolean;
+  tooLarge?: boolean;
+  binary?: boolean;
 }
 
 export interface DiffSummary {
   files: DiffFileEntry[];
+  ignoredTruncated?: boolean;
 }
 
 export interface FileDiff {
@@ -167,8 +195,81 @@ export async function getDiffSummary(opts: {
     files.push({ path: p, status, additions, deletions });
   }
 
-  files.sort((a, b) => a.path.localeCompare(b.path));
-  return { files };
+  const summary: DiffSummary = { files };
+  await appendIgnoredFiles(summary, { worktree, knownPaths: paths });
+
+  summary.files.sort((a, b) => a.path.localeCompare(b.path));
+  return summary;
+}
+
+function isDeniedIgnoredPath(p: string): boolean {
+  return IGNORED_DENY_PREFIXES.some((prefix) =>
+    prefix.endsWith('/') ? p === prefix || p.startsWith(prefix) : p === prefix,
+  );
+}
+
+async function appendIgnoredFiles(
+  summary: DiffSummary,
+  opts: { worktree: string; knownPaths: Set<string> },
+): Promise<void> {
+  const { worktree, knownPaths } = opts;
+
+  let stdout = '';
+  try {
+    stdout = await git(worktree, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']);
+  } catch (err) {
+    logger.warn(
+      { worktree, err: (err as Error).message },
+      'ls-files --ignored failed; skipping ignored files',
+    );
+    return;
+  }
+
+  // -z separates entries with NUL (filenames may contain newlines).
+  const candidates = stdout.split('\0').filter(Boolean);
+  const filtered: string[] = [];
+  for (const p of candidates) {
+    if (knownPaths.has(p)) continue;
+    if (isDeniedIgnoredPath(p)) continue;
+    filtered.push(p);
+  }
+  if (filtered.length > MAX_IGNORED_FILES) {
+    summary.ignoredTruncated = true;
+    filtered.length = MAX_IGNORED_FILES;
+  }
+
+  for (const p of filtered) {
+    const abs = path.join(worktree, p);
+    let tooLarge = false;
+    let binary = false;
+    let additions = 0;
+    try {
+      const stat = await fs.promises.stat(abs);
+      if (stat.size > MAX_FILE_BYTES) {
+        tooLarge = true;
+      } else {
+        const buf = await fs.promises.readFile(abs);
+        const sniff = buf.subarray(0, Math.min(buf.length, 8192));
+        binary = sniff.includes(0);
+        if (!binary && buf.length > 0) {
+          for (let i = 0; i < buf.length; i++) if (buf[i] === 0x0a) additions++;
+          if (buf[buf.length - 1] !== 0x0a) additions++;
+        }
+      }
+    } catch {
+      continue;
+    }
+    const entry: DiffFileEntry = {
+      path: p,
+      status: 'A',
+      additions,
+      deletions: 0,
+      ignored: true,
+    };
+    if (tooLarge) entry.tooLarge = true;
+    if (binary) entry.binary = true;
+    summary.files.push(entry);
+  }
 }
 
 export async function getFileDiff(opts: {
