@@ -253,8 +253,11 @@ describe('reduce / enterAddAgent', () => {
 // ─── clearIntent transitions ──────────────────────────────────────────────
 
 describe('reduce / clearIntent', () => {
-  it('add-agent → empty', () => {
-    expect(reduce(addAgent, { type: 'clearIntent' })).toEqual({ mode: 'empty' });
+  it('add-agent → scratch', () => {
+    expect(reduce(addAgent, { type: 'clearIntent' })).toEqual({
+      mode: 'scratch',
+      isDraft: false,
+    });
   });
   it('new with forkOf → new without forkOf', () => {
     const withFork: ComposerState = { ...newState, forkOf: 'src1' };
@@ -284,9 +287,13 @@ describe('reduce / toggleDraft', () => {
 
 describe('hydrateFromUrl', () => {
   const table: Array<{ name: string; qs: string; expected: ComposerState }> = [
-    { name: 'empty URL → empty state', qs: '', expected: { mode: 'empty' } },
     {
-      name: '?mode=scratch → scratch',
+      name: 'empty URL → scratch state',
+      qs: '',
+      expected: { mode: 'scratch', isDraft: false },
+    },
+    {
+      name: '?mode=scratch → scratch (same as bare URL)',
       qs: 'mode=scratch',
       expected: { mode: 'scratch', isDraft: false },
     },
@@ -361,7 +368,6 @@ describe('hydrateFromUrl', () => {
 
 describe('stateToUrlParams', () => {
   const roundtrips: ComposerState[] = [
-    { mode: 'empty' },
     { mode: 'scratch', isDraft: false },
     { mode: 'new', repo: '/r', branch: 'main', isDraft: false },
     { mode: 'new', repo: '/r', branch: 'main', isDraft: false, forkOf: 'src1' },
@@ -403,6 +409,14 @@ describe('validateForSubmit', () => {
   });
   it('allows scratch with non-empty prompt', () => {
     expect(validateForSubmit(scratch, 'hello')).toBeNull();
+  });
+  it('scratch with prompt "hello" returns no blocking reason', () => {
+    expect(validateForSubmit({ mode: 'scratch', isDraft: false }, 'hello')).toBeNull();
+  });
+  it('scratch with empty prompt blocks with a prompt-required reason', () => {
+    expect(validateForSubmit({ mode: 'scratch', isDraft: false }, '')).toMatch(
+      /prompt is required/i,
+    );
   });
   it('requires branch for new mode', () => {
     expect(validateForSubmit({ ...newState, branch: null }, 'p')).toMatch(/branch/i);
