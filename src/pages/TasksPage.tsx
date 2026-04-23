@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import { useTaskFilters } from '@/lib/use-task-filters';
 import { TaskList } from '@/components/TaskList';
 import { EmptyState } from '@/components/EmptyState';
 import { TaskFilterBar } from '@/components/TaskFilterBar';
-import { CreateTaskDialog } from '@/components/CreateTaskDialog';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { PlusIcon } from '@/components/icons';
@@ -21,8 +21,8 @@ function NewTaskButton({ onClick }: { onClick: () => void }) {
 export default function TasksPage() {
   const { tasks, loading, error, refresh } = useTasksContext();
   const { filters, setFilter, filtered, counts, repos } = useTaskFilters(tasks);
-  const [createOpen, setCreateOpen] = useState(false);
-  const openCreate = useCallback(() => setCreateOpen(true), []);
+  const navigate = useNavigate();
+  const openCreate = useCallback(() => navigate('/'), [navigate]);
 
   const handleClose = useCallback(
     async (id: string) => {
@@ -139,7 +139,6 @@ export default function TasksPage() {
               onDelete={handleDelete}
               onResume={handleResume}
             />
-            <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refresh} />
           </>
         )}
       </div>
