@@ -21,7 +21,9 @@ export const DEFAULTS = {
     pr_head_sha: null,
     user_window_index: null,
     initial_prompt: null,
-    no_worktree: 0,
+    run_mode: 'new' as const,
+    base_sha: null,
+    last_viewed_at: null,
     source: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
@@ -43,7 +45,9 @@ export const DEFAULTS = {
     pr_head_sha: null,
     user_window_index: null,
     initial_prompt: null,
-    no_worktree: 0,
+    run_mode: 'new' as const,
+    base_sha: 'abcdef0000000000000000000000000000000000',
+    last_viewed_at: null,
     source: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
@@ -107,8 +111,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   } as Task;
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, no_worktree, source, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, run_mode, base_sha, last_viewed_at, source, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -124,7 +128,9 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.pr_head_sha ?? null,
     task.user_window_index,
     task.initial_prompt,
-    task.no_worktree ?? 0,
+    task.run_mode ?? 'new',
+    task.base_sha ?? null,
+    task.last_viewed_at ?? null,
     task.source ?? null,
     task.error,
     task.created_at,
@@ -316,8 +322,10 @@ export const TASKS_TABLE_COLUMNS = [
   'pr_head_sha',
   'user_window_index',
   'initial_prompt',
-  'no_worktree',
   'source',
+  'base_sha',
+  'last_viewed_at',
+  'run_mode',
   'error',
   'created_at',
   'updated_at',

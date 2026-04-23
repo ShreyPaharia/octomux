@@ -395,8 +395,8 @@ async function upsertReviewTask(
   db.prepare(
     `INSERT INTO tasks
        (id, title, description, repo_path, status, branch, base_branch, pr_url, pr_number,
-        pr_head_sha, initial_prompt, source)
-     VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, 'auto_review')`,
+        pr_head_sha, initial_prompt, source, run_mode)
+     VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, 'auto_review', 'new')`,
   ).run(
     id,
     title,

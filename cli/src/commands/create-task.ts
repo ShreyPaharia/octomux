@@ -3,10 +3,12 @@ import { promisify } from 'node:util';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import type { OctomuxClient, Task } from '../client.js';
+import type { OctomuxClient, RunMode, Task } from '../client.js';
 import { outputJson, label, success, colorStatus } from '../format.js';
 
 const execFileAsync = promisify(execFile);
+
+const VALID_MODES: readonly RunMode[] = ['new', 'existing', 'none', 'scratch'] as const;
 
 export interface ForkResolution {
   baseBranch: string;
@@ -29,11 +31,11 @@ export async function resolveForkFrom(
   }
 
   const status = source.status;
-  const runMode = source.run_mode ?? (source.no_worktree ? 'scratch' : 'new');
+  const runMode = source.run_mode ?? 'new';
 
-  if (runMode === 'scratch' || runMode === 'none') {
+  if (runMode === 'scratch' || runMode === 'none' || runMode === 'existing') {
     throw new Error(
-      `cannot fork from ${forkFromId}: source has no branch (status=${status}, run_mode=${runMode})`,
+      `cannot fork from ${forkFromId}: source has no managed branch (status=${status}, run_mode=${runMode})`,
     );
   }
   if (status === 'draft') {
@@ -79,21 +81,30 @@ export function registerCreateTask(program: Command): void {
     .description('Create a new agent task')
     .requiredOption('-t, --title <title>', 'task title')
     .requiredOption('-d, --description <desc>', 'task description')
-    .option('-r, --repo-path <path>', 'repository path (inherited from source when using --fork-from)')
+    .option('-r, --repo-path <path>', 'repository path (required for new/none)')
     .option('-p, --initial-prompt <prompt>', 'initial prompt for the agent')
-    .option('-b, --branch <name>', 'branch name')
-    .option('--base-branch <name>', 'base branch name')
-    .option('--fork-from <task-id>', 'fork from an existing task (sets base branch to agents/<id>)')
+    .option('-b, --branch <name>', 'branch name (new mode only)')
+    .option('--base-branch <name>', 'base branch name (new mode only)')
+    .option(
+      '--mode <mode>',
+      `run mode: ${VALID_MODES.join(' | ')} (default: new)`,
+      'new',
+    )
+    .option('--worktree-path <path>', 'existing worktree path (required for existing mode)')
+    .option('--fork-from <task-id>', 'fork from an existing new-mode task (sets base_branch to agents/<id>)')
     .option('--draft', 'create as draft without starting')
-    .option('--no-worktree', 'run agent in the repo directory without creating a worktree')
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      if (opts.forkFrom && opts.baseBranch) {
-        throw new Error('--fork-from and --base-branch are mutually exclusive');
+      const mode = opts.mode as RunMode;
+      if (!VALID_MODES.includes(mode)) {
+        cmd.error(`--mode must be one of: ${VALID_MODES.join(', ')}`);
       }
 
+      // --fork-from is only meaningful for new mode — it derives base_branch.
       if (opts.forkFrom) {
+        if (mode !== 'new') cmd.error('--fork-from is only valid with --mode=new');
+        if (opts.baseBranch) cmd.error('--fork-from and --base-branch are mutually exclusive');
         const fork = await resolveForkFrom(client, opts.forkFrom, opts.repoPath);
         opts.baseBranch = fork.baseBranch;
         opts.repoPath = fork.repoPath;
@@ -102,12 +113,29 @@ export function registerCreateTask(program: Command): void {
         }
       }
 
-      if (!opts.repoPath) {
-        throw new Error("required option '-r, --repo-path <path>' not specified");
+      // Mode-specific field validation
+      if (mode === 'existing') {
+        if (!opts.worktreePath) cmd.error('--worktree-path is required for --mode=existing');
+        if (opts.baseBranch) cmd.error('--base-branch is not allowed for --mode=existing');
+      }
+      if (mode === 'none') {
+        if (!opts.repoPath) cmd.error('--repo-path is required for --mode=none');
+        if (opts.baseBranch) cmd.error('--base-branch is not allowed for --mode=none');
+        if (opts.branch) cmd.error('--branch is not allowed for --mode=none');
+        if (opts.worktreePath) cmd.error('--worktree-path is not allowed for --mode=none');
+      }
+      if (mode === 'scratch') {
+        if (opts.repoPath) cmd.error('--repo-path is not allowed for --mode=scratch');
+        if (opts.baseBranch) cmd.error('--base-branch is not allowed for --mode=scratch');
+        if (opts.branch) cmd.error('--branch is not allowed for --mode=scratch');
+        if (opts.worktreePath) cmd.error('--worktree-path is not allowed for --mode=scratch');
+      }
+      if (mode === 'new' && !opts.repoPath) {
+        cmd.error('--repo-path is required for --mode=new');
       }
 
-      // Auto-fill base branch from repo config if not specified
-      if (!opts.baseBranch) {
+      // Auto-fill base branch from repo config (new mode only)
+      if (mode === 'new' && !opts.baseBranch && opts.repoPath) {
         try {
           const config = await client.getRepoConfig(opts.repoPath);
           if (config.base_branch) {
@@ -126,7 +154,8 @@ export function registerCreateTask(program: Command): void {
         branch: opts.branch,
         base_branch: opts.baseBranch,
         draft: opts.draft,
-        no_worktree: opts.noWorktree,
+        run_mode: mode,
+        worktree_path: opts.worktreePath,
       });
 
       if (json) {
@@ -136,6 +165,7 @@ export function registerCreateTask(program: Command): void {
 
       success(`Created task ${task.id}`);
       console.log(label('Title', task.title));
+      console.log(label('Mode', mode));
       console.log(label('Status', colorStatus(task.status)));
       console.log(label('Branch', task.branch));
       console.log(label('Repo', task.repo_path));
