@@ -39,9 +39,18 @@ vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
 }));
 
-vi.mock('./settings.js', () => ({
-  getSettings: vi.fn().mockResolvedValue({ editor: 'nvim', useOrchestratorAgent: false }),
-}));
+vi.mock('./settings.js', async () => {
+  const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
+  return {
+    ...actual,
+    getSettings: vi.fn().mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    }),
+  };
+});
 
 vi.mock('./repo-config.js', () => ({
   getOrCreateRepoConfig: vi.fn().mockResolvedValue({
@@ -906,6 +915,155 @@ describe('resumeTask', () => {
   });
 });
 
+// ─── claude launch flags ─────────────────────────────────────────────────────
+
+describe('claude launch flags', () => {
+  function findClaudeCmd(): string | undefined {
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys', 'Enter'],
+    });
+    if (!sendKeysCall) return undefined;
+    return (sendKeysCall[1] as string[]).find((a: string) => a.includes('claude'));
+  }
+
+  beforeEach(() => {
+    // Earlier tests may have left execFile with a throwing or send-keys-failing
+    // implementation. Restore the default working mock. Support both the 3-arg
+    // (cmd, args, cb) and 4-arg (cmd, args, opts, cb) calling conventions used
+    // by promisified execFile.
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      if (args.includes('display-message')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: 'true', stderr: '' });
+      }
+    }) as any);
+  });
+
+  afterEach(() => {
+    delete process.env.OCTOMUX_CLAUDE_FLAGS;
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    });
+  });
+
+  it('appends OCTOMUX_CLAUDE_FLAGS env var verbatim, ignoring settings', async () => {
+    process.env.OCTOMUX_CLAUDE_FLAGS = '--from-env';
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: true,
+      claudeFlags: '--from-settings',
+    });
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toContain('--from-env');
+    expect(claudeCmd).not.toContain('--from-settings');
+    expect(claudeCmd).not.toContain('--dangerously-skip-permissions');
+  });
+
+  it('appends --dangerously-skip-permissions when setting is enabled', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: true,
+      claudeFlags: '',
+    });
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toContain('--dangerously-skip-permissions');
+  });
+
+  it('appends claudeFlags from settings when env var unset', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '--model opus',
+    });
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toMatch(/claude --session-id [^ ]+ --model opus/);
+  });
+
+  it('composes dangerouslySkipPermissions before claudeFlags', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: true,
+      claudeFlags: '--model opus',
+    });
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toContain('--dangerously-skip-permissions --model opus');
+  });
+
+  it('applies flags in resumeTask --resume branch', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: true,
+      claudeFlags: '',
+    });
+    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: 'abc-123' });
+    await resumeTask(closedTask);
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toContain('--resume abc-123 --dangerously-skip-permissions');
+  });
+
+  it('applies flags in resumeTask --continue branch', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '--model opus',
+    });
+    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'stopped', claude_session_id: null });
+    await resumeTask(closedTask);
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toContain('--continue --session-id');
+    expect(claudeCmd).toContain('--model opus');
+  });
+
+  it('applies flags in addAgent', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: true,
+      claudeFlags: '--model opus',
+    });
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await addAgent({ ...DEFAULTS.runningTask } as Task);
+    // Flush fire-and-forget launch
+    await new Promise((r) => setTimeout(r, 0));
+    const claudeCmd = findClaudeCmd();
+    expect(claudeCmd).toContain('--dangerously-skip-permissions --model opus');
+  });
+});
+
 // ─── createUserTerminal ──────────────────────────────────────────────────────
 
 describe('createUserTerminal', () => {
@@ -970,7 +1128,12 @@ describe('createUserTerminal', () => {
   });
 
   it('opens vscode when editor setting is vscode', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ editor: 'vscode', useOrchestratorAgent: false });
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'vscode',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    });
     insertTask(db, { ...DEFAULTS.runningTask });
     const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
     const result = await createUserTerminal(task);
@@ -981,7 +1144,12 @@ describe('createUserTerminal', () => {
   });
 
   it('opens cursor when editor setting is cursor', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ editor: 'cursor', useOrchestratorAgent: false });
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'cursor',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    });
     insertTask(db, { ...DEFAULTS.runningTask });
     const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
     const result = await createUserTerminal(task);
@@ -992,7 +1160,12 @@ describe('createUserTerminal', () => {
   });
 
   it('creates tmux window with nvim when editor setting is nvim', async () => {
-    vi.mocked(getSettings).mockResolvedValue({ editor: 'nvim', useOrchestratorAgent: false });
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    });
     insertTask(db, { ...DEFAULTS.runningTask });
     const result = await createUserTerminal(runningTask);
     expect(result).toEqual({ editor: 'nvim', windowIndex: expect.any(Number) });

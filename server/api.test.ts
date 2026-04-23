@@ -114,10 +114,17 @@ vi.mock('./skills.js', () => ({
 }));
 
 vi.mock('./settings.js', () => ({
-  getSettings: vi.fn(async () => ({ editor: 'nvim', useOrchestratorAgent: false })),
+  getSettings: vi.fn(async () => ({
+    editor: 'nvim',
+    useOrchestratorAgent: false,
+    dangerouslySkipPermissions: false,
+    claudeFlags: '',
+  })),
   updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({
     editor: 'nvim',
     useOrchestratorAgent: false,
+    dangerouslySkipPermissions: false,
+    claudeFlags: '',
     ...patch,
   })),
 }));
@@ -1427,10 +1434,27 @@ describe('Skills API', () => {
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 describe('GET /api/settings', () => {
-  it('returns default settings', async () => {
+  afterEach(() => {
+    delete process.env.OCTOMUX_CLAUDE_FLAGS;
+  });
+
+  it('returns default settings with envOverrides', async () => {
     const res = await request(app).get('/api/settings');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ editor: 'nvim', useOrchestratorAgent: false });
+    expect(res.body).toEqual({
+      editor: 'nvim',
+      useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+      envOverrides: { claudeFlags: null },
+    });
+  });
+
+  it('surfaces OCTOMUX_CLAUDE_FLAGS in envOverrides when set', async () => {
+    process.env.OCTOMUX_CLAUDE_FLAGS = '--model opus';
+    const res = await request(app).get('/api/settings');
+    expect(res.status).toBe(200);
+    expect(res.body.envOverrides).toEqual({ claudeFlags: '--model opus' });
   });
 });
 
@@ -1439,6 +1463,8 @@ describe('PATCH /api/settings', () => {
     vi.mocked(updateSettings).mockResolvedValue({
       editor: 'cursor',
       useOrchestratorAgent: false,
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
     });
     const res = await request(app).patch('/api/settings').send({ editor: 'cursor' });
     expect(res.status).toBe(200);
@@ -1449,5 +1475,14 @@ describe('PATCH /api/settings', () => {
     vi.mocked(updateSettings).mockRejectedValue(new Error('Invalid editor: emacs'));
     const res = await request(app).patch('/api/settings').send({ editor: 'emacs' });
     expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when claudeFlags validation fails', async () => {
+    vi.mocked(updateSettings).mockRejectedValue(
+      new Error('Invalid claudeFlags: backticks are not allowed'),
+    );
+    const res = await request(app).patch('/api/settings').send({ claudeFlags: '`whoami`' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid claudeFlags');
   });
 });

@@ -6,7 +6,7 @@ import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
-import { getSettings } from './settings.js';
+import { getSettings, resolveClaudeFlags } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
 import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
@@ -20,6 +20,14 @@ export interface UserTerminalResult {
 }
 
 const execFile = promisify(execFileCb);
+
+/**
+ * Resolve extra claude CLI flags from env var (if set) or settings.
+ * Returns a string with a leading space, or '' when empty.
+ */
+async function getClaudeFlags(): Promise<string> {
+  return resolveClaudeFlags(await getSettings());
+}
 
 /** Get the active window index of a tmux session. */
 async function getActiveWindowIndex(session: string): Promise<number> {
@@ -305,9 +313,10 @@ export async function startTask(task: Task): Promise<void> {
 
     // Launch claude in the window. Prompt (if any) goes via a tempfile to avoid
     // shell-escape hazards in the user-supplied prompt content.
+    const flags = await getClaudeFlags();
     await sendClaudeCommand({
       target: `${session}:${windowIndex}`,
-      baseCmd: `claude --session-id ${claudeSessionId}`,
+      baseCmd: `claude --session-id ${claudeSessionId}${flags}`,
       prompt: task.initial_prompt,
       worktreePath,
       agentId,
@@ -370,11 +379,12 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 
   // Launch claude asynchronously — do not block the HTTP response
   const addTarget = `${task.tmux_session}:${windowIndex}`;
+  const flags = await getClaudeFlags();
   (async () => {
     try {
       await sendClaudeCommand({
         target: addTarget,
-        baseCmd: `claude --session-id ${claudeSessionId}`,
+        baseCmd: `claude --session-id ${claudeSessionId}${flags}`,
         prompt,
         worktreePath: task.worktree!,
         agentId,
@@ -702,14 +712,15 @@ export async function resumeTask(task: Task): Promise<void> {
     }
 
     // Phase 2: Launch claude in all windows concurrently (slow part — waitForShellReady)
+    const flags = await getClaudeFlags();
     await Promise.all(
       agentTargets.map(async ({ agent, windowIndex, target }) => {
         let baseCmd: string;
         if (agent.claude_session_id) {
-          baseCmd = `claude --resume ${agent.claude_session_id}`;
+          baseCmd = `claude --resume ${agent.claude_session_id}${flags}`;
         } else {
           const newSessionId = crypto.randomUUID();
-          baseCmd = `claude --continue --session-id ${newSessionId}`;
+          baseCmd = `claude --continue --session-id ${newSessionId}${flags}`;
           db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
             newSessionId,
             agent.id,
