@@ -41,6 +41,7 @@ function extToLanguage(p: string): string {
 
 export function DiffViewer({ taskId, isRunning }: Props) {
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
+  const [ignoredTruncated, setIgnoredTruncated] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [fileDiff, setFileDiff] = useState<FileDiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +100,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
     try {
       const s = await api.getTaskDiffSummary(taskId);
       setFiles(s.files);
+      setIgnoredTruncated(s.ignoredTruncated ?? false);
       setError(null);
       const cur = selectedRef.current;
       if (!cur && s.files.length > 0) setSelected(s.files[0].path);
@@ -181,7 +183,13 @@ export function DiffViewer({ taskId, isRunning }: Props) {
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
         ) : (
-          <DiffFileTree files={files} selected={selected} onSelect={handleSelect} />
+          <DiffFileTree
+            files={files}
+            selected={selected}
+            onSelect={handleSelect}
+            taskId={taskId}
+            ignoredTruncated={ignoredTruncated}
+          />
         )}
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
