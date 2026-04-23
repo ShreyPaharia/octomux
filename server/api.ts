@@ -396,7 +396,8 @@ export function setupRoutes(app: Express): void {
     if (runMode === 'scratch') {
       if (body.repo_path || body.base_branch || body.branch || body.worktree_path) {
         res.status(400).json({
-          error: 'repo_path, base_branch, branch, worktree_path are not allowed for run_mode=scratch',
+          error:
+            'repo_path, base_branch, branch, worktree_path are not allowed for run_mode=scratch',
         });
         return;
       }
