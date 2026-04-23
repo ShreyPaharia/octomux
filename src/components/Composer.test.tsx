@@ -295,6 +295,44 @@ describe('Composer / chip interactions', () => {
   });
 });
 
+// ─── Global shortcut bridges ─────────────────────────────────────────────
+
+describe('Composer / global shortcut bridges', () => {
+  it('auto-focuses the textarea on mount', () => {
+    renderComposer('/');
+    expect(document.activeElement).toBe(screen.getByTestId('composer-prompt'));
+  });
+
+  it('`focus-composer` window event refocuses textarea', () => {
+    renderComposer('/');
+    const textarea = screen.getByTestId('composer-prompt') as HTMLTextAreaElement;
+    // Move focus away, then dispatch focus-composer.
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).not.toBe(textarea);
+    window.dispatchEvent(new CustomEvent('focus-composer'));
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('`submit-composer` window event submits when state is valid', async () => {
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'global-submit' }));
+    const user = userEvent.setup();
+    renderComposer('/?mode=scratch');
+    await user.type(screen.getByTestId('composer-prompt'), 'via global shortcut');
+    window.dispatchEvent(new CustomEvent('submit-composer'));
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ description: 'via global shortcut' }),
+      );
+    });
+  });
+
+  it('`submit-composer` is a no-op when prompt is empty', () => {
+    renderComposer('/?mode=scratch');
+    window.dispatchEvent(new CustomEvent('submit-composer'));
+    expect(apiMock.createTask).not.toHaveBeenCalled();
+  });
+});
+
 // ─── URL mirror ──────────────────────────────────────────────────────────
 
 describe('Composer / URL mirror', () => {

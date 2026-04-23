@@ -1,5 +1,5 @@
-import { Component, lazy, Suspense, type ReactNode } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Component, lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
@@ -7,6 +7,15 @@ import HomePage from './pages/HomePage';
 import { OrchestratorProvider } from './lib/orchestrator-context';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
+import { CommandPalette } from './components/CommandPalette';
+import { useGlobalShortcut } from './lib/shortcuts';
+import { groupTasksForSidebar } from './lib/sidebar-utils';
+import {
+  currentTaskIdFromPath,
+  getNextSessionId,
+  readCollapsedGroups,
+  visibleSessionIds,
+} from './lib/sidebar-nav';
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
@@ -67,7 +76,53 @@ export default function App() {
   );
 }
 
-function AppShell() {
+export function AppShell() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { tasks } = useTasksContext();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const groups = useMemo(() => groupTasksForSidebar(tasks), [tasks]);
+
+  useGlobalShortcut({ key: 'k', mod: true }, (e) => {
+    e.preventDefault();
+    setPaletteOpen(true);
+  });
+
+  useGlobalShortcut({ key: 'n', mod: true, shift: true }, (e) => {
+    if (paletteOpen) return;
+    e.preventDefault();
+    navigate('/', { replace: true });
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('focus-composer'));
+    });
+  });
+
+  useGlobalShortcut({ key: 'ArrowDown', mod: true }, (e) => {
+    if (paletteOpen) return;
+    const visible = visibleSessionIds(groups, readCollapsedGroups(groups));
+    if (visible.length === 0) return;
+    e.preventDefault();
+    const next = getNextSessionId(visible, currentTaskIdFromPath(location.pathname), 'next');
+    if (next) navigate(`/tasks/${next}`);
+  });
+
+  useGlobalShortcut({ key: 'ArrowUp', mod: true }, (e) => {
+    if (paletteOpen) return;
+    const visible = visibleSessionIds(groups, readCollapsedGroups(groups));
+    if (visible.length === 0) return;
+    e.preventDefault();
+    const next = getNextSessionId(visible, currentTaskIdFromPath(location.pathname), 'prev');
+    if (next) navigate(`/tasks/${next}`);
+  });
+
+  useGlobalShortcut({ key: 'Enter', mod: true }, (e) => {
+    if (paletteOpen) return;
+    if (location.pathname !== '/') return;
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent('submit-composer'));
+  });
+
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Toaster
@@ -98,6 +153,7 @@ function AppShell() {
           </Routes>
         </Suspense>
       </main>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }
