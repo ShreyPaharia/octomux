@@ -55,6 +55,14 @@ beforeEach(() => {
 });
 
 describe('DiffViewer', () => {
+  it('shows base_sha-unavailable empty state when server returns that error', async () => {
+    apiMock.getTaskDiffSummary.mockRejectedValue(new Error('base_sha not available for this task'));
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => expect(screen.getByText(/base_sha not captured/i)).toBeInTheDocument());
+    // Error path should NOT render the destructive error style.
+    expect(screen.queryByText(/base_sha not available for this task/i)).not.toBeInTheDocument();
+  });
+
   it('shows empty state when no files changed', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({ files: [] });
     render(<DiffViewer taskId="t1" isRunning={false} />);
