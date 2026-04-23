@@ -256,19 +256,19 @@ describe('startTask per-mode setup', () => {
     { mode: 'scratch' as const, callsWorktreeAdd: 0 },
   ];
 
-  it.each(modes)('$mode mode calls worktree add $callsWorktreeAdd times', async ({
-    mode,
-    callsWorktreeAdd,
-  }) => {
-    const task: Task = { ...DEFAULTS.task, run_mode: mode } as Task;
-    if (mode === 'scratch') task.repo_path = '';
-    insertTask(db, { ...task });
-    await startTask(task);
+  it.each(modes)(
+    '$mode mode calls worktree add $callsWorktreeAdd times',
+    async ({ mode, callsWorktreeAdd }) => {
+      const task: Task = { ...DEFAULTS.task, run_mode: mode } as Task;
+      if (mode === 'scratch') task.repo_path = '';
+      insertTask(db, { ...task });
+      await startTask(task);
 
-    expect(
-      countExecCalls(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'add'] }),
-    ).toBe(callsWorktreeAdd);
-  });
+      expect(
+        countExecCalls(vi.mocked(execFile), { cmd: 'git', argsInclude: ['worktree', 'add'] }),
+      ).toBe(callsWorktreeAdd);
+    },
+  );
 
   it('existing mode does not call worktree add and captures base_sha from HEAD', async () => {
     const task: Task = {
