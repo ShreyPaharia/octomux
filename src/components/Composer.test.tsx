@@ -55,16 +55,16 @@ beforeEach(() => {
 // ─── URL hydration ────────────────────────────────────────────────────────
 
 describe('Composer / URL hydration', () => {
-  it('empty URL → scratch state (scratch intent, submittable with prompt only)', () => {
+  it('empty URL → scratch state (chat intent, submittable with prompt only)', () => {
     renderComposer('/');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new chat/i);
+    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/chat/i);
   });
 
-  it('?mode=scratch → scratch intent', () => {
+  it('?mode=scratch → chat intent', () => {
     renderComposer('/?mode=scratch');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new chat/i);
+    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/chat/i);
   });
 
   it('?repo=/r&mode=new → New task in basename', () => {
@@ -276,7 +276,7 @@ describe('Composer / intent dismiss', () => {
     renderComposer('/?add_agent=t1', { tasks: [makeTask({ id: 't1', title: 'Parent' })] });
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/adding agent to parent/i);
     await user.click(screen.getByRole('button', { name: /dismiss intent/i }));
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new chat/i);
   });
 
   it('dismissing fork-of returns to plain new mode', async () => {
@@ -309,7 +309,7 @@ describe('Composer / chip interactions', () => {
       .getByTestId('repo-chip')
       .querySelector('button[aria-label="Remove"]') as HTMLButtonElement;
     await user.click(removeBtn);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
+    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/chat/i);
   });
 });
 

@@ -551,8 +551,8 @@ describe('TaskDetail', () => {
       },
       {
         mode: 'scratch' as const,
-        badge: 'S',
-        tooltip: 'scratch',
+        badge: 'C',
+        tooltip: 'chat',
         showsDiff: false,
         showsBranchInfo: false,
       },
@@ -629,7 +629,7 @@ describe('TaskDetail', () => {
       );
       renderDetail();
       await waitFor(() => {
-        expect(screen.getByTestId('mode-badge')).toHaveTextContent('S');
+        expect(screen.getByTestId('mode-badge')).toHaveTextContent('C');
       });
       expect(screen.queryByText('#99')).not.toBeInTheDocument();
     });

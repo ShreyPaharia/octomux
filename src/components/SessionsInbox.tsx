@@ -12,7 +12,8 @@ function pendingPromptCount(task: Task): number {
 }
 
 function subtitleFor(task: Task, kind: RowKind): string {
-  if (kind === 'activity') return 'closed';
+  const isChat = task.run_mode === 'scratch';
+  if (kind === 'activity') return isChat ? 'chat closed' : 'closed';
   if (task.status === 'error') return task.error ? `errored · ${task.error}` : 'errored';
   const prompts = pendingPromptCount(task);
   if (prompts > 0)

@@ -18,14 +18,14 @@ const MODE_LABEL: Record<RunMode, string> = {
   new: 'N',
   existing: 'E',
   none: 'Ø',
-  scratch: 'S',
+  scratch: 'C',
 };
 
 const MODE_TOOLTIP: Record<RunMode, string> = {
   new: 'new worktree',
   existing: 'attached existing',
   none: 'in-place (no worktree)',
-  scratch: 'scratch',
+  scratch: 'chat',
 };
 
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).

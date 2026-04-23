@@ -74,7 +74,7 @@ describe('UniversalSidebar grouping', () => {
     expect(screen.getByRole('button', { expanded: true, name: /^octomux$/i })).toBeInTheDocument();
   });
 
-  it('renders an Other group for scratch / repo-less tasks', async () => {
+  it('renders a Chats group for scratch tasks', async () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
       makeTask({
@@ -82,27 +82,61 @@ describe('UniversalSidebar grouping', () => {
         status: 'running',
         repo_path: '',
         run_mode: 'scratch',
-        title: 'Scratchwork',
+        title: 'Chatwork',
       }),
     ]);
     renderSidebar();
-    await waitFor(() => expect(screen.getByText('Scratchwork')).toBeInTheDocument());
-    expect(screen.getByText('OTHER')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Chatwork')).toBeInTheDocument());
+    expect(screen.getByText('CHATS')).toBeInTheDocument();
+    expect(screen.queryByText('OTHER')).toBeNull();
+  });
+
+  it('renders an Other group for repo-less non-scratch tasks only', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({
+        id: 'orphan-1',
+        status: 'running',
+        repo_path: '',
+        run_mode: 'new',
+        title: 'Orphan',
+      }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText('OTHER')).toBeInTheDocument());
   });
 
   it('does not render a + button on the Other group', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({
+        id: 'orphan-1',
+        status: 'running',
+        repo_path: '',
+        run_mode: 'new',
+        title: 'Orphan',
+      }),
+    ]);
+    renderSidebar();
+    await waitFor(() => expect(screen.getByText('OTHER')).toBeInTheDocument());
+    expect(screen.queryByTestId('sidebar-group-add-__other__')).toBeNull();
+  });
+
+  it('renders a + button on the Chats group that navigates to /', async () => {
+    const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
       makeTask({
         id: 'scratch-1',
         status: 'running',
         repo_path: '',
         run_mode: 'scratch',
-        title: 'Scratchwork',
+        title: 'Chatwork',
       }),
     ]);
     renderSidebar();
-    await waitFor(() => expect(screen.getByText('OTHER')).toBeInTheDocument());
-    expect(screen.queryByTestId('sidebar-group-add-__other__')).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-group-add-__chats__')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId('sidebar-group-add-__chats__'));
+    expect(mockNavigate).toHaveBeenCalledWith('/');
   });
 
   it('navigates to the composer with repo + mode on + click', async () => {
@@ -126,7 +160,7 @@ describe('UniversalSidebar status glyph + run-mode badge', () => {
     { mode: 'new', letter: 'N' },
     { mode: 'existing', letter: 'E' },
     { mode: 'none', letter: 'Ø' },
-    { mode: 'scratch', letter: 'S' },
+    { mode: 'scratch', letter: 'C' },
   ])('renders the $letter badge for run_mode=$mode', async ({ mode, letter }) => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({
@@ -313,7 +347,7 @@ describe('forkDisabledReason', () => {
   it.each<{ name: string; item: Partial<SidebarItem>; expected: string | null }>([
     { name: 'allows new', item: { runMode: 'new' }, expected: null },
     { name: 'allows existing', item: { runMode: 'existing' }, expected: null },
-    { name: 'disallows scratch', item: { runMode: 'scratch' }, expected: 'scratch' },
+    { name: 'disallows scratch', item: { runMode: 'scratch' }, expected: 'chat' },
     { name: 'disallows none', item: { runMode: 'none' }, expected: 'working tree' },
     { name: 'disallows draft', item: { status: 'draft' }, expected: 'draft' },
   ])('$name', ({ item: overrides, expected }) => {

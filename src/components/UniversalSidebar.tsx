@@ -4,6 +4,7 @@ import { useTasksContext } from '@/lib/tasks-context';
 import {
   groupTasksForSidebar,
   OTHER_GROUP_KEY,
+  CHATS_GROUP_KEY,
   type SidebarItem,
   type SidebarGroup,
 } from '@/lib/sidebar-utils';
@@ -133,14 +134,14 @@ const RUN_MODE_LETTER: Record<RunMode, string> = {
   new: 'N',
   existing: 'E',
   none: 'Ø',
-  scratch: 'S',
+  scratch: 'C',
 };
 
 const RUN_MODE_TOOLTIP: Record<RunMode, string> = {
   new: 'New worktree',
   existing: 'Existing worktree',
   none: 'No worktree (working tree)',
-  scratch: 'Scratch (no repo)',
+  scratch: 'Chat (no repo)',
 };
 
 function RunModeBadge({ mode }: { mode: RunMode }) {
@@ -262,7 +263,7 @@ const NAV_ITEMS = [
 // ─── Fork refusal helper ────────────────────────────────────────────────────
 
 export function forkDisabledReason(item: SidebarItem): string | null {
-  if (item.runMode === 'scratch') return 'Cannot fork a scratch task (no repo).';
+  if (item.runMode === 'scratch') return 'Cannot fork a chat (no repo).';
   if (item.runMode === 'none')
     return 'Cannot fork a task that runs on the working tree (no branch).';
   if (item.status === 'draft') return 'Cannot fork a draft task (no branch yet).';
@@ -681,6 +682,10 @@ export function UniversalSidebar() {
             onToggleGroup={() => toggleGroupCollapsed(group.key)}
             onAddTask={() => {
               if (group.key === OTHER_GROUP_KEY) return;
+              if (group.key === CHATS_GROUP_KEY) {
+                navigate('/');
+                return;
+              }
               navigate(buildGroupAddUrl(group.key));
             }}
             onOpenRow={(id) => navigate(`/tasks/${id}`)}
@@ -736,6 +741,8 @@ function SidebarGroupView({
   onDelete,
 }: SidebarGroupViewProps) {
   const isOther = group.key === OTHER_GROUP_KEY;
+  const isChats = group.key === CHATS_GROUP_KEY;
+  const addLabel = isChats ? 'New chat' : `New task in ${group.repo}`;
 
   return (
     <div style={{ paddingBottom: 16 }}>
@@ -777,8 +784,8 @@ function SidebarGroupView({
             <button
               type="button"
               onClick={onAddTask}
-              aria-label={`New task in ${group.repo}`}
-              title={`New task in ${group.repo}`}
+              aria-label={addLabel}
+              title={addLabel}
               data-testid={`sidebar-group-add-${group.key}`}
               className="flex h-4 w-4 items-center justify-center text-[#6a6a6a] opacity-0 hover:text-white group-hover/header:opacity-100"
             >

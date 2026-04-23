@@ -388,7 +388,7 @@ function intentHeaderText(
     case 'empty':
       return null;
     case 'scratch':
-      return 'Scratch session';
+      return 'New chat';
     case 'new':
       if (state.forkOf) {
         return `Forking from ${sourceTask?.title ?? state.forkOf}`;
@@ -408,7 +408,7 @@ function useDerivedModeLabel(state: ComposerState, sourceTask: Task | null): str
     case 'empty':
       return '→ pick a repo or start typing';
     case 'scratch':
-      return '→ scratch ⏎';
+      return '→ chat ⏎';
     case 'new':
       return '→ new worktree ⏎';
     case 'none':

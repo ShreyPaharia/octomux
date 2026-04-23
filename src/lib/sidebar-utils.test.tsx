@@ -125,7 +125,7 @@ describe('groupTasksForSidebar', () => {
     expect(group.repo).toBe('r');
   });
 
-  it('places scratch-mode tasks in the Other group (sorted last)', () => {
+  it('places scratch-mode tasks in the Chats group (sorted first)', () => {
     const tasks = [
       makeTask({ id: '1', status: 'running', repo_path: '/home/dev/alpha' }),
       makeTask({
@@ -133,14 +133,28 @@ describe('groupTasksForSidebar', () => {
         status: 'running',
         repo_path: '',
         run_mode: 'scratch',
-        title: 'Scratch work',
+        title: 'Chat work',
       }),
     ];
     const groups = groupTasksForSidebar(tasks);
-    expect(groups.map((g) => g.repo)).toEqual(['alpha', 'Other']);
-    expect(groups[1].key).toBe('__other__');
-    expect(groups[1].items).toHaveLength(1);
-    expect(groups[1].items[0].id).toBe('2');
+    expect(groups.map((g) => g.repo)).toEqual(['Chats', 'alpha']);
+    expect(groups[0].key).toBe('__chats__');
+    expect(groups[0].items).toHaveLength(1);
+    expect(groups[0].items[0].id).toBe('2');
+  });
+
+  it('places scratch-mode tasks in Chats even when repo_path is set', () => {
+    const tasks = [
+      makeTask({
+        id: '1',
+        status: 'running',
+        repo_path: '/home/dev/alpha',
+        run_mode: 'scratch',
+      }),
+    ];
+    const groups = groupTasksForSidebar(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('__chats__');
   });
 
   it('places repo-less non-scratch tasks in the Other group', () => {
@@ -148,6 +162,17 @@ describe('groupTasksForSidebar', () => {
     const groups = groupTasksForSidebar(tasks);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe('__other__');
+  });
+
+  it('sorts Chats first and Other last with repo groups in between', () => {
+    const tasks = [
+      makeTask({ id: '1', status: 'running', repo_path: '', run_mode: 'new' }),
+      makeTask({ id: '2', status: 'running', repo_path: '/dev/zebra' }),
+      makeTask({ id: '3', status: 'running', repo_path: '', run_mode: 'scratch' }),
+      makeTask({ id: '4', status: 'running', repo_path: '/dev/alpha' }),
+    ];
+    const groups = groupTasksForSidebar(tasks);
+    expect(groups.map((g) => g.repo)).toEqual(['Chats', 'alpha', 'zebra', 'Other']);
   });
 
   it('surfaces runMode on each item', () => {

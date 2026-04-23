@@ -3,6 +3,8 @@ import { repoName } from './utils';
 
 export const OTHER_GROUP_KEY = '__other__';
 export const OTHER_GROUP_LABEL = 'Other';
+export const CHATS_GROUP_KEY = '__chats__';
+export const CHATS_GROUP_LABEL = 'Chats';
 
 export interface SidebarItem {
   id: string;
@@ -14,7 +16,12 @@ export interface SidebarItem {
 }
 
 export interface SidebarGroup {
-  /** Stable key — either the task's `repo_path` or `OTHER_GROUP_KEY` for scratch/repo-less tasks. */
+  /**
+   * Stable key:
+   * - `CHATS_GROUP_KEY` for scratch-mode tasks (shown as "Chats")
+   * - `OTHER_GROUP_KEY` for repo-less non-scratch tasks
+   * - otherwise the task's `repo_path`.
+   */
   key: string;
   /** Display label for the group header. */
   repo: string;
@@ -43,7 +50,10 @@ function itemFromTask(task: Task): SidebarItem {
 }
 
 function groupKeyFor(task: Task): { key: string; label: string } {
-  if (task.run_mode === 'scratch' || !task.repo_path) {
+  if (task.run_mode === 'scratch') {
+    return { key: CHATS_GROUP_KEY, label: CHATS_GROUP_LABEL };
+  }
+  if (!task.repo_path) {
     return { key: OTHER_GROUP_KEY, label: OTHER_GROUP_LABEL };
   }
   return { key: task.repo_path, label: repoName(task.repo_path) };
@@ -78,7 +88,9 @@ export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
   }
 
   groups.sort((a, b) => {
-    // "Other" always sorts last.
+    // "Chats" always sorts first, "Other" always sorts last.
+    if (a.key === CHATS_GROUP_KEY) return -1;
+    if (b.key === CHATS_GROUP_KEY) return 1;
     if (a.key === OTHER_GROUP_KEY) return 1;
     if (b.key === OTHER_GROUP_KEY) return -1;
     return a.repo.localeCompare(b.repo);
