@@ -52,13 +52,11 @@ describe('HomePage', () => {
     expect(screen.getByTestId('sessions-inbox-slot')).toBeInTheDocument();
   });
 
-  it('renders the ⌘K jump affordance next to the H1', () => {
+  it('renders an inline search input next to the H1', () => {
     renderHome('/');
-    const jump = screen.getByTestId('home-jump-palette');
-    expect(jump).toHaveTextContent(/⌘\s*K/);
-    expect(jump).toHaveTextContent(/jump/);
-    const h1 = screen.getByRole('heading', { level: 1 });
-    expect(h1).toHaveClass('text-[32px]');
+    const search = screen.getByTestId('home-search');
+    expect(search).toBeInTheDocument();
+    expect(screen.getByTestId('command-palette-input')).toBeInTheDocument();
   });
 
   it('renders first-run CTA when there are no tasks', () => {

@@ -102,18 +102,11 @@ export function PrSheet({ open, task, onClose, onShipped }: Props) {
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        e.preventDefault();
-        void handleSubmit(false);
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        void handleSubmit(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, title, body, task?.id]);
+  }, [open, onClose]);
 
   if (!open || !task) return null;
 
@@ -195,9 +188,6 @@ export function PrSheet({ open, task, onClose, onShipped }: Props) {
         </div>
 
         <footer className="mt-4 flex items-center gap-3 border-t border-glass-edge bg-[#FFFFFF05] px-6 py-3.5">
-          <span className="font-mono text-[11px] text-[#8a8a8a]">
-            ⌘↵ Ship · ⌘D Draft PR · ⌘K Close
-          </span>
           <div className="flex-1" />
           <button
             type="button"

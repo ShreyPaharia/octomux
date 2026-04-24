@@ -349,15 +349,6 @@ export default function TaskDetail() {
             </Button>
           )}
 
-          <span
-            aria-label="open command palette"
-            title="Command palette (⌘K)"
-            className="bg-glass-l1 glass-blur-l1 hidden h-7 items-center gap-0.5 border border-glass-edge px-1.5 font-mono text-[11px] tracking-wider text-[#b5b5bd] sm:inline-flex"
-          >
-            <span className="text-[13px] leading-none">⌘</span>
-            <span>K</span>
-          </span>
-
           {isRunning && !!task.tmux_session && (
             <Button
               variant="outline"

@@ -63,22 +63,13 @@ describe('UniversalSidebar nav', () => {
     expect(screen.getByText('TASKS').closest('a')).toHaveAttribute('href', '/tasks');
   });
 
-  it('renders keycap shortcuts for each nav item', async () => {
+  it('nav links carry an aria-label matching the nav label', async () => {
     renderSidebar('/');
     await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
-    expect(screen.getByText('⌘1')).toBeInTheDocument();
-    expect(screen.getByText('⌘2')).toBeInTheDocument();
-    expect(screen.getByText('⌘3')).toBeInTheDocument();
-    expect(screen.getByText('⌘,')).toBeInTheDocument();
-  });
-
-  it('aria-label on nav links includes the keyboard shortcut', async () => {
-    renderSidebar('/');
-    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
-    expect(screen.getByLabelText('Home (Cmd+1)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tasks (Cmd+2)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Orchestrator (Cmd+3)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Settings (Cmd+,)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Home')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tasks')).toBeInTheDocument();
+    expect(screen.getByLabelText('Orchestrator')).toBeInTheDocument();
+    expect(screen.getByLabelText('Settings')).toBeInTheDocument();
   });
 
   it('active nav row carries the cyan tint + 2px left accent bar', async () => {
