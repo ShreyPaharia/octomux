@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
 import { getOrchestratorSession } from './orchestrator.js';
+import { SELECT_TASK_SQL } from './task-select.js';
 
 const execFile = promisify(execFileCb);
 
@@ -180,7 +181,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   });
 
   const db = getDb();
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
 
   if (!task || !task.tmux_session) {
     ws.close(4004, 'Task not found or no tmux session');

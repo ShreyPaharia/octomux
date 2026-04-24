@@ -21,8 +21,13 @@ vi.mock('./task-runner.js', async () => {
       const db = getDb();
       const branch = task.branch || `agents/${task.id}`;
       db.prepare(
-        `UPDATE tasks SET status = 'running', tmux_session = ?, branch = COALESCE(branch, ?), worktree = ?, updated_at = datetime('now') WHERE id = ?`,
-      ).run(`octomux-agent-${task.id}`, branch, `/tmp/.worktrees/${task.id}`, task.id);
+        `UPDATE tasks SET status = 'running', tmux_session = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run(`octomux-agent-${task.id}`, task.id);
+      if (task.worktree_id) {
+        db.prepare(
+          `UPDATE worktrees SET path = ?, branch = COALESCE(branch, ?) WHERE id = ?`,
+        ).run(`/tmp/.worktrees/${task.id}`, branch, task.worktree_id);
+      }
     }),
     closeTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -638,7 +643,12 @@ describe('PATCH /api/tasks/:id', () => {
     'resumes run_mode=none %s task when repo_path exists',
     async (status) => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      insertTask(db, { ...DEFAULTS.runningTask, status, run_mode: 'none', worktree: null });
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        status,
+        run_mode: 'none',
+        worktree: DEFAULTS.runningTask.repo_path,
+      });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
         .send({ status: 'running' });
@@ -651,7 +661,12 @@ describe('PATCH /api/tasks/:id', () => {
     'refuses resume of run_mode=none %s task when repo_path missing',
     async (status) => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
-      insertTask(db, { ...DEFAULTS.runningTask, status, run_mode: 'none', worktree: null });
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        status,
+        run_mode: 'none',
+        worktree: DEFAULTS.runningTask.repo_path,
+      });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
         .send({ status: 'running' });
@@ -770,6 +785,13 @@ describe('GET /api/tasks/:id/diff', () => {
 
   it('returns 400 when task has no worktree', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, worktree: null });
+    // Explicitly null the worktree row path so the diff handler reports absence.
+    db.prepare(
+      `UPDATE worktrees SET path = '' WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
+    ).run(DEFAULTS.runningTask.id);
+    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(
+      DEFAULTS.runningTask.id,
+    );
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/worktree/i);
@@ -1674,6 +1696,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
 
   it('worktree_row is null when task has no worktree_id', async () => {
     insertTask(db, { id: 'tK' });
+    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = 'tK'`).run();
     const res = await request(app).get('/api/tasks/tK');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeNull();

@@ -19,22 +19,38 @@ const DB_PATH = path.join(DB_DIR, 'tasks.db');
 const OLD_DB_PATH = path.join(__dirname, '..', 'data', 'tasks.db');
 
 export const SCHEMA = `
+CREATE TABLE IF NOT EXISTS worktrees (
+    id            TEXT PRIMARY KEY,
+    path          TEXT NOT NULL,
+    repo_path     TEXT,
+    branch        TEXT,
+    base_branch   TEXT,
+    base_sha      TEXT,
+    mode          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'available',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_worktrees_path ON worktrees(path);
+CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
+
 CREATE TABLE IF NOT EXISTS tasks (
-    id           TEXT PRIMARY KEY,
-    title        TEXT NOT NULL,
-    description  TEXT NOT NULL,
-    repo_path    TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'draft',
-    branch       TEXT,
-    base_branch  TEXT,
-    worktree     TEXT,
-    tmux_session TEXT,
-    pr_url       TEXT,
-    pr_number    INTEGER,
-    initial_prompt TEXT,
-    error        TEXT,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    id                TEXT PRIMARY KEY,
+    title             TEXT NOT NULL,
+    description       TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'draft',
+    worktree_id       TEXT REFERENCES worktrees(id),
+    tmux_session      TEXT,
+    pr_url            TEXT,
+    pr_number         INTEGER,
+    pr_head_sha       TEXT,
+    user_window_index INTEGER,
+    initial_prompt    TEXT,
+    last_viewed_at    TEXT,
+    source            TEXT,
+    error             TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -96,21 +112,6 @@ CREATE TABLE IF NOT EXISTS config (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS worktrees (
-    id            TEXT PRIMARY KEY,
-    path          TEXT NOT NULL,
-    repo_path     TEXT,
-    branch        TEXT,
-    base_branch   TEXT,
-    base_sha      TEXT,
-    mode          TEXT NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'available',
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    last_used_at  TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_worktrees_path ON worktrees(path);
-CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
 `;
 
 /** Well-known id for the pinned orchestrator agent row. */
@@ -228,67 +229,55 @@ export function initDb(instance: Database.Database): void {
     }
   };
 
-  // Additive migrations — idempotent, one read per table
+  // Additive migrations — idempotent, one read per table.
+  // Columns added here are ones still present on the current schema; legacy
+  // columns (worktree, run_mode, repo_path, branch, base_branch, base_sha)
+  // were dropped after Phase 2a and are re-homed in the worktrees table.
   const taskCols = columnsOf('tasks');
-  addColumn('tasks', 'initial_prompt', 'initial_prompt TEXT', taskCols);
-  addColumn('tasks', 'base_branch', 'base_branch TEXT', taskCols);
-  addColumn('tasks', 'user_window_index', 'user_window_index INTEGER', taskCols);
-  // Legacy column; dropped by run_mode migration below if present.
-  addColumn('tasks', 'no_worktree', 'no_worktree INTEGER NOT NULL DEFAULT 0', taskCols);
-  addColumn('tasks', 'source', 'source TEXT', taskCols);
-  addColumn('tasks', 'pr_head_sha', 'pr_head_sha TEXT', taskCols);
-  addColumn('tasks', 'base_sha', 'base_sha TEXT', taskCols);
-  addColumn('tasks', 'last_viewed_at', 'last_viewed_at TEXT', taskCols);
 
   const agentCols = columnsOf('agents');
   addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);
   addColumn('agents', 'hook_activity', "hook_activity TEXT NOT NULL DEFAULT 'active'", agentCols);
   addColumn('agents', 'hook_activity_updated_at', 'hook_activity_updated_at TEXT', agentCols);
 
-  // ─── run_mode migration ───────────────────────────────────────────────
-  // Introduce run_mode, backfill from legacy no_worktree + repo_path, drop
-  // no_worktree. One transaction so a crash mid-migration can't leave a
-  // half-shaped schema.
-  if (taskCols.has('no_worktree') || !taskCols.has('run_mode')) {
+  // ─── Legacy pre-Phase-2a shim: add run_mode / backfill from no_worktree ──
+  // Needed only for very old DBs that predate run_mode. The Phase 2a backfill
+  // below expects tasks.run_mode to exist.
+  if (taskCols.has('no_worktree') && !taskCols.has('run_mode')) {
     instance
       .transaction(() => {
-        if (!taskCols.has('run_mode')) {
-          instance.exec(`ALTER TABLE tasks ADD COLUMN run_mode TEXT`);
-          taskCols.add('run_mode');
-        }
-
-        if (taskCols.has('no_worktree')) {
-          instance.exec(`
-            UPDATE tasks SET run_mode = CASE
-              WHEN no_worktree = 1 AND (repo_path IS NULL OR repo_path = '') THEN 'scratch'
-              WHEN no_worktree = 1                                            THEN 'none'
-              ELSE                                                                 'new'
-            END
-            WHERE run_mode IS NULL
-          `);
-        } else {
-          instance.exec(`UPDATE tasks SET run_mode = 'new' WHERE run_mode IS NULL`);
-        }
-
-        if (taskCols.has('no_worktree')) {
-          instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
-          taskCols.delete('no_worktree');
-        }
+        instance.exec(`ALTER TABLE tasks ADD COLUMN run_mode TEXT`);
+        taskCols.add('run_mode');
+        instance.exec(`
+          UPDATE tasks SET run_mode = CASE
+            WHEN no_worktree = 1 AND (repo_path IS NULL OR repo_path = '') THEN 'scratch'
+            WHEN no_worktree = 1                                            THEN 'none'
+            ELSE                                                                 'new'
+          END
+          WHERE run_mode IS NULL
+        `);
+        instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
+        taskCols.delete('no_worktree');
+      })
+      .default();
+  } else if (taskCols.has('no_worktree')) {
+    // run_mode already exists; backfill it from no_worktree for any NULL rows,
+    // then drop the dead column.
+    instance
+      .transaction(() => {
+        instance.exec(`
+          UPDATE tasks SET run_mode = CASE
+            WHEN no_worktree = 1 AND (repo_path IS NULL OR repo_path = '') THEN 'scratch'
+            WHEN no_worktree = 1                                            THEN 'none'
+            ELSE                                                                 'new'
+          END
+          WHERE run_mode IS NULL
+        `);
+        instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
+        taskCols.delete('no_worktree');
       })
       .default();
   }
-
-  // Partial unique indexes: DB-enforced safety matrix (prevents app-level TOCTOU).
-  instance.exec(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_existing_path
-       ON tasks(worktree)
-       WHERE run_mode = 'existing' AND status IN ('setting_up','running')`,
-  );
-  instance.exec(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_none_repo
-       ON tasks(repo_path)
-       WHERE run_mode = 'none' AND status IN ('setting_up','running')`,
-  );
 
   // ─── Phase 2a migration: worktrees entity + agents.task_id nullable ──────
   // Additive shape: introduces `worktrees` table, `tasks.worktree_id`,
@@ -296,6 +285,9 @@ export function initDb(instance: Database.Database): void {
   // Legacy columns on `tasks` (worktree, run_mode, etc.) remain for now;
   // a later phase rewrites consumers then drops them.
   const agentFk = agentFkIsNotNull(instance);
+  // Only run the backfill if the legacy `worktree` column still exists on
+  // tasks — on fresh DBs it's already gone and there's nothing to backfill.
+  const canBackfill = taskCols.has('worktree');
   {
     instance
       .transaction(() => {
@@ -303,6 +295,8 @@ export function initDb(instance: Database.Database): void {
           instance.exec(`ALTER TABLE tasks ADD COLUMN worktree_id TEXT REFERENCES worktrees(id)`);
           taskCols.add('worktree_id');
         }
+
+        if (!canBackfill) return;
 
         // Backfill worktrees for any task that has a worktree path but no link.
         const rows = instance
@@ -364,7 +358,33 @@ export function initDb(instance: Database.Database): void {
   addColumn('agents', 'pinned', 'pinned INTEGER NOT NULL DEFAULT 0', agentCols2);
   addColumn('agents', 'tmux_session', 'tmux_session TEXT', agentCols2);
 
-  // New partial unique index keyed to worktree_id (complements legacy ones).
+  // ─── Drop legacy columns from tasks ──────────────────────────────────────
+  // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),
+  // but partial indexes pinned to those columns must be dropped first.
+  const currentTaskCols = columnsOf('tasks');
+  const legacyCols = [
+    'worktree',
+    'run_mode',
+    'repo_path',
+    'branch',
+    'base_branch',
+    'base_sha',
+  ] as const;
+  if (legacyCols.some((c) => currentTaskCols.has(c))) {
+    instance
+      .transaction(() => {
+        instance.exec(`DROP INDEX IF EXISTS idx_tasks_existing_path`);
+        instance.exec(`DROP INDEX IF EXISTS idx_tasks_none_repo`);
+        for (const col of legacyCols) {
+          if (currentTaskCols.has(col)) {
+            instance.exec(`ALTER TABLE tasks DROP COLUMN ${col}`);
+          }
+        }
+      })
+      .default();
+  }
+
+  // Partial unique index keyed to worktree_id — replaces the dropped ones.
   instance.exec(
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_active_worktree
        ON tasks(worktree_id)
