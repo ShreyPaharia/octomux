@@ -81,12 +81,12 @@ describe('UniversalSidebar nav', () => {
     expect(screen.getByLabelText('Settings (Cmd+,)')).toBeInTheDocument();
   });
 
-  it('active nav row carries the cyan-tinted stroke', async () => {
+  it('active nav row carries the cyan tint + 2px left accent bar', async () => {
     renderSidebar('/tasks');
     const row = await screen.findByTestId('sidebar-nav-tasks');
     expect(row).toHaveAttribute('data-active', 'true');
-    expect(row.style.backgroundColor).toBe('rgba(59, 130, 246, 0.12)');
-    expect(row.style.border).toContain('rgba(59, 130, 246, 0.4)');
+    expect(row.style.backgroundColor).toBe('rgba(59, 130, 246, 0.14)');
+    expect(row.style.borderLeft).toBe('2px solid rgb(59, 130, 246)');
   });
 });
 
