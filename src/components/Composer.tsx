@@ -359,29 +359,37 @@ export function Composer({ onSubmitted }: Props = {}) {
 
         {showScratchHint && (
           <span
-            className="ml-auto select-none rounded border border-border/60 bg-muted/20 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+            className="ml-auto inline-flex select-none items-center gap-1 rounded-full border border-white/[0.12] bg-white/[0.03] px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
             data-testid="scratch-hint"
             title="No repo selected — submission creates a scratch chat."
           >
-            <span className="mr-1 text-[9px] opacity-60">S</span>scratch
+            <span className="text-[9px] font-bold opacity-70">S</span>
+            <span>scratch</span>
           </span>
         )}
       </div>
 
-      {/* Prompt + submit. Textarea stays opaque (terminal rule). */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      {/* Prompt + submit — opaque block (terminal rule). */}
+      <form
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-3 rounded-2xl border border-white/10 p-3"
+        style={{ backgroundColor: '#0B0C0F' }}
+      >
         <textarea
           ref={textareaRef}
           data-testid="composer-prompt"
-          className="min-h-[72px] resize-y rounded-2xl border border-white/10 px-3 py-2 text-sm font-mono text-foreground outline-none focus:border-ring"
-          style={{ backgroundColor: '#0B0C0F' }}
+          className="focus-ring min-h-[72px] resize-y rounded-lg bg-transparent px-1 py-1 text-sm font-mono text-foreground outline-none"
           placeholder={promptPlaceholder(state)}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onTextareaKeyDown}
           aria-label="Task prompt"
         />
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[11px] text-[#6a6a6a]" aria-hidden>
+            ⌘↵ start · ⇧↵ new line
+          </span>
+          <span className="flex-1" />
           {blockedReason && prompt.trim() && (
             <span className="text-[11px] text-muted-foreground" title={blockedReason}>
               {blockedReason}
@@ -393,7 +401,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             data-testid="composer-submit"
             title={blockedReason ?? undefined}
             className="bg-cyan-500 text-white hover:bg-cyan-400"
-            style={{ boxShadow: canSubmit ? '0 0 12px rgba(34,211,238,0.45)' : undefined }}
+            style={{ boxShadow: canSubmit ? '0 0 20px rgba(59,130,246,0.45)' : undefined }}
           >
             {submitting ? 'Starting…' : 'Start task'}
           </Button>
@@ -496,7 +504,7 @@ const RepoChip = forwardRef<HTMLButtonElement, RepoChipProps>(function RepoChip(
         type="button"
         onClick={() => setExpanded(true)}
         data-testid="repo-chip-picker"
-        className="inline-flex items-center gap-1 rounded border border-dashed border-border/80 px-3 py-1 text-[11px] font-mono text-muted-foreground hover:border-foreground hover:text-foreground"
+        className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/20 bg-white/[0.03] px-3 py-1 text-[11px] font-mono text-muted-foreground hover:border-foreground hover:text-foreground"
       >
         <span aria-hidden>+</span>
         <span>Add repo or folder</span>
@@ -520,13 +528,31 @@ const RepoChip = forwardRef<HTMLButtonElement, RepoChipProps>(function RepoChip(
     );
   }
   return (
-    <ChipRemovable
-      buttonRef={ref}
-      label={`📁 ${repoBasename(value)}`}
-      title={value}
-      onRemove={onClear}
+    <div
       data-testid="repo-chip"
-    />
+      title={value}
+      className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-mono"
+      style={{
+        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+        borderColor: 'rgba(59, 130, 246, 0.4)',
+        color: '#3B82F6',
+      }}
+    >
+      <button
+        ref={ref}
+        type="button"
+        onClick={onClear}
+        aria-label="Remove"
+        className="inline-flex items-center gap-1.5 font-semibold hover:opacity-80"
+        style={{ color: '#3B82F6' }}
+      >
+        <span aria-hidden>📁</span>
+        <span>{repoBasename(value)}</span>
+        <span aria-hidden style={{ color: 'rgba(59, 130, 246, 0.7)' }}>
+          ×
+        </span>
+      </button>
+    </div>
   );
 });
 
@@ -541,12 +567,21 @@ const BranchChip = forwardRef<HTMLButtonElement, BranchChipProps>(function Branc
   ref,
 ) {
   return (
-    <div className="flex items-center gap-1" data-testid="branch-chip">
-      <span className="text-xs text-muted-foreground" aria-hidden>
+    <div
+      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-[3px] text-[11px] font-mono"
+      data-testid="branch-chip"
+    >
+      <span className="text-[11px] text-muted-foreground" aria-hidden>
         ⎇
       </span>
-      <div className="min-w-[140px] max-w-[220px]">
-        <BranchPickerField triggerRef={ref} repoPath={repoPath} value={value} onChange={onChange} />
+      <div className="min-w-[100px] max-w-[220px]">
+        <BranchPickerField
+          triggerRef={ref}
+          repoPath={repoPath}
+          value={value}
+          onChange={onChange}
+          triggerClassName="focus-ring flex w-full items-center justify-between gap-1.5 bg-transparent font-mono text-[11px] text-[#D0D0D0] outline-none hover:text-white disabled:opacity-60"
+        />
       </div>
     </div>
   );
@@ -574,18 +609,19 @@ const WorktreeCheckbox = forwardRef<HTMLButtonElement, WorktreeCheckboxProps>(
         onClick={() => onChange(!checked)}
         data-testid="worktree-checkbox"
         data-state={checked ? 'checked' : 'unchecked'}
-        className="inline-flex items-center gap-2 rounded border px-2 py-1 text-[11px] font-mono transition-colors"
+        className="focus-ring inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] font-mono transition-colors"
         style={{
-          borderColor: checked ? 'rgba(59,130,246,0.4)' : 'var(--border)',
+          borderColor: checked ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.18)',
           backgroundColor: checked ? 'rgba(59,130,246,0.12)' : 'transparent',
-          color: checked ? 'rgb(147,197,253)' : 'var(--muted-foreground)',
+          color: checked ? '#3B82F6' : 'var(--muted-foreground)',
+          fontWeight: checked ? 600 : 500,
         }}
       >
         <span
           aria-hidden
           className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-sm border"
           style={{
-            borderColor: checked ? 'rgba(59,130,246,0.6)' : 'var(--border)',
+            borderColor: checked ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.22)',
             backgroundColor: checked ? 'rgb(59,130,246)' : 'transparent',
           }}
         >
@@ -604,7 +640,7 @@ const WorktreeCheckbox = forwardRef<HTMLButtonElement, WorktreeCheckboxProps>(
             </svg>
           )}
         </span>
-        <span>worktree</span>
+        <span>new worktree</span>
       </button>
     );
   },
@@ -625,7 +661,8 @@ function AttachChip({
   if (!value && !expanded) {
     return (
       <ChipButton onClick={() => setExpanded(true)} data-testid="attach-chip-picker">
-        🔗 attach
+        <span aria-hidden>🔗</span>
+        <span>attach</span>
       </ChipButton>
     );
   }
@@ -685,10 +722,10 @@ function DraftToggle({
       disabled={disabled}
       aria-pressed={checked}
       data-testid="draft-toggle"
-      className={`px-2 py-1 border text-[11px] font-mono ${
+      className={`focus-ring rounded-full border px-3 py-1 text-[11px] font-mono transition-colors disabled:opacity-40 ${
         checked
-          ? 'border-primary bg-primary/10 text-primary'
-          : 'border-border text-muted-foreground'
+          ? 'border-primary/40 bg-primary/10 text-primary'
+          : 'border-white/[0.15] bg-white/[0.03] text-muted-foreground hover:text-foreground'
       }`}
     >
       📝 draft
@@ -703,7 +740,7 @@ function ChipButton({ children, onClick, ...rest }: React.ButtonHTMLAttributes<H
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 border border-border px-2 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted/40"
+      className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.03] px-3 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-white/[0.08]"
       {...rest}
     >
       {children}
@@ -727,14 +764,14 @@ function ChipRemovable({
     <div
       {...rest}
       title={title}
-      className="inline-flex items-center gap-1 border border-border px-2 py-1 text-[11px] font-mono"
+      className="inline-flex items-center gap-1 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-1 text-[11px] font-mono"
     >
       <button
         ref={buttonRef}
         type="button"
         onClick={onRemove}
         aria-label="Remove"
-        className="inline-flex items-center gap-1 text-foreground hover:text-muted-foreground"
+        className="focus-ring inline-flex items-center gap-1.5 text-foreground hover:text-muted-foreground"
       >
         <span>{label}</span>
         <span className="text-muted-foreground">×</span>
