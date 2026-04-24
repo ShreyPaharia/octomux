@@ -3,11 +3,11 @@ import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderWithRouter, setupApiMock, setupRouterNavigateMock } from '../test-helpers';
 import type { WorktreeSummary } from '../../server/types';
 
-const { mockNavigate, routerMockFactory } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
 );
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('react-router-dom', routerMockFactory);
@@ -45,15 +45,16 @@ beforeEach(() => {
 describe('WorkspacesPage', () => {
   it('renders the empty state', async () => {
     renderWithRouter(<WorkspacesPage />);
-    await waitFor(() =>
-      expect(screen.getByText(/No workspaces yet/i)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/No workspaces yet/i)).toBeInTheDocument());
   });
 
   it('renders worktree rows', async () => {
     (apiMock as unknown as Record<string, ReturnType<typeof vi.fn>>).listWorktrees = vi
       .fn()
-      .mockResolvedValue([wt({ id: 'w1' }), wt({ id: 'w2', repo_path: '/other', mode: 'existing' })]);
+      .mockResolvedValue([
+        wt({ id: 'w1' }),
+        wt({ id: 'w2', repo_path: '/other', mode: 'existing' }),
+      ]);
     renderWithRouter(<WorkspacesPage />);
     await waitFor(() => {
       expect(screen.getByTestId('workspace-row-w1')).toBeInTheDocument();
@@ -80,10 +81,7 @@ describe('WorkspacesPage', () => {
   it('filters by mode', async () => {
     (apiMock as unknown as Record<string, ReturnType<typeof vi.fn>>).listWorktrees = vi
       .fn()
-      .mockResolvedValue([
-        wt({ id: 'w1', mode: 'new' }),
-        wt({ id: 'w2', mode: 'scratch' }),
-      ]);
+      .mockResolvedValue([wt({ id: 'w1', mode: 'new' }), wt({ id: 'w2', mode: 'scratch' })]);
     renderWithRouter(<WorkspacesPage />);
     await waitFor(() => expect(screen.getByTestId('workspace-row-w1')).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText(/Filter by mode/i), { target: { value: 'scratch' } });

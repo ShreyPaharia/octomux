@@ -18,7 +18,8 @@
   --secondary: #141414;
   --secondary-foreground: #ffffff;
   --muted: #141414;
-  --muted-foreground: #8a8a8a;
+  --muted-foreground: #b5b5bd;
+  --muted-soft: #8a8a8a;
   --accent: #141414;
   --accent-foreground: #ffffff;
   --destructive: #ef4444;
@@ -43,10 +44,19 @@
   /* Custom design tokens */
   --color-success: #22c55e;
   --color-warning: #ffb800;
-  --color-text-secondary: #8a8a8a;
+  --color-text-secondary: #b5b5bd;
   --color-text-muted: #6a6a6a;
   --color-surface-elevated: #141414;
   --color-terminal-bg: #09090b;
+
+  /* Glass material system */
+  --glass-l0: #0a0a0b;
+  --glass-l1: rgba(255, 255, 255, 0.08);
+  --glass-l2: rgba(255, 255, 255, 0.12);
+  --glass-l3: rgba(255, 255, 255, 0.18);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-edge-strong: rgba(255, 255, 255, 0.26);
+  --glass-specular: rgba(255, 255, 255, 0.22);
 }
 
 /* Dark-only app — no light theme. Keep .dark for shadcn compatibility. */
@@ -62,7 +72,8 @@
   --secondary: #141414;
   --secondary-foreground: #ffffff;
   --muted: #141414;
-  --muted-foreground: #8a8a8a;
+  --muted-foreground: #b5b5bd;
+  --muted-soft: #8a8a8a;
   --accent: #141414;
   --accent-foreground: #ffffff;
   --destructive: #ef4444;
@@ -109,6 +120,7 @@
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
+  --color-muted-soft: var(--muted-soft);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -121,6 +133,13 @@
   --color-background: var(--background);
   --color-success: var(--color-success);
   --color-warning: var(--color-warning);
+  --color-glass-l0: var(--glass-l0);
+  --color-glass-l1: var(--glass-l1);
+  --color-glass-l2: var(--glass-l2);
+  --color-glass-l3: var(--glass-l3);
+  --color-glass-edge: var(--glass-edge);
+  --color-glass-edge-strong: var(--glass-edge-strong);
+  --color-glass-specular: var(--glass-specular);
   --radius-sm: 0;
   --radius-md: 0;
   --radius-lg: 0;
@@ -139,5 +158,29 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@utility glass-blur-l1 {
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+}
+
+@utility glass-blur-l2 {
+  backdrop-filter: blur(60px);
+  -webkit-backdrop-filter: blur(60px);
+}
+
+@utility glass-blur-l3 {
+  backdrop-filter: blur(80px);
+  -webkit-backdrop-filter: blur(80px);
+}
+
+@utility focus-ring {
+  &:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px #07080b,
+      0 0 0 4px #60a5fae6;
   }
 }
