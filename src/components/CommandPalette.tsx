@@ -4,8 +4,6 @@ import { useTasksContext } from '@/lib/tasks-context';
 import { repoName } from '@/lib/utils';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { StatusGlyph } from '@/components/ui/status-glyph';
-import { api } from '@/lib/api';
-import { showToast } from '@/components/CustomToast';
 import type { Task } from '../../server/types';
 
 interface Props {
@@ -70,7 +68,7 @@ export function CommandPalette({ open, onClose }: Props) {
   const { tasks } = useTasksContext();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const [creating, setCreating] = useState(false);
+  const creating = false;
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -89,23 +87,15 @@ export function CommandPalette({ open, onClose }: Props) {
     });
   };
 
-  const createFromQuery = async (title: string) => {
-    if (!title.trim() || creating) return;
-    setCreating(true);
-    try {
-      const task = await api.createTask({
-        title: title.trim(),
-        description: title.trim(),
-        initial_prompt: title.trim(),
-        run_mode: 'scratch',
-      });
-      onClose();
-      navigate(`/tasks/${task.id}`);
-    } catch (err) {
-      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to create task');
-    } finally {
-      setCreating(false);
-    }
+  const createFromQuery = (title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed || creating) return;
+    // Open composer pre-filled — don't create immediately, let user finish composing.
+    onClose();
+    navigate('/', { replace: true });
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('focus-composer', { detail: { prefill: trimmed } }));
+    });
   };
 
   const actionNewTask = () => {
@@ -264,8 +254,15 @@ export function CommandPalette({ open, onClose }: Props) {
           className="max-h-[60vh] overflow-y-auto"
         >
           {rows.length === 0 && (
-            <li className="px-4 py-3 text-xs text-muted-foreground" aria-live="polite">
-              No matches
+            <li
+              data-testid="command-palette-no-results"
+              className="flex flex-col items-center gap-3 px-4 py-8 text-center"
+              aria-live="polite"
+            >
+              <h2 className="text-[15px] font-semibold text-[#D0D0D0]">No matches</h2>
+              <p className="max-w-[260px] text-[12px] leading-relaxed text-[#8a8a8a]">
+                Try a different term, or press ⌘N to start a new task.
+              </p>
             </li>
           )}
 
@@ -299,13 +296,23 @@ export function CommandPalette({ open, onClose }: Props) {
           })}
 
           {rows.length === 1 && rows[0].kind === 'escape' && (
-            <EscapeRowView
-              query={(rows[0] as EscapeRow).query}
-              active={active === 0}
-              disabled={creating}
-              onMouseEnter={() => setActive(0)}
-              onSelect={() => createFromQuery((rows[0] as EscapeRow).query)}
-            />
+            <li
+              data-testid="command-palette-no-results"
+              className="flex flex-col items-center gap-3 px-4 py-8 text-center"
+              aria-live="polite"
+            >
+              <h2 className="text-[15px] font-semibold text-[#D0D0D0]">No matches</h2>
+              <p className="max-w-[260px] text-[12px] leading-relaxed text-[#8a8a8a]">
+                Try a different term, or press ⌘N to start a new task.
+              </p>
+              <EscapeChip
+                query={(rows[0] as EscapeRow).query}
+                active={active === 0}
+                disabled={creating}
+                onMouseEnter={() => setActive(0)}
+                onSelect={() => createFromQuery((rows[0] as EscapeRow).query)}
+              />
+            </li>
           )}
         </ul>
       </GlassPanel>
@@ -359,7 +366,13 @@ function SessionRowView({
     >
       <div className="flex items-center gap-2">
         <StatusGlyph status={task.status} size={10} />
-        <span className="min-w-0 flex-1 truncate font-medium">{task.title}</span>
+        <span
+          className="min-w-0 flex-1 truncate font-medium"
+          title={task.title}
+          aria-label={task.title}
+        >
+          {task.title}
+        </span>
         {task.repo_path && (
           <span className="truncate text-xs text-muted-foreground">{repoName(task.repo_path)}</span>
         )}
@@ -401,7 +414,7 @@ function ActionRowView({
   );
 }
 
-function EscapeRowView({
+function EscapeChip({
   query,
   active,
   disabled,
@@ -415,8 +428,8 @@ function EscapeRowView({
   onSelect: () => void;
 }) {
   return (
-    <li
-      role="option"
+    <button
+      type="button"
       aria-selected={active}
       onMouseDown={(e) => {
         e.preventDefault();
@@ -426,16 +439,13 @@ function EscapeRowView({
       data-testid="command-palette-escape"
       data-row-kind="escape"
       data-active={active ? 'true' : undefined}
-      className={rowClass(active)}
-      style={active ? SELECTED_ROW_STYLE : undefined}
+      disabled={disabled}
+      className="inline-flex items-center gap-2 rounded-lg border border-[#3B82F666] bg-[#3B82F61F] px-3 py-1.5 text-[12px] font-medium text-[#3B82F6] hover:bg-[#3B82F633] disabled:opacity-50"
     >
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate">
-          <span className="text-[#60a5fa]">⌘N</span> New task with{' '}
-          <span className="text-white">'{query}'</span>
-        </span>
-        <Keycap>↵</Keycap>
-      </div>
-    </li>
+      <span className="font-mono text-[11px] font-semibold">⌘N</span>
+      <span>
+        New task with <span className="text-white">'{query}'</span>
+      </span>
+    </button>
   );
 }

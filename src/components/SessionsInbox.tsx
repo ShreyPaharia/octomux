@@ -4,9 +4,11 @@ import type { Task } from '../../server/types';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 import { useInbox } from '@/lib/inbox';
+import { useTasksContextOptional } from '@/lib/tasks-context';
 import { timeAgo } from '@/lib/time';
 import { repoName } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import { CircleCheckIcon } from '@/components/icons';
 
 type RowKind = 'awaiting_reply' | 'errored' | 'activity';
 
@@ -152,6 +154,8 @@ function ActivitySection({ tasks }: { tasks: Task[] }) {
 
 export function SessionsInbox() {
   const { needsYou, activity, loading, error, markAllRead } = useInbox();
+  const tasksCtx = useTasksContextOptional();
+  const tasks = tasksCtx?.tasks ?? [];
 
   const { awaitingReply, errored } = useMemo(() => {
     const awaitingReply: Task[] = [];
@@ -163,8 +167,11 @@ export function SessionsInbox() {
     return { awaitingReply, errored };
   }, [needsYou]);
 
+  const runningCount = useMemo(() => tasks.filter((t) => t.status === 'running').length, [tasks]);
+
   const isEmpty =
     !loading && awaitingReply.length === 0 && errored.length === 0 && activity.length === 0;
+  const isInboxZero = !loading && !isEmpty && awaitingReply.length === 0 && errored.length === 0;
 
   return (
     <GlassPanel
@@ -205,20 +212,43 @@ export function SessionsInbox() {
         </p>
       ) : (
         <>
-          <Section
-            title="Awaiting reply"
-            tasks={awaitingReply}
-            kind="awaiting_reply"
-            testId="inbox-section-awaiting_reply"
-            eyebrow="//"
-          />
-          <Section
-            title="Errored"
-            tasks={errored}
-            kind="errored"
-            testId="inbox-section-errored"
-            eyebrow="//"
-          />
+          {isInboxZero ? (
+            <div
+              data-testid="inbox-zero"
+              className="bg-glass-l2 glass-blur-l2 mx-3 flex flex-col items-center gap-3 rounded-xl border border-glass-edge px-6 py-8 text-center"
+            >
+              <div
+                className="flex h-12 w-12 items-center justify-center rounded-full border border-[#22C55E66] bg-[#22C55E1F]"
+                aria-hidden
+              >
+                <CircleCheckIcon size={20} className="text-[#22C55E]" />
+              </div>
+              <h3 className="text-[16px] font-bold tracking-tight text-white">Inbox zero</h3>
+              <p className="max-w-sm text-[13px] leading-relaxed text-[#B5B5BD]">
+                Nothing needs your attention.
+                {runningCount > 0
+                  ? ` Your ${runningCount} running ${runningCount === 1 ? 'agent' : 'agents'} will ping you when they're blocked.`
+                  : ''}
+              </p>
+            </div>
+          ) : (
+            <>
+              <Section
+                title="Awaiting reply"
+                tasks={awaitingReply}
+                kind="awaiting_reply"
+                testId="inbox-section-awaiting_reply"
+                eyebrow="//"
+              />
+              <Section
+                title="Errored"
+                tasks={errored}
+                kind="errored"
+                testId="inbox-section-errored"
+                eyebrow="//"
+              />
+            </>
+          )}
           <ActivitySection tasks={activity} />
         </>
       )}

@@ -154,22 +154,27 @@ describe('CommandPalette', () => {
     const escape = await screen.findByTestId('command-palette-escape');
     expect(escape).toBeInTheDocument();
     expect(escape.textContent).toContain("'brand new thing'");
+    expect(screen.getByTestId('command-palette-no-results')).toHaveTextContent(/no matches/i);
   });
 
-  it('Enter on escape-hatch calls api.createTask and navigates', async () => {
+  it('Enter on escape-hatch navigates to composer with prefill', async () => {
     const user = userEvent.setup();
-    apiMock.createTask.mockResolvedValue(makeTask({ id: 'new-42', title: 'fresh task' }));
-    renderPalette([]);
-    const input = screen.getByTestId('command-palette-input');
-    await user.type(input, 'fresh task');
-    // Escape row is the only row; active is 0 → Enter runs it.
-    await user.keyboard('{Enter}');
-    expect(apiMock.createTask).toHaveBeenCalledTimes(1);
-    const arg = apiMock.createTask.mock.calls[0][0] as Record<string, unknown>;
-    expect(arg.title).toBe('fresh task');
-    expect(arg.run_mode).toBe('scratch');
-    await screen.findByTestId('command-palette-input'); // flush microtasks
-    expect(mockNavigate).toHaveBeenCalledWith('/tasks/new-42');
+    const focusSpy = vi.fn();
+    window.addEventListener('focus-composer', focusSpy);
+    try {
+      renderPalette([]);
+      const input = screen.getByTestId('command-palette-input');
+      await user.type(input, 'fresh task');
+      // Escape row is the only row; active is 0 → Enter runs it.
+      await user.keyboard('{Enter}');
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      expect(focusSpy).toHaveBeenCalled();
+      const call = focusSpy.mock.calls[0][0] as CustomEvent<{ prefill: string }>;
+      expect(call.detail?.prefill).toBe('fresh task');
+    } finally {
+      window.removeEventListener('focus-composer', focusSpy);
+    }
   });
 
   it('renders ACTIONS group with New task action', () => {

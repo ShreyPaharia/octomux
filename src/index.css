@@ -184,3 +184,32 @@
       0 0 0 4px #60a5fae6;
   }
 }
+
+@keyframes setting-up-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes setting-up-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+.setting-up-spinner {
+  animation: setting-up-spin 1.4s linear infinite;
+}
+
+.setting-up-pulse {
+  animation: setting-up-pulse 1.2s ease-in-out infinite;
+}
