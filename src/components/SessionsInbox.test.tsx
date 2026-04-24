@@ -176,9 +176,7 @@ describe('SessionsInbox', () => {
 
     await waitFor(() => expect(screen.getByTestId('inbox-row-n1')).toBeInTheDocument());
     // Click the inner title button (not the reply button). For errored rows, only the title exists.
-    await user.click(
-      screen.getByTestId('inbox-row-n1').querySelector('button') as HTMLElement,
-    );
+    await user.click(screen.getByTestId('inbox-row-n1').querySelector('button') as HTMLElement);
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/n1');
   });
 
