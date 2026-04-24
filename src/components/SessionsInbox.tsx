@@ -50,8 +50,7 @@ function ReplyButton({ taskId }: { taskId: string }) {
       className="shrink-0 px-2.5 py-1 text-[11px] font-bold tracking-wider uppercase text-[#1f1300] transition-colors hover:brightness-110"
       style={{
         backgroundColor: '#FFB800',
-        boxShadow:
-          'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 16px 0 rgba(255, 184, 0, 0.35)',
+        boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 16px 0 rgba(255, 184, 0, 0.35)',
       }}
     >
       Reply →

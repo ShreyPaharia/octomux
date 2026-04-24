@@ -22,7 +22,13 @@ const EM_DASH = '—';
 
 function ModeBadge({ mode }: { mode: Task['run_mode'] }) {
   const label =
-    mode === 'scratch' ? 'SCRATCH' : mode === 'existing' ? 'EXISTING' : mode === 'none' ? 'NONE' : 'NEW';
+    mode === 'scratch'
+      ? 'SCRATCH'
+      : mode === 'existing'
+        ? 'EXISTING'
+        : mode === 'none'
+          ? 'NONE'
+          : 'NEW';
   return (
     <span
       className="font-mono text-[10px] font-bold tracking-wider text-[#8a8a8a]"

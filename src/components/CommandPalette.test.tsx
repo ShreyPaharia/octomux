@@ -132,4 +132,50 @@ describe('CommandPalette', () => {
     renderPalette(tasks, { open: false });
     expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument();
   });
+
+  it('selected row gets cyan-tinted style', async () => {
+    const user = userEvent.setup();
+    renderPalette(tasks);
+    screen.getByTestId('command-palette-input').focus();
+    // default active = row 0 (first session)
+    const first = screen.getByTestId('command-palette-result-t1');
+    expect(first).toHaveAttribute('data-active', 'true');
+    // Style includes the cyan tint
+    expect(first.getAttribute('style')).toContain('59, 130, 246');
+    // Moving down updates which row is selected
+    await user.keyboard('{ArrowDown}');
+    expect(first).not.toHaveAttribute('data-active');
+  });
+
+  it('renders escape-hatch CTA when query has no matches', async () => {
+    const user = userEvent.setup();
+    renderPalette([]);
+    await user.type(screen.getByTestId('command-palette-input'), 'brand new thing');
+    const escape = await screen.findByTestId('command-palette-escape');
+    expect(escape).toBeInTheDocument();
+    expect(escape.textContent).toContain("'brand new thing'");
+  });
+
+  it('Enter on escape-hatch calls api.createTask and navigates', async () => {
+    const user = userEvent.setup();
+    apiMock.createTask.mockResolvedValue(makeTask({ id: 'new-42', title: 'fresh task' }));
+    renderPalette([]);
+    const input = screen.getByTestId('command-palette-input');
+    await user.type(input, 'fresh task');
+    // Escape row is the only row; active is 0 → Enter runs it.
+    await user.keyboard('{Enter}');
+    expect(apiMock.createTask).toHaveBeenCalledTimes(1);
+    const arg = apiMock.createTask.mock.calls[0][0] as Record<string, unknown>;
+    expect(arg.title).toBe('fresh task');
+    expect(arg.run_mode).toBe('scratch');
+    await screen.findByTestId('command-palette-input'); // flush microtasks
+    expect(mockNavigate).toHaveBeenCalledWith('/tasks/new-42');
+  });
+
+  it('renders ACTIONS group with New task action', () => {
+    renderPalette([]);
+    expect(screen.getByTestId('command-palette-action-new-task')).toBeInTheDocument();
+    expect(screen.getByTestId('command-palette-action-attach-terminal')).toBeInTheDocument();
+    expect(screen.getByTestId('command-palette-action-toggle-sidebar')).toBeInTheDocument();
+  });
 });
