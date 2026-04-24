@@ -33,6 +33,15 @@ export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head
     return true;
   }
 
+  // Match /ws/terminal/chat/:id (standalone agent tmux session)
+  const chatMatch = req.url?.match(/^\/ws\/terminal\/chat\/([^/]+)$/);
+  if (chatMatch) {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      handleChatConnection(ws, chatMatch[1]);
+    });
+    return true;
+  }
+
   // Match /ws/terminal/:taskId/:windowIndex
   const match = req.url?.match(/^\/ws\/terminal\/([^/]+)\/(\d+)$/);
   if (!match) return false;
@@ -208,6 +217,23 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
 function handleOrchestratorConnection(ws: WebSocket): void {
   const session = getOrchestratorSession();
   attachToTmuxSession(ws, session, 'orchestrator', 'Failed to attach to orchestrator session');
+}
+
+function handleChatConnection(ws: WebSocket, chatId: string): void {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT tmux_session FROM agents WHERE id = ? AND task_id IS NULL`)
+    .get(chatId) as { tmux_session: string | null } | undefined;
+  if (!row || !row.tmux_session) {
+    ws.close(4004, 'Chat not found');
+    return;
+  }
+  attachToTmuxSession(
+    ws,
+    row.tmux_session,
+    `chat:${chatId}`,
+    `Failed to attach to chat session`,
+  );
 }
 
 export function getActiveConnections(): Map<string, TerminalConnection[]> {
