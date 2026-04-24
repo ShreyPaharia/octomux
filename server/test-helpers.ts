@@ -115,8 +115,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   } as Task;
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, run_mode, base_sha, last_viewed_at, source, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, run_mode, base_sha, last_viewed_at, source, worktree_id, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -136,6 +136,7 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.base_sha ?? null,
     task.last_viewed_at ?? null,
     task.source ?? null,
+    task.worktree_id ?? null,
     task.error,
     task.created_at,
     task.updated_at,
