@@ -12,6 +12,25 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { Agent, UserTerminal } from '../../server/types';
 import { CloseIcon } from '@/components/icons';
+import { StatusGlyph } from '@/components/ui/status-glyph';
+
+/**
+ * Map an agent's server status + hook_activity into the StatusGlyph state set.
+ * - stopped                    → closed (○, grey) — filtered out above, but safe fallback
+ * - status=running, hook=active → running (● green)
+ * - status=running, hook=waiting → awaiting (▲ amber)
+ * - status=running, hook=idle   → closed (○ grey, still alive but quiet)
+ * - status=waiting              → awaiting (▲ amber)
+ * - status=idle                 → closed (○ grey)
+ */
+function agentDisplayStatus(agent: Agent): string {
+  if (agent.status === 'stopped') return 'closed';
+  if (agent.status === 'waiting') return 'awaiting';
+  if (agent.status === 'idle') return 'closed';
+  if (agent.hook_activity === 'waiting') return 'awaiting';
+  if (agent.hook_activity === 'idle') return 'closed';
+  return 'running';
+}
 
 interface AgentTabsProps {
   agents: Agent[];
@@ -41,55 +60,59 @@ export function AgentTabs({
   onDetachAgent,
 }: AgentTabsProps) {
   return (
-    <div className="flex items-center gap-1 border-b border-border px-1 pb-1">
+    <div className="flex items-center gap-1 border-b border-glass-edge px-1 pb-1">
       {agents
         .filter((agent) => agent.status !== 'stopped')
-        .map((agent) => (
-          <div key={agent.id} className="group flex items-center">
-            <button
-              className={cn(
-                'flex items-center gap-1.5 px-3.5 py-2.5 text-sm transition-colors',
-                agent.window_index === activeIndex
-                  ? 'border-b-2 border-[#3B82F6] text-[#3B82F6] font-bold'
-                  : 'text-[#8a8a8a] font-medium hover:text-foreground',
-              )}
-              onClick={() => onSelect(agent.window_index)}
-            >
-              {agent.status === 'running' && (
-                <span
-                  className={`inline-block h-2 w-2 ${
-                    agent.hook_activity === 'waiting'
-                      ? 'bg-[#FFB800]'
-                      : agent.hook_activity === 'idle'
-                        ? 'bg-[#6a6a6a]'
-                        : 'animate-pulse bg-[#22C55E]'
-                  }`}
+        .map((agent) => {
+          const displayStatus = agentDisplayStatus(agent);
+          const active = agent.window_index === activeIndex;
+          return (
+            <div key={agent.id} className="group flex items-center">
+              <button
+                data-testid={`agent-tab-${agent.id}`}
+                data-active={active ? 'true' : undefined}
+                data-display-status={displayStatus}
+                className={cn(
+                  'flex items-center gap-1.5 px-3.5 py-2 text-sm transition-colors',
+                  active
+                    ? 'border border-[#22D3EE] bg-[#0B0C0F] text-[#3B82F6] font-bold'
+                    : 'border border-transparent text-[#8a8a8a] font-medium hover:text-foreground',
+                )}
+                onClick={() => onSelect(agent.window_index)}
+              >
+                <StatusGlyph status={displayStatus} size={10} />
+                {agent.status === 'running' && agent.hook_activity === 'active' && (
+                  <span
+                    aria-hidden
+                    data-testid="agent-pulse"
+                    className="inline-block h-2 w-2 animate-pulse bg-[#22C55E]"
+                  />
+                )}
+                {agent.label}
+              </button>
+              {agent.status === 'running' && (onMoveAgent || onDetachAgent) && (
+                <AgentTabMenu
+                  agent={agent}
+                  onMove={onMoveAgent}
+                  onDetach={onDetachAgent}
+                  onStop={onStopAgent}
                 />
               )}
-              {agent.label}
-            </button>
-            {agent.status === 'running' && (onMoveAgent || onDetachAgent) && (
-              <AgentTabMenu
-                agent={agent}
-                onMove={onMoveAgent}
-                onDetach={onDetachAgent}
-                onStop={onStopAgent}
-              />
-            )}
-            {agent.status === 'running' && !onMoveAgent && !onDetachAgent && (
-              <button
-                className="ml-0.5 hidden rounded p-0.5 text-[#6a6a6a] hover:text-destructive group-hover:inline-flex"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStopAgent(agent.id);
-                }}
-                title="Stop agent"
-              >
-                <CloseIcon />
-              </button>
-            )}
-          </div>
-        ))}
+              {agent.status === 'running' && !onMoveAgent && !onDetachAgent && (
+                <button
+                  className="ml-0.5 hidden rounded p-0.5 text-[#6a6a6a] hover:text-destructive group-hover:inline-flex"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStopAgent(agent.id);
+                  }}
+                  title="Stop agent"
+                >
+                  <CloseIcon />
+                </button>
+              )}
+            </div>
+          );
+        })}
       {canAddAgent && <AddAgentButton onAdd={onAddAgent} />}
       {(userTerminals.length > 0 || onAddTerminal) && (
         <div data-testid="tab-separator" className="mx-1 h-6 w-px bg-[#2f2f2f]" />
@@ -98,10 +121,10 @@ export function AgentTabs({
         <div key={terminal.id} className="group flex items-center">
           <button
             className={cn(
-              'flex items-center gap-1.5 px-3.5 py-2.5 text-sm transition-colors',
+              'flex items-center gap-1.5 px-3.5 py-2 text-sm transition-colors',
               terminal.window_index === activeIndex
-                ? 'border-b-2 border-[#3B82F6] text-[#3B82F6] font-bold'
-                : 'text-[#8a8a8a] font-medium hover:text-foreground',
+                ? 'border border-[#22D3EE] bg-[#0B0C0F] text-[#3B82F6] font-bold'
+                : 'border border-transparent text-[#8a8a8a] font-medium hover:text-foreground',
             )}
             onClick={() => onSelect(terminal.window_index)}
           >
