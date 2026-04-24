@@ -1,8 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
-import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
+import {
+  getDiffExpanded,
+  setDiffExpanded,
+  getReviewed,
+  setReviewed as persistReviewed,
+} from '@/lib/diff-state';
 import { Button } from '@/components/ui/button';
 import { DiffFileTree } from './DiffFileTree';
 
@@ -50,6 +55,40 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   const [fileLoading, setFileLoading] = useState(false);
   const [expandedAll, setExpandedAll] = useState(false);
   const expandedFallback = useRef<Record<string, boolean>>({});
+  const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
+
+  // Hydrate reviewed set from localStorage whenever the file list changes.
+  useEffect(() => {
+    const next = new Set<string>();
+    for (const f of files) {
+      if (getReviewed(taskId, f.path)) next.add(f.path);
+    }
+    setReviewedState(next);
+  }, [taskId, files]);
+
+  const toggleReviewed = useCallback(
+    (path: string) => {
+      setReviewedState((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) {
+          next.delete(path);
+          persistReviewed(taskId, path, false);
+        } else {
+          next.add(path);
+          persistReviewed(taskId, path, true);
+        }
+        return next;
+      });
+    },
+    [taskId],
+  );
+
+  const reviewCounts = useMemo(() => {
+    const nonIgnored = files.filter((f) => !f.ignored);
+    const total = nonIgnored.length;
+    const done = nonIgnored.filter((f) => reviewed.has(f.path)).length;
+    return { done, total };
+  }, [files, reviewed]);
 
   const editorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
   const editorKeyRef = useRef<string | null>(null);
@@ -195,7 +234,7 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   }
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0" style={{ background: '#0B0C0F' }}>
       <aside className="w-[280px] shrink-0 border-r border-border">
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
@@ -206,23 +245,40 @@ export function DiffViewer({ taskId, isRunning }: Props) {
             onSelect={handleSelect}
             taskId={taskId}
             ignoredTruncated={ignoredTruncated}
+            reviewed={reviewed}
+            onToggleReview={toggleReviewed}
           />
         )}
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
-        {showToolbar && selected ? (
-          <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-            <span className="truncate text-xs text-muted-foreground">{selected}</span>
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={toggleExpandedAll}
-              aria-label={expandedAll ? 'Collapse all' : 'Expand all'}
-            >
-              {expandedAll ? 'Collapse all' : 'Expand all'}
-            </Button>
-          </div>
-        ) : null}
+        <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-1.5">
+          <span className="flex min-w-0 items-center gap-3">
+            {showToolbar && selected ? (
+              <span className="truncate text-xs text-muted-foreground">{selected}</span>
+            ) : null}
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {reviewCounts.total > 0 ? (
+              <span
+                data-testid="review-progress"
+                aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
+                className="bg-glass-l1 glass-blur-l1 inline-flex items-center gap-1 border border-[#22D3EE] px-1.5 py-0.5 font-mono text-[11px] tracking-wider text-[#22D3EE]"
+              >
+                {reviewCounts.done} / {reviewCounts.total} reviewed
+              </span>
+            ) : null}
+            {showToolbar && selected ? (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={toggleExpandedAll}
+                aria-label={expandedAll ? 'Collapse all' : 'Expand all'}
+              >
+                {expandedAll ? 'Collapse all' : 'Expand all'}
+              </Button>
+            ) : null}
+          </span>
+        </div>
         <div className="min-h-0 flex-1">
           {error && selected ? (
             <div className="flex h-full items-center justify-center text-sm text-destructive">

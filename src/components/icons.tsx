@@ -50,6 +50,27 @@ export function PlusIcon({ size = 16, ...props }: IconProps) {
   );
 }
 
+export function PullRequestIcon({ size = 14, ...props }: IconProps) {
+  return (
+    <svg {...baseProps(size)} {...props}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path d="M6 8.5v7" />
+      <path d="M18 15.5V9a3 3 0 0 0-3-3h-3" />
+      <path d="m15 9-3-3 3-3" />
+    </svg>
+  );
+}
+
+export function CheckIcon({ size = 12, ...props }: IconProps) {
+  return (
+    <svg {...baseProps(size)} {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 /** Rounded square with an arrow — used for "terminal" empty states. */
 export function TerminalRectIcon({ size = 48, strokeWidth = 1.5, ...props }: IconProps) {
   return (

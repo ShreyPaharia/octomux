@@ -12,8 +12,10 @@ import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
 import { repoName } from '@/lib/utils';
-import { TerminalRectIcon } from '@/components/icons';
+import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
 import type { RunMode } from '../../server/types';
+
+export const SHIP_EVENT = 'octomux:open-pr-sheet';
 
 const MODE_LABEL: Record<RunMode, string> = {
   new: 'N',
@@ -127,6 +129,13 @@ export default function TaskDetail() {
   }, [task?.status]);
 
   const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
+  const [closeConfirm, setCloseConfirm] = useState(false);
+
+  const handleShip = useCallback(() => {
+    if (!taskId) return;
+    // T7 will mount the PR sheet listener. Route stub deferred — event-only for now.
+    window.dispatchEvent(new CustomEvent(SHIP_EVENT, { detail: { taskId } }));
+  }, [taskId]);
 
   const handleAddAgent = useCallback(
     async (prompt?: string) => {
@@ -166,6 +175,7 @@ export default function TaskDetail() {
     if (!taskId) return;
     try {
       await api.updateTask(taskId, { status: 'closed' });
+      setCloseConfirm(false);
       refresh();
     } catch (err) {
       console.error('Failed to close task:', err);
@@ -285,33 +295,50 @@ export default function TaskDetail() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2 sm:px-4 sm:py-3">
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-base font-semibold sm:text-lg">{task.title}</h1>
-              <span
-                data-testid="mode-badge"
-                title={MODE_TOOLTIP[runMode]}
-                aria-label={`run mode: ${MODE_TOOLTIP[runMode]}`}
-                className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-[#2f2f2f] bg-[#1a1a1a] px-1.5 font-mono text-[10px] font-bold text-[#8a8a8a]"
-              >
-                {MODE_LABEL[runMode]}
-              </span>
-              <StatusBadge status={task.derived_status || task.status} />
-            </div>
-            <p className="hidden max-w-xl truncate text-xs text-muted-foreground sm:block">
-              {task.description}
-            </p>
-          </div>
+      {/* L1 glass header — compact 12px vertical padding */}
+      <div
+        data-testid="task-detail-header"
+        className="bg-glass-l1 glass-blur-l1 flex items-center justify-between gap-3 border-b border-glass-edge px-4 py-3"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="truncate text-[15px] font-semibold leading-none">{task.title}</h1>
+          <span
+            data-testid="mode-badge"
+            title={MODE_TOOLTIP[runMode]}
+            aria-label={`run mode: ${MODE_TOOLTIP[runMode]}`}
+            className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-[#2f2f2f] bg-[#1a1a1a] px-1.5 font-mono text-[10px] font-bold text-[#8a8a8a]"
+          >
+            {MODE_LABEL[runMode]}
+          </span>
+          <StatusBadge status={task.derived_status || task.status} />
         </div>
-        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {canResume && (
             <Button variant="default" size="sm" disabled={resuming} onClick={handleResume}>
               {resuming ? '...' : 'Resume'}
             </Button>
           )}
+
+          {canShowDiff && (
+            <Button
+              size="sm"
+              data-testid="ship-button"
+              onClick={handleShip}
+              className="gap-1.5 border border-[#22C55EAA] bg-[#22C55E1F] text-[#DCFCE7] shadow-[0_0_0_1px_rgba(34,197,94,0.4),0_0_18px_-4px_rgba(34,197,94,0.7)] hover:bg-[#22C55E33] hover:text-white"
+            >
+              <PullRequestIcon size={14} aria-hidden />
+              <span className="font-semibold tracking-wider uppercase">Ship</span>
+            </Button>
+          )}
+
+          <span
+            aria-label="open command palette"
+            title="Command palette (⌘K)"
+            className="bg-glass-l1 glass-blur-l1 hidden h-7 items-center gap-0.5 border border-glass-edge px-1.5 font-mono text-[11px] tracking-wider text-[#b5b5bd] sm:inline-flex"
+          >
+            <span className="text-[13px] leading-none">⌘</span>
+            <span>K</span>
+          </span>
 
           {isRunning && !!task.tmux_session && (
             <Button
@@ -342,16 +369,39 @@ export default function TaskDetail() {
               Start
             </Button>
           )}
-          {isRunning && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-[#2f2f2f] text-[#EF4444]"
-              onClick={handleClose}
-            >
-              CLOSE
-            </Button>
-          )}
+          {isRunning &&
+            (closeConfirm ? (
+              <div
+                role="alertdialog"
+                aria-label="Confirm close task"
+                data-testid="close-confirm"
+                className="bg-glass-l2 glass-blur-l2 flex items-center gap-2 border border-[#EF4444AA] px-2 py-1 text-[11px] text-[#FEE2E2]"
+              >
+                <span className="font-semibold tracking-wider uppercase">Close task?</span>
+                <button
+                  className="px-1.5 py-0.5 text-[#b5b5bd] hover:text-white"
+                  onClick={() => setCloseConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  data-testid="close-confirm-accept"
+                  className="border border-[#EF4444AA] bg-[#EF44441F] px-1.5 py-0.5 font-bold uppercase text-[#FEE2E2] hover:bg-[#EF444433]"
+                  onClick={handleClose}
+                >
+                  Confirm
+                </button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#EF4444AA] bg-[#EF44441F] text-[#FEE2E2] hover:bg-[#EF444433] hover:text-white"
+                onClick={() => setCloseConfirm(true)}
+              >
+                CLOSE
+              </Button>
+            ))}
         </div>
       </div>
 
@@ -362,12 +412,19 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Metadata bar — hidden for scratch tasks which have no repo/branch */}
+      {/* Thin metadata bar — L1 lighter (5% white + 30px blur), 6px vertical padding */}
       {!isScratch && (
-        <div className="flex items-center gap-5 border-b border-border bg-[#141414] px-6 py-2">
+        <div
+          className="flex items-center gap-5 border-b border-glass-edge px-6 py-[6px]"
+          style={{
+            background: 'rgba(255,255,255,0.05)',
+            backdropFilter: 'blur(30px)',
+            WebkitBackdropFilter: 'blur(30px)',
+          }}
+        >
           {task.repo_path && (
             <>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
                 REPO
               </span>
               <span className="text-[11px] text-[#8a8a8a]">{repoName(task.repo_path)}</span>
@@ -376,7 +433,7 @@ export default function TaskDetail() {
           {task.branch && (
             <>
               {task.repo_path && <span className="text-[11px] text-[#2f2f2f]">|</span>}
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
                 {runMode === 'existing' ? 'WORKTREE HEAD' : 'BRANCH'}
               </span>
               <span className="text-[11px] font-medium text-[#3B82F6]">
@@ -387,7 +444,7 @@ export default function TaskDetail() {
           {task.base_branch && (
             <>
               <span className="text-[11px] text-[#2f2f2f]">|</span>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
                 BASE
               </span>
               <span className="text-[11px] text-[#8a8a8a]">{task.base_branch}</span>
@@ -396,7 +453,7 @@ export default function TaskDetail() {
           {task.pr_url && (
             <>
               <span className="text-[11px] text-[#2f2f2f]">|</span>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
                 PR
               </span>
               <a
