@@ -61,6 +61,13 @@ describe('HomePage', () => {
     expect(h1).toHaveClass('text-[32px]');
   });
 
+  it('renders the // INBOX eyebrow above the welcome heading', () => {
+    renderHome('/');
+    const eyebrow = screen.getByTestId('home-eyebrow');
+    expect(eyebrow).toHaveTextContent(/\/\/ INBOX/);
+    expect(eyebrow).toHaveTextContent(/inbox zero|sessions? want/i);
+  });
+
   it('renders first-run CTA when there are no tasks', () => {
     renderHome('/', { tasks: [] });
     expect(screen.getByTestId('home-first-run')).toBeInTheDocument();

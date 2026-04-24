@@ -49,10 +49,11 @@ function ReplyButton({ taskId }: { taskId: string }) {
         e.stopPropagation();
         navigate(`/?add_agent=${taskId}`);
       }}
-      className="shrink-0 rounded-[10px] px-3 py-1.5 text-[11px] font-bold tracking-wider uppercase text-[#1f1300] transition-colors hover:brightness-110"
+      className="shrink-0 rounded-[10px] text-[12px] font-bold text-[#0A0A0B] transition-[filter] hover:brightness-110"
       style={{
         backgroundColor: '#FFB800',
-        boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 16px 0 rgba(255, 184, 0, 0.35)',
+        padding: '8px 14px',
+        boxShadow: '0 4px 16px -2px rgba(255, 184, 0, 0.4)',
       }}
     >
       Reply →
@@ -60,50 +61,49 @@ function ReplyButton({ taskId }: { taskId: string }) {
   );
 }
 
-// Per-mockup: awaiting_reply cards carry amber tint in border + a specular
-// top-edge; errored cards use red-tinted border; activity rows stay L1 glass.
-function cardStyleFor(kind: RowKind): { style: CSSProperties; className: string } {
+// Card materials per pen frame lBhOV (awaiting) / MYKbE (errored):
+// awaiting is the "hot" card — brighter fill, top specular highlight;
+// errored dims to L2-low without the specular edge.
+function cardStyleFor(kind: RowKind): { style: CSSProperties; borderColor: string } {
   if (kind === 'awaiting_reply') {
     return {
-      className: 'border-[#FFB80040]',
+      borderColor: 'rgba(255, 255, 255, 0.12)',
       style: {
-        backgroundColor: 'rgba(255, 255, 255, 0.10)',
+        backgroundColor: 'rgba(255, 255, 255, 0.0625)',
         boxShadow:
-          'inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 12px 30px -8px rgba(0, 0, 0, 0.55)',
+          'inset 0 1px 0 0 rgba(255, 255, 255, 0.18), 0 20px 40px -10px rgba(0, 0, 0, 0.38)',
       },
     };
   }
   return {
-    className: 'border-[#EF444440]',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     style: {
-      backgroundColor: 'rgba(255, 255, 255, 0.10)',
-      boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 12px 30px -8px rgba(0, 0, 0, 0.55)',
+      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+      boxShadow: '0 20px 40px -10px rgba(0, 0, 0, 0.38)',
     },
   };
 }
 
 function InboxCard({ task, kind }: { task: Task; kind: RowKind }) {
   const navigate = useNavigate();
-  const { style, className } = cardStyleFor(kind);
+  const { style, borderColor } = cardStyleFor(kind);
   return (
     <GlassPanel
       level={2}
       data-testid={`inbox-row-${task.id}`}
-      className={`group flex items-center gap-3 rounded-[16px] px-5 py-4 transition-colors hover:bg-glass-l3 ${className}`}
-      style={style}
+      className="group flex items-center gap-4 rounded-[16px] px-[22px] py-[18px] transition-colors"
+      style={{ ...style, borderColor }}
     >
       <button
         type="button"
         onClick={() => navigate(`/tasks/${task.id}`)}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <StatusGlyph status={glyphStatusFor(kind)} size={12} />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <StatusGlyph status={glyphStatusFor(kind)} size={14} />
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
           <span className="flex items-baseline gap-2">
-            <span className="truncate text-sm font-semibold text-foreground">{task.title}</span>
-            <span className="truncate text-xs text-muted-foreground">
-              {subtitleFor(task, kind)}
-            </span>
+            <span className="truncate text-[15px] font-semibold text-white">{task.title}</span>
+            <span className="truncate text-xs text-[#8a8a8a]">{subtitleFor(task, kind)}</span>
           </span>
           <span className="font-mono text-[11px] text-[#8a8a8a]">
             {repoName(task.repo_path)} · {timeAgo(task.updated_at)}
@@ -115,25 +115,42 @@ function InboxCard({ task, kind }: { task: Task; kind: RowKind }) {
   );
 }
 
+function activityStatusKey(task: Task): string {
+  if (task.status === 'running') return 'running';
+  if (task.status === 'setting_up') return 'setting_up';
+  if (task.status === 'error') return 'error';
+  return 'closed';
+}
+
 function ActivityRow({ task }: { task: Task }) {
   const navigate = useNavigate();
+  const statusKey = activityStatusKey(task);
+  const isClosed = statusKey === 'closed';
   return (
     <GlassPanel
       level={1}
       data-testid={`inbox-row-${task.id}`}
-      className="group flex items-center gap-4 rounded-[12px] px-4 py-2.5 transition-colors hover:bg-glass-l2"
+      className="group flex items-center gap-3.5 rounded-[12px] px-[18px] py-3 transition-colors"
+      style={{
+        backgroundColor: 'rgba(255, 255, 255, 0.031)',
+        borderColor: 'rgba(255, 255, 255, 0.063)',
+      }}
     >
       <button
         type="button"
         onClick={() => navigate(`/tasks/${task.id}`)}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        className="flex min-w-0 flex-1 items-center gap-3.5 text-left"
       >
-        <StatusGlyph status="closed" size={10} />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#B5B5BD]">
+        <StatusGlyph status={statusKey} size={12} />
+        <span
+          className={`min-w-0 flex-1 truncate text-[13px] font-medium ${
+            isClosed ? 'text-[#8a8a8a]' : 'text-white'
+          }`}
+        >
           {task.title}
         </span>
-        <span className="shrink-0 font-mono text-[11px] text-[#6a6a6a]">
-          {repoName(task.repo_path)} · closed · {timeAgo(task.updated_at)}
+        <span className="shrink-0 font-mono text-[11px] text-[#8a8a8a]">
+          {repoName(task.repo_path)} · {statusKey.replace('_', ' ')} · {timeAgo(task.updated_at)}
         </span>
       </button>
     </GlassPanel>
@@ -142,19 +159,21 @@ function ActivityRow({ task }: { task: Task }) {
 
 function SectionHeader({
   accent,
+  lineColor,
   icon,
   title,
   count,
   meta,
 }: {
   accent: string;
+  lineColor?: string;
   icon: React.ReactNode;
   title: string;
   count?: string | number;
   meta?: string;
 }) {
   return (
-    <div className="flex items-center gap-2.5 px-1 py-1">
+    <div className="flex items-center gap-2.5 py-1">
       <span className="flex items-center justify-center" style={{ color: accent }} aria-hidden>
         {icon}
       </span>
@@ -168,7 +187,11 @@ function SectionHeader({
         <span className="font-mono text-[11px] font-bold text-[#6a6a6a]">{count}</span>
       )}
       {meta && <span className="font-mono text-[11px] font-medium text-[#6a6a6a]">{meta}</span>}
-      <span className="ml-1 h-px flex-1" style={{ backgroundColor: `${accent}22` }} aria-hidden />
+      <span
+        className="ml-1 h-px flex-1"
+        style={{ backgroundColor: lineColor ?? `${accent}22` }}
+        aria-hidden
+      />
     </div>
   );
 }
@@ -217,6 +240,7 @@ function ActivitySection({ tasks, runningCount }: { tasks: Task[]; runningCount:
     <section data-testid="inbox-section-activity" className="flex flex-col gap-2">
       <SectionHeader
         accent="#22C55E"
+        lineColor="rgba(34, 197, 94, 0.08)"
         icon={<ActivityIcon size={14} />}
         title="ACTIVITY"
         meta={meta}
