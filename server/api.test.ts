@@ -1675,6 +1675,86 @@ describe('GET /api/worktrees', () => {
   });
 });
 
+describe('GET /api/worktrees/:id', () => {
+  it('returns 404 for unknown id', async () => {
+    const res = await request(app).get('/api/worktrees/does-not-exist');
+    expect(res.status).toBe(404);
+  });
+
+  it('returns the worktree plus active task and history', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, mode, status)
+       VALUES ('wtD1','/tmp/wtD1','/repo','new','in_use')`,
+    ).run();
+    insertTask(db, { id: 'tActive', worktree_id: 'wtD1', status: 'running' });
+    insertTask(db, {
+      id: 'tClosed',
+      worktree_id: 'wtD1',
+      status: 'closed',
+      updated_at: '2026-01-01 00:00:00',
+    });
+
+    const res = await request(app).get('/api/worktrees/wtD1');
+    expect(res.status).toBe(200);
+    expect(res.body.worktree.id).toBe('wtD1');
+    expect(res.body.active_task?.id).toBe('tActive');
+    expect(res.body.history.map((t: Task) => t.id)).toEqual(['tClosed']);
+  });
+
+  it('returns null active_task when none active', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtD2','/tmp/wtD2','new','available')`,
+    ).run();
+    insertTask(db, { id: 'tX', worktree_id: 'wtD2', status: 'closed' });
+
+    const res = await request(app).get('/api/worktrees/wtD2');
+    expect(res.status).toBe(200);
+    expect(res.body.active_task).toBeNull();
+    expect(res.body.history).toHaveLength(1);
+  });
+});
+
+describe('DELETE /api/worktrees/:id', () => {
+  it('returns 404 for unknown id', async () => {
+    const res = await request(app).delete('/api/worktrees/does-not-exist');
+    expect(res.status).toBe(404);
+  });
+
+  it('409 when worktree is in_use', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtU1','/tmp/wtU1','new','in_use')`,
+    ).run();
+    const res = await request(app).delete('/api/worktrees/wtU1');
+    expect(res.status).toBe(409);
+  });
+
+  it('409 when active task references it', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtA1','/tmp/wtA1','new','available')`,
+    ).run();
+    insertTask(db, { id: 'tRun', worktree_id: 'wtA1', status: 'running' });
+
+    const res = await request(app).delete('/api/worktrees/wtA1');
+    expect(res.status).toBe(409);
+  });
+
+  it('deletes row when available with no active tasks', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtOK','/tmp/wtOK','existing','available')`,
+    ).run();
+    insertTask(db, { id: 'tTerm', worktree_id: 'wtOK', status: 'closed' });
+
+    const res = await request(app).delete('/api/worktrees/wtOK');
+    expect(res.status).toBe(204);
+    const remaining = db.prepare(`SELECT id FROM worktrees WHERE id = 'wtOK'`).get();
+    expect(remaining).toBeUndefined();
+    const task = db.prepare(`SELECT worktree_id FROM tasks WHERE id = 'tTerm'`).get() as {
+      worktree_id: string | null;
+    };
+    expect(task.worktree_id).toBeNull();
+  });
+});
+
 describe('GET /api/tasks/:id — worktree_row join', () => {
   it('includes the linked worktree row under worktree_row', async () => {
     db.prepare(

@@ -230,6 +230,28 @@ function TerminalIcon({ color }: { color: string }) {
   );
 }
 
+function WorkspacesIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="14" y="14" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
 function SettingsIcon({ color }: { color: string }) {
   return (
     <svg
@@ -257,6 +279,10 @@ const NAV_ITEMS = [
   { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
   { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/chats/orchestrator', Icon: TerminalIcon },
   { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
+] as const;
+
+const MORE_ITEMS = [
+  { key: 'workspaces', label: 'WORKSPACES', to: '/workspaces', Icon: WorkspacesIcon },
 ] as const;
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────
@@ -669,6 +695,9 @@ export function UniversalSidebar() {
         })}
       </div>
 
+      {/* More (secondary nav: workspaces, etc.) */}
+      <MoreSection collapsed={collapsed} activePath={location.pathname} />
+
       {/* Chats section (non-orchestrator standalone agents) */}
       <ChatsSection collapsed={collapsed} activePath={location.pathname} />
 
@@ -959,6 +988,105 @@ function RenameInput({
       aria-label="Rename task"
       data-testid="sidebar-rename-input"
     />
+  );
+}
+
+// ─── More (collapsible secondary nav) ──────────────────────────────────────
+
+const MORE_STORAGE_KEY = 'octomux:sidebar:more-open';
+
+function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(MORE_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(MORE_STORAGE_KEY, String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  if (collapsed) {
+    return (
+      <div style={{ paddingBottom: 16 }}>
+        {MORE_ITEMS.map(({ key, to, Icon, label }) => {
+          const isActive = activePath === to || activePath.startsWith(to + '/');
+          const color = isActive ? '#3B82F6' : '#8a8a8a';
+          return (
+            <Link
+              key={key}
+              to={to}
+              title={label}
+              className="flex items-center"
+              style={{
+                padding: '12px 0',
+                justifyContent: 'center',
+                backgroundColor: isActive ? '#3B82F620' : 'transparent',
+              }}
+            >
+              <Icon color={color} />
+            </Link>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ paddingBottom: 16 }}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        data-testid="sidebar-more-toggle"
+        className="flex w-full items-center justify-between font-bold uppercase tracking-wider hover:text-white"
+        style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
+      >
+        <span>{'// MORE'}</span>
+        <span
+          style={{
+            transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+            transition: 'transform 120ms',
+            display: 'inline-block',
+          }}
+        >
+          ⌄
+        </span>
+      </button>
+      {open &&
+        MORE_ITEMS.map(({ key, to, Icon, label }) => {
+          const isActive = activePath === to || activePath.startsWith(to + '/');
+          const color = isActive ? '#3B82F6' : '#8a8a8a';
+          return (
+            <Link
+              key={key}
+              to={to}
+              className="flex items-center"
+              style={{
+                padding: '10px 20px',
+                gap: 12,
+                backgroundColor: isActive ? '#3B82F620' : 'transparent',
+                color,
+                fontWeight: isActive ? 700 : 500,
+                fontSize: 12,
+              }}
+            >
+              <Icon color={color} />
+              {label}
+            </Link>
+          );
+        })}
+    </div>
   );
 }
 
