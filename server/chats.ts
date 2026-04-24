@@ -95,8 +95,8 @@ export function listChats(): Agent[] {
 
 export function getChat(id: string): Agent | null {
   const db = getDb();
-  const row = db
-    .prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`)
-    .get(id) as Agent | undefined;
+  const row = db.prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) as
+    | Agent
+    | undefined;
   return row ?? null;
 }

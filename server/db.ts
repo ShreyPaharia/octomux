@@ -141,9 +141,9 @@ function rebuildAgentsTable(instance: Database.Database): void {
   instance
     .transaction(() => {
       // Capture dynamically-added columns that may not exist in the CREATE.
-      const oldCols = (
-        instance.pragma('table_info(agents)') as Array<{ name: string }>
-      ).map((c) => c.name);
+      const oldCols = (instance.pragma('table_info(agents)') as Array<{ name: string }>).map(
+        (c) => c.name,
+      );
       const has = (c: string) => oldCols.includes(c);
 
       instance.exec(`
@@ -320,9 +320,7 @@ export function initDb(instance: Database.Database): void {
           `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use', ?)`,
         );
-        const linkTask = instance.prepare(
-          `UPDATE tasks SET worktree_id = ? WHERE id = ?`,
-        );
+        const linkTask = instance.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`);
 
         for (const r of rows) {
           const wtId = nanoid(12);

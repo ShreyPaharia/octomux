@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import { useTasksContext } from '@/lib/tasks-context';
 import {
   groupTasksForSidebar,
@@ -230,6 +231,28 @@ function TerminalIcon({ color }: { color: string }) {
   );
 }
 
+function WorkspacesIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="14" y="14" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
 function SettingsIcon({ color }: { color: string }) {
   return (
     <svg
@@ -257,6 +280,10 @@ const NAV_ITEMS = [
   { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
   { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/chats/orchestrator', Icon: TerminalIcon },
   { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
+] as const;
+
+const MORE_ITEMS = [
+  { key: 'workspaces', label: 'WORKSPACES', to: '/workspaces', Icon: WorkspacesIcon },
 ] as const;
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────
@@ -491,10 +518,7 @@ export function UniversalSidebar() {
 
   // Active nav detection
   const activeNav = useMemo(() => {
-    if (
-      location.pathname === '/orchestrator' ||
-      location.pathname === '/chats/orchestrator'
-    )
+    if (location.pathname === '/orchestrator' || location.pathname === '/chats/orchestrator')
       return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
     if (location.pathname === '/tasks' || location.pathname.startsWith('/tasks/')) return 'tasks';
@@ -671,6 +695,9 @@ export function UniversalSidebar() {
           );
         })}
       </div>
+
+      {/* More (secondary nav: workspaces, etc.) */}
+      <MoreSection collapsed={collapsed} activePath={location.pathname} />
 
       {/* Chats section (non-orchestrator standalone agents) */}
       <ChatsSection collapsed={collapsed} activePath={location.pathname} />
@@ -965,46 +992,145 @@ function RenameInput({
   );
 }
 
+// ─── More (collapsible secondary nav) ──────────────────────────────────────
+
+const MORE_STORAGE_KEY = 'octomux:sidebar:more-open';
+
+function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(MORE_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(MORE_STORAGE_KEY, String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  if (collapsed) {
+    return (
+      <div style={{ paddingBottom: 16 }}>
+        {MORE_ITEMS.map(({ key, to, Icon, label }) => {
+          const isActive = activePath === to || activePath.startsWith(to + '/');
+          const color = isActive ? '#3B82F6' : '#8a8a8a';
+          return (
+            <Link
+              key={key}
+              to={to}
+              title={label}
+              className="flex items-center"
+              style={{
+                padding: '12px 0',
+                justifyContent: 'center',
+                backgroundColor: isActive ? '#3B82F620' : 'transparent',
+              }}
+            >
+              <Icon color={color} />
+            </Link>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ paddingBottom: 16 }}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        data-testid="sidebar-more-toggle"
+        className="flex w-full items-center justify-between font-bold uppercase tracking-wider hover:text-white"
+        style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
+      >
+        <span>{'// MORE'}</span>
+        <span
+          style={{
+            transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+            transition: 'transform 120ms',
+            display: 'inline-block',
+          }}
+        >
+          ⌄
+        </span>
+      </button>
+      {open &&
+        MORE_ITEMS.map(({ key, to, Icon, label }) => {
+          const isActive = activePath === to || activePath.startsWith(to + '/');
+          const color = isActive ? '#3B82F6' : '#8a8a8a';
+          return (
+            <Link
+              key={key}
+              to={to}
+              className="flex items-center"
+              style={{
+                padding: '10px 20px',
+                gap: 12,
+                backgroundColor: isActive ? '#3B82F620' : 'transparent',
+                color,
+                fontWeight: isActive ? 700 : 500,
+                fontSize: 12,
+              }}
+            >
+              <Icon color={color} />
+              {label}
+            </Link>
+          );
+        })}
+    </div>
+  );
+}
+
 // ─── Chats section ─────────────────────────────────────────────────────────
 
 /**
  * Lists standalone runtime agents ("chats"). The orchestrator is already shown
  * in the NAVIGATION section, so it's excluded here. Row click → /chats/:id.
  */
-function ChatsSection({
-  collapsed,
-  activePath,
-}: {
-  collapsed: boolean;
-  activePath: string;
-}) {
+function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
   const [chats, setChats] = useState<Agent[]>([]);
+  const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
+
+  const loadChats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/chats');
+      if (!res.ok) return;
+      const rows = (await res.json()) as Agent[];
+      setChats(rows.filter((c) => c.id !== 'orchestrator'));
+    } catch {
+      // silent — sidebar is non-critical
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch('/api/chats');
-        if (!res.ok) return;
-        const rows = (await res.json()) as Agent[];
-        if (!cancelled) setChats(rows.filter((c) => c.id !== 'orchestrator'));
-      } catch {
-        // silent — sidebar is non-critical
-      }
+    const tick = async () => {
+      if (cancelled) return;
+      await loadChats();
     };
-    void load();
-    const interval = setInterval(() => void load(), 5000);
+    void tick();
+    const interval = setInterval(() => void tick(), 5000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [loadChats]);
 
-  if (chats.length === 0) return null;
+  if (chats.length === 0 && !movingAgentId) return null;
 
   return (
     <div style={{ paddingBottom: 16 }}>
-      {!collapsed && (
+      {!collapsed && chats.length > 0 && (
         <div
           className="font-bold uppercase tracking-wider"
           style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
@@ -1016,25 +1142,123 @@ function ChatsSection({
         const to = `/chats/${chat.id}`;
         const isActive = activePath === to;
         const color = isActive ? '#3B82F6' : '#8a8a8a';
+        if (collapsed) {
+          return (
+            <Link
+              key={chat.id}
+              to={to}
+              className="flex items-center"
+              style={{
+                padding: '8px 0',
+                gap: 12,
+                backgroundColor: isActive ? '#3B82F620' : 'transparent',
+                color,
+                justifyContent: 'center',
+              }}
+            >
+              💬
+            </Link>
+          );
+        }
         return (
-          <Link
+          <div
             key={chat.id}
-            to={to}
-            className="flex items-center"
+            className="group/chatrow flex items-center"
             style={{
-              padding: collapsed ? '8px 0' : '8px 20px',
-              gap: 12,
+              padding: '8px 20px',
+              gap: 8,
               backgroundColor: isActive ? '#3B82F620' : 'transparent',
-              color,
-              fontWeight: isActive ? 700 : 500,
-              fontSize: 12,
-              justifyContent: collapsed ? 'center' : undefined,
             }}
           >
-            {collapsed ? '💬' : <span className="truncate">{chat.label}</span>}
-          </Link>
+            <Link
+              to={to}
+              className="min-w-0 flex-1 truncate"
+              style={{
+                color,
+                fontWeight: isActive ? 700 : 500,
+                fontSize: 12,
+              }}
+            >
+              {chat.label}
+            </Link>
+            <ChatRowMenu
+              chatId={chat.id}
+              onMoveToTask={() => setMovingAgentId(chat.id)}
+            />
+          </div>
         );
       })}
+      {movingAgentId && (
+        <MoveAgentDialog
+          open={!!movingAgentId}
+          onOpenChange={(open) => !open && setMovingAgentId(null)}
+          agentId={movingAgentId}
+          currentTaskId={null}
+          agentLabel={chats.find((c) => c.id === movingAgentId)?.label ?? 'chat'}
+          onMoved={() => {
+            setMovingAgentId(null);
+            void loadChats();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: globalThis.MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-label="Chat actions"
+        data-testid={`chat-row-menu-${chatId}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+        className={
+          'flex h-5 w-5 items-center justify-center text-[#8a8a8a] hover:text-white ' +
+          (open ? 'opacity-100' : 'opacity-0 group-hover/chatrow:opacity-100')
+        }
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.5" />
+          <circle cx="12" cy="12" r="1.5" />
+          <circle cx="12" cy="19" r="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid={`chat-row-menu-items-${chatId}`}
+          className="absolute right-0 top-full z-50 mt-1 min-w-44 bg-[#141414] border border-border py-1 text-xs outline-none"
+        >
+          <button
+            role="menuitem"
+            className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              onMoveToTask();
+            }}
+          >
+            Move to task…
+          </button>
+        </div>
+      )}
     </div>
   );
 }

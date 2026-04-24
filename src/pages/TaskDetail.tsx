@@ -7,6 +7,7 @@ import { AgentTabs } from '@/components/AgentTabs';
 import { DiffViewer } from '@/components/DiffViewer';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
+import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
@@ -124,6 +125,8 @@ export default function TaskDetail() {
       setLocalUserWindowIndex(null);
     }
   }, [task?.status]);
+
+  const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
 
   const handleAddAgent = useCallback(
     async (prompt?: string) => {
@@ -422,7 +425,33 @@ export default function TaskDetail() {
             userTerminals={isRunning ? task.user_terminals || [] : []}
             onAddTerminal={isRunning ? handleAddTerminal : undefined}
             onCloseTerminal={isRunning ? handleCloseTerminal : undefined}
+            onMoveAgent={isRunning ? (id) => setMovingAgentId(id) : undefined}
+            onDetachAgent={
+              isRunning
+                ? async (id) => {
+                    try {
+                      await api.moveAgentToTask(id, null);
+                      navigate(`/chats/${id}`);
+                    } catch (err) {
+                      console.error('Failed to detach agent:', err);
+                    }
+                  }
+                : undefined
+            }
           />
+          {movingAgentId && (
+            <MoveAgentDialog
+              open={!!movingAgentId}
+              onOpenChange={(open) => !open && setMovingAgentId(null)}
+              agentId={movingAgentId}
+              currentTaskId={task.id}
+              agentLabel={task.agents?.find((a) => a.id === movingAgentId)?.label}
+              onMoved={() => {
+                setMovingAgentId(null);
+                refresh();
+              }}
+            />
+          )}
           <div className="min-h-0 flex-1 overflow-hidden p-1">
             <TerminalView
               taskId={task.id}

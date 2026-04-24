@@ -25,9 +25,7 @@ function readOrchestratorSession(): string {
 }
 
 /** Update the orchestrator agent row's status. Silent on DB errors. */
-function writeOrchestratorStatus(
-  status: 'running' | 'idle' | 'stopped',
-): void {
+function writeOrchestratorStatus(status: 'running' | 'idle' | 'stopped'): void {
   try {
     getDb()
       .prepare(
