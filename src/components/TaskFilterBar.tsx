@@ -62,12 +62,7 @@ function FilterChip({
     >
       {chip.glyphStatus && <StatusGlyph status={chip.glyphStatus} size={10} />}
       <span>{chip.label}</span>
-      <span
-        className={cn(
-          'tabular-nums',
-          active ? 'text-foreground' : 'text-[#6a6a6a]',
-        )}
-      >
+      <span className={cn('tabular-nums', active ? 'text-foreground' : 'text-[#6a6a6a]')}>
         ({count})
       </span>
     </button>
