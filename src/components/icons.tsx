@@ -82,6 +82,14 @@ export function TerminalRectIcon({ size = 48, strokeWidth = 1.5, ...props }: Ico
   );
 }
 
+export function ActivityIcon({ size = 14, ...props }: IconProps) {
+  return (
+    <svg {...baseProps(size)} {...props}>
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </svg>
+  );
+}
+
 export function TriangleAlertIcon({ size = 14, ...props }: IconProps) {
   return (
     <svg {...baseProps(size)} {...props}>

@@ -109,6 +109,12 @@ export function AppShell() {
     setPaletteOpen(true);
   });
 
+  useEffect(() => {
+    const handler = () => setPaletteOpen(true);
+    window.addEventListener('open-command-palette', handler);
+    return () => window.removeEventListener('open-command-palette', handler);
+  }, []);
+
   useGlobalShortcut({ key: 'g', mod: true, shift: true }, (e) => {
     e.preventDefault();
     navigate('/tasks/grid');
@@ -164,28 +170,31 @@ export function AppShell() {
         <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="ambient-tint-backdrop" aria-hidden="true" />
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-muted-foreground">
-                Loading...
-              </div>
-            }
-          >
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/tasks" element={<TasksPage />} />
-              <Route path="/tasks/grid" element={<ParallelGridPage />} />
-              <Route path="/orchestrator/grid" element={<ParallelGridPage />} />
-              <Route path="/tasks/:id" element={<TaskDetail />} />
-              <Route path="/orchestrator" element={<Navigate to="/chats/orchestrator" replace />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/skills/:name" element={<SkillEditor />} />
-              <Route path="/agents/:name" element={<AgentEditor />} />
-              <Route path="/chats/:id" element={<ChatPage />} />
-              <Route path="/workspaces" element={<WorkspacesPage />} />
-              <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
-            </Routes>
-          </Suspense>
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Loading...
+                </div>
+              }
+            >
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/tasks" element={<TasksPage />} />
+                <Route path="/tasks/grid" element={<ParallelGridPage />} />
+                <Route path="/orchestrator/grid" element={<ParallelGridPage />} />
+                <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route
+                  path="/orchestrator"
+                  element={<Navigate to="/chats/orchestrator" replace />}
+                />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/skills/:name" element={<SkillEditor />} />
+                <Route path="/agents/:name" element={<AgentEditor />} />
+                <Route path="/chats/:id" element={<ChatPage />} />
+                <Route path="/workspaces" element={<WorkspacesPage />} />
+                <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
+              </Routes>
+            </Suspense>
           </div>
         </main>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

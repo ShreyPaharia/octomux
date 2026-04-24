@@ -52,10 +52,11 @@ describe('HomePage', () => {
     expect(screen.getByTestId('sessions-inbox-slot')).toBeInTheDocument();
   });
 
-  it('renders the // INBOX eyebrow above the H1', () => {
+  it('renders the ⌘K jump affordance next to the H1', () => {
     renderHome('/');
-    const eyebrow = screen.getByTestId('page-eyebrow');
-    expect(eyebrow).toHaveTextContent('// INBOX');
+    const jump = screen.getByTestId('home-jump-palette');
+    expect(jump).toHaveTextContent(/⌘\s*K/);
+    expect(jump).toHaveTextContent(/jump/);
     const h1 = screen.getByRole('heading', { level: 1 });
     expect(h1).toHaveClass('text-[32px]');
   });
