@@ -1,26 +1,39 @@
 import { memo } from 'react';
 
-const statusConfig: Record<string, { label: string; className: string }> = {
-  draft: { label: '[DRAFT]', className: 'text-[#6a6a6a]' },
-  setting_up: { label: '[SETTING_UP]', className: 'text-[#FFB800]' },
-  running: { label: '[RUNNING]', className: 'text-[#22C55E]' },
-  closed: { label: '[CLOSED]', className: 'text-[#6a6a6a]' },
-  error: { label: '[ERROR]', className: 'text-[#EF4444]' },
-  working: { label: '[WORKING]', className: 'text-[#22C55E]' },
-  needs_attention: { label: '[ALERT]', className: 'text-[#FFB800]' },
-  done: { label: '[DONE]', className: 'text-[#22C55E]' },
+import { StatusGlyph } from './ui/status-glyph';
+
+const labels: Record<string, string> = {
+  draft: 'DRAFT',
+  setting_up: 'SETTING_UP',
+  running: 'RUNNING',
+  closed: 'CLOSED',
+  error: 'ERROR',
+  working: 'WORKING',
+  needs_attention: 'ALERT',
+  done: 'DONE',
 };
 
-const fallbackConfig = { label: '[UNKNOWN]', className: 'text-[#6a6a6a]' };
+const colors: Record<string, string> = {
+  draft: 'text-[#6a6a6a]',
+  setting_up: 'text-[#FFB800]',
+  running: 'text-[#22C55E]',
+  closed: 'text-[#6a6a6a]',
+  error: 'text-[#EF4444]',
+  working: 'text-[#22C55E]',
+  needs_attention: 'text-[#FFB800]',
+  done: 'text-[#22C55E]',
+};
 
 export const StatusBadge = memo(function StatusBadge({ status }: { status: string }) {
-  const config = statusConfig[status] || fallbackConfig;
+  const label = labels[status] || 'UNKNOWN';
+  const colorClass = colors[status] || 'text-[#6a6a6a]';
   return (
-    <span className={`text-xs font-bold uppercase tracking-wider ${config.className}`}>
-      {(status === 'running' || status === 'working') && (
-        <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse bg-[#22C55E]" />
-      )}
-      {config.label}
+    <span
+      data-status={status}
+      className={`inline-flex items-center gap-1 text-xs font-bold tracking-wider uppercase ${colorClass}`}
+    >
+      <StatusGlyph status={status} size={10} />
+      <span>{label}</span>
     </span>
   );
 });
