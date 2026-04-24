@@ -116,20 +116,27 @@ describe('TaskDetail', () => {
     });
   });
 
-  // ─── Header content (table-driven) ────────────────────────────────────────
+  // ─── Header content ───────────────────────────────────────────────────────
 
-  const headerElements = [
-    { name: 'title', text: 'Fix order validation' },
-    { name: 'description', text: 'Add negative quantity checks' },
-  ];
-
-  it.each(headerElements)('shows $name in header', async ({ text }) => {
+  it('shows title in header', async () => {
     renderDetail();
     await waitFor(() => {
-      // Description may appear in both the truncated header and the body
-      const matches = screen.getAllByText(text);
-      expect(matches.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
     });
+  });
+
+  it('does not render the description subtitle in the header (glass compact header)', async () => {
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Add negative quantity checks')).not.toBeInTheDocument();
+  });
+
+  it('renders the ⌘K keycap in the header action cluster for running tasks', async () => {
+    renderDetail();
+    const header = await screen.findByTestId('task-detail-header');
+    expect(header.textContent).toContain('⌘');
   });
 
   // ─── Running task controls ────────────────────────────────────────────────
@@ -141,16 +148,43 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('clicking Close calls updateTask with status "closed"', async () => {
+  it('clicking Close opens an inline confirm sheet (no native dialog)', async () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
       expect(screen.getByText('CLOSE')).toBeInTheDocument();
     });
     await user.click(screen.getByText('CLOSE'));
+    expect(await screen.findByTestId('close-confirm')).toBeInTheDocument();
+    // Not called until confirmed
+    expect(apiMock.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('confirming the Close sheet calls updateTask with status "closed"', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('CLOSE')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('CLOSE'));
+    await user.click(await screen.findByTestId('close-confirm-accept'));
     await waitFor(() => {
       expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', { status: 'closed' });
     });
+  });
+
+  it('cancel in Close confirm sheet dismisses without calling updateTask', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('CLOSE')).toBeInTheDocument();
+    });
+    await user.click(screen.getByText('CLOSE'));
+    await user.click(screen.getByText('Cancel'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('close-confirm')).not.toBeInTheDocument();
+    });
+    expect(apiMock.updateTask).not.toHaveBeenCalled();
   });
 
   // ─── Draft task controls ────────────────────────────────────────────────
@@ -236,6 +270,44 @@ describe('TaskDetail', () => {
     await waitFor(() => {
       expect(screen.getByText('Agent 1')).toBeInTheDocument();
     });
+  });
+
+  it('active agent tab renders a state chip glyph (T1 StatusGlyph)', async () => {
+    renderDetail();
+    const tab = await screen.findByTestId('agent-tab-a1');
+    expect(tab).toHaveAttribute('data-active', 'true');
+    expect(tab).toHaveAttribute('data-display-status', 'running');
+    // StatusGlyph renders role=img with an aria-label for the state name
+    expect(tab.querySelector('[role="img"][aria-label="running"]')).not.toBeNull();
+  });
+
+  // ─── Ship button ──────────────────────────────────────────────────────────
+
+  it('shows the Ship button for a running task and dispatches open-pr-sheet on click', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    const ship = await screen.findByTestId('ship-button');
+    const spy = vi.fn();
+    window.addEventListener('octomux:open-pr-sheet', spy);
+    try {
+      await user.click(ship);
+      expect(spy).toHaveBeenCalled();
+      const evt = spy.mock.calls[0][0] as CustomEvent<{ taskId: string }>;
+      expect(evt.detail.taskId).toBe('test-task-01');
+    } finally {
+      window.removeEventListener('octomux:open-pr-sheet', spy);
+    }
+  });
+
+  it('hides the Ship button for a scratch task (no repo)', async () => {
+    apiMock.getTask.mockResolvedValue(
+      makeTask({ run_mode: 'scratch', status: 'running', agents: [makeAgent({ id: 'a1' })] }),
+    );
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('ship-button')).not.toBeInTheDocument();
   });
 
   // ─── PR link ──────────────────────────────────────────────────────────────

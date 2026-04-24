@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useRef } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { diffExpandedKey } from '@/lib/diff-state';
+import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 
 const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -233,6 +233,79 @@ describe('DiffViewer', () => {
         screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}',
       );
       expect(opts.hideUnchangedRegions.enabled).toBe(false);
+    });
+  });
+
+  // ─── Review flow ──────────────────────────────────────────────────────────
+
+  it('clicking the review checkbox persists to localStorage and updates the progress chip', async () => {
+    const user = userEvent.setup();
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
+        { path: 'src/b.ts', status: 'A', additions: 1, deletions: 0 },
+      ],
+    });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+
+    const progress = await screen.findByTestId('review-progress');
+    expect(progress.textContent).toMatch(/0\s*\/\s*2\s*reviewed/);
+    expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
+
+    await user.click(await screen.findByTestId('review-toggle-src/a.ts'));
+
+    expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBe('true');
+    await waitFor(() => {
+      expect(screen.getByTestId('review-progress').textContent).toMatch(/1\s*\/\s*2\s*reviewed/);
+    });
+
+    // Second click toggles off
+    await user.click(screen.getByTestId('review-toggle-src/a.ts'));
+    expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
+  });
+
+  it('pressing "r" while focused on a file row toggles reviewed', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [{ path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 }],
+    });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+
+    const row = await screen.findByTestId('diff-file-row-src/a.ts');
+    expect(row).not.toHaveAttribute('data-reviewed');
+    row.focus();
+    fireEvent.keyDown(row, { key: 'r' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('diff-file-row-src/a.ts')).toHaveAttribute('data-reviewed', 'true');
+    });
+    expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBe('true');
+  });
+
+  it('reviewed files render dimmed (opacity-50) and the row carries a data-reviewed flag', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [{ path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 }],
+    });
+    localStorage.setItem(reviewedKey('t1', 'src/a.ts'), 'true');
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('diff-file-row-src/a.ts')).toHaveAttribute('data-reviewed', 'true');
+    });
+    expect(screen.getByTestId('diff-file-row-src/a.ts').className).toMatch(/opacity-50/);
+  });
+
+  it('groups files by top-level directory in the file tree', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: 'design/page.md', status: 'M', additions: 1, deletions: 0 },
+        { path: 'src/components/Foo.tsx', status: 'A', additions: 10, deletions: 0 },
+        { path: 'src/components/Bar.tsx', status: 'M', additions: 2, deletions: 1 },
+      ],
+    });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('diff-group-design')).toBeInTheDocument();
+      expect(screen.getByTestId('diff-group-src')).toBeInTheDocument();
+      expect(screen.getByTestId('diff-group-src/components')).toBeInTheDocument();
     });
   });
 
