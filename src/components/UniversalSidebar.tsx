@@ -491,10 +491,7 @@ export function UniversalSidebar() {
 
   // Active nav detection
   const activeNav = useMemo(() => {
-    if (
-      location.pathname === '/orchestrator' ||
-      location.pathname === '/chats/orchestrator'
-    )
+    if (location.pathname === '/orchestrator' || location.pathname === '/chats/orchestrator')
       return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
     if (location.pathname === '/tasks' || location.pathname.startsWith('/tasks/')) return 'tasks';
@@ -971,13 +968,7 @@ function RenameInput({
  * Lists standalone runtime agents ("chats"). The orchestrator is already shown
  * in the NAVIGATION section, so it's excluded here. Row click → /chats/:id.
  */
-function ChatsSection({
-  collapsed,
-  activePath,
-}: {
-  collapsed: boolean;
-  activePath: string;
-}) {
+function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
   const [chats, setChats] = useState<Agent[]>([]);
 
   useEffect(() => {
