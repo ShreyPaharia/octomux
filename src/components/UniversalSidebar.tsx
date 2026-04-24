@@ -48,8 +48,9 @@ const FOCUS_RING = 'focus-ring';
 const CYAN_ACTIVE_FG = '#7DD3FC';
 const NAV_INACTIVE_FG = 'rgba(255,255,255,0.65)';
 const NAV_MUTED_FG = 'rgba(255,255,255,0.45)';
-const ACTIVE_FILL = 'rgba(59,130,246,0.12)';
-const ACTIVE_STROKE = 'rgba(59,130,246,0.4)';
+// Mockup spec (PsSGN/uReOg): active row = 14% cyan fill + 2px left accent bar.
+const ACTIVE_FILL = 'rgba(59,130,246,0.14)';
+const ACTIVE_ACCENT = '#3B82F6';
 const SIDEBAR_EXPANDED_WIDTH = 240;
 const SIDEBAR_COLLAPSED_WIDTH = 56;
 const RAIL_TILE_SIZE = 36;
@@ -219,9 +220,9 @@ function Keycap({ children, active }: { children: ReactNode; active: boolean }) 
         fontSize: 10,
         fontWeight: 500,
         letterSpacing: 0.2,
-        backgroundColor: active ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.04)',
-        color: active ? CYAN_ACTIVE_FG : NAV_MUTED_FG,
-        border: active ? '1px solid rgba(59,130,246,0.3)' : '1px solid rgba(255,255,255,0.06)',
+        backgroundColor: active ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.04)',
+        color: active ? ACTIVE_ACCENT : NAV_MUTED_FG,
+        border: active ? '1px solid rgba(59,130,246,0.25)' : '1px solid rgba(255,255,255,0.06)',
       }}
       aria-hidden="true"
     >
@@ -893,11 +894,12 @@ function ExpandedNavRow({
         className={`flex items-center hover:bg-white/[0.04] ${FOCUS_RING}`}
         style={{
           padding: '8px 10px',
+          paddingLeft: isActive ? 8 : 10,
           gap: 10,
           borderRadius: 10,
           backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-          border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
-          color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+          borderLeft: `2px solid ${isActive ? ACTIVE_ACCENT : 'transparent'}`,
+          color: isActive ? ACTIVE_ACCENT : NAV_INACTIVE_FG,
           fontWeight: isActive ? 600 : 500,
           fontSize: 13,
         }}
@@ -951,7 +953,7 @@ function CollapsedNavTile({
           height: RAIL_TILE_SIZE,
           borderRadius: 10,
           backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-          border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+          border: `1px solid ${isActive ? 'rgba(59,130,246,0.4)' : 'transparent'}`,
         }}
       >
         <Icon color={iconColor} />
@@ -1174,7 +1176,6 @@ function SessionRow({
             height: 28,
             borderRadius: 8,
             backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-            border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
           }}
         >
           <StatusIcon item={item} />
@@ -1195,7 +1196,6 @@ function SessionRow({
           gap: 8,
           borderRadius: 8,
           backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-          border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
         }}
       >
         <StatusIcon item={item} />
@@ -1352,11 +1352,12 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
                 className={`flex items-center hover:bg-white/[0.04] ${FOCUS_RING}`}
                 style={{
                   padding: '8px 10px',
+                  paddingLeft: isActive ? 8 : 10,
                   gap: 10,
                   borderRadius: 10,
                   backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-                  border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
-                  color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+                  borderLeft: `2px solid ${isActive ? ACTIVE_ACCENT : 'transparent'}`,
+                  color: isActive ? ACTIVE_ACCENT : NAV_INACTIVE_FG,
                   fontWeight: isActive ? 600 : 500,
                   fontSize: 12,
                 }}
@@ -1433,8 +1434,7 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
                   height: RAIL_TILE_SIZE,
                   borderRadius: 10,
                   backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-                  border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
-                  color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+                  color: isActive ? ACTIVE_ACCENT : NAV_INACTIVE_FG,
                 }}
               >
                 💬
@@ -1451,7 +1451,6 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
                 gap: 8,
                 borderRadius: 8,
                 backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-                border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
               }}
             >
               <Link
