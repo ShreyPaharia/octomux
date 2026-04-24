@@ -520,6 +520,25 @@ export async function startTask(task: Task): Promise<void> {
          WHERE id = ?`,
     ).run('setting_up', setup.branch, setup.baseBranch, setup.worktreePath, setup.baseSha, id);
 
+    // Phase 2a: materialise a worktrees row and link the task to it. One row
+    // per setup — reuse not yet implemented (Phase 2b Workspaces).
+    const worktreeId = nanoid(12);
+    const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
+    db.prepare(
+      `INSERT INTO worktrees
+         (id, path, repo_path, branch, base_branch, base_sha, mode, status, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use', datetime('now'))`,
+    ).run(
+      worktreeId,
+      setup.worktreePath,
+      worktreeRepoPath,
+      setup.branch,
+      setup.baseBranch,
+      setup.baseSha,
+      runMode,
+    );
+    db.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
+
     logger.info(
       {
         task_id: id,
@@ -699,6 +718,11 @@ export async function closeTask(task: Task): Promise<void> {
   db.prepare(
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
   ).run(task.id);
+  // Release the worktree so Phase 2b Workspaces can show it as available.
+  db.prepare(
+    `UPDATE worktrees SET status = 'available', last_used_at = datetime('now')
+      WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
+  ).run(task.id);
   logger.info(
     { task_id: task.id, operation: 'closeTask' },
     'closeTask: DB marked task closed + agents stopped',
@@ -731,6 +755,7 @@ export async function closeTask(task: Task): Promise<void> {
 }
 
 export async function deleteTask(task: Task): Promise<void> {
+  const db = getDb();
   logger.info(
     { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
     'deleteTask: start',
@@ -823,6 +848,20 @@ export async function deleteTask(task: Task): Promise<void> {
       }
       break;
     }
+  }
+
+  // Worktree row fate: `new`/`scratch` own the filesystem, so their row goes
+  // away with the task. `existing`/`none` belong to the user — keep the row
+  // so Phase 2b Workspaces still sees it.
+  if (task.run_mode === 'new' || task.run_mode === 'scratch') {
+    db.prepare(
+      `DELETE FROM worktrees WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
+    ).run(task.id);
+  } else {
+    db.prepare(
+      `UPDATE worktrees SET status = 'available', last_used_at = datetime('now')
+         WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
+    ).run(task.id);
   }
 
   logger.info({ task_id: task.id, operation: 'deleteTask' }, 'deleteTask: complete');
