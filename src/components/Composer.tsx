@@ -275,7 +275,12 @@ export function Composer({ onSubmitted }: Props = {}) {
   const showScratchHint = !hasRepo && state.mode !== 'add-agent';
 
   return (
-    <GlassPanel level={3} specular className="flex flex-col gap-2 px-4 py-3" data-testid="composer">
+    <GlassPanel
+      level={3}
+      specular
+      className="flex flex-col gap-2 rounded-[20px] px-4 py-3"
+      data-testid="composer"
+    >
       <IntentHeader
         state={state}
         sourceTask={sourceTask}
