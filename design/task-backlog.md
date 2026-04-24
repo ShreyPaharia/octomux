@@ -9,6 +9,7 @@ primitives), then T2–T6 in parallel, then T7 last (integrates lifecycle/empty
 states into surfaces touched by earlier tasks).
 
 **All tasks share these constraints:**
+
 - Repo: `/Users/shreypaharia/Documents/Projects/Ostium/octomux-agents`, base branch `main`.
 - `bun run lint`, `bun run typecheck`, `bun run test` must pass.
 - Conventional commits. No `Co-Authored-By` lines.
