@@ -110,39 +110,43 @@ describe('Composer / URL hydration', () => {
 describe('Composer / submit', () => {
   const user = userEvent.setup();
 
-  it('scratch mode → POST /tasks with run_mode=scratch, navigates push', async () => {
-    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'new-1', title: 'hello' }));
+  it('scratch mode → POST /api/chats, navigates to /chats/:id', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'chat-1' }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
     renderComposer('/?mode=scratch');
     await user.type(screen.getByTestId('composer-prompt'), 'hello world');
     await user.click(screen.getByTestId('composer-submit'));
     await waitFor(() => {
-      expect(apiMock.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          run_mode: 'scratch',
-          description: 'hello world',
-          initial_prompt: 'hello world',
-        }),
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/chats',
+        expect.objectContaining({ method: 'POST' }),
       );
     });
-    expect(mockNavigate).toHaveBeenLastCalledWith('/tasks/new-1');
+    expect(mockNavigate).toHaveBeenLastCalledWith('/chats/chat-1');
+    expect(apiMock.createTask).not.toHaveBeenCalled();
   });
 
-  it('bare `/` URL → typing + Enter dispatches a scratch task (no repo_path/base_branch)', async () => {
-    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'scratch-default', title: 'hello' }));
+  it('bare `/` URL → typing + Enter creates a chat, navigates to /chats/:id', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'chat-default' }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
     renderComposer('/');
     const textarea = screen.getByTestId('composer-prompt');
     await user.type(textarea, 'hello world{Enter}');
     await waitFor(() => {
-      expect(apiMock.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          run_mode: 'scratch',
-          initial_prompt: 'hello world',
-        }),
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/chats',
+        expect.objectContaining({ method: 'POST' }),
       );
     });
-    const payload = apiMock.createTask.mock.calls[0][0];
-    expect(payload).not.toHaveProperty('repo_path');
-    expect(payload).not.toHaveProperty('base_branch');
+    expect(mockNavigate).toHaveBeenLastCalledWith('/chats/chat-default');
   });
 
   it('new mode → POST /tasks with run_mode=new, repo_path, base_branch', async () => {
@@ -212,7 +216,7 @@ describe('Composer / submit', () => {
 
   it('draft toggle adds draft=true to payload', async () => {
     apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'd1' }));
-    renderComposer('/?mode=scratch');
+    renderComposer('/?repo=%2Fr&mode=new&branch=main');
     await user.click(screen.getByTestId('draft-toggle'));
     await user.type(screen.getByTestId('composer-prompt'), 'draft me');
     await user.click(screen.getByTestId('composer-submit'));
@@ -223,7 +227,7 @@ describe('Composer / submit', () => {
 
   it('Enter (without shift) submits', async () => {
     apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'e1' }));
-    renderComposer('/?mode=scratch');
+    renderComposer('/?repo=%2Fr&mode=new&branch=main');
     const textarea = screen.getByTestId('composer-prompt');
     await user.type(textarea, 'go{Enter}');
     await waitFor(() => {
@@ -248,7 +252,7 @@ describe('Composer / submit', () => {
     apiMock.createTask.mockRejectedValueOnce(
       new Error('That worktree is already in use by task abc12345'),
     );
-    renderComposer('/?mode=scratch');
+    renderComposer('/?repo=%2Fr&mode=new&branch=main');
     await user.type(screen.getByTestId('composer-prompt'), 'p');
     await user.click(screen.getByTestId('composer-submit'));
     await waitFor(() => {
@@ -334,7 +338,7 @@ describe('Composer / global shortcut bridges', () => {
   it('`submit-composer` window event submits when state is valid', async () => {
     apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'global-submit' }));
     const user = userEvent.setup();
-    renderComposer('/?mode=scratch');
+    renderComposer('/?repo=%2Fr&mode=new&branch=main');
     await user.type(screen.getByTestId('composer-prompt'), 'via global shortcut');
     window.dispatchEvent(new CustomEvent('submit-composer'));
     await waitFor(() => {

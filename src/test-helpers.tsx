@@ -14,6 +14,8 @@ export const AGENT_DEFAULTS: Agent = {
   claude_session_id: null,
   hook_activity: 'active',
   hook_activity_updated_at: null,
+  pinned: false,
+  tmux_session: null,
   created_at: '2026-01-01 00:00:00',
 };
 
@@ -40,6 +42,7 @@ export const TASK_DEFAULTS: Task = {
   base_sha: null,
   last_viewed_at: null,
   source: null,
+  worktree_id: null,
   error: null,
   created_at: '2026-01-01 00:00:00',
   updated_at: '2026-01-01 00:00:00',

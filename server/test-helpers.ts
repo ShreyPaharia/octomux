@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import { initDb, setDb } from './db.js';
+import { SELECT_TASK_SQL } from './task-select.js';
 import type { Task, Agent, UserTerminal } from './types.js';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ export const DEFAULTS = {
     base_sha: null,
     last_viewed_at: null,
     source: null,
+    worktree_id: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -49,6 +51,7 @@ export const DEFAULTS = {
     base_sha: 'abcdef0000000000000000000000000000000000',
     last_viewed_at: null,
     source: null,
+    worktree_id: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -61,6 +64,8 @@ export const DEFAULTS = {
     label: 'Agent 1',
     status: 'running' as const,
     claude_session_id: 'test-session-uuid-01',
+    pinned: false,
+    tmux_session: null,
     created_at: '2026-01-01 00:00:00',
   },
 
@@ -110,33 +115,55 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     ...overrides,
   } as Task;
 
+  // Phase 2a: worktree/branch/base_branch/base_sha/repo_path/run_mode now live
+  // on the worktrees table. Materialise a row only when the fixture supplies a
+  // worktree path (or, for 'none' mode, a repo_path standing in as the path).
+  let wtId: string | null = task.worktree_id ?? null;
+  // Tests express "no worktree" by passing `worktree: null` explicitly; any
+  // other shape (including the default repo_path) gets a row so joins work.
+  const explicitlyNullWorktree = 'worktree' in overrides && overrides.worktree === null;
+  const shouldCreateRow =
+    !wtId && !explicitlyNullWorktree && (!!task.worktree || !!task.repo_path);
+  if (shouldCreateRow) {
+    wtId = `wt-${task.id}`;
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use')`,
+    ).run(
+      wtId,
+      task.worktree ?? task.repo_path ?? '',
+      task.repo_path ?? null,
+      task.branch ?? null,
+      task.base_branch ?? null,
+      task.base_sha ?? null,
+      task.run_mode ?? 'new',
+    );
+  }
+
   db.prepare(
-    `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, run_mode, base_sha, last_viewed_at, source, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
     task.description,
-    task.repo_path,
     task.status,
-    task.branch,
-    task.base_branch,
-    task.worktree,
     task.tmux_session,
     task.pr_url,
     task.pr_number,
     task.pr_head_sha ?? null,
     task.user_window_index,
     task.initial_prompt,
-    task.run_mode ?? 'new',
-    task.base_sha ?? null,
     task.last_viewed_at ?? null,
     task.source ?? null,
+    wtId,
     task.error,
     task.created_at,
     task.updated_at,
   );
 
+  // Echo joined shape back for assertions.
+  task.worktree_id = wtId;
   return task;
 }
 
@@ -162,7 +189,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
 }
 
 export function getTask(db: Database.Database, id: string): Task | undefined {
-  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | undefined;
+  return db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
 export function getAgents(db: Database.Database, taskId: string): Agent[] {
@@ -313,21 +340,16 @@ export const TASKS_TABLE_COLUMNS = [
   'id',
   'title',
   'description',
-  'repo_path',
   'status',
-  'branch',
-  'base_branch',
-  'worktree',
+  'worktree_id',
   'tmux_session',
   'pr_url',
   'pr_number',
   'pr_head_sha',
   'user_window_index',
   'initial_prompt',
-  'source',
-  'base_sha',
   'last_viewed_at',
-  'run_mode',
+  'source',
   'error',
   'created_at',
   'updated_at',
@@ -342,7 +364,22 @@ export const AGENTS_TABLE_COLUMNS = [
   'claude_session_id',
   'hook_activity',
   'hook_activity_updated_at',
+  'pinned',
+  'tmux_session',
   'created_at',
+];
+
+export const WORKTREES_TABLE_COLUMNS = [
+  'id',
+  'path',
+  'repo_path',
+  'branch',
+  'base_branch',
+  'base_sha',
+  'mode',
+  'status',
+  'created_at',
+  'last_used_at',
 ];
 
 export const PERMISSION_PROMPTS_TABLE_COLUMNS = [

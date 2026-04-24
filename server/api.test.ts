@@ -21,8 +21,13 @@ vi.mock('./task-runner.js', async () => {
       const db = getDb();
       const branch = task.branch || `agents/${task.id}`;
       db.prepare(
-        `UPDATE tasks SET status = 'running', tmux_session = ?, branch = COALESCE(branch, ?), worktree = ?, updated_at = datetime('now') WHERE id = ?`,
-      ).run(`octomux-agent-${task.id}`, branch, `/tmp/.worktrees/${task.id}`, task.id);
+        `UPDATE tasks SET status = 'running', tmux_session = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run(`octomux-agent-${task.id}`, task.id);
+      if (task.worktree_id) {
+        db.prepare(
+          `UPDATE worktrees SET path = ?, branch = COALESCE(branch, ?) WHERE id = ?`,
+        ).run(`/tmp/.worktrees/${task.id}`, branch, task.worktree_id);
+      }
     }),
     closeTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -88,6 +93,37 @@ vi.mock('fs', () => ({
     },
   },
 }));
+
+vi.mock('./chats.js', async () => {
+  const { getDb } = await import('./db.js');
+  return {
+    createChat: vi.fn(async (opts: { label?: string; cwd?: string } = {}) => {
+      const db = getDb();
+      const id = 'chat-test-01';
+      db.prepare(
+        `INSERT INTO agents
+           (id, task_id, window_index, label, status, claude_session_id,
+            hook_activity, pinned, tmux_session, created_at)
+         VALUES (?, NULL, 0, ?, 'running', ?, 'active', 0, ?, datetime('now'))`,
+      ).run(id, opts.label ?? 'Chat', 'sid-01', `octomux-chat-${id}`);
+      return db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
+    }),
+    listChats: vi.fn(() => {
+      const db = getDb();
+      return db
+        .prepare(`SELECT * FROM agents WHERE task_id IS NULL ORDER BY pinned DESC`)
+        .all();
+    }),
+    getChat: vi.fn((id: string) => {
+      const db = getDb();
+      return (
+        db
+          .prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`)
+          .get(id) ?? null
+      );
+    }),
+  };
+});
 
 vi.mock('./orchestrator.js', () => ({
   isOrchestratorRunning: vi.fn(async () => true),
@@ -607,7 +643,12 @@ describe('PATCH /api/tasks/:id', () => {
     'resumes run_mode=none %s task when repo_path exists',
     async (status) => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      insertTask(db, { ...DEFAULTS.runningTask, status, run_mode: 'none', worktree: null });
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        status,
+        run_mode: 'none',
+        worktree: DEFAULTS.runningTask.repo_path,
+      });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
         .send({ status: 'running' });
@@ -620,7 +661,12 @@ describe('PATCH /api/tasks/:id', () => {
     'refuses resume of run_mode=none %s task when repo_path missing',
     async (status) => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
-      insertTask(db, { ...DEFAULTS.runningTask, status, run_mode: 'none', worktree: null });
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        status,
+        run_mode: 'none',
+        worktree: DEFAULTS.runningTask.repo_path,
+      });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
         .send({ status: 'running' });
@@ -739,6 +785,13 @@ describe('GET /api/tasks/:id/diff', () => {
 
   it('returns 400 when task has no worktree', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, worktree: null });
+    // Explicitly null the worktree row path so the diff handler reports absence.
+    db.prepare(
+      `UPDATE worktrees SET path = '' WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
+    ).run(DEFAULTS.runningTask.id);
+    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(
+      DEFAULTS.runningTask.id,
+    );
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/worktree/i);
@@ -1569,5 +1622,83 @@ describe('PATCH /api/settings', () => {
     const res = await request(app).patch('/api/settings').send({ claudeFlags: '`whoami`' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Invalid claudeFlags');
+  });
+});
+
+describe('Chats API (standalone agents)', () => {
+  it('POST /api/chats creates a standalone agent (task_id=NULL)', async () => {
+    const res = await request(app).post('/api/chats').send({ label: 'My chat' });
+    expect(res.status).toBe(201);
+    expect(res.body.task_id).toBeNull();
+    expect(res.body.label).toBe('My chat');
+    expect(res.body.tmux_session).toMatch(/^octomux-chat-/);
+  });
+
+  it('GET /api/chats lists standalone agents, orchestrator pinned first', async () => {
+    await request(app).post('/api/chats').send({ label: 'Chat A' });
+    const res = await request(app).get('/api/chats');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    // Orchestrator is seeded on init with pinned=1 and should sort first.
+    expect(res.body[0].id).toBe('orchestrator');
+    expect(res.body[0].pinned).toBe(1);
+  });
+
+  it('GET /api/chats/:id returns a chat by id', async () => {
+    const created = await request(app).post('/api/chats').send({ label: 'Chat B' });
+    const res = await request(app).get(`/api/chats/${created.body.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(created.body.id);
+    expect(res.body.label).toBe('Chat B');
+  });
+
+  it('GET /api/chats/:id returns 404 for unknown id', async () => {
+    const res = await request(app).get('/api/chats/does-not-exist');
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /api/worktrees', () => {
+  it('returns an empty list when no worktrees exist', async () => {
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it('returns worktree rows with task_count aggregate', async () => {
+    // Seed worktree + linked task.
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt1','/tmp/wt1','new','in_use')`,
+    ).run();
+    insertTask(db, { id: 'tX', worktree_id: 'wt1', status: 'running' });
+
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].id).toBe('wt1');
+    expect(res.body[0].task_count).toBe(1);
+    expect(res.body[0].active_task_id).toBe('tX');
+  });
+});
+
+describe('GET /api/tasks/:id — worktree_row join', () => {
+  it('includes the linked worktree row under worktree_row', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt2','/tmp/wt2','existing','in_use')`,
+    ).run();
+    insertTask(db, { id: 'tJ', worktree_id: 'wt2' });
+    const res = await request(app).get('/api/tasks/tJ');
+    expect(res.status).toBe(200);
+    expect(res.body.worktree_row).toBeTruthy();
+    expect(res.body.worktree_row.id).toBe('wt2');
+    expect(res.body.worktree_row.path).toBe('/tmp/wt2');
+  });
+
+  it('worktree_row is null when task has no worktree_id', async () => {
+    insertTask(db, { id: 'tK' });
+    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = 'tK'`).run();
+    const res = await request(app).get('/api/tasks/tK');
+    expect(res.status).toBe(200);
+    expect(res.body.worktree_row).toBeNull();
   });
 });

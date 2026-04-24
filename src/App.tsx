@@ -3,6 +3,7 @@ import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
+import { Navigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import { OrchestratorProvider } from './lib/orchestrator-context';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
@@ -19,10 +20,10 @@ import {
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
-const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SkillEditor = lazy(() => import('./pages/SkillEditor'));
 const AgentEditor = lazy(() => import('./pages/AgentEditor'));
+const ChatPage = lazy(() => import('./pages/ChatPage'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -146,10 +147,11 @@ export function AppShell() {
             <Route path="/" element={<HomePage />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/tasks/:id" element={<TaskDetail />} />
-            <Route path="/orchestrator" element={<OrchestratorPage />} />
+            <Route path="/orchestrator" element={<Navigate to="/chats/orchestrator" replace />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/skills/:name" element={<SkillEditor />} />
             <Route path="/agents/:name" element={<AgentEditor />} />
+            <Route path="/chats/:id" element={<ChatPage />} />
           </Routes>
         </Suspense>
       </main>

@@ -25,6 +25,7 @@ import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
 import type { Task } from './types.js';
+import { SELECT_TASK_SQL } from './task-select.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
@@ -46,7 +47,7 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 async function recoverTasks(): Promise<void> {
   const db = getDb();
   const staleTasks = db
-    .prepare("SELECT * FROM tasks WHERE status IN ('running', 'setting_up')")
+    .prepare(`${SELECT_TASK_SQL} WHERE t.status IN ('running', 'setting_up')`)
     .all() as Task[];
 
   for (const task of staleTasks) {
