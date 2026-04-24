@@ -25,6 +25,7 @@ export const DEFAULTS = {
     base_sha: null,
     last_viewed_at: null,
     source: null,
+    worktree_id: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -49,6 +50,7 @@ export const DEFAULTS = {
     base_sha: 'abcdef0000000000000000000000000000000000',
     last_viewed_at: null,
     source: null,
+    worktree_id: null,
     error: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -61,6 +63,8 @@ export const DEFAULTS = {
     label: 'Agent 1',
     status: 'running' as const,
     claude_session_id: 'test-session-uuid-01',
+    pinned: false,
+    tmux_session: null,
     created_at: '2026-01-01 00:00:00',
   },
 
@@ -328,6 +332,7 @@ export const TASKS_TABLE_COLUMNS = [
   'base_sha',
   'last_viewed_at',
   'run_mode',
+  'worktree_id',
   'error',
   'created_at',
   'updated_at',
@@ -342,7 +347,22 @@ export const AGENTS_TABLE_COLUMNS = [
   'claude_session_id',
   'hook_activity',
   'hook_activity_updated_at',
+  'pinned',
+  'tmux_session',
   'created_at',
+];
+
+export const WORKTREES_TABLE_COLUMNS = [
+  'id',
+  'path',
+  'repo_path',
+  'branch',
+  'base_branch',
+  'base_sha',
+  'mode',
+  'status',
+  'created_at',
+  'last_used_at',
 ];
 
 export const PERMISSION_PROMPTS_TABLE_COLUMNS = [

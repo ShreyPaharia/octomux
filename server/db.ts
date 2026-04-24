@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { nanoid } from 'nanoid';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
 
@@ -94,7 +95,96 @@ CREATE TABLE IF NOT EXISTS config (
     github_login    TEXT,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS worktrees (
+    id            TEXT PRIMARY KEY,
+    path          TEXT NOT NULL,
+    repo_path     TEXT,
+    branch        TEXT,
+    base_branch   TEXT,
+    base_sha      TEXT,
+    mode          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'available',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_worktrees_path ON worktrees(path);
+CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
 `;
+
+/** Well-known id for the pinned orchestrator agent row. */
+export const ORCHESTRATOR_AGENT_ID = 'orchestrator';
+/** Tmux session name for the orchestrator agent. */
+export const ORCHESTRATOR_TMUX_SESSION = 'octomux-orchestrator';
+
+/**
+ * Returns true when the live `agents.task_id` column is declared NOT NULL.
+ * Used to trigger the nullable-task_id migration exactly once.
+ */
+function agentFkIsNotNull(instance: Database.Database): boolean {
+  const rows = instance.pragma('table_info(agents)') as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const col = rows.find((c) => c.name === 'task_id');
+  return !!col && col.notnull === 1;
+}
+
+/**
+ * Rebuild the `agents` table to make `task_id` nullable while preserving rows,
+ * FK, cascade behaviour, and indexes. SQLite < 3.35 can't ALTER a column's
+ * NOT NULL in place; a table rebuild is the supported path.
+ */
+function rebuildAgentsTable(instance: Database.Database): void {
+  instance
+    .transaction(() => {
+      // Capture dynamically-added columns that may not exist in the CREATE.
+      const oldCols = (
+        instance.pragma('table_info(agents)') as Array<{ name: string }>
+      ).map((c) => c.name);
+      const has = (c: string) => oldCols.includes(c);
+
+      instance.exec(`
+        CREATE TABLE agents_new (
+          id                       TEXT PRIMARY KEY,
+          task_id                  TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          window_index             INTEGER NOT NULL,
+          label                    TEXT NOT NULL,
+          status                   TEXT NOT NULL DEFAULT 'running',
+          claude_session_id        TEXT,
+          hook_activity            TEXT NOT NULL DEFAULT 'active',
+          hook_activity_updated_at TEXT,
+          created_at               TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+
+      const selectCols = [
+        'id',
+        'task_id',
+        'window_index',
+        'label',
+        'status',
+        has('claude_session_id') ? 'claude_session_id' : 'NULL AS claude_session_id',
+        has('hook_activity') ? 'hook_activity' : `'active' AS hook_activity`,
+        has('hook_activity_updated_at')
+          ? 'hook_activity_updated_at'
+          : 'NULL AS hook_activity_updated_at',
+        'created_at',
+      ].join(', ');
+
+      instance.exec(`INSERT INTO agents_new SELECT ${selectCols} FROM agents`);
+      instance.exec(`DROP TABLE agents`);
+      instance.exec(`ALTER TABLE agents_new RENAME TO agents`);
+
+      // Recreate indexes (idempotent CREATE IF NOT EXISTS).
+      instance.exec(`CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id)`);
+      instance.exec(
+        `CREATE INDEX IF NOT EXISTS idx_agents_claude_session_id ON agents(claude_session_id)`,
+      );
+    })
+    .default();
+}
 
 let db: Database.Database;
 
@@ -199,6 +289,96 @@ export function initDb(instance: Database.Database): void {
        ON tasks(repo_path)
        WHERE run_mode = 'none' AND status IN ('setting_up','running')`,
   );
+
+  // ─── Phase 2a migration: worktrees entity + agents.task_id nullable ──────
+  // Additive shape: introduces `worktrees` table, `tasks.worktree_id`,
+  // `agents.pinned`, `agents.tmux_session`, and nullable `agents.task_id`.
+  // Legacy columns on `tasks` (worktree, run_mode, etc.) remain for now;
+  // a later phase rewrites consumers then drops them.
+  const agentFk = agentFkIsNotNull(instance);
+  {
+    instance
+      .transaction(() => {
+        if (!taskCols.has('worktree_id')) {
+          instance.exec(`ALTER TABLE tasks ADD COLUMN worktree_id TEXT REFERENCES worktrees(id)`);
+          taskCols.add('worktree_id');
+        }
+
+        // Backfill worktrees for any task that has a worktree path but no link.
+        const rows = instance
+          .prepare(
+            `SELECT id, repo_path, branch, base_branch, base_sha, worktree, run_mode, created_at
+               FROM tasks
+              WHERE worktree IS NOT NULL AND worktree_id IS NULL`,
+          )
+          .all() as Array<{
+          id: string;
+          repo_path: string | null;
+          branch: string | null;
+          base_branch: string | null;
+          base_sha: string | null;
+          worktree: string | null;
+          run_mode: string | null;
+          created_at: string;
+        }>;
+
+        const insertWt = instance.prepare(
+          `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use', ?)`,
+        );
+        const linkTask = instance.prepare(
+          `UPDATE tasks SET worktree_id = ? WHERE id = ?`,
+        );
+
+        for (const r of rows) {
+          const wtId = nanoid(12);
+          const mode = r.run_mode || 'new';
+          // scratch tasks: repo_path/branch/etc may be absent by design.
+          const repoPath = mode === 'scratch' ? null : r.repo_path;
+          const branch = mode === 'scratch' ? null : r.branch;
+          const baseBranch = mode === 'scratch' ? null : r.base_branch;
+          const baseSha = mode === 'scratch' ? null : r.base_sha;
+          insertWt.run(
+            wtId,
+            r.worktree!,
+            repoPath,
+            branch,
+            baseBranch,
+            baseSha,
+            mode,
+            r.created_at,
+          );
+          linkTask.run(wtId, r.id);
+        }
+      })
+      .default();
+  }
+
+  // Make agents.task_id nullable via table rebuild if currently NOT NULL.
+  if (agentFk) {
+    rebuildAgentsTable(instance);
+  }
+
+  // Add agents.pinned and agents.tmux_session columns (post-rebuild).
+  const agentCols2 = columnsOf('agents');
+  addColumn('agents', 'pinned', 'pinned INTEGER NOT NULL DEFAULT 0', agentCols2);
+  addColumn('agents', 'tmux_session', 'tmux_session TEXT', agentCols2);
+
+  // New partial unique index keyed to worktree_id (complements legacy ones).
+  instance.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_active_worktree
+       ON tasks(worktree_id)
+       WHERE status IN ('draft','setting_up','running') AND worktree_id IS NOT NULL`,
+  );
+
+  // Ensure orchestrator pinned agent row exists (idempotent).
+  instance
+    .prepare(
+      `INSERT OR IGNORE INTO agents
+         (id, task_id, window_index, label, status, hook_activity, pinned, tmux_session, created_at)
+       VALUES (?, NULL, 0, 'orchestrator', 'idle', 'active', 1, ?, datetime('now'))`,
+    )
+    .run(ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_TMUX_SESSION);
 
   // Data migrations
   instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);
