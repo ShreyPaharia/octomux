@@ -33,12 +33,12 @@ System-state strips (full-width banners with inline captions):
 
 ## Material system
 
-| Tier | Fill | Blur | Where |
-| --- | --- | --- | --- |
-| **L0** | Opaque `#0A0A0B` / `#0B0C0F` | — | page canvas, terminal, diff pane, prompt input |
-| **L1** | 8% white | 40–50px backdrop | sidebar, headers, filter bar, orchestrator command bar |
-| **L2** | 12–14% white | 50–60px backdrop | session / task / settings cards |
-| **L3** | 18–23% white | 80px backdrop + drop shadow | composer dock, palette, PR sheet |
+| Tier   | Fill                         | Blur                        | Where                                                  |
+| ------ | ---------------------------- | --------------------------- | ------------------------------------------------------ |
+| **L0** | Opaque `#0A0A0B` / `#0B0C0F` | —                           | page canvas, terminal, diff pane, prompt input         |
+| **L1** | 8% white                     | 40–50px backdrop            | sidebar, headers, filter bar, orchestrator command bar |
+| **L2** | 12–14% white                 | 50–60px backdrop            | session / task / settings cards                        |
+| **L3** | 18–23% white                 | 80px backdrop + drop shadow | composer dock, palette, PR sheet                       |
 
 Every raised panel carries a 1px **specular top-edge highlight** (white at
 18–30%) and a 1px inset stroke to define its glass edge. Ambient cyan +
@@ -48,7 +48,7 @@ content to blur through.
 ## Key decisions
 
 - **Opaque terminals / diff panes / prompt inputs.** Readability always beats
-  decoration. Glass tints everything *around* code, never code itself.
+  decoration. Glass tints everything _around_ code, never code itself.
 - **One selection vocabulary.** Cyan-tinted glass (`#3B82F61F` fill + 1px
   `#3B82F666` stroke) means "selected" everywhere — sidebar rows, active
   diff file, selected palette row, active repo chip.
