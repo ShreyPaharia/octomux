@@ -9,6 +9,38 @@ export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
 
 export const RUN_MODES: readonly RunMode[] = ['new', 'existing', 'none', 'scratch'] as const;
 
+export type WorktreeStatus = 'available' | 'in_use';
+
+export interface Worktree {
+  id: string;
+  path: string;
+  repo_path: string | null;
+  branch: string | null;
+  base_branch: string | null;
+  base_sha: string | null;
+  mode: RunMode;
+  status: WorktreeStatus;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** Task joined with its worktree row — returned by GET /api/tasks/:id. */
+export interface TaskWithWorktree extends Task {
+  worktree_row: Worktree | null;
+}
+
+/** Aggregated worktree summary returned by GET /api/worktrees. */
+export interface WorktreeSummary extends Worktree {
+  task_count: number;
+  active_task_id: string | null;
+}
+
+/** Request body for POST /api/chats — create a standalone runtime agent. */
+export interface CreateChatRequest {
+  label?: string;
+  cwd?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -28,6 +60,8 @@ export interface Task {
   base_sha: string | null;
   last_viewed_at: string | null;
   source: TaskSource;
+  /** Phase 2a: link into the extracted `worktrees` table. Null = scratch/none during transition. */
+  worktree_id: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -39,13 +73,18 @@ export interface Task {
 
 export interface Agent {
   id: string;
-  task_id: string;
+  /** Phase 2a: null for standalone agents (orchestrator, chats). */
+  task_id: string | null;
   window_index: number;
   label: string;
   status: AgentStatus;
   claude_session_id: string | null;
   hook_activity: HookActivity;
   hook_activity_updated_at: string | null;
+  /** Phase 2a: true for pinned rows (orchestrator). */
+  pinned: boolean;
+  /** Phase 2a: populated for standalone agents; task-scoped agents read via task.tmux_session. */
+  tmux_session: string | null;
   created_at: string;
 }
 

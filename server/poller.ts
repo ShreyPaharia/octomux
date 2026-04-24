@@ -8,6 +8,7 @@ import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
 import { readGithubLogin } from './github-login.js';
+import { SELECT_TASK_SQL } from './task-select.js';
 import type { Task, UserTerminal } from './types.js';
 
 const logger = childLogger('poller');
@@ -41,7 +42,7 @@ export async function pollStatuses(): Promise<void> {
   // session column and mark the task 'Setup interrupted' prematurely.
   const runningTasks = db
     .prepare(
-      "SELECT * FROM tasks WHERE status IN ('running', 'setting_up') AND tmux_session IS NOT NULL",
+      `${SELECT_TASK_SQL} WHERE t.status IN ('running', 'setting_up') AND t.tmux_session IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -88,7 +89,7 @@ export function ensureHooksInstalled(): void {
   const db = getDb();
   const runningTasks = db
     .prepare(
-      "SELECT * FROM tasks WHERE status IN ('running', 'setting_up') AND worktree IS NOT NULL",
+      `${SELECT_TASK_SQL} WHERE t.status IN ('running', 'setting_up') AND w.path IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -127,7 +128,7 @@ export async function pollPRs(): Promise<void> {
   const db = getDb();
   const tasks = db
     .prepare(
-      "SELECT * FROM tasks WHERE status IN ('running', 'closed') AND pr_url IS NULL AND branch IS NOT NULL",
+      `${SELECT_TASK_SQL} WHERE t.status IN ('running', 'closed') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -155,7 +156,7 @@ export async function pollPRs(): Promise<void> {
 export async function checkMergedPRs(): Promise<void> {
   const db = getDb();
   const tasks = db
-    .prepare("SELECT * FROM tasks WHERE status = 'running' AND pr_number IS NOT NULL")
+    .prepare(`${SELECT_TASK_SQL} WHERE t.status = 'running' AND t.pr_number IS NOT NULL`)
     .all() as Task[];
 
   const results = await Promise.allSettled(
@@ -214,7 +215,14 @@ interface OpenReviewPR {
 /** List tracked repos — same derivation as GET /api/recent-repos. */
 function listTrackedRepos(): string[] {
   const rows = getDb()
-    .prepare(`SELECT repo_path FROM tasks GROUP BY repo_path ORDER BY MAX(created_at) DESC`)
+    .prepare(
+      `SELECT w.repo_path AS repo_path
+         FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path IS NOT NULL
+        GROUP BY w.repo_path
+        ORDER BY MAX(t.created_at) DESC`,
+    )
     .all() as Array<{ repo_path: string }>;
   return rows.map((r) => r.repo_path);
 }
@@ -340,10 +348,14 @@ async function upsertReviewTask(
   const db = getDb();
   const existing = db
     .prepare(
-      `SELECT id, status, source, pr_head_sha, initial_prompt, tmux_session
-       FROM tasks
-       WHERE repo_path = ? AND pr_number = ? AND status NOT IN ('closed', 'error')
-       ORDER BY created_at DESC LIMIT 1`,
+      `SELECT t.id AS id, t.status AS status, t.source AS source,
+              t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
+              t.tmux_session AS tmux_session
+         FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.pr_number = ?
+          AND t.status NOT IN ('closed', 'error')
+        ORDER BY t.created_at DESC LIMIT 1`,
     )
     .get(repoPath, pr.number) as
     | {
@@ -397,23 +409,19 @@ async function upsertReviewTask(
   const description = `Auto-created review task for PR #${pr.number} in ${short}`;
   const prompt = buildReviewPrompt(pr, new Date().toISOString());
 
+  // Materialise a worktree row for the review-branch base before linking the task.
+  const worktreeId = nanoid(12);
+  db.prepare(
+    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+     VALUES (?, '', ?, ?, ?, 'new', 'available')`,
+  ).run(worktreeId, repoPath, branch, pr.baseRefName);
+
   db.prepare(
     `INSERT INTO tasks
-       (id, title, description, repo_path, status, branch, base_branch, pr_url, pr_number,
-        pr_head_sha, initial_prompt, source, run_mode)
-     VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, 'auto_review', 'new')`,
-  ).run(
-    id,
-    title,
-    description,
-    repoPath,
-    branch,
-    pr.baseRefName,
-    pr.url,
-    pr.number,
-    pr.headRefOid,
-    prompt,
-  );
+       (id, title, description, status, pr_url, pr_number, pr_head_sha,
+        initial_prompt, source, worktree_id)
+     VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, 'auto_review', ?)`,
+  ).run(id, title, description, pr.url, pr.number, pr.headRefOid, prompt, worktreeId);
   return { action: 'created', taskId: id };
 }
 
@@ -422,8 +430,9 @@ function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<numb
   const db = getDb();
   const drafts = db
     .prepare(
-      `SELECT id, pr_number FROM tasks
-       WHERE repo_path = ? AND source = 'auto_review' AND status = 'draft'`,
+      `SELECT t.id AS id, t.pr_number AS pr_number FROM tasks t
+         LEFT JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.status = 'draft'`,
     )
     .all(repoPath) as Array<{ id: string; pr_number: number | null }>;
 

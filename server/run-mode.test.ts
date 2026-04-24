@@ -154,12 +154,38 @@ describe('migration: no_worktree → run_mode', () => {
         tmux_session TEXT,
         pr_url       TEXT,
         pr_number    INTEGER,
+        pr_head_sha  TEXT,
+        user_window_index INTEGER,
         initial_prompt TEXT,
+        last_viewed_at TEXT,
+        source       TEXT,
+        run_mode     TEXT,
+        base_sha     TEXT,
         error        TEXT,
         no_worktree INTEGER NOT NULL DEFAULT 0,
         created_at   TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
       );
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        window_index INTEGER NOT NULL, label TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        claude_session_id TEXT,
+        hook_activity TEXT NOT NULL DEFAULT 'active',
+        hook_activity_updated_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE permission_prompts (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        agent_id TEXT, session_id TEXT, tool_name TEXT,
+        tool_input TEXT, status TEXT, created_at TEXT, resolved_at TEXT
+      );
+      CREATE TABLE user_terminals (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        window_index INTEGER, label TEXT, status TEXT, created_at TEXT
+      );
+      CREATE TABLE repo_configs (repo_path TEXT PRIMARY KEY);
+      CREATE TABLE config (id INTEGER PRIMARY KEY CHECK (id = 1));
     `);
     return db;
   }
@@ -176,22 +202,37 @@ describe('migration: no_worktree → run_mode', () => {
       const legacy = legacyDb();
       legacy
         .prepare(
-          `INSERT INTO tasks (id, title, description, repo_path, no_worktree)
-           VALUES (?, 'T', 'D', ?, ?)`,
+          `INSERT INTO tasks (id, title, description, repo_path, no_worktree, worktree)
+           VALUES (?, 'T', 'D', ?, ?, ?)`,
         )
-        .run(id, repo_path, no_worktree);
+        .run(
+          id,
+          repo_path,
+          no_worktree,
+          // Phase 2a migrates tasks with a worktree path into the worktrees
+          // table. Give each case a plausible path so the backfill fires.
+          expected === 'scratch' ? `/scratch/${id}` : `/tmp/.worktrees/${id}`,
+        );
 
       initDb(legacy);
 
-      const row = legacy.prepare('SELECT run_mode FROM tasks WHERE id = ?').get(id) as {
-        run_mode: string;
-      };
-      expect(row.run_mode).toBe(expected);
+      // After migration the Task.run_mode lives on worktrees.mode (joined).
+      const row = legacy
+        .prepare(
+          `SELECT w.mode AS mode FROM tasks t
+             LEFT JOIN worktrees w ON t.worktree_id = w.id
+            WHERE t.id = ?`,
+        )
+        .get(id) as { mode: string };
+      expect(row.mode).toBe(expected);
 
       const cols = (legacy.pragma('table_info(tasks)') as Array<{ name: string }>).map(
         (c) => c.name,
       );
       expect(cols).not.toContain('no_worktree');
+      // Legacy columns are dropped after Phase 2a.
+      expect(cols).not.toContain('run_mode');
+      expect(cols).not.toContain('worktree');
       legacy.close();
     },
   );
@@ -200,50 +241,42 @@ describe('migration: no_worktree → run_mode', () => {
 // ─── Partial unique indexes (race test) ─────────────────────────────────────
 
 describe('partial unique indexes', () => {
-  it('rejects two concurrent existing-mode tasks with same worktree', () => {
-    insertTask(db, {
-      id: 't1',
-      run_mode: 'existing',
-      status: 'running',
-      worktree: '/some/user/repo',
-    });
+  it('rejects two concurrent tasks sharing the same worktree_id', () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status)
+       VALUES ('shared-wt', '/some/user/repo', 'existing', 'in_use')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, status, worktree_id)
+       VALUES ('t1', 'T', 'D', 'running', 'shared-wt')`,
+    ).run();
     expect(() =>
-      insertTask(db, {
-        id: 't2',
-        run_mode: 'existing',
-        status: 'setting_up',
-        worktree: '/some/user/repo',
-      }),
+      db
+        .prepare(
+          `INSERT INTO tasks (id, title, description, status, worktree_id)
+           VALUES ('t2', 'T', 'D', 'setting_up', 'shared-wt')`,
+        )
+        .run(),
     ).toThrow(/UNIQUE/i);
   });
 
-  it('allows closed existing-mode task to share worktree with a new one', () => {
-    insertTask(db, {
-      id: 't-closed',
-      run_mode: 'existing',
-      status: 'closed',
-      worktree: '/some/user/repo',
-    });
+  it('allows a closed task to share a worktree_id with a new active one', () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, mode, status)
+       VALUES ('shared-wt-2', '/some/user/repo', 'existing', 'available')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, status, worktree_id)
+       VALUES ('t-closed', 'T', 'D', 'closed', 'shared-wt-2')`,
+    ).run();
     expect(() =>
-      insertTask(db, {
-        id: 't-running',
-        run_mode: 'existing',
-        status: 'running',
-        worktree: '/some/user/repo',
-      }),
+      db
+        .prepare(
+          `INSERT INTO tasks (id, title, description, status, worktree_id)
+           VALUES ('t-running', 'T', 'D', 'running', 'shared-wt-2')`,
+        )
+        .run(),
     ).not.toThrow();
-  });
-
-  it('rejects two concurrent none-mode tasks with same repo_path', () => {
-    insertTask(db, { id: 't1', run_mode: 'none', status: 'running', repo_path: '/shared/repo' });
-    expect(() =>
-      insertTask(db, {
-        id: 't2',
-        run_mode: 'none',
-        status: 'setting_up',
-        repo_path: '/shared/repo',
-      }),
-    ).toThrow(/UNIQUE/i);
   });
 });
 

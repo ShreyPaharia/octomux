@@ -9,7 +9,7 @@ import {
 } from '@/lib/sidebar-utils';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
 import { api } from '@/lib/api';
-import type { RunMode, TaskStatus } from '../../server/types';
+import type { RunMode, TaskStatus, Agent } from '../../server/types';
 
 const STORAGE_KEY = 'octomux-sidebar-collapsed';
 const GROUP_COLLAPSE_PREFIX = 'octomux:sidebar:collapsed:';
@@ -255,7 +255,7 @@ function SettingsIcon({ color }: { color: string }) {
 const NAV_ITEMS = [
   { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon },
   { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
-  { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/orchestrator', Icon: TerminalIcon },
+  { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/chats/orchestrator', Icon: TerminalIcon },
   { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
 ] as const;
 
@@ -491,7 +491,11 @@ export function UniversalSidebar() {
 
   // Active nav detection
   const activeNav = useMemo(() => {
-    if (location.pathname === '/orchestrator') return 'orchestrator';
+    if (
+      location.pathname === '/orchestrator' ||
+      location.pathname === '/chats/orchestrator'
+    )
+      return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
     if (location.pathname === '/tasks' || location.pathname.startsWith('/tasks/')) return 'tasks';
     if (activeTaskId) return null;
@@ -667,6 +671,9 @@ export function UniversalSidebar() {
           );
         })}
       </div>
+
+      {/* Chats section (non-orchestrator standalone agents) */}
+      <ChatsSection collapsed={collapsed} activePath={location.pathname} />
 
       {/* Task groups */}
       <div className="flex-1">
@@ -955,5 +962,79 @@ function RenameInput({
       aria-label="Rename task"
       data-testid="sidebar-rename-input"
     />
+  );
+}
+
+// ─── Chats section ─────────────────────────────────────────────────────────
+
+/**
+ * Lists standalone runtime agents ("chats"). The orchestrator is already shown
+ * in the NAVIGATION section, so it's excluded here. Row click → /chats/:id.
+ */
+function ChatsSection({
+  collapsed,
+  activePath,
+}: {
+  collapsed: boolean;
+  activePath: string;
+}) {
+  const [chats, setChats] = useState<Agent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/chats');
+        if (!res.ok) return;
+        const rows = (await res.json()) as Agent[];
+        if (!cancelled) setChats(rows.filter((c) => c.id !== 'orchestrator'));
+      } catch {
+        // silent — sidebar is non-critical
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  if (chats.length === 0) return null;
+
+  return (
+    <div style={{ paddingBottom: 16 }}>
+      {!collapsed && (
+        <div
+          className="font-bold uppercase tracking-wider"
+          style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
+        >
+          {'// CHATS'}
+        </div>
+      )}
+      {chats.map((chat) => {
+        const to = `/chats/${chat.id}`;
+        const isActive = activePath === to;
+        const color = isActive ? '#3B82F6' : '#8a8a8a';
+        return (
+          <Link
+            key={chat.id}
+            to={to}
+            className="flex items-center"
+            style={{
+              padding: collapsed ? '8px 0' : '8px 20px',
+              gap: 12,
+              backgroundColor: isActive ? '#3B82F620' : 'transparent',
+              color,
+              fontWeight: isActive ? 700 : 500,
+              fontSize: 12,
+              justifyContent: collapsed ? 'center' : undefined,
+            }}
+          >
+            {collapsed ? '💬' : <span className="truncate">{chat.label}</span>}
+          </Link>
+        );
+      })}
+    </div>
   );
 }

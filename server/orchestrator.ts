@@ -3,11 +3,43 @@ import { promisify } from 'util';
 import { getAgent, saveAgent, resetAgent, syncAgents } from './agents.js';
 import { getSettings, resolveClaudeFlags } from './settings.js';
 import { childLogger } from './logger.js';
+import { getDb, ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_TMUX_SESSION } from './db.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('orchestrator');
 
-const ORCHESTRATOR_SESSION = 'octomux-orchestrator';
+/**
+ * Read the orchestrator's tmux session name from its pinned agent row.
+ * Falls back to the well-known constant if the row isn't seeded yet (test
+ * harnesses that call orchestrator helpers before initDb).
+ */
+function readOrchestratorSession(): string {
+  try {
+    const row = getDb()
+      .prepare(`SELECT tmux_session FROM agents WHERE id = ?`)
+      .get(ORCHESTRATOR_AGENT_ID) as { tmux_session: string | null } | undefined;
+    return row?.tmux_session ?? ORCHESTRATOR_TMUX_SESSION;
+  } catch {
+    return ORCHESTRATOR_TMUX_SESSION;
+  }
+}
+
+/** Update the orchestrator agent row's status. Silent on DB errors. */
+function writeOrchestratorStatus(
+  status: 'running' | 'idle' | 'stopped',
+): void {
+  try {
+    getDb()
+      .prepare(
+        `UPDATE agents
+            SET status = ?, hook_activity = ?, hook_activity_updated_at = datetime('now')
+          WHERE id = ?`,
+      )
+      .run(status, status === 'running' ? 'active' : 'idle', ORCHESTRATOR_AGENT_ID);
+  } catch {
+    // non-critical — row may not exist yet (tests)
+  }
+}
 
 export async function getCustomPrompt(): Promise<string | null> {
   const agent = await getAgent('orchestrator');
@@ -34,7 +66,7 @@ export async function resetCustomPrompt(): Promise<void> {
 
 export async function isOrchestratorRunning(): Promise<boolean> {
   try {
-    await execFile('tmux', ['has-session', '-t', ORCHESTRATOR_SESSION]);
+    await execFile('tmux', ['has-session', '-t', readOrchestratorSession()]);
     return true;
   } catch {
     return false;
@@ -63,12 +95,12 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
       'new-session',
       '-d',
       '-s',
-      ORCHESTRATOR_SESSION,
+      readOrchestratorSession(),
       '-c',
       cwd || process.cwd(),
     ]);
     logger.info(
-      { operation: 'startOrchestrator', tmux_session: ORCHESTRATOR_SESSION },
+      { operation: 'startOrchestrator', tmux_session: readOrchestratorSession() },
       'startOrchestrator: tmux session created',
     );
 
@@ -90,13 +122,15 @@ export async function startOrchestrator(cwd?: string, initialMessage?: string): 
     const messagePart = initialMessage ? ` '${initialMessage.replace(/'/g, "'\"'\"'")}'` : '';
     claudeCmd += messagePart;
 
-    await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, claudeCmd, 'Enter']);
+    await execFile('tmux', ['send-keys', '-t', readOrchestratorSession(), claudeCmd, 'Enter']);
+    writeOrchestratorStatus('running');
     logger.info(
       { operation: 'startOrchestrator', use_orchestrator_agent: settings.useOrchestratorAgent },
       'startOrchestrator: complete',
     );
   } catch (err) {
     logger.error({ operation: 'startOrchestrator', err }, 'startOrchestrator: failed');
+    writeOrchestratorStatus('stopped');
     throw err;
   }
 }
@@ -111,8 +145,8 @@ export async function sendToOrchestrator(message: string): Promise<void> {
   }
   // Use -l (literal) to prevent tmux from interpreting key names in the message.
   // Must be a separate call from 'Enter' because -l makes ALL args literal.
-  await execFile('tmux', ['send-keys', '-l', '-t', ORCHESTRATOR_SESSION, message]);
-  await execFile('tmux', ['send-keys', '-t', ORCHESTRATOR_SESSION, 'Enter']);
+  await execFile('tmux', ['send-keys', '-l', '-t', readOrchestratorSession(), message]);
+  await execFile('tmux', ['send-keys', '-t', readOrchestratorSession(), 'Enter']);
 }
 
 /** Type message into orchestrator terminal WITHOUT pressing Enter. User reviews and sends. */
@@ -124,15 +158,15 @@ export async function typeToOrchestrator(message: string): Promise<void> {
     );
     throw new Error('Orchestrator is not running');
   }
-  await execFile('tmux', ['send-keys', '-l', '-t', ORCHESTRATOR_SESSION, message]);
+  await execFile('tmux', ['send-keys', '-l', '-t', readOrchestratorSession(), message]);
 }
 
 export async function stopOrchestrator(): Promise<void> {
   logger.info({ operation: 'stopOrchestrator' }, 'stopOrchestrator: start');
   try {
-    await execFile('tmux', ['kill-session', '-t', ORCHESTRATOR_SESSION]);
+    await execFile('tmux', ['kill-session', '-t', readOrchestratorSession()]);
     logger.info(
-      { operation: 'stopOrchestrator', tmux_session: ORCHESTRATOR_SESSION },
+      { operation: 'stopOrchestrator', tmux_session: readOrchestratorSession() },
       'stopOrchestrator: complete',
     );
   } catch (err) {
@@ -141,8 +175,9 @@ export async function stopOrchestrator(): Promise<void> {
       'stopOrchestrator: kill-session failed (already stopped?)',
     );
   }
+  writeOrchestratorStatus('stopped');
 }
 
 export function getOrchestratorSession(): string {
-  return ORCHESTRATOR_SESSION;
+  return readOrchestratorSession();
 }

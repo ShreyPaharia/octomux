@@ -284,8 +284,9 @@ export async function gcScratchDirs(): Promise<void> {
     (
       db
         .prepare(
-          `SELECT id FROM tasks
-           WHERE run_mode = 'scratch' AND status IN ('draft','setting_up','running')`,
+          `SELECT t.id AS id FROM tasks t
+             LEFT JOIN worktrees w ON t.worktree_id = w.id
+            WHERE w.mode = 'scratch' AND t.status IN ('draft','setting_up','running')`,
         )
         .all() as Array<{ id: string }>
     ).map((r) => r.id),
@@ -513,12 +514,46 @@ export async function startTask(task: Task): Promise<void> {
     // written after tmux new-session succeeds below. Otherwise pollStatuses
     // can run a has-session check on the not-yet-created session, mark it
     // dead, and stamp error='Setup interrupted' before the session exists.
+    // Phase 2a: worktrees is the source of truth. If the task already has a
+    // linked worktree row (existing/none/draft-edited), update it. Otherwise
+    // create a fresh one.
     db.prepare(
-      `UPDATE tasks
-         SET status = ?, branch = ?, base_branch = ?, worktree = ?,
-             base_sha = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-    ).run('setting_up', setup.branch, setup.baseBranch, setup.worktreePath, setup.baseSha, id);
+      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run('setting_up', id);
+
+    const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
+    if (task.worktree_id) {
+      db.prepare(
+        `UPDATE worktrees
+            SET path = ?, repo_path = ?, branch = ?, base_branch = ?, base_sha = ?,
+                mode = ?, status = 'in_use', last_used_at = datetime('now')
+          WHERE id = ?`,
+      ).run(
+        setup.worktreePath,
+        worktreeRepoPath,
+        setup.branch,
+        setup.baseBranch,
+        setup.baseSha,
+        runMode,
+        task.worktree_id,
+      );
+    } else {
+      const worktreeId = nanoid(12);
+      db.prepare(
+        `INSERT INTO worktrees
+           (id, path, repo_path, branch, base_branch, base_sha, mode, status, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use', datetime('now'))`,
+      ).run(
+        worktreeId,
+        setup.worktreePath,
+        worktreeRepoPath,
+        setup.branch,
+        setup.baseBranch,
+        setup.baseSha,
+        runMode,
+      );
+      db.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
+    }
 
     logger.info(
       {
@@ -672,6 +707,8 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     claude_session_id: claudeSessionId,
     hook_activity: 'active' as const,
     hook_activity_updated_at: null,
+    pinned: false,
+    tmux_session: null,
     created_at: new Date().toISOString(),
   };
 }
@@ -696,6 +733,11 @@ export async function closeTask(task: Task): Promise<void> {
   );
   db.prepare(
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
+  ).run(task.id);
+  // Release the worktree so Phase 2b Workspaces can show it as available.
+  db.prepare(
+    `UPDATE worktrees SET status = 'available', last_used_at = datetime('now')
+      WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
   ).run(task.id);
   logger.info(
     { task_id: task.id, operation: 'closeTask' },
@@ -729,6 +771,7 @@ export async function closeTask(task: Task): Promise<void> {
 }
 
 export async function deleteTask(task: Task): Promise<void> {
+  const db = getDb();
   logger.info(
     { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
     'deleteTask: start',
@@ -820,6 +863,24 @@ export async function deleteTask(task: Task): Promise<void> {
         );
       }
       break;
+    }
+  }
+
+  // Worktree row fate: `new`/`scratch` own the filesystem, so their row goes
+  // away with the task. `existing`/`none` belong to the user — keep the row
+  // so Phase 2b Workspaces still sees it.
+  //
+  // FK ordering: tasks.worktree_id references worktrees.id. Unlink the task
+  // from the worktree row before deleting the row, else the FK check fires.
+  const wtId = task.worktree_id;
+  if (wtId) {
+    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(task.id);
+    if (task.run_mode === 'new' || task.run_mode === 'scratch') {
+      db.prepare(`DELETE FROM worktrees WHERE id = ?`).run(wtId);
+    } else {
+      db.prepare(
+        `UPDATE worktrees SET status = 'available', last_used_at = datetime('now') WHERE id = ?`,
+      ).run(wtId);
     }
   }
 

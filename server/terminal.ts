@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
 import { getOrchestratorSession } from './orchestrator.js';
+import { SELECT_TASK_SQL } from './task-select.js';
 
 const execFile = promisify(execFileCb);
 
@@ -29,6 +30,15 @@ export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head
   if (orchMatch) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       handleOrchestratorConnection(ws);
+    });
+    return true;
+  }
+
+  // Match /ws/terminal/chat/:id (standalone agent tmux session)
+  const chatMatch = req.url?.match(/^\/ws\/terminal\/chat\/([^/]+)$/);
+  if (chatMatch) {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      handleChatConnection(ws, chatMatch[1]);
     });
     return true;
   }
@@ -171,7 +181,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   });
 
   const db = getDb();
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task | undefined;
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
 
   if (!task || !task.tmux_session) {
     ws.close(4004, 'Task not found or no tmux session');
@@ -208,6 +218,23 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
 function handleOrchestratorConnection(ws: WebSocket): void {
   const session = getOrchestratorSession();
   attachToTmuxSession(ws, session, 'orchestrator', 'Failed to attach to orchestrator session');
+}
+
+function handleChatConnection(ws: WebSocket, chatId: string): void {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT tmux_session FROM agents WHERE id = ? AND task_id IS NULL`)
+    .get(chatId) as { tmux_session: string | null } | undefined;
+  if (!row || !row.tmux_session) {
+    ws.close(4004, 'Chat not found');
+    return;
+  }
+  attachToTmuxSession(
+    ws,
+    row.tmux_session,
+    `chat:${chatId}`,
+    `Failed to attach to chat session`,
+  );
 }
 
 export function getActiveConnections(): Map<string, TerminalConnection[]> {
