@@ -9,6 +9,8 @@ interface BranchPickerFieldProps {
   onChange: (value: string) => void;
   onBranchesLoaded?: (branches: string[], defaultBranch: string) => void;
   disabled?: boolean;
+  /** Optional ref to the trigger button (used by ⌘B to open the picker). */
+  triggerRef?: React.Ref<HTMLButtonElement>;
 }
 
 export function BranchPickerField({
@@ -17,6 +19,7 @@ export function BranchPickerField({
   onChange,
   onBranchesLoaded,
   disabled,
+  triggerRef,
 }: BranchPickerFieldProps) {
   const [branches, setBranches] = useState<string[]>([]);
   const [branchSearch, setBranchSearch] = useState('');
@@ -69,6 +72,7 @@ export function BranchPickerField({
         <PopoverTrigger
           render={
             <button
+              ref={triggerRef}
               type="button"
               disabled={disabled || branches.length === 0}
               className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
