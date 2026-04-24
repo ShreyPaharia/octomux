@@ -25,6 +25,17 @@ vi.mock('./agents.js', () => ({
   syncAgents: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('./db.js', () => ({
+  getDb: vi.fn(() => ({
+    prepare: vi.fn(() => ({
+      get: vi.fn(() => ({ tmux_session: 'octomux-orchestrator' })),
+      run: vi.fn(),
+    })),
+  })),
+  ORCHESTRATOR_AGENT_ID: 'orchestrator',
+  ORCHESTRATOR_TMUX_SESSION: 'octomux-orchestrator',
+}));
+
 vi.mock('./settings.js', async () => {
   const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
   return {
