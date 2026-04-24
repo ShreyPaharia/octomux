@@ -1181,10 +1181,7 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
             >
               {chat.label}
             </Link>
-            <ChatRowMenu
-              chatId={chat.id}
-              onMoveToTask={() => setMovingAgentId(chat.id)}
-            />
+            <ChatRowMenu chatId={chat.id} onMoveToTask={() => setMovingAgentId(chat.id)} />
           </div>
         );
       })}

@@ -188,11 +188,7 @@ export default function WorkspacesPage() {
                       {truncate(w.path)}
                     </td>
                     <td className="px-3 py-2">
-                      <span
-                        className={
-                          w.status === 'in_use' ? 'text-[#22C55E]' : 'text-[#8a8a8a]'
-                        }
-                      >
+                      <span className={w.status === 'in_use' ? 'text-[#22C55E]' : 'text-[#8a8a8a]'}>
                         {w.status}
                       </span>
                     </td>
