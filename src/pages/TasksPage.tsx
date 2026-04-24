@@ -11,7 +11,14 @@ import { PlusIcon } from '@/components/icons';
 
 function NewTaskButton({ onClick }: { onClick: () => void }) {
   return (
-    <Button onClick={onClick}>
+    <Button
+      onClick={onClick}
+      className="bg-[#3B82F6] text-white hover:bg-[#3B82F6]/90"
+      style={{
+        boxShadow:
+          'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 24px 0 rgba(59, 130, 246, 0.35)',
+      }}
+    >
       <PlusIcon data-icon="inline-start" />
       NEW TASK
     </Button>
@@ -111,15 +118,21 @@ export default function TasksPage() {
         ) : (
           <>
             {/* Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex flex-col gap-1.5">
-                <h1
-                  className="font-display text-[42px] font-bold leading-none tracking-tight"
-                  style={{ letterSpacing: '-1px' }}
+            <div className="flex items-end justify-between">
+              <div className="flex flex-col gap-2">
+                <span
+                  data-testid="page-eyebrow"
+                  className="font-mono text-[11px] font-bold text-[#B5B5BD]"
+                  style={{ letterSpacing: '1.5px' }}
                 >
-                  COMMAND CENTER
+                  // TASKS
+                </span>
+                <h1
+                  className="font-display text-[32px] font-bold leading-[1.1] tracking-tight"
+                  style={{ letterSpacing: '-0.5px' }}
+                >
+                  Command center
                 </h1>
-                <span className="text-sm text-[#8a8a8a]">// autonomous agent orchestration</span>
               </div>
               <NewTaskButton onClick={openCreate} />
             </div>

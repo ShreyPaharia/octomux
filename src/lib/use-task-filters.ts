@@ -5,22 +5,29 @@ import { repoName } from './utils';
 const REPO_FILTER_KEY = 'octomux-repo-filter';
 const STATUS_FILTER_KEY = 'octomux-status-filter';
 
-export type StatusTab = 'open' | 'closed' | 'backlog';
+export type StatusTab = 'all' | 'running' | 'needs_you' | 'closed';
 
 export interface TaskFilters {
   status: StatusTab;
   repo: string; // full repo_path or '' for all
 }
 
-const OPEN_STATUSES = ['setting_up', 'running', 'error'];
+const RUNNING_STATUSES = ['setting_up', 'running'];
 
-const STATUS_TABS: readonly StatusTab[] = ['open', 'closed', 'backlog'];
+const STATUS_TABS: readonly StatusTab[] = ['all', 'running', 'needs_you', 'closed'];
+
+function isNeedsYou(t: Task): boolean {
+  if (t.status === 'error') return true;
+  if ((t.pending_prompts?.length ?? 0) > 0) return true;
+  if (t.derived_status === 'needs_attention') return true;
+  return false;
+}
 
 function readStatusTab(): StatusTab {
   const stored = localStorage.getItem(STATUS_FILTER_KEY);
   return stored && (STATUS_TABS as readonly string[]).includes(stored)
     ? (stored as StatusTab)
-    : 'open';
+    : 'all';
 }
 
 export function useTaskFilters(tasks: Task[]) {
@@ -37,19 +44,22 @@ export function useTaskFilters(tasks: Task[]) {
   const counts = useMemo(() => {
     const repoFiltered = filters.repo ? tasks.filter((t) => t.repo_path === filters.repo) : tasks;
     return {
-      open: repoFiltered.filter((t) => OPEN_STATUSES.includes(t.status)).length,
+      all: repoFiltered.length,
+      running: repoFiltered.filter((t) => RUNNING_STATUSES.includes(t.status)).length,
+      needs_you: repoFiltered.filter(isNeedsYou).length,
       closed: repoFiltered.filter((t) => t.status === 'closed').length,
-      backlog: repoFiltered.filter((t) => t.status === 'draft').length,
     };
   }, [tasks, filters.repo]);
 
   const filtered = useMemo(() => {
     const result = tasks.filter((t) => {
       let statusMatch: boolean;
-      if (filters.status === 'open') {
-        statusMatch = OPEN_STATUSES.includes(t.status);
-      } else if (filters.status === 'backlog') {
-        statusMatch = t.status === 'draft';
+      if (filters.status === 'all') {
+        statusMatch = true;
+      } else if (filters.status === 'running') {
+        statusMatch = RUNNING_STATUSES.includes(t.status);
+      } else if (filters.status === 'needs_you') {
+        statusMatch = isNeedsYou(t);
       } else {
         statusMatch = t.status === 'closed';
       }
@@ -57,24 +67,21 @@ export function useTaskFilters(tasks: Task[]) {
       return statusMatch && repoMatch;
     });
 
-    // Sort open tasks: needs_attention first, then working, then others
-    if (filters.status === 'open') {
-      const priorityOrder: Record<string, number> = {
-        needs_attention: 0,
-        working: 1,
-        running: 2,
-        setting_up: 3,
-        error: 4,
-        draft: 5,
-      };
-      result.sort((a, b) => {
-        const aPriority = priorityOrder[a.derived_status ?? a.status] ?? 9;
-        const bPriority = priorityOrder[b.derived_status ?? b.status] ?? 9;
-        if (aPriority !== bPriority) return aPriority - bPriority;
-        // Within same priority, keep newest first
-        return b.created_at.localeCompare(a.created_at);
-      });
-    }
+    // Priority sort: needs_attention → working → running → setting_up → error → draft
+    const priorityOrder: Record<string, number> = {
+      needs_attention: 0,
+      working: 1,
+      running: 2,
+      setting_up: 3,
+      error: 4,
+      draft: 5,
+    };
+    result.sort((a, b) => {
+      const aPriority = priorityOrder[a.derived_status ?? a.status] ?? 9;
+      const bPriority = priorityOrder[b.derived_status ?? b.status] ?? 9;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return b.created_at.localeCompare(a.created_at);
+    });
 
     return result;
   }, [tasks, filters]);

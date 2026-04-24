@@ -52,6 +52,14 @@ describe('HomePage', () => {
     expect(screen.getByTestId('sessions-inbox-slot')).toBeInTheDocument();
   });
 
+  it('renders the // INBOX eyebrow above the H1', () => {
+    renderHome('/');
+    const eyebrow = screen.getByTestId('page-eyebrow');
+    expect(eyebrow).toHaveTextContent('// INBOX');
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1).toHaveClass('text-[32px]');
+  });
+
   it('hydrates composer from URL with repo + fork_of, then submits', async () => {
     const user = userEvent.setup();
     apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'spawned' }));
