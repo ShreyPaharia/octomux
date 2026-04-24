@@ -15,7 +15,7 @@ sidebar was cross-verified against all six page frames instead.
 2. **Ambient tint blobs missing** — content canvas had no cyan/purple
    backdrop, so L1/L2/L3 glass had nothing to blur through. Added
    `--ambient-cyan` / `--ambient-purple` tokens + an `ambient-tint-
-   backdrop` utility; mounted on `<main>` only in `src/App.tsx` so
+backdrop` utility; mounted on `<main>` only in `src/App.tsx` so
    terminal panes (`<TerminalView>` inside `<main>` still renders on
    top of its own opaque `#0B0C0F` fill) stay opaque.
 3. **Sidebar nav active row shape drift** — code used a 1px all-around

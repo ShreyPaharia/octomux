@@ -180,9 +180,7 @@ function ActivitySection({ tasks }: { tasks: Task[] }) {
   const hidden = tasks.length - visible.length;
   return (
     <section data-testid="inbox-section-activity" className="flex flex-col gap-2">
-      <div
-        className="flex items-baseline gap-2 border-t border-[#FFFFFF14] px-1 pt-4 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]"
-      >
+      <div className="flex items-baseline gap-2 border-t border-[#FFFFFF14] px-1 pt-4 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]">
         <span className="font-mono text-[#6a6a6a]" style={{ letterSpacing: '1.5px' }}>
           //
         </span>

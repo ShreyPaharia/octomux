@@ -38,10 +38,22 @@ const toneByStatus: Record<string, PillTone> = {
 };
 
 const pillStyles: Record<PillTone, CSSProperties> = {
-  green: { backgroundColor: 'rgba(34, 197, 94, 0.08)', boxShadow: 'inset 0 0 0 1px rgba(34, 197, 94, 0.24)' },
-  amber: { backgroundColor: 'rgba(255, 184, 0, 0.08)', boxShadow: 'inset 0 0 0 1px rgba(255, 184, 0, 0.24)' },
-  red: { backgroundColor: 'rgba(239, 68, 68, 0.08)', boxShadow: 'inset 0 0 0 1px rgba(239, 68, 68, 0.28)' },
-  grey: { backgroundColor: 'rgba(255, 255, 255, 0.04)', boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)' },
+  green: {
+    backgroundColor: 'rgba(34, 197, 94, 0.08)',
+    boxShadow: 'inset 0 0 0 1px rgba(34, 197, 94, 0.24)',
+  },
+  amber: {
+    backgroundColor: 'rgba(255, 184, 0, 0.08)',
+    boxShadow: 'inset 0 0 0 1px rgba(255, 184, 0, 0.24)',
+  },
+  red: {
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    boxShadow: 'inset 0 0 0 1px rgba(239, 68, 68, 0.28)',
+  },
+  grey: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.08)',
+  },
 };
 
 export const StatusBadge = memo(function StatusBadge({
