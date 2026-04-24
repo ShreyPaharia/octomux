@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,6 +23,8 @@ interface AgentTabsProps {
   userTerminals?: UserTerminal[];
   onAddTerminal?: () => void;
   onCloseTerminal?: (terminalId: string) => void;
+  onMoveAgent?: (agentId: string) => void;
+  onDetachAgent?: (agentId: string) => void;
 }
 
 export function AgentTabs({
@@ -35,6 +37,8 @@ export function AgentTabs({
   userTerminals = [],
   onAddTerminal,
   onCloseTerminal,
+  onMoveAgent,
+  onDetachAgent,
 }: AgentTabsProps) {
   return (
     <div className="flex items-center gap-1 border-b border-border px-1 pb-1">
@@ -64,7 +68,15 @@ export function AgentTabs({
               )}
               {agent.label}
             </button>
-            {agent.status === 'running' && (
+            {agent.status === 'running' && (onMoveAgent || onDetachAgent) && (
+              <AgentTabMenu
+                agent={agent}
+                onMove={onMoveAgent}
+                onDetach={onDetachAgent}
+                onStop={onStopAgent}
+              />
+            )}
+            {agent.status === 'running' && !onMoveAgent && !onDetachAgent && (
               <button
                 className="ml-0.5 hidden rounded p-0.5 text-[#6a6a6a] hover:text-destructive group-hover:inline-flex"
                 onClick={(e) => {
@@ -122,6 +134,98 @@ export function AgentTabs({
         >
           +
         </button>
+      )}
+    </div>
+  );
+}
+
+function AgentTabMenu({
+  agent,
+  onMove,
+  onDetach,
+  onStop,
+}: {
+  agent: Agent;
+  onMove?: (id: string) => void;
+  onDetach?: (id: string) => void;
+  onStop: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const timeout = window.setTimeout(() => {
+      document.addEventListener('click', close);
+    }, 0);
+    return () => {
+      window.clearTimeout(timeout);
+      document.removeEventListener('click', close);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative ml-0.5">
+      <button
+        className="hidden rounded p-0.5 text-[#6a6a6a] hover:text-foreground group-hover:inline-flex"
+        data-testid={`agent-tab-menu-${agent.id}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        title="Agent actions"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.5" />
+          <circle cx="12" cy="12" r="1.5" />
+          <circle cx="12" cy="19" r="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid={`agent-tab-menu-items-${agent.id}`}
+          className="absolute right-0 top-full z-50 mt-1 min-w-44 bg-[#141414] border border-border py-1 text-xs outline-none"
+        >
+          {onMove && (
+            <button
+              role="menuitem"
+              className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onMove(agent.id);
+              }}
+            >
+              Move to task…
+            </button>
+          )}
+          {onDetach && (
+            <button
+              role="menuitem"
+              className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onDetach(agent.id);
+              }}
+            >
+              Detach to chat
+            </button>
+          )}
+          <div className="my-1 h-px bg-[#2f2f2f]" />
+          <button
+            role="menuitem"
+            className="block w-full px-3 py-1.5 text-left text-[#EF4444] hover:bg-[#1a1a1a]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              onStop(agent.id);
+            }}
+          >
+            Stop agent
+          </button>
+        </div>
       )}
     </div>
   );

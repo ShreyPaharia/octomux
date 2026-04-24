@@ -264,7 +264,13 @@ describe('Database', () => {
       const row = db
         .prepare('SELECT id, task_id, label, pinned, tmux_session FROM agents WHERE id = ?')
         .get(ORCHESTRATOR_AGENT_ID) as
-        | { id: string; task_id: string | null; label: string; pinned: number; tmux_session: string }
+        | {
+            id: string;
+            task_id: string | null;
+            label: string;
+            pinned: number;
+            tmux_session: string;
+          }
         | undefined;
       expect(row).toBeTruthy();
       expect(row!.task_id).toBeNull();
@@ -322,9 +328,7 @@ describe('Database', () => {
         .get('backfill-1') as { worktree_id: string | null };
       expect(task.worktree_id).toBeTruthy();
 
-      const wt = legacy
-        .prepare('SELECT * FROM worktrees WHERE id = ?')
-        .get(task.worktree_id) as
+      const wt = legacy.prepare('SELECT * FROM worktrees WHERE id = ?').get(task.worktree_id) as
         | { path: string; mode: string; branch: string; base_sha: string }
         | undefined;
       expect(wt).toBeTruthy();
@@ -334,9 +338,9 @@ describe('Database', () => {
       expect(wt!.base_sha).toBe('abc123');
 
       // Legacy columns must be gone after migration.
-      const cols = (
-        legacy.pragma('table_info(tasks)') as Array<{ name: string }>
-      ).map((c) => c.name);
+      const cols = (legacy.pragma('table_info(tasks)') as Array<{ name: string }>).map(
+        (c) => c.name,
+      );
       for (const c of ['worktree', 'run_mode', 'repo_path', 'branch', 'base_branch', 'base_sha']) {
         expect(cols).not.toContain(c);
       }

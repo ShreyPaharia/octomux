@@ -6,7 +6,15 @@ import type {
   Agent,
   OrchestratorStatus,
   UserTerminal,
+  Worktree,
+  WorktreeSummary,
 } from '../../server/types';
+
+export interface WorktreeDetail {
+  worktree: Worktree;
+  active_task: Task | null;
+  history: Task[];
+}
 
 const BASE = '/api';
 
@@ -235,6 +243,19 @@ export const api = {
     request<AgentDetail>('/agents', { method: 'POST', body: JSON.stringify(data) }),
   deleteAgent: (name: string) =>
     request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // Agent task hopping (runtime agent row ← tasks table)
+  moveAgentToTask: (agentId: string, taskId: string | null) =>
+    request<Agent>(`/agents/${encodeURIComponent(agentId)}/task`, {
+      method: 'PATCH',
+      body: JSON.stringify({ task_id: taskId }),
+    }),
+
+  // Worktrees
+  listWorktrees: () => request<WorktreeSummary[]>('/worktrees'),
+  getWorktree: (id: string) => request<WorktreeDetail>(`/worktrees/${encodeURIComponent(id)}`),
+  deleteWorktree: (id: string) =>
+    request<void>(`/worktrees/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Repo Config
   listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),

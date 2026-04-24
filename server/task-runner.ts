@@ -11,7 +11,8 @@ import { getSettings, resolveClaudeFlags } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
 import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
-import type { Task, Agent, UserTerminal, RunMode } from './types.js';
+import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
+import { chatDirFor, chatSessionName } from './chats.js';
 
 const logger = childLogger('task-runner');
 
@@ -517,9 +518,10 @@ export async function startTask(task: Task): Promise<void> {
     // Phase 2a: worktrees is the source of truth. If the task already has a
     // linked worktree row (existing/none/draft-edited), update it. Otherwise
     // create a fresh one.
-    db.prepare(
-      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run('setting_up', id);
+    db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      'setting_up',
+      id,
+    );
 
     const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
     if (task.worktree_id) {
@@ -1129,4 +1131,139 @@ export async function resumeTask(task: Task): Promise<void> {
       `UPDATE tasks SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run((err as Error).message, task.id);
   }
+}
+
+// ─── Agent task-hopping ──────────────────────────────────────────────────────
+
+/**
+ * Move `agent` to a different task (or detach it to a standalone chat when
+ * `targetTaskId` is null). Kills the old tmux window, creates a new one at the
+ * new cwd, and resumes with `claude --resume` so transcript context survives.
+ */
+export async function hopAgent(
+  agent: Agent,
+  targetTaskId: string | null,
+): Promise<Agent> {
+  const db = getDb();
+  const fromTaskId = agent.task_id;
+  logger.info(
+    {
+      agent_id: agent.id,
+      from_task_id: fromTaskId,
+      to_task_id: targetTaskId,
+      operation: 'task_hop',
+    },
+    'task_hop: start',
+  );
+
+  // Resolve old tmux target for the kill step.
+  let oldTarget: { session: string; window: number } | null = null;
+  if (agent.task_id) {
+    const prevTask = db
+      .prepare(`SELECT tmux_session FROM tasks WHERE id = ?`)
+      .get(agent.task_id) as { tmux_session: string | null } | undefined;
+    if (prevTask?.tmux_session) {
+      oldTarget = { session: prevTask.tmux_session, window: agent.window_index };
+    }
+  } else if (agent.tmux_session) {
+    // Standalone chat agents have their own session.
+    oldTarget = { session: agent.tmux_session, window: agent.window_index };
+  }
+
+  // Resolve new destination.
+  let newSession: string;
+  let cwd: string;
+  let isStandalone: boolean;
+  if (targetTaskId === null) {
+    // Detach → standalone chat.
+    isStandalone = true;
+    newSession = chatSessionName(agent.id);
+    cwd = chatDirFor(agent.id);
+    fs.mkdirSync(cwd, { recursive: true });
+  } else {
+    isStandalone = false;
+    const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(targetTaskId) as
+      | { id: string; tmux_session: string | null; worktree_id: string | null; status: string }
+      | undefined;
+    if (!task) throw new Error(`Task not found: ${targetTaskId}`);
+    if (!task.worktree_id) throw new Error(`Task ${targetTaskId} has no worktree`);
+    const worktree = db.prepare(`SELECT * FROM worktrees WHERE id = ?`).get(task.worktree_id) as
+      | Worktree
+      | undefined;
+    if (!worktree) throw new Error(`Worktree not found for task ${targetTaskId}`);
+    if (!worktree.path || !fs.existsSync(worktree.path)) {
+      throw new Error(`Worktree path does not exist: ${worktree.path}`);
+    }
+    if (!task.tmux_session) {
+      throw new Error(`Task ${targetTaskId} has no tmux session (not running)`);
+    }
+    newSession = task.tmux_session;
+    cwd = worktree.path;
+  }
+
+  // Kill the old window. For a standalone chat agent, kill the entire session
+  // (it belongs to this agent only).
+  if (oldTarget) {
+    try {
+      if (!agent.task_id && agent.tmux_session) {
+        await execFile('tmux', ['kill-session', '-t', agent.tmux_session]);
+      } else {
+        await execFile('tmux', ['kill-window', '-t', `${oldTarget.session}:${oldTarget.window}`]);
+      }
+    } catch (err) {
+      if (!isTmuxTargetMissing(err)) {
+        logger.warn(
+          { agent_id: agent.id, operation: 'task_hop', err },
+          'task_hop: kill old tmux target failed',
+        );
+      }
+    }
+  }
+
+  // Create the new tmux destination.
+  let newWindowIndex: number;
+  if (isStandalone) {
+    await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd]);
+    await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
+    newWindowIndex = 0;
+  } else {
+    await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd]);
+    newWindowIndex = await getLastWindowIndex(newSession);
+  }
+
+  // Resume claude in the new target.
+  const target = `${newSession}:${newWindowIndex}`;
+  const flags = await getClaudeFlags();
+  let baseCmd: string;
+  if (agent.claude_session_id) {
+    baseCmd = `claude --resume ${agent.claude_session_id}${flags}`;
+  } else {
+    const newId = crypto.randomUUID();
+    baseCmd = `claude --session-id ${newId}${flags}`;
+    db.prepare(`UPDATE agents SET claude_session_id = ? WHERE id = ?`).run(newId, agent.id);
+  }
+  await sendClaudeCommand({ target, baseCmd });
+
+  // Update DB row. For standalone agents we persist tmux_session; for
+  // task-scoped ones we read the session via the task join.
+  db.prepare(
+    `UPDATE agents
+        SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running',
+            hook_activity = 'active', hook_activity_updated_at = datetime('now')
+      WHERE id = ?`,
+  ).run(targetTaskId, newWindowIndex, isStandalone ? newSession : null, agent.id);
+
+  logger.info(
+    {
+      agent_id: agent.id,
+      from_task_id: fromTaskId,
+      to_task_id: targetTaskId,
+      new_window_index: newWindowIndex,
+      new_tmux_session: newSession,
+      operation: 'task_hop',
+    },
+    'task_hop: complete',
+  );
+
+  return db.prepare(`SELECT * FROM agents WHERE id = ?`).get(agent.id) as Agent;
 }

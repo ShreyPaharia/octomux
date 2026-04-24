@@ -229,12 +229,7 @@ function handleChatConnection(ws: WebSocket, chatId: string): void {
     ws.close(4004, 'Chat not found');
     return;
   }
-  attachToTmuxSession(
-    ws,
-    row.tmux_session,
-    `chat:${chatId}`,
-    `Failed to attach to chat session`,
-  );
+  attachToTmuxSession(ws, row.tmux_session, `chat:${chatId}`, `Failed to attach to chat session`);
 }
 
 export function getActiveConnections(): Map<string, TerminalConnection[]> {
