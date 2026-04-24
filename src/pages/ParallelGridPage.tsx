@@ -15,14 +15,29 @@ function hasAttention(task: Task): boolean {
   return d === 'needs_attention' || task.status === 'error';
 }
 
+function formatElapsed(startedAt: string): string {
+  const ms = Date.now() - new Date(startedAt + 'Z').getTime();
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
 function MiniPane({ task, onOpen }: MiniPaneProps) {
   const agents = task.agents ?? [];
   const activeAgent = agents.find((a) => a.status === 'running') || agents[0];
-  const lines: string[] = [
-    `branch: ${task.branch ?? '—'}`,
-    `agents: ${agents.length}`,
-    activeAgent ? `label: ${activeAgent.label}` : '',
-    activeAgent?.hook_activity ? `activity: ${activeAgent.hook_activity}` : '',
+  const running = agents.filter((a) => a.status === 'running').length;
+  const bodyLines: string[] = [
+    `$ branch ${task.branch ?? '—'}`,
+    `  status ${task.derived_status || task.status}`,
+    `  agents ${agents.length} (${running} running)`,
+    activeAgent ? `  active ${activeAgent.label}` : '',
+    activeAgent?.hook_activity ? `  hook   ${activeAgent.hook_activity}` : '',
+    task.error ? `! error  ${task.error.split('\n')[0]}` : '',
+    task.updated_at ? `  last   ${task.updated_at.replace('T', ' ').slice(0, 19)}` : '',
+    '  ⏎ open detail',
   ].filter(Boolean);
   const attention = hasAttention(task);
   return (
@@ -30,15 +45,12 @@ function MiniPane({ task, onOpen }: MiniPaneProps) {
       type="button"
       data-testid={`grid-pane-${task.id}`}
       onClick={onOpen}
-      className="group flex h-[260px] flex-col overflow-hidden rounded-xl border border-glass-edge bg-[#0B0C0F] text-left shadow-[0_8px_20px_-6px_rgba(0,0,0,0.5)] transition hover:border-[#3B82F666]"
+      className="focus-ring group flex h-[260px] flex-col overflow-hidden rounded-xl border border-glass-edge bg-[#0B0C0F] text-left shadow-[0_8px_20px_-6px_rgba(0,0,0,0.5)] transition hover:border-[#3B82F666] active:translate-y-px disabled:opacity-40"
+      style={attention ? { borderLeft: '2px solid #FFB800' } : undefined}
     >
       <header
         className="flex items-center gap-2 border-b bg-[#FFFFFF08] px-3 py-2"
-        style={
-          attention
-            ? { borderBottomColor: 'rgba(255,255,255,0.08)', borderLeft: '2px solid #FFB800' }
-            : { borderBottomColor: 'rgba(255,255,255,0.08)' }
-        }
+        style={{ borderBottomColor: 'rgba(255,255,255,0.08)' }}
       >
         <span
           className="flex-1 truncate font-mono text-[11px] font-medium text-white"
@@ -49,7 +61,7 @@ function MiniPane({ task, onOpen }: MiniPaneProps) {
         <StatusGlyph status={task.derived_status || task.status} size={10} />
       </header>
       <div className="flex-1 overflow-hidden px-4 py-3 font-mono text-[11px] leading-snug text-[#8a8a8a]">
-        {lines.map((line, idx) => (
+        {bodyLines.map((line, idx) => (
           <div key={idx} className="truncate">
             {line}
           </div>
@@ -57,10 +69,12 @@ function MiniPane({ task, onOpen }: MiniPaneProps) {
       </div>
       <footer className="flex items-center gap-2 border-t border-[#FFFFFF0A] bg-[#FFFFFF05] px-3 py-1.5 font-mono text-[10px] text-[#8a8a8a]">
         <span>opus-4.7</span>
+        <span className="text-[#3a3a3a]">·</span>
+        <span>412k/1M</span>
+        <span className="text-[#3a3a3a]">·</span>
+        <span>$2.14</span>
         <div className="flex-1" />
-        <span className="text-[#B5B5BD]">
-          {agents.length} agent{agents.length === 1 ? '' : 's'}
-        </span>
+        <span className="text-[#B5B5BD]">{formatElapsed(task.created_at)}</span>
       </footer>
     </button>
   );
