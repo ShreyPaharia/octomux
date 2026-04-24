@@ -1,4 +1,13 @@
-import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+  type KeyboardEvent,
+  type ReactNode,
+  type CSSProperties,
+} from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import { useTasksContext } from '@/lib/tasks-context';
@@ -14,6 +23,36 @@ import type { RunMode, TaskStatus, Agent } from '../../server/types';
 
 const STORAGE_KEY = 'octomux-sidebar-collapsed';
 const GROUP_COLLAPSE_PREFIX = 'octomux:sidebar:collapsed:';
+
+// ─── Glass material ────────────────────────────────────────────────────────
+// The sidebar uses a dark L1 glass panel (spec: rgba(14,15,20,0.9)) which is
+// distinct from the shared `--glass-l1` white tint (meant for surfaces sitting
+// on top of the page). We reuse the `glass-blur-l1` + `focus-ring` utilities
+// from the T1 design system (src/index.css) and only inline the dark tint +
+// specular highlight, which are sidebar-specific.
+
+const GLASS_L1_STYLE: CSSProperties = {
+  backgroundColor: 'rgba(14,15,20,0.9)',
+  borderRight: '1px solid rgba(255,255,255,0.08)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+};
+
+const FOOTER_STRIP_STYLE: CSSProperties = {
+  backgroundColor: 'rgba(14,15,20,0.75)',
+  borderTop: '1px solid rgba(255,255,255,0.08)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+};
+
+const FOCUS_RING = 'focus-ring';
+
+const CYAN_ACTIVE_FG = '#7DD3FC';
+const NAV_INACTIVE_FG = 'rgba(255,255,255,0.65)';
+const NAV_MUTED_FG = 'rgba(255,255,255,0.45)';
+const ACTIVE_FILL = 'rgba(59,130,246,0.12)';
+const ACTIVE_STROKE = 'rgba(59,130,246,0.4)';
+const SIDEBAR_EXPANDED_WIDTH = 240;
+const SIDEBAR_COLLAPSED_WIDTH = 56;
+const RAIL_TILE_SIZE = 36;
 
 function getInitialCollapsed(): boolean {
   try {
@@ -153,14 +192,40 @@ function RunModeBadge({ mode }: { mode: RunMode }) {
         fontWeight: 700,
         fontFamily: 'ui-monospace, SFMono-Regular, monospace',
         color: '#8a8a8a',
-        backgroundColor: '#1a1a1a',
-        border: '1px solid #2f2f2f',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        border: '1px solid rgba(255,255,255,0.08)',
       }}
       title={RUN_MODE_TOOLTIP[mode]}
       aria-label={RUN_MODE_TOOLTIP[mode]}
       data-run-mode={mode}
     >
       {RUN_MODE_LETTER[mode]}
+    </span>
+  );
+}
+
+// ─── Keycap chip ───────────────────────────────────────────────────────────
+
+function Keycap({ children, active }: { children: ReactNode; active: boolean }) {
+  return (
+    <span
+      data-testid="sidebar-keycap"
+      className="inline-flex items-center justify-center shrink-0 font-mono"
+      style={{
+        height: 18,
+        minWidth: 22,
+        padding: '0 5px',
+        borderRadius: 4,
+        fontSize: 10,
+        fontWeight: 500,
+        letterSpacing: 0.2,
+        backgroundColor: active ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.04)',
+        color: active ? CYAN_ACTIVE_FG : NAV_MUTED_FG,
+        border: active ? '1px solid rgba(59,130,246,0.3)' : '1px solid rgba(255,255,255,0.06)',
+      }}
+      aria-hidden="true"
+    >
+      {children}
     </span>
   );
 }
@@ -275,12 +340,42 @@ function SettingsIcon({ color }: { color: string }) {
 
 // ─── Static config ──────────────────────────────────────────────────────────
 
-const NAV_ITEMS = [
-  { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon },
-  { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
-  { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/chats/orchestrator', Icon: TerminalIcon },
-  { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
-] as const;
+type NavKey = 'home' | 'tasks' | 'orchestrator' | 'settings';
+
+const NAV_ITEMS: ReadonlyArray<{
+  key: NavKey;
+  label: string;
+  to: string;
+  Icon: (p: { color: string }) => ReactNode;
+  shortcut: string;
+  shortcutLabel: string;
+}> = [
+  { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon, shortcut: '⌘1', shortcutLabel: 'Cmd+1' },
+  {
+    key: 'tasks',
+    label: 'TASKS',
+    to: '/tasks',
+    Icon: TasksIcon,
+    shortcut: '⌘2',
+    shortcutLabel: 'Cmd+2',
+  },
+  {
+    key: 'orchestrator',
+    label: 'ORCHESTRATOR',
+    to: '/chats/orchestrator',
+    Icon: TerminalIcon,
+    shortcut: '⌘3',
+    shortcutLabel: 'Cmd+3',
+  },
+  {
+    key: 'settings',
+    label: 'SETTINGS',
+    to: '/settings',
+    Icon: SettingsIcon,
+    shortcut: '⌘,',
+    shortcutLabel: 'Cmd+,',
+  },
+];
 
 const MORE_ITEMS = [
   { key: 'workspaces', label: 'WORKSPACES', to: '/workspaces', Icon: WorkspacesIcon },
@@ -317,6 +412,29 @@ function buildAddAgentUrl(taskId: string): string {
   return `/?add_agent=${encodeURIComponent(taskId)}`;
 }
 
+// ─── Connection status hook (ws shim — swap for T1 context on rebase) ──────
+
+export type ConnectionStatus = 'connected' | 'reconnecting';
+
+export function useConnectionStatus(): ConnectionStatus {
+  const [status, setStatus] = useState<ConnectionStatus>(() =>
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'reconnecting' : 'connected',
+  );
+
+  useEffect(() => {
+    const onOnline = () => setStatus('connected');
+    const onOffline = () => setStatus('reconnecting');
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  return status;
+}
+
 // ─── Row menu ───────────────────────────────────────────────────────────────
 
 interface RowMenuProps {
@@ -335,7 +453,6 @@ function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss on outside click or Escape
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: globalThis.MouseEvent) {
@@ -374,7 +491,9 @@ function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete
         title="Task actions"
         data-testid={`task-row-menu-trigger-${item.id}`}
         className={
-          'flex h-5 w-5 items-center justify-center text-[#8a8a8a] hover:text-white ' +
+          'flex h-5 w-5 items-center justify-center rounded-[4px] text-[#8a8a8a] hover:text-white ' +
+          FOCUS_RING +
+          ' ' +
           (open ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100')
         }
       >
@@ -388,7 +507,11 @@ function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete
         <div
           role="menu"
           data-testid={`task-row-menu-${item.id}`}
-          className="absolute right-0 top-full z-50 mt-1 min-w-44 bg-[#141414] border border-border py-1 text-sm outline-hidden"
+          className="glass-blur-l1 absolute right-0 top-full z-50 mt-1 min-w-44 rounded-[8px] border py-1 text-sm outline-hidden"
+          style={{
+            backgroundColor: 'rgba(20,21,28,0.95)',
+            borderColor: 'rgba(255,255,255,0.08)',
+          }}
         >
           <MenuItemRow onClick={() => choose(onOpen)} label="Open" />
           <MenuItemRow
@@ -398,7 +521,7 @@ function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete
             label="Fork into new task"
           />
           <MenuItemRow onClick={() => choose(onAddAgent)} label="Add agent…" />
-          <div className="my-1 h-px bg-[#2f2f2f]" />
+          <div className="my-1 h-px" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }} />
           <MenuItemRow onClick={() => choose(onRename)} label="Rename" />
           <MenuItemRow onClick={() => choose(onClose)} disabled={closeDisabled} label="Close" />
           <MenuItemRow onClick={() => choose(onDelete)} label="Delete" destructive />
@@ -433,8 +556,8 @@ function MenuItemRow({
         (disabled
           ? 'cursor-not-allowed text-[#555]'
           : destructive
-            ? 'text-[#EF4444] hover:bg-[#1a1a1a]'
-            : 'text-[#d0d0d0] hover:bg-[#1a1a1a]')
+            ? 'text-[#EF4444] hover:bg-white/[0.04]'
+            : 'text-[#d0d0d0] hover:bg-white/[0.04]')
       }
     >
       {label}
@@ -451,13 +574,9 @@ export function UniversalSidebar() {
   const navigate = useNavigate();
   const { running: orchestratorRunning } = useOrchestratorContext();
 
-  // Track renaming state per task id
   const [renamingId, setRenamingId] = useState<string | null>(null);
-
-  // Track per-group collapse state
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
-  // Extract task ID from URL — useParams doesn't work here since we're outside <Routes>
   const activeTaskId = useMemo(() => {
     const match = location.pathname.match(/^\/tasks\/([^/]+)/);
     return match?.[1] ?? null;
@@ -465,7 +584,6 @@ export function UniversalSidebar() {
 
   const groups = useMemo(() => groupTasksForSidebar(tasks), [tasks]);
 
-  // Hydrate collapsed state for new groups that appear
   useEffect(() => {
     setCollapsedGroups((prev) => {
       const next = { ...prev };
@@ -504,7 +622,6 @@ export function UniversalSidebar() {
     });
   }, []);
 
-  // Cmd/Ctrl+B keyboard shortcut
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
@@ -516,8 +633,7 @@ export function UniversalSidebar() {
     return () => window.removeEventListener('keydown', handleKeyDown as unknown as EventListener);
   }, [toggleCollapsed]);
 
-  // Active nav detection
-  const activeNav = useMemo(() => {
+  const activeNav = useMemo<NavKey | null>(() => {
     if (location.pathname === '/orchestrator' || location.pathname === '/chats/orchestrator')
       return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
@@ -568,21 +684,34 @@ export function UniversalSidebar() {
     [refresh],
   );
 
+  // Flat list of status glyphs for the collapsed-rail preview.
+  const collapsedStatusPreview = useMemo(
+    () =>
+      groups
+        .flatMap((g) => g.items)
+        .filter((item) => {
+          const s = item.derivedStatus ?? item.status;
+          return s !== 'closed';
+        })
+        .slice(0, 6),
+    [groups],
+  );
+
   return (
     <nav
       aria-label="Sidebar"
-      className="hidden md:flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-150 ease-out"
+      data-testid="universal-sidebar"
+      className="glass-blur-l1 hidden md:flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-150 ease-out"
       style={{
-        width: collapsed ? 48 : 240,
-        backgroundColor: '#080808',
-        borderRight: '1px solid #2f2f2f',
+        width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH,
+        ...GLASS_L1_STYLE,
       }}
     >
       {/* Logo row */}
       {collapsed ? (
         <button
           onClick={toggleCollapsed}
-          className="flex shrink-0 items-center justify-center py-4 hover:opacity-80"
+          className={`flex shrink-0 items-center justify-center py-4 hover:opacity-80 ${FOCUS_RING}`}
           style={{ height: 48 }}
           aria-label="Expand sidebar"
         >
@@ -596,7 +725,7 @@ export function UniversalSidebar() {
       ) : (
         <div
           className="flex shrink-0 items-center justify-between"
-          style={{ padding: '24px 20px' }}
+          style={{ padding: '20px 20px 16px' }}
         >
           <div className="flex items-center gap-2.5 min-w-0">
             <img
@@ -614,11 +743,11 @@ export function UniversalSidebar() {
             >
               OCTOMUX
             </span>
-            <span style={{ fontSize: 11, color: '#6a6a6a' }}>v2.0</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>v2.0</span>
           </div>
           <button
             onClick={toggleCollapsed}
-            className="p-1 hover:opacity-80"
+            className={`p-1 rounded-[4px] hover:opacity-80 ${FOCUS_RING}`}
             aria-label="Collapse sidebar"
           >
             <svg
@@ -626,7 +755,7 @@ export function UniversalSidebar() {
               height="16"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#6a6a6a"
+              stroke="rgba(255,255,255,0.45)"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -639,59 +768,42 @@ export function UniversalSidebar() {
       )}
 
       {/* Navigation section */}
-      <div style={{ paddingBottom: 24 }}>
+      <div style={{ paddingBottom: 16 }}>
         {!collapsed && (
           <div
             className="font-bold uppercase tracking-wider"
             style={{
               fontSize: 10,
-              color: '#6a6a6a',
+              color: 'rgba(255,255,255,0.4)',
               padding: '0 20px 8px',
             }}
           >
             {'// NAVIGATION'}
           </div>
         )}
-        {NAV_ITEMS.map(({ key, label, to, Icon }) => {
+        {NAV_ITEMS.map(({ key, label, to, Icon, shortcut, shortcutLabel }) => {
           const isActive = activeNav === key;
-          const color = isActive ? '#3B82F6' : '#8a8a8a';
-          return (
-            <Link
+          return collapsed ? (
+            <CollapsedNavTile
               key={key}
               to={to}
-              className="flex items-center"
-              style={{
-                padding: collapsed ? '12px 0' : '12px 20px',
-                gap: 12,
-                backgroundColor: isActive ? '#3B82F620' : 'transparent',
-                color,
-                fontWeight: isActive ? 700 : 500,
-                fontSize: 13,
-                justifyContent: collapsed
-                  ? 'center'
-                  : key === 'orchestrator'
-                    ? 'space-between'
-                    : undefined,
-              }}
-            >
-              {collapsed ? (
-                <Icon color={color} />
-              ) : (
-                <>
-                  <span className="flex items-center" style={{ gap: 12 }}>
-                    <Icon color={color} />
-                    {label}
-                  </span>
-                  {key === 'orchestrator' && orchestratorRunning && (
-                    <span
-                      className="shrink-0 rounded-full"
-                      style={{ width: 6, height: 6, backgroundColor: '#22C55E' }}
-                      aria-label="Orchestrator running"
-                    />
-                  )}
-                </>
-              )}
-            </Link>
+              Icon={Icon}
+              isActive={isActive}
+              tooltip={`${label.charAt(0) + label.slice(1).toLowerCase()} (${shortcutLabel})`}
+              ariaLabel={`${label.charAt(0) + label.slice(1).toLowerCase()} (${shortcutLabel})`}
+              badge={key === 'orchestrator' && orchestratorRunning ? <OrchestratorBadge /> : null}
+            />
+          ) : (
+            <ExpandedNavRow
+              key={key}
+              to={to}
+              Icon={Icon}
+              label={label}
+              isActive={isActive}
+              shortcut={shortcut}
+              shortcutLabel={shortcutLabel}
+              orchestratorRunning={key === 'orchestrator' ? orchestratorRunning : false}
+            />
           );
         })}
       </div>
@@ -701,6 +813,19 @@ export function UniversalSidebar() {
 
       {/* Chats section (non-orchestrator standalone agents) */}
       <ChatsSection collapsed={collapsed} activePath={location.pathname} />
+
+      {/* Collapsed-rail status preview */}
+      {collapsed && collapsedStatusPreview.length > 0 && (
+        <div
+          className="mx-auto my-2 flex flex-col items-center gap-2 pt-3"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.08)', width: 24 }}
+          data-testid="sidebar-status-preview"
+        >
+          {collapsedStatusPreview.map((item) => (
+            <StatusIcon key={item.id} item={item} />
+          ))}
+        </div>
+      )}
 
       {/* Task groups */}
       <div className="flex-1">
@@ -728,7 +853,129 @@ export function UniversalSidebar() {
           />
         ))}
       </div>
+
+      {/* Footer strip */}
+      <SidebarFooter collapsed={collapsed} />
     </nav>
+  );
+}
+
+// ─── Nav row (expanded) ────────────────────────────────────────────────────
+
+function ExpandedNavRow({
+  to,
+  Icon,
+  label,
+  isActive,
+  shortcut,
+  shortcutLabel,
+  orchestratorRunning,
+}: {
+  to: string;
+  Icon: (p: { color: string }) => ReactNode;
+  label: string;
+  isActive: boolean;
+  shortcut: string;
+  shortcutLabel: string;
+  orchestratorRunning: boolean;
+}) {
+  const pretty = label.charAt(0) + label.slice(1).toLowerCase();
+  const iconColor = isActive ? '#3B82F6' : NAV_INACTIVE_FG;
+
+  return (
+    <div style={{ padding: '2px 12px' }}>
+      <Link
+        to={to}
+        aria-label={`${pretty} (${shortcutLabel})`}
+        aria-current={isActive ? 'page' : undefined}
+        data-active={isActive || undefined}
+        data-testid={`sidebar-nav-${label.toLowerCase()}`}
+        className={`flex items-center hover:bg-white/[0.04] ${FOCUS_RING}`}
+        style={{
+          padding: '8px 10px',
+          gap: 10,
+          borderRadius: 10,
+          backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+          border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+          color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+          fontWeight: isActive ? 600 : 500,
+          fontSize: 13,
+        }}
+      >
+        <Icon color={iconColor} />
+        <span className="truncate">{label}</span>
+        {orchestratorRunning ? (
+          <span
+            className="shrink-0 rounded-full"
+            style={{ width: 6, height: 6, backgroundColor: '#22C55E' }}
+            aria-label="Orchestrator running"
+          />
+        ) : null}
+        <span className="ml-auto">
+          <Keycap active={isActive}>{shortcut}</Keycap>
+        </span>
+      </Link>
+    </div>
+  );
+}
+
+// ─── Nav tile (collapsed rail) ─────────────────────────────────────────────
+
+function CollapsedNavTile({
+  to,
+  Icon,
+  isActive,
+  tooltip,
+  ariaLabel,
+  badge,
+}: {
+  to: string;
+  Icon: (p: { color: string }) => ReactNode;
+  isActive: boolean;
+  tooltip: string;
+  ariaLabel: string;
+  badge?: ReactNode;
+}) {
+  const iconColor = isActive ? '#3B82F6' : NAV_INACTIVE_FG;
+  return (
+    <div className="flex justify-center py-1">
+      <Link
+        to={to}
+        title={tooltip}
+        aria-label={ariaLabel}
+        aria-current={isActive ? 'page' : undefined}
+        data-active={isActive || undefined}
+        className={`relative flex items-center justify-center ${FOCUS_RING}`}
+        style={{
+          width: RAIL_TILE_SIZE,
+          height: RAIL_TILE_SIZE,
+          borderRadius: 10,
+          backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+          border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+        }}
+      >
+        <Icon color={iconColor} />
+        {badge}
+      </Link>
+    </div>
+  );
+}
+
+function OrchestratorBadge() {
+  return (
+    <span
+      aria-label="Orchestrator running"
+      data-testid="sidebar-orchestrator-badge"
+      className="absolute rounded-full"
+      style={{
+        top: 4,
+        right: 4,
+        width: 8,
+        height: 8,
+        backgroundColor: '#22C55E',
+        boxShadow: '0 0 0 1.5px rgba(14,15,20,0.95)',
+      }}
+    />
   );
 }
 
@@ -772,17 +1019,17 @@ function SidebarGroupView({
   const isOther = group.key === OTHER_GROUP_KEY;
 
   return (
-    <div style={{ paddingBottom: 16 }}>
+    <div style={{ paddingBottom: 12 }}>
       {!collapsed && (
         <div
           className="group/header flex items-center justify-between"
-          style={{ padding: '0 20px 8px' }}
+          style={{ padding: '0 20px 6px' }}
         >
           <button
             type="button"
             onClick={onToggleGroup}
-            className="flex items-center gap-1.5 font-bold uppercase tracking-wider hover:text-white"
-            style={{ fontSize: 10, color: '#6a6a6a' }}
+            className={`flex items-center gap-1.5 font-bold uppercase tracking-wider hover:text-white rounded-[4px] ${FOCUS_RING}`}
+            style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}
             aria-expanded={!groupCollapsed}
             aria-controls={`sidebar-group-${group.key}`}
           >
@@ -806,6 +1053,23 @@ function SidebarGroupView({
               />
             </svg>
             <span>{group.repo.toUpperCase()}</span>
+            <span
+              aria-hidden="true"
+              data-testid={`sidebar-group-count-${group.key}`}
+              className="inline-flex items-center justify-center font-mono"
+              style={{
+                minWidth: 16,
+                height: 14,
+                padding: '0 4px',
+                borderRadius: 3,
+                fontSize: 9,
+                fontWeight: 600,
+                backgroundColor: 'rgba(255,255,255,0.06)',
+                color: 'rgba(255,255,255,0.55)',
+              }}
+            >
+              {group.items.length}
+            </span>
           </button>
           {!isOther && (
             <button
@@ -814,7 +1078,7 @@ function SidebarGroupView({
               aria-label={`New task in ${group.repo}`}
               title={`New task in ${group.repo}`}
               data-testid={`sidebar-group-add-${group.key}`}
-              className="flex h-4 w-4 items-center justify-center text-[#6a6a6a] opacity-0 hover:text-white group-hover/header:opacity-100"
+              className={`flex h-4 w-4 items-center justify-center rounded-[4px] text-[rgba(255,255,255,0.4)] opacity-0 hover:text-white group-hover/header:opacity-100 ${FOCUS_RING}`}
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                 <line
@@ -898,62 +1162,71 @@ function SessionRow({
 }: SessionRowProps) {
   if (collapsed) {
     return (
-      <Link
-        to={`/tasks/${item.id}`}
-        aria-current={isActive ? 'page' : undefined}
-        title={item.title}
-        className="flex items-center"
-        style={{
-          padding: '10px 0',
-          gap: 10,
-          backgroundColor: isActive ? '#3B82F620' : 'transparent',
-          justifyContent: 'center',
-        }}
-      >
-        <StatusIcon item={item} />
-      </Link>
+      <div className="flex justify-center py-1">
+        <Link
+          to={`/tasks/${item.id}`}
+          aria-current={isActive ? 'page' : undefined}
+          title={item.title}
+          data-testid={`sidebar-row-${item.id}-collapsed`}
+          className={`flex items-center justify-center ${FOCUS_RING}`}
+          style={{
+            width: RAIL_TILE_SIZE,
+            height: 28,
+            borderRadius: 8,
+            backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+            border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+          }}
+        >
+          <StatusIcon item={item} />
+        </Link>
+      </div>
     );
   }
 
   return (
-    <div
-      className="group/row flex items-center"
-      data-testid={`sidebar-row-${item.id}`}
-      data-run-mode={item.runMode}
-      style={{
-        padding: '6px 20px',
-        gap: 8,
-        backgroundColor: isActive ? '#3B82F620' : 'transparent',
-      }}
-    >
-      <StatusIcon item={item} />
-      <RunModeBadge mode={item.runMode} />
-      {isRenaming ? (
-        <RenameInput initial={item.title} onSubmit={onSubmitRename} onCancel={onCancelRename} />
-      ) : (
-        <Link
-          to={`/tasks/${item.id}`}
-          aria-current={isActive ? 'page' : undefined}
-          className="min-w-0 flex-1 truncate font-medium"
-          style={{
-            fontSize: 11,
-            color: isActive ? '#3B82F6' : '#8a8a8a',
-          }}
-        >
-          {item.title}
-        </Link>
-      )}
-      {!isRenaming && (
-        <RowMenu
-          item={item}
-          onOpen={onOpen}
-          onFork={onFork}
-          onAddAgent={onAddAgent}
-          onRename={onStartRename}
-          onClose={onClose}
-          onDelete={onDelete}
-        />
-      )}
+    <div style={{ padding: '2px 12px' }}>
+      <div
+        className="group/row flex items-center hover:bg-white/[0.04]"
+        data-testid={`sidebar-row-${item.id}`}
+        data-run-mode={item.runMode}
+        data-active={isActive || undefined}
+        style={{
+          padding: '6px 10px',
+          gap: 8,
+          borderRadius: 8,
+          backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+          border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+        }}
+      >
+        <StatusIcon item={item} />
+        <RunModeBadge mode={item.runMode} />
+        {isRenaming ? (
+          <RenameInput initial={item.title} onSubmit={onSubmitRename} onCancel={onCancelRename} />
+        ) : (
+          <Link
+            to={`/tasks/${item.id}`}
+            aria-current={isActive ? 'page' : undefined}
+            className={`min-w-0 flex-1 truncate font-medium rounded-[4px] ${FOCUS_RING}`}
+            style={{
+              fontSize: 11,
+              color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+            }}
+          >
+            {item.title}
+          </Link>
+        )}
+        {!isRenaming && (
+          <RowMenu
+            item={item}
+            onOpen={onOpen}
+            onFork={onFork}
+            onAddAgent={onAddAgent}
+            onRename={onStartRename}
+            onClose={onClose}
+            onDelete={onDelete}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -984,8 +1257,12 @@ function RenameInput({
           onCancel();
         }
       }}
-      className="min-w-0 flex-1 bg-[#141414] px-1.5 py-0.5 font-medium text-white outline-none"
-      style={{ fontSize: 11, border: '1px solid #3B82F6' }}
+      className="min-w-0 flex-1 px-1.5 py-0.5 font-medium text-white outline-none rounded-[4px]"
+      style={{
+        fontSize: 11,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        border: '1px solid #3B82F6',
+      }}
       aria-label="Rename task"
       data-testid="sidebar-rename-input"
     />
@@ -1019,24 +1296,18 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
 
   if (collapsed) {
     return (
-      <div style={{ paddingBottom: 16 }}>
+      <div style={{ paddingBottom: 12 }}>
         {MORE_ITEMS.map(({ key, to, Icon, label }) => {
           const isActive = activePath === to || activePath.startsWith(to + '/');
-          const color = isActive ? '#3B82F6' : '#8a8a8a';
           return (
-            <Link
+            <CollapsedNavTile
               key={key}
               to={to}
-              title={label}
-              className="flex items-center"
-              style={{
-                padding: '12px 0',
-                justifyContent: 'center',
-                backgroundColor: isActive ? '#3B82F620' : 'transparent',
-              }}
-            >
-              <Icon color={color} />
-            </Link>
+              Icon={Icon}
+              isActive={isActive}
+              tooltip={label.toLowerCase()}
+              ariaLabel={label.toLowerCase()}
+            />
           );
         })}
       </div>
@@ -1044,14 +1315,18 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
   }
 
   return (
-    <div style={{ paddingBottom: 16 }}>
+    <div style={{ paddingBottom: 12 }}>
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         data-testid="sidebar-more-toggle"
-        className="flex w-full items-center justify-between font-bold uppercase tracking-wider hover:text-white"
-        style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
+        className={`flex w-full items-center justify-between font-bold uppercase tracking-wider hover:text-white rounded-[4px] ${FOCUS_RING}`}
+        style={{
+          fontSize: 10,
+          color: 'rgba(255,255,255,0.4)',
+          padding: '0 20px 8px',
+        }}
       >
         <span>{'// MORE'}</span>
         <span
@@ -1067,24 +1342,27 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
       {open &&
         MORE_ITEMS.map(({ key, to, Icon, label }) => {
           const isActive = activePath === to || activePath.startsWith(to + '/');
-          const color = isActive ? '#3B82F6' : '#8a8a8a';
           return (
-            <Link
-              key={key}
-              to={to}
-              className="flex items-center"
-              style={{
-                padding: '10px 20px',
-                gap: 12,
-                backgroundColor: isActive ? '#3B82F620' : 'transparent',
-                color,
-                fontWeight: isActive ? 700 : 500,
-                fontSize: 12,
-              }}
-            >
-              <Icon color={color} />
-              {label}
-            </Link>
+            <div key={key} style={{ padding: '2px 12px' }}>
+              <Link
+                to={to}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center hover:bg-white/[0.04] ${FOCUS_RING}`}
+                style={{
+                  padding: '8px 10px',
+                  gap: 10,
+                  borderRadius: 10,
+                  backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+                  border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+                  color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+                  fontWeight: isActive ? 600 : 500,
+                  fontSize: 12,
+                }}
+              >
+                <Icon color={isActive ? '#3B82F6' : NAV_INACTIVE_FG} />
+                {label}
+              </Link>
+            </div>
           );
         })}
     </div>
@@ -1093,10 +1371,6 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
 
 // ─── Chats section ─────────────────────────────────────────────────────────
 
-/**
- * Lists standalone runtime agents ("chats"). The orchestrator is already shown
- * in the NAVIGATION section, so it's excluded here. Row click → /chats/:id.
- */
 function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
   const [chats, setChats] = useState<Agent[]>([]);
   const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
@@ -1108,7 +1382,7 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
       const rows = (await res.json()) as Agent[];
       setChats(rows.filter((c) => c.id !== 'orchestrator'));
     } catch {
-      // silent — sidebar is non-critical
+      // silent
     }
   }, []);
 
@@ -1129,11 +1403,15 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
   if (chats.length === 0 && !movingAgentId) return null;
 
   return (
-    <div style={{ paddingBottom: 16 }}>
+    <div style={{ paddingBottom: 12 }}>
       {!collapsed && chats.length > 0 && (
         <div
           className="font-bold uppercase tracking-wider"
-          style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
+          style={{
+            fontSize: 10,
+            color: 'rgba(255,255,255,0.4)',
+            padding: '0 20px 6px',
+          }}
         >
           {'// CHATS'}
         </div>
@@ -1141,47 +1419,53 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
       {chats.map((chat) => {
         const to = `/chats/${chat.id}`;
         const isActive = activePath === to;
-        const color = isActive ? '#3B82F6' : '#8a8a8a';
         if (collapsed) {
           return (
-            <Link
-              key={chat.id}
-              to={to}
-              className="flex items-center"
-              style={{
-                padding: '8px 0',
-                gap: 12,
-                backgroundColor: isActive ? '#3B82F620' : 'transparent',
-                color,
-                justifyContent: 'center',
-              }}
-            >
-              💬
-            </Link>
+            <div key={chat.id} className="flex justify-center py-1">
+              <Link
+                to={to}
+                title={chat.label}
+                className={`flex items-center justify-center ${FOCUS_RING}`}
+                style={{
+                  width: RAIL_TILE_SIZE,
+                  height: RAIL_TILE_SIZE,
+                  borderRadius: 10,
+                  backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+                  border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
+                  color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+                }}
+              >
+                💬
+              </Link>
+            </div>
           );
         }
         return (
-          <div
-            key={chat.id}
-            className="group/chatrow flex items-center"
-            style={{
-              padding: '8px 20px',
-              gap: 8,
-              backgroundColor: isActive ? '#3B82F620' : 'transparent',
-            }}
-          >
-            <Link
-              to={to}
-              className="min-w-0 flex-1 truncate"
+          <div key={chat.id} style={{ padding: '2px 12px' }}>
+            <div
+              className="group/chatrow flex items-center hover:bg-white/[0.04]"
               style={{
-                color,
-                fontWeight: isActive ? 700 : 500,
-                fontSize: 12,
+                padding: '6px 10px',
+                gap: 8,
+                borderRadius: 8,
+                backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
+                border: `1px solid ${isActive ? ACTIVE_STROKE : 'transparent'}`,
               }}
             >
-              {chat.label}
-            </Link>
-            <ChatRowMenu chatId={chat.id} onMoveToTask={() => setMovingAgentId(chat.id)} />
+              <Link
+                to={to}
+                aria-current={isActive ? 'page' : undefined}
+                className={`min-w-0 flex-1 truncate rounded-[4px] ${FOCUS_RING}`}
+                style={{
+                  color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
+                  fontWeight: isActive ? 600 : 500,
+                  fontSize: 12,
+                }}
+              >
+                {chat.label}
+              </Link>
+              <ChatRowMenu chatId={chat.id} onMoveToTask={() => setMovingAgentId(chat.id)} />
+            </div>
           </div>
         );
       })}
@@ -1227,7 +1511,9 @@ function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: (
           setOpen((v) => !v);
         }}
         className={
-          'flex h-5 w-5 items-center justify-center text-[#8a8a8a] hover:text-white ' +
+          'flex h-5 w-5 items-center justify-center rounded-[4px] text-[#8a8a8a] hover:text-white ' +
+          FOCUS_RING +
+          ' ' +
           (open ? 'opacity-100' : 'opacity-0 group-hover/chatrow:opacity-100')
         }
       >
@@ -1241,11 +1527,15 @@ function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: (
         <div
           role="menu"
           data-testid={`chat-row-menu-items-${chatId}`}
-          className="absolute right-0 top-full z-50 mt-1 min-w-44 bg-[#141414] border border-border py-1 text-xs outline-none"
+          className="glass-blur-l1 absolute right-0 top-full z-50 mt-1 min-w-44 rounded-[8px] border py-1 text-xs outline-none"
+          style={{
+            backgroundColor: 'rgba(20,21,28,0.95)',
+            borderColor: 'rgba(255,255,255,0.08)',
+          }}
         >
           <button
             role="menuitem"
-            className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+            className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-white/[0.04]"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
@@ -1255,6 +1545,156 @@ function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: (
             Move to task…
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Footer ────────────────────────────────────────────────────────────────
+
+function SidebarFooter({ collapsed }: { collapsed: boolean }) {
+  const connection = useConnectionStatus();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDoc(e: globalThis.MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
+  const handle = 'octomux';
+  const initials = 'OM';
+  const dotColor = connection === 'connected' ? '#22C55E' : '#FFB800';
+  const connectionLabel = connection === 'connected' ? 'connected' : 'reconnecting';
+
+  return (
+    <div
+      ref={rootRef}
+      data-testid="sidebar-footer"
+      data-connection={connection}
+      className="glass-blur-l1 relative shrink-0 mt-auto"
+      style={{
+        ...FOOTER_STRIP_STYLE,
+        padding: collapsed ? '10px 0' : '10px 12px',
+      }}
+    >
+      {menuOpen && (
+        <div
+          role="menu"
+          data-testid="sidebar-footer-menu"
+          className="glass-blur-l1 absolute left-2 right-2 bottom-full mb-2 rounded-[8px] border py-1 text-xs outline-none z-50"
+          style={{
+            backgroundColor: 'rgba(20,21,28,0.95)',
+            borderColor: 'rgba(255,255,255,0.08)',
+          }}
+        >
+          <button
+            role="menuitem"
+            type="button"
+            className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-white/[0.04]"
+          >
+            Preferences
+          </button>
+          <div className="my-1 h-px" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          <button
+            role="menuitem"
+            type="button"
+            className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-white/[0.04]"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+      {collapsed ? (
+        <div className="flex flex-col items-center gap-2">
+          <span
+            aria-label={`User ${handle}`}
+            className="flex items-center justify-center rounded-full font-semibold"
+            style={{
+              width: 28,
+              height: 28,
+              backgroundColor: 'rgba(59,130,246,0.2)',
+              color: CYAN_ACTIVE_FG,
+              border: '1px solid rgba(59,130,246,0.35)',
+              fontSize: 10,
+            }}
+          >
+            {initials}
+          </span>
+          <span
+            aria-label={`Connection ${connectionLabel}`}
+            data-testid="sidebar-connection-dot"
+            className="rounded-full"
+            style={{ width: 8, height: 8, backgroundColor: dotColor }}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label="User menu"
+          aria-expanded={menuOpen}
+          data-testid="sidebar-footer-trigger"
+          className={`flex w-full items-center gap-2.5 rounded-[8px] px-2 py-1.5 hover:bg-white/[0.04] ${FOCUS_RING}`}
+        >
+          <span
+            className="flex shrink-0 items-center justify-center rounded-full font-semibold"
+            style={{
+              width: 26,
+              height: 26,
+              backgroundColor: 'rgba(59,130,246,0.2)',
+              color: CYAN_ACTIVE_FG,
+              border: '1px solid rgba(59,130,246,0.35)',
+              fontSize: 10,
+            }}
+            aria-hidden="true"
+          >
+            {initials}
+          </span>
+          <span
+            className="min-w-0 flex-1 truncate text-left font-medium"
+            style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)' }}
+          >
+            {handle}
+          </span>
+          <span
+            aria-label={`Connection ${connectionLabel}`}
+            data-testid="sidebar-connection-dot"
+            className="shrink-0 rounded-full"
+            style={{ width: 8, height: 8, backgroundColor: dotColor }}
+          />
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            aria-hidden="true"
+            className="shrink-0"
+            style={{
+              transform: menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 120ms',
+            }}
+          >
+            <path
+              d="M3 7.5 6 4.5l3 3"
+              stroke="rgba(255,255,255,0.6)"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
       )}
     </div>
   );
