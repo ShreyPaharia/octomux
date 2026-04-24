@@ -65,11 +65,13 @@ describe('TasksPage', () => {
 
   // ─── Header ────────────────────────────────────────────────────────────────
 
-  it('renders COMMAND CENTER heading', async () => {
+  it('renders Command center heading with // TASKS eyebrow', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByText('COMMAND CENTER')).toBeInTheDocument();
+      expect(screen.getByText('Command center')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('page-eyebrow')).toHaveTextContent('// TASKS');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveClass('text-[32px]');
   });
 
   // ─── Task list rendering ──────────────────────────────────────────────────
@@ -105,15 +107,17 @@ describe('TasksPage', () => {
 
   // ─── Filter bar ─────────────────────────────────────────────────────────
 
-  it('shows Open and Closed filter tabs', async () => {
+  it('shows All, Running, Needs You, Closed filter chips', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByText(/^Open/)).toBeInTheDocument();
-      expect(screen.getByText(/^Closed/)).toBeInTheDocument();
+      expect(screen.getByTestId('filter-chip-all')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('filter-chip-running')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-chip-needs_you')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-chip-closed')).toBeInTheDocument();
   });
 
-  it('defaults to Open filter', async () => {
+  it('defaults to All filter and shows all statuses', async () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
       makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
@@ -122,10 +126,11 @@ describe('TasksPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Running Task')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Closed Task')).not.toBeInTheDocument();
+    expect(screen.getByText('Closed Task')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-chip-all')).toHaveAttribute('data-active', 'true');
   });
 
-  it('switches to Closed filter on tab click', async () => {
+  it('switches to Closed filter on chip click', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
       makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
@@ -135,29 +140,28 @@ describe('TasksPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Running Task')).toBeInTheDocument();
     });
-    await user.click(screen.getByText(/^Closed/));
+    await user.click(screen.getByTestId('filter-chip-closed'));
     await waitFor(() => {
-      expect(screen.getByText('Closed Task')).toBeInTheDocument();
+      expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
     });
-    expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
+    expect(screen.getByText('Closed Task')).toBeInTheDocument();
   });
 
-  it('shows draft tasks in Backlog filter', async () => {
+  it('shows errored tasks in Needs You filter', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', title: 'Draft Task', status: 'draft' }),
+      makeTask({ id: 't1', title: 'Errored Task', status: 'error' }),
+      makeTask({ id: 't2', title: 'Running Task', status: 'running' }),
     ]);
     renderDashboard();
-    // Default filter is 'open', so draft should NOT appear
     await waitFor(() => {
-      expect(screen.getByText(/^Backlog/)).toBeInTheDocument();
+      expect(screen.getByText('Errored Task')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Draft Task')).not.toBeInTheDocument();
-    // Switch to backlog tab
-    await user.click(screen.getByText(/^Backlog/));
+    await user.click(screen.getByTestId('filter-chip-needs_you'));
     await waitFor(() => {
-      expect(screen.getByText('Draft Task')).toBeInTheDocument();
+      expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
     });
+    expect(screen.getByText('Errored Task')).toBeInTheDocument();
   });
 
   // ─── Close ───────────────────────────────────────────────────────────────
@@ -184,12 +188,6 @@ describe('TasksPage', () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([makeTask({ status: 'closed' })]);
     renderDashboard();
-
-    // Switch to Closed filter to see closed tasks
-    await waitFor(() => {
-      expect(screen.getByText(/^Closed/)).toBeInTheDocument();
-    });
-    await user.click(screen.getByText(/^Closed/));
 
     await waitFor(() => {
       expect(screen.getByText('Fix order validation')).toBeInTheDocument();

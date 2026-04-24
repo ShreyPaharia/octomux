@@ -47,7 +47,7 @@ describe('App routing', () => {
     await waitFor(() => {
       expect(screen.getByText(/welcome back/i)).toBeInTheDocument();
     });
-    expect(screen.queryByText('COMMAND CENTER')).not.toBeInTheDocument();
+    expect(screen.queryByText('Command center')).not.toBeInTheDocument();
   });
 
   it('renders TasksPage (former Dashboard) at /tasks', async () => {
@@ -66,7 +66,7 @@ describe('App routing', () => {
       </MemoryRouter>,
     );
     await waitFor(() => {
-      expect(screen.getByText('COMMAND CENTER')).toBeInTheDocument();
+      expect(screen.getByText('Command center')).toBeInTheDocument();
     });
   });
 });
