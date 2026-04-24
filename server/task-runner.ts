@@ -1140,10 +1140,7 @@ export async function resumeTask(task: Task): Promise<void> {
  * `targetTaskId` is null). Kills the old tmux window, creates a new one at the
  * new cwd, and resumes with `claude --resume` so transcript context survives.
  */
-export async function hopAgent(
-  agent: Agent,
-  targetTaskId: string | null,
-): Promise<Agent> {
+export async function hopAgent(agent: Agent, targetTaskId: string | null): Promise<Agent> {
   const db = getDb();
   const fromTaskId = agent.task_id;
   logger.info(

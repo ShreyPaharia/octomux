@@ -4,11 +4,11 @@ import { renderWithRouter, makeTask } from '../test-helpers';
 import type { Worktree } from '../../server/types';
 import type { WorktreeDetail } from '@/lib/api';
 
-const { mockNavigate, routerMockFactory } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
 );
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('react-router-dom', routerMockFactory);
@@ -80,19 +80,20 @@ describe('WorkspaceDetailPage', () => {
   });
 
   it('remove workspace triggers deleteWorktree and navigates back', async () => {
-    const getWt = vi
-      .fn()
-      .mockResolvedValue(
-        detail({
-          worktree: worktree({ status: 'available' }),
-          active_task: null,
-          history: [],
-        }),
-      );
+    const getWt = vi.fn().mockResolvedValue(
+      detail({
+        worktree: worktree({ status: 'available' }),
+        active_task: null,
+        history: [],
+      }),
+    );
     const delWt = vi.fn().mockResolvedValue(undefined);
     (apiMock as unknown as Record<string, ReturnType<typeof vi.fn>>).getWorktree = getWt;
     (apiMock as unknown as Record<string, ReturnType<typeof vi.fn>>).deleteWorktree = delWt;
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
 
     renderWithRouter(<WorkspaceDetailPage />, {
       path: '/workspaces/:id',

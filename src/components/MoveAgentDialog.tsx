@@ -2,12 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { Task } from '../../server/types';
 
 interface MoveAgentDialogProps {
@@ -130,7 +125,9 @@ export function MoveAgentDialog({
                       onChange={() => setSelected(t.id)}
                     />
                     <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                    <span className="shrink-0 text-[10px] uppercase text-[#8a8a8a]">{t.status}</span>
+                    <span className="shrink-0 text-[10px] uppercase text-[#8a8a8a]">
+                      {t.status}
+                    </span>
                   </label>
                 ))}
               </div>
