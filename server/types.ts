@@ -24,6 +24,23 @@ export interface Worktree {
   last_used_at: string | null;
 }
 
+/** Task joined with its worktree row — returned by GET /api/tasks/:id. */
+export interface TaskWithWorktree extends Task {
+  worktree_row: Worktree | null;
+}
+
+/** Aggregated worktree summary returned by GET /api/worktrees. */
+export interface WorktreeSummary extends Worktree {
+  task_count: number;
+  active_task_id: string | null;
+}
+
+/** Request body for POST /api/chats — create a standalone runtime agent. */
+export interface CreateChatRequest {
+  label?: string;
+  cwd?: string;
+}
+
 export interface Task {
   id: string;
   title: string;

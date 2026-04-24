@@ -59,6 +59,9 @@ import type {
   DerivedTaskStatus,
   UserTerminal,
   RunMode,
+  Worktree,
+  WorktreeSummary,
+  CreateChatRequest,
 } from './types.js';
 import { RUN_MODES } from './types.js';
 
@@ -376,12 +379,18 @@ export function setupRoutes(app: Express): void {
       tool_input: safeParseJson(pp.tool_input as string),
     }));
     const userTerminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
+    const worktreeRow = task.worktree_id
+      ? (db.prepare('SELECT * FROM worktrees WHERE id = ?').get(task.worktree_id) as
+          | Worktree
+          | undefined) ?? null
+      : null;
     res.json({
       ...task,
       agents,
       pending_prompts: parsedPrompts,
       derived_status: derivedStatus({ status: task.status, agents }),
       user_terminals: userTerminals,
+      worktree_row: worktreeRow,
     });
   });
 
