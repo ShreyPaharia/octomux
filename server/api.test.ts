@@ -24,9 +24,11 @@ vi.mock('./task-runner.js', async () => {
         `UPDATE tasks SET status = 'running', tmux_session = ?, updated_at = datetime('now') WHERE id = ?`,
       ).run(`octomux-agent-${task.id}`, task.id);
       if (task.worktree_id) {
-        db.prepare(
-          `UPDATE worktrees SET path = ?, branch = COALESCE(branch, ?) WHERE id = ?`,
-        ).run(`/tmp/.worktrees/${task.id}`, branch, task.worktree_id);
+        db.prepare(`UPDATE worktrees SET path = ?, branch = COALESCE(branch, ?) WHERE id = ?`).run(
+          `/tmp/.worktrees/${task.id}`,
+          branch,
+          task.worktree_id,
+        );
       }
     }),
     closeTask: vi.fn(async (task: any) => {
@@ -110,17 +112,11 @@ vi.mock('./chats.js', async () => {
     }),
     listChats: vi.fn(() => {
       const db = getDb();
-      return db
-        .prepare(`SELECT * FROM agents WHERE task_id IS NULL ORDER BY pinned DESC`)
-        .all();
+      return db.prepare(`SELECT * FROM agents WHERE task_id IS NULL ORDER BY pinned DESC`).all();
     }),
     getChat: vi.fn((id: string) => {
       const db = getDb();
-      return (
-        db
-          .prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`)
-          .get(id) ?? null
-      );
+      return db.prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) ?? null;
     }),
   };
 });
@@ -789,9 +785,7 @@ describe('GET /api/tasks/:id/diff', () => {
     db.prepare(
       `UPDATE worktrees SET path = '' WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
     ).run(DEFAULTS.runningTask.id);
-    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(
-      DEFAULTS.runningTask.id,
-    );
+    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(DEFAULTS.runningTask.id);
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/worktree/i);

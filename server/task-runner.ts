@@ -517,9 +517,10 @@ export async function startTask(task: Task): Promise<void> {
     // Phase 2a: worktrees is the source of truth. If the task already has a
     // linked worktree row (existing/none/draft-edited), update it. Otherwise
     // create a fresh one.
-    db.prepare(
-      `UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run('setting_up', id);
+    db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      'setting_up',
+      id,
+    );
 
     const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
     if (task.worktree_id) {

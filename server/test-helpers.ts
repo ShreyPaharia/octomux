@@ -122,8 +122,7 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   // Tests express "no worktree" by passing `worktree: null` explicitly; any
   // other shape (including the default repo_path) gets a row so joins work.
   const explicitlyNullWorktree = 'worktree' in overrides && overrides.worktree === null;
-  const shouldCreateRow =
-    !wtId && !explicitlyNullWorktree && (!!task.worktree || !!task.repo_path);
+  const shouldCreateRow = !wtId && !explicitlyNullWorktree && (!!task.worktree || !!task.repo_path);
   if (shouldCreateRow) {
     wtId = `wt-${task.id}`;
     db.prepare(

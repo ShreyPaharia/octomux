@@ -268,9 +268,7 @@ export function setupRoutes(app: Express): void {
         .prepare(`${SELECT_TASK_SQL} WHERE w.repo_path = ? ORDER BY t.created_at DESC`)
         .all(repoPath) as Task[];
     } else {
-      tasks = db
-        .prepare(`${SELECT_TASK_SQL} ORDER BY t.created_at DESC`)
-        .all() as Task[];
+      tasks = db.prepare(`${SELECT_TASK_SQL} ORDER BY t.created_at DESC`).all() as Task[];
     }
 
     if (tasks.length === 0) {
@@ -390,9 +388,9 @@ export function setupRoutes(app: Express): void {
     }));
     const userTerminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
     const worktreeRow = task.worktree_id
-      ? (db.prepare('SELECT * FROM worktrees WHERE id = ?').get(task.worktree_id) as
+      ? ((db.prepare('SELECT * FROM worktrees WHERE id = ?').get(task.worktree_id) as
           | Worktree
-          | undefined) ?? null
+          | undefined) ?? null)
       : null;
     res.json({
       ...task,
@@ -631,9 +629,9 @@ export function setupRoutes(app: Express): void {
           db.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(wtId, task.id);
         }
         worktreeValues.push(wtId);
-        db.prepare(
-          `UPDATE worktrees SET ${worktreeFields.join(', ')} WHERE id = ?`,
-        ).run(...worktreeValues);
+        db.prepare(`UPDATE worktrees SET ${worktreeFields.join(', ')} WHERE id = ?`).run(
+          ...worktreeValues,
+        );
       }
     } else if (body.status === 'running') {
       // Resume task
