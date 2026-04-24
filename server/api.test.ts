@@ -1770,9 +1770,7 @@ describe('DELETE /api/worktrees/:id', () => {
 
 describe('PATCH /api/agents/:id/task', () => {
   it('404 when agent does not exist', async () => {
-    const res = await request(app)
-      .patch('/api/agents/missing/task')
-      .send({ task_id: null });
+    const res = await request(app).patch('/api/agents/missing/task').send({ task_id: null });
     expect(res.status).toBe(404);
   });
 
@@ -1785,9 +1783,7 @@ describe('PATCH /api/agents/:id/task', () => {
   it('400 when task_id equals current task_id (no-op)', async () => {
     insertTask(db, { id: 'tSame', status: 'running' });
     insertAgent(db, { id: 'aSame', task_id: 'tSame' });
-    const res = await request(app)
-      .patch('/api/agents/aSame/task')
-      .send({ task_id: 'tSame' });
+    const res = await request(app).patch('/api/agents/aSame/task').send({ task_id: 'tSame' });
     expect(res.status).toBe(400);
   });
 
@@ -1802,9 +1798,7 @@ describe('PATCH /api/agents/:id/task', () => {
   it('409 when target task is not active', async () => {
     insertTask(db, { id: 'tClosed', status: 'closed' });
     insertAgent(db, { id: 'aC', task_id: null });
-    const res = await request(app)
-      .patch('/api/agents/aC/task')
-      .send({ task_id: 'tClosed' });
+    const res = await request(app).patch('/api/agents/aC/task').send({ task_id: 'tClosed' });
     expect(res.status).toBe(409);
   });
 
@@ -1812,9 +1806,7 @@ describe('PATCH /api/agents/:id/task', () => {
     insertTask(db, { id: 'tFrom', status: 'running' });
     insertAgent(db, { id: 'aDet', task_id: 'tFrom' });
 
-    const res = await request(app)
-      .patch('/api/agents/aDet/task')
-      .send({ task_id: null });
+    const res = await request(app).patch('/api/agents/aDet/task').send({ task_id: null });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBeNull();
     expect(res.body.tmux_session).toBe('octomux-chat-aDet');

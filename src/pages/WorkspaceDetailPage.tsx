@@ -91,8 +91,7 @@ export default function WorkspaceDetailPage() {
   }
 
   const w = detail.worktree;
-  const canRemove =
-    w.status === 'available' && detail.active_task === null && !removing;
+  const canRemove = w.status === 'available' && detail.active_task === null && !removing;
   const userOwned = w.mode === 'existing' || w.mode === 'none';
 
   return (
@@ -160,7 +159,10 @@ export default function WorkspaceDetailPage() {
             Active task
           </h2>
           {detail.active_task ? (
-            <TaskRow task={detail.active_task} onClick={() => navigate(`/tasks/${detail.active_task!.id}`)} />
+            <TaskRow
+              task={detail.active_task}
+              onClick={() => navigate(`/tasks/${detail.active_task!.id}`)}
+            />
           ) : (
             <div className="rounded-md border border-border bg-card p-4 text-sm text-[#8a8a8a]">
               No active task.

@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderWithRouter, makeTask } from '../test-helpers';
 
-const { mockNavigate, routerMockFactory } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupRouterNavigateMock(),
+const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupRouterNavigateMock(),
 );
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('react-router-dom', routerMockFactory);
@@ -48,12 +48,7 @@ describe('MoveAgentDialog', () => {
 
   it('detaches by default and navigates to /chats/:id', async () => {
     renderWithRouter(
-      <MoveAgentDialog
-        open={true}
-        onOpenChange={() => {}}
-        agentId="a1"
-        currentTaskId={null}
-      />,
+      <MoveAgentDialog open={true} onOpenChange={() => {}} agentId="a1" currentTaskId={null} />,
     );
     await waitFor(() => expect(screen.getByText(/Detach/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Move$/i }));
@@ -67,12 +62,7 @@ describe('MoveAgentDialog', () => {
 
   it('moves to a chosen task and navigates to /tasks/:id', async () => {
     renderWithRouter(
-      <MoveAgentDialog
-        open={true}
-        onOpenChange={() => {}}
-        agentId="a1"
-        currentTaskId={null}
-      />,
+      <MoveAgentDialog open={true} onOpenChange={() => {}} agentId="a1" currentTaskId={null} />,
     );
     const target = await screen.findByTestId('move-agent-target-t-running');
     fireEvent.click(target.querySelector('input')!);
@@ -90,12 +80,7 @@ describe('MoveAgentDialog', () => {
       .fn()
       .mockRejectedValue(new Error('Target task is not active (status=closed)'));
     renderWithRouter(
-      <MoveAgentDialog
-        open={true}
-        onOpenChange={() => {}}
-        agentId="a1"
-        currentTaskId={null}
-      />,
+      <MoveAgentDialog open={true} onOpenChange={() => {}} agentId="a1" currentTaskId={null} />,
     );
     await waitFor(() => expect(screen.getByText(/Detach/i)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Move$/i }));
