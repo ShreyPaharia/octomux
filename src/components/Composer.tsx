@@ -20,7 +20,18 @@ import { BranchPickerField } from './fields/BranchPickerField';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useTasksContext } from '@/lib/tasks-context';
-import type { Task } from '../../server/types';
+import type { Task, Agent } from '../../server/types';
+
+/** POST /api/chats — create a standalone runtime agent. */
+async function createChatRequest(body: { label?: string }): Promise<Agent> {
+  const res = await fetch('/api/chats', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST /api/chats: ${res.status}`);
+  return (await res.json()) as Agent;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -142,6 +153,12 @@ export function Composer({ onSubmitted }: Props = {}) {
           await api.addAgent(state.sessionId, { prompt: trimmed });
           refresh();
           navigate(`/tasks/${state.sessionId}`);
+        } else if (state.mode === 'scratch') {
+          // Phase 2a: scratch submit creates a standalone runtime agent (chat),
+          // not a scratch task. The prompt is not forwarded today — the Claude
+          // session starts fresh in the chat terminal.
+          const chat = await createChatRequest({ label: deriveTitleFromPrompt(trimmed) });
+          navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
           const title = deriveTitleFromPrompt(trimmed);
           const payload: Parameters<typeof api.createTask>[0] = {
@@ -149,9 +166,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             description: trimmed,
             initial_prompt: trimmed,
           };
-          if (state.mode === 'scratch') {
-            payload.run_mode = 'scratch';
-          } else if (state.mode === 'new') {
+          if (state.mode === 'new') {
             payload.run_mode = 'new';
             payload.repo_path = state.repo;
             if (state.branch) payload.base_branch = state.branch;
