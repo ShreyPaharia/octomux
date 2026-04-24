@@ -109,6 +109,12 @@ export function AppShell() {
     setPaletteOpen(true);
   });
 
+  useEffect(() => {
+    const handler = () => setPaletteOpen(true);
+    window.addEventListener('open-command-palette', handler);
+    return () => window.removeEventListener('open-command-palette', handler);
+  }, []);
+
   useGlobalShortcut({ key: 'g', mod: true, shift: true }, (e) => {
     e.preventDefault();
     navigate('/tasks/grid');

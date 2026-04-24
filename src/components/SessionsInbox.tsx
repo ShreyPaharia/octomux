@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Task } from '../../server/types';
@@ -7,7 +8,7 @@ import { useInbox } from '@/lib/inbox';
 import { useTasksContextOptional } from '@/lib/tasks-context';
 import { timeAgo } from '@/lib/time';
 import { repoName } from '@/lib/utils';
-import { CircleCheckIcon } from '@/components/icons';
+import { ActivityIcon, CircleCheckIcon, TriangleAlertIcon } from '@/components/icons';
 
 type RowKind = 'awaiting_reply' | 'errored' | 'activity';
 
@@ -139,30 +140,64 @@ function ActivityRow({ task }: { task: Task }) {
   );
 }
 
+function SectionHeader({
+  accent,
+  icon,
+  title,
+  count,
+  meta,
+}: {
+  accent: string;
+  icon: React.ReactNode;
+  title: string;
+  count?: string | number;
+  meta?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 px-1 py-1">
+      <span className="flex items-center justify-center" style={{ color: accent }} aria-hidden>
+        {icon}
+      </span>
+      <span
+        className="font-mono text-[11px] font-bold"
+        style={{ color: accent, letterSpacing: '1.5px' }}
+      >
+        {title}
+      </span>
+      {count !== undefined && (
+        <span className="font-mono text-[11px] font-bold text-[#6a6a6a]">{count}</span>
+      )}
+      {meta && (
+        <span className="font-mono text-[11px] font-medium text-[#6a6a6a]">{meta}</span>
+      )}
+      <span
+        className="ml-1 h-px flex-1"
+        style={{ backgroundColor: `${accent}22` }}
+        aria-hidden
+      />
+    </div>
+  );
+}
+
 function Section({
   title,
   tasks,
   kind,
   testId,
-  eyebrow,
+  accent,
+  icon,
 }: {
   title: string;
   tasks: Task[];
   kind: RowKind;
   testId: string;
-  eyebrow?: string;
+  accent: string;
+  icon: React.ReactNode;
 }) {
   if (tasks.length === 0) return null;
   return (
     <section data-testid={testId} className="flex flex-col gap-3">
-      <h3 className="flex items-baseline gap-2 px-1 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]">
-        {eyebrow && (
-          <span className="font-mono text-[#6a6a6a]" style={{ letterSpacing: '1.5px' }}>
-            {eyebrow}
-          </span>
-        )}
-        <span>{title}</span>
-      </h3>
+      <SectionHeader accent={accent} icon={icon} title={title} count={tasks.length} />
       <div className="flex flex-col gap-3">
         {tasks.map((t) => (
           <InboxCard key={t.id} task={t} kind={kind} />
@@ -172,20 +207,26 @@ function Section({
   );
 }
 
-function ActivitySection({ tasks }: { tasks: Task[] }) {
+function ActivitySection({ tasks, runningCount }: { tasks: Task[]; runningCount: number }) {
   const [expanded, setExpanded] = useState(false);
   if (tasks.length === 0) return null;
   const collapsed = !expanded && tasks.length > ACTIVITY_COLLAPSED_LIMIT;
   const visible = collapsed ? tasks.slice(0, ACTIVITY_COLLAPSED_LIMIT) : tasks;
   const hidden = tasks.length - visible.length;
+  const meta =
+    runningCount > 0
+      ? `${runningCount} running  ·  tap to expand`
+      : tasks.length > ACTIVITY_COLLAPSED_LIMIT
+        ? 'tap to expand'
+        : undefined;
   return (
     <section data-testid="inbox-section-activity" className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-2 border-t border-[#FFFFFF14] px-1 pt-4 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]">
-        <span className="font-mono text-[#6a6a6a]" style={{ letterSpacing: '1.5px' }}>
-          //
-        </span>
-        <span>Activity</span>
-      </div>
+      <SectionHeader
+        accent="#22C55E"
+        icon={<ActivityIcon size={14} />}
+        title="ACTIVITY"
+        meta={meta}
+      />
       <div className="flex flex-col gap-2">
         {visible.map((t) => (
           <ActivityRow key={t.id} task={t} />
@@ -227,12 +268,9 @@ export function SessionsInbox() {
   const isInboxZero = !loading && !isEmpty && awaitingReply.length === 0 && errored.length === 0;
 
   return (
-    <div data-testid="sessions-inbox" className="flex flex-col gap-6">
-      <div className="flex items-baseline justify-between px-1">
-        <h2 className="font-display text-sm font-bold uppercase tracking-wider text-[#6a6a6a]">
-          Sessions
-        </h2>
-        {(awaitingReply.length > 0 || errored.length > 0 || activity.length > 0) && (
+    <div data-testid="sessions-inbox" className="flex flex-col gap-8">
+      {(awaitingReply.length > 0 || errored.length > 0 || activity.length > 0) && (
+        <div className="flex items-baseline justify-end px-1">
           <button
             type="button"
             data-testid="inbox-mark-all-read"
@@ -241,8 +279,8 @@ export function SessionsInbox() {
           >
             Mark all read
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {error && (
         <p data-testid="inbox-error" className="px-1 text-xs text-destructive">
@@ -281,22 +319,24 @@ export function SessionsInbox() {
           ) : (
             <>
               <Section
-                title="Awaiting reply"
+                title="AWAITING REPLY"
                 tasks={awaitingReply}
                 kind="awaiting_reply"
                 testId="inbox-section-awaiting_reply"
-                eyebrow="//"
+                accent="#FFB800"
+                icon={<TriangleAlertIcon size={14} />}
               />
               <Section
-                title="Errored"
+                title="ERRORED"
                 tasks={errored}
                 kind="errored"
                 testId="inbox-section-errored"
-                eyebrow="//"
+                accent="#EF4444"
+                icon={<TriangleAlertIcon size={14} />}
               />
             </>
           )}
-          <ActivitySection tasks={activity} />
+          <ActivitySection tasks={activity} runningCount={runningCount} />
         </>
       )}
     </div>

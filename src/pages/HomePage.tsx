@@ -1,7 +1,20 @@
 import { Composer } from '@/components/Composer';
 import { SessionsInbox } from '@/components/SessionsInbox';
+import { useInbox } from '@/lib/inbox';
 import { useTasksContext } from '@/lib/tasks-context';
 import { RocketIcon } from '@/components/icons';
+
+function todayLabel(): string {
+  const d = new Date();
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'short' });
+  const month = d.toLocaleDateString('en-US', { month: 'short' });
+  const day = d.getDate();
+  return `${weekday} · ${month} ${day}`;
+}
+
+function openPalette() {
+  window.dispatchEvent(new CustomEvent('open-command-palette'));
+}
 
 function FirstRunEmptyState() {
   const focusComposer = () => {
@@ -40,26 +53,44 @@ function FirstRunEmptyState() {
 
 export default function HomePage() {
   const { tasks, loading } = useTasksContext();
+  const { needsYou } = useInbox();
   const isFirstRun = !loading && tasks.length === 0;
+  const needsCount = needsYou.length;
 
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex-1 overflow-auto">
         <div className="mx-auto max-w-4xl px-8 pt-12 pb-[280px]">
-          <div className="flex flex-col gap-2">
-            <span
-              data-testid="page-eyebrow"
-              className="font-mono text-[11px] font-bold text-[#B5B5BD]"
-              style={{ letterSpacing: '1.5px' }}
+          <div className="flex items-end justify-between gap-4">
+            <div className="flex flex-col gap-1.5">
+              <h1
+                className="font-display text-[32px] font-bold leading-[1.1] tracking-tight"
+                style={{ letterSpacing: '-1.2px' }}
+              >
+                Welcome back
+              </h1>
+              <p className="text-[14px] leading-snug text-[#8a8a8a]">
+                {todayLabel()}
+                {needsCount > 0 ? (
+                  <>
+                    {' · '}
+                    <span className="text-[#FFB800]">
+                      {needsCount} session{needsCount === 1 ? '' : 's'} want
+                      {needsCount === 1 ? 's' : ''} your attention
+                    </span>
+                  </>
+                ) : null}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="home-jump-palette"
+              onClick={openPalette}
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-[#FFFFFF14] bg-[#FFFFFF0A] px-3 py-2 text-[12px] text-[#8a8a8a] transition-colors hover:bg-[#FFFFFF14] hover:text-white"
             >
-              // INBOX
-            </span>
-            <h1
-              className="font-display text-[32px] font-bold leading-[1.1] tracking-tight"
-              style={{ letterSpacing: '-0.5px' }}
-            >
-              Welcome back
-            </h1>
+              <span className="font-mono font-semibold text-[#D0D0D0]">⌘ K</span>
+              <span className="text-[#8a8a8a]">jump</span>
+            </button>
           </div>
           <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot" className="mt-8">
             {isFirstRun ? <FirstRunEmptyState /> : <SessionsInbox />}
