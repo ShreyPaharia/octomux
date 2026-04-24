@@ -22,6 +22,7 @@ import {
   closeShellTerminal,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
+import { createChat, listChats, getChat } from './chats.js';
 
 import {
   isOrchestratorRunning,
@@ -1106,6 +1107,56 @@ export function setupRoutes(app: Express): void {
     } catch (err) {
       sendDomainError(res, err);
     }
+  });
+
+  // ─── Chats (standalone runtime agents) ───────────────────────────────────
+  // Distinct from /api/agents (agent-prompt definitions). A "chat" is a
+  // tmux-backed Claude runtime instance with `agents.task_id = NULL`.
+
+  app.get('/api/chats', (_req: Request, res: Response) => {
+    try {
+      res.json(listChats());
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/chats/:id', (req: Request, res: Response) => {
+    const chat = getChat(req.params.id as string);
+    if (!chat) {
+      res.status(404).json({ error: 'Chat not found' });
+      return;
+    }
+    res.json(chat);
+  });
+
+  app.post('/api/chats', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as CreateChatRequest;
+    try {
+      const chat = await createChat({ label: body.label, cwd: body.cwd });
+      res.status(201).json(chat);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─── Worktrees (read-only index) ─────────────────────────────────────────
+
+  app.get('/api/worktrees', (_req: Request, res: Response) => {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT w.*,
+                (SELECT COUNT(*) FROM tasks t WHERE t.worktree_id = w.id) as task_count,
+                (SELECT t.id FROM tasks t
+                   WHERE t.worktree_id = w.id
+                     AND t.status IN ('draft','setting_up','running')
+                   LIMIT 1) as active_task_id
+           FROM worktrees w
+          ORDER BY COALESCE(w.last_used_at, w.created_at) DESC`,
+      )
+      .all() as WorktreeSummary[];
+    res.json(rows);
   });
 
   // ─── Skills ──────────────────────────────────────────────────────────────────
