@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { UniversalSidebar, forkDisabledReason } from './UniversalSidebar';
 import { renderWithRouter, makeTask } from '../test-helpers';
@@ -58,6 +58,32 @@ describe('UniversalSidebar nav', () => {
     await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
     expect(screen.getByText('HOME').closest('a')).toHaveAttribute('href', '/');
     expect(screen.getByText('TASKS').closest('a')).toHaveAttribute('href', '/tasks');
+  });
+
+  it('renders keycap shortcuts for each nav item', async () => {
+    renderSidebar('/');
+    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
+    expect(screen.getByText('⌘1')).toBeInTheDocument();
+    expect(screen.getByText('⌘2')).toBeInTheDocument();
+    expect(screen.getByText('⌘3')).toBeInTheDocument();
+    expect(screen.getByText('⌘,')).toBeInTheDocument();
+  });
+
+  it('aria-label on nav links includes the keyboard shortcut', async () => {
+    renderSidebar('/');
+    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
+    expect(screen.getByLabelText('Home (Cmd+1)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tasks (Cmd+2)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Orchestrator (Cmd+3)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Settings (Cmd+,)')).toBeInTheDocument();
+  });
+
+  it('active nav row carries the cyan-tinted stroke', async () => {
+    renderSidebar('/tasks');
+    const row = await screen.findByTestId('sidebar-nav-tasks');
+    expect(row).toHaveAttribute('data-active', 'true');
+    expect(row.style.backgroundColor).toBe('rgba(59, 130, 246, 0.12)');
+    expect(row.style.border).toContain('rgba(59, 130, 246, 0.4)');
   });
 });
 
@@ -293,6 +319,57 @@ describe('UniversalSidebar row menu', () => {
     await user.keyboard('{Enter}');
     await waitFor(() =>
       expect(apiMock.updateTask).toHaveBeenCalledWith('t1', { title: 'New Title' }),
+    );
+  });
+});
+
+describe('UniversalSidebar footer', () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(window.navigator, 'onLine');
+
+  function setOnline(value: boolean) {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      get: () => value,
+    });
+  }
+
+  afterEach(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(window.navigator, 'onLine', originalDescriptor);
+    }
+  });
+
+  it('shows the connected state when the ws/context reports online', async () => {
+    setOnline(true);
+    renderSidebar('/');
+    const footer = await screen.findByTestId('sidebar-footer');
+    expect(footer).toHaveAttribute('data-connection', 'connected');
+    expect(screen.getByLabelText('Connection connected')).toBeInTheDocument();
+  });
+
+  it('switches to reconnecting when the ws/context reports offline', async () => {
+    setOnline(false);
+    renderSidebar('/');
+    const footer = await screen.findByTestId('sidebar-footer');
+    expect(footer).toHaveAttribute('data-connection', 'reconnecting');
+    expect(screen.getByLabelText('Connection reconnecting')).toBeInTheDocument();
+  });
+
+  it('reacts to online/offline events while mounted', async () => {
+    setOnline(true);
+    renderSidebar('/');
+    const footer = await screen.findByTestId('sidebar-footer');
+    expect(footer).toHaveAttribute('data-connection', 'connected');
+
+    setOnline(false);
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-footer')).toHaveAttribute(
+        'data-connection',
+        'reconnecting',
+      ),
     );
   });
 });
