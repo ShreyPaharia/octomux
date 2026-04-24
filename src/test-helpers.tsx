@@ -127,6 +127,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     startTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     deleteTask: vi.fn().mockResolvedValue(undefined),
     getTaskDiffSummary: vi.fn().mockResolvedValue({ files: [] }),
+    createPr: vi.fn().mockResolvedValue({ ok: true }),
     getTaskDiffFile: vi.fn().mockResolvedValue({
       oldContent: '',
       newContent: '',

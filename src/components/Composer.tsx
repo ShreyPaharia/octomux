@@ -224,7 +224,13 @@ export function Composer({ onSubmitted }: Props = {}) {
   stateRef.current = state;
 
   useEffect(() => {
-    const onFocus = () => textareaRef.current?.focus();
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<{ prefill?: string } | undefined>).detail;
+      if (detail?.prefill) {
+        setPrompt((prev) => (prev ? prev : detail.prefill!));
+      }
+      textareaRef.current?.focus();
+    };
     const onSubmit = () => {
       void submitRef.current();
     };

@@ -9,7 +9,10 @@ const { apiMock, apiProxy } = await vi.hoisted(async () =>
 );
 
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
-vi.mock('@/lib/event-source', () => ({ subscribe: vi.fn(() => () => {}) }));
+vi.mock('@/lib/event-source', () => ({
+  subscribe: vi.fn(() => () => {}),
+  subscribeConnectionState: vi.fn(() => () => {}),
+}));
 vi.mock('@/lib/orchestrator-context', () => ({
   useOrchestratorContext: () => ({
     running: false,

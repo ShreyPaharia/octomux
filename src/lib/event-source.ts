@@ -15,7 +15,23 @@ export interface ServerEvent {
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = INITIAL_RECONNECT_DELAY;
+let connectedState = true;
 const subscribers = new Set<(event: ServerEvent) => void>();
+const stateSubscribers = new Set<(connected: boolean) => void>();
+
+function setConnected(v: boolean) {
+  if (connectedState === v) return;
+  connectedState = v;
+  for (const cb of stateSubscribers) cb(v);
+}
+
+export function subscribeConnectionState(cb: (connected: boolean) => void): () => void {
+  stateSubscribers.add(cb);
+  cb(connectedState);
+  return () => {
+    stateSubscribers.delete(cb);
+  };
+}
 
 function getWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -29,6 +45,7 @@ function connect(): void {
 
   ws.onopen = () => {
     reconnectDelay = INITIAL_RECONNECT_DELAY;
+    setConnected(true);
   };
 
   ws.onmessage = (event) => {
@@ -44,6 +61,7 @@ function connect(): void {
   ws.onclose = (event) => {
     ws = null;
     if (event.code !== 1000 && subscribers.size > 0) {
+      setConnected(false);
       reconnectTimer = setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
         connect();

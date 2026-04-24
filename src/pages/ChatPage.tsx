@@ -1,11 +1,28 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 import { api } from '@/lib/api';
 import { useOrchestratorContext } from '@/lib/orchestrator-context';
 import { showToast } from '@/components/CustomToast';
+import { LayoutGridIcon } from '@/components/icons';
 import type { Agent } from '../../server/types';
+
+function OrchestratorGridToggle() {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      data-testid="orchestrator-grid-toggle"
+      onClick={() => navigate('/tasks/grid')}
+      title="Parallel grid (⌘⇧G)"
+      className="focus-ring bg-glass-l1 glass-blur-l1 inline-flex items-center gap-1.5 rounded-md border border-glass-edge px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-[#b5b5bd] hover:text-white"
+    >
+      <LayoutGridIcon size={11} />
+      Grid
+    </button>
+  );
+}
 
 const TerminalView = lazy(() =>
   import('@/components/TerminalView').then((m) => ({ default: m.TerminalView })),
@@ -181,6 +198,7 @@ function OrchestratorHeader({
           </span>
         )}
         <div className="ml-auto flex items-center gap-3">
+          <OrchestratorGridToggle />
           {running && (
             <button
               type="button"

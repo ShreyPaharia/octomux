@@ -1206,6 +1206,8 @@ function SessionRow({
           <Link
             to={`/tasks/${item.id}`}
             aria-current={isActive ? 'page' : undefined}
+            title={item.title}
+            aria-label={item.title}
             className={`min-w-0 flex-1 truncate font-medium rounded-[4px] ${FOCUS_RING}`}
             style={{
               fontSize: 11,
@@ -1455,6 +1457,8 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
               <Link
                 to={to}
                 aria-current={isActive ? 'page' : undefined}
+                title={chat.label}
+                aria-label={chat.label}
                 className={`min-w-0 flex-1 truncate rounded-[4px] ${FOCUS_RING}`}
                 style={{
                   color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
