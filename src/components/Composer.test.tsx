@@ -55,34 +55,32 @@ beforeEach(() => {
 // ─── URL hydration ────────────────────────────────────────────────────────
 
 describe('Composer / URL hydration', () => {
-  it('empty URL → scratch state (scratch intent, submittable with prompt only)', () => {
+  it('empty URL → scratch intent + scratch hint pill', () => {
     renderComposer('/');
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
+    expect(screen.getByTestId('scratch-hint')).toHaveTextContent(/scratch/i);
   });
 
   it('?mode=scratch → scratch intent', () => {
     renderComposer('/?mode=scratch');
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
   });
 
-  it('?repo=/r&mode=new → New task in basename', () => {
+  it('?repo=/r&mode=new → New task in basename, worktree checkbox ON', () => {
     renderComposer('/?repo=%2Fusers%2Fdev%2Focto&mode=new');
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task in octo/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/new worktree/i);
+    expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('?repo=/r&mode=none → in-place intent', () => {
+  it('?repo=/r&mode=none → in-place intent, worktree checkbox OFF', () => {
     renderComposer('/?repo=%2Fusers%2Fdev%2Focto&mode=none');
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/in-place in octo/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/in-place/i);
+    expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'false');
   });
 
   it('?repo=/r&mode=existing&worktree_path=/p → attach intent', () => {
     renderComposer('/?repo=%2Fusers%2Fdev%2Focto&mode=existing&worktree_path=%2Ftmp%2Fx');
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/attaching existing x/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/attach existing/i);
   });
 
   it('?repo=/r&mode=new&fork_of=abc shows Forking intent (title from source task)', () => {
@@ -95,7 +93,6 @@ describe('Composer / URL hydration', () => {
     const src = makeTask({ id: 't1', title: 'Parent Task' });
     renderComposer('/?add_agent=t1', { tasks: [src] });
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/adding agent to parent task/i);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/add agent → parent task/i);
   });
 
   it('fork_of referencing non-existent task shows Source task not found', () => {
@@ -298,13 +295,19 @@ describe('Composer / intent dismiss', () => {
 describe('Composer / chip interactions', () => {
   const user = userEvent.setup();
 
-  it('toggle worktree → in-place switches derived label', async () => {
+  it('toggling worktree checkbox switches derived run_mode (new ↔ none)', async () => {
     renderComposer('/?repo=%2Fr&mode=new&branch=main');
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/new worktree/i);
-    await user.click(screen.getByTestId('worktree-toggle-in-place'));
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/in-place/i);
-    await user.click(screen.getByTestId('worktree-toggle-worktree'));
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/new worktree/i);
+    const checkbox = screen.getByTestId('worktree-checkbox');
+    expect(checkbox).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task/i);
+
+    await user.click(checkbox);
+    expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/in-place/i);
+
+    await user.click(screen.getByTestId('worktree-checkbox'));
+    expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task/i);
   });
 
   it('removing repo chip switches to scratch mode', async () => {
@@ -313,7 +316,42 @@ describe('Composer / chip interactions', () => {
       .getByTestId('repo-chip')
       .querySelector('button[aria-label="Remove"]') as HTMLButtonElement;
     await user.click(removeBtn);
-    expect(screen.getByTestId('derived-mode-label')).toHaveTextContent(/scratch/i);
+    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch/i);
+    expect(screen.getByTestId('scratch-hint')).toBeInTheDocument();
+  });
+
+  it('empty composer shows dashed "Add repo or folder" chip + scratch hint', () => {
+    renderComposer('/');
+    expect(screen.getByTestId('repo-chip-picker')).toHaveTextContent(/add repo or folder/i);
+    expect(screen.getByTestId('scratch-hint')).toBeInTheDocument();
+    expect(screen.queryByTestId('worktree-checkbox')).not.toBeInTheDocument();
+  });
+
+  // T5 deliverable: repo + worktree=on → run_mode 'new'; off → 'none'.
+  it('checking worktree before submit emits run_mode=new', async () => {
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'wt-on' }));
+    renderComposer('/?repo=%2Fr&mode=none&branch=main');
+    expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'false');
+    await user.click(screen.getByTestId('worktree-checkbox'));
+    await user.type(screen.getByTestId('composer-prompt'), 'fresh worktree');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(expect.objectContaining({ run_mode: 'new' }));
+    });
+  });
+
+  it('unchecking worktree before submit emits run_mode=none', async () => {
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'wt-off' }));
+    renderComposer('/?repo=%2Fr&mode=new&branch=main');
+    expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByTestId('worktree-checkbox'));
+    await user.type(screen.getByTestId('composer-prompt'), 'edit in place');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ run_mode: 'none' }),
+      );
+    });
   });
 });
 

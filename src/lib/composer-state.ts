@@ -1,9 +1,15 @@
 /**
  * Composer state machine for the Home chip-row composer.
  *
- * The four run modes (new / existing / none / scratch) plus add-agent are DERIVED
- * from chip state. The reducer encodes precedence rules so that every user
- * interaction with a chip results in exactly one valid state.
+ * `run_mode` is DERIVED from chip state — the composer no longer has an explicit
+ * mode chip. The mapping is:
+ *   - no repo                       → 'scratch'
+ *   - repo + worktree unchecked     → 'none'   (attach to branch's working tree)
+ *   - repo + worktree checked       → 'new'    (fresh worktree)
+ *   - repo + attach path            → 'existing' (advanced; reachable via the
+ *                                                 attach chip or `⌘⇧E`)
+ * Every user interaction produces exactly one valid state; there is no
+ * `setMode` action.
  */
 
 export type ComposerMode = 'empty' | 'new' | 'existing' | 'none' | 'scratch' | 'add-agent';
@@ -64,10 +70,21 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
       if (state.mode === 'existing') {
         return { ...state, repo };
       }
-      // From empty / scratch / new / none — produce a `new` with the repo's default branch and worktree ON.
       const isDraft = 'isDraft' in state ? state.isDraft : false;
-      const forkOf = state.mode === 'new' ? state.forkOf : undefined;
-      return { mode: 'new', repo, branch: defaultBranch, isDraft, ...(forkOf ? { forkOf } : {}) };
+      // Preserve worktree-on when we were already in `new` (and carry any fork intent).
+      if (state.mode === 'new') {
+        const forkOf = state.forkOf;
+        return {
+          mode: 'new',
+          repo,
+          branch: defaultBranch,
+          isDraft,
+          ...(forkOf ? { forkOf } : {}),
+        };
+      }
+      // First repo pick from empty / scratch, and repo swap from `none`:
+      // worktree checkbox starts OFF → `none` mode.
+      return { mode: 'none', repo, branch: defaultBranch, isDraft };
     }
 
     case 'clearRepo': {
@@ -164,8 +181,10 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
 /**
  * Parse URL search params into an initial ComposerState.
  *
- * Precedence: add_agent > repo+mode/attach > scratch. Unknown combinations fall back
- * sensibly (e.g. ?repo without ?mode defaults to `new`).
+ * Precedence: add_agent > repo+attach > repo+mode > scratch. Mirrors the
+ * UI-level derivation: `?repo` without `?mode=new` means the worktree checkbox
+ * is unchecked → `none`. Only explicit `?mode=new` (or `worktree=1`) produces a
+ * fresh worktree.
  */
 export function hydrateFromUrl(params: URLSearchParams): ComposerState {
   const addAgent = params.get('add_agent');
@@ -199,21 +218,22 @@ export function hydrateFromUrl(params: URLSearchParams): ComposerState {
     };
   }
 
-  if (modeParam === 'none' || worktreeParam === '0') {
+  if (modeParam === 'new' || worktreeParam === '1' || forkOf) {
     return {
-      mode: 'none',
+      mode: 'new',
       repo,
       branch: branch ?? null,
       isDraft: false,
+      ...(forkOf ? { forkOf } : {}),
     };
   }
 
+  // Default: repo present but no worktree intent → attach in-place.
   return {
-    mode: 'new',
+    mode: 'none',
     repo,
     branch: branch ?? null,
     isDraft: false,
-    ...(forkOf ? { forkOf } : {}),
   };
 }
 
