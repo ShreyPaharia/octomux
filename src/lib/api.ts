@@ -244,6 +244,13 @@ export const api = {
   deleteAgent: (name: string) =>
     request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
+  // Agent task hopping (runtime agent row ← tasks table)
+  moveAgentToTask: (agentId: string, taskId: string | null) =>
+    request<Agent>(`/agents/${encodeURIComponent(agentId)}/task`, {
+      method: 'PATCH',
+      body: JSON.stringify({ task_id: taskId }),
+    }),
+
   // Worktrees
   listWorktrees: () => request<WorktreeSummary[]>('/worktrees'),
   getWorktree: (id: string) => request<WorktreeDetail>(`/worktrees/${encodeURIComponent(id)}`),

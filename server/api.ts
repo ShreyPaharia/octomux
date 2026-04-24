@@ -20,6 +20,7 @@ import {
   createUserTerminal,
   createShellTerminal,
   closeShellTerminal,
+  hopAgent,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
 import { createChat, listChats, getChat } from './chats.js';
@@ -1179,6 +1180,76 @@ export function setupRoutes(app: Express): void {
       return;
     }
     res.json(chat);
+  });
+
+  /**
+   * Move a runtime agent between task ids (or detach to a standalone chat
+   * with task_id=null). Kills the old tmux window, opens a new one at the new
+   * cwd, and resumes claude so transcript context survives.
+   */
+  app.patch('/api/agents/:id/task', async (req: Request, res: Response) => {
+    const db = getDb();
+    const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id) as
+      | Agent
+      | undefined;
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as { task_id?: string | null };
+    if (!('task_id' in body)) {
+      res.status(400).json({ error: 'task_id is required (string or null)' });
+      return;
+    }
+    const targetTaskId = body.task_id;
+    if (targetTaskId !== null && typeof targetTaskId !== 'string') {
+      res.status(400).json({ error: 'task_id must be a string or null' });
+      return;
+    }
+    if (targetTaskId === agent.task_id) {
+      res.status(400).json({ error: 'Agent is already on that task' });
+      return;
+    }
+    if (targetTaskId !== null) {
+      const targetTask = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(targetTaskId) as
+        | Task
+        | undefined;
+      if (!targetTask) {
+        res.status(404).json({ error: `Task not found: ${targetTaskId}` });
+        return;
+      }
+      if (!(['draft', 'setting_up', 'running'] as const).includes(targetTask.status as 'running')) {
+        res.status(409).json({ error: `Target task is not active (status=${targetTask.status})` });
+        return;
+      }
+      if (!targetTask.worktree_id) {
+        res.status(409).json({ error: 'Target task has no worktree' });
+        return;
+      }
+    }
+
+    try {
+      const updated = await hopAgent(agent, targetTaskId);
+      broadcast({ type: 'task:updated', payload: { taskId: agent.task_id ?? targetTaskId ?? '' } });
+      res.json(updated);
+    } catch (err) {
+      const msg = (err as Error).message;
+      apiLogger.error(
+        {
+          agent_id: agent.id,
+          from_task_id: agent.task_id,
+          to_task_id: targetTaskId,
+          operation: 'task_hop',
+          err,
+        },
+        'task_hop: failed',
+      );
+      if (msg.includes('not found') || msg.includes('does not exist')) {
+        res.status(409).json({ error: msg });
+      } else {
+        res.status(500).json({ error: msg });
+      }
+    }
   });
 
   app.post('/api/chats', async (req: Request, res: Response) => {

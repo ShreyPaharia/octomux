@@ -100,6 +100,7 @@ const {
   cleanupLinkedSessions,
   cleanupOrphanedViewerSessions,
   preflightWorktree,
+  hopAgent,
 } = await import('./task-runner.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
@@ -1841,5 +1842,92 @@ describe('preflightWorktree', () => {
       argsInclude: ['-c', 'bun run lint'],
     });
     expect(lintCall).toBeDefined();
+  });
+});
+
+// ─── hopAgent ────────────────────────────────────────────────────────────────
+
+describe('hopAgent', () => {
+  it('detaches a task agent to a standalone chat session', async () => {
+    insertTask(db, {
+      id: 'tFrom',
+      status: 'running',
+      tmux_session: 'octomux-agent-tFrom',
+    });
+    const agent = insertAgent(db, { id: 'agDet', task_id: 'tFrom', window_index: 3 });
+
+    const updated = await hopAgent(agent, null);
+    expect(updated.task_id).toBeNull();
+    expect(updated.tmux_session).toBe('octomux-chat-agDet');
+    expect(updated.status).toBe('running');
+
+    const killCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['kill-window', '-t', 'octomux-agent-tFrom:3'],
+    });
+    expect(killCall).toBeDefined();
+
+    const newSessionCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['new-session', '-d', '-s', 'octomux-chat-agDet'],
+    });
+    expect(newSessionCall).toBeDefined();
+
+    const resumeCall = vi.mocked(execFile).mock.calls.find((c) => {
+      const args = c[1] as string[];
+      return (
+        c[0] === 'tmux' &&
+        args.includes('send-keys') &&
+        args.some((a) => typeof a === 'string' && a.includes('claude --resume'))
+      );
+    });
+    expect(resumeCall).toBeDefined();
+  });
+
+  it('moves a task agent between tasks', async () => {
+    insertTask(db, { id: 'tA', status: 'running', tmux_session: 'octomux-agent-tA' });
+    insertTask(db, {
+      id: 'tB',
+      status: 'running',
+      tmux_session: 'octomux-agent-tB',
+      worktree: '/tmp/wt-b',
+    });
+    const agent = insertAgent(db, { id: 'agHop', task_id: 'tA', window_index: 2 });
+
+    const updated = await hopAgent(agent, 'tB');
+    expect(updated.task_id).toBe('tB');
+    expect(updated.tmux_session).toBeNull();
+
+    const newWindow = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['new-window', '-t', 'octomux-agent-tB'],
+    });
+    expect(newWindow).toBeDefined();
+  });
+
+  it('attaches a standalone chat to a task (kills the chat session)', async () => {
+    insertTask(db, {
+      id: 'tT',
+      status: 'running',
+      tmux_session: 'octomux-agent-tT',
+      worktree: '/tmp/wt-t',
+    });
+    const agent = insertAgent(db, { id: 'agChat', task_id: null });
+    db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
+    const reloaded = {
+      ...agent,
+      task_id: null,
+      tmux_session: 'octomux-chat-agChat',
+    } as Agent;
+
+    const updated = await hopAgent(reloaded, 'tT');
+    expect(updated.task_id).toBe('tT');
+    expect(updated.tmux_session).toBeNull();
+
+    const killSession = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['kill-session', '-t', 'octomux-chat-agChat'],
+    });
+    expect(killSession).toBeDefined();
   });
 });
