@@ -145,7 +145,7 @@ export const TaskFilterBar = memo(function TaskFilterBar({
       level={1}
       specular
       data-testid="task-filter-bar"
-      className="my-3 flex items-center justify-between px-2 py-1.5"
+      className="my-3 flex items-center justify-between gap-2 rounded-[14px] px-2 py-1.5"
     >
       <div className="flex items-center gap-1">
         {STATUS_CHIPS.map((chip) => (
@@ -160,7 +160,14 @@ export const TaskFilterBar = memo(function TaskFilterBar({
       </div>
       <div className="flex items-center gap-2">
         {repos.length > 1 && (
-          <RepoFilterDropdown repos={repos} activeRepo={activeRepo} onRepoChange={onRepoChange} />
+          <>
+            <span
+              aria-hidden
+              className="h-5 w-px"
+              style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }}
+            />
+            <RepoFilterDropdown repos={repos} activeRepo={activeRepo} onRepoChange={onRepoChange} />
+          </>
         )}
       </div>
     </GlassPanel>
