@@ -1191,7 +1191,7 @@ export function setupRoutes(app: Express): void {
     }
   });
 
-  // ─── Worktrees (read-only index) ─────────────────────────────────────────
+  // ─── Worktrees (browser) ─────────────────────────────────────────────────
 
   app.get('/api/worktrees', (_req: Request, res: Response) => {
     const db = getDb();
@@ -1208,6 +1208,98 @@ export function setupRoutes(app: Express): void {
       )
       .all() as WorktreeSummary[];
     res.json(rows);
+  });
+
+  app.get('/api/worktrees/:id', (req: Request, res: Response) => {
+    const db = getDb();
+    const worktree = db.prepare('SELECT * FROM worktrees WHERE id = ?').get(req.params.id) as
+      | Worktree
+      | undefined;
+    if (!worktree) {
+      res.status(404).json({ error: 'Worktree not found' });
+      return;
+    }
+    const tasks = db
+      .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? ORDER BY t.updated_at DESC`)
+      .all(worktree.id) as Task[];
+    const active = tasks.find((t) =>
+      (['draft', 'setting_up', 'running'] as const).includes(t.status as 'running'),
+    );
+    const history = tasks.filter((t) => t.id !== active?.id);
+    res.json({
+      worktree,
+      active_task: active ?? null,
+      history,
+    });
+  });
+
+  app.delete('/api/worktrees/:id', async (req: Request, res: Response) => {
+    const db = getDb();
+    const worktree = db.prepare('SELECT * FROM worktrees WHERE id = ?').get(req.params.id) as
+      | Worktree
+      | undefined;
+    if (!worktree) {
+      res.status(404).json({ error: 'Worktree not found' });
+      return;
+    }
+    if (worktree.status !== 'available') {
+      res.status(409).json({ error: 'Worktree is in use' });
+      return;
+    }
+    const referencingTasks = db
+      .prepare('SELECT id, status FROM tasks WHERE worktree_id = ?')
+      .all(worktree.id) as Array<{ id: string; status: string }>;
+    const activeRef = referencingTasks.find((t) =>
+      (['draft', 'setting_up', 'running'] as const).includes(t.status as 'running'),
+    );
+    if (activeRef) {
+      res.status(409).json({ error: 'Worktree has an active task' });
+      return;
+    }
+
+    // Only delete filesystem for worktree-owned modes (new/scratch).
+    if (worktree.mode === 'new' || worktree.mode === 'scratch') {
+      if (worktree.path) {
+        try {
+          if (worktree.mode === 'new' && worktree.repo_path) {
+            await execFile('git', [
+              '-C',
+              worktree.repo_path,
+              'worktree',
+              'remove',
+              worktree.path,
+              '--force',
+            ]).catch(() => {});
+            if (worktree.branch) {
+              await execFile('git', [
+                '-C',
+                worktree.repo_path,
+                'branch',
+                '-D',
+                worktree.branch,
+              ]).catch(() => {});
+            }
+          }
+          if (fs.existsSync(worktree.path)) {
+            fs.rmSync(worktree.path, { recursive: true, force: true });
+          }
+        } catch (err) {
+          apiLogger.warn(
+            { worktree_id: worktree.id, err, operation: 'delete_worktree' },
+            'filesystem cleanup failed',
+          );
+        }
+      }
+    }
+
+    // Unlink referencing (terminal-state) tasks before deleting the row.
+    db.prepare('UPDATE tasks SET worktree_id = NULL WHERE worktree_id = ?').run(worktree.id);
+    db.prepare('DELETE FROM worktrees WHERE id = ?').run(worktree.id);
+    apiLogger.info(
+      { worktree_id: worktree.id, mode: worktree.mode, operation: 'delete_worktree' },
+      'worktree deleted',
+    );
+    res.status(204).send();
   });
 
   // ─── Skills ──────────────────────────────────────────────────────────────────
