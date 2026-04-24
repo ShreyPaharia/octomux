@@ -39,15 +39,20 @@ function scoreMatch(haystack: string, needle: string): number {
 const OPEN_STATUSES = new Set(['running', 'setting_up', 'error']);
 
 const BACKDROP_STYLE: React.CSSProperties = {
-  backgroundColor: 'rgba(0, 0, 0, 0.4)',
+  backgroundColor: 'rgba(0, 0, 0, 0.48)',
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
 };
 
-function Keycap({ children }: { children: React.ReactNode }) {
+function Keycap({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <span
-      className="ml-auto inline-flex h-5 items-center gap-0.5 border border-glass-edge bg-glass-l1 px-1.5 font-mono text-[10px] text-[#b5b5bd]"
+      className={[
+        'inline-flex h-5 items-center gap-0.5 rounded-md border border-glass-edge bg-glass-l1 px-1.5 font-mono text-[10px] text-[#b5b5bd]',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
       style={{ boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.12)' }}
     >
       {children}
@@ -55,10 +60,13 @@ function Keycap({ children }: { children: React.ReactNode }) {
   );
 }
 
-function GroupHeader({ label }: { label: string }) {
+function GroupHeader({ label, count }: { label: string; count?: number }) {
   return (
-    <div className="px-4 pt-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-      {label}
+    <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
+      <span>{label}</span>
+      {count !== undefined && count > 0 && (
+        <span className="font-mono text-[10px] font-bold text-[#6a6a6a]">{count}</span>
+      )}
     </div>
   );
 }
@@ -222,13 +230,10 @@ export function CommandPalette({ open, onClose }: Props) {
         aria-modal="true"
         aria-label="Command palette"
         data-testid="command-palette"
-        className="w-full max-w-xl"
+        className="w-full max-w-xl overflow-hidden rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          className="flex items-center gap-2 border-b border-glass-edge px-3"
-          style={{ backgroundColor: '#0B0C0F' }}
-        >
+        <div className="flex items-center gap-3 border-b border-[rgba(255,255,255,0.1)] px-5 py-3">
           <input
             ref={inputRef}
             type="text"
@@ -241,7 +246,7 @@ export function CommandPalette({ open, onClose }: Props) {
             placeholder="search tasks…"
             aria-label="Search tasks"
             data-testid="command-palette-input"
-            className="focus-ring w-full bg-transparent px-1 py-3 text-sm text-white caret-[#60a5fa] placeholder:text-[#6a6a6a] outline-none"
+            className="focus-ring w-full bg-transparent text-sm text-white caret-[#60a5fa] placeholder:text-[#6a6a6a] outline-none"
             style={{ caretColor: '#60a5fa' }}
           />
           <Keycap>⌘K</Keycap>
@@ -266,7 +271,9 @@ export function CommandPalette({ open, onClose }: Props) {
             </li>
           )}
 
-          {sessionRows.length > 0 && <GroupHeader label="OPEN SESSIONS" />}
+          {sessionRows.length > 0 && (
+            <GroupHeader label="OPEN SESSIONS" count={sessionRows.length} />
+          )}
           {sessionRows.map((row, i) => {
             const idx = sessionsFrom + i;
             const isActive = idx === active;
@@ -329,8 +336,8 @@ function rowClass(active: boolean, extra?: string) {
   return [
     'command-palette-row',
     active
-      ? 'cursor-pointer px-4 py-2 text-sm text-foreground'
-      : 'cursor-pointer px-4 py-2 text-sm text-muted-foreground',
+      ? 'cursor-pointer rounded-lg px-4 py-2 text-sm text-foreground'
+      : 'cursor-pointer rounded-lg px-4 py-2 text-sm text-muted-foreground',
     active ? 'command-palette-row--selected' : '',
     extra,
   ]
