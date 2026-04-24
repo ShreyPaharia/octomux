@@ -199,6 +199,41 @@ describe('TerminalView', () => {
     expect(closeSpy).toHaveBeenCalled();
   });
 
+  it('does NOT show the disconnect overlay when an OPEN ws is idle for 10+ seconds', async () => {
+    // Regression test: previously a 5s data-silence window would trip a stall
+    // timer and show the "Server unreachable" overlay on any idle terminal
+    // (shell at prompt, Claude waiting for input). Data silence is not a
+    // disconnect signal — only ws.onclose should surface that overlay.
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+
+    // Simulate a long idle window with zero terminal output.
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+    expect(queryByTestId('terminal-disconnected-overlay')).toBeNull();
+  });
+
+  it('shows the disconnect overlay when the ws closes with a non-normal code', async () => {
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+    // Non-normal close code (1005 = no status received) triggers the reconnect
+    // path and the overlay.
+    act(() => ws._close(1005));
+
+    expect(queryByTestId('terminal-disconnected-overlay')).not.toBeNull();
+  });
+
   it('does not reconnect a replaced WebSocket after it closes', async () => {
     // This is the core bug guard: once we switch tabs, the old WS's onclose
     // must NOT trigger a reconnect via the stale closure.
