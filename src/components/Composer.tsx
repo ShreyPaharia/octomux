@@ -4,8 +4,10 @@ import {
   useState,
   useCallback,
   useRef,
+  forwardRef,
   type KeyboardEvent,
   type FormEvent,
+  type Ref,
 } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
@@ -18,6 +20,7 @@ import {
 import { RepoPickerField } from './fields/RepoPickerField';
 import { BranchPickerField } from './fields/BranchPickerField';
 import { Button } from '@/components/ui/button';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
 import { useTasksContext } from '@/lib/tasks-context';
 import type { Task, Agent } from '../../server/types';
@@ -57,7 +60,6 @@ export function Composer({ onSubmitted }: Props = {}) {
   const navigate = useNavigate();
   const { tasks, refresh } = useTasksContext();
 
-  // Initial state is derived from the URL exactly once on mount.
   const [state, dispatch] = useReducer(reduce, searchParams, (params: URLSearchParams) =>
     hydrateFromUrl(params),
   );
@@ -69,9 +71,11 @@ export function Composer({ onSubmitted }: Props = {}) {
     conflictTaskId?: string | null;
   } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const repoChipRef = useRef<HTMLButtonElement>(null);
+  const branchChipRef = useRef<HTMLButtonElement>(null);
+  const worktreeCheckboxRef = useRef<HTMLButtonElement>(null);
 
-  // Re-hydrate when the URL is changed externally (e.g. sidebar click navigating
-  // to a new `?repo=...` URL while the Composer is already mounted).
+  // Re-hydrate when the URL is changed externally.
   const lastHydratedRef = useRef(searchParams.toString());
   useEffect(() => {
     const current = searchParams.toString();
@@ -81,7 +85,7 @@ export function Composer({ onSubmitted }: Props = {}) {
     setErrorBanner(null);
   }, [searchParams]);
 
-  // Mirror chip state → URL. Skip when nothing would change to avoid dirty loops.
+  // Mirror chip state → URL.
   useEffect(() => {
     const next = stateToUrlParams(state).toString();
     if (next === searchParams.toString()) return;
@@ -89,14 +93,13 @@ export function Composer({ onSubmitted }: Props = {}) {
     setSearchParams(next ? new URLSearchParams(next) : new URLSearchParams(), { replace: true });
   }, [state, searchParams, setSearchParams]);
 
-  // Source task lookup for add-agent + fork intent headers.
   const addAgentSourceId = state.mode === 'add-agent' ? state.sessionId : null;
   const forkOfId = state.mode === 'new' && state.forkOf ? state.forkOf : null;
   const sourceTaskId = addAgentSourceId ?? forkOfId ?? null;
   const sourceTask = sourceTaskId ? (tasks.find((t) => t.id === sourceTaskId) ?? null) : null;
   const sourceTaskMissing = sourceTaskId !== null && !sourceTask && tasks.length > 0;
 
-  // ─── Chip dispatchers ────────────────────────────────────────────────
+  // ─── Dispatchers ─────────────────────────────────────────────────────
 
   const onPickRepo = useCallback(async (repoPath: string) => {
     if (!repoPath) {
@@ -154,9 +157,6 @@ export function Composer({ onSubmitted }: Props = {}) {
           refresh();
           navigate(`/tasks/${state.sessionId}`);
         } else if (state.mode === 'scratch') {
-          // Phase 2a: scratch submit creates a standalone runtime agent (chat),
-          // not a scratch task. The prompt is not forwarded today — the Claude
-          // session starts fresh in the chat terminal.
           const chat = await createChatRequest({ label: deriveTitleFromPrompt(trimmed) });
           navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
@@ -187,7 +187,6 @@ export function Composer({ onSubmitted }: Props = {}) {
         }
       } catch (err) {
         const message = (err as Error).message || 'Submission failed';
-        // Try to correlate server conflict messages to an existing task for an inline link.
         const conflictMatch = /task\s+([a-zA-Z0-9_-]{6,})/i.exec(message);
         setErrorBanner({
           message,
@@ -210,43 +209,67 @@ export function Composer({ onSubmitted }: Props = {}) {
     [handleSubmit],
   );
 
-  // Auto-focus on mount so the composer is immediately typeable — also gives
-  // ⌘⇧N (navigate to /) a predictable focus target on remount.
+  // Auto-focus on mount.
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
-  // Listen for global shortcut bridges (⌘⇧N → focus, ⌘Enter → submit).
+  // Global shortcut bridges (⌘⇧N → focus, ⌘Enter → submit) + local shortcuts
+  // (⌘R → repo, ⌘B → branch, ⌘W → toggle worktree).
   const submitRef = useRef(handleSubmit);
   submitRef.current = handleSubmit;
+  const toggleWorktreeRef = useRef(onToggleWorktree);
+  toggleWorktreeRef.current = onToggleWorktree;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   useEffect(() => {
     const onFocus = () => textareaRef.current?.focus();
     const onSubmit = () => {
       void submitRef.current();
     };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'r') {
+        e.preventDefault();
+        repoChipRef.current?.click();
+      } else if (key === 'b') {
+        e.preventDefault();
+        branchChipRef.current?.click();
+      } else if (key === 'w') {
+        const s = stateRef.current;
+        if (s.mode === 'new') {
+          e.preventDefault();
+          toggleWorktreeRef.current(false);
+        } else if (s.mode === 'none') {
+          e.preventDefault();
+          toggleWorktreeRef.current(true);
+        }
+      }
+    };
     window.addEventListener('focus-composer', onFocus);
     window.addEventListener('submit-composer', onSubmit);
+    window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('focus-composer', onFocus);
       window.removeEventListener('submit-composer', onSubmit);
+      window.removeEventListener('keydown', onKey);
     };
   }, []);
 
-  // ─── Render helpers ──────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────
 
-  const derivedLabel = useDerivedModeLabel(state, sourceTask);
-  const showRepoChip = state.mode !== 'add-agent';
-  const showBranchChip = state.mode === 'new';
-  const showWorktreeToggle = state.mode === 'new' || state.mode === 'none';
+  const hasRepo = state.mode === 'new' || state.mode === 'none' || state.mode === 'existing';
+  const worktreeOn = state.mode === 'new';
+  const showBranchChip = state.mode === 'new' || state.mode === 'none';
+  const showWorktreeCheckbox = state.mode === 'new' || state.mode === 'none';
   const showAttachChip = state.mode === 'new' || state.mode === 'existing' || state.mode === 'none';
   const disabledByAddAgent = state.mode === 'add-agent';
+  const showScratchHint = !hasRepo && state.mode !== 'add-agent';
 
   return (
-    <div
-      className="flex flex-col gap-2 border-t border-border bg-background px-4 py-3"
-      data-testid="composer"
-    >
-      {/* ─── Intent header ───────────────────────────────────────────── */}
+    <GlassPanel level={3} specular className="flex flex-col gap-2 px-4 py-3" data-testid="composer">
       <IntentHeader
         state={state}
         sourceTask={sourceTask}
@@ -254,7 +277,6 @@ export function Composer({ onSubmitted }: Props = {}) {
         onClear={onClearIntent}
       />
 
-      {/* ─── Error banner ────────────────────────────────────────────── */}
       {errorBanner && (
         <div
           role="alert"
@@ -273,15 +295,16 @@ export function Composer({ onSubmitted }: Props = {}) {
         </div>
       )}
 
-      {/* ─── Chip row ────────────────────────────────────────────────── */}
+      {/* Chip row — derives run_mode from (repo ∧ worktree). */}
       <div
-        className={`flex flex-wrap items-center gap-2 ${disabledByAddAgent ? 'opacity-40 pointer-events-none' : ''}`}
+        className={`flex flex-wrap items-center gap-2 ${disabledByAddAgent ? 'pointer-events-none opacity-40' : ''}`}
         data-testid="chip-row"
       >
-        <span className="select-none text-xs font-mono text-muted-foreground">🏠 Local</span>
-
-        {showRepoChip && (
+        {!hasRepo ? (
+          <RepoChip ref={repoChipRef} value="" onChange={onPickRepo} onClear={onClearRepo} />
+        ) : (
           <RepoChip
+            ref={repoChipRef}
             value={
               state.mode === 'new' || state.mode === 'none' || state.mode === 'existing'
                 ? state.repo
@@ -292,14 +315,20 @@ export function Composer({ onSubmitted }: Props = {}) {
           />
         )}
 
-        {showBranchChip && state.mode === 'new' && (
-          <BranchChip repoPath={state.repo} value={state.branch ?? ''} onChange={onPickBranch} />
+        {showBranchChip && (
+          <BranchChip
+            ref={branchChipRef}
+            repoPath={state.mode === 'new' || state.mode === 'none' ? state.repo : ''}
+            value={state.branch ?? ''}
+            onChange={onPickBranch}
+          />
         )}
 
-        {showWorktreeToggle && (
-          <WorktreeToggle
-            value={state.mode === 'new' ? 'worktree' : 'in-place'}
-            onChange={(v) => onToggleWorktree(v === 'worktree')}
+        {showWorktreeCheckbox && (
+          <WorktreeCheckbox
+            ref={worktreeCheckboxRef}
+            checked={worktreeOn}
+            onChange={onToggleWorktree}
           />
         )}
 
@@ -316,42 +345,50 @@ export function Composer({ onSubmitted }: Props = {}) {
           onChange={onToggleDraft}
           disabled={state.mode === 'empty' || state.mode === 'add-agent'}
         />
+
+        {showScratchHint && (
+          <span
+            className="ml-auto select-none rounded border border-border/60 bg-muted/20 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+            data-testid="scratch-hint"
+            title="No repo selected — submission creates a scratch chat."
+          >
+            <span className="mr-1 text-[9px] opacity-60">S</span>scratch
+          </span>
+        )}
       </div>
 
-      {/* ─── Prompt + submit ─────────────────────────────────────────── */}
+      {/* Prompt + submit. Textarea stays opaque (terminal rule). */}
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <textarea
           ref={textareaRef}
           data-testid="composer-prompt"
-          className="min-h-[72px] resize-y border border-input bg-transparent px-3 py-2 text-sm font-mono outline-none focus:border-ring"
+          className="min-h-[72px] resize-y rounded-2xl border border-white/10 px-3 py-2 text-sm font-mono text-foreground outline-none focus:border-ring"
+          style={{ backgroundColor: '#0B0C0F' }}
           placeholder={promptPlaceholder(state)}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onTextareaKeyDown}
           aria-label="Task prompt"
         />
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted-foreground" data-testid="derived-mode-label">
-            {derivedLabel}
-          </span>
-          <div className="flex items-center gap-2">
-            {blockedReason && prompt.trim() && (
-              <span className="text-[11px] text-muted-foreground" title={blockedReason}>
-                {blockedReason}
-              </span>
-            )}
-            <Button
-              type="submit"
-              disabled={!canSubmit}
-              data-testid="composer-submit"
-              title={blockedReason ?? undefined}
-            >
-              {submitting ? 'DISPATCHING…' : 'DISPATCH ⏎'}
-            </Button>
-          </div>
+        <div className="flex items-center justify-end gap-2">
+          {blockedReason && prompt.trim() && (
+            <span className="text-[11px] text-muted-foreground" title={blockedReason}>
+              {blockedReason}
+            </span>
+          )}
+          <Button
+            type="submit"
+            disabled={!canSubmit}
+            data-testid="composer-submit"
+            title={blockedReason ?? undefined}
+            className="bg-cyan-500 text-white hover:bg-cyan-400"
+            style={{ boxShadow: canSubmit ? '0 0 12px rgba(34,211,238,0.45)' : undefined }}
+          >
+            {submitting ? 'Starting…' : 'Start task'}
+          </Button>
         </div>
       </form>
-    </div>
+    </GlassPanel>
   );
 }
 
@@ -418,23 +455,6 @@ function intentHeaderText(
   }
 }
 
-function useDerivedModeLabel(state: ComposerState, sourceTask: Task | null): string {
-  switch (state.mode) {
-    case 'empty':
-      return '→ pick a repo or start typing';
-    case 'scratch':
-      return '→ scratch ⏎';
-    case 'new':
-      return '→ new worktree ⏎';
-    case 'none':
-      return '→ in-place ⏎';
-    case 'existing':
-      return '→ attach existing ⏎';
-    case 'add-agent':
-      return `→ add agent → ${sourceTask?.title ?? state.sessionId} ⏎`;
-  }
-}
-
 function promptPlaceholder(state: ComposerState): string {
   if (state.mode === 'add-agent') return 'Instructions for the new agent…';
   if (state.mode === 'empty') return 'Describe a task or ask a question…';
@@ -443,21 +463,33 @@ function promptPlaceholder(state: ComposerState): string {
 
 // ─── Chip primitives ─────────────────────────────────────────────────────
 
-function RepoChip({
-  value,
-  onChange,
-  onClear,
-}: {
+interface RepoChipProps {
   value: string;
   onChange: (v: string) => void;
   onClear: () => void;
-}) {
+}
+
+/**
+ * Empty state: a dashed-border chip `+ Add repo or folder`.
+ * Filled state: a pill showing the repo basename with a remove button.
+ */
+const RepoChip = forwardRef<HTMLButtonElement, RepoChipProps>(function RepoChip(
+  { value, onChange, onClear },
+  ref,
+) {
   const [expanded, setExpanded] = useState(false);
   if (!value && !expanded) {
     return (
-      <ChipButton onClick={() => setExpanded(true)} data-testid="repo-chip-picker">
-        📁 repo
-      </ChipButton>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => setExpanded(true)}
+        data-testid="repo-chip-picker"
+        className="inline-flex items-center gap-1 rounded border border-dashed border-border/80 px-3 py-1 text-[11px] font-mono text-muted-foreground hover:border-foreground hover:text-foreground"
+      >
+        <span aria-hidden>+</span>
+        <span>Add repo or folder</span>
+      </button>
     );
   }
   if (!value && expanded) {
@@ -478,72 +510,94 @@ function RepoChip({
   }
   return (
     <ChipRemovable
+      buttonRef={ref}
       label={`📁 ${repoBasename(value)}`}
       title={value}
       onRemove={onClear}
       data-testid="repo-chip"
     />
   );
-}
+});
 
-function BranchChip({
-  repoPath,
-  value,
-  onChange,
-}: {
+interface BranchChipProps {
   repoPath: string;
   value: string;
   onChange: (branch: string) => void;
-}) {
+}
+
+const BranchChip = forwardRef<HTMLButtonElement, BranchChipProps>(function BranchChip(
+  { repoPath, value, onChange },
+  ref,
+) {
   return (
     <div className="flex items-center gap-1" data-testid="branch-chip">
-      <span className="text-xs text-muted-foreground">⎇</span>
+      <span className="text-xs text-muted-foreground" aria-hidden>
+        ⎇
+      </span>
       <div className="min-w-[140px] max-w-[220px]">
-        <BranchPickerField repoPath={repoPath} value={value} onChange={onChange} />
+        <BranchPickerField triggerRef={ref} repoPath={repoPath} value={value} onChange={onChange} />
       </div>
     </div>
   );
+});
+
+interface WorktreeCheckboxProps {
+  checked: boolean;
+  onChange: (v: boolean) => void;
 }
 
-function WorktreeToggle({
-  value,
-  onChange,
-}: {
-  value: 'worktree' | 'in-place';
-  onChange: (v: 'worktree' | 'in-place') => void;
-}) {
-  return (
-    <div
-      className="inline-flex items-stretch border border-border text-[11px] font-mono"
-      role="group"
-      data-testid="worktree-toggle"
-      aria-label="Worktree mode"
-    >
+/**
+ * Worktree checkbox pill. Off = task runs on the branch's working tree
+ * (`run_mode: 'none'`). On = fresh worktree (`run_mode: 'new'`). When on, the
+ * pill fills cyan with a white checkmark.
+ */
+const WorktreeCheckbox = forwardRef<HTMLButtonElement, WorktreeCheckboxProps>(
+  function WorktreeCheckbox({ checked, onChange }, ref) {
+    return (
       <button
+        ref={ref}
         type="button"
-        onClick={() => onChange('worktree')}
-        className={`px-2 py-1 ${value === 'worktree' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-        aria-pressed={value === 'worktree'}
-        data-testid="worktree-toggle-worktree"
+        role="checkbox"
+        aria-checked={checked}
+        aria-label="Create a fresh worktree for this task"
+        onClick={() => onChange(!checked)}
+        data-testid="worktree-checkbox"
+        data-state={checked ? 'checked' : 'unchecked'}
+        className="inline-flex items-center gap-2 rounded border px-2 py-1 text-[11px] font-mono transition-colors"
+        style={{
+          borderColor: checked ? 'rgba(59,130,246,0.4)' : 'var(--border)',
+          backgroundColor: checked ? 'rgba(59,130,246,0.12)' : 'transparent',
+          color: checked ? 'rgb(147,197,253)' : 'var(--muted-foreground)',
+        }}
       >
-        worktree
+        <span
+          aria-hidden
+          className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-sm border"
+          style={{
+            borderColor: checked ? 'rgba(59,130,246,0.6)' : 'var(--border)',
+            backgroundColor: checked ? 'rgb(59,130,246)' : 'transparent',
+          }}
+        >
+          {checked && (
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          )}
+        </span>
+        <span>worktree</span>
       </button>
-      <button
-        type="button"
-        onClick={() => onChange('in-place')}
-        className={`px-2 py-1 ${
-          value === 'in-place'
-            ? 'bg-amber-500/20 text-amber-300'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-        aria-pressed={value === 'in-place'}
-        data-testid="worktree-toggle-in-place"
-      >
-        in-place
-      </button>
-    </div>
-  );
-}
+    );
+  },
+);
 
 function AttachChip({
   value,
@@ -650,11 +704,13 @@ function ChipRemovable({
   label,
   title,
   onRemove,
+  buttonRef,
   ...rest
 }: {
   label: string;
   title?: string;
   onRemove: () => void;
+  buttonRef?: Ref<HTMLButtonElement>;
 } & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
@@ -662,14 +718,15 @@ function ChipRemovable({
       title={title}
       className="inline-flex items-center gap-1 border border-border px-2 py-1 text-[11px] font-mono"
     >
-      <span>{label}</span>
       <button
+        ref={buttonRef}
         type="button"
         onClick={onRemove}
         aria-label="Remove"
-        className="text-muted-foreground hover:text-foreground"
+        className="inline-flex items-center gap-1 text-foreground hover:text-muted-foreground"
       >
-        ×
+        <span>{label}</span>
+        <span className="text-muted-foreground">×</span>
       </button>
     </div>
   );

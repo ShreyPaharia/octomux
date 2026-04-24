@@ -4,6 +4,7 @@ import {
   hydrateFromUrl,
   stateToUrlParams,
   validateForSubmit,
+  deriveRunMode,
   INITIAL_STATE,
   type ComposerState,
   type ComposerAction,
@@ -41,10 +42,13 @@ const addAgent: ComposerState = {
 
 describe('reduce / pickRepo', () => {
   const cases: Array<{ from: ComposerState; expectedMode: string }> = [
-    { from: empty, expectedMode: 'new' },
-    { from: scratch, expectedMode: 'new' },
+    // Fresh pick: worktree checkbox starts OFF → `none` mode.
+    { from: empty, expectedMode: 'none' },
+    { from: scratch, expectedMode: 'none' },
+    // Repo swap within `new` preserves the on-state of the checkbox.
     { from: newState, expectedMode: 'new' },
-    { from: noneState, expectedMode: 'new' },
+    // Repo swap within `none` preserves the off-state.
+    { from: noneState, expectedMode: 'none' },
     { from: existingState, expectedMode: 'existing' },
   ];
   it.each(cases)('$from.mode → $expectedMode on pickRepo', ({ from, expectedMode }) => {
@@ -52,15 +56,15 @@ describe('reduce / pickRepo', () => {
     expect(next.mode).toBe(expectedMode);
   });
 
-  it('pickRepo from empty yields new with default branch and worktree ON (not none)', () => {
+  it('pickRepo from empty yields none with default branch (worktree OFF by default)', () => {
     const next = reduce(empty, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
-    expect(next).toEqual({ mode: 'new', repo: '/r', branch: 'main', isDraft: false });
+    expect(next).toEqual({ mode: 'none', repo: '/r', branch: 'main', isDraft: false });
   });
 
   it('pickRepo preserves isDraft', () => {
     const draftScratch: ComposerState = { mode: 'scratch', isDraft: true };
     const next = reduce(draftScratch, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
-    expect(next).toMatchObject({ mode: 'new', isDraft: true });
+    expect(next).toMatchObject({ mode: 'none', isDraft: true });
   });
 
   it('pickRepo preserves forkOf from new mode', () => {
@@ -298,19 +302,35 @@ describe('hydrateFromUrl', () => {
       expected: { mode: 'scratch', isDraft: false },
     },
     {
-      name: '?repo=/r → new with null branch',
+      // New default: repo without explicit mode means worktree checkbox is off.
+      name: '?repo=/r → none with null branch (worktree OFF default)',
       qs: 'repo=%2Fr',
+      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false },
+    },
+    {
+      name: '?repo=/r&branch=dev → none with dev',
+      qs: 'repo=%2Fr&branch=dev',
+      expected: { mode: 'none', repo: '/r', branch: 'dev', isDraft: false },
+    },
+    {
+      name: '?repo=/r&base_branch=main → none with main',
+      qs: 'repo=%2Fr&base_branch=main',
+      expected: { mode: 'none', repo: '/r', branch: 'main', isDraft: false },
+    },
+    {
+      name: '?repo=/r&mode=new → new (worktree ON)',
+      qs: 'repo=%2Fr&mode=new',
       expected: { mode: 'new', repo: '/r', branch: null, isDraft: false },
     },
     {
-      name: '?repo=/r&branch=dev → new with dev',
-      qs: 'repo=%2Fr&branch=dev',
-      expected: { mode: 'new', repo: '/r', branch: 'dev', isDraft: false },
+      name: '?repo=/r&worktree=1 → new (worktree ON via explicit flag)',
+      qs: 'repo=%2Fr&worktree=1',
+      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false },
     },
     {
-      name: '?repo=/r&base_branch=main → new with main',
-      qs: 'repo=%2Fr&base_branch=main',
-      expected: { mode: 'new', repo: '/r', branch: 'main', isDraft: false },
+      name: '?repo=/r&fork_of=x → new with forkOf (fork_of implies worktree ON)',
+      qs: 'repo=%2Fr&fork_of=x',
+      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false, forkOf: 'x' },
     },
     {
       name: '?repo=/r&mode=new&fork_of=x → new with forkOf',
@@ -361,6 +381,17 @@ describe('hydrateFromUrl', () => {
       params: new URLSearchParams('repo=%2Fr&mode=new'),
     });
     expect(next).toMatchObject({ mode: 'new', repo: '/r' });
+  });
+
+  // Per T5 spec: explicit `mode=new` must produce repo + worktree=on (i.e. `mode:'new'`).
+  it('hydrateFromUrl({ repo, mode: "new" }) → repo set + worktree ON (mode=new)', () => {
+    const state = hydrateFromUrl(new URLSearchParams('repo=%2Fr&mode=new&branch=main'));
+    expect(state).toEqual({
+      mode: 'new',
+      repo: '/r',
+      branch: 'main',
+      isDraft: false,
+    });
   });
 });
 
@@ -431,6 +462,33 @@ describe('validateForSubmit', () => {
   });
   it('requires sessionId for add-agent', () => {
     expect(validateForSubmit(addAgent, 'p')).toBeNull();
+  });
+});
+
+// ─── deriveRunMode — T5: run_mode is derived from (repo ∧ worktree) ──────
+
+describe('deriveRunMode', () => {
+  it('empty composer (no repo) → "scratch"', () => {
+    expect(deriveRunMode(scratch)).toBe('scratch');
+  });
+
+  it('repo + worktree ON → "new"', () => {
+    // Simulate "user clicked add repo, then checked the worktree box".
+    const afterPickRepo = reduce(empty, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
+    const afterCheck = reduce(afterPickRepo, { type: 'toggleWorktree', worktree: true });
+    expect(deriveRunMode(afterCheck)).toBe('new');
+  });
+
+  it('repo + worktree OFF → "none"', () => {
+    // Default on first pick: worktree off → none.
+    const afterPickRepo = reduce(empty, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
+    expect(deriveRunMode(afterPickRepo)).toBe('none');
+  });
+
+  it('attach chip takes precedence → "existing"', () => {
+    const afterPickRepo = reduce(empty, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
+    const afterAttach = reduce(afterPickRepo, { type: 'setExistingPath', path: '/p' });
+    expect(deriveRunMode(afterAttach)).toBe('existing');
   });
 });
 
