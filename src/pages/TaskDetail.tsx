@@ -8,6 +8,8 @@ import { DiffViewer } from '@/components/DiffViewer';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
+import { TaskSettingUpView } from '@/components/TaskSettingUpView';
+import { TaskErrorView } from '@/components/TaskErrorView';
 
 import { useTask } from '@/lib/hooks';
 import { api } from '@/lib/api';
@@ -192,6 +194,16 @@ export default function TaskDetail() {
     }
   }, [taskId, refresh]);
 
+  const handleDelete = useCallback(async () => {
+    if (!taskId) return;
+    try {
+      await api.deleteTask(taskId);
+      navigate('/tasks');
+    } catch (err) {
+      console.error('Failed to delete task:', err);
+    }
+  }, [taskId, navigate]);
+
   const handleResume = useCallback(async () => {
     if (!taskId) return;
     setResuming(true);
@@ -301,7 +313,13 @@ export default function TaskDetail() {
         className="bg-glass-l1 glass-blur-l1 flex items-center justify-between gap-3 border-b border-glass-edge px-4 py-3"
       >
         <div className="flex min-w-0 items-center gap-2">
-          <h1 className="truncate text-[15px] font-semibold leading-none">{task.title}</h1>
+          <h1
+            title={task.title}
+            aria-label={task.title}
+            className="truncate text-[15px] font-semibold leading-none"
+          >
+            {task.title}
+          </h1>
           <span
             data-testid="mode-badge"
             title={MODE_TOOLTIP[runMode]}
@@ -405,8 +423,8 @@ export default function TaskDetail() {
         </div>
       </div>
 
-      {/* Error display */}
-      {task.error && (
+      {/* Error display — only when status !== 'error' (dedicated error view shows error) */}
+      {task.error && task.status !== 'error' && (
         <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {task.error}
         </div>
@@ -469,8 +487,20 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Agent view — shown in agents mode */}
-      {hasTerminal ? (
+      {/* Dedicated lifecycle state: setting_up */}
+      {task.status === 'setting_up' && !hasTerminal && mode === 'agents' && (
+        <TaskSettingUpView task={task} />
+      )}
+
+      {/* Dedicated lifecycle state: error */}
+      {task.status === 'error' && mode === 'agents' && (
+        <TaskErrorView task={task} onRetry={handleResume} onDelete={handleDelete} />
+      )}
+
+      {/* Agent view — shown in agents mode. Skip entirely when a dedicated
+          lifecycle state (setting_up / error) is rendering above. */}
+      {task.status === 'error' ||
+      (task.status === 'setting_up' && !hasTerminal) ? null : hasTerminal ? (
         <div className={mode === 'agents' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           <AgentTabs
             agents={agents}
@@ -529,9 +559,7 @@ export default function TaskDetail() {
               : 'hidden'
           }
         >
-          {task.status === 'setting_up' ? (
-            'Setting up terminal...'
-          ) : task.status === 'closed' || task.status === 'error' ? (
+          {task.status === 'closed' ? (
             <>
               <TerminalRectIcon size={32} className="text-muted-foreground/50" />
               <span className="text-sm">Terminal session ended</span>

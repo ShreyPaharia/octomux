@@ -60,6 +60,25 @@ describe('HomePage', () => {
     expect(h1).toHaveClass('text-[32px]');
   });
 
+  it('renders first-run CTA when there are no tasks', () => {
+    renderHome('/', { tasks: [] });
+    expect(screen.getByTestId('home-first-run')).toBeInTheDocument();
+    expect(screen.getByTestId('home-first-run-cta')).toHaveTextContent(/create your first task/i);
+  });
+
+  it('clicking first-run CTA dispatches focus-composer event', async () => {
+    const user = userEvent.setup();
+    const spy = vi.fn();
+    window.addEventListener('focus-composer', spy);
+    try {
+      renderHome('/', { tasks: [] });
+      await user.click(screen.getByTestId('home-first-run-cta'));
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('focus-composer', spy);
+    }
+  });
+
   it('hydrates composer from URL with repo + fork_of, then submits', async () => {
     const user = userEvent.setup();
     apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'spawned' }));

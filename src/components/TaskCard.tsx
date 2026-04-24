@@ -100,7 +100,11 @@ export const TaskCard = memo(function TaskCard({
         <div className="min-w-0 flex-1">
           {/* Title + mode badge */}
           <div className="flex items-center gap-2">
-            <h3 className="font-display min-w-0 truncate text-base font-semibold leading-snug">
+            <h3
+              title={task.title}
+              aria-label={task.title}
+              className="font-display min-w-0 truncate text-base font-semibold leading-snug"
+            >
               {task.title}
             </h3>
             <ModeBadge mode={task.run_mode} />
