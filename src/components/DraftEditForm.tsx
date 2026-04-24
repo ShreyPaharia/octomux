@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
 import type { Task } from '../../server/types';
 import { RepoPickerField } from './fields/RepoPickerField';
@@ -62,7 +63,11 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <div className="flex flex-col gap-5">
+      <GlassPanel
+        level={2}
+        specular
+        className="flex flex-col gap-5 rounded-2xl p-6 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.55)]"
+      >
         <div className="flex flex-col gap-2">
           <Label htmlFor="edit-title">Title</Label>
           <Input
@@ -156,7 +161,7 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
           </Button>
           {saved && <span className="font-mono text-xs text-[#22C55E]">SAVED</span>}
         </div>
-      </div>
+      </GlassPanel>
     </div>
   );
 }
