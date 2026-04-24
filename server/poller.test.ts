@@ -644,9 +644,14 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const created = db.prepare(`SELECT * FROM tasks WHERE source = 'auto_review'`).get() as
-      | Record<string, unknown>
-      | undefined;
+    const created = db
+      .prepare(
+        `SELECT t.id, t.status, t.title, t.pr_number, t.pr_head_sha, t.initial_prompt,
+                w.branch AS branch, w.base_branch AS base_branch
+           FROM tasks t LEFT JOIN worktrees w ON t.worktree_id = w.id
+          WHERE t.source = 'auto_review'`,
+      )
+      .get() as Record<string, unknown> | undefined;
     expect(created).toBeDefined();
     expect(created!.status).toBe('draft');
     expect(created!.pr_number).toBe(42);

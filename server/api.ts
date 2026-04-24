@@ -23,6 +23,7 @@ import {
 } from './task-runner.js';
 import * as diffMod from './diff.js';
 import { createChat, listChats, getChat } from './chats.js';
+import { SELECT_TASK_SQL } from './task-select.js';
 
 import {
   isOrchestratorRunning,
@@ -82,7 +83,7 @@ function safeParseJson(s: string): Record<string, unknown> {
 
 /** Load a task by :id param; respond 404 and return null if missing. */
 function loadTaskOrFail(req: Request, res: Response): Task | null {
-  const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id) as
+  const task = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(req.params.id) as
     | Task
     | undefined;
   if (!task) {
@@ -110,7 +111,7 @@ function sendDomainError(res: Response, err: unknown): void {
 /** Reload a task with its related agents and user_terminals. */
 function fetchTaskBundle(taskId: string): Task {
   const db = getDb();
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Task;
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task;
   task.agents = db
     .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
     .all(taskId) as Agent[];
@@ -244,7 +245,13 @@ export function setupRoutes(app: Express): void {
     const db = getDb();
     const rows = db
       .prepare(
-        `SELECT repo_path, MAX(created_at) as last_used FROM tasks GROUP BY repo_path ORDER BY last_used DESC LIMIT 10`,
+        `SELECT w.repo_path AS repo_path, MAX(t.created_at) as last_used
+           FROM tasks t
+           INNER JOIN worktrees w ON t.worktree_id = w.id
+          WHERE w.repo_path IS NOT NULL
+          GROUP BY w.repo_path
+          ORDER BY last_used DESC
+          LIMIT 10`,
       )
       .all() as Array<{ repo_path: string; last_used: string }>;
     res.json(rows);
@@ -258,10 +265,12 @@ export function setupRoutes(app: Express): void {
     let tasks: Task[];
     if (repoPath) {
       tasks = db
-        .prepare('SELECT * FROM tasks WHERE repo_path = ? ORDER BY created_at DESC')
+        .prepare(`${SELECT_TASK_SQL} WHERE w.repo_path = ? ORDER BY t.created_at DESC`)
         .all(repoPath) as Task[];
     } else {
-      tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Task[];
+      tasks = db
+        .prepare(`${SELECT_TASK_SQL} ORDER BY t.created_at DESC`)
+        .all() as Task[];
     }
 
     if (tasks.length === 0) {
@@ -354,7 +363,7 @@ export function setupRoutes(app: Express): void {
     const db = getDb();
     db.prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`).run(task.id);
     apiLogger.info({ task_id: task.id, operation: 'marked_viewed' }, 'marked task viewed');
-    const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id) as Task;
+    const updated = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id) as Task;
     res.json(updated);
   });
 
@@ -462,23 +471,38 @@ export function setupRoutes(app: Express): void {
     const id = nanoid(12);
     const isDraft = !!body.draft;
 
+    // Phase 2a: worktrees owns path/branch/base/repo. Always create a
+    // worktree row at task creation. For `new` mode the path isn't known
+    // until setup runs (derived from slug); stage it as empty string and
+    // task-runner updates it when the git worktree is cut.
+    const worktreeId = nanoid(12);
+    const stagedPath =
+      runMode === 'existing' ? storedWorktree! : runMode === 'none' ? storedRepoPath : '';
     try {
       db.prepare(
+        `INSERT INTO worktrees
+           (id, path, repo_path, branch, base_branch, mode, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'available')`,
+      ).run(
+        worktreeId,
+        stagedPath,
+        runMode === 'scratch' ? null : storedRepoPath || null,
+        body.branch ?? null,
+        body.base_branch ?? null,
+        runMode,
+      );
+
+      db.prepare(
         `INSERT INTO tasks
-           (id, title, description, repo_path, status, branch, base_branch,
-            worktree, initial_prompt, run_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, description, status, initial_prompt, worktree_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         body.title,
         body.description,
-        storedRepoPath,
         isDraft ? 'draft' : 'setting_up',
-        body.branch ?? null,
-        body.base_branch ?? null,
-        storedWorktree,
         body.initial_prompt ?? null,
-        runMode,
+        worktreeId,
       );
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
@@ -489,7 +513,7 @@ export function setupRoutes(app: Express): void {
       throw err;
     }
 
-    const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
+    const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
     created.agents = [];
     created.user_terminals = [];
     broadcast({ type: 'task:created', payload: { taskId: id } });
@@ -557,30 +581,59 @@ export function setupRoutes(app: Express): void {
         return;
       }
 
-      const fields: string[] = [];
-      const values: unknown[] = [];
-      for (const key of [
-        'title',
-        'description',
-        'repo_path',
-        'branch',
-        'base_branch',
-        'initial_prompt',
-        'run_mode',
-      ] as const) {
+      // Route updates between tasks (title/description/initial_prompt) and
+      // worktrees (repo_path/branch/base_branch/path/mode).
+      const taskFields: string[] = [];
+      const taskValues: unknown[] = [];
+      for (const key of ['title', 'description', 'initial_prompt'] as const) {
         if (body[key] !== undefined) {
-          fields.push(`${key} = ?`);
-          values.push(body[key] ?? null);
+          taskFields.push(`${key} = ?`);
+          taskValues.push(body[key] ?? null);
         }
       }
-      if (body.worktree_path !== undefined) {
-        fields.push('worktree = ?');
-        values.push(body.worktree_path ?? null);
+      if (taskFields.length > 0) {
+        taskFields.push(`updated_at = datetime('now')`);
+        taskValues.push(task.id);
+        db.prepare(`UPDATE tasks SET ${taskFields.join(', ')} WHERE id = ?`).run(...taskValues);
       }
-      if (fields.length > 0) {
-        fields.push(`updated_at = datetime('now')`);
-        values.push(task.id);
-        db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+
+      const worktreeFields: string[] = [];
+      const worktreeValues: unknown[] = [];
+      if (body.repo_path !== undefined) {
+        worktreeFields.push('repo_path = ?');
+        worktreeValues.push(body.repo_path ?? null);
+      }
+      if (body.branch !== undefined) {
+        worktreeFields.push('branch = ?');
+        worktreeValues.push(body.branch ?? null);
+      }
+      if (body.base_branch !== undefined) {
+        worktreeFields.push('base_branch = ?');
+        worktreeValues.push(body.base_branch ?? null);
+      }
+      if (body.worktree_path !== undefined) {
+        worktreeFields.push('path = ?');
+        worktreeValues.push(body.worktree_path ?? '');
+      }
+      if (body.run_mode !== undefined) {
+        worktreeFields.push('mode = ?');
+        worktreeValues.push(body.run_mode);
+      }
+      if (worktreeFields.length > 0) {
+        let wtId = task.worktree_id;
+        if (!wtId) {
+          // Materialise a placeholder worktree row for this draft; fields get
+          // refined as the user edits or at setup time.
+          wtId = nanoid(12);
+          db.prepare(
+            `INSERT INTO worktrees (id, path, mode, status) VALUES (?, '', ?, 'available')`,
+          ).run(wtId, body.run_mode ?? task.run_mode ?? 'new');
+          db.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(wtId, task.id);
+        }
+        worktreeValues.push(wtId);
+        db.prepare(
+          `UPDATE worktrees SET ${worktreeFields.join(', ')} WHERE id = ?`,
+        ).run(...worktreeValues);
       }
     } else if (body.status === 'running') {
       // Resume task
