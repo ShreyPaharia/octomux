@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
@@ -9,8 +9,12 @@ import { OrchestratorProvider } from './lib/orchestrator-context';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
 import { CommandPalette } from './components/CommandPalette';
+import { PrSheet } from './components/PrSheet';
+import { OfflineBanner } from './components/OfflineBanner';
+import { SHIP_EVENT } from './pages/TaskDetail';
 import { useGlobalShortcut } from './lib/shortcuts';
 import { groupTasksForSidebar } from './lib/sidebar-utils';
+import type { Task } from '../server/types';
 import {
   currentTaskIdFromPath,
   getNextSessionId,
@@ -20,6 +24,7 @@ import {
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+const ParallelGridPage = lazy(() => import('./pages/ParallelGridPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SkillEditor = lazy(() => import('./pages/SkillEditor'));
 const AgentEditor = lazy(() => import('./pages/AgentEditor'));
@@ -82,14 +87,31 @@ export default function App() {
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { tasks } = useTasksContext();
+  const { tasks, refresh: refreshTasks } = useTasksContext();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [prSheetTask, setPrSheetTask] = useState<Task | null>(null);
 
   const groups = useMemo(() => groupTasksForSidebar(tasks), [tasks]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ taskId?: string }>).detail;
+      if (!detail?.taskId) return;
+      const task = tasks.find((t) => t.id === detail.taskId);
+      if (task) setPrSheetTask(task);
+    };
+    window.addEventListener(SHIP_EVENT, handler);
+    return () => window.removeEventListener(SHIP_EVENT, handler);
+  }, [tasks]);
 
   useGlobalShortcut({ key: 'k', mod: true }, (e) => {
     e.preventDefault();
     setPaletteOpen(true);
+  });
+
+  useGlobalShortcut({ key: 'g', mod: true, shift: true }, (e) => {
+    e.preventDefault();
+    navigate('/tasks/grid');
   });
 
   useGlobalShortcut({ key: 'n', mod: true, shift: true }, (e) => {
@@ -127,39 +149,50 @@ export function AppShell() {
   });
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      <Toaster
-        theme="dark"
-        position="bottom-right"
-        toastOptions={{
-          unstyled: true,
-        }}
-      />
-      <GlobalNotifications />
-      <UniversalSidebar />
-      <main className="min-h-0 min-w-0 flex-1">
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              Loading...
-            </div>
-          }
-        >
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/tasks" element={<TasksPage />} />
-            <Route path="/tasks/:id" element={<TaskDetail />} />
-            <Route path="/orchestrator" element={<Navigate to="/chats/orchestrator" replace />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/skills/:name" element={<SkillEditor />} />
-            <Route path="/agents/:name" element={<AgentEditor />} />
-            <Route path="/chats/:id" element={<ChatPage />} />
-            <Route path="/workspaces" element={<WorkspacesPage />} />
-            <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
-          </Routes>
-        </Suspense>
-      </main>
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      <OfflineBanner />
+      <div className="flex min-h-0 flex-1">
+        <Toaster
+          theme="dark"
+          position="bottom-right"
+          toastOptions={{
+            unstyled: true,
+          }}
+        />
+        <GlobalNotifications />
+        <UniversalSidebar />
+        <main className="min-h-0 min-w-0 flex-1">
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                Loading...
+              </div>
+            }
+          >
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/tasks" element={<TasksPage />} />
+              <Route path="/tasks/grid" element={<ParallelGridPage />} />
+              <Route path="/orchestrator/grid" element={<ParallelGridPage />} />
+              <Route path="/tasks/:id" element={<TaskDetail />} />
+              <Route path="/orchestrator" element={<Navigate to="/chats/orchestrator" replace />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/skills/:name" element={<SkillEditor />} />
+              <Route path="/agents/:name" element={<AgentEditor />} />
+              <Route path="/chats/:id" element={<ChatPage />} />
+              <Route path="/workspaces" element={<WorkspacesPage />} />
+              <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
+            </Routes>
+          </Suspense>
+        </main>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+        <PrSheet
+          open={!!prSheetTask}
+          task={prSheetTask}
+          onClose={() => setPrSheetTask(null)}
+          onShipped={() => refreshTasks()}
+        />
+      </div>
     </div>
   );
 }

@@ -13,6 +13,7 @@ vi.mock('@/lib/event-source', () => ({
     eventCallbacks.add(cb);
     return () => eventCallbacks.delete(cb);
   }),
+  subscribeConnectionState: vi.fn(() => () => {}),
 }));
 
 function simulateEvent(taskId = 'test-task-01') {
@@ -333,8 +334,24 @@ describe('TaskDetail', () => {
     apiMock.getTask.mockResolvedValue(makeTask({ status: 'error', error: 'Setup failed' }));
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('Setup failed')).toBeInTheDocument();
+      expect(screen.getByTestId('task-error-view')).toBeInTheDocument();
     });
+    const banner = screen.getByTestId('task-error-banner');
+    expect(banner).toHaveTextContent('Setup failed');
+    expect(screen.getByTestId('task-error-retry')).toBeInTheDocument();
+    expect(screen.getByTestId('task-error-delete')).toBeInTheDocument();
+  });
+
+  it('renders setting_up checklist when status=setting_up and no terminal yet', async () => {
+    apiMock.getTask.mockResolvedValue(
+      makeTask({ status: 'setting_up', agents: [], tmux_session: null }),
+    );
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByTestId('task-setting-up')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/setting up task/i)).toBeInTheDocument();
+    expect(screen.getByText(/Launching Claude Code/i)).toBeInTheDocument();
   });
 
   // ─── Editor toggle ───────────────────────────────────────────────────────
@@ -405,7 +422,7 @@ describe('TaskDetail', () => {
       apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
       simulateEvent();
       await waitFor(() => {
-        expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+        expect(screen.getByTestId('task-setting-up')).toBeInTheDocument();
       });
 
       apiMock.getTask.mockResolvedValue(runningTask);
@@ -534,7 +551,7 @@ describe('TaskDetail', () => {
       apiMock.getTask.mockResolvedValue(makeTask({ status: 'setting_up', agents: [] }));
       simulateEvent();
       await waitFor(() => {
-        expect(screen.getByText('Setting up terminal...')).toBeInTheDocument();
+        expect(screen.getByTestId('task-setting-up')).toBeInTheDocument();
       });
     });
   });

@@ -168,6 +168,11 @@ export const api = {
   startTask: (id: string) => request<Task>(`/tasks/${id}/start`, { method: 'POST' }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
   getTaskDiffSummary: (id: string) => request<DiffSummaryResponse>(`/tasks/${id}/diff`),
+  createPr: (id: string, data: { title: string; body: string; draft?: boolean }) =>
+    request<{ ok: boolean; url?: string; number?: number }>(`/tasks/${id}/pr`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getTaskDiffFile: (id: string, relPath: string) =>
     request<FileDiffResponse>(
       `/tasks/${id}/diff/${relPath.split('/').map(encodeURIComponent).join('/')}`,

@@ -544,9 +544,24 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
       )}
 
       {!loading && !error && configs.length === 0 && (
-        <div className="py-8 text-center text-sm text-[#8a8a8a]">
-          No repositories configured yet. Repositories appear here automatically when you create
-          tasks.
+        <div
+          data-testid="repos-empty"
+          className="flex flex-col items-center gap-2 py-10 text-center"
+        >
+          <button
+            type="button"
+            data-testid="repos-add-first"
+            onClick={() => {
+              navigate('/');
+              requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('focus-composer')));
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[#3B82F666] bg-[#3B82F61F] px-3 py-2 text-[12px] font-semibold text-[#60a5fa] hover:bg-[#3B82F633]"
+          >
+            + Add your first repo
+          </button>
+          <p className="text-[11px] text-[#8a8a8a]">
+            Repositories appear here automatically when you create tasks.
+          </p>
         </div>
       )}
 

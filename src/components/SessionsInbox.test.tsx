@@ -21,6 +21,7 @@ vi.mock('@/lib/event-source', () => ({
       unsubscribe();
     };
   }),
+  subscribeConnectionState: vi.fn(() => () => {}),
 }));
 
 function fireEvent(event: any): void {

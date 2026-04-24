@@ -1,8 +1,9 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { CloudOffIcon } from './icons';
 
 interface TerminalViewProps {
   taskId?: string;
@@ -13,6 +14,7 @@ interface TerminalViewProps {
 
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
+const STALL_THRESHOLD_MS = 5_000;
 
 export function TerminalView({
   taskId,
@@ -27,6 +29,10 @@ export function TerminalView({
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(INITIAL_RECONNECT_DELAY);
   const unmounted = useRef(false);
+  const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
+  const [retrySecs, setRetrySecs] = useState<number>(0);
 
   const getWsUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -54,6 +60,20 @@ export function TerminalView({
     }
   }, []);
 
+  const clearStallTimer = useCallback(() => {
+    if (stallTimer.current) {
+      clearTimeout(stallTimer.current);
+      stallTimer.current = null;
+    }
+  }, []);
+
+  const armStallTimer = useCallback(() => {
+    clearStallTimer();
+    stallTimer.current = setTimeout(() => {
+      setDisconnected(true);
+    }, STALL_THRESHOLD_MS);
+  }, [clearStallTimer]);
+
   const connectWs = useCallback(
     (term: Terminal) => {
       if (unmounted.current) return;
@@ -62,6 +82,12 @@ export function TerminalView({
 
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+        setDisconnected(false);
+        if (countdownTimer.current) {
+          clearInterval(countdownTimer.current);
+          countdownTimer.current = null;
+        }
+        armStallTimer();
         // Re-fit now that we know layout is settled (WS connect takes a few ms,
         // guaranteeing the browser has completed layout), then send correct dimensions.
         fitAndSendResize(ws);
@@ -72,6 +98,7 @@ export function TerminalView({
       };
 
       ws.onmessage = (event) => {
+        armStallTimer();
         term.write(event.data);
       };
 
@@ -83,11 +110,18 @@ export function TerminalView({
         if (unmounted.current || wsRef.current !== ws) return;
         if (event.code !== 1000 && event.code !== 1001) {
           term.write('\r\n\x1b[31m[Terminal disconnected — reconnecting...]\x1b[0m\r\n');
+          setDisconnected(true);
+          const delay = reconnectDelay.current;
+          setRetrySecs(Math.ceil(delay / 1000));
+          if (countdownTimer.current) clearInterval(countdownTimer.current);
+          countdownTimer.current = setInterval(() => {
+            setRetrySecs((s) => (s > 0 ? s - 1 : 0));
+          }, 1000);
           // Exponential backoff reconnection
           reconnectTimer.current = setTimeout(() => {
             reconnectDelay.current = Math.min(reconnectDelay.current * 2, MAX_RECONNECT_DELAY);
             connectWs(term);
-          }, reconnectDelay.current);
+          }, delay);
         }
       };
 
@@ -97,7 +131,7 @@ export function TerminalView({
 
       wsRef.current = ws;
     },
-    [getWsUrl],
+    [getWsUrl, fitAndSendResize, armStallTimer],
   );
 
   const connect = useCallback(() => {
@@ -167,6 +201,22 @@ export function TerminalView({
     connectWs(term);
   }, [connectWs]);
 
+  const handleRetryNow = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    if (countdownTimer.current) {
+      clearInterval(countdownTimer.current);
+      countdownTimer.current = null;
+    }
+    reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+    setRetrySecs(0);
+    if (termRef.current) {
+      connectWs(termRef.current);
+    }
+  }, [connectWs]);
+
   // Connect on mount and reconnect when taskId/windowIndex changes
   useEffect(() => {
     unmounted.current = false;
@@ -176,6 +226,12 @@ export function TerminalView({
       unmounted.current = true;
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
+      }
+      if (stallTimer.current) {
+        clearTimeout(stallTimer.current);
+      }
+      if (countdownTimer.current) {
+        clearInterval(countdownTimer.current);
       }
       wsRef.current?.close();
       termRef.current?.dispose();
@@ -222,6 +278,31 @@ export function TerminalView({
   }, [visible, fitAndSendResize]);
 
   return (
-    <div ref={containerRef} className="h-full w-full overflow-hidden rounded-lg bg-[#09090b]" />
+    <div className="relative h-full w-full">
+      <div
+        ref={containerRef}
+        className="h-full w-full overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
+        style={{ opacity: disconnected ? 0.7 : 1 }}
+      />
+      {disconnected && (
+        <div
+          data-testid="terminal-disconnected-overlay"
+          role="alert"
+          className="bg-glass-l1 glass-blur-l1 pointer-events-auto absolute left-3 right-3 top-3 flex items-center gap-3 rounded-md border border-[#FFB80033] bg-[#FFB80014] px-4 py-2.5"
+        >
+          <CloudOffIcon size={14} className="shrink-0 text-[#FFB800]" />
+          <span className="flex-1 text-[12px] font-medium text-[#FFB800]">
+            Server unreachable — reconnecting in {Math.max(retrySecs, 0)}s…
+          </span>
+          <button
+            type="button"
+            onClick={handleRetryNow}
+            className="rounded-md border border-[#FFB80066] bg-[#FFB80022] px-2.5 py-1 text-[11px] font-semibold text-[#FFB800] hover:bg-[#FFB80033]"
+          >
+            Retry now
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -25,3 +25,8 @@ export function useTasksContext(): TasksState {
   if (!ctx) throw new Error('useTasksContext must be used within TasksProvider');
   return ctx;
 }
+
+/** Optional variant — returns null when no provider is mounted (e.g. isolated component tests). */
+export function useTasksContextOptional(): TasksState | null {
+  return useContext(TasksContext);
+}
