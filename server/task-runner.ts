@@ -672,6 +672,8 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     claude_session_id: claudeSessionId,
     hook_activity: 'active' as const,
     hook_activity_updated_at: null,
+    pinned: false,
+    tmux_session: null,
     created_at: new Date().toISOString(),
   };
 }

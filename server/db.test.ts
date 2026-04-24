@@ -15,8 +15,9 @@ import {
   AGENTS_TABLE_COLUMNS,
   PERMISSION_PROMPTS_TABLE_COLUMNS,
   USER_TERMINALS_TABLE_COLUMNS,
+  WORKTREES_TABLE_COLUMNS,
 } from './test-helpers.js';
-import { getDb, initDb } from './db.js';
+import { getDb, initDb, ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_TMUX_SESSION } from './db.js';
 
 describe('Database', () => {
   let db: Database.Database;
@@ -227,6 +228,103 @@ describe('Database', () => {
         hook_activity: string;
       };
       expect(agent.hook_activity).toBe(expected);
+    });
+  });
+
+  // ─── Phase 2a: worktrees + standalone agents ────────────────────────────
+
+  describe('phase 2a migration', () => {
+    it('creates worktrees table with expected columns', () => {
+      const cols = (db.pragma('table_info(worktrees)') as Array<{ name: string }>).map(
+        (c) => c.name,
+      );
+      expect(cols).toEqual(WORKTREES_TABLE_COLUMNS);
+    });
+
+    it('adds tasks.worktree_id column', () => {
+      const cols = (db.pragma('table_info(tasks)') as Array<{ name: string }>).map((c) => c.name);
+      expect(cols).toContain('worktree_id');
+    });
+
+    it('makes agents.task_id nullable', () => {
+      const rows = db.pragma('table_info(agents)') as Array<{
+        name: string;
+        notnull: number;
+      }>;
+      const col = rows.find((c) => c.name === 'task_id')!;
+      expect(col.notnull).toBe(0);
+    });
+
+    it('adds agents.pinned and agents.tmux_session columns', () => {
+      const cols = (db.pragma('table_info(agents)') as Array<{ name: string }>).map((c) => c.name);
+      expect(cols).toContain('pinned');
+      expect(cols).toContain('tmux_session');
+    });
+
+    it('inserts orchestrator pinned agent row on init', () => {
+      const row = db
+        .prepare('SELECT id, task_id, label, pinned, tmux_session FROM agents WHERE id = ?')
+        .get(ORCHESTRATOR_AGENT_ID) as
+        | { id: string; task_id: string | null; label: string; pinned: number; tmux_session: string }
+        | undefined;
+      expect(row).toBeTruthy();
+      expect(row!.task_id).toBeNull();
+      expect(row!.label).toBe('orchestrator');
+      expect(row!.pinned).toBe(1);
+      expect(row!.tmux_session).toBe(ORCHESTRATOR_TMUX_SESSION);
+    });
+
+    it('allows inserting a standalone agent with NULL task_id', () => {
+      const stmt = db.prepare(
+        `INSERT INTO agents (id, task_id, window_index, label, tmux_session)
+         VALUES (?, NULL, 0, 'chat', 'octomux-agent-chat-1')`,
+      );
+      expect(() => stmt.run('chat-1')).not.toThrow();
+    });
+
+    it('backfills worktrees from pre-existing task rows', () => {
+      // Simulate a pre-phase-2a task row (we seeded via migration path, so
+      // insert a new task with a worktree path and re-run migration).
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, repo_path, status, branch, base_branch, worktree, run_mode, base_sha)
+         VALUES ('backfill-1','T','D','/tmp/repo','draft','agents/foo','main','/tmp/repo/.worktrees/foo','new','abc123')`,
+      ).run();
+      // Drop the auto-linked worktree_id to simulate a pre-existing row.
+      db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = 'backfill-1'`).run();
+      initDb(db);
+
+      const task = db
+        .prepare('SELECT worktree_id FROM tasks WHERE id = ?')
+        .get('backfill-1') as { worktree_id: string | null };
+      expect(task.worktree_id).toBeTruthy();
+
+      const wt = db
+        .prepare('SELECT * FROM worktrees WHERE id = ?')
+        .get(task.worktree_id) as
+        | { path: string; mode: string; branch: string; base_sha: string }
+        | undefined;
+      expect(wt).toBeTruthy();
+      expect(wt!.path).toBe('/tmp/repo/.worktrees/foo');
+      expect(wt!.mode).toBe('new');
+      expect(wt!.branch).toBe('agents/foo');
+      expect(wt!.base_sha).toBe('abc123');
+    });
+
+    it('enforces one-active-task-per-worktree via partial unique index', () => {
+      // Insert a worktree row + one active task pointing to it.
+      db.prepare(
+        `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt-1', '/tmp/wt', 'existing', 'in_use')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, repo_path, status, worktree_id)
+         VALUES ('t-1','T','D','/tmp','running','wt-1')`,
+      ).run();
+      expect(() => {
+        db.prepare(
+          `INSERT INTO tasks (id, title, description, repo_path, status, worktree_id)
+           VALUES ('t-2','T','D','/tmp','running','wt-1')`,
+        ).run();
+      }).toThrow();
     });
   });
 

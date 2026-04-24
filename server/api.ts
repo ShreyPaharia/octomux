@@ -292,6 +292,7 @@ export function setupRoutes(app: Express): void {
     // Group by task_id using Maps
     const agentsByTask = new Map<string, Agent[]>();
     for (const agent of allAgents) {
+      if (!agent.task_id) continue; // standalone agents don't belong to a task
       const list = agentsByTask.get(agent.task_id) || [];
       list.push(agent);
       agentsByTask.set(agent.task_id, list);

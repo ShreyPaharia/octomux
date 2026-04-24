@@ -9,6 +9,21 @@ export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
 
 export const RUN_MODES: readonly RunMode[] = ['new', 'existing', 'none', 'scratch'] as const;
 
+export type WorktreeStatus = 'available' | 'in_use';
+
+export interface Worktree {
+  id: string;
+  path: string;
+  repo_path: string | null;
+  branch: string | null;
+  base_branch: string | null;
+  base_sha: string | null;
+  mode: RunMode;
+  status: WorktreeStatus;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -28,6 +43,8 @@ export interface Task {
   base_sha: string | null;
   last_viewed_at: string | null;
   source: TaskSource;
+  /** Phase 2a: link into the extracted `worktrees` table. Null = scratch/none during transition. */
+  worktree_id: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -39,13 +56,18 @@ export interface Task {
 
 export interface Agent {
   id: string;
-  task_id: string;
+  /** Phase 2a: null for standalone agents (orchestrator, chats). */
+  task_id: string | null;
   window_index: number;
   label: string;
   status: AgentStatus;
   claude_session_id: string | null;
   hook_activity: HookActivity;
   hook_activity_updated_at: string | null;
+  /** Phase 2a: true for pinned rows (orchestrator). */
+  pinned: boolean;
+  /** Phase 2a: populated for standalone agents; task-scoped agents read via task.tmux_session. */
+  tmux_session: string | null;
   created_at: string;
 }
 
