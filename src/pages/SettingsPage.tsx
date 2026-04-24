@@ -41,7 +41,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
       type="button"
       role="switch"
       aria-checked={checked}
-      className="relative h-5 w-9 transition-colors"
+      className="focus-ring relative h-5 w-9 transition-colors disabled:opacity-40"
       style={checked ? TOGGLE_ON_STYLE : TOGGLE_OFF_STYLE}
       onClick={() => onChange(!checked)}
     >
@@ -162,7 +162,10 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
       {error && (
         <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
-          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
+          <button
+            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
+            onClick={refresh}
+          >
             Retry
           </button>
         </div>
@@ -209,13 +212,13 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
           />
           <div className="flex justify-end gap-2">
             <button
-              className="px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
+              className="focus-ring px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
               onClick={() => setShowCreate(false)}
             >
               Cancel
             </button>
             <button
-              className="bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+              className="focus-ring bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
               onClick={handleCreate}
               disabled={creating || !newName.trim()}
             >
@@ -288,7 +291,10 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
       {error && (
         <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
-          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
+          <button
+            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
+            onClick={refresh}
+          >
             Retry
           </button>
         </div>
@@ -298,7 +304,7 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
         <div className="py-8 text-center text-sm text-[#8a8a8a]">
           No skills installed.{' '}
           <button
-            className="text-[#3B82F6] hover:text-[#60a5fa]"
+            className="focus-ring text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
             onClick={() => setShowCreate(true)}
           >
             Create your first skill
@@ -320,7 +326,7 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
                 {skill.description && <p className="text-xs text-[#b5b5bd]">{skill.description}</p>}
               </div>
               <button
-                className="text-xs text-[#8a8a8a] opacity-0 group-hover:opacity-100 hover:text-red-400"
+                className="focus-ring text-xs text-[#8a8a8a] opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100"
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleteTarget(skill.name);
@@ -349,13 +355,13 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
           />
           <div className="flex justify-end gap-2">
             <button
-              className="px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
+              className="focus-ring px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
               onClick={() => setShowCreate(false)}
             >
               Cancel
             </button>
             <button
-              className="bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+              className="focus-ring bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
               onClick={handleCreate}
               disabled={creating || !newName.trim()}
             >
@@ -381,13 +387,13 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
           </DialogHeader>
           <div className="flex justify-end gap-2">
             <button
-              className="px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
+              className="focus-ring px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
             </button>
             <button
-              className="bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+              className="focus-ring bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 active:bg-red-800 disabled:opacity-40"
               onClick={handleDelete}
               disabled={deleting}
             >
@@ -405,7 +411,7 @@ function AddChip({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="focus-ring inline-flex items-center gap-1 border border-[#3B82F6]/40 bg-[#3B82F6]/12 px-2.5 py-1 text-xs font-medium text-[#60a5fa] hover:bg-[#3B82F6]/20"
+      className="focus-ring inline-flex items-center gap-1 rounded-md border border-[#3B82F6]/40 px-2.5 py-1 text-xs font-medium text-[#60a5fa] transition-colors hover:bg-[#3B82F6]/20 active:bg-[#3B82F6]/30 disabled:opacity-40"
       style={{ backgroundColor: 'rgba(59,130,246,0.12)' }}
     >
       {label}
@@ -433,7 +439,7 @@ function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () 
           type="button"
           aria-label={`Actions for ${repoName(config.repo_path)}`}
           data-testid={`repo-overflow-${repoName(config.repo_path)}`}
-          className="text-[#8a8a8a] opacity-0 group-hover:opacity-100 hover:text-white focus:opacity-100"
+          className="focus-ring text-[#8a8a8a] opacity-0 transition-opacity group-hover:opacity-100 hover:text-white focus-visible:opacity-100"
           onClick={() => setShowMenu((v) => !v)}
         >
           ⋯
@@ -446,7 +452,7 @@ function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () 
           >
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-white hover:bg-glass-l1"
+              className="focus-ring block w-full px-3 py-1.5 text-left text-white hover:bg-glass-l1"
               onClick={() => {
                 setShowMenu(false);
                 onEditClick();
@@ -456,7 +462,7 @@ function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () 
             </button>
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-red-400 hover:bg-red-400/10"
+              className="focus-ring block w-full px-3 py-1.5 text-left text-red-400 hover:bg-red-400/10"
               onClick={() => {
                 setShowMenu(false);
                 navigate(`/?repo=${encodeURIComponent(config.repo_path)}`);
@@ -537,7 +543,10 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
       {error && (
         <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
-          <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
+          <button
+            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
+            onClick={refresh}
+          >
             Retry
           </button>
         </div>
@@ -592,14 +601,14 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           <div className="flex justify-end gap-2 pt-1">
             <button
               onClick={() => setEditingPath(null)}
-              className="px-3 py-1 text-xs text-[#b5b5bd] hover:text-white"
+              className="focus-ring px-3 py-1 text-xs text-[#b5b5bd] hover:text-white"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
@@ -656,7 +665,7 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
         <select
           value={editor}
           onChange={(e) => handleChange(e.target.value)}
-          className="bg-[#0B0C0F] border border-glass-edge px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
+          className="focus-ring bg-[#0B0C0F] border border-glass-edge px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
         >
           <option value="nvim">Neovim</option>
           <option value="vscode">VS Code</option>
@@ -769,7 +778,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
             <button
               onClick={saveFlags}
               disabled={!isDirty || saving}
-              className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
@@ -911,7 +920,7 @@ function OrchestratorPromptSection() {
           <button
             onClick={save}
             disabled={!isDirty || saving}
-            className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+            className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
@@ -926,7 +935,10 @@ function OrchestratorPromptSection() {
         />
         <div className="mt-2 flex items-center gap-3">
           {data?.isCustom && (
-            <button onClick={reset} className="text-xs text-red-400 hover:text-red-300">
+            <button
+              onClick={reset}
+              className="focus-ring text-xs text-red-400 hover:text-red-300 active:text-red-500"
+            >
               Reset to Default
             </button>
           )}
@@ -956,7 +968,7 @@ function OrchestratorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null
               showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to restart');
             }
           }}
-          className="border border-glass-edge bg-glass-l1 px-3 py-1 text-xs text-white hover:bg-glass-l2"
+          className="focus-ring border border-glass-edge bg-glass-l1 px-3 py-1 text-xs text-white transition-colors hover:bg-glass-l2 active:bg-glass-l3 disabled:opacity-40"
         >
           Restart
         </button>

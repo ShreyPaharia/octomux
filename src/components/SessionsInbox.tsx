@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Task } from '../../server/types';
 import { GlassPanel } from '@/components/ui/glass-panel';
@@ -7,7 +7,6 @@ import { useInbox } from '@/lib/inbox';
 import { useTasksContextOptional } from '@/lib/tasks-context';
 import { timeAgo } from '@/lib/time';
 import { repoName } from '@/lib/utils';
-import { cn } from '@/lib/utils';
 import { CircleCheckIcon } from '@/components/icons';
 
 type RowKind = 'awaiting_reply' | 'errored' | 'activity';
@@ -49,7 +48,7 @@ function ReplyButton({ taskId }: { taskId: string }) {
         e.stopPropagation();
         navigate(`/?add_agent=${taskId}`);
       }}
-      className="shrink-0 px-2.5 py-1 text-[11px] font-bold tracking-wider uppercase text-[#1f1300] transition-colors hover:brightness-110"
+      className="shrink-0 rounded-[10px] px-3 py-1.5 text-[11px] font-bold tracking-wider uppercase text-[#1f1300] transition-colors hover:brightness-110"
       style={{
         backgroundColor: '#FFB800',
         boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 16px 0 rgba(255, 184, 0, 0.35)',
@@ -60,12 +59,37 @@ function ReplyButton({ taskId }: { taskId: string }) {
   );
 }
 
-function InboxRow({ task, kind }: { task: Task; kind: RowKind }) {
+// Per-mockup: awaiting_reply cards carry amber tint in border + a specular
+// top-edge; errored cards use red-tinted border; activity rows stay L1 glass.
+function cardStyleFor(kind: RowKind): { style: CSSProperties; className: string } {
+  if (kind === 'awaiting_reply') {
+    return {
+      className: 'border-[#FFB80040]',
+      style: {
+        backgroundColor: 'rgba(255, 255, 255, 0.10)',
+        boxShadow:
+          'inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 12px 30px -8px rgba(0, 0, 0, 0.55)',
+      },
+    };
+  }
+  return {
+    className: 'border-[#EF444440]',
+    style: {
+      backgroundColor: 'rgba(255, 255, 255, 0.10)',
+      boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 12px 30px -8px rgba(0, 0, 0, 0.55)',
+    },
+  };
+}
+
+function InboxCard({ task, kind }: { task: Task; kind: RowKind }) {
   const navigate = useNavigate();
+  const { style, className } = cardStyleFor(kind);
   return (
-    <div
+    <GlassPanel
+      level={2}
       data-testid={`inbox-row-${task.id}`}
-      className="group flex w-full items-center gap-3 border border-transparent px-3 py-2 transition-colors hover:border-[#2f2f2f] hover:bg-[#141414]"
+      className={`group flex items-center gap-3 rounded-[16px] px-5 py-4 transition-colors hover:bg-glass-l3 ${className}`}
+      style={style}
     >
       <button
         type="button"
@@ -73,16 +97,45 @@ function InboxRow({ task, kind }: { task: Task; kind: RowKind }) {
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
         <StatusGlyph status={glyphStatusFor(kind)} size={12} />
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="truncate text-sm font-medium text-foreground">{task.title}</span>
-          <span className="truncate text-xs text-muted-foreground">{subtitleFor(task, kind)}</span>
-        </span>
-        <span className="shrink-0 text-[11px] text-[#6a6a6a]">
-          {repoName(task.repo_path)} · {timeAgo(task.updated_at)}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex items-baseline gap-2">
+            <span className="truncate text-sm font-semibold text-foreground">{task.title}</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {subtitleFor(task, kind)}
+            </span>
+          </span>
+          <span className="font-mono text-[11px] text-[#8a8a8a]">
+            {repoName(task.repo_path)} · {timeAgo(task.updated_at)}
+          </span>
         </span>
       </button>
       {kind === 'awaiting_reply' && <ReplyButton taskId={task.id} />}
-    </div>
+    </GlassPanel>
+  );
+}
+
+function ActivityRow({ task }: { task: Task }) {
+  const navigate = useNavigate();
+  return (
+    <GlassPanel
+      level={1}
+      data-testid={`inbox-row-${task.id}`}
+      className="group flex items-center gap-4 rounded-[12px] px-4 py-2.5 transition-colors hover:bg-glass-l2"
+    >
+      <button
+        type="button"
+        onClick={() => navigate(`/tasks/${task.id}`)}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        <StatusGlyph status="closed" size={10} />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#B5B5BD]">
+          {task.title}
+        </span>
+        <span className="shrink-0 font-mono text-[11px] text-[#6a6a6a]">
+          {repoName(task.repo_path)} · closed · {timeAgo(task.updated_at)}
+        </span>
+      </button>
+    </GlassPanel>
   );
 }
 
@@ -101,8 +154,8 @@ function Section({
 }) {
   if (tasks.length === 0) return null;
   return (
-    <section data-testid={testId} className="flex flex-col gap-1">
-      <h3 className="flex items-baseline gap-2 px-3 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]">
+    <section data-testid={testId} className="flex flex-col gap-3">
+      <h3 className="flex items-baseline gap-2 px-1 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]">
         {eyebrow && (
           <span className="font-mono text-[#6a6a6a]" style={{ letterSpacing: '1.5px' }}>
             {eyebrow}
@@ -110,9 +163,9 @@ function Section({
         )}
         <span>{title}</span>
       </h3>
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-3">
         {tasks.map((t) => (
-          <InboxRow key={t.id} task={t} kind={kind} />
+          <InboxCard key={t.id} task={t} kind={kind} />
         ))}
       </div>
     </section>
@@ -126,16 +179,18 @@ function ActivitySection({ tasks }: { tasks: Task[] }) {
   const visible = collapsed ? tasks.slice(0, ACTIVITY_COLLAPSED_LIMIT) : tasks;
   const hidden = tasks.length - visible.length;
   return (
-    <section data-testid="inbox-section-activity" className="flex flex-col gap-1">
-      <h3 className="flex items-baseline gap-2 px-3 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]">
+    <section data-testid="inbox-section-activity" className="flex flex-col gap-2">
+      <div
+        className="flex items-baseline gap-2 border-t border-[#FFFFFF14] px-1 pt-4 text-[10px] font-bold uppercase tracking-wider text-[#B5B5BD]"
+      >
         <span className="font-mono text-[#6a6a6a]" style={{ letterSpacing: '1.5px' }}>
           //
         </span>
         <span>Activity</span>
-      </h3>
-      <div className="flex flex-col">
+      </div>
+      <div className="flex flex-col gap-2">
         {visible.map((t) => (
-          <InboxRow key={t.id} task={t} kind="activity" />
+          <ActivityRow key={t.id} task={t} />
         ))}
       </div>
       {tasks.length > ACTIVITY_COLLAPSED_LIMIT && (
@@ -143,7 +198,7 @@ function ActivitySection({ tasks }: { tasks: Task[] }) {
           type="button"
           data-testid="inbox-activity-toggle"
           onClick={() => setExpanded((v) => !v)}
-          className="self-start px-3 py-1 text-[11px] font-medium text-[#8a8a8a] hover:text-foreground"
+          className="self-start px-1 py-1 text-[11px] font-medium text-[#8a8a8a] hover:text-foreground"
         >
           {collapsed ? `Tap to expand (${hidden} more)` : 'Collapse'}
         </button>
@@ -174,14 +229,8 @@ export function SessionsInbox() {
   const isInboxZero = !loading && !isEmpty && awaitingReply.length === 0 && errored.length === 0;
 
   return (
-    <GlassPanel
-      level={1}
-      specular
-      data-testid="sessions-inbox"
-      className={cn('flex flex-col gap-5 p-4')}
-      style={{ borderRadius: '14px' }}
-    >
-      <div className="flex items-baseline justify-between px-3">
+    <div data-testid="sessions-inbox" className="flex flex-col gap-6">
+      <div className="flex items-baseline justify-between px-1">
         <h2 className="font-display text-sm font-bold uppercase tracking-wider text-[#6a6a6a]">
           Sessions
         </h2>
@@ -198,7 +247,7 @@ export function SessionsInbox() {
       </div>
 
       {error && (
-        <p data-testid="inbox-error" className="px-3 text-xs text-destructive">
+        <p data-testid="inbox-error" className="px-1 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -206,7 +255,7 @@ export function SessionsInbox() {
       {isEmpty ? (
         <p
           data-testid="inbox-empty"
-          className="px-3 py-8 text-center text-sm text-muted-foreground"
+          className="px-1 py-8 text-center text-sm text-muted-foreground"
         >
           You&rsquo;re all caught up
         </p>
@@ -215,7 +264,7 @@ export function SessionsInbox() {
           {isInboxZero ? (
             <div
               data-testid="inbox-zero"
-              className="bg-glass-l2 glass-blur-l2 mx-3 flex flex-col items-center gap-3 rounded-xl border border-glass-edge px-6 py-8 text-center"
+              className="bg-glass-l2 glass-blur-l2 flex flex-col items-center gap-3 rounded-[16px] border border-glass-edge px-6 py-8 text-center"
             >
               <div
                 className="flex h-12 w-12 items-center justify-center rounded-full border border-[#22C55E66] bg-[#22C55E1F]"
@@ -252,6 +301,6 @@ export function SessionsInbox() {
           <ActivitySection tasks={activity} />
         </>
       )}
-    </GlassPanel>
+    </div>
   );
 }

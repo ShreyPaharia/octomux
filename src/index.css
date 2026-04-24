@@ -52,11 +52,15 @@
   /* Glass material system */
   --glass-l0: #0a0a0b;
   --glass-l1: rgba(255, 255, 255, 0.08);
-  --glass-l2: rgba(255, 255, 255, 0.12);
-  --glass-l3: rgba(255, 255, 255, 0.18);
+  --glass-l2: rgba(255, 255, 255, 0.14);
+  --glass-l3: rgba(255, 255, 255, 0.22);
   --glass-edge: rgba(255, 255, 255, 0.14);
   --glass-edge-strong: rgba(255, 255, 255, 0.26);
   --glass-specular: rgba(255, 255, 255, 0.22);
+
+  /* Ambient tint blobs (content canvas only — not terminal panes) */
+  --ambient-cyan: rgba(59, 130, 246, 0.18);
+  --ambient-purple: rgba(124, 58, 237, 0.12);
 }
 
 /* Dark-only app — no light theme. Keep .dark for shadcn compatibility. */
@@ -140,6 +144,8 @@
   --color-glass-edge: var(--glass-edge);
   --color-glass-edge-strong: var(--glass-edge-strong);
   --color-glass-specular: var(--glass-specular);
+  --color-ambient-cyan: var(--ambient-cyan);
+  --color-ambient-purple: var(--ambient-purple);
   --radius-sm: 0;
   --radius-md: 0;
   --radius-lg: 0;
@@ -182,6 +188,43 @@
     box-shadow:
       0 0 0 2px #07080b,
       0 0 0 4px #60a5fae6;
+  }
+}
+
+/*
+ * Ambient tint backdrop — cyan top-right, purple bottom-left gradient blobs
+ * sitting behind content so backdrop-blur panels have something to blur
+ * through. Must never sit behind a terminal pane (terminal rule).
+ */
+@utility ambient-tint-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+  }
+
+  &::before {
+    width: 900px;
+    height: 900px;
+    top: -200px;
+    right: -150px;
+    background: radial-gradient(circle, var(--ambient-cyan) 0%, transparent 70%);
+  }
+
+  &::after {
+    width: 700px;
+    height: 700px;
+    bottom: -200px;
+    left: -150px;
+    background: radial-gradient(circle, var(--ambient-purple) 0%, transparent 70%);
   }
 }
 

@@ -11,6 +11,8 @@ interface BranchPickerFieldProps {
   disabled?: boolean;
   /** Optional ref to the trigger button (used by ⌘B to open the picker). */
   triggerRef?: React.Ref<HTMLButtonElement>;
+  /** Override trigger button className — e.g. to blend into a chip pill. */
+  triggerClassName?: string;
 }
 
 export function BranchPickerField({
@@ -20,6 +22,7 @@ export function BranchPickerField({
   onBranchesLoaded,
   disabled,
   triggerRef,
+  triggerClassName,
 }: BranchPickerFieldProps) {
   const [branches, setBranches] = useState<string[]>([]);
   const [branchSearch, setBranchSearch] = useState('');
@@ -75,7 +78,10 @@ export function BranchPickerField({
               ref={triggerRef}
               type="button"
               disabled={disabled || branches.length === 0}
-              className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className={
+                triggerClassName ??
+                'flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+              }
             >
               <span className={value ? 'font-mono text-xs' : 'text-muted-foreground'}>
                 {value || 'Select base branch...'}

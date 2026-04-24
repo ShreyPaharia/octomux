@@ -17,6 +17,10 @@ export function ignoredGroupKey(taskId: string): string {
   return `octomux:diff-ignored-open:${taskId}`;
 }
 
+export function topGroupKey(taskId: string, group: string): string {
+  return `octomux:diff-group-open:${taskId}:${group}`;
+}
+
 interface Node {
   name: string;
   fullPath: string;
@@ -65,6 +69,9 @@ function TreeRow({
   onSelect,
   reviewed,
   onToggleReview,
+  collapsible,
+  openGroups,
+  onToggleGroup,
 }: {
   node: Node;
   depth: number;
@@ -72,6 +79,9 @@ function TreeRow({
   onSelect: (path: string) => void;
   reviewed?: Set<string>;
   onToggleReview?: (path: string) => void;
+  collapsible?: boolean;
+  openGroups?: Record<string, boolean>;
+  onToggleGroup?: (path: string) => void;
 }) {
   if (node.isFile && node.file) {
     const f = node.file;
@@ -89,11 +99,14 @@ function TreeRow({
         type="button"
         data-testid={`diff-file-row-${f.path}`}
         data-reviewed={isReviewed ? 'true' : undefined}
+        data-active={active ? 'true' : undefined}
         onClick={() => onSelect(f.path)}
         onKeyDown={handleKey}
         className={cn(
-          'flex w-full items-center gap-2 px-2 py-1 text-left text-xs hover:bg-accent',
-          active && 'bg-accent',
+          'flex w-full items-center gap-2 px-2 py-1 text-left text-xs',
+          active
+            ? 'border border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6]'
+            : 'border border-transparent hover:bg-[#FFFFFF0A]',
           isReviewed && 'opacity-50',
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -138,28 +151,49 @@ function TreeRow({
     if (a.isFile !== b.isFile) return a.isFile ? 1 : -1;
     return a.name.localeCompare(b.name);
   });
+  const isGroupCollapsible = Boolean(node.name && collapsible);
+  const groupOpen = isGroupCollapsible ? (openGroups?.[node.fullPath] ?? true) : true;
   return (
     <>
-      {node.name && (
-        <div
-          data-testid={`diff-group-${node.fullPath}`}
-          className="px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        >
-          {node.name}
-        </div>
-      )}
-      {children.map((child) => (
-        <TreeRow
-          key={child.fullPath}
-          node={child}
-          depth={node.name ? depth + 1 : depth}
-          selected={selected}
-          onSelect={onSelect}
-          reviewed={reviewed}
-          onToggleReview={onToggleReview}
-        />
-      ))}
+      {node.name &&
+        (isGroupCollapsible ? (
+          <button
+            type="button"
+            data-testid={`diff-group-${node.fullPath}`}
+            aria-expanded={groupOpen}
+            onClick={() => onToggleGroup?.(node.fullPath)}
+            className="flex w-full items-center gap-1.5 px-2 py-1 text-left font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-[#FFFFFF0A]"
+            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          >
+            <span aria-hidden className="inline-block w-3 font-mono">
+              {groupOpen ? '▾' : '▸'}
+            </span>
+            <span>{node.name}</span>
+          </button>
+        ) : (
+          <div
+            data-testid={`diff-group-${node.fullPath}`}
+            className="px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
+            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          >
+            {node.name}
+          </div>
+        ))}
+      {groupOpen &&
+        children.map((child) => (
+          <TreeRow
+            key={child.fullPath}
+            node={child}
+            depth={node.name ? depth + 1 : depth}
+            selected={selected}
+            onSelect={onSelect}
+            reviewed={reviewed}
+            onToggleReview={onToggleReview}
+            collapsible={collapsible}
+            openGroups={openGroups}
+            onToggleGroup={onToggleGroup}
+          />
+        ))}
     </>
   );
 }
@@ -179,6 +213,7 @@ export function DiffFileTree({
   const ignoredTree = useMemo(() => buildTree(ignored), [ignored]);
 
   const [ignoredOpen, setIgnoredOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (!taskId) return;
     try {
@@ -187,6 +222,41 @@ export function DiffFileTree({
       // localStorage unavailable (SSR, privacy mode, etc.) — keep default closed.
     }
   }, [taskId]);
+
+  const toggleGroup = (path: string) => {
+    setOpenGroups((prev) => {
+      const current = prev[path] ?? true;
+      const next = { ...prev, [path]: !current };
+      if (taskId) {
+        try {
+          localStorage.setItem(topGroupKey(taskId, path), String(!current));
+        } catch {
+          // ignore
+        }
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!taskId) return;
+    const next: Record<string, boolean> = {};
+    const walk = (node: Node) => {
+      if (node.name) {
+        try {
+          const stored = localStorage.getItem(topGroupKey(taskId, node.fullPath));
+          if (stored !== null) next[node.fullPath] = stored === 'true';
+        } catch {
+          // ignore
+        }
+      }
+      if (node.children) {
+        for (const c of node.children.values()) walk(c);
+      }
+    };
+    walk(changedTree);
+    setOpenGroups(next);
+  }, [taskId, changedTree]);
 
   const toggleIgnored = () => {
     setIgnoredOpen((prev) => {
@@ -207,7 +277,7 @@ export function DiffFileTree({
   }
 
   return (
-    <div className="overflow-y-auto">
+    <div className="flex-1 overflow-y-auto p-1">
       {changed.length > 0 ? (
         <TreeRow
           node={changedTree}
@@ -216,15 +286,18 @@ export function DiffFileTree({
           onSelect={onSelect}
           reviewed={reviewed}
           onToggleReview={onToggleReview}
+          collapsible
+          openGroups={openGroups}
+          onToggleGroup={toggleGroup}
         />
       ) : null}
       {ignored.length > 0 ? (
-        <div className="border-t border-border">
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <button
             type="button"
             onClick={toggleIgnored}
             aria-expanded={ignoredOpen}
-            className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent"
+            className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-[#FFFFFF0A]"
           >
             <span aria-hidden className="inline-block w-3 font-mono">
               {ignoredOpen ? '▾' : '▸'}
