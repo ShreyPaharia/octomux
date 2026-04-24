@@ -167,14 +167,8 @@ function SectionHeader({
       {count !== undefined && (
         <span className="font-mono text-[11px] font-bold text-[#6a6a6a]">{count}</span>
       )}
-      {meta && (
-        <span className="font-mono text-[11px] font-medium text-[#6a6a6a]">{meta}</span>
-      )}
-      <span
-        className="ml-1 h-px flex-1"
-        style={{ backgroundColor: `${accent}22` }}
-        aria-hidden
-      />
+      {meta && <span className="font-mono text-[11px] font-medium text-[#6a6a6a]">{meta}</span>}
+      <span className="ml-1 h-px flex-1" style={{ backgroundColor: `${accent}22` }} aria-hidden />
     </div>
   );
 }
