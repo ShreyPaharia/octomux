@@ -173,7 +173,12 @@ export function RepoPickerField({ value, onChange, onValidationChange }: RepoPic
               </Button>
             }
           />
-          <PopoverContent align="end" side="bottom" sideOffset={4} className="w-[420px] p-0">
+          <PopoverContent
+            align="end"
+            side="bottom"
+            sideOffset={4}
+            className="w-[420px] gap-0 p-0 overflow-hidden"
+          >
             <FolderBrowser
               data={browseData}
               loading={browseLoading}
@@ -195,12 +200,12 @@ export function RepoPickerField({ value, onChange, onValidationChange }: RepoPic
       {!value.trim() && recentRepos.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium">Recent</span>
-          <div className="rounded-md border border-border overflow-hidden">
+          <div className="flex flex-col gap-1 rounded-lg border border-glass-edge bg-glass-l1 p-1">
             {recentRepos.slice(0, 5).map((repo) => (
               <button
                 key={repo.repo_path}
                 type="button"
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted transition-colors"
+                className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-glass-l2"
                 onClick={() => onChange(repo.repo_path)}
               >
                 <span className="font-mono text-xs truncate mr-3">{repo.repo_path}</span>
@@ -240,11 +245,11 @@ function FolderBrowser({
   return (
     <div className="flex flex-col">
       {/* Header: back + current path */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-glass-edge px-3 py-2">
         <button
           type="button"
           disabled={!data.parent}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+          className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-glass-l2 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
           onClick={() => data.parent && onNavigate(data.parent)}
         >
           <ChevronLeftIcon />
@@ -255,7 +260,7 @@ function FolderBrowser({
       </div>
 
       {/* Directory list */}
-      <div className="max-h-[280px] overflow-y-auto">
+      <div className="max-h-[280px] overflow-y-auto p-1">
         {data.entries.length === 0 && (
           <div className="px-3 py-4 text-center text-xs text-muted-foreground">
             No subdirectories
@@ -265,7 +270,7 @@ function FolderBrowser({
           <button
             key={entry.path}
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted transition-colors"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-glass-l2"
             onClick={() => onNavigate(entry.path)}
             onDoubleClick={() => entry.isGit && onSelect(entry.path)}
           >
@@ -297,7 +302,7 @@ function FolderBrowser({
       </div>
 
       {/* Footer: Select button */}
-      <div className="flex items-center justify-between border-t border-border px-3 py-2">
+      <div className="flex items-center justify-between border-t border-glass-edge px-3 py-2">
         <span className="font-mono text-[10px] text-muted-foreground truncate mr-2">
           {data.current}
         </span>
