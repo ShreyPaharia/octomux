@@ -31,7 +31,7 @@
   --chart-3: #ffb800;
   --chart-4: #ef4444;
   --chart-5: #8a8a8a;
-  --radius: 0;
+  --radius: 0.5rem;
   --sidebar: #080808;
   --sidebar-foreground: #ffffff;
   --sidebar-primary: #3b82f6;
@@ -146,13 +146,13 @@
   --color-glass-specular: var(--glass-specular);
   --color-ambient-cyan: var(--ambient-cyan);
   --color-ambient-purple: var(--ambient-purple);
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
-  --radius-xl: 0;
-  --radius-2xl: 0;
-  --radius-3xl: 0;
-  --radius-4xl: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 24px;
 }
 
 @layer base {

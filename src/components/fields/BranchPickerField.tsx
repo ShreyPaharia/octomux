@@ -80,7 +80,7 @@ export function BranchPickerField({
               disabled={disabled || branches.length === 0}
               className={
                 triggerClassName ??
-                'flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                'flex h-9 w-full items-center justify-between rounded-lg border border-glass-edge bg-glass-l1 px-3 py-1 text-sm transition-colors hover:bg-glass-l2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
               }
             >
               <span className={value ? 'font-mono text-xs' : 'text-muted-foreground'}>
@@ -94,30 +94,35 @@ export function BranchPickerField({
           align="start"
           side="bottom"
           sideOffset={4}
-          className="w-[--trigger-width] p-0"
+          className="w-[--trigger-width] gap-1 p-1.5"
         >
-          <div className="flex flex-col">
-            <div className="border-b border-border px-3 py-2">
-              <input
-                type="text"
-                placeholder="Search branches..."
-                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                value={branchSearch}
-                onChange={(e) => setBranchSearch(e.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="max-h-[200px] overflow-y-auto">
-              {filteredBranches.length === 0 && (
-                <div className="px-3 py-3 text-center text-xs text-muted-foreground">
-                  {branches.length === 0 ? 'Select a repository first' : 'No matching branches'}
-                </div>
-              )}
-              {filteredBranches.map((b) => (
+          <div className="border-b border-glass-edge px-2 pb-2">
+            <input
+              type="text"
+              placeholder="Search branches..."
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              value={branchSearch}
+              onChange={(e) => setBranchSearch(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="max-h-[220px] overflow-y-auto py-1">
+            {filteredBranches.length === 0 && (
+              <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+                {branches.length === 0 ? 'Select a repository first' : 'No matching branches'}
+              </div>
+            )}
+            {filteredBranches.map((b) => {
+              const selected = b === value;
+              return (
                 <button
                   key={b}
                   type="button"
-                  className={`flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted transition-colors ${b === value ? 'bg-muted font-medium' : ''}`}
+                  className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${
+                    selected
+                      ? 'border border-[#3B82F666] bg-[#3B82F61F] font-medium text-foreground'
+                      : 'border border-transparent hover:bg-glass-l2'
+                  }`}
                   onClick={() => {
                     onChange(b);
                     setBranchSearch('');
@@ -126,8 +131,8 @@ export function BranchPickerField({
                 >
                   <span className="font-mono text-xs truncate">{b}</span>
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </PopoverContent>
       </Popover>
