@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+  type CSSProperties,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
@@ -6,6 +13,7 @@ import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { useSaveShortcut } from '@/lib/use-editor-shortcuts';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import {
   Dialog,
   DialogContent,
@@ -14,13 +22,27 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 
+const ROW_DIVIDER: CSSProperties = { borderBottom: '1px solid rgba(255,255,255,0.10)' };
+
+const TOGGLE_ON_STYLE: CSSProperties = {
+  background: 'linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%)',
+  boxShadow: '0 0 12px rgba(59,130,246,0.45), inset 0 1px 0 rgba(255,255,255,0.35)',
+};
+
+const TOGGLE_OFF_STYLE: CSSProperties = {
+  backgroundColor: 'rgba(255,255,255,0.08)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
+  border: '1px solid rgba(255,255,255,0.14)',
+};
+
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      className={`relative h-5 w-9 transition-colors ${checked ? 'bg-primary' : 'bg-[#2f2f2f]'}`}
+      className="relative h-5 w-9 transition-colors"
+      style={checked ? TOGGLE_ON_STYLE : TOGGLE_OFF_STYLE}
       onClick={() => onChange(!checked)}
     >
       <span
@@ -30,11 +52,14 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
   );
 }
 
-function SectionHeader({ label }: { label: string }) {
+function Keycap({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-4 text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-      // {label}
-    </h2>
+    <span
+      className="inline-flex h-5 items-center gap-0.5 border border-glass-edge bg-glass-l1 px-1.5 font-mono text-[10px] text-[#b5b5bd]"
+      style={{ boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.12)' }}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -42,23 +67,59 @@ function SettingRow({
   label,
   description,
   children,
+  lastRow = false,
 }: {
   label: string;
   description?: string;
-  children: React.ReactNode;
+  children: ReactNode;
+  lastRow?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-[#2f2f2f] py-3">
+    <div
+      className="flex items-center justify-between py-3"
+      style={lastRow ? undefined : ROW_DIVIDER}
+    >
       <div>
         <span className="text-sm">{label}</span>
-        {description && <p className="text-xs text-[#6a6a6a]">{description}</p>}
+        {description && <p className="text-xs text-[#b5b5bd]">{description}</p>}
       </div>
       {children}
     </div>
   );
 }
 
-function AgentsSection() {
+interface SectionCardProps {
+  id: string;
+  title: string;
+  count?: string | number;
+  help?: string;
+  trailing?: ReactNode;
+  children: ReactNode;
+  scrollRef: (el: HTMLElement | null) => void;
+}
+
+function SectionCard({ id, title, count, help, trailing, children, scrollRef }: SectionCardProps) {
+  return (
+    <section id={`section-${id}`} ref={scrollRef} className="mb-6 scroll-mt-6">
+      <GlassPanel level={2} className="px-5">
+        <header
+          className="flex items-center justify-between"
+          style={{ ...ROW_DIVIDER, padding: '18px 0' }}
+        >
+          <div className="flex items-center gap-3">
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-white">{title}</h2>
+            {count !== undefined && <span className="text-xs text-[#8a8a8a]">{count}</span>}
+            {help && <span className="text-xs text-[#8a8a8a]">{help}</span>}
+          </div>
+          {trailing}
+        </header>
+        <div className="py-2">{children}</div>
+      </GlassPanel>
+    </section>
+  );
+}
+
+function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { agents, loading, error, refresh } = useAgents();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
@@ -83,30 +144,23 @@ function AgentsSection() {
   }, [newName, navigate]);
 
   return (
-    <section className="mb-8">
-      <div className="flex items-center justify-between">
-        <SectionHeader label="AGENTS" />
-        <button
-          className="mb-4 text-xs text-[#3B82F6] hover:text-[#60a5fa]"
-          onClick={() => setShowCreate(true)}
-        >
-          + New Agent
-        </button>
-      </div>
-
+    <SectionCard
+      id="agents"
+      title="AGENTS"
+      count={!loading && !error ? agents.length : undefined}
+      scrollRef={scrollRef}
+      trailing={<AddChip label="+ New agent" onClick={() => setShowCreate(true)} />}
+    >
       {loading && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]"
-            />
+            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
           ))}
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
+        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
           <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
             Retry
@@ -115,22 +169,23 @@ function AgentsSection() {
       )}
 
       {!loading && !error && agents.length === 0 && (
-        <div className="py-8 text-center text-sm text-[#6a6a6a]">No agents found.</div>
+        <div className="py-8 text-center text-sm text-[#8a8a8a]">No agents found.</div>
       )}
 
       {!loading && !error && agents.length > 0 && (
-        <div className="space-y-0">
-          {agents.map((agent) => (
+        <div>
+          {agents.map((agent, i) => (
             <div
               key={agent.name}
-              className="flex items-center justify-between border-b border-[#2f2f2f] py-3 cursor-pointer hover:bg-[#141414]"
+              className="flex items-center justify-between py-3 cursor-pointer hover:bg-glass-l1 px-1 -mx-1"
+              style={i === agents.length - 1 ? undefined : ROW_DIVIDER}
               onClick={() => navigate(`/agents/${encodeURIComponent(agent.name)}`)}
             >
               <div>
                 <span className="text-sm font-mono">{agent.name}</span>
-                {agent.description && <p className="text-xs text-[#8a8a8a]">{agent.description}</p>}
+                {agent.description && <p className="text-xs text-[#b5b5bd]">{agent.description}</p>}
               </div>
-              <span className={`text-xs ${agent.isCustom ? 'text-[#FFB800]' : 'text-[#6a6a6a]'}`}>
+              <span className={`text-xs ${agent.isCustom ? 'text-[#FFB800]' : 'text-[#8a8a8a]'}`}>
                 {agent.isCustom ? 'Custom' : 'Default'}
               </span>
             </div>
@@ -149,18 +204,18 @@ function AgentsSection() {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            className="w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+            className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
             autoFocus
           />
           <div className="flex justify-end gap-2">
             <button
-              className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+              className="px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
               onClick={() => setShowCreate(false)}
             >
               Cancel
             </button>
             <button
-              className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+              className="bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
               onClick={handleCreate}
               disabled={creating || !newName.trim()}
             >
@@ -169,11 +224,11 @@ function AgentsSection() {
           </div>
         </DialogContent>
       </Dialog>
-    </section>
+    </SectionCard>
   );
 }
 
-function SkillsSection() {
+function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { skills, loading, error, refresh } = useSkills();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
@@ -215,30 +270,23 @@ function SkillsSection() {
   }, [deleteTarget, refresh]);
 
   return (
-    <section className="mb-8">
-      <div className="flex items-center justify-between">
-        <SectionHeader label="SKILLS" />
-        <button
-          className="mb-4 text-xs text-[#3B82F6] hover:text-[#60a5fa]"
-          onClick={() => setShowCreate(true)}
-        >
-          + New Skill
-        </button>
-      </div>
-
+    <SectionCard
+      id="skills"
+      title="SKILLS"
+      count={!loading && !error ? skills.length : undefined}
+      scrollRef={scrollRef}
+      trailing={<AddChip label="+ New skill" onClick={() => setShowCreate(true)} />}
+    >
       {loading && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]"
-            />
+            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
           ))}
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
+        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
           <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
             Retry
@@ -247,7 +295,7 @@ function SkillsSection() {
       )}
 
       {!loading && !error && skills.length === 0 && (
-        <div className="py-8 text-center text-sm text-[#6a6a6a]">
+        <div className="py-8 text-center text-sm text-[#8a8a8a]">
           No skills installed.{' '}
           <button
             className="text-[#3B82F6] hover:text-[#60a5fa]"
@@ -259,19 +307,20 @@ function SkillsSection() {
       )}
 
       {!loading && !error && skills.length > 0 && (
-        <div className="space-y-0">
-          {skills.map((skill) => (
+        <div>
+          {skills.map((skill, i) => (
             <div
               key={skill.name}
-              className="flex items-center justify-between border-b border-[#2f2f2f] py-3 cursor-pointer hover:bg-[#141414]"
+              className="group flex items-center justify-between py-3 cursor-pointer hover:bg-glass-l1 px-1 -mx-1"
+              style={i === skills.length - 1 ? undefined : ROW_DIVIDER}
               onClick={() => navigate(`/skills/${encodeURIComponent(skill.name)}`)}
             >
               <div>
                 <span className="text-sm font-mono">{skill.name}</span>
-                {skill.description && <p className="text-xs text-[#8a8a8a]">{skill.description}</p>}
+                {skill.description && <p className="text-xs text-[#b5b5bd]">{skill.description}</p>}
               </div>
               <button
-                className="text-xs text-[#6a6a6a] hover:text-red-400"
+                className="text-xs text-[#8a8a8a] opacity-0 group-hover:opacity-100 hover:text-red-400"
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleteTarget(skill.name);
@@ -295,18 +344,18 @@ function SkillsSection() {
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            className="w-full rounded border border-[#2f2f2f] bg-[#141414] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+            className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
             autoFocus
           />
           <div className="flex justify-end gap-2">
             <button
-              className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+              className="px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
               onClick={() => setShowCreate(false)}
             >
               Cancel
             </button>
             <button
-              className="rounded bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
+              className="bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] disabled:opacity-50"
               onClick={handleCreate}
               disabled={creating || !newName.trim()}
             >
@@ -325,20 +374,20 @@ function SkillsSection() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-sm font-bold">Delete Skill</DialogTitle>
-            <DialogDescription className="text-xs text-[#8a8a8a]">
+            <DialogDescription className="text-xs text-[#b5b5bd]">
               Are you sure you want to delete{' '}
               <span className="font-mono text-white">{deleteTarget}</span>? This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
             <button
-              className="rounded px-3 py-1.5 text-xs text-[#8a8a8a] hover:text-white"
+              className="px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
               onClick={() => setDeleteTarget(null)}
             >
               Cancel
             </button>
             <button
-              className="rounded bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+              className="bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50"
               onClick={handleDelete}
               disabled={deleting}
             >
@@ -347,12 +396,89 @@ function SkillsSection() {
           </div>
         </DialogContent>
       </Dialog>
-    </section>
+    </SectionCard>
   );
 }
 
-function RepoConfigsSection() {
+function AddChip({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="focus-ring inline-flex items-center gap-1 border border-[#3B82F6]/40 bg-[#3B82F6]/12 px-2.5 py-1 text-xs font-medium text-[#60a5fa] hover:bg-[#3B82F6]/20"
+      style={{ backgroundColor: 'rgba(59,130,246,0.12)' }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () => void }) {
+  const [showMenu, setShowMenu] = useState(false);
+  const navigate = useNavigate();
+
+  return (
+    <div className="group relative flex items-center justify-between py-3" style={ROW_DIVIDER}>
+      <div>
+        <span className="text-sm font-bold">{repoName(config.repo_path)}</span>
+        <span className="ml-2 text-xs text-[#8a8a8a]">{config.repo_path}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        {config.base_branch && (
+          <span className="bg-[#1a1a2e] px-2 py-0.5 text-xs text-[#8a8aff]">
+            {config.base_branch}
+          </span>
+        )}
+        <button
+          type="button"
+          aria-label={`Actions for ${repoName(config.repo_path)}`}
+          data-testid={`repo-overflow-${repoName(config.repo_path)}`}
+          className="text-[#8a8a8a] opacity-0 group-hover:opacity-100 hover:text-white focus:opacity-100"
+          onClick={() => setShowMenu((v) => !v)}
+        >
+          ⋯
+        </button>
+        {showMenu && (
+          <GlassPanel
+            level={3}
+            specular
+            className="absolute right-0 top-10 z-10 min-w-32 py-1 text-xs"
+          >
+            <button
+              type="button"
+              className="block w-full px-3 py-1.5 text-left text-white hover:bg-glass-l1"
+              onClick={() => {
+                setShowMenu(false);
+                onEditClick();
+              }}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="block w-full px-3 py-1.5 text-left text-red-400 hover:bg-red-400/10"
+              onClick={() => {
+                setShowMenu(false);
+                navigate(`/?repo=${encodeURIComponent(config.repo_path)}`);
+                showToast(
+                  'info',
+                  'REMOVE REPO',
+                  'Open the task for this repo to archive or remove it.',
+                );
+              }}
+            >
+              Remove
+            </button>
+          </GlassPanel>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { configs, loading, error, refresh } = useRepoConfigs();
+  const navigate = useNavigate();
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -382,23 +508,34 @@ function RepoConfigsSection() {
     }
   };
 
-  return (
-    <section className="mb-8">
-      <SectionHeader label="REPOSITORIES" />
+  const editing = configs.find((c) => c.repo_path === editingPath) ?? null;
 
+  return (
+    <SectionCard
+      id="repositories"
+      title="REPOSITORIES"
+      count={!loading && !error ? configs.length : undefined}
+      scrollRef={scrollRef}
+      trailing={
+        <AddChip
+          label="+ Add repo"
+          onClick={() => {
+            navigate('/');
+            requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('focus-composer')));
+          }}
+        />
+      }
+    >
       {loading && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[1, 2].map((i) => (
-            <div
-              key={i}
-              className="h-12 animate-pulse rounded bg-[#141414] border border-[#2f2f2f]"
-            />
+            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
           ))}
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-3 rounded border border-red-400/30 bg-red-400/5 px-4 py-3">
+        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
           <span className="text-sm text-red-400">{error}</span>
           <button className="text-xs text-[#3B82F6] hover:text-[#60a5fa]" onClick={refresh}>
             Retry
@@ -407,7 +544,7 @@ function RepoConfigsSection() {
       )}
 
       {!loading && !error && configs.length === 0 && (
-        <div className="py-8 text-center text-sm text-[#6a6a6a]">
+        <div className="py-8 text-center text-sm text-[#8a8a8a]">
           No repositories configured yet. Repositories appear here automatically when you create
           tasks.
         </div>
@@ -416,66 +553,49 @@ function RepoConfigsSection() {
       {!loading &&
         !error &&
         configs.map((config) => (
-          <div key={config.repo_path} className="border-b border-[#2f2f2f] py-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-sm font-bold">{repoName(config.repo_path)}</span>
-                <span className="ml-2 text-xs text-[#6a6a6a]">{config.repo_path}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                {config.base_branch && (
-                  <span className="bg-[#1a1a2e] px-2 py-0.5 text-xs text-[#8a8aff]">
-                    {config.base_branch}
-                  </span>
-                )}
-                <button
-                  className="text-xs text-[#3B82F6] hover:text-[#60a5fa]"
-                  onClick={() =>
-                    editingPath === config.repo_path ? setEditingPath(null) : startEdit(config)
-                  }
-                >
-                  {editingPath === config.repo_path ? 'Cancel' : 'Edit'}
-                </button>
-              </div>
-            </div>
-
-            {editingPath === config.repo_path && (
-              <div className="mt-3 space-y-2">
-                {(['base_branch', 'test_command', 'format_command', 'lint_command'] as const).map(
-                  (field) => (
-                    <div key={field} className="flex items-center gap-2">
-                      <label className="w-32 text-xs text-[#6a6a6a]">
-                        {field.replace(/_/g, ' ')}
-                      </label>
-                      <input
-                        type="text"
-                        value={editForm[field] ?? ''}
-                        onChange={(e) =>
-                          setEditForm((prev) => ({ ...prev, [field]: e.target.value }))
-                        }
-                        className="flex-1 border border-[#2f2f2f] bg-[#141414] px-2 py-1 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
-                      />
-                    </div>
-                  ),
-                )}
-                <div className="flex justify-end pt-1">
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
-                  >
-                    {saving ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <RepoRow key={config.repo_path} config={config} onEditClick={() => startEdit(config)} />
         ))}
-    </section>
+
+      {editing && (
+        <div className="mt-3 space-y-2 border border-glass-edge bg-glass-l1 p-3">
+          <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a]">
+            Edit {repoName(editing.repo_path)}
+          </div>
+          {(['base_branch', 'test_command', 'format_command', 'lint_command'] as const).map(
+            (field) => (
+              <div key={field} className="flex items-center gap-2">
+                <label className="w-32 text-xs text-[#b5b5bd]">{field.replace(/_/g, ' ')}</label>
+                <input
+                  type="text"
+                  value={editForm[field] ?? ''}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, [field]: e.target.value }))}
+                  className="flex-1 border border-glass-edge bg-[#0B0C0F] px-2 py-1 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+                />
+              </div>
+            ),
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setEditingPath(null)}
+              className="px-3 py-1 text-xs text-[#b5b5bd] hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-[#3B82F6] px-3 py-1 text-xs text-white disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+    </SectionCard>
   );
 }
 
-function EditorSection() {
+function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [editor, setEditor] = useState<string>('nvim');
   const [loading, setLoading] = useState(true);
 
@@ -512,27 +632,27 @@ function EditorSection() {
   if (loading) return null;
 
   return (
-    <section className="mb-8">
-      <SectionHeader label="EDITOR" />
+    <SectionCard id="editor" title="EDITOR" scrollRef={scrollRef}>
       <SettingRow
         label="Editor"
         description="Editor to open when clicking the Editor button on tasks"
+        lastRow
       >
         <select
           value={editor}
           onChange={(e) => handleChange(e.target.value)}
-          className="bg-[#141414] border border-[#2f2f2f] px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
+          className="bg-[#0B0C0F] border border-glass-edge px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
         >
           <option value="nvim">Neovim</option>
           <option value="vscode">VS Code</option>
           <option value="cursor">Cursor</option>
         </select>
       </SettingRow>
-    </section>
+    </SectionCard>
   );
 }
 
-function ClaudeLaunchFlagsSection() {
+function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [dangerouslySkip, setDangerouslySkip] = useState(false);
   const [savedFlags, setSavedFlags] = useState('');
   const [flagsBuffer, setFlagsBuffer] = useState('');
@@ -599,9 +719,7 @@ function ClaudeLaunchFlagsSection() {
   if (loading) return null;
 
   return (
-    <section className="mb-8">
-      <SectionHeader label="AGENT LAUNCH FLAGS" />
-
+    <SectionCard id="agent-launch" title="AGENT LAUNCH FLAGS" scrollRef={scrollRef}>
       {envOverride !== null && (
         <div className="mb-3 border border-[#FFB800]/40 bg-[#FFB800]/5 px-3 py-2 text-xs text-[#FFB800]">
           Overridden by OCTOMUX_CLAUDE_FLAGS env var:{' '}
@@ -623,11 +741,11 @@ function ClaudeLaunchFlagsSection() {
         </div>
       )}
 
-      <div className="border-b border-[#2f2f2f] py-3">
+      <div className="py-3" style={ROW_DIVIDER}>
         <div className="mb-2 flex items-center justify-between">
           <div>
             <span className="text-sm">Advanced flags</span>
-            <p className="text-xs text-[#6a6a6a]">
+            <p className="text-xs text-[#b5b5bd]">
               Extra flags appended to the claude launch command
             </p>
           </div>
@@ -647,11 +765,11 @@ function ClaudeLaunchFlagsSection() {
           value={flagsBuffer}
           onChange={(e) => setFlagsBuffer(e.target.value)}
           placeholder="--model opus --verbose"
-          className="w-full border border-[#2f2f2f] bg-[#0A0A0A] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
           spellCheck={false}
         />
       </div>
-    </section>
+    </SectionCard>
   );
 }
 
@@ -764,7 +882,7 @@ function OrchestratorPromptSection() {
   useSaveShortcut(save);
 
   if (loading) {
-    return <p className="py-3 text-xs text-[#6a6a6a]">Loading prompt...</p>;
+    return <p className="py-3 text-xs text-[#8a8a8a]">Loading prompt...</p>;
   }
 
   return (
@@ -784,11 +902,11 @@ function OrchestratorPromptSection() {
           </button>
         </div>
       </SettingRow>
-      <div className="border-b border-[#2f2f2f] pb-4">
+      <div className="pb-4" style={ROW_DIVIDER}>
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="mt-2 h-64 w-full resize-y border border-[#2f2f2f] bg-[#0A0A0A] p-3 font-mono text-xs leading-relaxed text-white outline-none focus:border-[#3B82F6]"
+          className="mt-2 h-64 w-full resize-y border border-glass-edge bg-[#0B0C0F] p-3 font-mono text-xs leading-relaxed text-white outline-none focus:border-[#3B82F6]"
           spellCheck={false}
         />
         <div className="mt-2 flex items-center gap-3">
@@ -803,77 +921,166 @@ function OrchestratorPromptSection() {
   );
 }
 
-export default function SettingsPage() {
+function OrchestratorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
+  return (
+    <SectionCard id="orchestrator" title="ORCHESTRATOR" scrollRef={scrollRef}>
+      <OrchestratorAgentToggle />
+      <OrchestratorPromptSection />
+      <SettingRow
+        label="Restart Orchestrator"
+        description="Stop and restart the orchestrator process"
+        lastRow
+      >
+        <button
+          onClick={async () => {
+            try {
+              await api.orchestratorStop();
+              await api.orchestratorStart();
+              showToast('success', 'ORCHESTRATOR', 'Orchestrator restarted');
+            } catch (err) {
+              showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to restart');
+            }
+          }}
+          className="border border-glass-edge bg-glass-l1 px-3 py-1 text-xs text-white hover:bg-glass-l2"
+        >
+          Restart
+        </button>
+      </SettingRow>
+    </SectionCard>
+  );
+}
+
+type SectionId =
+  | 'general'
+  | 'orchestrator'
+  | 'agents'
+  | 'skills'
+  | 'repositories'
+  | 'editor'
+  | 'agent-launch';
+
+const NAV_ITEMS: { id: SectionId; label: string }[] = [
+  { id: 'general', label: 'GENERAL' },
+  { id: 'orchestrator', label: 'ORCHESTRATOR' },
+  { id: 'agents', label: 'AGENTS' },
+  { id: 'skills', label: 'SKILLS' },
+  { id: 'repositories', label: 'REPOSITORIES' },
+  { id: 'editor', label: 'EDITOR' },
+  { id: 'agent-launch', label: 'AGENT LAUNCH' },
+];
+
+function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [notifications, setNotifications] = useState(
     () => localStorage.getItem('octomux-notifications') !== 'false',
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('octomux-sidebar-collapsed') === 'true',
   );
+  return (
+    <SectionCard id="general" title="GENERAL" scrollRef={scrollRef}>
+      <SettingRow label="Notifications" description="Show toast notifications for task events">
+        <ToggleSwitch
+          checked={notifications}
+          onChange={(v) => {
+            setNotifications(v);
+            localStorage.setItem('octomux-notifications', String(v));
+          }}
+        />
+      </SettingRow>
+      <SettingRow label="Sidebar collapsed by default" lastRow>
+        <ToggleSwitch
+          checked={sidebarCollapsed}
+          onChange={(v) => {
+            setSidebarCollapsed(v);
+            localStorage.setItem('octomux-sidebar-collapsed', String(v));
+          }}
+        />
+      </SettingRow>
+    </SectionCard>
+  );
+}
+
+export default function SettingsPage() {
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [activeSection, setActiveSection] = useState<SectionId>('general');
+
+  const setRef = useCallback(
+    (id: SectionId) => (el: HTMLElement | null) => {
+      sectionRefs.current[id] = el;
+    },
+    [],
+  );
+
+  const scrollTo = useCallback((id: SectionId) => {
+    setActiveSection(id);
+    const el = sectionRefs.current[id];
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-2xl px-6 py-6">
-        <h1 className="mb-8 font-display text-2xl font-bold">SETTINGS</h1>
+    <div className="flex h-full flex-col">
+      <GlassPanel level={1}>
+        <div className="flex items-center justify-between px-6 py-4">
+          <div>
+            <h1 className="font-display text-[30px] font-semibold leading-none text-white">
+              Settings
+            </h1>
+            <p className="mt-1 font-mono text-[11px] text-[#8a8a8a]">
+              // workspace preferences · synced to ~/.octomux/config.json
+            </p>
+          </div>
+          <Keycap>⌘K</Keycap>
+        </div>
+      </GlassPanel>
 
-        <section className="mb-8">
-          <SectionHeader label="GENERAL" />
-          <SettingRow label="Notifications" description="Show toast notifications for task events">
-            <ToggleSwitch
-              checked={notifications}
-              onChange={(v) => {
-                setNotifications(v);
-                localStorage.setItem('octomux-notifications', String(v));
-              }}
-            />
-          </SettingRow>
-          <SettingRow label="Sidebar collapsed by default">
-            <ToggleSwitch
-              checked={sidebarCollapsed}
-              onChange={(v) => {
-                setSidebarCollapsed(v);
-                localStorage.setItem('octomux-sidebar-collapsed', String(v));
-              }}
-            />
-          </SettingRow>
-        </section>
+      <div className="flex min-h-0 flex-1">
+        <GlassPanel
+          level={1}
+          className="flex shrink-0 flex-col gap-1 border-r border-glass-edge py-4"
+          style={{ width: 220 }}
+        >
+          <nav aria-label="Settings sections" className="flex flex-col">
+            {NAV_ITEMS.map((item) => {
+              const isActive = item.id === activeSection;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-testid={`settings-nav-${item.id}`}
+                  data-active={isActive ? 'true' : undefined}
+                  onClick={() => scrollTo(item.id)}
+                  className={`focus-ring relative px-5 py-2 text-left text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                    isActive ? 'text-[#60a5fa]' : 'text-[#b5b5bd] hover:text-white'
+                  }`}
+                  style={
+                    isActive
+                      ? {
+                          backgroundColor: 'rgba(59,130,246,0.12)',
+                          boxShadow: 'inset 2px 0 0 0 #3B82F6',
+                        }
+                      : undefined
+                  }
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        </GlassPanel>
 
-        <EditorSection />
-        <ClaudeLaunchFlagsSection />
-        <RepoConfigsSection />
-
-        <section className="mb-8">
-          <SectionHeader label="ORCHESTRATOR" />
-          <OrchestratorAgentToggle />
-          <OrchestratorPromptSection />
-          <SettingRow
-            label="Restart Orchestrator"
-            description="Stop and restart the orchestrator process"
-          >
-            <button
-              onClick={async () => {
-                try {
-                  await api.orchestratorStop();
-                  await api.orchestratorStart();
-                  showToast('success', 'ORCHESTRATOR', 'Orchestrator restarted');
-                } catch (err) {
-                  showToast(
-                    'error',
-                    'ERROR',
-                    err instanceof Error ? err.message : 'Failed to restart',
-                  );
-                }
-              }}
-              className="bg-[#2f2f2f] px-3 py-1 text-xs text-white hover:bg-[#3f3f3f]"
-            >
-              Restart
-            </button>
-          </SettingRow>
-        </section>
-
-        <AgentsSection />
-
-        <SkillsSection />
+        <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
+          <div className="mx-auto max-w-3xl">
+            <GeneralSection scrollRef={setRef('general')} />
+            <OrchestratorSection scrollRef={setRef('orchestrator')} />
+            <AgentsSection scrollRef={setRef('agents')} />
+            <SkillsSection scrollRef={setRef('skills')} />
+            <RepoConfigsSection scrollRef={setRef('repositories')} />
+            <EditorSection scrollRef={setRef('editor')} />
+            <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -15,8 +15,7 @@ function NewTaskButton({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       className="bg-[#3B82F6] text-white hover:bg-[#3B82F6]/90"
       style={{
-        boxShadow:
-          'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 24px 0 rgba(59, 130, 246, 0.35)',
+        boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 24px 0 rgba(59, 130, 246, 0.35)',
       }}
     >
       <PlusIcon data-icon="inline-start" />
