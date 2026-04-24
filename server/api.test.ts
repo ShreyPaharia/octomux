@@ -80,6 +80,19 @@ vi.mock('./task-runner.js', async () => {
       };
     }),
     closeShellTerminal: vi.fn(),
+    hopAgent: vi.fn(async (agent: any, toTaskId: string | null) => {
+      const { getDb } = await import('./db.js');
+      const db = getDb();
+      db.prepare(
+        `UPDATE agents SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running' WHERE id = ?`,
+      ).run(
+        toTaskId,
+        toTaskId === null ? 0 : 7,
+        toTaskId === null ? `octomux-chat-${agent.id}` : null,
+        agent.id,
+      );
+      return db.prepare('SELECT * FROM agents WHERE id = ?').get(agent.id);
+    }),
   };
 });
 
@@ -1752,6 +1765,80 @@ describe('DELETE /api/worktrees/:id', () => {
       worktree_id: string | null;
     };
     expect(task.worktree_id).toBeNull();
+  });
+});
+
+describe('PATCH /api/agents/:id/task', () => {
+  it('404 when agent does not exist', async () => {
+    const res = await request(app)
+      .patch('/api/agents/missing/task')
+      .send({ task_id: null });
+    expect(res.status).toBe(404);
+  });
+
+  it('400 when body missing task_id key', async () => {
+    insertAgent(db, { id: 'aBody', task_id: null });
+    const res = await request(app).patch('/api/agents/aBody/task').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when task_id equals current task_id (no-op)', async () => {
+    insertTask(db, { id: 'tSame', status: 'running' });
+    insertAgent(db, { id: 'aSame', task_id: 'tSame' });
+    const res = await request(app)
+      .patch('/api/agents/aSame/task')
+      .send({ task_id: 'tSame' });
+    expect(res.status).toBe(400);
+  });
+
+  it('404 when target task does not exist', async () => {
+    insertAgent(db, { id: 'aOrph', task_id: null });
+    const res = await request(app)
+      .patch('/api/agents/aOrph/task')
+      .send({ task_id: 'does-not-exist' });
+    expect(res.status).toBe(404);
+  });
+
+  it('409 when target task is not active', async () => {
+    insertTask(db, { id: 'tClosed', status: 'closed' });
+    insertAgent(db, { id: 'aC', task_id: null });
+    const res = await request(app)
+      .patch('/api/agents/aC/task')
+      .send({ task_id: 'tClosed' });
+    expect(res.status).toBe(409);
+  });
+
+  it('detaches to standalone (task_id=null)', async () => {
+    insertTask(db, { id: 'tFrom', status: 'running' });
+    insertAgent(db, { id: 'aDet', task_id: 'tFrom' });
+
+    const res = await request(app)
+      .patch('/api/agents/aDet/task')
+      .send({ task_id: null });
+    expect(res.status).toBe(200);
+    expect(res.body.task_id).toBeNull();
+    expect(res.body.tmux_session).toBe('octomux-chat-aDet');
+  });
+
+  it('moves between tasks', async () => {
+    insertTask(db, { id: 'tA', status: 'running' });
+    insertTask(db, { id: 'tB', status: 'running' });
+    insertAgent(db, { id: 'aMove', task_id: 'tA' });
+
+    const res = await request(app).patch('/api/agents/aMove/task').send({ task_id: 'tB' });
+    expect(res.status).toBe(200);
+    expect(res.body.task_id).toBe('tB');
+  });
+
+  it('attaches a standalone chat agent to a task', async () => {
+    insertTask(db, { id: 'tTarget', status: 'running' });
+    insertAgent(db, { id: 'aChat', task_id: null });
+    // Standalone agents carry their own tmux_session.
+    db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-aChat' WHERE id = 'aChat'`).run();
+
+    const res = await request(app).patch('/api/agents/aChat/task').send({ task_id: 'tTarget' });
+    expect(res.status).toBe(200);
+    expect(res.body.task_id).toBe('tTarget');
   });
 });
 

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import { useTasksContext } from '@/lib/tasks-context';
 import {
   groupTasksForSidebar,
@@ -1098,32 +1099,38 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
  */
 function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
   const [chats, setChats] = useState<Agent[]>([]);
+  const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
+
+  const loadChats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/chats');
+      if (!res.ok) return;
+      const rows = (await res.json()) as Agent[];
+      setChats(rows.filter((c) => c.id !== 'orchestrator'));
+    } catch {
+      // silent — sidebar is non-critical
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch('/api/chats');
-        if (!res.ok) return;
-        const rows = (await res.json()) as Agent[];
-        if (!cancelled) setChats(rows.filter((c) => c.id !== 'orchestrator'));
-      } catch {
-        // silent — sidebar is non-critical
-      }
+    const tick = async () => {
+      if (cancelled) return;
+      await loadChats();
     };
-    void load();
-    const interval = setInterval(() => void load(), 5000);
+    void tick();
+    const interval = setInterval(() => void tick(), 5000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [loadChats]);
 
-  if (chats.length === 0) return null;
+  if (chats.length === 0 && !movingAgentId) return null;
 
   return (
     <div style={{ paddingBottom: 16 }}>
-      {!collapsed && (
+      {!collapsed && chats.length > 0 && (
         <div
           className="font-bold uppercase tracking-wider"
           style={{ fontSize: 10, color: '#6a6a6a', padding: '0 20px 8px' }}
@@ -1135,25 +1142,123 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
         const to = `/chats/${chat.id}`;
         const isActive = activePath === to;
         const color = isActive ? '#3B82F6' : '#8a8a8a';
+        if (collapsed) {
+          return (
+            <Link
+              key={chat.id}
+              to={to}
+              className="flex items-center"
+              style={{
+                padding: '8px 0',
+                gap: 12,
+                backgroundColor: isActive ? '#3B82F620' : 'transparent',
+                color,
+                justifyContent: 'center',
+              }}
+            >
+              💬
+            </Link>
+          );
+        }
         return (
-          <Link
+          <div
             key={chat.id}
-            to={to}
-            className="flex items-center"
+            className="group/chatrow flex items-center"
             style={{
-              padding: collapsed ? '8px 0' : '8px 20px',
-              gap: 12,
+              padding: '8px 20px',
+              gap: 8,
               backgroundColor: isActive ? '#3B82F620' : 'transparent',
-              color,
-              fontWeight: isActive ? 700 : 500,
-              fontSize: 12,
-              justifyContent: collapsed ? 'center' : undefined,
             }}
           >
-            {collapsed ? '💬' : <span className="truncate">{chat.label}</span>}
-          </Link>
+            <Link
+              to={to}
+              className="min-w-0 flex-1 truncate"
+              style={{
+                color,
+                fontWeight: isActive ? 700 : 500,
+                fontSize: 12,
+              }}
+            >
+              {chat.label}
+            </Link>
+            <ChatRowMenu
+              chatId={chat.id}
+              onMoveToTask={() => setMovingAgentId(chat.id)}
+            />
+          </div>
         );
       })}
+      {movingAgentId && (
+        <MoveAgentDialog
+          open={!!movingAgentId}
+          onOpenChange={(open) => !open && setMovingAgentId(null)}
+          agentId={movingAgentId}
+          currentTaskId={null}
+          agentLabel={chats.find((c) => c.id === movingAgentId)?.label ?? 'chat'}
+          onMoved={() => {
+            setMovingAgentId(null);
+            void loadChats();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: globalThis.MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-label="Chat actions"
+        data-testid={`chat-row-menu-${chatId}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+        className={
+          'flex h-5 w-5 items-center justify-center text-[#8a8a8a] hover:text-white ' +
+          (open ? 'opacity-100' : 'opacity-0 group-hover/chatrow:opacity-100')
+        }
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.5" />
+          <circle cx="12" cy="12" r="1.5" />
+          <circle cx="12" cy="19" r="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid={`chat-row-menu-items-${chatId}`}
+          className="absolute right-0 top-full z-50 mt-1 min-w-44 bg-[#141414] border border-border py-1 text-xs outline-none"
+        >
+          <button
+            role="menuitem"
+            className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              onMoveToTask();
+            }}
+          >
+            Move to task…
+          </button>
+        </div>
+      )}
     </div>
   );
 }
