@@ -16,32 +16,66 @@ describe('useTaskFilters', () => {
     makeTask({ id: 't4', status: 'error', repo_path: '/tmp/beta' }),
   ];
 
-  it('defaults to open filter showing non-closed, non-draft tasks', () => {
+  it('defaults to All filter showing every task', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
-    expect(result.current.filters.status).toBe('open');
-    const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t1', 't4']);
+    expect(result.current.filters.status).toBe('all');
+    const ids = result.current.filtered.map((t) => t.id).sort();
+    expect(ids).toEqual(['t1', 't2', 't3', 't4']);
   });
 
-  it('switches to closed filter', () => {
+  it('Running chip shows only running / setting_up tasks', () => {
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    act(() => result.current.setFilter('status', 'running'));
+    const ids = result.current.filtered.map((t) => t.id);
+    expect(ids).toEqual(['t1']);
+  });
+
+  it('Needs You chip includes errored tasks', () => {
+    const { result } = renderHook(() => useTaskFilters(tasks));
+    act(() => result.current.setFilter('status', 'needs_you'));
+    const ids = result.current.filtered.map((t) => t.id);
+    expect(ids).toEqual(['t4']);
+  });
+
+  it('Needs You includes tasks with pending prompts', () => {
+    const extra = makeTask({
+      id: 't5',
+      status: 'running',
+      repo_path: '/tmp/beta',
+      pending_prompts: [
+        {
+          id: 'pp1',
+          task_id: 't5',
+          agent_id: null,
+          agent_label: 'a',
+          session_id: 's',
+          tool_name: 'Bash',
+          tool_input: {},
+          status: 'pending',
+          created_at: '',
+          resolved_at: null,
+        },
+      ],
+    });
+    const { result } = renderHook(() => useTaskFilters([...tasks, extra]));
+    act(() => result.current.setFilter('status', 'needs_you'));
+    const ids = result.current.filtered.map((t) => t.id).sort();
+    expect(ids).toEqual(['t4', 't5']);
+  });
+
+  it('Closed chip shows only closed tasks', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     act(() => result.current.setFilter('status', 'closed'));
     const ids = result.current.filtered.map((t) => t.id);
     expect(ids).toEqual(['t3']);
   });
 
-  it('switches to backlog filter showing only drafts', () => {
+  it('provides status counts for all chips', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
-    act(() => result.current.setFilter('status', 'backlog'));
-    const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t2']);
-  });
-
-  it('provides status counts including backlog', () => {
-    const { result } = renderHook(() => useTaskFilters(tasks));
-    expect(result.current.counts.open).toBe(2);
+    expect(result.current.counts.all).toBe(4);
+    expect(result.current.counts.running).toBe(1);
+    expect(result.current.counts.needs_you).toBe(1);
     expect(result.current.counts.closed).toBe(1);
-    expect(result.current.counts.backlog).toBe(1);
   });
 
   // ─── Repo filtering ─────────────────────────────────────────────────────
@@ -59,17 +93,17 @@ describe('useTaskFilters', () => {
   it('filters tasks by repo', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     act(() => result.current.setFilter('repo', '/tmp/alpha'));
-    const ids = result.current.filtered.map((t) => t.id);
-    // open filter + alpha repo = only t1 (running in alpha)
-    expect(ids).toEqual(['t1']);
+    const ids = result.current.filtered.map((t) => t.id).sort();
+    expect(ids).toEqual(['t1', 't3']);
   });
 
   it('updates counts when repo filter is active', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     act(() => result.current.setFilter('repo', '/tmp/alpha'));
-    expect(result.current.counts.open).toBe(1);
+    expect(result.current.counts.all).toBe(2);
+    expect(result.current.counts.running).toBe(1);
+    expect(result.current.counts.needs_you).toBe(0);
     expect(result.current.counts.closed).toBe(1);
-    expect(result.current.counts.backlog).toBe(0);
   });
 
   it('shows all tasks for selected repo when switching status tabs', () => {
@@ -80,7 +114,7 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t3']);
   });
 
-  // ─── Status persistence ──────────────────────────────────────────────
+  // ─── Persistence ──────────────────────────────────────────────────────
 
   it('persists status filter to localStorage', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
@@ -96,21 +130,13 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t3']);
   });
 
-  it('persists backlog status filter to localStorage', () => {
+  it('restores needs_you status filter from localStorage', () => {
+    localStorage.setItem('octomux-status-filter', 'needs_you');
     const { result } = renderHook(() => useTaskFilters(tasks));
-    act(() => result.current.setFilter('status', 'backlog'));
-    expect(localStorage.getItem('octomux-status-filter')).toBe('backlog');
-  });
-
-  it('restores backlog status filter from localStorage', () => {
-    localStorage.setItem('octomux-status-filter', 'backlog');
-    const { result } = renderHook(() => useTaskFilters(tasks));
-    expect(result.current.filters.status).toBe('backlog');
+    expect(result.current.filters.status).toBe('needs_you');
     const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t2']);
+    expect(ids).toEqual(['t4']);
   });
-
-  // ─── Repo persistence ──────────────────────────────────────────────
 
   it('persists repo filter to localStorage', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
@@ -122,8 +148,7 @@ describe('useTaskFilters', () => {
     localStorage.setItem('octomux-repo-filter', '/tmp/beta');
     const { result } = renderHook(() => useTaskFilters(tasks));
     expect(result.current.filters.repo).toBe('/tmp/beta');
-    // Should filter immediately — open tasks in beta (no draft)
-    const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t4']);
+    const ids = result.current.filtered.map((t) => t.id).sort();
+    expect(ids).toEqual(['t2', 't4']);
   });
 });
