@@ -234,8 +234,11 @@ export function DiffViewer({ taskId, isRunning }: Props) {
   }
 
   return (
-    <div className="flex h-full min-h-0" style={{ background: '#0B0C0F' }}>
-      <aside className="w-[280px] shrink-0 border-r border-border">
+    <div className="flex h-full min-h-0 gap-3 p-3">
+      <aside
+        data-testid="diff-file-list"
+        className="bg-glass-l1 glass-blur-l1 flex w-[260px] shrink-0 flex-col overflow-hidden border border-glass-edge"
+      >
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
         ) : (
@@ -250,11 +253,21 @@ export function DiffViewer({ taskId, isRunning }: Props) {
           />
         )}
       </aside>
-      <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-1.5">
+      <main
+        data-testid="diff-pane"
+        className="flex min-w-0 flex-1 flex-col overflow-hidden border border-glass-edge"
+        style={{
+          background: '#0B0C0F',
+          boxShadow: '0 8px 24px -6px rgba(0,0,0,0.5)',
+        }}
+      >
+        <div
+          className="flex items-center justify-between gap-3 px-4 py-[10px]"
+          style={{ background: '#101217', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        >
           <span className="flex min-w-0 items-center gap-3">
             {showToolbar && selected ? (
-              <span className="truncate text-xs text-muted-foreground">{selected}</span>
+              <span className="truncate font-mono text-[11px] text-[#B5B5BD]">{selected}</span>
             ) : null}
           </span>
           <span className="flex shrink-0 items-center gap-2">

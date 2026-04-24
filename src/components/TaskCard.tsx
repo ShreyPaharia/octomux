@@ -186,7 +186,7 @@ export const TaskCard = memo(function TaskCard({
         {/* Right: status pill + timestamp + actions + arrow */}
         <div className="flex shrink-0 flex-col items-end gap-2">
           <div className="flex items-center gap-2">
-            <StatusBadge status={displayStatus} />
+            <StatusBadge status={displayStatus} variant="pill" />
             <span className="text-xs tabular-nums whitespace-nowrap text-muted-foreground">
               {timeAgo(task.created_at)}
             </span>

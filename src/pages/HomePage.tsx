@@ -43,9 +43,9 @@ export default function HomePage() {
   const isFirstRun = !loading && tasks.length === 0;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-4xl px-8 py-12">
+        <div className="mx-auto max-w-4xl px-8 pt-12 pb-[280px]">
           <div className="flex flex-col gap-2">
             <span
               data-testid="page-eyebrow"
@@ -66,7 +66,19 @@ export default function HomePage() {
           </div>
         </div>
       </div>
-      <Composer />
+      <div
+        data-testid="composer-dock"
+        className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center"
+      >
+        <div
+          className="pointer-events-auto w-[90%] max-w-[1056px]"
+          style={{
+            filter: 'drop-shadow(0 24px 60px rgba(0, 0, 0, 0.56))',
+          }}
+        >
+          <Composer />
+        </div>
+      </div>
     </div>
   );
 }

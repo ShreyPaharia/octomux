@@ -161,7 +161,9 @@ export function AppShell() {
         />
         <GlobalNotifications />
         <UniversalSidebar />
-        <main className="min-h-0 min-w-0 flex-1">
+        <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="ambient-tint-backdrop" aria-hidden="true" />
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col">
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -184,6 +186,7 @@ export function AppShell() {
               <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
             </Routes>
           </Suspense>
+          </div>
         </main>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
         <PrSheet

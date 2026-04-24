@@ -307,16 +307,16 @@ export default function TaskDetail() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* L1 glass header — compact 12px vertical padding */}
+      {/* L1 glass header — 18px vertical / 24px horizontal padding, 17px title */}
       <div
         data-testid="task-detail-header"
-        className="bg-glass-l1 glass-blur-l1 flex items-center justify-between gap-3 border-b border-glass-edge px-4 py-3"
+        className="bg-glass-l1 glass-blur-l1 flex items-center justify-between gap-3 border-b border-glass-edge px-6 py-[18px]"
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
           <h1
             title={task.title}
             aria-label={task.title}
-            className="truncate text-[15px] font-semibold leading-none"
+            className="truncate text-[17px] font-semibold leading-none tracking-tight"
           >
             {task.title}
           </h1>
@@ -372,9 +372,11 @@ export default function TaskDetail() {
             <Button
               variant="outline"
               size="sm"
+              data-testid="diff-toggle"
+              data-active={mode === 'diff' ? 'true' : undefined}
               className={
                 mode === 'diff'
-                  ? 'border-[#2f2f2f] text-[#3B82F6]'
+                  ? 'border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6] hover:bg-[#3B82F633] hover:text-[#3B82F6]'
                   : 'border-[#2f2f2f] text-[#8a8a8a]'
               }
               onClick={() => setMode(mode === 'diff' ? 'agents' : 'diff')}
@@ -430,14 +432,16 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Thin metadata bar — L1 lighter (5% white + 30px blur), 6px vertical padding */}
+      {/* Thin metadata bar — L1 lighter (5% white + 30px blur), 10/24 padding, 10% bottom stroke */}
       {!isScratch && (
         <div
-          className="flex items-center gap-5 border-b border-glass-edge px-6 py-[6px]"
+          data-testid="task-detail-meta"
+          className="flex items-center gap-5 px-6 py-[10px]"
           style={{
             background: 'rgba(255,255,255,0.05)',
             backdropFilter: 'blur(30px)',
             WebkitBackdropFilter: 'blur(30px)',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
           }}
         >
           {task.repo_path && (
