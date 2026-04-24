@@ -26,7 +26,7 @@ pen frames `9VzuO` (Home) + `TF8jb` (Tasks).
   implicit gap with the `fbSep` rule in the pen).
 - **Composer dock.** Home now renders the Composer as a floating
   L3 dock: absolute-positioned at `bottom-6`, centered, `w-[90%]
-  max-w-[1056px]`, with a drop-shadow filter for lift. Scroll body
+max-w-[1056px]`, with a drop-shadow filter for lift. Scroll body
   gets `pb-[280px]` so inbox content no longer slides under the
   dock. Composer itself now has an explicit `rounded-[20px]` outer
   radius to match the pen.
