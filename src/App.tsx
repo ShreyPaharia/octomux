@@ -1,5 +1,5 @@
-import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
@@ -8,19 +8,10 @@ import HomePage from './pages/HomePage';
 import { OrchestratorProvider } from './lib/orchestrator-context';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
-import { CommandPalette } from './components/CommandPalette';
 import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SHIP_EVENT } from './pages/TaskDetail';
-import { useGlobalShortcut } from './lib/shortcuts';
-import { groupTasksForSidebar } from './lib/sidebar-utils';
 import type { Task } from '../server/types';
-import {
-  currentTaskIdFromPath,
-  getNextSessionId,
-  readCollapsedGroups,
-  visibleSessionIds,
-} from './lib/sidebar-nav';
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
@@ -85,13 +76,8 @@ export default function App() {
 }
 
 export function AppShell() {
-  const navigate = useNavigate();
-  const location = useLocation();
   const { tasks, refresh: refreshTasks } = useTasksContext();
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [prSheetTask, setPrSheetTask] = useState<Task | null>(null);
-
-  const groups = useMemo(() => groupTasksForSidebar(tasks), [tasks]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -103,56 +89,6 @@ export function AppShell() {
     window.addEventListener(SHIP_EVENT, handler);
     return () => window.removeEventListener(SHIP_EVENT, handler);
   }, [tasks]);
-
-  useGlobalShortcut({ key: 'k', mod: true }, (e) => {
-    e.preventDefault();
-    setPaletteOpen(true);
-  });
-
-  useEffect(() => {
-    const handler = () => setPaletteOpen(true);
-    window.addEventListener('open-command-palette', handler);
-    return () => window.removeEventListener('open-command-palette', handler);
-  }, []);
-
-  useGlobalShortcut({ key: 'g', mod: true, shift: true }, (e) => {
-    e.preventDefault();
-    navigate('/tasks/grid');
-  });
-
-  useGlobalShortcut({ key: 'n', mod: true, shift: true }, (e) => {
-    if (paletteOpen) return;
-    e.preventDefault();
-    navigate('/', { replace: true });
-    requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('focus-composer'));
-    });
-  });
-
-  useGlobalShortcut({ key: 'ArrowDown', mod: true }, (e) => {
-    if (paletteOpen) return;
-    const visible = visibleSessionIds(groups, readCollapsedGroups(groups));
-    if (visible.length === 0) return;
-    e.preventDefault();
-    const next = getNextSessionId(visible, currentTaskIdFromPath(location.pathname), 'next');
-    if (next) navigate(`/tasks/${next}`);
-  });
-
-  useGlobalShortcut({ key: 'ArrowUp', mod: true }, (e) => {
-    if (paletteOpen) return;
-    const visible = visibleSessionIds(groups, readCollapsedGroups(groups));
-    if (visible.length === 0) return;
-    e.preventDefault();
-    const next = getNextSessionId(visible, currentTaskIdFromPath(location.pathname), 'prev');
-    if (next) navigate(`/tasks/${next}`);
-  });
-
-  useGlobalShortcut({ key: 'Enter', mod: true }, (e) => {
-    if (paletteOpen) return;
-    if (location.pathname !== '/') return;
-    e.preventDefault();
-    window.dispatchEvent(new CustomEvent('submit-composer'));
-  });
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
@@ -197,7 +133,6 @@ export function AppShell() {
             </Suspense>
           </div>
         </main>
-        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
         <PrSheet
           open={!!prSheetTask}
           task={prSheetTask}

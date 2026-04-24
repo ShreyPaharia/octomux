@@ -4,7 +4,6 @@ import {
   useEffect,
   useCallback,
   useRef,
-  type KeyboardEvent,
   type ReactNode,
   type CSSProperties,
 } from 'react';
@@ -47,7 +46,6 @@ const FOCUS_RING = 'focus-ring';
 
 const CYAN_ACTIVE_FG = '#7DD3FC';
 const NAV_INACTIVE_FG = 'rgba(255,255,255,0.65)';
-const NAV_MUTED_FG = 'rgba(255,255,255,0.45)';
 // Mockup spec (PsSGN/uReOg): active row = 14% cyan fill + 2px left accent bar.
 const ACTIVE_FILL = 'rgba(59,130,246,0.14)';
 const ACTIVE_ACCENT = '#3B82F6';
@@ -205,32 +203,6 @@ function RunModeBadge({ mode }: { mode: RunMode }) {
   );
 }
 
-// ─── Keycap chip ───────────────────────────────────────────────────────────
-
-function Keycap({ children, active }: { children: ReactNode; active: boolean }) {
-  return (
-    <span
-      data-testid="sidebar-keycap"
-      className="inline-flex items-center justify-center shrink-0 font-mono"
-      style={{
-        height: 18,
-        minWidth: 22,
-        padding: '0 5px',
-        borderRadius: 4,
-        fontSize: 10,
-        fontWeight: 500,
-        letterSpacing: 0.2,
-        backgroundColor: active ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.04)',
-        color: active ? ACTIVE_ACCENT : NAV_MUTED_FG,
-        border: active ? '1px solid rgba(59,130,246,0.25)' : '1px solid rgba(255,255,255,0.06)',
-      }}
-      aria-hidden="true"
-    >
-      {children}
-    </span>
-  );
-}
-
 // ─── Nav icons (inline SVGs, 16px) ──────────────────────────────────────────
 
 function HomeIcon({ color }: { color: string }) {
@@ -348,34 +320,11 @@ const NAV_ITEMS: ReadonlyArray<{
   label: string;
   to: string;
   Icon: (p: { color: string }) => ReactNode;
-  shortcut: string;
-  shortcutLabel: string;
 }> = [
-  { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon, shortcut: '⌘1', shortcutLabel: 'Cmd+1' },
-  {
-    key: 'tasks',
-    label: 'TASKS',
-    to: '/tasks',
-    Icon: TasksIcon,
-    shortcut: '⌘2',
-    shortcutLabel: 'Cmd+2',
-  },
-  {
-    key: 'orchestrator',
-    label: 'ORCHESTRATOR',
-    to: '/chats/orchestrator',
-    Icon: TerminalIcon,
-    shortcut: '⌘3',
-    shortcutLabel: 'Cmd+3',
-  },
-  {
-    key: 'settings',
-    label: 'SETTINGS',
-    to: '/settings',
-    Icon: SettingsIcon,
-    shortcut: '⌘,',
-    shortcutLabel: 'Cmd+,',
-  },
+  { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon },
+  { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
+  { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/chats/orchestrator', Icon: TerminalIcon },
+  { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
 ];
 
 const MORE_ITEMS = [
@@ -623,17 +572,6 @@ export function UniversalSidebar() {
     });
   }, []);
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
-        e.preventDefault();
-        toggleCollapsed();
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown as unknown as EventListener);
-    return () => window.removeEventListener('keydown', handleKeyDown as unknown as EventListener);
-  }, [toggleCollapsed]);
-
   const activeNav = useMemo<NavKey | null>(() => {
     if (location.pathname === '/orchestrator' || location.pathname === '/chats/orchestrator')
       return 'orchestrator';
@@ -782,16 +720,17 @@ export function UniversalSidebar() {
             {'// NAVIGATION'}
           </div>
         )}
-        {NAV_ITEMS.map(({ key, label, to, Icon, shortcut, shortcutLabel }) => {
+        {NAV_ITEMS.map(({ key, label, to, Icon }) => {
           const isActive = activeNav === key;
+          const pretty = label.charAt(0) + label.slice(1).toLowerCase();
           return collapsed ? (
             <CollapsedNavTile
               key={key}
               to={to}
               Icon={Icon}
               isActive={isActive}
-              tooltip={`${label.charAt(0) + label.slice(1).toLowerCase()} (${shortcutLabel})`}
-              ariaLabel={`${label.charAt(0) + label.slice(1).toLowerCase()} (${shortcutLabel})`}
+              tooltip={pretty}
+              ariaLabel={pretty}
               badge={key === 'orchestrator' && orchestratorRunning ? <OrchestratorBadge /> : null}
             />
           ) : (
@@ -801,8 +740,6 @@ export function UniversalSidebar() {
               Icon={Icon}
               label={label}
               isActive={isActive}
-              shortcut={shortcut}
-              shortcutLabel={shortcutLabel}
               orchestratorRunning={key === 'orchestrator' ? orchestratorRunning : false}
             />
           );
@@ -868,16 +805,12 @@ function ExpandedNavRow({
   Icon,
   label,
   isActive,
-  shortcut,
-  shortcutLabel,
   orchestratorRunning,
 }: {
   to: string;
   Icon: (p: { color: string }) => ReactNode;
   label: string;
   isActive: boolean;
-  shortcut: string;
-  shortcutLabel: string;
   orchestratorRunning: boolean;
 }) {
   const pretty = label.charAt(0) + label.slice(1).toLowerCase();
@@ -887,7 +820,7 @@ function ExpandedNavRow({
     <div style={{ padding: '2px 12px' }}>
       <Link
         to={to}
-        aria-label={`${pretty} (${shortcutLabel})`}
+        aria-label={pretty}
         aria-current={isActive ? 'page' : undefined}
         data-active={isActive || undefined}
         data-testid={`sidebar-nav-${label.toLowerCase()}`}
@@ -913,9 +846,6 @@ function ExpandedNavRow({
             aria-label="Orchestrator running"
           />
         ) : null}
-        <span className="ml-auto">
-          <Keycap active={isActive}>{shortcut}</Keycap>
-        </span>
       </Link>
     </div>
   );

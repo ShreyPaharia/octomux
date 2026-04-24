@@ -7,7 +7,7 @@
  *   - repo + worktree unchecked     → 'none'   (attach to branch's working tree)
  *   - repo + worktree checked       → 'new'    (fresh worktree)
  *   - repo + attach path            → 'existing' (advanced; reachable via the
- *                                                 attach chip or `⌘⇧E`)
+ *                                                 attach chip)
  * Every user interaction produces exactly one valid state; there is no
  * `setMode` action.
  */

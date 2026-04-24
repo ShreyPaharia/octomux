@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useRef } from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 
@@ -262,23 +262,6 @@ describe('DiffViewer', () => {
     // Second click toggles off
     await user.click(screen.getByTestId('review-toggle-src/a.ts'));
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
-  });
-
-  it('pressing "r" while focused on a file row toggles reviewed', async () => {
-    apiMock.getTaskDiffSummary.mockResolvedValue({
-      files: [{ path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 }],
-    });
-    render(<DiffViewer taskId="t1" isRunning={false} />);
-
-    const row = await screen.findByTestId('diff-file-row-src/a.ts');
-    expect(row).not.toHaveAttribute('data-reviewed');
-    row.focus();
-    fireEvent.keyDown(row, { key: 'r' });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('diff-file-row-src/a.ts')).toHaveAttribute('data-reviewed', 'true');
-    });
-    expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBe('true');
   });
 
   it('reviewed files render dimmed (opacity-50) and the row carries a data-reviewed flag', async () => {

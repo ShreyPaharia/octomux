@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { showToast } from '@/components/CustomToast';
-import { useSaveShortcut, useUnsavedWarning } from '@/lib/use-editor-shortcuts';
 
 export default function AgentEditor() {
   const { name } = useParams<{ name: string }>();
@@ -68,9 +67,6 @@ export default function AgentEditor() {
       showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to reset');
     }
   }, [name, defaultContent]);
-
-  useSaveShortcut(save);
-  useUnsavedWarning(isDirty);
 
   const handleBack = useCallback(() => {
     if (isDirty) {

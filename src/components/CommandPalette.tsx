@@ -1,22 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import { repoName } from '@/lib/utils';
-import { GlassPanel } from '@/components/ui/glass-panel';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 import type { Task } from '../../server/types';
-
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
 
 type SessionRow = { kind: 'session'; task: Task };
 type ActionRow = {
   kind: 'action';
   id: string;
   label: string;
-  keycap: string;
   run: () => void;
 };
 type EscapeRow = { kind: 'escape'; query: string };
@@ -38,28 +31,6 @@ function scoreMatch(haystack: string, needle: string): number {
 
 const OPEN_STATUSES = new Set(['running', 'setting_up', 'error']);
 
-const BACKDROP_STYLE: React.CSSProperties = {
-  backgroundColor: 'rgba(0, 0, 0, 0.48)',
-  backdropFilter: 'blur(20px)',
-  WebkitBackdropFilter: 'blur(20px)',
-};
-
-function Keycap({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <span
-      className={[
-        'inline-flex h-5 items-center gap-0.5 rounded-md border border-glass-edge bg-glass-l1 px-1.5 font-mono text-[10px] text-[#b5b5bd]',
-        className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      style={{ boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.12)' }}
-    >
-      {children}
-    </span>
-  );
-}
-
 function GroupHeader({ label, count }: { label: string; count?: number }) {
   return (
     <div className="flex items-center gap-2 px-4 pt-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
@@ -71,35 +42,24 @@ function GroupHeader({ label, count }: { label: string; count?: number }) {
   );
 }
 
-export function CommandPalette({ open, onClose }: Props) {
+export function CommandPalette() {
   const navigate = useNavigate();
   const { tasks } = useTasksContext();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const creating = false;
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
+  const selectTask = (task: Task) => {
     setQuery('');
     setActive(0);
-    const id = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, [open]);
-
-  const selectTask = (task: Task) => {
-    onClose();
     navigate(`/tasks/${task.id}`);
-    requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('focus-terminal'));
-    });
   };
 
   const createFromQuery = (title: string) => {
     const trimmed = title.trim();
-    if (!trimmed || creating) return;
-    // Open composer pre-filled — don't create immediately, let user finish composing.
-    onClose();
+    if (!trimmed) return;
+    setQuery('');
+    setActive(0);
     navigate('/', { replace: true });
     requestAnimationFrame(() => {
       window.dispatchEvent(new CustomEvent('focus-composer', { detail: { prefill: trimmed } }));
@@ -107,32 +67,17 @@ export function CommandPalette({ open, onClose }: Props) {
   };
 
   const actionNewTask = () => {
-    onClose();
+    setQuery('');
+    setActive(0);
     navigate('/', { replace: true });
     requestAnimationFrame(() => {
       window.dispatchEvent(new CustomEvent('focus-composer'));
     });
   };
 
-  const actionAttachTerminal = () => {
-    onClose();
-    requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('focus-terminal'));
-    });
-  };
-
-  const actionToggleSidebar = () => {
-    onClose();
-    requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('toggle-sidebar'));
-    });
-  };
-
   const sessionRows = useMemo<SessionRow[]>(() => {
     const openTasks = tasks.filter((t) => OPEN_STATUSES.has(t.status));
-    if (!query) {
-      return openTasks.slice(0, 50).map((t) => ({ kind: 'session' as const, task: t }));
-    }
+    if (!query) return [];
     const scored: { task: Task; score: number }[] = [];
     for (const t of openTasks) {
       const hay = `${t.title} ${t.repo_path ? repoName(t.repo_path) : ''}`;
@@ -145,23 +90,9 @@ export function CommandPalette({ open, onClose }: Props) {
 
   const actionRows = useMemo<ActionRow[]>(() => {
     const base: ActionRow[] = [
-      { kind: 'action', id: 'new-task', label: 'New task', keycap: '⌘N', run: actionNewTask },
-      {
-        kind: 'action',
-        id: 'attach-terminal',
-        label: 'Attach terminal',
-        keycap: '⌘T',
-        run: actionAttachTerminal,
-      },
-      {
-        kind: 'action',
-        id: 'toggle-sidebar',
-        label: 'Toggle sidebar',
-        keycap: '⌘B',
-        run: actionToggleSidebar,
-      },
+      { kind: 'action', id: 'new-task', label: 'New task', run: actionNewTask },
     ];
-    if (!query) return base;
+    if (!query) return [];
     const scored: { row: ActionRow; score: number }[] = [];
     for (const row of base) {
       const s = scoreMatch(row.label, query);
@@ -169,22 +100,16 @@ export function CommandPalette({ open, onClose }: Props) {
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.map((s) => s.row);
-    // action handlers are module-level closures; omit deps to keep list stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   const rows = useMemo<Row[]>(() => {
-    if (sessionRows.length === 0 && actionRows.length === 0 && query.trim()) {
+    if (!query.trim()) return [];
+    if (sessionRows.length === 0 && actionRows.length === 0) {
       return [{ kind: 'escape', query: query.trim() }];
     }
     return [...sessionRows, ...actionRows];
   }, [sessionRows, actionRows, query]);
-
-  useEffect(() => {
-    if (active >= rows.length) setActive(Math.max(0, rows.length - 1));
-  }, [rows.length, active]);
-
-  if (!open) return null;
 
   const runRow = (row: Row) => {
     if (row.kind === 'session') selectTask(row.task);
@@ -193,9 +118,10 @@ export function CommandPalette({ open, onClose }: Props) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (rows.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((a) => Math.min(Math.max(rows.length - 1, 0), a + 1));
+      setActive((a) => Math.min(rows.length - 1, a + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActive((a) => Math.max(0, a - 1));
@@ -203,9 +129,6 @@ export function CommandPalette({ open, onClose }: Props) {
       e.preventDefault();
       const r = rows[active];
       if (r) runRow(r);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
     }
   };
 
@@ -213,64 +136,39 @@ export function CommandPalette({ open, onClose }: Props) {
   const sessionsFrom = cursor;
   cursor += sessionRows.length;
   const actionsFrom = cursor;
-  cursor += actionRows.length;
+
+  const showResults = query.trim().length > 0;
 
   return (
-    <div
-      role="presentation"
-      data-testid="command-palette-backdrop"
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh]"
-      style={BACKDROP_STYLE}
-      onClick={onClose}
-    >
-      <GlassPanel
-        level={3}
-        specular
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        data-testid="command-palette"
-        className="w-full max-w-xl overflow-hidden rounded-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-3 border-b border-[rgba(255,255,255,0.1)] px-5 py-3">
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActive(0);
-            }}
-            onKeyDown={onKeyDown}
-            placeholder="search tasks…"
-            aria-label="Search tasks"
-            data-testid="command-palette-input"
-            className="focus-ring w-full bg-transparent text-sm text-white caret-[#60a5fa] placeholder:text-[#6a6a6a] outline-none"
-            style={{ caretColor: '#60a5fa' }}
-          />
-          <Keycap>⌘K</Keycap>
-        </div>
+    <div data-testid="command-palette" className="flex w-full flex-col">
+      <div className="flex items-center gap-3 rounded-lg border border-glass-edge bg-glass-l1 px-3 py-2">
+        <span aria-hidden className="text-[13px] text-[#6a6a6a]">
+          ⌕
+        </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setActive(0);
+          }}
+          onKeyDown={onKeyDown}
+          placeholder="Search tasks…"
+          aria-label="Search tasks"
+          data-testid="command-palette-input"
+          className="focus-ring w-full bg-transparent text-sm text-white caret-[#60a5fa] placeholder:text-[#6a6a6a] outline-none"
+          style={{ caretColor: '#60a5fa' }}
+        />
+      </div>
 
+      {showResults && (
         <ul
           role="listbox"
           aria-label="Results"
           data-testid="command-palette-results"
-          className="max-h-[60vh] overflow-y-auto"
+          className="mt-2 max-h-[60vh] overflow-y-auto rounded-lg border border-glass-edge bg-glass-l1"
         >
-          {rows.length === 0 && (
-            <li
-              data-testid="command-palette-no-results"
-              className="flex flex-col items-center gap-3 px-4 py-8 text-center"
-              aria-live="polite"
-            >
-              <h2 className="text-[15px] font-semibold text-[#D0D0D0]">No matches</h2>
-              <p className="max-w-[260px] text-[12px] leading-relaxed text-[#8a8a8a]">
-                Try a different term, or press ⌘N to start a new task.
-              </p>
-            </li>
-          )}
-
           {sessionRows.length > 0 && (
             <GroupHeader label="OPEN SESSIONS" count={sessionRows.length} />
           )}
@@ -305,24 +203,20 @@ export function CommandPalette({ open, onClose }: Props) {
           {rows.length === 1 && rows[0].kind === 'escape' && (
             <li
               data-testid="command-palette-no-results"
-              className="flex flex-col items-center gap-3 px-4 py-8 text-center"
+              className="flex flex-col items-center gap-3 px-4 py-6 text-center"
               aria-live="polite"
             >
               <h2 className="text-[15px] font-semibold text-[#D0D0D0]">No matches</h2>
-              <p className="max-w-[260px] text-[12px] leading-relaxed text-[#8a8a8a]">
-                Try a different term, or press ⌘N to start a new task.
-              </p>
               <EscapeChip
                 query={(rows[0] as EscapeRow).query}
                 active={active === 0}
-                disabled={creating}
                 onMouseEnter={() => setActive(0)}
                 onSelect={() => createFromQuery((rows[0] as EscapeRow).query)}
               />
             </li>
           )}
         </ul>
-      </GlassPanel>
+      )}
     </div>
   );
 }
@@ -332,14 +226,13 @@ const SELECTED_ROW_STYLE: React.CSSProperties = {
   boxShadow: 'inset 0 0 0 1px rgba(59, 130, 246, 0.4)',
 };
 
-function rowClass(active: boolean, extra?: string) {
+function rowClass(active: boolean) {
   return [
     'command-palette-row',
     active
       ? 'cursor-pointer rounded-lg px-4 py-2 text-sm text-foreground'
       : 'cursor-pointer rounded-lg px-4 py-2 text-sm text-muted-foreground',
     active ? 'command-palette-row--selected' : '',
-    extra,
   ]
     .filter(Boolean)
     .join(' ');
@@ -383,7 +276,6 @@ function SessionRowView({
         {task.repo_path && (
           <span className="truncate text-xs text-muted-foreground">{repoName(task.repo_path)}</span>
         )}
-        <Keycap>↵</Keycap>
       </div>
     </li>
   );
@@ -415,7 +307,6 @@ function ActionRowView({
     >
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate">{row.label}</span>
-        <Keycap>{row.keycap}</Keycap>
       </div>
     </li>
   );
@@ -424,13 +315,11 @@ function ActionRowView({
 function EscapeChip({
   query,
   active,
-  disabled,
   onMouseEnter,
   onSelect,
 }: {
   query: string;
   active: boolean;
-  disabled: boolean;
   onMouseEnter: () => void;
   onSelect: () => void;
 }) {
@@ -440,16 +329,14 @@ function EscapeChip({
       aria-selected={active}
       onMouseDown={(e) => {
         e.preventDefault();
-        if (!disabled) onSelect();
+        onSelect();
       }}
       onMouseEnter={onMouseEnter}
       data-testid="command-palette-escape"
       data-row-kind="escape"
       data-active={active ? 'true' : undefined}
-      disabled={disabled}
-      className="inline-flex items-center gap-2 rounded-lg border border-[#3B82F666] bg-[#3B82F61F] px-3 py-1.5 text-[12px] font-medium text-[#3B82F6] hover:bg-[#3B82F633] disabled:opacity-50"
+      className="inline-flex items-center gap-2 rounded-lg border border-[#3B82F666] bg-[#3B82F61F] px-3 py-1.5 text-[12px] font-medium text-[#3B82F6] hover:bg-[#3B82F633]"
     >
-      <span className="font-mono text-[11px] font-semibold">⌘N</span>
       <span>
         New task with <span className="text-white">'{query}'</span>
       </span>
