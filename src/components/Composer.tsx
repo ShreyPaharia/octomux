@@ -277,9 +277,14 @@ export function Composer({ onSubmitted }: Props = {}) {
   return (
     <GlassPanel
       level={3}
-      specular
       className="flex flex-col gap-2 rounded-[20px] px-4 py-3"
       data-testid="composer"
+      style={{
+        backgroundColor: 'rgba(255, 255, 255, 0.078)',
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+        boxShadow:
+          'inset 0 1px 0 0 rgba(255, 255, 255, 0.25), 0 24px 60px -12px rgba(0, 0, 0, 0.56)',
+      }}
     >
       <IntentHeader
         state={state}
