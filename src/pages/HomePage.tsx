@@ -9,7 +9,7 @@ function todayLabel(): string {
   const weekday = d.toLocaleDateString('en-US', { weekday: 'short' });
   const month = d.toLocaleDateString('en-US', { month: 'short' });
   const day = d.getDate();
-  return `${weekday} · ${month} ${day}`;
+  return `${weekday} ${month} ${day}`;
 }
 
 function openPalette() {
@@ -57,30 +57,37 @@ export default function HomePage() {
   const isFirstRun = !loading && tasks.length === 0;
   const needsCount = needsYou.length;
 
+  const attentionMeta =
+    needsCount > 0
+      ? `${needsCount} session${needsCount === 1 ? '' : 's'} want${needsCount === 1 ? 's' : ''} your attention`
+      : 'inbox zero';
+
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-4xl px-8 pt-12 pb-[280px]">
+        <div className="flex flex-col gap-8 px-[72px] pt-12 pb-[160px]">
           <div className="flex items-end justify-between gap-4">
             <div className="flex flex-col gap-1.5">
+              <div
+                data-testid="home-eyebrow"
+                className="flex items-center gap-2 pb-0.5 font-mono text-[11px]"
+              >
+                <span className="font-bold text-[#B5B5BD]" style={{ letterSpacing: '1.5px' }}>
+                  // INBOX
+                </span>
+                <span className="text-[#6a6a6a]">·</span>
+                <span className="text-[#6a6a6a]">{todayLabel()}</span>
+                <span className="text-[#6a6a6a]">·</span>
+                <span className={needsCount > 0 ? 'text-[#FFB800]' : 'text-[#6a6a6a]'}>
+                  {attentionMeta}
+                </span>
+              </div>
               <h1
-                className="font-display text-[32px] font-bold leading-[1.1] tracking-tight"
+                className="font-display text-[32px] font-bold leading-[1.1] tracking-tight text-white"
                 style={{ letterSpacing: '-1.2px' }}
               >
                 Welcome back
               </h1>
-              <p className="text-[14px] leading-snug text-[#8a8a8a]">
-                {todayLabel()}
-                {needsCount > 0 ? (
-                  <>
-                    {' · '}
-                    <span className="text-[#FFB800]">
-                      {needsCount} session{needsCount === 1 ? '' : 's'} want
-                      {needsCount === 1 ? 's' : ''} your attention
-                    </span>
-                  </>
-                ) : null}
-              </p>
             </div>
             <button
               type="button"
@@ -92,21 +99,16 @@ export default function HomePage() {
               <span className="text-[#8a8a8a]">jump</span>
             </button>
           </div>
-          <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot" className="mt-8">
+          <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot">
             {isFirstRun ? <FirstRunEmptyState /> : <SessionsInbox />}
           </div>
         </div>
       </div>
       <div
         data-testid="composer-dock"
-        className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center"
+        className="pointer-events-none absolute inset-x-0 bottom-10 flex justify-center px-[72px]"
       >
-        <div
-          className="pointer-events-auto w-[90%] max-w-[1056px]"
-          style={{
-            filter: 'drop-shadow(0 24px 60px rgba(0, 0, 0, 0.56))',
-          }}
-        >
+        <div className="pointer-events-auto w-full max-w-[1056px]">
           <Composer />
         </div>
       </div>
