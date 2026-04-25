@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '../lib/api';
-import { useSaveShortcut, useUnsavedWarning } from '@/lib/use-editor-shortcuts';
 
 export default function SkillEditor() {
   const { name } = useParams<{ name: string }>();
@@ -39,9 +38,6 @@ export default function SkillEditor() {
       setSaving(false);
     }
   }, [name, content, isDirty, saving]);
-
-  useSaveShortcut(save);
-  useUnsavedWarning(isDirty);
 
   const handleBack = useCallback(() => {
     if (isDirty) {

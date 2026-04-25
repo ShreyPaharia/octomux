@@ -1,4 +1,5 @@
 import { Composer } from '@/components/Composer';
+import { CommandPalette } from '@/components/CommandPalette';
 import { SessionsInbox } from '@/components/SessionsInbox';
 import { useInbox } from '@/lib/inbox';
 import { useTasksContext } from '@/lib/tasks-context';
@@ -10,10 +11,6 @@ function todayLabel(): string {
   const month = d.toLocaleDateString('en-US', { month: 'short' });
   const day = d.getDate();
   return `${weekday} ${month} ${day}`;
-}
-
-function openPalette() {
-  window.dispatchEvent(new CustomEvent('open-command-palette'));
 }
 
 function FirstRunEmptyState() {
@@ -45,7 +42,6 @@ function FirstRunEmptyState() {
         className="inline-flex items-center gap-2 rounded-md bg-[#3B82F6] px-4 py-2.5 text-[13px] font-bold text-white shadow-[0_6px_20px_-4px_rgba(59,130,246,0.6)] hover:bg-[#2563EB]"
       >
         Create your first task
-        <span className="font-mono text-[11px] text-white/80">⌘N</span>
       </button>
     </div>
   );
@@ -89,15 +85,9 @@ export default function HomePage() {
                 Welcome back
               </h1>
             </div>
-            <button
-              type="button"
-              data-testid="home-jump-palette"
-              onClick={openPalette}
-              className="focus-ring inline-flex items-center gap-1.5 rounded-lg border border-[#FFFFFF14] bg-[#FFFFFF0A] px-3 py-2 text-[12px] text-[#8a8a8a] transition-colors hover:bg-[#FFFFFF14] hover:text-white"
-            >
-              <span className="font-mono font-semibold text-[#D0D0D0]">⌘ K</span>
-              <span className="text-[#8a8a8a]">jump</span>
-            </button>
+            <div data-testid="home-search" className="w-[280px] max-w-full">
+              <CommandPalette />
+            </div>
           </div>
           <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot">
             {isFirstRun ? <FirstRunEmptyState /> : <SessionsInbox />}

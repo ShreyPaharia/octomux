@@ -15,7 +15,7 @@ function OrchestratorGridToggle() {
       type="button"
       data-testid="orchestrator-grid-toggle"
       onClick={() => navigate('/tasks/grid')}
-      title="Parallel grid (⌘⇧G)"
+      title="Parallel grid"
       className="focus-ring bg-glass-l1 glass-blur-l1 inline-flex items-center gap-1.5 rounded-md border border-glass-edge px-2 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-[#b5b5bd] hover:text-white"
     >
       <LayoutGridIcon size={11} />
@@ -89,17 +89,6 @@ export default function ChatPage() {
         </Suspense>
       </div>
     </div>
-  );
-}
-
-function Keycap({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      className="inline-flex h-5 items-center gap-0.5 border border-glass-edge bg-glass-l1 px-1.5 font-mono text-[10px] text-[#b5b5bd]"
-      style={{ boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.12)' }}
-    >
-      {children}
-    </span>
   );
 }
 
@@ -208,7 +197,6 @@ function OrchestratorHeader({
               RESTART
             </button>
           )}
-          <Keycap>⌘K</Keycap>
         </div>
       </div>
     </GlassPanel>
@@ -287,7 +275,6 @@ function OrchestratorPrompt() {
           disabled={sending}
           className="focus-ring flex-1 bg-transparent text-sm text-white placeholder:text-[#6a6a6a] outline-none disabled:opacity-50"
         />
-        <Keycap>⌘↵</Keycap>
       </form>
     </GlassPanel>
   );
