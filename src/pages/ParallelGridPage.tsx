@@ -120,7 +120,6 @@ export default function ParallelGridPage() {
           {errored.length} errored
         </span>
         <div className="flex-1" />
-        <span className="font-mono text-[11px] text-[#8a8a8a]">⌘⇧G to toggle grid</span>
       </div>
 
       {visible.length === 0 ? (

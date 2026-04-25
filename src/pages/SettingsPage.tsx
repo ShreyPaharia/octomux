@@ -12,7 +12,6 @@ import { api } from '@/lib/api';
 import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
-import { useSaveShortcut } from '@/lib/use-editor-shortcuts';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import {
   Dialog,
@@ -49,17 +48,6 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
         className={`absolute top-0.5 left-0.5 h-4 w-4 bg-white transition-transform ${checked ? 'translate-x-4' : ''}`}
       />
     </button>
-  );
-}
-
-function Keycap({ children }: { children: ReactNode }) {
-  return (
-    <span
-      className="inline-flex h-5 items-center gap-0.5 border border-glass-edge bg-glass-l1 px-1.5 font-mono text-[10px] text-[#b5b5bd]"
-      style={{ boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.12)' }}
-    >
-      {children}
-    </span>
   );
 }
 
@@ -903,8 +891,6 @@ function OrchestratorPromptSection() {
     }
   }, []);
 
-  useSaveShortcut(save);
-
   if (loading) {
     return <p className="py-3 text-xs text-[#8a8a8a]">Loading prompt...</p>;
   }
@@ -1058,7 +1044,6 @@ export default function SettingsPage() {
               // workspace preferences · synced to ~/.octomux/config.json
             </p>
           </div>
-          <Keycap>⌘K</Keycap>
         </div>
       </GlassPanel>
 

@@ -4,10 +4,8 @@ import {
   useState,
   useCallback,
   useRef,
-  forwardRef,
   type KeyboardEvent,
   type FormEvent,
-  type Ref,
 } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
@@ -71,9 +69,6 @@ export function Composer({ onSubmitted }: Props = {}) {
     conflictTaskId?: string | null;
   } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const repoChipRef = useRef<HTMLButtonElement>(null);
-  const branchChipRef = useRef<HTMLButtonElement>(null);
-  const worktreeCheckboxRef = useRef<HTMLButtonElement>(null);
 
   // Re-hydrate when the URL is changed externally.
   const lastHydratedRef = useRef(searchParams.toString());
@@ -214,15 +209,6 @@ export function Composer({ onSubmitted }: Props = {}) {
     textareaRef.current?.focus();
   }, []);
 
-  // Global shortcut bridges (⌘⇧N → focus, ⌘Enter → submit) + local shortcuts
-  // (⌘R → repo, ⌘B → branch, ⌘W → toggle worktree).
-  const submitRef = useRef(handleSubmit);
-  submitRef.current = handleSubmit;
-  const toggleWorktreeRef = useRef(onToggleWorktree);
-  toggleWorktreeRef.current = onToggleWorktree;
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
   useEffect(() => {
     const onFocus = (e: Event) => {
       const detail = (e as CustomEvent<{ prefill?: string } | undefined>).detail;
@@ -231,36 +217,9 @@ export function Composer({ onSubmitted }: Props = {}) {
       }
       textareaRef.current?.focus();
     };
-    const onSubmit = () => {
-      void submitRef.current();
-    };
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
-      const key = e.key.toLowerCase();
-      if (key === 'r') {
-        e.preventDefault();
-        repoChipRef.current?.click();
-      } else if (key === 'b') {
-        e.preventDefault();
-        branchChipRef.current?.click();
-      } else if (key === 'w') {
-        const s = stateRef.current;
-        if (s.mode === 'new') {
-          e.preventDefault();
-          toggleWorktreeRef.current(false);
-        } else if (s.mode === 'none') {
-          e.preventDefault();
-          toggleWorktreeRef.current(true);
-        }
-      }
-    };
     window.addEventListener('focus-composer', onFocus);
-    window.addEventListener('submit-composer', onSubmit);
-    window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('focus-composer', onFocus);
-      window.removeEventListener('submit-composer', onSubmit);
-      window.removeEventListener('keydown', onKey);
     };
   }, []);
 
@@ -317,10 +276,9 @@ export function Composer({ onSubmitted }: Props = {}) {
         data-testid="chip-row"
       >
         {!hasRepo ? (
-          <RepoChip ref={repoChipRef} value="" onChange={onPickRepo} onClear={onClearRepo} />
+          <RepoChip value="" onChange={onPickRepo} onClear={onClearRepo} />
         ) : (
           <RepoChip
-            ref={repoChipRef}
             value={
               state.mode === 'new' || state.mode === 'none' || state.mode === 'existing'
                 ? state.repo
@@ -333,7 +291,6 @@ export function Composer({ onSubmitted }: Props = {}) {
 
         {showBranchChip && (
           <BranchChip
-            ref={branchChipRef}
             repoPath={state.mode === 'new' || state.mode === 'none' ? state.repo : ''}
             value={state.branch ?? ''}
             onChange={onPickBranch}
@@ -341,11 +298,7 @@ export function Composer({ onSubmitted }: Props = {}) {
         )}
 
         {showWorktreeCheckbox && (
-          <WorktreeCheckbox
-            ref={worktreeCheckboxRef}
-            checked={worktreeOn}
-            onChange={onToggleWorktree}
-          />
+          <WorktreeCheckbox checked={worktreeOn} onChange={onToggleWorktree} />
         )}
 
         {showAttachChip && (
@@ -391,9 +344,6 @@ export function Composer({ onSubmitted }: Props = {}) {
           aria-label="Task prompt"
         />
         <div className="flex items-center gap-3">
-          <span className="font-mono text-[11px] text-[#6a6a6a]" aria-hidden>
-            ⌘↵ start · ⇧↵ new line
-          </span>
           <span className="flex-1" />
           {blockedReason && prompt.trim() && (
             <span className="text-[11px] text-muted-foreground" title={blockedReason}>
@@ -497,15 +447,11 @@ interface RepoChipProps {
  * Empty state: a dashed-border chip `+ Add repo or folder`.
  * Filled state: a pill showing the repo basename with a remove button.
  */
-const RepoChip = forwardRef<HTMLButtonElement, RepoChipProps>(function RepoChip(
-  { value, onChange, onClear },
-  ref,
-) {
+function RepoChip({ value, onChange, onClear }: RepoChipProps) {
   const [expanded, setExpanded] = useState(false);
   if (!value && !expanded) {
     return (
       <button
-        ref={ref}
         type="button"
         onClick={() => setExpanded(true)}
         data-testid="repo-chip-picker"
@@ -544,7 +490,6 @@ const RepoChip = forwardRef<HTMLButtonElement, RepoChipProps>(function RepoChip(
       }}
     >
       <button
-        ref={ref}
         type="button"
         onClick={onClear}
         aria-label="Remove"
@@ -559,7 +504,7 @@ const RepoChip = forwardRef<HTMLButtonElement, RepoChipProps>(function RepoChip(
       </button>
     </div>
   );
-});
+}
 
 interface BranchChipProps {
   repoPath: string;
@@ -567,10 +512,7 @@ interface BranchChipProps {
   onChange: (branch: string) => void;
 }
 
-const BranchChip = forwardRef<HTMLButtonElement, BranchChipProps>(function BranchChip(
-  { repoPath, value, onChange },
-  ref,
-) {
+function BranchChip({ repoPath, value, onChange }: BranchChipProps) {
   return (
     <div
       className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-[3px] text-[11px] font-mono"
@@ -581,7 +523,6 @@ const BranchChip = forwardRef<HTMLButtonElement, BranchChipProps>(function Branc
       </span>
       <div className="min-w-[100px] max-w-[220px]">
         <BranchPickerField
-          triggerRef={ref}
           repoPath={repoPath}
           value={value}
           onChange={onChange}
@@ -590,7 +531,7 @@ const BranchChip = forwardRef<HTMLButtonElement, BranchChipProps>(function Branc
       </div>
     </div>
   );
-});
+}
 
 interface WorktreeCheckboxProps {
   checked: boolean;
@@ -602,54 +543,51 @@ interface WorktreeCheckboxProps {
  * (`run_mode: 'none'`). On = fresh worktree (`run_mode: 'new'`). When on, the
  * pill fills cyan with a white checkmark.
  */
-const WorktreeCheckbox = forwardRef<HTMLButtonElement, WorktreeCheckboxProps>(
-  function WorktreeCheckbox({ checked, onChange }, ref) {
-    return (
-      <button
-        ref={ref}
-        type="button"
-        role="checkbox"
-        aria-checked={checked}
-        aria-label="Create a fresh worktree for this task"
-        onClick={() => onChange(!checked)}
-        data-testid="worktree-checkbox"
-        data-state={checked ? 'checked' : 'unchecked'}
-        className="focus-ring inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] font-mono transition-colors"
+function WorktreeCheckbox({ checked, onChange }: WorktreeCheckboxProps) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label="Create a fresh worktree for this task"
+      onClick={() => onChange(!checked)}
+      data-testid="worktree-checkbox"
+      data-state={checked ? 'checked' : 'unchecked'}
+      className="focus-ring inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] font-mono transition-colors"
+      style={{
+        borderColor: checked ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.18)',
+        backgroundColor: checked ? 'rgba(59,130,246,0.12)' : 'transparent',
+        color: checked ? '#3B82F6' : 'var(--muted-foreground)',
+        fontWeight: checked ? 600 : 500,
+      }}
+    >
+      <span
+        aria-hidden
+        className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-sm border"
         style={{
-          borderColor: checked ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.18)',
-          backgroundColor: checked ? 'rgba(59,130,246,0.12)' : 'transparent',
-          color: checked ? '#3B82F6' : 'var(--muted-foreground)',
-          fontWeight: checked ? 600 : 500,
+          borderColor: checked ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.22)',
+          backgroundColor: checked ? 'rgb(59,130,246)' : 'transparent',
         }}
       >
-        <span
-          aria-hidden
-          className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-sm border"
-          style={{
-            borderColor: checked ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.22)',
-            backgroundColor: checked ? 'rgb(59,130,246)' : 'transparent',
-          }}
-        >
-          {checked && (
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          )}
-        </span>
-        <span>new worktree</span>
-      </button>
-    );
-  },
-);
+        {checked && (
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        )}
+      </span>
+      <span>new worktree</span>
+    </button>
+  );
+}
 
 function AttachChip({
   value,
@@ -757,13 +695,11 @@ function ChipRemovable({
   label,
   title,
   onRemove,
-  buttonRef,
   ...rest
 }: {
   label: string;
   title?: string;
   onRemove: () => void;
-  buttonRef?: Ref<HTMLButtonElement>;
 } & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
@@ -772,7 +708,6 @@ function ChipRemovable({
       className="inline-flex items-center gap-1 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-1 text-[11px] font-mono"
     >
       <button
-        ref={buttonRef}
         type="button"
         onClick={onRemove}
         aria-label="Remove"

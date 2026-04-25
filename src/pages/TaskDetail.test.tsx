@@ -134,12 +134,6 @@ describe('TaskDetail', () => {
     expect(screen.queryByText('Add negative quantity checks')).not.toBeInTheDocument();
   });
 
-  it('renders the ⌘K keycap in the header action cluster for running tasks', async () => {
-    renderDetail();
-    const header = await screen.findByTestId('task-detail-header');
-    expect(header.textContent).toContain('⌘');
-  });
-
   // ─── Running task controls ────────────────────────────────────────────────
 
   it('shows Close button for running task', async () => {

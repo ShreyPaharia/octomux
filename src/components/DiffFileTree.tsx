@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { DiffFileEntry } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { CheckIcon } from '@/components/icons';
@@ -87,13 +87,6 @@ function TreeRow({
     const f = node.file;
     const active = selected === f.path;
     const isReviewed = reviewed?.has(f.path) ?? false;
-    const handleKey = (e: KeyboardEvent<HTMLButtonElement>) => {
-      if (e.key === 'r' && onToggleReview && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        onToggleReview(f.path);
-      }
-    };
     return (
       <button
         type="button"
@@ -101,7 +94,6 @@ function TreeRow({
         data-reviewed={isReviewed ? 'true' : undefined}
         data-active={active ? 'true' : undefined}
         onClick={() => onSelect(f.path)}
-        onKeyDown={handleKey}
         className={cn(
           'flex w-full items-center gap-2 px-2 py-1 text-left text-xs',
           active
