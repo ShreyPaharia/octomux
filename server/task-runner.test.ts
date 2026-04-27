@@ -76,6 +76,8 @@ vi.mock('child_process', () => ({
         cb(null, { stdout: '', stderr: '' });
       } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
         cb(null, { stdout: '', stderr: '' });
+      } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+        cb(null, { stdout: 'main\n', stderr: '' });
       } else if (args.includes('rev-parse')) {
         cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
       } else {
@@ -395,9 +397,9 @@ describe('startTask', () => {
       expect(updated.worktree).toBe(DEFAULTS.task.repo_path);
     });
 
-    it('sets branch to null', () => {
+    it('records current branch in worktree row', () => {
       const updated = getTask(db, DEFAULTS.task.id)!;
-      expect(updated.branch).toBeNull();
+      expect(updated.branch).toBe('main');
     });
 
     it('sets status to running', () => {
@@ -435,6 +437,173 @@ describe('startTask', () => {
 
     it('installs hook settings in repo_path', () => {
       expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.task.repo_path);
+    });
+  });
+
+  // ─── No-worktree mode with base_branch ──────────────────────────────────
+
+  describe('run_mode=none with base_branch', () => {
+    it('checks out target branch when current differs and tree is clean', async () => {
+      insertTask(db, { run_mode: 'none', base_branch: 'feature-x' });
+      const noneTask = {
+        ...DEFAULTS.task,
+        run_mode: 'none' as const,
+        base_branch: 'feature-x',
+      } as Task;
+      await startTask(noneTask);
+
+      const checkoutCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['checkout', 'feature-x'],
+      });
+      expect(checkoutCall).toBeDefined();
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.status).toBe('running');
+      expect(updated.branch).toBe('feature-x');
+    });
+
+    describe('when current branch already equals base_branch', () => {
+      beforeEach(() => {
+        // Override --abbrev-ref to return 'feature-x' so currentBranch === target.
+        vi.mocked(execFile).mockImplementation(
+          (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+            const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
+            if (args.includes('display-message')) {
+              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+            } else if (args.includes('list-windows')) {
+              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+            } else if (args.includes('new-window')) {
+              nextWindowIndex++;
+              cb(null, { stdout: '', stderr: '' });
+            } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
+              cb(null, { stdout: '', stderr: '' });
+            } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+              cb(null, { stdout: 'feature-x\n', stderr: '' });
+            } else if (args.includes('rev-parse')) {
+              cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
+            } else {
+              cb(null, { stdout: 'true', stderr: '' });
+            }
+          },
+        );
+      });
+
+      afterEach(() => {
+        // Restore the default mock so subsequent tests don't see 'feature-x' from --abbrev-ref.
+        vi.mocked(execFile).mockImplementation(
+          (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+            const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
+            if (args.includes('display-message')) {
+              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+            } else if (args.includes('list-windows')) {
+              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+            } else if (args.includes('new-window')) {
+              nextWindowIndex++;
+              cb(null, { stdout: '', stderr: '' });
+            } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
+              cb(null, { stdout: '', stderr: '' });
+            } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+              cb(null, { stdout: 'main\n', stderr: '' });
+            } else if (args.includes('rev-parse')) {
+              cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
+            } else {
+              cb(null, { stdout: 'true', stderr: '' });
+            }
+          },
+        );
+      });
+
+      it('skips checkout when current branch equals base_branch', async () => {
+        insertTask(db, { run_mode: 'none', base_branch: 'feature-x' });
+        const noneTask = {
+          ...DEFAULTS.task,
+          run_mode: 'none' as const,
+          base_branch: 'feature-x',
+        } as Task;
+        await startTask(noneTask);
+
+        expect(
+          findExecCall(vi.mocked(execFile), {
+            cmd: 'git',
+            argsInclude: ['checkout', 'feature-x'],
+          }),
+        ).toBeUndefined();
+
+        const updated = getTask(db, DEFAULTS.task.id)!;
+        expect(updated.branch).toBe('feature-x');
+      });
+    });
+
+    it('errors when current==target but another active task is on the same branch', async () => {
+      // Override mock so abbrev-ref returns feature-x (already on target)
+      const originalImpl = vi.mocked(execFile).getMockImplementation();
+      vi.mocked(execFile).mockImplementation(
+        (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+          const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
+          if (args.includes('--abbrev-ref')) {
+            cb(null, { stdout: 'feature-x\n', stderr: '' });
+            return;
+          }
+          // delegate to the original baseline for everything else
+          if (originalImpl) (originalImpl as Function)(_cmd, args, optsOrCb, maybeCb);
+        },
+      );
+
+      try {
+        db.prepare(
+          `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+           VALUES ('wt-other', '/tmp/test-repo', '/tmp/test-repo', 'feature-x', 'feature-x', 'none', 'in_use')`,
+        ).run();
+        db.prepare(
+          `INSERT INTO tasks (id, title, description, status, worktree_id)
+           VALUES ('other', 'other', '', 'running', 'wt-other')`,
+        ).run();
+
+        insertTask(db, { run_mode: 'none', base_branch: 'feature-x' });
+        const noneTask = {
+          ...DEFAULTS.task,
+          run_mode: 'none' as const,
+          base_branch: 'feature-x',
+        } as Task;
+        await startTask(noneTask);
+
+        const updated = getTask(db, DEFAULTS.task.id)!;
+        expect(updated.status).toBe('error');
+        expect(updated.error).toMatch(/another chat is active on feature-x/);
+        expect(
+          findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['checkout', 'feature-x'] }),
+        ).toBeUndefined();
+      } finally {
+        if (originalImpl) vi.mocked(execFile).mockImplementation(originalImpl as never);
+      }
+    });
+
+    it('errors when another active task is on the same branch', async () => {
+      // Insert a conflicting active task directly into the DB
+      db.prepare(
+        `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+         VALUES ('wt-other', '/tmp/test-repo', '/tmp/test-repo', 'feature-x', 'feature-x', 'none', 'in_use')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, status, worktree_id)
+         VALUES ('other-task', 'other', '', 'running', 'wt-other')`,
+      ).run();
+
+      insertTask(db, { run_mode: 'none', base_branch: 'feature-x' });
+      const noneTask = {
+        ...DEFAULTS.task,
+        run_mode: 'none' as const,
+        base_branch: 'feature-x',
+      } as Task;
+      await startTask(noneTask);
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.status).toBe('error');
+      expect(updated.error).toMatch(/another chat is active on feature-x/);
+      expect(
+        findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['checkout', 'feature-x'] }),
+      ).toBeUndefined();
     });
   });
 
