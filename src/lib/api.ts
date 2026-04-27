@@ -7,6 +7,7 @@ import type {
   UserTerminal,
   Worktree,
   WorktreeSummary,
+  TaskStatus,
 } from '../../server/types';
 
 export interface WorktreeDetail {
@@ -108,6 +109,21 @@ export interface RepoConfig {
   lint_command: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface PreflightConflict {
+  task_id: string;
+  title: string;
+  status: TaskStatus;
+  branch: string | null;
+}
+
+export interface PreflightResult {
+  ok: boolean;
+  currentBranch: string;
+  targetBranch: string;
+  conflicts: PreflightConflict[];
+  dirty: { count: number } | null;
 }
 
 export type DiffFileStatus = 'A' | 'M' | 'D' | 'B';
@@ -238,5 +254,16 @@ export const api = {
     request<RepoConfig>('/repo-config', {
       method: 'PATCH',
       body: JSON.stringify({ repo_path: repoPath, ...updates }),
+    }),
+
+  // Preflight checks
+  preflightNoneMode: (repoPath: string, baseBranch: string) =>
+    request<PreflightResult>(
+      `/preflight/none-mode?repo_path=${encodeURIComponent(repoPath)}&base_branch=${encodeURIComponent(baseBranch)}`,
+    ),
+  stashRepo: (repoPath: string, targetBranch: string) =>
+    request<{ ok: true }>(`/preflight/stash`, {
+      method: 'POST',
+      body: JSON.stringify({ repo_path: repoPath, target_branch: targetBranch }),
     }),
 };
