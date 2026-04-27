@@ -206,6 +206,23 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // Preflight check for none-mode task creation
+  app.get('/api/preflight/none-mode', async (req: Request, res: Response) => {
+    const repoPath = String(req.query.repo_path ?? '');
+    const baseBranch = String(req.query.base_branch ?? '');
+    if (!repoPath || !baseBranch) {
+      res.status(400).json({ error: 'repo_path and base_branch are required' });
+      return;
+    }
+    try {
+      const { preflightNoneMode } = await import('./preflight.js');
+      const result = await preflightNoneMode(repoPath, baseBranch);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // Get default branch for a git repo
   app.get('/api/default-branch', async (req: Request, res: Response) => {
     const repoPath = req.query.repo_path as string;
