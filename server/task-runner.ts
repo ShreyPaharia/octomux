@@ -9,6 +9,7 @@ import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
 import { getSettings, resolveClaudeFlags } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
+import { syncAgents } from './agents.js';
 import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
@@ -595,14 +596,18 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'launch_agent';
     const agentId = nanoid(12);
     const claudeSessionId = crypto.randomUUID();
+    const agentName = task.agent ?? null;
     db.prepare(
-      'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
-    ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId);
+      'INSERT INTO agents (id, task_id, window_index, label, claude_session_id, agent) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId, agentName);
+
+    if (agentName) await syncAgents(setup.worktreePath);
 
     const flags = await getClaudeFlags();
+    const agentFlag = agentName ? ` --agent ${agentName}` : '';
     await sendClaudeCommand({
       target: `${session}:${windowIndex}`,
-      baseCmd: `claude --session-id ${claudeSessionId}${flags}`,
+      baseCmd: `claude${agentFlag} --session-id ${claudeSessionId}${flags}`,
       prompt: task.initial_prompt,
       worktreePath: setup.worktreePath,
       agentId,
@@ -636,10 +641,14 @@ export async function startTask(task: Task): Promise<void> {
   }
 }
 
-export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
+export async function addAgent(
+  task: Task,
+  prompt?: string,
+  agentName?: string | null,
+): Promise<Agent> {
   const db = getDb();
 
-  logger.info({ task_id: task.id, operation: 'addAgent' }, 'addAgent: start');
+  logger.info({ task_id: task.id, operation: 'addAgent', agent: agentName }, 'addAgent: start');
 
   const activeAgents = db
     .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
@@ -656,17 +665,21 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
 
   const agentId = nanoid(12);
   const claudeSessionId = crypto.randomUUID();
+  const resolvedAgent = agentName ?? null;
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, claude_session_id) VALUES (?, ?, ?, ?, ?)',
-  ).run(agentId, task.id, windowIndex, label, claudeSessionId);
+    'INSERT INTO agents (id, task_id, window_index, label, claude_session_id, agent) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(agentId, task.id, windowIndex, label, claudeSessionId, resolvedAgent);
+
+  if (resolvedAgent) await syncAgents(task.worktree!);
 
   const addTarget = `${task.tmux_session}:${windowIndex}`;
   const flags = await getClaudeFlags();
+  const agentFlag = resolvedAgent ? ` --agent ${resolvedAgent}` : '';
   (async () => {
     try {
       await sendClaudeCommand({
         target: addTarget,
-        baseCmd: `claude --session-id ${claudeSessionId}${flags}`,
+        baseCmd: `claude${agentFlag} --session-id ${claudeSessionId}${flags}`,
         prompt,
         worktreePath: task.worktree!,
         agentId,
@@ -709,8 +722,8 @@ export async function addAgent(task: Task, prompt?: string): Promise<Agent> {
     claude_session_id: claudeSessionId,
     hook_activity: 'active' as const,
     hook_activity_updated_at: null,
-    pinned: false,
     tmux_session: null,
+    agent: resolvedAgent,
     created_at: new Date().toISOString(),
   };
 }
@@ -1084,14 +1097,17 @@ export async function resumeTask(task: Task): Promise<void> {
     }
 
     const flags = await getClaudeFlags();
+    const needsAgentSync = agentTargets.some(({ agent }) => !!agent.agent);
+    if (needsAgentSync) await syncAgents(cwd);
     await Promise.all(
       agentTargets.map(async ({ agent, windowIndex, target }) => {
+        const agentFlag = agent.agent ? ` --agent ${agent.agent}` : '';
         let baseCmd: string;
         if (agent.claude_session_id) {
-          baseCmd = `claude --resume ${agent.claude_session_id}${flags}`;
+          baseCmd = `claude${agentFlag} --resume ${agent.claude_session_id}${flags}`;
         } else {
           const newSessionId = crypto.randomUUID();
-          baseCmd = `claude --continue --session-id ${newSessionId}${flags}`;
+          baseCmd = `claude${agentFlag} --continue --session-id ${newSessionId}${flags}`;
           db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
             newSessionId,
             agent.id,

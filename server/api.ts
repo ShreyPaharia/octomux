@@ -26,18 +26,6 @@ import * as diffMod from './diff.js';
 import { createChat, listChats, getChat } from './chats.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 
-import {
-  isOrchestratorRunning,
-  startOrchestrator,
-  stopOrchestrator,
-  getOrchestratorSession,
-  sendToOrchestrator,
-  typeToOrchestrator,
-  getCustomPrompt,
-  getDefaultPrompt,
-  saveCustomPrompt,
-  resetCustomPrompt,
-} from './orchestrator.js';
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import {
   listAgents,
@@ -493,8 +481,8 @@ export function setupRoutes(app: Express): void {
 
       db.prepare(
         `INSERT INTO tasks
-           (id, title, description, status, initial_prompt, worktree_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (id, title, description, status, initial_prompt, worktree_id, agent)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         body.title,
@@ -502,6 +490,7 @@ export function setupRoutes(app: Express): void {
         isDraft ? 'draft' : 'setting_up',
         body.initial_prompt ?? null,
         worktreeId,
+        body.agent ?? null,
       );
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
@@ -716,7 +705,7 @@ export function setupRoutes(app: Express): void {
     }
 
     const body = req.body as AddAgentRequest;
-    const agent = await addAgent(task, body.prompt);
+    const agent = await addAgent(task, body.prompt, body.agent);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.status(201).json(agent);
   });
@@ -982,110 +971,6 @@ export function setupRoutes(app: Express): void {
     }
   });
 
-  // ─── Orchestrator ──────────────────────────────────────────────────────────
-
-  app.get('/api/orchestrator/status', async (_req: Request, res: Response) => {
-    const running = await isOrchestratorRunning();
-    res.json({ running, session: getOrchestratorSession() });
-  });
-
-  app.post('/api/orchestrator/start', async (req: Request, res: Response) => {
-    const cwd = (req.body as { cwd?: string })?.cwd;
-    await startOrchestrator(cwd);
-    res.json({ running: true, session: getOrchestratorSession() });
-  });
-
-  app.post('/api/orchestrator/stop', async (_req: Request, res: Response) => {
-    await stopOrchestrator();
-    res.json({ running: false });
-  });
-
-  app.post('/api/orchestrator/send', async (req: Request, res: Response) => {
-    const { message } = req.body as { message?: string };
-    if (!message) {
-      res.status(400).json({ error: 'message is required' });
-      return;
-    }
-
-    try {
-      const running = await isOrchestratorRunning();
-      if (!running) {
-        await startOrchestrator(undefined, message);
-      } else {
-        await sendToOrchestrator(message);
-      }
-      res.json({ ok: true, running: true });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: (err as Error).message });
-    }
-  });
-
-  // Type message into orchestrator terminal without pressing Enter (user reviews first)
-  app.post('/api/orchestrator/type', async (req: Request, res: Response) => {
-    const { message } = req.body as { message?: string };
-    if (!message) {
-      res.status(400).json({ error: 'message is required' });
-      return;
-    }
-
-    try {
-      const running = await isOrchestratorRunning();
-      if (!running) {
-        await startOrchestrator();
-      }
-      await typeToOrchestrator(message);
-      res.json({ ok: true, running: true });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: (err as Error).message });
-    }
-  });
-
-  // ─── Orchestrator Prompt ────────────────────────────────────────────────────
-
-  app.get('/api/orchestrator/prompt', async (_req: Request, res: Response) => {
-    try {
-      const [custom, defaultPrompt] = await Promise.all([getCustomPrompt(), getDefaultPrompt()]);
-      res.json({
-        content: custom ?? defaultPrompt,
-        default: defaultPrompt,
-        isCustom: custom !== null,
-      });
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
-    }
-  });
-
-  app.put('/api/orchestrator/prompt', async (req: Request, res: Response) => {
-    const { content } = req.body as { content?: string };
-    if (content === undefined || content === null) {
-      res.status(400).json({ error: 'content is required' });
-      return;
-    }
-    try {
-      await saveCustomPrompt(content);
-      if (await isOrchestratorRunning()) {
-        await stopOrchestrator();
-        await startOrchestrator();
-      }
-      res.json({ ok: true, isCustom: true });
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
-    }
-  });
-
-  app.delete('/api/orchestrator/prompt', async (_req: Request, res: Response) => {
-    try {
-      await resetCustomPrompt();
-      if (await isOrchestratorRunning()) {
-        await stopOrchestrator();
-        await startOrchestrator();
-      }
-      res.json({ ok: true, isCustom: false });
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
-    }
-  });
-
   // ─── Agents ──────────────────────────────────────────────────────────────────
 
   app.get('/api/agents', async (_req: Request, res: Response) => {
@@ -1116,10 +1001,6 @@ export function setupRoutes(app: Express): void {
       await saveAgent(req.params.name as string, content);
       await syncAgents();
       const agent = await getAgent(req.params.name as string);
-      if (req.params.name === 'orchestrator' && (await isOrchestratorRunning())) {
-        await stopOrchestrator();
-        await startOrchestrator();
-      }
       res.json(agent);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1135,10 +1016,6 @@ export function setupRoutes(app: Express): void {
         await deleteAgent(name);
       }
       await syncAgents();
-      if (name === 'orchestrator' && (await isOrchestratorRunning())) {
-        await stopOrchestrator();
-        await startOrchestrator();
-      }
       res.json({ ok: true });
     } catch (err) {
       sendDomainError(res, err);
@@ -1255,7 +1132,7 @@ export function setupRoutes(app: Express): void {
   app.post('/api/chats', async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as CreateChatRequest;
     try {
-      const chat = await createChat({ label: body.label, cwd: body.cwd });
+      const chat = await createChat({ label: body.label, cwd: body.cwd, agent: body.agent });
       res.status(201).json(chat);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

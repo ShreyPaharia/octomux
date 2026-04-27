@@ -16,17 +16,6 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
-vi.mock('@/lib/orchestrator-context', () => ({
-  useOrchestratorContext: () => ({
-    running: false,
-    loading: false,
-    start: vi.fn(),
-    stop: vi.fn(),
-    error: null,
-    refresh: vi.fn(),
-  }),
-}));
-
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
@@ -48,12 +37,12 @@ beforeEach(() => {
 });
 
 describe('UniversalSidebar nav', () => {
-  it('renders Home, Tasks, Orchestrator, Settings nav items', async () => {
+  it('renders Home, Tasks, Settings nav items', async () => {
     renderSidebar('/');
     await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
     expect(screen.getByText('TASKS')).toBeInTheDocument();
-    expect(screen.getByText('ORCHESTRATOR')).toBeInTheDocument();
     expect(screen.getByText('SETTINGS')).toBeInTheDocument();
+    expect(screen.queryByText('ORCHESTRATOR')).not.toBeInTheDocument();
   });
 
   it('points Tasks to /tasks and Home to /', async () => {
@@ -68,7 +57,6 @@ describe('UniversalSidebar nav', () => {
     await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
     expect(screen.getByLabelText('Home')).toBeInTheDocument();
     expect(screen.getByLabelText('Tasks')).toBeInTheDocument();
-    expect(screen.getByLabelText('Orchestrator')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
   });
 

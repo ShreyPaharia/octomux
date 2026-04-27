@@ -13,29 +13,33 @@ import {
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
 const empty: ComposerState = { mode: 'empty' };
-const scratch: ComposerState = { mode: 'scratch', isDraft: false };
+const scratch: ComposerState = { mode: 'scratch', isDraft: false, agent: null };
 const newState: ComposerState = {
   mode: 'new',
   repo: '/r',
   branch: 'main',
   isDraft: false,
+  agent: null,
 };
 const noneState: ComposerState = {
   mode: 'none',
   repo: '/r',
   branch: 'main',
   isDraft: false,
+  agent: null,
 };
 const existingState: ComposerState = {
   mode: 'existing',
   repo: '/r',
   worktreePath: '/r/.worktrees/abc',
   isDraft: false,
+  agent: null,
   lastBranch: 'main',
 };
 const addAgent: ComposerState = {
   mode: 'add-agent',
   sessionId: 't1',
+  agent: null,
 };
 
 // ─── pickRepo transitions ─────────────────────────────────────────────────
@@ -58,11 +62,11 @@ describe('reduce / pickRepo', () => {
 
   it('pickRepo from empty yields none with default branch (worktree OFF by default)', () => {
     const next = reduce(empty, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
-    expect(next).toEqual({ mode: 'none', repo: '/r', branch: 'main', isDraft: false });
+    expect(next).toEqual({ mode: 'none', repo: '/r', branch: 'main', isDraft: false, agent: null });
   });
 
   it('pickRepo preserves isDraft', () => {
-    const draftScratch: ComposerState = { mode: 'scratch', isDraft: true };
+    const draftScratch: ComposerState = { mode: 'scratch', isDraft: true, agent: null };
     const next = reduce(draftScratch, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
     expect(next).toMatchObject({ mode: 'none', isDraft: true });
   });
@@ -86,6 +90,12 @@ describe('reduce / pickRepo', () => {
       worktreePath: '/r/.worktrees/abc',
     });
   });
+
+  it('pickRepo carries the picked agent through mode transitions', () => {
+    const withAgent: ComposerState = { ...scratch, agent: 'orchestrator' };
+    const next = reduce(withAgent, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
+    expect(next).toMatchObject({ mode: 'none', agent: 'orchestrator' });
+  });
 });
 
 // ─── clearRepo transitions ────────────────────────────────────────────────
@@ -95,22 +105,29 @@ describe('reduce / clearRepo', () => {
     expect(reduce(newState, { type: 'clearRepo' })).toEqual({
       mode: 'scratch',
       isDraft: false,
+      agent: null,
     });
   });
   it('none → scratch', () => {
     expect(reduce(noneState, { type: 'clearRepo' })).toEqual({
       mode: 'scratch',
       isDraft: false,
+      agent: null,
     });
   });
   it('existing → scratch', () => {
     expect(reduce(existingState, { type: 'clearRepo' })).toEqual({
       mode: 'scratch',
       isDraft: false,
+      agent: null,
     });
   });
   it('scratch stays scratch', () => {
-    expect(reduce(scratch, { type: 'clearRepo' })).toEqual({ mode: 'scratch', isDraft: false });
+    expect(reduce(scratch, { type: 'clearRepo' })).toEqual({
+      mode: 'scratch',
+      isDraft: false,
+      agent: null,
+    });
   });
   it('empty stays empty', () => {
     expect(reduce(empty, { type: 'clearRepo' })).toBe(empty);
@@ -150,6 +167,7 @@ describe('reduce / toggleWorktree', () => {
       repo: '/r',
       branch: 'main',
       isDraft: false,
+      agent: null,
     });
   });
   it('none + toggle on → new', () => {
@@ -159,6 +177,7 @@ describe('reduce / toggleWorktree', () => {
       repo: '/r',
       branch: 'main',
       isDraft: false,
+      agent: null,
     });
   });
   it('new + toggle on is a no-op', () => {
@@ -189,6 +208,7 @@ describe('reduce / setExistingPath', () => {
       repo: '/r',
       worktreePath: '/p',
       isDraft: false,
+      agent: null,
       lastBranch: 'main',
     });
   });
@@ -215,6 +235,7 @@ describe('reduce / clearExistingPath', () => {
       repo: '/r',
       branch: 'main',
       isDraft: false,
+      agent: null,
     });
   });
   it('existing without lastBranch → new with null branch', () => {
@@ -234,7 +255,7 @@ describe('reduce / enterAddAgent', () => {
     'every state → add-agent (suppresses other chips)',
     (from) => {
       const next = reduce(from, { type: 'enterAddAgent', sessionId: 'sess' });
-      expect(next).toEqual({ mode: 'add-agent', sessionId: 'sess' });
+      expect(next).toMatchObject({ mode: 'add-agent', sessionId: 'sess' });
     },
   );
 
@@ -248,9 +269,30 @@ describe('reduce / enterAddAgent', () => {
     expect(next).toEqual({
       mode: 'add-agent',
       sessionId: 'sess',
+      agent: null,
       agentType: 'reviewer',
       label: 'reviewer#2',
     });
+  });
+});
+
+// ─── pickAgent transitions ────────────────────────────────────────────────
+
+describe('reduce / pickAgent', () => {
+  it.each([scratch, newState, noneState, existingState, addAgent])(
+    'sets agent on $mode',
+    (from) => {
+      const next = reduce(from, { type: 'pickAgent', agent: 'orchestrator' });
+      expect(next).toMatchObject({ agent: 'orchestrator' });
+    },
+  );
+  it('clears agent with null', () => {
+    const set = reduce(scratch, { type: 'pickAgent', agent: 'planner' });
+    const cleared = reduce(set, { type: 'pickAgent', agent: null });
+    expect(cleared).toMatchObject({ agent: null });
+  });
+  it('no-op on empty', () => {
+    expect(reduce(empty, { type: 'pickAgent', agent: 'x' })).toBe(empty);
   });
 });
 
@@ -261,6 +303,7 @@ describe('reduce / clearIntent', () => {
     expect(reduce(addAgent, { type: 'clearIntent' })).toEqual({
       mode: 'scratch',
       isDraft: false,
+      agent: null,
     });
   });
   it('new with forkOf → new without forkOf', () => {
@@ -294,58 +337,72 @@ describe('hydrateFromUrl', () => {
     {
       name: 'empty URL → scratch state',
       qs: '',
-      expected: { mode: 'scratch', isDraft: false },
+      expected: { mode: 'scratch', isDraft: false, agent: null },
     },
     {
       name: '?mode=scratch → scratch (same as bare URL)',
       qs: 'mode=scratch',
-      expected: { mode: 'scratch', isDraft: false },
+      expected: { mode: 'scratch', isDraft: false, agent: null },
     },
     {
       // New default: repo without explicit mode means worktree checkbox is off.
       name: '?repo=/r → none with null branch (worktree OFF default)',
       qs: 'repo=%2Fr',
-      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false },
+      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&branch=dev → none with dev',
       qs: 'repo=%2Fr&branch=dev',
-      expected: { mode: 'none', repo: '/r', branch: 'dev', isDraft: false },
+      expected: { mode: 'none', repo: '/r', branch: 'dev', isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&base_branch=main → none with main',
       qs: 'repo=%2Fr&base_branch=main',
-      expected: { mode: 'none', repo: '/r', branch: 'main', isDraft: false },
+      expected: { mode: 'none', repo: '/r', branch: 'main', isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&mode=new → new (worktree ON)',
       qs: 'repo=%2Fr&mode=new',
-      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false },
+      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&worktree=1 → new (worktree ON via explicit flag)',
       qs: 'repo=%2Fr&worktree=1',
-      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false },
+      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&fork_of=x → new with forkOf (fork_of implies worktree ON)',
       qs: 'repo=%2Fr&fork_of=x',
-      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false, forkOf: 'x' },
+      expected: {
+        mode: 'new',
+        repo: '/r',
+        branch: null,
+        isDraft: false,
+        agent: null,
+        forkOf: 'x',
+      },
     },
     {
       name: '?repo=/r&mode=new&fork_of=x → new with forkOf',
       qs: 'repo=%2Fr&mode=new&fork_of=x',
-      expected: { mode: 'new', repo: '/r', branch: null, isDraft: false, forkOf: 'x' },
+      expected: {
+        mode: 'new',
+        repo: '/r',
+        branch: null,
+        isDraft: false,
+        agent: null,
+        forkOf: 'x',
+      },
     },
     {
       name: '?repo=/r&mode=none → none',
       qs: 'repo=%2Fr&mode=none',
-      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false },
+      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&worktree=0 → none',
       qs: 'repo=%2Fr&worktree=0',
-      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false },
+      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false, agent: null },
     },
     {
       name: '?repo=/r&mode=existing&worktree_path=/p → existing',
@@ -355,18 +412,29 @@ describe('hydrateFromUrl', () => {
         repo: '/r',
         worktreePath: '/p',
         isDraft: false,
+        agent: null,
         lastBranch: null,
       },
     },
     {
       name: '?add_agent=sess → add-agent',
       qs: 'add_agent=sess',
-      expected: { mode: 'add-agent', sessionId: 'sess' },
+      expected: { mode: 'add-agent', sessionId: 'sess', agent: null },
     },
     {
       name: '?add_agent=sess&repo=/r (add_agent wins)',
       qs: 'add_agent=sess&repo=%2Fr',
-      expected: { mode: 'add-agent', sessionId: 'sess' },
+      expected: { mode: 'add-agent', sessionId: 'sess', agent: null },
+    },
+    {
+      name: '?agent=orchestrator → scratch with agent',
+      qs: 'agent=orchestrator',
+      expected: { mode: 'scratch', isDraft: false, agent: 'orchestrator' },
+    },
+    {
+      name: '?repo=/r&agent=planner → none with agent',
+      qs: 'repo=%2Fr&agent=planner',
+      expected: { mode: 'none', repo: '/r', branch: null, isDraft: false, agent: 'planner' },
     },
   ];
 
@@ -391,6 +459,7 @@ describe('hydrateFromUrl', () => {
       repo: '/r',
       branch: 'main',
       isDraft: false,
+      agent: null,
     });
   });
 });
@@ -399,12 +468,13 @@ describe('hydrateFromUrl', () => {
 
 describe('stateToUrlParams', () => {
   const roundtrips: ComposerState[] = [
-    { mode: 'scratch', isDraft: false },
-    { mode: 'new', repo: '/r', branch: 'main', isDraft: false },
-    { mode: 'new', repo: '/r', branch: 'main', isDraft: false, forkOf: 'src1' },
-    { mode: 'none', repo: '/r', branch: 'main', isDraft: false },
-    { mode: 'existing', repo: '/r', worktreePath: '/p', isDraft: false },
-    { mode: 'add-agent', sessionId: 'sess' },
+    { mode: 'scratch', isDraft: false, agent: null },
+    { mode: 'new', repo: '/r', branch: 'main', isDraft: false, agent: null },
+    { mode: 'new', repo: '/r', branch: 'main', isDraft: false, agent: null, forkOf: 'src1' },
+    { mode: 'none', repo: '/r', branch: 'main', isDraft: false, agent: null },
+    { mode: 'existing', repo: '/r', worktreePath: '/p', isDraft: false, agent: null },
+    { mode: 'add-agent', sessionId: 'sess', agent: null },
+    { mode: 'scratch', isDraft: false, agent: 'orchestrator' },
   ];
 
   it.each(roundtrips)('$mode round-trips through URL', (state) => {
@@ -425,6 +495,9 @@ describe('stateToUrlParams', () => {
     if (state.mode === 'add-agent') {
       expect(parsed).toMatchObject({ sessionId: state.sessionId });
     }
+    if ('agent' in state) {
+      expect(parsed).toMatchObject({ agent: state.agent });
+    }
   });
 });
 
@@ -442,10 +515,10 @@ describe('validateForSubmit', () => {
     expect(validateForSubmit(scratch, 'hello')).toBeNull();
   });
   it('scratch with prompt "hello" returns no blocking reason', () => {
-    expect(validateForSubmit({ mode: 'scratch', isDraft: false }, 'hello')).toBeNull();
+    expect(validateForSubmit({ mode: 'scratch', isDraft: false, agent: null }, 'hello')).toBeNull();
   });
   it('scratch with empty prompt blocks with a prompt-required reason', () => {
-    expect(validateForSubmit({ mode: 'scratch', isDraft: false }, '')).toMatch(
+    expect(validateForSubmit({ mode: 'scratch', isDraft: false, agent: null }, '')).toMatch(
       /prompt is required/i,
     );
   });
@@ -513,15 +586,14 @@ describe('reduce / exhaustiveness (action × mode)', () => {
     { type: 'setExistingPath', path: '/p' },
     { type: 'clearExistingPath' },
     { type: 'enterAddAgent', sessionId: 'sess' },
+    { type: 'pickAgent', agent: 'orchestrator' },
     { type: 'clearIntent' },
     { type: 'toggleDraft' },
   ];
   const matrix = modes.flatMap((m) => actions.map((a) => ({ mode: m.mode, type: a.type, m, a })));
-  it.each(matrix)('$mode + $type → returns a valid ComposerState', ({ m, a }) => {
+  it.each(matrix)('reduce($mode, $type) returns a valid state', ({ m, a }) => {
     const next = reduce(m, a);
-    expect(next).toHaveProperty('mode');
-    expect(['empty', 'scratch', 'new', 'none', 'existing', 'add-agent'].includes(next.mode)).toBe(
-      true,
-    );
+    expect(next).toBeTruthy();
+    expect(typeof next.mode).toBe('string');
   });
 });

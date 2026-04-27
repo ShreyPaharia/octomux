@@ -17,7 +17,7 @@ import {
   USER_TERMINALS_TABLE_COLUMNS,
   WORKTREES_TABLE_COLUMNS,
 } from './test-helpers.js';
-import { getDb, initDb, ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_TMUX_SESSION } from './db.js';
+import { getDb, initDb } from './db.js';
 
 describe('Database', () => {
   let db: Database.Database;
@@ -254,29 +254,23 @@ describe('Database', () => {
       expect(col.notnull).toBe(0);
     });
 
-    it('adds agents.pinned and agents.tmux_session columns', () => {
+    it('adds agents.tmux_session and agents.agent columns; drops legacy pinned', () => {
       const cols = (db.pragma('table_info(agents)') as Array<{ name: string }>).map((c) => c.name);
-      expect(cols).toContain('pinned');
       expect(cols).toContain('tmux_session');
+      expect(cols).toContain('agent');
+      expect(cols).not.toContain('pinned');
     });
 
-    it('inserts orchestrator pinned agent row on init', () => {
+    it('adds tasks.agent column', () => {
+      const cols = (db.pragma('table_info(tasks)') as Array<{ name: string }>).map((c) => c.name);
+      expect(cols).toContain('agent');
+    });
+
+    it('removes legacy seeded orchestrator agent row', () => {
       const row = db
-        .prepare('SELECT id, task_id, label, pinned, tmux_session FROM agents WHERE id = ?')
-        .get(ORCHESTRATOR_AGENT_ID) as
-        | {
-            id: string;
-            task_id: string | null;
-            label: string;
-            pinned: number;
-            tmux_session: string;
-          }
-        | undefined;
-      expect(row).toBeTruthy();
-      expect(row!.task_id).toBeNull();
-      expect(row!.label).toBe('orchestrator');
-      expect(row!.pinned).toBe(1);
-      expect(row!.tmux_session).toBe(ORCHESTRATOR_TMUX_SESSION);
+        .prepare(`SELECT id FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`)
+        .get();
+      expect(row).toBeUndefined();
     });
 
     it('allows inserting a standalone agent with NULL task_id', () => {

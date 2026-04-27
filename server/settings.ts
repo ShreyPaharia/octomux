@@ -6,14 +6,12 @@ export type EditorChoice = 'nvim' | 'vscode' | 'cursor';
 
 export interface OctomuxSettings {
   editor: EditorChoice;
-  useOrchestratorAgent: boolean;
   dangerouslySkipPermissions: boolean;
   claudeFlags: string;
 }
 
 export const DEFAULT_SETTINGS: OctomuxSettings = {
   editor: 'nvim',
-  useOrchestratorAgent: false,
   dangerouslySkipPermissions: false,
   claudeFlags: '',
 };

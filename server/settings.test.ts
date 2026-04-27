@@ -49,7 +49,6 @@ describe('settings', () => {
     it('returns saved settings when file exists', async () => {
       const saved: OctomuxSettings = {
         editor: 'cursor',
-        useOrchestratorAgent: false,
         dangerouslySkipPermissions: true,
         claudeFlags: '--model opus',
       };

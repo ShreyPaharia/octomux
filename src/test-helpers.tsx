@@ -14,8 +14,8 @@ export const AGENT_DEFAULTS: Agent = {
   claude_session_id: null,
   hook_activity: 'active',
   hook_activity_updated_at: null,
-  pinned: false,
   tmux_session: null,
+  agent: null,
   created_at: '2026-01-01 00:00:00',
 };
 
@@ -43,6 +43,7 @@ export const TASK_DEFAULTS: Task = {
   last_viewed_at: null,
   source: null,
   worktree_id: null,
+  agent: null,
   error: null,
   created_at: '2026-01-01 00:00:00',
   updated_at: '2026-01-01 00:00:00',
@@ -158,27 +159,11 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     recentRepos: vi.fn().mockResolvedValue([]),
     listBranches: vi.fn().mockResolvedValue([]),
     getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
-    orchestratorStatus: vi
-      .fn()
-      .mockResolvedValue({ running: false, session: 'octomux-orchestrator' }),
-    orchestratorStart: vi
-      .fn()
-      .mockResolvedValue({ running: true, session: 'octomux-orchestrator' }),
-    orchestratorStop: vi.fn().mockResolvedValue({ running: false }),
-    orchestratorSend: vi.fn().mockResolvedValue({ ok: true, running: true }),
-    orchestratorType: vi.fn().mockResolvedValue({ ok: true, running: true }),
     listSkills: vi.fn().mockResolvedValue([]),
     getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
     createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
     updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
     deleteSkill: vi.fn().mockResolvedValue(undefined),
-    getOrchestratorPrompt: vi.fn().mockResolvedValue({
-      content: '# Default prompt',
-      default: '# Default prompt',
-      isCustom: false,
-    }),
-    updateOrchestratorPrompt: vi.fn().mockResolvedValue({ ok: true, isCustom: true }),
-    resetOrchestratorPrompt: vi.fn().mockResolvedValue({ ok: true, isCustom: false }),
   };
   return { ...defaults, ...overrides };
 }

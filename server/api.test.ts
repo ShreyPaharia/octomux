@@ -111,21 +111,25 @@ vi.mock('fs', () => ({
 
 vi.mock('./chats.js', async () => {
   const { getDb } = await import('./db.js');
+  let counter = 0;
   return {
-    createChat: vi.fn(async (opts: { label?: string; cwd?: string } = {}) => {
-      const db = getDb();
-      const id = 'chat-test-01';
-      db.prepare(
-        `INSERT INTO agents
-           (id, task_id, window_index, label, status, claude_session_id,
-            hook_activity, pinned, tmux_session, created_at)
-         VALUES (?, NULL, 0, ?, 'running', ?, 'active', 0, ?, datetime('now'))`,
-      ).run(id, opts.label ?? 'Chat', 'sid-01', `octomux-chat-${id}`);
-      return db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
-    }),
+    createChat: vi.fn(
+      async (opts: { label?: string; cwd?: string; agent?: string | null } = {}) => {
+        const db = getDb();
+        counter += 1;
+        const id = `chat-test-${counter.toString().padStart(2, '0')}`;
+        db.prepare(
+          `INSERT INTO agents
+             (id, task_id, window_index, label, status, claude_session_id,
+              hook_activity, tmux_session, agent, created_at)
+           VALUES (?, NULL, 0, ?, 'running', ?, 'active', ?, ?, datetime('now'))`,
+        ).run(id, opts.label ?? 'Chat', `sid-${id}`, `octomux-chat-${id}`, opts.agent ?? null);
+        return db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
+      },
+    ),
     listChats: vi.fn(() => {
       const db = getDb();
-      return db.prepare(`SELECT * FROM agents WHERE task_id IS NULL ORDER BY pinned DESC`).all();
+      return db.prepare(`SELECT * FROM agents WHERE task_id IS NULL ORDER BY created_at ASC`).all();
     }),
     getChat: vi.fn((id: string) => {
       const db = getDb();
@@ -133,14 +137,6 @@ vi.mock('./chats.js', async () => {
     }),
   };
 });
-
-vi.mock('./orchestrator.js', () => ({
-  isOrchestratorRunning: vi.fn(async () => true),
-  startOrchestrator: vi.fn(),
-  stopOrchestrator: vi.fn(),
-  getOrchestratorSession: vi.fn(() => 'octomux-orchestrator'),
-  sendToOrchestrator: vi.fn(),
-}));
 
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
@@ -161,13 +157,11 @@ vi.mock('./skills.js', () => ({
 vi.mock('./settings.js', () => ({
   getSettings: vi.fn(async () => ({
     editor: 'nvim',
-    useOrchestratorAgent: false,
     dangerouslySkipPermissions: false,
     claudeFlags: '',
   })),
   updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({
     editor: 'nvim',
-    useOrchestratorAgent: false,
     dangerouslySkipPermissions: false,
     claudeFlags: '',
     ...patch,
@@ -199,8 +193,6 @@ const {
   createShellTerminal,
   closeShellTerminal,
 } = await import('./task-runner.js');
-const { isOrchestratorRunning, startOrchestrator, sendToOrchestrator } =
-  await import('./orchestrator.js');
 const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
 const { updateSettings } = await import('./settings.js');
 
@@ -1465,44 +1457,6 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
   });
 });
 
-// ─── POST /api/orchestrator/send ─────────────────────────────────────────────
-
-describe('POST /api/orchestrator/send', () => {
-  it('sends message when orchestrator is running', async () => {
-    vi.mocked(isOrchestratorRunning).mockResolvedValue(true);
-    const res = await request(app)
-      .post('/api/orchestrator/send')
-      .send({ message: 'Show me all tasks' });
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, running: true });
-    expect(sendToOrchestrator).toHaveBeenCalledWith('Show me all tasks');
-  });
-
-  it('auto-starts orchestrator when not running', async () => {
-    vi.mocked(isOrchestratorRunning).mockResolvedValue(false);
-    const res = await request(app)
-      .post('/api/orchestrator/send')
-      .send({ message: 'Create a task' });
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, running: true });
-    expect(startOrchestrator).toHaveBeenCalledWith(undefined, 'Create a task');
-  });
-
-  it('returns 400 when message is missing', async () => {
-    const res = await request(app).post('/api/orchestrator/send').send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('message is required');
-  });
-
-  it('returns 500 when orchestrator fails to start', async () => {
-    vi.mocked(isOrchestratorRunning).mockResolvedValue(false);
-    vi.mocked(startOrchestrator).mockRejectedValueOnce(new Error('tmux failed'));
-    const res = await request(app).post('/api/orchestrator/send').send({ message: 'hello' });
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ ok: false, error: 'tmux failed' });
-  });
-});
-
 // ─── Skills API ──────────────────────────────────────────────────────────────
 
 describe('Skills API', () => {
@@ -1588,7 +1542,6 @@ describe('GET /api/settings', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
       envOverrides: { claudeFlags: null },
@@ -1607,7 +1560,6 @@ describe('PATCH /api/settings', () => {
   it('updates editor setting', async () => {
     vi.mocked(updateSettings).mockResolvedValue({
       editor: 'cursor',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     });
@@ -1641,14 +1593,20 @@ describe('Chats API (standalone agents)', () => {
     expect(res.body.tmux_session).toMatch(/^octomux-chat-/);
   });
 
-  it('GET /api/chats lists standalone agents, orchestrator pinned first', async () => {
-    await request(app).post('/api/chats').send({ label: 'Chat A' });
+  it('GET /api/chats lists standalone agents in creation order', async () => {
+    const a = await request(app).post('/api/chats').send({ label: 'Chat A' });
     const res = await request(app).get('/api/chats');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
-    // Orchestrator is seeded on init with pinned=1 and should sort first.
-    expect(res.body[0].id).toBe('orchestrator');
-    expect(res.body[0].pinned).toBe(1);
+    expect(res.body[0].id).toBe(a.body.id);
+  });
+
+  it('POST /api/chats accepts an agent name and persists it on the row', async () => {
+    const res = await request(app)
+      .post('/api/chats')
+      .send({ label: 'Run as orchestrator', agent: 'orchestrator' });
+    expect(res.status).toBe(201);
+    expect(res.body.agent).toBe('orchestrator');
   });
 
   it('GET /api/chats/:id returns a chat by id', async () => {

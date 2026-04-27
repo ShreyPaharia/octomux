@@ -4,20 +4,18 @@ import userEvent from '@testing-library/user-event';
 import SettingsPage from './SettingsPage';
 import { renderWithRouter } from '../test-helpers';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () => {
+const { apiProxy } = await vi.hoisted(async () => {
   const { vi } = await import('vitest');
   const helpers = await import('../test-helpers');
   return helpers.setupApiMock({
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
       envOverrides: { claudeFlags: null },
     }),
     updateSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
       envOverrides: { claudeFlags: null },
@@ -39,11 +37,6 @@ vi.mock('../lib/hooks', async (importOriginal) => {
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMock.getOrchestratorPrompt.mockResolvedValue({
-      content: 'prompt',
-      default: 'prompt',
-      isCustom: false,
-    });
   });
 
   it('renders the section navigation with all groups', async () => {
@@ -51,17 +44,10 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('settings-nav-general')).toBeInTheDocument();
     });
-    for (const id of [
-      'general',
-      'orchestrator',
-      'agents',
-      'skills',
-      'repositories',
-      'editor',
-      'agent-launch',
-    ]) {
+    for (const id of ['general', 'agents', 'skills', 'repositories', 'editor', 'agent-launch']) {
       expect(screen.getByTestId(`settings-nav-${id}`)).toBeInTheDocument();
     }
+    expect(screen.queryByTestId('settings-nav-orchestrator')).not.toBeInTheDocument();
   });
 
   it('marks the default nav item (general) as active', async () => {

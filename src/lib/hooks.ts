@@ -1,63 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
-import type { Skill, OrchestratorPromptData, RepoConfig, AgentDefinition } from './api';
+import type { Skill, RepoConfig, AgentDefinition } from './api';
 import { api } from './api';
 import { subscribe } from './event-source';
-
-export function useOrchestrator() {
-  const [running, setRunning] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.orchestratorStatus();
-      setRunning(data.running);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Fetch once on mount. Orchestrator status only changes on user action
-  // (start / stop / restart) so the explicit refresh in those handlers
-  // is sufficient — no need to poll on every task:* websocket event.
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const start = useCallback(async () => {
-    try {
-      await api.orchestratorStart();
-      setRunning(true);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  const stop = useCallback(async () => {
-    try {
-      await api.orchestratorStop();
-      setRunning(false);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  const restart = useCallback(async () => {
-    try {
-      await api.orchestratorStop();
-      await api.orchestratorStart();
-      setRunning(true);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  return { running, loading, error, start, stop, restart, refresh };
-}
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -199,43 +144,4 @@ export function useAgents() {
   }, [refresh]);
 
   return { agents, loading, error, refresh };
-}
-
-export function useOrchestratorPrompt() {
-  const [data, setData] = useState<OrchestratorPromptData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const result = await api.getOrchestratorPrompt();
-      setData(result);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const save = useCallback(
-    async (content: string) => {
-      const result = await api.updateOrchestratorPrompt(content);
-      await refresh();
-      return result;
-    },
-    [refresh],
-  );
-
-  const reset = useCallback(async () => {
-    const result = await api.resetOrchestratorPrompt();
-    await refresh();
-    return result;
-  }, [refresh]);
-
-  return { data, loading, error, save, reset, refresh };
 }

@@ -4,7 +4,6 @@ import type {
   UpdateTaskRequest,
   AddAgentRequest,
   Agent,
-  OrchestratorStatus,
   UserTerminal,
   Worktree,
   WorktreeSummary,
@@ -79,12 +78,6 @@ export interface SkillDetail {
   content: string;
 }
 
-export interface OrchestratorPromptData {
-  content: string;
-  default: string;
-  isCustom: boolean;
-}
-
 export interface AgentDefinition {
   name: string;
   description: string;
@@ -100,7 +93,6 @@ export interface AgentDetail {
 
 export interface OctomuxSettings {
   editor: 'nvim' | 'vscode' | 'cursor';
-  useOrchestratorAgent: boolean;
   dangerouslySkipPermissions: boolean;
   claudeFlags: string;
   envOverrides?: {
@@ -196,30 +188,6 @@ export const api = {
   getSettings: () => request<OctomuxSettings>('/settings'),
   updateSettings: (data: Partial<OctomuxSettings>) =>
     request<OctomuxSettings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
-
-  orchestratorStatus: () => request<OrchestratorStatus>('/orchestrator/status'),
-  orchestratorStart: () => request<OrchestratorStatus>('/orchestrator/start', { method: 'POST' }),
-  orchestratorStop: () => request<void>('/orchestrator/stop', { method: 'POST' }),
-  orchestratorSend: (message: string) =>
-    request<{ ok: boolean; running: boolean }>('/orchestrator/send', {
-      method: 'POST',
-      body: JSON.stringify({ message }),
-    }),
-  orchestratorType: (message: string) =>
-    request<{ ok: boolean; running: boolean }>('/orchestrator/type', {
-      method: 'POST',
-      body: JSON.stringify({ message }),
-    }),
-
-  // Orchestrator Prompt
-  getOrchestratorPrompt: () => request<OrchestratorPromptData>('/orchestrator/prompt'),
-  updateOrchestratorPrompt: (content: string) =>
-    request<{ ok: boolean; isCustom: boolean }>('/orchestrator/prompt', {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    }),
-  resetOrchestratorPrompt: () =>
-    request<{ ok: boolean; isCustom: boolean }>('/orchestrator/prompt', { method: 'DELETE' }),
 
   // Skills
   listSkills: () => request<Skill[]>('/skills'),

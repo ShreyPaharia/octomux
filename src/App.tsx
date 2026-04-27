@@ -3,9 +3,7 @@ import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
-import { Navigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
-import { OrchestratorProvider } from './lib/orchestrator-context';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
 import { PrSheet } from './components/PrSheet';
@@ -67,9 +65,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <TasksProvider>
-        <OrchestratorProvider>
-          <AppShell />
-        </OrchestratorProvider>
+        <AppShell />
       </TasksProvider>
     </ErrorBoundary>
   );
@@ -117,12 +113,7 @@ export function AppShell() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/tasks/grid" element={<ParallelGridPage />} />
-                <Route path="/orchestrator/grid" element={<ParallelGridPage />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
-                <Route
-                  path="/orchestrator"
-                  element={<Navigate to="/chats/orchestrator" replace />}
-                />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/skills/:name" element={<SkillEditor />} />
                 <Route path="/agents/:name" element={<AgentEditor />} />

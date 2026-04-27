@@ -45,7 +45,6 @@ vi.mock('./settings.js', async () => {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     }),
@@ -1132,7 +1131,6 @@ describe('claude launch flags', () => {
     delete process.env.OCTOMUX_CLAUDE_FLAGS;
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     });
@@ -1142,7 +1140,6 @@ describe('claude launch flags', () => {
     process.env.OCTOMUX_CLAUDE_FLAGS = '--from-env';
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: true,
       claudeFlags: '--from-settings',
     });
@@ -1157,7 +1154,6 @@ describe('claude launch flags', () => {
   it('appends --dangerously-skip-permissions when setting is enabled', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: true,
       claudeFlags: '',
     });
@@ -1170,7 +1166,6 @@ describe('claude launch flags', () => {
   it('appends claudeFlags from settings when env var unset', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '--model opus',
     });
@@ -1183,7 +1178,6 @@ describe('claude launch flags', () => {
   it('composes dangerouslySkipPermissions before claudeFlags', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: true,
       claudeFlags: '--model opus',
     });
@@ -1196,7 +1190,6 @@ describe('claude launch flags', () => {
   it('applies flags in resumeTask --resume branch', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: true,
       claudeFlags: '',
     });
@@ -1211,7 +1204,6 @@ describe('claude launch flags', () => {
   it('applies flags in resumeTask --continue branch', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '--model opus',
     });
@@ -1227,7 +1219,6 @@ describe('claude launch flags', () => {
   it('applies flags in addAgent', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: true,
       claudeFlags: '--model opus',
     });
@@ -1306,7 +1297,6 @@ describe('createUserTerminal', () => {
   it('opens vscode when editor setting is vscode', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'vscode',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     });
@@ -1322,7 +1312,6 @@ describe('createUserTerminal', () => {
   it('opens cursor when editor setting is cursor', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'cursor',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     });
@@ -1338,7 +1327,6 @@ describe('createUserTerminal', () => {
   it('creates tmux window with nvim when editor setting is nvim', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     });

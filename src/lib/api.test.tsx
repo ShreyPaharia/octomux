@@ -161,39 +161,6 @@ const apiCases = [
     response: undefined,
     status: 204,
   },
-  {
-    name: 'orchestratorStatus',
-    call: () => api.orchestratorStatus(),
-    expectedUrl: '/api/orchestrator/status',
-    expectedMethod: undefined,
-    expectedBody: undefined,
-    response: { running: false, session: '' },
-  },
-  {
-    name: 'orchestratorStart',
-    call: () => api.orchestratorStart(),
-    expectedUrl: '/api/orchestrator/start',
-    expectedMethod: 'POST',
-    expectedBody: undefined,
-    response: { running: true, session: 'octomux-orchestrator' },
-  },
-  {
-    name: 'orchestratorStop',
-    call: () => api.orchestratorStop(),
-    expectedUrl: '/api/orchestrator/stop',
-    expectedMethod: 'POST',
-    expectedBody: undefined,
-    response: undefined,
-    status: 204,
-  },
-  {
-    name: 'orchestratorSend',
-    call: () => api.orchestratorSend('hello'),
-    expectedUrl: '/api/orchestrator/send',
-    expectedMethod: 'POST',
-    expectedBody: JSON.stringify({ message: 'hello' }),
-    response: { ok: true, running: true },
-  },
 ] as const;
 
 describe('api methods (table-driven)', () => {
