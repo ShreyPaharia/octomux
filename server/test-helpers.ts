@@ -64,8 +64,8 @@ export const DEFAULTS = {
     label: 'Agent 1',
     status: 'running' as const,
     claude_session_id: 'test-session-uuid-01',
-    pinned: false,
     tmux_session: null,
+    agent: null as string | null,
     created_at: '2026-01-01 00:00:00',
   },
 
@@ -352,6 +352,7 @@ export const TASKS_TABLE_COLUMNS = [
   'error',
   'created_at',
   'updated_at',
+  'agent',
 ];
 
 export const AGENTS_TABLE_COLUMNS = [
@@ -363,8 +364,8 @@ export const AGENTS_TABLE_COLUMNS = [
   'claude_session_id',
   'hook_activity',
   'hook_activity_updated_at',
-  'pinned',
   'tmux_session',
+  'agent',
   'created_at',
 ];
 

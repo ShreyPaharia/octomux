@@ -40,7 +40,6 @@ vi.mock('./settings.js', async () => {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
-      useOrchestratorAgent: false,
       dangerouslySkipPermissions: false,
       claudeFlags: '',
     }),

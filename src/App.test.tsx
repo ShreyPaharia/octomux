@@ -13,18 +13,6 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
-vi.mock('@/lib/orchestrator-context', () => ({
-  useOrchestratorContext: () => ({
-    running: false,
-    loading: false,
-    start: vi.fn(),
-    stop: vi.fn(),
-    error: null,
-    refresh: vi.fn(),
-  }),
-  OrchestratorProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 
 async function renderAt(route: string) {

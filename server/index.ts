@@ -20,7 +20,6 @@ import {
   gcScratchDirs,
 } from './task-runner.js';
 import { getDb } from './db.js';
-import { startOrchestrator } from './orchestrator.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
@@ -82,13 +81,8 @@ await cleanupOrphanedViewerSessions();
 await gcScratchDirs();
 
 // Sync built-in agent definitions to .claude/agents/
-await syncAgents().catch((err) => {
+await syncAgents().catch((err: unknown) => {
   logger.error({ err }, 'Failed to sync agents');
-});
-
-// Auto-start orchestrator
-startOrchestrator().catch((err) => {
-  logger.error({ err }, 'Failed to auto-start orchestrator');
 });
 
 // Resolve owner's GitHub login for reviewer-request polling (non-blocking)

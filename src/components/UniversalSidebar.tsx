@@ -16,7 +16,6 @@ import {
   type SidebarItem,
   type SidebarGroup,
 } from '@/lib/sidebar-utils';
-import { useOrchestratorContext } from '@/lib/orchestrator-context';
 import { api } from '@/lib/api';
 import type { RunMode, TaskStatus, Agent } from '../../server/types';
 
@@ -249,26 +248,6 @@ function TasksIcon({ color }: { color: string }) {
   );
 }
 
-function TerminalIcon({ color }: { color: string }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={color}
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0"
-      aria-hidden="true"
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
-    </svg>
-  );
-}
-
 function WorkspacesIcon({ color }: { color: string }) {
   return (
     <svg
@@ -313,7 +292,7 @@ function SettingsIcon({ color }: { color: string }) {
 
 // ─── Static config ──────────────────────────────────────────────────────────
 
-type NavKey = 'home' | 'tasks' | 'orchestrator' | 'settings';
+type NavKey = 'home' | 'tasks' | 'settings';
 
 const NAV_ITEMS: ReadonlyArray<{
   key: NavKey;
@@ -323,7 +302,6 @@ const NAV_ITEMS: ReadonlyArray<{
 }> = [
   { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon },
   { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
-  { key: 'orchestrator', label: 'ORCHESTRATOR', to: '/chats/orchestrator', Icon: TerminalIcon },
   { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
 ];
 
@@ -522,7 +500,6 @@ export function UniversalSidebar() {
   const { tasks, refresh } = useTasksContext();
   const location = useLocation();
   const navigate = useNavigate();
-  const { running: orchestratorRunning } = useOrchestratorContext();
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -573,8 +550,6 @@ export function UniversalSidebar() {
   }, []);
 
   const activeNav = useMemo<NavKey | null>(() => {
-    if (location.pathname === '/orchestrator' || location.pathname === '/chats/orchestrator')
-      return 'orchestrator';
     if (location.pathname === '/settings') return 'settings';
     if (location.pathname === '/tasks' || location.pathname.startsWith('/tasks/')) return 'tasks';
     if (activeTaskId) return null;
@@ -731,17 +706,9 @@ export function UniversalSidebar() {
               isActive={isActive}
               tooltip={pretty}
               ariaLabel={pretty}
-              badge={key === 'orchestrator' && orchestratorRunning ? <OrchestratorBadge /> : null}
             />
           ) : (
-            <ExpandedNavRow
-              key={key}
-              to={to}
-              Icon={Icon}
-              label={label}
-              isActive={isActive}
-              orchestratorRunning={key === 'orchestrator' ? orchestratorRunning : false}
-            />
+            <ExpandedNavRow key={key} to={to} Icon={Icon} label={label} isActive={isActive} />
           );
         })}
       </div>
@@ -749,7 +716,7 @@ export function UniversalSidebar() {
       {/* More (secondary nav: workspaces, etc.) */}
       <MoreSection collapsed={collapsed} activePath={location.pathname} />
 
-      {/* Chats section (non-orchestrator standalone agents) */}
+      {/* Chats section (standalone runtime agents) */}
       <ChatsSection collapsed={collapsed} activePath={location.pathname} />
 
       {/* Collapsed-rail status preview */}
@@ -805,13 +772,11 @@ function ExpandedNavRow({
   Icon,
   label,
   isActive,
-  orchestratorRunning,
 }: {
   to: string;
   Icon: (p: { color: string }) => ReactNode;
   label: string;
   isActive: boolean;
-  orchestratorRunning: boolean;
 }) {
   const pretty = label.charAt(0) + label.slice(1).toLowerCase();
   const iconColor = isActive ? '#3B82F6' : NAV_INACTIVE_FG;
@@ -839,13 +804,6 @@ function ExpandedNavRow({
       >
         <Icon color={iconColor} />
         <span className="truncate">{label}</span>
-        {orchestratorRunning ? (
-          <span
-            className="shrink-0 rounded-full"
-            style={{ width: 6, height: 6, backgroundColor: '#22C55E' }}
-            aria-label="Orchestrator running"
-          />
-        ) : null}
       </Link>
     </div>
   );
@@ -859,14 +817,12 @@ function CollapsedNavTile({
   isActive,
   tooltip,
   ariaLabel,
-  badge,
 }: {
   to: string;
   Icon: (p: { color: string }) => ReactNode;
   isActive: boolean;
   tooltip: string;
   ariaLabel: string;
-  badge?: ReactNode;
 }) {
   const iconColor = isActive ? '#3B82F6' : NAV_INACTIVE_FG;
   return (
@@ -887,27 +843,8 @@ function CollapsedNavTile({
         }}
       >
         <Icon color={iconColor} />
-        {badge}
       </Link>
     </div>
-  );
-}
-
-function OrchestratorBadge() {
-  return (
-    <span
-      aria-label="Orchestrator running"
-      data-testid="sidebar-orchestrator-badge"
-      className="absolute rounded-full"
-      style={{
-        top: 4,
-        right: 4,
-        width: 8,
-        height: 8,
-        backgroundColor: '#22C55E',
-        boxShadow: '0 0 0 1.5px rgba(14,15,20,0.95)',
-      }}
-    />
   );
 }
 
@@ -1313,7 +1250,7 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
       const res = await fetch('/api/chats');
       if (!res.ok) return;
       const rows = (await res.json()) as Agent[];
-      setChats(rows.filter((c) => c.id !== 'orchestrator'));
+      setChats(rows);
     } catch {
       // silent
     }

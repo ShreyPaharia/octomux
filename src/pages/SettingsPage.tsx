@@ -9,7 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
-import type { OrchestratorPromptData, RepoConfig } from '@/lib/api';
+import type { RepoConfig } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { GlassPanel } from '@/components/ui/glass-panel';
@@ -785,196 +785,10 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
   );
 }
 
-function OrchestratorAgentToggle() {
-  const [enabled, setEnabled] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getSettings()
-      .then((s) => {
-        if (!cancelled) setEnabled(s.useOrchestratorAgent);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleChange = async (value: boolean) => {
-    const prev = enabled;
-    setEnabled(value);
-    try {
-      await api.updateSettings({ useOrchestratorAgent: value });
-      showToast(
-        'success',
-        'ORCHESTRATOR',
-        value ? 'Using orchestrator agent' : 'Using plain claude',
-      );
-    } catch (err) {
-      setEnabled(prev);
-      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to update');
-    }
-  };
-
-  if (loading) return null;
-
-  return (
-    <SettingRow
-      label="Use orchestrator agent"
-      description="When enabled, starts the orchestrator with --agent orchestrator instead of plain claude"
-    >
-      <ToggleSwitch checked={enabled} onChange={handleChange} />
-    </SettingRow>
-  );
-}
-
-function OrchestratorPromptSection() {
-  const [data, setData] = useState<OrchestratorPromptData | null>(null);
-  const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const savedContentRef = useRef('');
-  const isDirty = content !== savedContentRef.current;
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getOrchestratorPrompt()
-      .then((result) => {
-        if (!cancelled) {
-          setData(result);
-          setContent(result.content);
-          savedContentRef.current = result.content;
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) showToast('error', 'ERROR', err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const save = useCallback(async () => {
-    if (!isDirty || saving) return;
-    setSaving(true);
-    try {
-      await api.updateOrchestratorPrompt(content);
-      savedContentRef.current = content;
-      setData((prev) => (prev ? { ...prev, content, isCustom: true } : prev));
-      showToast('success', 'PROMPT SAVED', 'Orchestrator restarted');
-    } catch (err) {
-      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to save prompt');
-    } finally {
-      setSaving(false);
-    }
-  }, [content, isDirty, saving]);
-
-  const reset = useCallback(async () => {
-    if (!window.confirm('Reset orchestrator prompt to default? This cannot be undone.')) return;
-    try {
-      await api.resetOrchestratorPrompt();
-      const result = await api.getOrchestratorPrompt();
-      setData(result);
-      setContent(result.content);
-      savedContentRef.current = result.content;
-      showToast('success', 'PROMPT RESET', 'Orchestrator restarted');
-    } catch (err) {
-      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to reset prompt');
-    }
-  }, []);
-
-  if (loading) {
-    return <p className="py-3 text-xs text-[#8a8a8a]">Loading prompt...</p>;
-  }
-
-  return (
-    <>
-      <SettingRow
-        label="Orchestrator Prompt"
-        description="Customize the orchestrator's system prompt"
-      >
-        <div className="flex items-center gap-2">
-          {isDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
-          <button
-            onClick={save}
-            disabled={!isDirty || saving}
-            className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </SettingRow>
-      <div className="pb-4" style={ROW_DIVIDER}>
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="mt-2 h-64 w-full resize-y border border-glass-edge bg-[#0B0C0F] p-3 font-mono text-xs leading-relaxed text-white outline-none focus:border-[#3B82F6]"
-          spellCheck={false}
-        />
-        <div className="mt-2 flex items-center gap-3">
-          {data?.isCustom && (
-            <button
-              onClick={reset}
-              className="focus-ring text-xs text-red-400 hover:text-red-300 active:text-red-500"
-            >
-              Reset to Default
-            </button>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function OrchestratorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
-  return (
-    <SectionCard id="orchestrator" title="ORCHESTRATOR" scrollRef={scrollRef}>
-      <OrchestratorAgentToggle />
-      <OrchestratorPromptSection />
-      <SettingRow
-        label="Restart Orchestrator"
-        description="Stop and restart the orchestrator process"
-        lastRow
-      >
-        <button
-          onClick={async () => {
-            try {
-              await api.orchestratorStop();
-              await api.orchestratorStart();
-              showToast('success', 'ORCHESTRATOR', 'Orchestrator restarted');
-            } catch (err) {
-              showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to restart');
-            }
-          }}
-          className="focus-ring border border-glass-edge bg-glass-l1 px-3 py-1 text-xs text-white transition-colors hover:bg-glass-l2 active:bg-glass-l3 disabled:opacity-40"
-        >
-          Restart
-        </button>
-      </SettingRow>
-    </SectionCard>
-  );
-}
-
-type SectionId =
-  | 'general'
-  | 'orchestrator'
-  | 'agents'
-  | 'skills'
-  | 'repositories'
-  | 'editor'
-  | 'agent-launch';
+type SectionId = 'general' | 'agents' | 'skills' | 'repositories' | 'editor' | 'agent-launch';
 
 const NAV_ITEMS: { id: SectionId; label: string }[] = [
   { id: 'general', label: 'GENERAL' },
-  { id: 'orchestrator', label: 'ORCHESTRATOR' },
   { id: 'agents', label: 'AGENTS' },
   { id: 'skills', label: 'SKILLS' },
   { id: 'repositories', label: 'REPOSITORIES' },
@@ -1085,7 +899,6 @@ export default function SettingsPage() {
         <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
           <div className="mx-auto max-w-3xl">
             <GeneralSection scrollRef={setRef('general')} />
-            <OrchestratorSection scrollRef={setRef('orchestrator')} />
             <AgentsSection scrollRef={setRef('agents')} />
             <SkillsSection scrollRef={setRef('skills')} />
             <RepoConfigsSection scrollRef={setRef('repositories')} />
