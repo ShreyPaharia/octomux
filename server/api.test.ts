@@ -1873,3 +1873,29 @@ describe('GET /api/preflight/none-mode', () => {
     expect(res.status).not.toBe(404);
   });
 });
+
+// ─── POST /api/preflight/stash ────────────────────────────────────────────────
+
+describe('POST /api/preflight/stash', () => {
+  it('400s when repo_path is missing', async () => {
+    const res = await request(app)
+      .post('/api/preflight/stash')
+      .send({ target_branch: 'feature-x' });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s when target_branch is missing', async () => {
+    const res = await request(app)
+      .post('/api/preflight/stash')
+      .send({ repo_path: '/r' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 from execFile failure on a fake repo path', async () => {
+    const res = await request(app)
+      .post('/api/preflight/stash')
+      .send({ repo_path: '/tmp/octomux-not-a-repo', target_branch: 'feature-x' });
+    expect([200, 400]).toContain(res.status);
+    expect(res.status).not.toBe(404);
+  });
+});

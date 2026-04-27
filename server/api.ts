@@ -223,6 +223,30 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // Stash uncommitted changes before switching branch
+  app.post('/api/preflight/stash', async (req: Request, res: Response) => {
+    const repoPath = String(req.body?.repo_path ?? '');
+    const targetBranch = String(req.body?.target_branch ?? '');
+    if (!repoPath || !targetBranch) {
+      res.status(400).json({ error: 'repo_path and target_branch are required' });
+      return;
+    }
+    try {
+      await execFile('git', [
+        '-C',
+        repoPath,
+        'stash',
+        'push',
+        '-u',
+        '-m',
+        `octomux: auto-stash before switching to ${targetBranch}`,
+      ]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // Get default branch for a git repo
   app.get('/api/default-branch', async (req: Request, res: Response) => {
     const repoPath = req.query.repo_path as string;
