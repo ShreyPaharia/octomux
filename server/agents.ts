@@ -134,10 +134,11 @@ export async function createAgent(name: string, content: string): Promise<void> 
 
 /**
  * Sync effective agent files (custom override or built-in default) to
- * `.claude/agents/` in the working directory so `claude --agent <name>` works.
+ * `.claude/agents/` in `cwd` (defaults to process.cwd) so `claude --agent <name>`
+ * resolves them when launched in that directory.
  */
-export async function syncAgents(): Promise<void> {
-  const targetDir = path.join(process.cwd(), '.claude', 'agents');
+export async function syncAgents(cwd?: string): Promise<void> {
+  const targetDir = path.join(cwd ?? process.cwd(), '.claude', 'agents');
   await fs.promises.mkdir(targetDir, { recursive: true });
 
   const agents = await listAgents();

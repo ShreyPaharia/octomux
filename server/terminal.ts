@@ -7,7 +7,6 @@ import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
-import { getOrchestratorSession } from './orchestrator.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 
 const execFile = promisify(execFileCb);
@@ -25,15 +24,6 @@ export function setupTerminalWebSocket(): void {
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-  // Match /ws/terminal/orchestrator
-  const orchMatch = req.url?.match(/^\/ws\/terminal\/orchestrator$/);
-  if (orchMatch) {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      handleOrchestratorConnection(ws);
-    });
-    return true;
-  }
-
   // Match /ws/terminal/chat/:id (standalone agent tmux session)
   const chatMatch = req.url?.match(/^\/ws\/terminal\/chat\/([^/]+)$/);
   if (chatMatch) {
@@ -213,11 +203,6 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
     linkedSession,
     pendingMessages,
   );
-}
-
-function handleOrchestratorConnection(ws: WebSocket): void {
-  const session = getOrchestratorSession();
-  attachToTmuxSession(ws, session, 'orchestrator', 'Failed to attach to orchestrator session');
 }
 
 function handleChatConnection(ws: WebSocket, chatId: string): void {

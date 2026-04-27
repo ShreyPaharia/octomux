@@ -7,6 +7,7 @@ import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { getSettings, resolveClaudeFlags } from './settings.js';
+import { syncAgents } from './agents.js';
 import { childLogger } from './logger.js';
 import type { Agent } from './types.js';
 
@@ -17,9 +18,6 @@ const logger = childLogger('chats');
  * A "chat" is a standalone runtime agent — a Claude instance with `task_id=NULL`.
  * Lives in its own tmux session (`octomux-chat-<id>`), with a per-agent scratch
  * working directory under `~/.octomux/chats/<id>/`.
- *
- * Orchestrator is a pinned chat seeded by the DB migration; it uses a fixed
- * session name `octomux-orchestrator` rather than `octomux-chat-<id>`.
  */
 
 /** Root directory for chat scratch working dirs. */
@@ -38,6 +36,7 @@ export function chatSessionName(id: string): string {
 export interface CreateChatOptions {
   label?: string;
   cwd?: string;
+  agent?: string | null;
 }
 
 /**
@@ -48,6 +47,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   const id = nanoid(12);
   const label = opts.label ?? 'Chat';
   const cwd = opts.cwd ?? chatDirFor(id);
+  const agent = opts.agent ?? null;
   fs.mkdirSync(cwd, { recursive: true });
 
   const session = chatSessionName(id);
@@ -56,20 +56,23 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   db.prepare(
     `INSERT INTO agents
        (id, task_id, window_index, label, status, claude_session_id,
-        hook_activity, pinned, tmux_session, created_at)
-     VALUES (?, NULL, 0, ?, 'running', ?, 'active', 0, ?, datetime('now'))`,
-  ).run(id, label, claudeSessionId, session);
+        hook_activity, tmux_session, agent, created_at)
+     VALUES (?, NULL, 0, ?, 'running', ?, 'active', ?, ?, datetime('now'))`,
+  ).run(id, label, claudeSessionId, session, agent);
 
   try {
+    if (agent) await syncAgents(cwd);
+
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
     const flags = resolveClaudeFlags(await getSettings());
-    const cmd = `claude --session-id ${claudeSessionId}${flags}`;
+    const agentFlag = agent ? ` --agent ${agent}` : '';
+    const cmd = `claude${agentFlag} --session-id ${claudeSessionId}${flags}`;
     await execFile('tmux', ['send-keys', '-t', session, cmd, 'Enter']);
 
     logger.info(
-      { chat_id: id, tmux_session: session, cwd, operation: 'createChat' },
+      { chat_id: id, tmux_session: session, cwd, agent, operation: 'createChat' },
       'createChat: complete',
     );
   } catch (err) {

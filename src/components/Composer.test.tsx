@@ -23,6 +23,7 @@ vi.mock('@/lib/hooks', () => ({
     error: null,
     refresh: vi.fn(),
   }),
+  useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
 }));
 
 const mockTasksRef = { current: [] as Task[] };

@@ -27,7 +27,7 @@ describe('currentTaskIdFromPath', () => {
     { path: '/tasks/abc/something', expected: 'abc' },
     { path: '/', expected: null },
     { path: '/tasks', expected: null },
-    { path: '/orchestrator', expected: null },
+    { path: '/settings', expected: null },
   ])('$path → $expected', ({ path, expected }) => {
     expect(currentTaskIdFromPath(path)).toBe(expected);
   });

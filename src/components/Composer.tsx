@@ -17,6 +17,7 @@ import {
 } from '@/lib/composer-state';
 import { RepoPickerField } from './fields/RepoPickerField';
 import { BranchPickerField } from './fields/BranchPickerField';
+import { AgentPickerField } from './fields/AgentPickerField';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
@@ -24,7 +25,7 @@ import { useTasksContext } from '@/lib/tasks-context';
 import type { Task, Agent } from '../../server/types';
 
 /** POST /api/chats — create a standalone runtime agent. */
-async function createChatRequest(body: { label?: string }): Promise<Agent> {
+async function createChatRequest(body: { label?: string; agent?: string | null }): Promise<Agent> {
   const res = await fetch('/api/chats', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -132,6 +133,11 @@ export function Composer({ onSubmitted }: Props = {}) {
 
   const onToggleDraft = useCallback(() => dispatch({ type: 'toggleDraft' }), []);
 
+  const onPickAgent = useCallback(
+    (agent: string | null) => dispatch({ type: 'pickAgent', agent }),
+    [],
+  );
+
   const onClearIntent = useCallback(() => dispatch({ type: 'clearIntent' }), []);
 
   // ─── Submit ──────────────────────────────────────────────────────────
@@ -147,12 +153,19 @@ export function Composer({ onSubmitted }: Props = {}) {
       setErrorBanner(null);
       try {
         const trimmed = prompt.trim();
+        const pickedAgent = 'agent' in state ? (state.agent ?? null) : null;
         if (state.mode === 'add-agent') {
-          await api.addAgent(state.sessionId, { prompt: trimmed });
+          await api.addAgent(state.sessionId, {
+            prompt: trimmed,
+            ...(pickedAgent ? { agent: pickedAgent } : {}),
+          });
           refresh();
           navigate(`/tasks/${state.sessionId}`);
         } else if (state.mode === 'scratch') {
-          const chat = await createChatRequest({ label: deriveTitleFromPrompt(trimmed) });
+          const chat = await createChatRequest({
+            label: deriveTitleFromPrompt(trimmed),
+            agent: pickedAgent,
+          });
           navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
           const title = deriveTitleFromPrompt(trimmed);
@@ -175,6 +188,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             payload.worktree_path = state.worktreePath;
           }
           if ('isDraft' in state && state.isDraft) payload.draft = true;
+          if (pickedAgent) payload.agent = pickedAgent;
           const created = await api.createTask(payload);
           refresh();
           onSubmitted?.(created);
@@ -232,6 +246,8 @@ export function Composer({ onSubmitted }: Props = {}) {
   const showAttachChip = state.mode === 'new' || state.mode === 'existing' || state.mode === 'none';
   const disabledByAddAgent = state.mode === 'add-agent';
   const showScratchHint = !hasRepo && state.mode !== 'add-agent';
+  const pickedAgent = 'agent' in state ? (state.agent ?? null) : null;
+  const showAgentChip = state.mode !== 'empty';
 
   return (
     <GlassPanel
@@ -308,6 +324,8 @@ export function Composer({ onSubmitted }: Props = {}) {
             onClear={onClearExistingPath}
           />
         )}
+
+        {showAgentChip && <AgentChip value={pickedAgent} onChange={onPickAgent} />}
 
         <DraftToggle
           checked={'isDraft' in state ? state.isDraft : false}
@@ -646,6 +664,56 @@ function AttachChip({
       onRemove={onClear}
       data-testid="attach-chip"
     />
+  );
+}
+
+interface AgentChipProps {
+  value: string | null;
+  onChange: (agent: string | null) => void;
+}
+
+/**
+ * Empty state: dashed pill `+ run as agent` (matches RepoChip).
+ * Filled state: amber pill `🤖 <name> ×` (×) clears, click reopens picker.
+ */
+function AgentChip({ value, onChange }: AgentChipProps) {
+  if (!value) {
+    return (
+      <div data-testid="agent-chip-empty">
+        <AgentPickerField
+          value={null}
+          onChange={onChange}
+          triggerLabel="+ run as agent"
+          triggerClassName="focus-ring inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/20 bg-white/[0.03] px-3 py-1 text-[11px] font-mono text-muted-foreground hover:border-foreground hover:text-foreground"
+        />
+      </div>
+    );
+  }
+  return (
+    <div
+      data-testid="agent-chip"
+      title={value}
+      className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-mono"
+      style={{
+        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+        borderColor: 'rgba(245, 158, 11, 0.4)',
+        color: '#F59E0B',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => onChange(null)}
+        aria-label="Clear agent"
+        className="inline-flex items-center gap-1.5 font-semibold hover:opacity-80"
+        style={{ color: '#F59E0B' }}
+      >
+        <span aria-hidden>🤖</span>
+        <span>{value}</span>
+        <span aria-hidden style={{ color: 'rgba(245, 158, 11, 0.7)' }}>
+          ×
+        </span>
+      </button>
+    </div>
   );
 }
 
