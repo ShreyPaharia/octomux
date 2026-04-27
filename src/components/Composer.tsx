@@ -21,8 +21,11 @@ import { AgentPickerField } from './fields/AgentPickerField';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
+import type { PreflightResult } from '@/lib/api';
 import { useTasksContext } from '@/lib/tasks-context';
 import type { Task, Agent } from '../../server/types';
+import { NoneModeConflictDialog } from './NoneModeConflictDialog';
+import { NoneModeDirtyDialog } from './NoneModeDirtyDialog';
 
 /** POST /api/chats — create a standalone runtime agent. */
 async function createChatRequest(body: { label?: string; agent?: string | null }): Promise<Agent> {
@@ -65,6 +68,10 @@ export function Composer({ onSubmitted }: Props = {}) {
 
   const [prompt, setPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [preflightBlock, setPreflightBlock] = useState<{
+    result: PreflightResult;
+    payload: Parameters<typeof api.createTask>[0];
+  } | null>(null);
   const [errorBanner, setErrorBanner] = useState<{
     message: string;
     conflictTaskId?: string | null;
@@ -189,6 +196,16 @@ export function Composer({ onSubmitted }: Props = {}) {
           }
           if ('isDraft' in state && state.isDraft) payload.draft = true;
           if (pickedAgent) payload.agent = pickedAgent;
+
+          // Preflight only for none-mode + base_branch
+          if (state.mode === 'none' && state.branch) {
+            const pre = await api.preflightNoneMode(state.repo, state.branch);
+            if (!pre.ok) {
+              setPreflightBlock({ result: pre, payload });
+              return;
+            }
+          }
+
           const created = await api.createTask(payload);
           refresh();
           onSubmitted?.(created);
@@ -380,6 +397,51 @@ export function Composer({ onSubmitted }: Props = {}) {
           </Button>
         </div>
       </form>
+      {preflightBlock && preflightBlock.result.conflicts.length > 0 && (
+        <NoneModeConflictDialog
+          open
+          conflicts={preflightBlock.result.conflicts}
+          targetBranch={preflightBlock.result.targetBranch}
+          onClose={() => setPreflightBlock(null)}
+          onCloseTask={async (taskId) => {
+            await api.updateTask(taskId, { status: 'closed' });
+            const repoForPreflight = preflightBlock.payload.repo_path!;
+            const branchForPreflight = preflightBlock.payload.base_branch!;
+            const next = await api.preflightNoneMode(repoForPreflight, branchForPreflight);
+            setPreflightBlock({ result: next, payload: preflightBlock.payload });
+          }}
+          onResolved={async () => {
+            if (preflightBlock.result.dirty) return;
+            const created = await api.createTask(preflightBlock.payload);
+            setPreflightBlock(null);
+            refresh();
+            onSubmitted?.(created);
+            navigate(`/tasks/${created.id}`);
+          }}
+        />
+      )}
+      {preflightBlock &&
+        preflightBlock.result.conflicts.length === 0 &&
+        preflightBlock.result.dirty && (
+          <NoneModeDirtyDialog
+            open
+            count={preflightBlock.result.dirty.count}
+            currentBranch={preflightBlock.result.currentBranch}
+            targetBranch={preflightBlock.result.targetBranch}
+            onClose={() => setPreflightBlock(null)}
+            onStash={async () => {
+              await api.stashRepo(
+                preflightBlock.payload.repo_path!,
+                preflightBlock.payload.base_branch!,
+              );
+              const created = await api.createTask(preflightBlock.payload);
+              setPreflightBlock(null);
+              refresh();
+              onSubmitted?.(created);
+              navigate(`/tasks/${created.id}`);
+            }}
+          />
+        )}
     </GlassPanel>
   );
 }
