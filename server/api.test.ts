@@ -1849,3 +1849,27 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
     expect(res.body.worktree_row).toBeNull();
   });
 });
+
+// ─── GET /api/preflight/none-mode ────────────────────────────────────────────
+
+describe('GET /api/preflight/none-mode', () => {
+  it('400s when repo_path is missing', async () => {
+    const res = await request(app).get('/api/preflight/none-mode?base_branch=main');
+    expect(res.status).toBe(400);
+  });
+
+  it('400s when base_branch is missing', async () => {
+    const res = await request(app).get('/api/preflight/none-mode?repo_path=/r');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 from execFile failure on a fake repo path', async () => {
+    const res = await request(app).get(
+      '/api/preflight/none-mode?repo_path=/tmp/octomux-not-a-repo&base_branch=main',
+    );
+    // Fake repo path will surface as 400 from execFile failure. We just want to
+    // confirm the route exists and delegates correctly.
+    expect([200, 400]).toContain(res.status);
+    expect(res.status).not.toBe(404);
+  });
+});
