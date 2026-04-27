@@ -467,7 +467,7 @@ describe('startTask', () => {
       beforeEach(() => {
         // Override --abbrev-ref to return 'feature-x' so currentBranch === target.
         vi.mocked(execFile).mockImplementation(
-          (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+          ((_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
             const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
             if (args.includes('display-message')) {
               cb(null, { stdout: String(nextWindowIndex), stderr: '' });
@@ -485,14 +485,14 @@ describe('startTask', () => {
             } else {
               cb(null, { stdout: 'true', stderr: '' });
             }
-          },
+          }) as never,
         );
       });
 
       afterEach(() => {
         // Restore the default mock so subsequent tests don't see 'feature-x' from --abbrev-ref.
         vi.mocked(execFile).mockImplementation(
-          (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+          ((_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
             const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
             if (args.includes('display-message')) {
               cb(null, { stdout: String(nextWindowIndex), stderr: '' });
@@ -510,7 +510,7 @@ describe('startTask', () => {
             } else {
               cb(null, { stdout: 'true', stderr: '' });
             }
-          },
+          }) as never,
         );
       });
 
@@ -539,7 +539,7 @@ describe('startTask', () => {
       // Override mock so abbrev-ref returns feature-x (already on target)
       const originalImpl = vi.mocked(execFile).getMockImplementation();
       vi.mocked(execFile).mockImplementation(
-        (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+        ((_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
           const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
           if (args.includes('--abbrev-ref')) {
             cb(null, { stdout: 'feature-x\n', stderr: '' });
@@ -547,7 +547,7 @@ describe('startTask', () => {
           }
           // delegate to the original baseline for everything else
           if (originalImpl) (originalImpl as Function)(_cmd, args, optsOrCb, maybeCb);
-        },
+        }) as never,
       );
 
       try {

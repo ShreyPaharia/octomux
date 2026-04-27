@@ -267,6 +267,62 @@ describe('Composer / submit', () => {
     await user.type(screen.getByTestId('composer-prompt'), 'p');
     expect(screen.getByTestId('composer-submit')).toBeDisabled();
   });
+
+  it('calls preflight before creating a none-mode task with base_branch', async () => {
+    apiMock.preflightNoneMode.mockResolvedValueOnce({
+      ok: true,
+      currentBranch: 'feature-x',
+      targetBranch: 'feature-x',
+      conflicts: [],
+      dirty: null,
+    });
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'none-1' }));
+    renderComposer('/?repo=%2Fr&mode=none&branch=feature-x');
+    await user.type(screen.getByTestId('composer-prompt'), 'do the thing');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => expect(apiMock.preflightNoneMode).toHaveBeenCalledWith('/r', 'feature-x'));
+    expect(apiMock.createTask).toHaveBeenCalled();
+  });
+
+  it('conflict dialog opens when preflight returns conflicts', async () => {
+    apiMock.preflightNoneMode.mockResolvedValueOnce({
+      ok: false,
+      conflicts: [{ task_id: 't1', title: 'other', status: 'running', branch: 'feature-x' }],
+      dirty: null,
+      currentBranch: 'main',
+      targetBranch: 'feature-x',
+    });
+    renderComposer('/?repo=%2Fr&mode=none&branch=feature-x');
+    await user.type(screen.getByTestId('composer-prompt'), 'do the thing');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => expect(screen.getByText(/Other chats are using/i)).toBeInTheDocument());
+    expect(apiMock.createTask).not.toHaveBeenCalled();
+  });
+
+  it('dirty dialog opens when preflight returns dirty', async () => {
+    apiMock.preflightNoneMode.mockResolvedValueOnce({
+      ok: false,
+      conflicts: [],
+      dirty: { count: 5 },
+      currentBranch: 'main',
+      targetBranch: 'feature-x',
+    });
+    renderComposer('/?repo=%2Fr&mode=none&branch=feature-x');
+    await user.type(screen.getByTestId('composer-prompt'), 'do the thing');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /Uncommitted changes/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('preflight skipped when none mode has no base_branch', async () => {
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'none-no-branch' }));
+    renderComposer('/?repo=%2Fr&mode=none');
+    await user.type(screen.getByTestId('composer-prompt'), 'edit in place');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => expect(apiMock.createTask).toHaveBeenCalled());
+    expect(apiMock.preflightNoneMode).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Intent header dismiss ────────────────────────────────────────────────
