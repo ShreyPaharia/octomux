@@ -39,6 +39,7 @@ export interface WorktreeSummary extends Worktree {
 export interface CreateChatRequest {
   label?: string;
   cwd?: string;
+  agent?: string;
 }
 
 export interface Task {
@@ -62,6 +63,8 @@ export interface Task {
   source: TaskSource;
   /** Phase 2a: link into the extracted `worktrees` table. Null = scratch/none during transition. */
   worktree_id: string | null;
+  /** Optional agent name (matches `agents/<name>.md`); null launches plain `claude`. */
+  agent: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -81,10 +84,10 @@ export interface Agent {
   claude_session_id: string | null;
   hook_activity: HookActivity;
   hook_activity_updated_at: string | null;
-  /** Phase 2a: true for pinned rows (orchestrator). */
-  pinned: boolean;
   /** Phase 2a: populated for standalone agents; task-scoped agents read via task.tmux_session. */
   tmux_session: string | null;
+  /** Optional agent name used at launch (`claude --agent <name>`). */
+  agent: string | null;
   created_at: string;
 }
 
@@ -122,15 +125,12 @@ export interface CreateTaskRequest {
   draft?: boolean;
   run_mode?: RunMode;
   worktree_path?: string;
-}
-
-export interface OrchestratorStatus {
-  running: boolean;
-  session: string;
+  agent?: string;
 }
 
 export interface AddAgentRequest {
   prompt?: string;
+  agent?: string;
 }
 
 export interface UpdateTaskRequest {

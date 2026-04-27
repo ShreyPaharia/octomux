@@ -10,7 +10,7 @@ export const SELECT_TASK_SQL = `
   SELECT t.id, t.title, t.description, t.status, t.tmux_session,
          t.pr_url, t.pr_number, t.pr_head_sha, t.user_window_index,
          t.initial_prompt, t.last_viewed_at, t.source, t.worktree_id,
-         t.error, t.created_at, t.updated_at,
+         t.agent, t.error, t.created_at, t.updated_at,
          w.path AS worktree,
          w.repo_path AS repo_path,
          w.branch AS branch,

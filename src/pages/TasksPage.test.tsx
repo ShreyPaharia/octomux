@@ -16,17 +16,6 @@ vi.mock('@/lib/event-source', () => ({
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/lib/orchestrator-context', () => ({
-  useOrchestratorContext: () => ({
-    running: false,
-    loading: false,
-    start: vi.fn(),
-    stop: vi.fn(),
-    error: null,
-    refresh: vi.fn(),
-  }),
-}));
-
 const { routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );

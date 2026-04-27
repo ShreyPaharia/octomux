@@ -114,11 +114,6 @@ CREATE TABLE IF NOT EXISTS config (
 
 `;
 
-/** Well-known id for the pinned orchestrator agent row. */
-export const ORCHESTRATOR_AGENT_ID = 'orchestrator';
-/** Tmux session name for the orchestrator agent. */
-export const ORCHESTRATOR_TMUX_SESSION = 'octomux-orchestrator';
-
 /**
  * Returns true when the live `agents.task_id` column is declared NOT NULL.
  * Used to trigger the nullable-task_id migration exactly once.
@@ -351,10 +346,20 @@ export function initDb(instance: Database.Database): void {
     rebuildAgentsTable(instance);
   }
 
-  // Add agents.pinned and agents.tmux_session columns (post-rebuild).
+  // Add agents.tmux_session column (post-rebuild).
   const agentCols2 = columnsOf('agents');
-  addColumn('agents', 'pinned', 'pinned INTEGER NOT NULL DEFAULT 0', agentCols2);
   addColumn('agents', 'tmux_session', 'tmux_session TEXT', agentCols2);
+  addColumn('agents', 'agent', 'agent TEXT', agentCols2);
+  // Drop legacy `pinned` column from older installs (carried the singleton
+  // orchestrator row). SQLite >= 3.35 supports DROP COLUMN.
+  if (agentCols2.has('pinned')) {
+    instance.exec(`ALTER TABLE agents DROP COLUMN pinned`);
+    agentCols2.delete('pinned');
+  }
+
+  // Add tasks.agent column (idempotent).
+  const taskColsForAgent = columnsOf('tasks');
+  addColumn('tasks', 'agent', 'agent TEXT', taskColsForAgent);
 
   // ─── Drop legacy columns from tasks ──────────────────────────────────────
   // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),
@@ -389,14 +394,8 @@ export function initDb(instance: Database.Database): void {
        WHERE status IN ('draft','setting_up','running') AND worktree_id IS NOT NULL`,
   );
 
-  // Ensure orchestrator pinned agent row exists (idempotent).
-  instance
-    .prepare(
-      `INSERT OR IGNORE INTO agents
-         (id, task_id, window_index, label, status, hook_activity, pinned, tmux_session, created_at)
-       VALUES (?, NULL, 0, 'orchestrator', 'idle', 'active', 1, ?, datetime('now'))`,
-    )
-    .run(ORCHESTRATOR_AGENT_ID, ORCHESTRATOR_TMUX_SESSION);
+  // Drop the legacy seeded orchestrator agent row from older installs.
+  instance.prepare(`DELETE FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`).run();
 
   // Data migrations
   instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);

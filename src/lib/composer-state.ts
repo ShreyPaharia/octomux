@@ -21,6 +21,7 @@ export type ComposerState =
       repo: string;
       branch: string | null;
       isDraft: boolean;
+      agent: string | null;
       forkOf?: string;
     }
   | {
@@ -28,6 +29,7 @@ export type ComposerState =
       repo: string;
       worktreePath: string;
       isDraft: boolean;
+      agent: string | null;
       /** Remembered from `new` mode so clearing the attach path can restore it. */
       lastBranch?: string | null;
     }
@@ -36,16 +38,19 @@ export type ComposerState =
       repo: string;
       branch: string | null;
       isDraft: boolean;
+      agent: string | null;
     }
   | {
       mode: 'scratch';
       isDraft: boolean;
+      agent: string | null;
     }
   | {
       mode: 'add-agent';
       sessionId: string;
       agentType?: string;
       label?: string;
+      agent: string | null;
     };
 
 export type ComposerAction =
@@ -56,11 +61,17 @@ export type ComposerAction =
   | { type: 'setExistingPath'; path: string }
   | { type: 'clearExistingPath' }
   | { type: 'enterAddAgent'; sessionId: string; agentType?: string; label?: string }
+  | { type: 'pickAgent'; agent: string | null }
   | { type: 'clearIntent' }
   | { type: 'toggleDraft' }
   | { type: 'hydrateFromUrl'; params: URLSearchParams };
 
 export const INITIAL_STATE: ComposerState = { mode: 'empty' };
+
+/** Carry-over `agent` field across mode transitions (or null when starting fresh). */
+function carryAgent(state: ComposerState): string | null {
+  return 'agent' in state ? (state.agent ?? null) : null;
+}
 
 export function reduce(state: ComposerState, action: ComposerAction): ComposerState {
   switch (action.type) {
@@ -71,6 +82,7 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
         return { ...state, repo };
       }
       const isDraft = 'isDraft' in state ? state.isDraft : false;
+      const agent = carryAgent(state);
       // Preserve worktree-on when we were already in `new` (and carry any fork intent).
       if (state.mode === 'new') {
         const forkOf = state.forkOf;
@@ -79,18 +91,19 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
           repo,
           branch: defaultBranch,
           isDraft,
+          agent,
           ...(forkOf ? { forkOf } : {}),
         };
       }
       // First repo pick from empty / scratch, and repo swap from `none`:
       // worktree checkbox starts OFF → `none` mode.
-      return { mode: 'none', repo, branch: defaultBranch, isDraft };
+      return { mode: 'none', repo, branch: defaultBranch, isDraft, agent };
     }
 
     case 'clearRepo': {
       if (state.mode === 'add-agent' || state.mode === 'empty') return state;
       const isDraft = 'isDraft' in state ? state.isDraft : false;
-      return { mode: 'scratch', isDraft };
+      return { mode: 'scratch', isDraft, agent: carryAgent(state) };
     }
 
     case 'pickBranch': {
@@ -109,7 +122,13 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
         return { ...rest, mode: 'none' };
       }
       if (state.mode === 'none' && action.worktree) {
-        return { mode: 'new', repo: state.repo, branch: state.branch, isDraft: state.isDraft };
+        return {
+          mode: 'new',
+          repo: state.repo,
+          branch: state.branch,
+          isDraft: state.isDraft,
+          agent: state.agent,
+        };
       }
       return state;
     }
@@ -121,6 +140,7 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
           repo: state.repo,
           worktreePath: action.path,
           isDraft: state.isDraft,
+          agent: state.agent,
           lastBranch: state.branch,
         };
       }
@@ -130,6 +150,7 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
           repo: state.repo,
           worktreePath: action.path,
           isDraft: state.isDraft,
+          agent: state.agent,
           lastBranch: state.branch,
         };
       }
@@ -146,6 +167,7 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
         repo: state.repo,
         branch: state.lastBranch ?? null,
         isDraft: state.isDraft,
+        agent: state.agent,
       };
     }
 
@@ -153,13 +175,20 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
       return {
         mode: 'add-agent',
         sessionId: action.sessionId,
+        agent: carryAgent(state),
         ...(action.agentType ? { agentType: action.agentType } : {}),
         ...(action.label ? { label: action.label } : {}),
       };
     }
 
+    case 'pickAgent': {
+      if (state.mode === 'empty') return state;
+      return { ...state, agent: action.agent };
+    }
+
     case 'clearIntent': {
-      if (state.mode === 'add-agent') return { mode: 'scratch', isDraft: false };
+      if (state.mode === 'add-agent')
+        return { mode: 'scratch', isDraft: false, agent: state.agent };
       if (state.mode === 'new' && state.forkOf) {
         const { forkOf: _forkOf, ...rest } = state;
         return rest;
@@ -187,11 +216,13 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
  * fresh worktree.
  */
 export function hydrateFromUrl(params: URLSearchParams): ComposerState {
+  const agent = params.get('agent');
   const addAgent = params.get('add_agent');
   if (addAgent) {
     return {
       mode: 'add-agent',
       sessionId: addAgent,
+      agent,
       ...(params.get('agent_type') ? { agentType: params.get('agent_type')! } : {}),
       ...(params.get('label') ? { label: params.get('label')! } : {}),
     };
@@ -205,7 +236,7 @@ export function hydrateFromUrl(params: URLSearchParams): ComposerState {
   const existingPath = params.get('worktree_path') ?? params.get('attach');
 
   if (!repo) {
-    return { mode: 'scratch', isDraft: false };
+    return { mode: 'scratch', isDraft: false, agent };
   }
 
   if (existingPath || modeParam === 'existing') {
@@ -214,6 +245,7 @@ export function hydrateFromUrl(params: URLSearchParams): ComposerState {
       repo,
       worktreePath: existingPath ?? '',
       isDraft: false,
+      agent,
       lastBranch: branch,
     };
   }
@@ -224,6 +256,7 @@ export function hydrateFromUrl(params: URLSearchParams): ComposerState {
       repo,
       branch: branch ?? null,
       isDraft: false,
+      agent,
       ...(forkOf ? { forkOf } : {}),
     };
   }
@@ -234,6 +267,7 @@ export function hydrateFromUrl(params: URLSearchParams): ComposerState {
     repo,
     branch: branch ?? null,
     isDraft: false,
+    agent,
   };
 }
 
@@ -246,7 +280,7 @@ export function stateToUrlParams(state: ComposerState): URLSearchParams {
   const params = new URLSearchParams();
   switch (state.mode) {
     case 'empty':
-      break;
+      return params;
     case 'scratch':
       params.set('mode', 'scratch');
       break;
@@ -272,6 +306,7 @@ export function stateToUrlParams(state: ComposerState): URLSearchParams {
       if (state.label) params.set('label', state.label);
       break;
   }
+  if ('agent' in state && state.agent) params.set('agent', state.agent);
   return params;
 }
 
