@@ -526,6 +526,42 @@ describe('POST /api/tasks', () => {
     expect(task?.run_mode).toBe('none');
   });
 
+  it('allows run_mode=none with base_branch (new behavior)', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({
+        title: 't',
+        description: 'd',
+        run_mode: 'none',
+        repo_path: '/tmp/repo',
+        base_branch: 'feature-x',
+      });
+    // We allow the request to pass validation; downstream setup may still fail
+    // when the repo path is fake. Accept any non-400 status.
+    expect(res.status).not.toBe(400);
+  });
+
+  it('still rejects run_mode=none with branch', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ title: 't', description: 'd', run_mode: 'none', repo_path: '/r', branch: 'x' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/branch and worktree_path are not allowed for run_mode=none/);
+  });
+
+  it('still rejects run_mode=none with worktree_path', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({
+        title: 't',
+        description: 'd',
+        run_mode: 'none',
+        repo_path: '/r',
+        worktree_path: '/r/.worktrees/x',
+      });
+    expect(res.status).toBe(400);
+  });
+
   it('defaults run_mode to new when not provided', async () => {
     const res = await request(app).post('/api/tasks').send(validPayload);
 
