@@ -423,12 +423,13 @@ export function setupRoutes(app: Express): void {
       }
     }
     if (runMode === 'none') {
-      if (body.base_branch || body.branch || body.worktree_path) {
+      if (body.branch || body.worktree_path) {
         res.status(400).json({
-          error: 'base_branch, branch, and worktree_path are not allowed for run_mode=none',
+          error: 'branch and worktree_path are not allowed for run_mode=none',
         });
         return;
       }
+      // base_branch is allowed for none mode (triggers branch switch at setup)
     }
     if (runMode === 'scratch') {
       if (body.repo_path || body.base_branch || body.branch || body.worktree_path) {
