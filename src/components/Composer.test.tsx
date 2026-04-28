@@ -274,6 +274,7 @@ describe('Composer / submit', () => {
       currentBranch: 'feature-x',
       targetBranch: 'feature-x',
       conflicts: [],
+      warnings: [],
       dirty: null,
     });
     apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'none-1' }));
@@ -284,10 +285,11 @@ describe('Composer / submit', () => {
     expect(apiMock.createTask).toHaveBeenCalled();
   });
 
-  it('conflict dialog opens when preflight returns conflicts', async () => {
+  it('conflict dialog opens when another task is on a different branch', async () => {
     apiMock.preflightNoneMode.mockResolvedValueOnce({
       ok: false,
-      conflicts: [{ task_id: 't1', title: 'other', status: 'running', branch: 'feature-x' }],
+      conflicts: [{ task_id: 't1', title: 'other', status: 'running', branch: 'main' }],
+      warnings: [],
       dirty: null,
       currentBranch: 'main',
       targetBranch: 'feature-x',
@@ -299,10 +301,30 @@ describe('Composer / submit', () => {
     expect(apiMock.createTask).not.toHaveBeenCalled();
   });
 
+  it('shared-branch dialog warns (non-blocking) when another task is on the same branch', async () => {
+    apiMock.preflightNoneMode.mockResolvedValueOnce({
+      ok: true,
+      conflicts: [],
+      warnings: [{ task_id: 't1', title: 'other', status: 'running', branch: 'feature-x' }],
+      dirty: null,
+      currentBranch: 'feature-x',
+      targetBranch: 'feature-x',
+    });
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'none-shared' }));
+    renderComposer('/?repo=%2Fr&mode=none&branch=feature-x');
+    await user.type(screen.getByTestId('composer-prompt'), 'do the thing');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => expect(screen.getByText(/share the working tree/i)).toBeInTheDocument());
+    expect(apiMock.createTask).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /continue anyway/i }));
+    await waitFor(() => expect(apiMock.createTask).toHaveBeenCalled());
+  });
+
   it('dirty dialog opens when preflight returns dirty', async () => {
     apiMock.preflightNoneMode.mockResolvedValueOnce({
       ok: false,
       conflicts: [],
+      warnings: [],
       dirty: { count: 5 },
       currentBranch: 'main',
       targetBranch: 'feature-x',

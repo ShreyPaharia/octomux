@@ -164,6 +164,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       currentBranch: 'main',
       targetBranch: 'main',
       conflicts: [],
+      warnings: [],
       dirty: null,
     }),
     stashRepo: vi.fn().mockResolvedValue(undefined),
