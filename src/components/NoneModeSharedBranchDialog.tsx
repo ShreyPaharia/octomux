@@ -1,32 +1,31 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import type { PreflightConflict } from '@/lib/api';
 
 interface Props {
   open: boolean;
-  count: number;
-  currentBranch: string;
+  warnings: PreflightConflict[];
   targetBranch: string;
   onClose: () => void;
-  onStash: () => Promise<void> | void;
+  onConfirm: () => Promise<void> | void;
 }
 
-export function NoneModeDirtyDialog({
+export function NoneModeSharedBranchDialog({
   open,
-  count,
-  currentBranch,
+  warnings,
   targetBranch,
   onClose,
-  onStash,
+  onConfirm,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleStash = async () => {
+  const handleConfirm = async () => {
     setBusy(true);
     setError(null);
     try {
-      await onStash();
+      await onConfirm();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -38,19 +37,26 @@ export function NoneModeDirtyDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Uncommitted changes</DialogTitle>
+          <DialogTitle>Other chats are using `{targetBranch}`</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          You have {count} uncommitted change{count === 1 ? '' : 's'} on `{currentBranch}`. Stash
-          them to switch to `{targetBranch}`, or cancel and resolve manually.
+          They share the working tree on this branch — concurrent edits may conflict. You can
+          continue, but the agents will see each other's changes.
         </p>
+        <ul className="mt-4 space-y-1">
+          {warnings.map((w) => (
+            <li key={w.task_id} className="truncate text-sm">
+              {w.title} <span className="text-xs text-muted-foreground">({w.status})</span>
+            </li>
+          ))}
+        </ul>
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleStash} disabled={busy}>
-            {busy ? 'Stashing…' : 'Stash and continue'}
+          <Button onClick={handleConfirm} disabled={busy}>
+            {busy ? 'Starting…' : 'Continue anyway'}
           </Button>
         </div>
       </DialogContent>

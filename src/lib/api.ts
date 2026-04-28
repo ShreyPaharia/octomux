@@ -122,7 +122,10 @@ export interface PreflightResult {
   ok: boolean;
   currentBranch: string;
   targetBranch: string;
+  /** Active none-mode tasks on the same root worktree, on a *different* branch. Blocks creation. */
   conflicts: PreflightConflict[];
+  /** Active none-mode tasks on the same root worktree, on the *same* branch. Non-blocking. */
+  warnings: PreflightConflict[];
   dirty: { count: number } | null;
 }
 

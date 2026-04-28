@@ -462,7 +462,9 @@ async function setupNone(task: Task): Promise<SetupResult> {
     const pre = await preflightNoneMode(task.repo_path, targetBranch);
     if (!pre.ok) {
       const reason = pre.conflicts.length
-        ? `another chat is active on ${targetBranch}: ${pre.conflicts.map((c) => c.task_id).join(', ')}`
+        ? `another chat is active on a different branch at ${task.repo_path}: ${pre.conflicts
+            .map((c) => `${c.task_id} (${c.branch ?? 'unknown'})`)
+            .join(', ')}`
         : `working tree at ${task.repo_path} has ${pre.dirty!.count} uncommitted changes`;
       throw new Error(`none mode preflight failed: ${reason}`);
     }

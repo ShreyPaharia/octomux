@@ -26,6 +26,7 @@ import { useTasksContext } from '@/lib/tasks-context';
 import type { Task, Agent } from '../../server/types';
 import { NoneModeConflictDialog } from './NoneModeConflictDialog';
 import { NoneModeDirtyDialog } from './NoneModeDirtyDialog';
+import { NoneModeSharedBranchDialog } from './NoneModeSharedBranchDialog';
 
 /** POST /api/chats — create a standalone runtime agent. */
 async function createChatRequest(body: { label?: string; agent?: string | null }): Promise<Agent> {
@@ -200,7 +201,10 @@ export function Composer({ onSubmitted }: Props = {}) {
           // Preflight only for none-mode + base_branch
           if (state.mode === 'none' && state.branch) {
             const pre = await api.preflightNoneMode(state.repo, state.branch);
-            if (!pre.ok) {
+            // Conflicts (different-branch active task) and dirty both block
+            // creation. Same-branch warnings don't block but require an
+            // explicit confirmation.
+            if (!pre.ok || pre.warnings.length > 0) {
               setPreflightBlock({ result: pre, payload });
               return;
             }
@@ -411,7 +415,10 @@ export function Composer({ onSubmitted }: Props = {}) {
             setPreflightBlock({ result: next, payload: preflightBlock.payload });
           }}
           onResolved={async () => {
+            // Hand off to the dirty / shared-branch dialogs if those checks
+            // now apply — their conditional renders will pick up the flow.
             if (preflightBlock.result.dirty) return;
+            if (preflightBlock.result.warnings.length > 0) return;
             const created = await api.createTask(preflightBlock.payload);
             setPreflightBlock(null);
             refresh();
@@ -434,6 +441,24 @@ export function Composer({ onSubmitted }: Props = {}) {
                 preflightBlock.payload.repo_path!,
                 preflightBlock.payload.base_branch!,
               );
+              const created = await api.createTask(preflightBlock.payload);
+              setPreflightBlock(null);
+              refresh();
+              onSubmitted?.(created);
+              navigate(`/tasks/${created.id}`);
+            }}
+          />
+        )}
+      {preflightBlock &&
+        preflightBlock.result.conflicts.length === 0 &&
+        !preflightBlock.result.dirty &&
+        preflightBlock.result.warnings.length > 0 && (
+          <NoneModeSharedBranchDialog
+            open
+            warnings={preflightBlock.result.warnings}
+            targetBranch={preflightBlock.result.targetBranch}
+            onClose={() => setPreflightBlock(null)}
+            onConfirm={async () => {
               const created = await api.createTask(preflightBlock.payload);
               setPreflightBlock(null);
               refresh();
