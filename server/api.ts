@@ -1225,7 +1225,12 @@ export function setupRoutes(app: Express): void {
   app.post('/api/chats', async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as CreateChatRequest;
     try {
-      const chat = await createChat({ label: body.label, cwd: body.cwd, agent: body.agent });
+      const chat = await createChat({
+        label: body.label,
+        cwd: body.cwd,
+        agent: body.agent,
+        prompt: body.prompt,
+      });
       res.status(201).json(chat);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
