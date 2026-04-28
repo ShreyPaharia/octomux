@@ -199,6 +199,11 @@ export const api = {
     request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'POST' }),
   unmarkReviewed: (taskId: string, filePath: string) =>
     request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'DELETE' }),
+  sendAgentMessage: (taskId: string, agentId: string, message: string) =>
+    request<{ ok: boolean }>(`/tasks/${taskId}/agents/${agentId}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
     request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
   stopAgent: (taskId: string, agentId: string) =>
