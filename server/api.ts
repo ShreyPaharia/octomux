@@ -206,6 +206,47 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // Preflight check for none-mode task creation
+  app.get('/api/preflight/none-mode', async (req: Request, res: Response) => {
+    const repoPath = String(req.query.repo_path ?? '');
+    const baseBranch = String(req.query.base_branch ?? '');
+    if (!repoPath || !baseBranch) {
+      res.status(400).json({ error: 'repo_path and base_branch are required' });
+      return;
+    }
+    try {
+      const { preflightNoneMode } = await import('./preflight.js');
+      const result = await preflightNoneMode(repoPath, baseBranch);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  // Stash uncommitted changes before switching branch
+  app.post('/api/preflight/stash', async (req: Request, res: Response) => {
+    const repoPath = String(req.body?.repo_path ?? '');
+    const targetBranch = String(req.body?.target_branch ?? '');
+    if (!repoPath || !targetBranch) {
+      res.status(400).json({ error: 'repo_path and target_branch are required' });
+      return;
+    }
+    try {
+      await execFile('git', [
+        '-C',
+        repoPath,
+        'stash',
+        'push',
+        '-u',
+        '-m',
+        `octomux: auto-stash before switching to ${targetBranch}`,
+      ]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   // Get default branch for a git repo
   app.get('/api/default-branch', async (req: Request, res: Response) => {
     const repoPath = req.query.repo_path as string;
@@ -423,12 +464,13 @@ export function setupRoutes(app: Express): void {
       }
     }
     if (runMode === 'none') {
-      if (body.base_branch || body.branch || body.worktree_path) {
+      if (body.branch || body.worktree_path) {
         res.status(400).json({
-          error: 'base_branch, branch, and worktree_path are not allowed for run_mode=none',
+          error: 'branch and worktree_path are not allowed for run_mode=none',
         });
         return;
       }
+      // base_branch is allowed for none mode (triggers branch switch at setup)
     }
     if (runMode === 'scratch') {
       if (body.repo_path || body.base_branch || body.branch || body.worktree_path) {

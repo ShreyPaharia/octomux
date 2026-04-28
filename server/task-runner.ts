@@ -445,19 +445,48 @@ async function setupExisting(task: Task): Promise<SetupResult> {
 async function setupNone(task: Task): Promise<SetupResult> {
   await validateRepo(task.repo_path);
 
-  const dirty = await checkDirty(task.repo_path);
-  if (dirty.length > 0) {
-    const preview = dirty.slice(0, 5).join(', ');
-    const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
-    throw new Error(`none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`);
+  const { stdout: headOut } = await execFile('git', [
+    '-C',
+    task.repo_path,
+    'rev-parse',
+    '--abbrev-ref',
+    'HEAD',
+  ]);
+  const currentBranch = headOut.trim();
+  const targetBranch = task.base_branch?.trim() || null;
+
+  if (targetBranch) {
+    // Defense in depth: re-run preflight inside setup, in case state changed
+    // between the API preflight and now.
+    const { preflightNoneMode } = await import('./preflight.js');
+    const pre = await preflightNoneMode(task.repo_path, targetBranch);
+    if (!pre.ok) {
+      const reason = pre.conflicts.length
+        ? `another chat is active on ${targetBranch}: ${pre.conflicts.map((c) => c.task_id).join(', ')}`
+        : `working tree at ${task.repo_path} has ${pre.dirty!.count} uncommitted changes`;
+      throw new Error(`none mode preflight failed: ${reason}`);
+    }
+    if (targetBranch !== currentBranch) {
+      await execFile('git', ['-C', task.repo_path, 'checkout', targetBranch]);
+    }
+  } else {
+    // Legacy path: no target branch provided, but the tree must still be clean
+    // for none mode (preserves existing behavior).
+    const dirty = await checkDirty(task.repo_path);
+    if (dirty.length > 0) {
+      const preview = dirty.slice(0, 5).join(', ');
+      const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
+      throw new Error(`none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`);
+    }
   }
 
+  const finalBranch = targetBranch ?? currentBranch;
   const baseSha = await revParseHead(task.repo_path);
 
   return {
     worktreePath: task.repo_path,
-    branch: null,
-    baseBranch: null,
+    branch: finalBranch,
+    baseBranch: targetBranch,
     baseSha,
     installHooksAt: task.repo_path,
     runPreflight: false,

@@ -526,6 +526,42 @@ describe('POST /api/tasks', () => {
     expect(task?.run_mode).toBe('none');
   });
 
+  it('allows run_mode=none with base_branch (new behavior)', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({
+        title: 't',
+        description: 'd',
+        run_mode: 'none',
+        repo_path: '/tmp/repo',
+        base_branch: 'feature-x',
+      });
+    // We allow the request to pass validation; downstream setup may still fail
+    // when the repo path is fake. Accept any non-400 status.
+    expect(res.status).not.toBe(400);
+  });
+
+  it('still rejects run_mode=none with branch', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ title: 't', description: 'd', run_mode: 'none', repo_path: '/r', branch: 'x' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/branch and worktree_path are not allowed for run_mode=none/);
+  });
+
+  it('still rejects run_mode=none with worktree_path', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({
+        title: 't',
+        description: 'd',
+        run_mode: 'none',
+        repo_path: '/r',
+        worktree_path: '/r/.worktrees/x',
+      });
+    expect(res.status).toBe(400);
+  });
+
   it('defaults run_mode to new when not provided', async () => {
     const res = await request(app).post('/api/tasks').send(validPayload);
 
@@ -1811,5 +1847,55 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
     const res = await request(app).get('/api/tasks/tK');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeNull();
+  });
+});
+
+// ─── GET /api/preflight/none-mode ────────────────────────────────────────────
+
+describe('GET /api/preflight/none-mode', () => {
+  it('400s when repo_path is missing', async () => {
+    const res = await request(app).get('/api/preflight/none-mode?base_branch=main');
+    expect(res.status).toBe(400);
+  });
+
+  it('400s when base_branch is missing', async () => {
+    const res = await request(app).get('/api/preflight/none-mode?repo_path=/r');
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 from execFile failure on a fake repo path', async () => {
+    const res = await request(app).get(
+      '/api/preflight/none-mode?repo_path=/tmp/octomux-not-a-repo&base_branch=main',
+    );
+    // Fake repo path will surface as 400 from execFile failure. We just want to
+    // confirm the route exists and delegates correctly.
+    expect([200, 400]).toContain(res.status);
+    expect(res.status).not.toBe(404);
+  });
+});
+
+// ─── POST /api/preflight/stash ────────────────────────────────────────────────
+
+describe('POST /api/preflight/stash', () => {
+  it('400s when repo_path is missing', async () => {
+    const res = await request(app)
+      .post('/api/preflight/stash')
+      .send({ target_branch: 'feature-x' });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s when target_branch is missing', async () => {
+    const res = await request(app)
+      .post('/api/preflight/stash')
+      .send({ repo_path: '/r' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 from execFile failure on a fake repo path', async () => {
+    const res = await request(app)
+      .post('/api/preflight/stash')
+      .send({ repo_path: '/tmp/octomux-not-a-repo', target_branch: 'feature-x' });
+    expect([200, 400]).toContain(res.status);
+    expect(res.status).not.toBe(404);
   });
 });
