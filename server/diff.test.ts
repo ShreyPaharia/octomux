@@ -11,6 +11,9 @@ import {
   MAX_IGNORED_FILES,
   IGNORED_DENY_PREFIXES,
 } from './diff.js';
+import type { Task } from './types.js';
+import { createTestDb, insertTestTask, DEFAULTS } from './test-helpers.js';
+import { setReviewed } from './file-review-state.js';
 
 const execFileRaw = promisify(execFileCb);
 
@@ -50,10 +53,27 @@ async function commit(dir: string, files: Record<string, string>, msg: string): 
 
 describe('diff module', () => {
   let repo: string;
+  let baseSha: string;
+
+  // Build a Task pointing at the temp repo, with `base_branch` left null so
+  // `resolveDiffBase` returns the snapshot SHA without trying to fetch from a
+  // non-existent origin.
+  function makeTaskForRepo(overrides: Partial<Task> = {}): Task {
+    return {
+      ...DEFAULTS.runningTask,
+      worktree: repo,
+      base_branch: null,
+      base_sha: baseSha,
+      ...overrides,
+    } as Task;
+  }
 
   beforeEach(async () => {
+    createTestDb();
     repo = await makeRepo();
     await commit(repo, { 'a.txt': 'hello\n', 'src/b.ts': 'export const x = 1;\n' }, 'initial');
+    const { stdout } = await execFile('git', ['-C', repo, 'rev-parse', 'main']);
+    baseSha = stdout.trim();
     await execFile('git', ['-C', repo, 'checkout', '-q', '-b', 'feature']);
   });
 
@@ -63,13 +83,13 @@ describe('diff module', () => {
 
   describe('getDiffSummary', () => {
     it('returns empty for no changes', async () => {
-      const summary = await getDiffSummary({ worktree: repo, base: 'main' });
+      const summary = await getDiffSummary({ task: makeTaskForRepo() });
       expect(summary.files).toEqual([]);
     });
 
     it('reports a committed modification', async () => {
       await commit(repo, { 'a.txt': 'hello world\n' }, 'tweak a');
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       expect(files).toHaveLength(1);
       expect(files[0]).toMatchObject({
         path: 'a.txt',
@@ -82,7 +102,7 @@ describe('diff module', () => {
 
     it('reports an unstaged modification', async () => {
       await fs.promises.writeFile(path.join(repo, 'a.txt'), 'hello there\n');
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       expect(files).toHaveLength(1);
       expect(files[0]).toMatchObject({
         path: 'a.txt',
@@ -96,39 +116,94 @@ describe('diff module', () => {
 
     it('reports an untracked file as added', async () => {
       await fs.promises.writeFile(path.join(repo, 'new.txt'), 'new\nfile\n');
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
-      expect(files).toEqual([
-        {
-          path: 'new.txt',
-          status: 'A',
-          additions: 2,
-          deletions: 0,
-          post_blob_sha: null,
-        },
-      ]);
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatchObject({
+        path: 'new.txt',
+        status: 'A',
+        additions: 2,
+        deletions: 0,
+        post_blob_sha: null,
+      });
     });
 
     it('reports a deleted file', async () => {
       await fs.promises.unlink(path.join(repo, 'a.txt'));
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
-      expect(files).toEqual([
-        {
-          path: 'a.txt',
-          status: 'D',
-          additions: 0,
-          deletions: 1,
-          post_blob_sha: null,
-        },
-      ]);
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatchObject({
+        path: 'a.txt',
+        status: 'D',
+        additions: 0,
+        deletions: 1,
+        post_blob_sha: null,
+      });
     });
 
     it('merges committed and uncommitted changes on the same file', async () => {
       await commit(repo, { 'a.txt': 'hello world\n' }, 'tweak a');
       await fs.promises.writeFile(path.join(repo, 'a.txt'), 'hello universe\n');
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       expect(files).toHaveLength(1);
       expect(files[0].path).toBe('a.txt');
       expect(files[0].status).toBe('M');
+    });
+  });
+
+  describe('getDiffSummary extended', () => {
+    it('includes base_sha, base_ref, base_is_stale on the summary', async () => {
+      await commit(repo, { 'src/foo.ts': 'export const x = 1;\n' }, 'add foo');
+      const summary = await getDiffSummary({ task: makeTaskForRepo() });
+      // No base_branch → snapshot SHA, not stale, ref = short SHA.
+      expect(summary.base_sha).toBe(baseSha);
+      expect(summary.base_ref).toBe(baseSha.slice(0, 7));
+      expect(summary.base_is_stale).toBe(false);
+      expect(summary.total_count).toBeGreaterThan(0);
+      expect(summary.reviewed_count).toBe(0);
+    });
+
+    it('marks file reviewed when stored commit blob matches HEAD blob', async () => {
+      await commit(repo, { 'src/foo.ts': 'export const x = 1;\n' }, 'add foo');
+      const { stdout: headSha } = await execFile('git', ['-C', repo, 'rev-parse', 'HEAD']);
+      insertTestTask({ id: 't-rev-1', worktree: repo, base_sha: baseSha, base_branch: null });
+      // Reviewed at the same HEAD that the diff is computed against → blob matches.
+      setReviewed('t-rev-1', 'src/foo.ts', headSha.trim());
+
+      const summary = await getDiffSummary({
+        task: makeTaskForRepo({ id: 't-rev-1' }),
+      });
+      const file = summary.files.find((f) => f.path === 'src/foo.ts');
+      expect(file?.reviewed).toBe(true);
+      expect(file?.changed_since_review).toBe(false);
+      expect(summary.reviewed_count).toBe(1);
+    });
+
+    it('flags changed_since_review when blobs differ', async () => {
+      await commit(repo, { 'src/foo.ts': 'export const x = 1;\n' }, 'add foo');
+      const { stdout: oldHead } = await execFile('git', ['-C', repo, 'rev-parse', 'HEAD']);
+      // Mark reviewed at the old HEAD …
+      insertTestTask({ id: 't-rev-2', worktree: repo, base_sha: baseSha, base_branch: null });
+      setReviewed('t-rev-2', 'src/foo.ts', oldHead.trim());
+      // … then change the file again so the new HEAD blob differs.
+      await commit(repo, { 'src/foo.ts': 'export const x = 2;\n' }, 'tweak foo');
+
+      const summary = await getDiffSummary({
+        task: makeTaskForRepo({ id: 't-rev-2' }),
+      });
+      const file = summary.files.find((f) => f.path === 'src/foo.ts');
+      expect(file?.reviewed).toBe(false);
+      expect(file?.changed_since_review).toBe(true);
+      expect(summary.reviewed_count).toBe(0);
+    });
+
+    it('total_count excludes ignored files', async () => {
+      await fs.promises.writeFile(path.join(repo, '.gitignore'), '*.log\n');
+      await fs.promises.writeFile(path.join(repo, 'debug.log'), 'x\n');
+      const summary = await getDiffSummary({ task: makeTaskForRepo() });
+      const ignored = summary.files.filter((f) => f.ignored).length;
+      const nonIgnored = summary.files.length - ignored;
+      expect(summary.total_count).toBe(nonIgnored);
+      expect(ignored).toBeGreaterThan(0);
     });
   });
 
@@ -184,7 +259,7 @@ describe('diff module', () => {
         '.gitignore': '*.log\n',
         'debug.log': 'line1\nline2\n',
       });
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       const entry = files.find((f) => f.path === 'debug.log');
       expect(entry).toBeDefined();
       expect(entry).toMatchObject({
@@ -210,7 +285,7 @@ describe('diff module', () => {
         'coverage/lcov.info': 'x\n',
         '.DS_Store': 'x',
       });
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       const ignoredPaths = files.filter((f) => f.ignored).map((f) => f.path);
       expect(ignoredPaths).toContain('debug.log');
       expect(ignoredPaths).not.toContain('node_modules/pkg/index.js');
@@ -225,7 +300,7 @@ describe('diff module', () => {
       });
       const big = 'x'.repeat(1_048_577);
       await fs.promises.writeFile(path.join(repo, 'big.log'), big);
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       const entry = files.find((f) => f.path === 'big.log');
       expect(entry).toBeDefined();
       expect(entry?.ignored).toBe(true);
@@ -241,7 +316,7 @@ describe('diff module', () => {
         path.join(repo, 'blob.bin'),
         Buffer.from([0, 1, 2, 3, 0, 255, 10]),
       );
-      const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
       const entry = files.find((f) => f.path === 'blob.bin');
       expect(entry?.ignored).toBe(true);
       expect(entry?.binary).toBe(true);
@@ -255,7 +330,7 @@ describe('diff module', () => {
       for (let i = 0; i < MAX_IGNORED_FILES + 5; i++) {
         await fs.promises.writeFile(path.join(repo, `file${i}.log`), 'x\n');
       }
-      const summary = await getDiffSummary({ worktree: repo, base: 'main' });
+      const summary = await getDiffSummary({ task: makeTaskForRepo() });
       const ignored = summary.files.filter((f) => f.ignored);
       expect(ignored).toHaveLength(MAX_IGNORED_FILES);
       expect(summary.ignoredTruncated).toBe(true);
@@ -266,7 +341,7 @@ describe('diff module', () => {
         '.gitignore': '*.log\n',
         'one.log': 'x\n',
       });
-      const summary = await getDiffSummary({ worktree: repo, base: 'main' });
+      const summary = await getDiffSummary({ task: makeTaskForRepo() });
       expect(summary.ignoredTruncated).toBeUndefined();
     });
   });

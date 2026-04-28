@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
-import { initDb, setDb } from './db.js';
+import { getDb, initDb, setDb } from './db.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 import type { Task, Agent, UserTerminal } from './types.js';
 
@@ -185,6 +185,14 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   );
 
   return agent;
+}
+
+/**
+ * Convenience wrapper around `insertTask` that uses the active DB
+ * (set via `createTestDb` / `setDb`). Returns the joined `Task` shape.
+ */
+export function insertTestTask(overrides: Partial<Task> = {}): Task {
+  return insertTask(getDb(), { ...DEFAULTS.runningTask, ...overrides });
 }
 
 export function getTask(db: Database.Database, id: string): Task | undefined {
