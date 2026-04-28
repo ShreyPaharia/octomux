@@ -40,8 +40,10 @@ function gitEnv(): NodeJS.ProcessEnv {
  * option in production by killing the child, but our tests mock `execFile`
  * without ever invoking the callback — so we also race against an internal
  * timer to guarantee the helper resolves promptly. The internal timer fires
- * slightly after the execFile timeout to let the runtime path win when
- * it actually delivers the timeout error.
+ * slightly *before* the execFile timeout so the wrapper deterministically wins
+ * in tests (where the mocked child is never killed) and stays under the
+ * vitest 5s default test timeout. In production both timers fire near the same
+ * instant; either path triggers the catch + fallback below.
  */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let handle: NodeJS.Timeout | undefined;
