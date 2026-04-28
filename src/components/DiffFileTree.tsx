@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DiffFileEntry } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { CheckIcon } from '@/components/icons';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   files: DiffFileEntry[];
@@ -11,6 +12,7 @@ interface Props {
   ignoredTruncated?: boolean;
   reviewed?: Set<string>;
   onToggleReview?: (path: string) => void;
+  onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
 }
 
 export function ignoredGroupKey(taskId: string): string {
@@ -55,6 +57,27 @@ function buildTree(files: DiffFileEntry[]): Node {
   return root;
 }
 
+interface FolderCounts {
+  reviewed: number;
+  total: number;
+}
+
+function countFolder(node: Node): FolderCounts {
+  if (node.isFile && node.file) {
+    return { reviewed: node.file.reviewed ? 1 : 0, total: 1 };
+  }
+  let reviewed = 0;
+  let total = 0;
+  if (node.children) {
+    for (const child of node.children.values()) {
+      const sub = countFolder(child);
+      reviewed += sub.reviewed;
+      total += sub.total;
+    }
+  }
+  return { reviewed, total };
+}
+
 const statusColor: Record<string, string> = {
   A: 'text-green-500',
   M: 'text-yellow-500',
@@ -69,6 +92,7 @@ function TreeRow({
   onSelect,
   reviewed,
   onToggleReview,
+  onToggleReviewed,
   collapsible,
   openGroups,
   onToggleGroup,
@@ -79,6 +103,7 @@ function TreeRow({
   onSelect: (path: string) => void;
   reviewed?: Set<string>;
   onToggleReview?: (path: string) => void;
+  onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
   collapsible?: boolean;
   openGroups?: Record<string, boolean>;
   onToggleGroup?: (path: string) => void;
@@ -86,56 +111,75 @@ function TreeRow({
   if (node.isFile && node.file) {
     const f = node.file;
     const active = selected === f.path;
-    const isReviewed = reviewed?.has(f.path) ?? false;
+    const isReviewed = reviewed?.has(f.path) ?? !!f.reviewed;
+    const showCheckbox = Boolean(onToggleReview || onToggleReviewed);
+    const handleToggle = () => {
+      if (onToggleReviewed) onToggleReviewed(f.path, isReviewed);
+      else if (onToggleReview) onToggleReview(f.path);
+    };
     return (
-      <button
-        type="button"
+      <div
         data-testid={`diff-file-row-${f.path}`}
-        data-reviewed={isReviewed ? 'true' : undefined}
+        data-reviewed={isReviewed ? 'true' : 'false'}
         data-active={active ? 'true' : undefined}
-        onClick={() => onSelect(f.path)}
         className={cn(
           'flex w-full items-center gap-2 px-2 py-1 text-left text-xs',
           active
             ? 'border border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6]'
             : 'border border-transparent hover:bg-[#FFFFFF0A]',
-          isReviewed && 'opacity-50',
+          'data-[reviewed=true]:opacity-50 data-[reviewed=true]:line-through',
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
-        {onToggleReview ? (
-          <span
-            role="checkbox"
-            aria-checked={isReviewed}
+        {showCheckbox ? (
+          <input
+            type="checkbox"
+            checked={isReviewed}
             aria-label={isReviewed ? `Unmark ${f.path} as reviewed` : `Mark ${f.path} as reviewed`}
             data-testid={`review-toggle-${f.path}`}
-            tabIndex={-1}
-            onClick={(e) => {
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
               e.stopPropagation();
-              onToggleReview(f.path);
+              handleToggle();
             }}
-            className={cn(
-              'inline-flex h-3.5 w-3.5 shrink-0 cursor-pointer items-center justify-center border',
-              isReviewed
-                ? 'border-[#22C55E] bg-[#22C55E33] text-[#22C55E]'
-                : 'border-[#2f2f2f] bg-transparent text-transparent hover:border-[#6a6a6a]',
-            )}
-          >
-            {isReviewed ? <CheckIcon size={10} /> : null}
-          </span>
+            className="h-3.5 w-3.5 shrink-0 cursor-pointer"
+          />
         ) : null}
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        {f.changed_since_review ? (
+          <Popover>
+            <PopoverTrigger
+              aria-label="Changed since review"
+              className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <PopoverContent className="w-72">
+              <div className="text-xs">
+                You reviewed this at commit{' '}
+                <code>{f.reviewed_at_commit?.slice(0, 7) ?? '(unknown)'}</code>. Changes have
+                happened since.
+              </div>
+              <Button size="sm" variant="ghost" disabled aria-disabled="true">
+                View since-last-review diff (v1.5)
+              </Button>
+            </PopoverContent>
+          </Popover>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => onSelect(f.path)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
           <span className={cn('font-mono text-[10px] font-bold', statusColor[f.status])}>
             {f.status}
           </span>
           <span className="truncate">{node.name}</span>
-        </span>
+        </button>
         <span className="shrink-0 font-mono text-[10px] tabular-nums">
           <span className="text-green-500">+{f.additions}</span>
           <span className="text-muted-foreground"> / </span>
           <span className="text-red-500">-{f.deletions}</span>
         </span>
-      </button>
+      </div>
     );
   }
   const children = node.children ? Array.from(node.children.values()) : [];
@@ -145,6 +189,7 @@ function TreeRow({
   });
   const isGroupCollapsible = Boolean(node.name && collapsible);
   const groupOpen = isGroupCollapsible ? (openGroups?.[node.fullPath] ?? true) : true;
+  const counts = node.name ? countFolder(node) : null;
   return (
     <>
       {node.name &&
@@ -161,6 +206,11 @@ function TreeRow({
               {groupOpen ? '▾' : '▸'}
             </span>
             <span>{node.name}</span>
+            {counts && counts.total > 0 ? (
+              <span className="ml-1 normal-case text-muted-foreground/70">
+                ({counts.reviewed}/{counts.total})
+              </span>
+            ) : null}
           </button>
         ) : (
           <div
@@ -169,6 +219,11 @@ function TreeRow({
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
           >
             {node.name}
+            {counts && counts.total > 0 ? (
+              <span className="ml-1 normal-case text-muted-foreground/70">
+                ({counts.reviewed}/{counts.total})
+              </span>
+            ) : null}
           </div>
         ))}
       {groupOpen &&
@@ -181,6 +236,7 @@ function TreeRow({
             onSelect={onSelect}
             reviewed={reviewed}
             onToggleReview={onToggleReview}
+            onToggleReviewed={onToggleReviewed}
             collapsible={collapsible}
             openGroups={openGroups}
             onToggleGroup={onToggleGroup}
@@ -198,6 +254,7 @@ export function DiffFileTree({
   ignoredTruncated,
   reviewed,
   onToggleReview,
+  onToggleReviewed,
 }: Props) {
   const changed = useMemo(() => files.filter((f) => !f.ignored), [files]);
   const ignored = useMemo(() => files.filter((f) => f.ignored), [files]);
@@ -278,6 +335,7 @@ export function DiffFileTree({
           onSelect={onSelect}
           reviewed={reviewed}
           onToggleReview={onToggleReview}
+          onToggleReviewed={onToggleReviewed}
           collapsible
           openGroups={openGroups}
           onToggleGroup={toggleGroup}
@@ -307,6 +365,7 @@ export function DiffFileTree({
               onSelect={onSelect}
               reviewed={reviewed}
               onToggleReview={onToggleReview}
+              onToggleReviewed={onToggleReviewed}
             />
           ) : null}
         </div>
