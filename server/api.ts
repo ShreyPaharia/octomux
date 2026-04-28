@@ -23,6 +23,7 @@ import {
   hopAgent,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
+import { setReviewed, clearReviewed } from './file-review-state.js';
 import { createChat, listChats, getChat } from './chats.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 
@@ -941,6 +942,56 @@ export function setupRoutes(app: Express): void {
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
+  });
+
+  // ─── File review state ─────────────────────────────────────────────────────
+
+  app.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd) {
+      res.status(400).json({ error: 'Task has no worktree' });
+      return;
+    }
+    const params = req.params as Record<string, string | string[]>;
+    const rawPath = params.path ?? params['0'] ?? '';
+    const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
+    try {
+      diffMod.safeResolvePath(cwd, relPath);
+    } catch {
+      res.status(400).json({ error: 'Invalid path' });
+      return;
+    }
+    try {
+      const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+      const headSha = stdout.trim();
+      setReviewed(task.id, relPath, headSha);
+      res.status(204).send();
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd) {
+      res.status(400).json({ error: 'Task has no worktree' });
+      return;
+    }
+    const params = req.params as Record<string, string | string[]>;
+    const rawPath = params.path ?? params['0'] ?? '';
+    const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
+    try {
+      diffMod.safeResolvePath(cwd, relPath);
+    } catch {
+      res.status(400).json({ error: 'Invalid path' });
+      return;
+    }
+    clearReviewed(task.id, relPath);
+    res.status(204).send();
   });
 
   // ─── Settings ──────────────────────────────────────────────────────────────
