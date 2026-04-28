@@ -753,4 +753,159 @@ describe('TaskDetail', () => {
       await waitFor(() => expect(screen.getByText(/no changes/i)).toBeInTheDocument());
     });
   });
+
+  // ─── Review cockpit integration ───────────────────────────────────────────
+
+  describe('review cockpit integration', () => {
+    function makeDiffSummary(overrides: Record<string, unknown> = {}) {
+      return {
+        files: [
+          {
+            path: 'src/foo.ts',
+            status: 'M',
+            additions: 1,
+            deletions: 0,
+            reviewed: false,
+            ignored: false,
+          },
+        ],
+        ignoredTruncated: false,
+        base_sha: 'abc123',
+        base_ref: 'main',
+        base_is_stale: false,
+        reviewed_count: 0,
+        total_count: 1,
+        ...overrides,
+      };
+    }
+
+    async function openDiff(user: ReturnType<typeof userEvent.setup>) {
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /^diff$/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /^diff$/i }));
+    }
+
+    it('toggling a file checkbox calls api.markReviewed and refetches', async () => {
+      const user = userEvent.setup();
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          status: 'running',
+          worktree: '/tmp/wt',
+          base_branch: 'main',
+          agents: [makeAgent({ id: 'a1' })],
+        }),
+      );
+      apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary());
+      apiMock.markReviewed.mockResolvedValue(undefined);
+
+      renderDetail();
+      await openDiff(user);
+
+      const checkbox = await screen.findByTestId('review-toggle-src/foo.ts');
+      await user.click(checkbox);
+
+      await waitFor(() => {
+        expect(apiMock.markReviewed).toHaveBeenCalledWith('test-task-01', 'src/foo.ts');
+      });
+    });
+
+    it('queueing comments and pressing Cmd+Enter sends a batched message to the active agent', async () => {
+      const user = userEvent.setup();
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          status: 'running',
+          worktree: '/tmp/wt',
+          base_branch: 'main',
+          agents: [makeAgent({ id: 'agent-99', window_index: 0, status: 'running' })],
+        }),
+      );
+      apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary());
+      apiMock.sendAgentMessage.mockResolvedValue({ ok: true });
+
+      // Seed two queued comments BEFORE render so useReviewQueue picks them
+      // up via its lazy-init load() — we don't depend on DiffViewer's inline
+      // composer being visible in the API-driven mode.
+      const queueKey = 'octomux:review-queue:test-task-01';
+      const seed = [
+        {
+          id: 'c1',
+          filePath: 'src/foo.ts',
+          line: 1,
+          lineText: 'foo',
+          body: 'first',
+        },
+        {
+          id: 'c2',
+          filePath: 'src/foo.ts',
+          line: 2,
+          lineText: 'bar',
+          body: 'second',
+        },
+      ];
+      localStorage.setItem(queueKey, JSON.stringify(seed));
+
+      renderDetail();
+      await openDiff(user);
+
+      // Drawer renders only when comments > 0 — verify it's there.
+      await waitFor(() => {
+        expect(screen.getByText(/Queued review/i)).toBeInTheDocument();
+      });
+
+      // Fire global Cmd+Enter — useDiffKeyboardNav listens on window.
+      await user.keyboard('{Meta>}{Enter}{/Meta}');
+
+      await waitFor(() => {
+        expect(apiMock.sendAgentMessage).toHaveBeenCalledTimes(1);
+      });
+      const [tid, aid, body] = apiMock.sendAgentMessage.mock.calls[0];
+      expect(tid).toBe('test-task-01');
+      expect(aid).toBe('agent-99');
+      expect(body).toContain('src/foo.ts:1');
+      expect(body).toContain('first');
+      expect(body).toContain('src/foo.ts:2');
+      expect(body).toContain('second');
+
+      localStorage.removeItem(queueKey);
+    });
+
+    it('shows offline indicator when base_is_stale is true on the diff response', async () => {
+      const user = userEvent.setup();
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          status: 'running',
+          worktree: '/tmp/wt',
+          base_branch: 'main',
+          agents: [makeAgent({ id: 'a1' })],
+        }),
+      );
+      apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary({ base_is_stale: true }));
+
+      renderDetail();
+      await openDiff(user);
+
+      await waitFor(() => {
+        expect(screen.getByText(/local base \(offline\)/i)).toBeInTheDocument();
+      });
+    });
+
+    it('renders the keybind cheat-sheet trigger in diff mode', async () => {
+      const user = userEvent.setup();
+      apiMock.getTask.mockResolvedValue(
+        makeTask({
+          status: 'running',
+          worktree: '/tmp/wt',
+          base_branch: 'main',
+          agents: [makeAgent({ id: 'a1' })],
+        }),
+      );
+      apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary());
+
+      renderDetail();
+      await openDiff(user);
+
+      expect(await screen.findByTestId('diff-keybind-help')).toBeInTheDocument();
+    });
+  });
 });
