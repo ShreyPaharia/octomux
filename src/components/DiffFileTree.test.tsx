@@ -84,3 +84,146 @@ describe('DiffFileTree', () => {
     expect(onSelect).toHaveBeenCalledWith('debug.log');
   });
 });
+
+describe('DiffFileTree reviewed state', () => {
+  const filesWithReview: DiffFileEntry[] = [
+    { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0, reviewed: true },
+    { path: 'src/b.ts', status: 'M', additions: 1, deletions: 0, reviewed: false },
+    { path: 'src/c.ts', status: 'M', additions: 1, deletions: 0, reviewed: false },
+  ];
+
+  it('renders a checkbox per file', () => {
+    render(
+      <DiffFileTree
+        files={filesWithReview}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+  });
+
+  it('checkbox is checked for reviewed files', () => {
+    render(
+      <DiffFileTree
+        files={filesWithReview}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+    expect(checkboxes[0].checked).toBe(true);
+    expect(checkboxes[1].checked).toBe(false);
+  });
+
+  it('reviewed rows carry data-reviewed=true', () => {
+    render(
+      <DiffFileTree
+        files={filesWithReview}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    const reviewedRow = screen.getByText('a.ts').closest('[data-reviewed]');
+    expect(reviewedRow?.getAttribute('data-reviewed')).toBe('true');
+  });
+
+  it('clicking the checkbox calls onToggleReviewed with file path and current state', async () => {
+    const onToggle = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <DiffFileTree
+        files={filesWithReview}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={onToggle}
+      />,
+    );
+    await user.click(screen.getAllByRole('checkbox')[1]);
+    expect(onToggle).toHaveBeenCalledWith('src/b.ts', false);
+  });
+
+  it('renders (X/Y) counter on folder rows', () => {
+    render(
+      <DiffFileTree
+        files={filesWithReview}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    expect(screen.getByText(/1\s*\/\s*3/)).toBeInTheDocument();
+  });
+});
+
+describe('DiffFileTree changed-since-review dot', () => {
+  it('shows the dot when changed_since_review is true', () => {
+    render(
+      <DiffFileTree
+        files={[
+          {
+            path: 'src/x.ts',
+            status: 'M',
+            additions: 1,
+            deletions: 0,
+            reviewed: false,
+            changed_since_review: true,
+            reviewed_at_commit: 'abc1234',
+          },
+        ]}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText(/changed since review/i)).toBeInTheDocument();
+  });
+
+  it('clicking the dot opens a popover with the commit short-hash', async () => {
+    const user = userEvent.setup();
+    render(
+      <DiffFileTree
+        files={[
+          {
+            path: 'src/x.ts',
+            status: 'M',
+            additions: 1,
+            deletions: 0,
+            reviewed: false,
+            changed_since_review: true,
+            reviewed_at_commit: 'abc1234567890',
+          },
+        ]}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    await user.click(screen.getByLabelText(/changed since review/i));
+    expect(screen.getByText(/abc1234/)).toBeInTheDocument();
+  });
+
+  it('does not show the dot when changed_since_review is false', () => {
+    render(
+      <DiffFileTree
+        files={[
+          {
+            path: 'src/x.ts',
+            status: 'M',
+            additions: 1,
+            deletions: 0,
+            reviewed: true,
+            changed_since_review: false,
+          },
+        ]}
+        selected={null}
+        onSelect={() => {}}
+        onToggleReviewed={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText(/changed since review/i)).not.toBeInTheDocument();
+  });
+});
