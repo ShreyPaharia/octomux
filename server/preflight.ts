@@ -18,7 +18,18 @@ export interface PreflightResult {
   ok: boolean;
   currentBranch: string;
   targetBranch: string;
+  /**
+   * Active none-mode tasks on the same root worktree but a *different* branch.
+   * These block creation because starting the new task would `git checkout`
+   * away from their branch and corrupt their working state.
+   */
   conflicts: PreflightConflict[];
+  /**
+   * Active none-mode tasks on the same root worktree on the *same* branch.
+   * They share the working tree, which is allowed but worth surfacing so the
+   * user can confirm before adding another agent that may step on the others.
+   */
+  warnings: PreflightConflict[];
   dirty: { count: number } | null;
 }
 
@@ -35,10 +46,33 @@ export async function preflightNoneMode(
   ]);
   const currentBranch = headOut.trim();
 
-  const conflicts: PreflightConflict[] = [];
-  let dirty: PreflightResult['dirty'] = null;
+  // Find every active task that is sharing this root worktree (mode='none').
+  // 'new'-mode tasks have their own dedicated worktrees and don't conflict.
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT t.id AS task_id, t.title, t.status, w.branch
+         FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE t.status IN ('running', 'setting_up')
+          AND w.repo_path = ?
+          AND w.mode = 'none'`,
+    )
+    .all(repoPath) as PreflightConflict[];
 
-  if (currentBranch !== baseBranch) {
+  const conflicts: PreflightConflict[] = [];
+  const warnings: PreflightConflict[] = [];
+  for (const row of rows) {
+    if (row.branch === baseBranch) warnings.push(row);
+    else conflicts.push(row);
+  }
+
+  // Dirty matters only when a checkout will actually happen. If conflicts
+  // exist we won't get to the checkout anyway — the user will close those
+  // tasks first and we'll re-run preflight, at which point dirty (if still
+  // present) will be surfaced.
+  let dirty: PreflightResult['dirty'] = null;
+  if (currentBranch !== baseBranch && conflicts.length === 0) {
     const { stdout: statusOut } = await execFile('git', [
       '-C',
       repoPath,
@@ -49,20 +83,16 @@ export async function preflightNoneMode(
     if (lines.length > 0) dirty = { count: lines.length };
   }
 
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT t.id AS task_id, t.title, t.status, w.branch
-         FROM tasks t
-         INNER JOIN worktrees w ON t.worktree_id = w.id
-        WHERE t.status IN ('running', 'setting_up')
-          AND w.repo_path = ?
-          AND w.branch = ?`,
-    )
-    .all(repoPath, baseBranch) as PreflightConflict[];
-  conflicts.push(...rows);
-
   const ok = conflicts.length === 0 && dirty === null;
-  logger.debug({ repoPath, baseBranch, ok, conflicts: conflicts.length }, 'preflight none mode');
-  return { ok, currentBranch, targetBranch: baseBranch, conflicts, dirty };
+  logger.debug(
+    {
+      repoPath,
+      baseBranch,
+      ok,
+      conflicts: conflicts.length,
+      warnings: warnings.length,
+    },
+    'preflight none mode',
+  );
+  return { ok, currentBranch, targetBranch: baseBranch, conflicts, warnings, dirty };
 }

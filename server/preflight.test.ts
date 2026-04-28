@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 describe('preflightNoneMode', () => {
-  it('returns ok=true when current branch matches target and no conflicts', async () => {
+  it('returns ok=true when current branch matches target and no other tasks', async () => {
     mockedExec.mockImplementation((cmd: string, args: string[]) => {
       if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
         return Promise.resolve({ stdout: 'main\n', stderr: '' });
@@ -36,6 +36,7 @@ describe('preflightNoneMode', () => {
       currentBranch: 'main',
       targetBranch: 'main',
       conflicts: [],
+      warnings: [],
       dirty: null,
     });
   });
@@ -69,7 +70,7 @@ describe('preflightNoneMode', () => {
     expect(result.dirty).toBeNull();
   });
 
-  it('returns conflicts when active task uses the same repo+branch', async () => {
+  it('treats same-branch active none task as a non-blocking warning', async () => {
     const db = getDb();
     db.prepare(
       `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
@@ -78,6 +79,32 @@ describe('preflightNoneMode', () => {
     db.prepare(
       `INSERT INTO tasks (id, title, description, status, worktree_id)
        VALUES ('t1', 'Other chat', '', 'running', 'wt1')`,
+    ).run();
+
+    mockedExec.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--abbrev-ref'))
+        return Promise.resolve({ stdout: 'feature-x\n', stderr: '' });
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    });
+
+    const result = await preflightNoneMode('/repo', 'feature-x');
+
+    expect(result.ok).toBe(true);
+    expect(result.conflicts).toEqual([]);
+    expect(result.warnings).toEqual([
+      { task_id: 't1', title: 'Other chat', status: 'running', branch: 'feature-x' },
+    ]);
+  });
+
+  it('treats different-branch active none task as a blocking conflict', async () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+       VALUES ('wt-main', '/repo', '/repo', 'main', 'main', 'none', 'in_use')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, status, worktree_id)
+       VALUES ('t-main', 'main task', '', 'running', 'wt-main')`,
     ).run();
 
     mockedExec.mockImplementation((_cmd: string, args: string[]) => {
@@ -90,37 +117,71 @@ describe('preflightNoneMode', () => {
 
     expect(result.ok).toBe(false);
     expect(result.conflicts).toEqual([
-      { task_id: 't1', title: 'Other chat', status: 'running', branch: 'feature-x' },
+      { task_id: 't-main', title: 'main task', status: 'running', branch: 'main' },
     ]);
+    expect(result.warnings).toEqual([]);
   });
 
-  it('skips closed tasks and tasks on other branches', async () => {
+  it('skips closed tasks and ignores new-mode worktree tasks', async () => {
     const db = getDb();
+    // closed none-mode task → ignored
     db.prepare(
       `INSERT INTO worktrees (id, path, repo_path, branch, mode, status)
-       VALUES ('wt1', '/repo', '/repo', 'feature-x', 'none', 'available')`,
-    ).run();
-    db.prepare(
-      `INSERT INTO worktrees (id, path, repo_path, branch, mode, status)
-       VALUES ('wt2', '/repo', '/repo', 'main', 'none', 'in_use')`,
+       VALUES ('wt-closed', '/repo', '/repo', 'feature-x', 'none', 'available')`,
     ).run();
     db.prepare(
       `INSERT INTO tasks (id, title, description, status, worktree_id)
-       VALUES ('closed1', 'closed', '', 'closed', 'wt1')`,
+       VALUES ('closed1', 'closed', '', 'closed', 'wt-closed')`,
+    ).run();
+    // active 'new'-mode task on the same branch → ignored (its own worktree)
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, mode, status)
+       VALUES ('wt-new', '/repo/.worktrees/x', '/repo', 'feature-x', 'new', 'in_use')`,
     ).run();
     db.prepare(
       `INSERT INTO tasks (id, title, description, status, worktree_id)
-       VALUES ('main1', 'main task', '', 'running', 'wt2')`,
+       VALUES ('new1', 'new wt task', '', 'running', 'wt-new')`,
     ).run();
 
     mockedExec.mockImplementation((_cmd: string, args: string[]) => {
-      if (args.includes('--abbrev-ref')) return Promise.resolve({ stdout: 'main\n', stderr: '' });
-      if (args.includes('--porcelain=v1')) return Promise.resolve({ stdout: '', stderr: '' });
+      if (args.includes('--abbrev-ref'))
+        return Promise.resolve({ stdout: 'feature-x\n', stderr: '' });
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     });
 
     const result = await preflightNoneMode('/repo', 'feature-x');
 
+    expect(result.ok).toBe(true);
     expect(result.conflicts).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('skips dirty check while a different-branch conflict is present', async () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, mode, status)
+       VALUES ('wt-main', '/repo', '/repo', 'main', 'none', 'in_use')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, status, worktree_id)
+       VALUES ('t-main', 'main task', '', 'running', 'wt-main')`,
+    ).run();
+
+    let porcelainCalled = false;
+    mockedExec.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--abbrev-ref')) return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      if (args.includes('--porcelain=v1')) {
+        porcelainCalled = true;
+        return Promise.resolve({ stdout: ' M a.ts\n', stderr: '' });
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    });
+
+    const result = await preflightNoneMode('/repo', 'feature-x');
+
+    expect(result.ok).toBe(false);
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.dirty).toBeNull();
+    expect(porcelainCalled).toBe(false);
   });
 });
