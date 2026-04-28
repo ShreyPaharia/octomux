@@ -106,6 +106,16 @@ CREATE TABLE IF NOT EXISTS repo_configs (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS file_review_state (
+    task_id            TEXT NOT NULL,
+    file_path          TEXT NOT NULL,
+    reviewed_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at_commit TEXT NOT NULL,
+    PRIMARY KEY (task_id, file_path),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_file_review_state_task ON file_review_state(task_id);
+
 CREATE TABLE IF NOT EXISTS config (
     id              INTEGER PRIMARY KEY CHECK (id = 1),
     github_login    TEXT,
