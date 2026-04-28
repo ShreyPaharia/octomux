@@ -6,7 +6,12 @@ import { blobAt } from './diff.js';
 
 describe('blobAt', () => {
   it('returns blob sha when ls-tree finds the path', async () => {
-    vi.mocked(execFile).mockImplementation(((_c, args: readonly string[], _o, cb) => {
+    vi.mocked(execFile).mockImplementation(((
+      _c: string,
+      args: readonly string[],
+      _o: unknown,
+      cb: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+    ) => {
       const arr = args as string[];
       if (arr.includes('ls-tree')) {
         cb(null, {
@@ -22,7 +27,12 @@ describe('blobAt', () => {
   });
 
   it('returns null when ls-tree output is empty (file absent at commit)', async () => {
-    vi.mocked(execFile).mockImplementation(((_c, _args, _o, cb) => {
+    vi.mocked(execFile).mockImplementation(((
+      _c: string,
+      _args: readonly string[],
+      _o: unknown,
+      cb: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+    ) => {
       cb(null, { stdout: '', stderr: '' });
       return undefined;
     }) as unknown as typeof execFile);
@@ -32,7 +42,12 @@ describe('blobAt', () => {
   });
 
   it('returns null on git error', async () => {
-    vi.mocked(execFile).mockImplementation(((_c, _args, _o, cb) => {
+    vi.mocked(execFile).mockImplementation(((
+      _c: string,
+      _args: readonly string[],
+      _o: unknown,
+      cb: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+    ) => {
       cb(new Error('bad object'), { stdout: '', stderr: '' });
       return undefined;
     }) as unknown as typeof execFile);
