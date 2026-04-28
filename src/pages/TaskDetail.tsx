@@ -68,10 +68,7 @@ function DiffKeybindCheatSheet() {
           </div>
           <ul className="mt-2 space-y-1">
             {DIFF_KEYBINDS.map((b) => (
-              <li
-                key={b.keys}
-                className="flex items-center justify-between gap-3 text-xs"
-              >
+              <li key={b.keys} className="flex items-center justify-between gap-3 text-xs">
                 <kbd className="rounded border border-glass-edge bg-glass-l1 px-1.5 py-0.5 font-mono text-[10px]">
                   {b.keys}
                 </kbd>
@@ -230,9 +227,7 @@ export default function TaskDetail() {
   const moveActiveFile = useCallback(
     (delta: 1 | -1) => {
       if (visibleFiles.length === 0) return;
-      const idx = activeFilePath
-        ? visibleFiles.findIndex((f) => f.path === activeFilePath)
-        : -1;
+      const idx = activeFilePath ? visibleFiles.findIndex((f) => f.path === activeFilePath) : -1;
       const next = (idx + delta + visibleFiles.length) % visibleFiles.length;
       setActiveFilePath(visibleFiles[next].path);
     },
@@ -241,9 +236,7 @@ export default function TaskDetail() {
 
   const jumpToNextUnreviewed = useCallback(() => {
     if (visibleFiles.length === 0) return;
-    const startIdx = activeFilePath
-      ? visibleFiles.findIndex((f) => f.path === activeFilePath)
-      : -1;
+    const startIdx = activeFilePath ? visibleFiles.findIndex((f) => f.path === activeFilePath) : -1;
     for (let i = 1; i <= visibleFiles.length; i++) {
       const candidate = visibleFiles[(startIdx + i) % visibleFiles.length];
       if (!candidate.reviewed) {

@@ -56,7 +56,12 @@ describe('useReviewQueue', () => {
   it('format() emits the agent-message body', () => {
     const { result } = renderHook(() => useReviewQueue('t1'));
     act(() => {
-      result.current.add({ filePath: 'src/a.ts', line: 10, lineText: '> if (x) {', body: 'this is dead' });
+      result.current.add({
+        filePath: 'src/a.ts',
+        line: 10,
+        lineText: '> if (x) {',
+        body: 'this is dead',
+      });
       result.current.add({ filePath: 'src/b.ts', line: 5, lineText: '> y', body: 'rename y' });
     });
     const msg = result.current.format();

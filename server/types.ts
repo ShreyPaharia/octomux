@@ -40,6 +40,7 @@ export interface CreateChatRequest {
   label?: string;
   cwd?: string;
   agent?: string;
+  prompt?: string;
 }
 
 export interface Task {

@@ -29,7 +29,11 @@ import { NoneModeDirtyDialog } from './NoneModeDirtyDialog';
 import { NoneModeSharedBranchDialog } from './NoneModeSharedBranchDialog';
 
 /** POST /api/chats — create a standalone runtime agent. */
-async function createChatRequest(body: { label?: string; agent?: string | null }): Promise<Agent> {
+async function createChatRequest(body: {
+  label?: string;
+  agent?: string | null;
+  prompt?: string;
+}): Promise<Agent> {
   const res = await fetch('/api/chats', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -173,7 +177,9 @@ export function Composer({ onSubmitted }: Props = {}) {
           const chat = await createChatRequest({
             label: deriveTitleFromPrompt(trimmed),
             agent: pickedAgent,
+            prompt: trimmed,
           });
+          refresh();
           navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
           const title = deriveTitleFromPrompt(trimmed);

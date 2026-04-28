@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useDiffKeyboardNav, DIFF_KEYBINDS } from './useDiffKeyboardNav.js';
 
-function fire(key: string, mods: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {}) {
+function fire(
+  key: string,
+  mods: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {},
+) {
   window.dispatchEvent(new KeyboardEvent('keydown', { key, ...mods }));
 }
 
