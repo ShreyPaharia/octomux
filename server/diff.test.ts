@@ -70,25 +70,56 @@ describe('diff module', () => {
     it('reports a committed modification', async () => {
       await commit(repo, { 'a.txt': 'hello world\n' }, 'tweak a');
       const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
-      expect(files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatchObject({
+        path: 'a.txt',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      });
+      expect(files[0].post_blob_sha).toMatch(/^[0-9a-f]{40}$/);
     });
 
     it('reports an unstaged modification', async () => {
       await fs.promises.writeFile(path.join(repo, 'a.txt'), 'hello there\n');
       const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
-      expect(files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatchObject({
+        path: 'a.txt',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      });
+      // unstaged: HEAD blob still matches the committed (pre-edit) content
+      expect(files[0].post_blob_sha).toMatch(/^[0-9a-f]{40}$/);
     });
 
     it('reports an untracked file as added', async () => {
       await fs.promises.writeFile(path.join(repo, 'new.txt'), 'new\nfile\n');
       const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
-      expect(files).toEqual([{ path: 'new.txt', status: 'A', additions: 2, deletions: 0 }]);
+      expect(files).toEqual([
+        {
+          path: 'new.txt',
+          status: 'A',
+          additions: 2,
+          deletions: 0,
+          post_blob_sha: null,
+        },
+      ]);
     });
 
     it('reports a deleted file', async () => {
       await fs.promises.unlink(path.join(repo, 'a.txt'));
       const { files } = await getDiffSummary({ worktree: repo, base: 'main' });
-      expect(files).toEqual([{ path: 'a.txt', status: 'D', additions: 0, deletions: 1 }]);
+      expect(files).toEqual([
+        {
+          path: 'a.txt',
+          status: 'D',
+          additions: 0,
+          deletions: 1,
+          post_blob_sha: null,
+        },
+      ]);
     });
 
     it('merges committed and uncommitted changes on the same file', async () => {
