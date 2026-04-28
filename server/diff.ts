@@ -43,6 +43,7 @@ export interface DiffFileEntry {
   ignored?: boolean;
   tooLarge?: boolean;
   binary?: boolean;
+  post_blob_sha?: string | null;
 }
 
 export interface DiffSummary {
@@ -74,6 +75,25 @@ async function git(cwd: string, args: string[]): Promise<string> {
     env: gitEnv(),
   });
   return stdout;
+}
+
+export async function blobAt(opts: {
+  worktree: string;
+  commit: string;
+  relPath: string;
+}): Promise<string | null> {
+  const { worktree, commit, relPath } = opts;
+  try {
+    const stdout = await git(worktree, ['ls-tree', commit, '--', relPath]);
+    const line = stdout.trim();
+    if (!line) return null;
+    // format: "<mode> blob <sha>\t<path>"
+    const parts = line.split(/\s+/);
+    if (parts.length < 3 || parts[1] !== 'blob') return null;
+    return parts[2];
+  } catch {
+    return null;
+  }
 }
 
 function parseNumstat(
@@ -192,7 +212,9 @@ export async function getDiffSummary(opts: {
       deletions = inCommitted.deletions;
     }
 
-    files.push({ path: p, status, additions, deletions });
+    const post_blob_sha =
+      status === 'D' ? null : await blobAt({ worktree, commit: 'HEAD', relPath: p });
+    files.push({ path: p, status, additions, deletions, post_blob_sha });
   }
 
   const summary: DiffSummary = { files };
