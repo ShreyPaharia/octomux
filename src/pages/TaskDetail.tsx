@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -10,9 +10,14 @@ import { EmptyState } from '@/components/EmptyState';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import { TaskSettingUpView } from '@/components/TaskSettingUpView';
 import { TaskErrorView } from '@/components/TaskErrorView';
+import { ReviewBaseRefBanner } from '@/components/ReviewBaseRefBanner';
+import { CommentQueueDrawer } from '@/components/CommentQueueDrawer';
+import { useReviewQueue } from '@/hooks/useReviewQueue';
+import { DIFF_KEYBINDS, useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 import { useTask } from '@/lib/hooks';
-import { api } from '@/lib/api';
+import { api, type DiffSummaryResponse } from '@/lib/api';
 import { repoName } from '@/lib/utils';
 import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
 import type { RunMode } from '../../server/types';
@@ -43,6 +48,41 @@ const perTaskUiState = new Map<string, PerTaskUiState>();
 /** Reset per-task UI state — exposed for tests only. */
 export function _resetPerTaskUiState() {
   perTaskUiState.clear();
+}
+
+/** Floating "?" chip that surfaces the diff keybind cheat sheet in a popover. */
+function DiffKeybindCheatSheet() {
+  return (
+    <div className="pointer-events-none absolute bottom-3 right-3">
+      <Popover>
+        <PopoverTrigger
+          aria-label="Show diff keyboard shortcuts"
+          data-testid="diff-keybind-help"
+          className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full border border-glass-edge bg-glass-l1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          ?
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-72">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Diff shortcuts
+          </div>
+          <ul className="mt-2 space-y-1">
+            {DIFF_KEYBINDS.map((b) => (
+              <li
+                key={b.keys}
+                className="flex items-center justify-between gap-3 text-xs"
+              >
+                <kbd className="rounded border border-glass-edge bg-glass-l1 px-1.5 py-0.5 font-mono text-[10px]">
+                  {b.keys}
+                </kbd>
+                <span className="text-muted-foreground">{b.description}</span>
+              </li>
+            ))}
+          </ul>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
 }
 
 export default function TaskDetail() {
@@ -132,6 +172,102 @@ export default function TaskDetail() {
 
   const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
   const [closeConfirm, setCloseConfirm] = useState(false);
+
+  // ─── Review cockpit state ────────────────────────────────────────────────
+  const reviewQueue = useReviewQueue(taskId);
+  const [diffSummary, setDiffSummary] = useState<DiffSummaryResponse | null>(null);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+
+  const visibleFiles = useMemo(
+    () => (diffSummary?.files ?? []).filter((f) => !f.ignored),
+    [diffSummary],
+  );
+
+  const refetchDiff = useCallback(async () => {
+    if (!taskId) return;
+    try {
+      const s = await api.getTaskDiffSummary(taskId);
+      setDiffSummary(s);
+    } catch {
+      // swallow — banner is best-effort, DiffViewer surfaces its own errors
+    }
+  }, [taskId]);
+
+  const handleToggleReviewed = useCallback(
+    async (filePath: string, currentlyReviewed: boolean) => {
+      if (!taskId) return;
+      try {
+        if (currentlyReviewed) await api.unmarkReviewed(taskId, filePath);
+        else await api.markReviewed(taskId, filePath);
+        await refetchDiff();
+      } catch (err) {
+        console.error('Failed to toggle reviewed:', err);
+      }
+    },
+    [taskId, refetchDiff],
+  );
+
+  const activeAgentId = useMemo(() => {
+    const ags = task?.agents ?? [];
+    if (activeWindow !== null) {
+      const a = ags.find((x) => x.window_index === activeWindow && x.status !== 'stopped');
+      if (a) return a.id;
+    }
+    return ags.find((x) => x.status !== 'stopped')?.id ?? null;
+  }, [task?.agents, activeWindow]);
+
+  const handleSendBatch = useCallback(async () => {
+    if (!taskId || !activeAgentId || reviewQueue.comments.length === 0) return;
+    try {
+      const body = reviewQueue.format();
+      await api.sendAgentMessage(taskId, activeAgentId, body);
+      reviewQueue.clear();
+    } catch (err) {
+      console.error('Failed to send review batch:', err);
+    }
+  }, [taskId, activeAgentId, reviewQueue]);
+
+  const moveActiveFile = useCallback(
+    (delta: 1 | -1) => {
+      if (visibleFiles.length === 0) return;
+      const idx = activeFilePath
+        ? visibleFiles.findIndex((f) => f.path === activeFilePath)
+        : -1;
+      const next = (idx + delta + visibleFiles.length) % visibleFiles.length;
+      setActiveFilePath(visibleFiles[next].path);
+    },
+    [visibleFiles, activeFilePath],
+  );
+
+  const jumpToNextUnreviewed = useCallback(() => {
+    if (visibleFiles.length === 0) return;
+    const startIdx = activeFilePath
+      ? visibleFiles.findIndex((f) => f.path === activeFilePath)
+      : -1;
+    for (let i = 1; i <= visibleFiles.length; i++) {
+      const candidate = visibleFiles[(startIdx + i) % visibleFiles.length];
+      if (!candidate.reviewed) {
+        setActiveFilePath(candidate.path);
+        return;
+      }
+    }
+  }, [visibleFiles, activeFilePath]);
+
+  const isDiffMode = mode === 'diff';
+  useDiffKeyboardNav({
+    onNextFile: isDiffMode ? () => moveActiveFile(1) : undefined,
+    onPrevFile: isDiffMode ? () => moveActiveFile(-1) : undefined,
+    onToggleReviewed: isDiffMode
+      ? () => {
+          if (!activeFilePath) return;
+          const file = visibleFiles.find((f) => f.path === activeFilePath);
+          if (!file) return;
+          handleToggleReviewed(activeFilePath, !!file.reviewed);
+        }
+      : undefined,
+    onJumpToNextUnreviewed: isDiffMode ? jumpToNextUnreviewed : undefined,
+    onSendBatch: isDiffMode ? handleSendBatch : undefined,
+  });
 
   const handleShip = useCallback(() => {
     if (!taskId) return;
@@ -581,10 +717,39 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Diff view */}
+      {/* Diff view — review cockpit */}
       {mode === 'diff' && canShowDiff && (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <DiffViewer taskId={task.id} isRunning={task.status === 'running'} />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {diffSummary && diffSummary.base_ref ? (
+            <ReviewBaseRefBanner
+              baseRef={diffSummary.base_ref}
+              baseIsStale={!!diffSummary.base_is_stale}
+              totalCount={diffSummary.total_count ?? 0}
+              reviewedCount={diffSummary.reviewed_count ?? 0}
+              onRefresh={refetchDiff}
+              onJumpToNextUnreviewed={jumpToNextUnreviewed}
+            />
+          ) : null}
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <DiffViewer
+                taskId={task.id}
+                isRunning={task.status === 'running'}
+                onSelectionChange={setActiveFilePath}
+                onSummaryLoaded={setDiffSummary}
+                onToggleReviewed={handleToggleReviewed}
+              />
+            </div>
+            {reviewQueue.comments.length > 0 ? (
+              <CommentQueueDrawer
+                comments={reviewQueue.comments}
+                onRemove={reviewQueue.remove}
+                onJumpTo={(p) => setActiveFilePath(p)}
+                onSend={handleSendBatch}
+              />
+            ) : null}
+          </div>
+          <DiffKeybindCheatSheet />
         </div>
       )}
 

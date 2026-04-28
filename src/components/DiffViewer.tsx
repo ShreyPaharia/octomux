@@ -37,6 +37,15 @@ interface Props {
   path?: string;
   onAddComment?: (c: { filePath: string; line: number; lineText: string; body: string }) => void;
   queuedComments?: QueuedReviewComment[];
+  // Optional notifier so a parent (e.g. TaskDetail's review cockpit) can mirror
+  // the currently-selected file path for keyboard nav and the review banner.
+  onSelectionChange?: (path: string | null) => void;
+  // Optional notifier so a parent can refresh its own copy of the diff summary
+  // after the API view fetches a new one (used for `reviewed_count` / banner).
+  onSummaryLoaded?: (summary: import('@/lib/api').DiffSummaryResponse) => void;
+  // When provided, the file tree's reviewed checkbox calls this instead of the
+  // local-storage backed flow — TaskDetail uses the API.
+  onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
 }
 
 function extToLanguage(p: string): string {
@@ -70,6 +79,9 @@ export function DiffViewer(props: Props) {
     path: standalonePath,
     onAddComment,
     queuedComments,
+    onSelectionChange,
+    onSummaryLoaded,
+    onToggleReviewed,
   } = props;
 
   // Standalone / composer mode — renders the new-content lines as clickable
@@ -93,7 +105,15 @@ export function DiffViewer(props: Props) {
     return null;
   }
 
-  return <ApiDiffViewer taskId={taskId} isRunning={isRunning ?? false} />;
+  return (
+    <ApiDiffViewer
+      taskId={taskId}
+      isRunning={isRunning ?? false}
+      onSelectionChange={onSelectionChange}
+      onSummaryLoaded={onSummaryLoaded}
+      onToggleReviewed={onToggleReviewed}
+    />
+  );
 }
 
 interface InlineComposerDiffProps {
@@ -178,7 +198,19 @@ function InlineComposerDiff({
   );
 }
 
-function ApiDiffViewer({ taskId, isRunning }: { taskId: string; isRunning: boolean }) {
+function ApiDiffViewer({
+  taskId,
+  isRunning,
+  onSelectionChange,
+  onSummaryLoaded,
+  onToggleReviewed: onToggleReviewedProp,
+}: {
+  taskId: string;
+  isRunning: boolean;
+  onSelectionChange?: (path: string | null) => void;
+  onSummaryLoaded?: (summary: import('@/lib/api').DiffSummaryResponse) => void;
+  onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
+}) {
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
   const [ignoredTruncated, setIgnoredTruncated] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -268,13 +300,15 @@ function ApiDiffViewer({ taskId, isRunning }: { taskId: string; isRunning: boole
   const selectedRef = useRef<string | null>(null);
   useEffect(() => {
     selectedRef.current = selected;
-  }, [selected]);
+    onSelectionChange?.(selected);
+  }, [selected, onSelectionChange]);
 
   const loadSummary = useCallback(async () => {
     try {
       const s = await api.getTaskDiffSummary(taskId);
       setFiles(s.files);
       setIgnoredTruncated(s.ignoredTruncated ?? false);
+      onSummaryLoaded?.(s);
       setError(null);
       setBaseShaUnavailable(false);
       const cur = selectedRef.current;
@@ -294,7 +328,7 @@ function ApiDiffViewer({ taskId, isRunning }: { taskId: string; isRunning: boole
     } finally {
       setSummaryLoading(false);
     }
-  }, [taskId]);
+  }, [taskId, onSummaryLoaded]);
 
   useEffect(() => {
     loadSummary();
@@ -384,6 +418,7 @@ function ApiDiffViewer({ taskId, isRunning }: { taskId: string; isRunning: boole
             ignoredTruncated={ignoredTruncated}
             reviewed={reviewed}
             onToggleReview={toggleReviewed}
+            onToggleReviewed={onToggleReviewedProp}
           />
         )}
       </aside>
