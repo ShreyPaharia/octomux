@@ -525,14 +525,14 @@ function intentHeaderText(
     case 'empty':
       return null;
     case 'scratch':
-      return 'Scratch session';
+      return null;
     case 'new':
       if (state.forkOf) {
         return `Forking from ${sourceTask?.title ?? state.forkOf}`;
       }
       return `New task in ${repoBasename(state.repo)}`;
     case 'none':
-      return `In-place in ${repoBasename(state.repo)}`;
+      return null;
     case 'existing':
       return `Attaching existing ${repoBasename(state.worktreePath)}`;
     case 'add-agent':

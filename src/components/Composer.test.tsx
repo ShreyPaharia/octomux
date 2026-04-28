@@ -56,15 +56,15 @@ beforeEach(() => {
 // ─── URL hydration ────────────────────────────────────────────────────────
 
 describe('Composer / URL hydration', () => {
-  it('empty URL → scratch intent + scratch hint pill', () => {
+  it('empty URL → no intent header, scratch hint pill', () => {
     renderComposer('/');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
     expect(screen.getByTestId('scratch-hint')).toHaveTextContent(/scratch/i);
   });
 
-  it('?mode=scratch → scratch intent', () => {
+  it('?mode=scratch → no intent header', () => {
     renderComposer('/?mode=scratch');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
   });
 
   it('?repo=/r&mode=new → New task in basename, worktree checkbox ON', () => {
@@ -73,9 +73,9 @@ describe('Composer / URL hydration', () => {
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('?repo=/r&mode=none → in-place intent, worktree checkbox OFF', () => {
+  it('?repo=/r&mode=none → no intent header, worktree checkbox OFF', () => {
     renderComposer('/?repo=%2Fusers%2Fdev%2Focto&mode=none');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/in-place in octo/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'false');
   });
 
@@ -356,7 +356,8 @@ describe('Composer / intent dismiss', () => {
     renderComposer('/?add_agent=t1', { tasks: [makeTask({ id: 't1', title: 'Parent' })] });
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/adding agent to parent/i);
     await user.click(screen.getByRole('button', { name: /dismiss intent/i }));
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch session/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
+    expect(screen.getByTestId('scratch-hint')).toBeInTheDocument();
   });
 
   it('dismissing fork-of returns to plain new mode', async () => {
@@ -382,7 +383,7 @@ describe('Composer / chip interactions', () => {
 
     await user.click(checkbox);
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/in-place/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId('worktree-checkbox'));
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
@@ -395,7 +396,7 @@ describe('Composer / chip interactions', () => {
       .getByTestId('repo-chip')
       .querySelector('button[aria-label="Remove"]') as HTMLButtonElement;
     await user.click(removeBtn);
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/scratch/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
     expect(screen.getByTestId('scratch-hint')).toBeInTheDocument();
   });
 
