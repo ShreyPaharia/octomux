@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
@@ -20,9 +20,11 @@ function task(overrides: Partial<Task>): Task {
   return Object.assign({}, baseTask, overrides);
 }
 
+const mockedExec = execFile as unknown as ReturnType<typeof vi.fn>;
+
 describe('resolveDiffBase', () => {
   beforeEach(() => {
-    vi.mocked(execFile).mockReset();
+    mockedExec.mockReset();
   });
 
   it('returns floor sha not-stale when base_branch is null', async () => {
@@ -33,25 +35,24 @@ describe('resolveDiffBase', () => {
       ref: 'aaaaaaa',
       is_stale: false,
     });
-    expect(execFile).not.toHaveBeenCalled();
+    expect(mockedExec).not.toHaveBeenCalled();
   });
 
   it('fetches origin/<base_branch> tip on success', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: readonly string[],
-      _opts: unknown,
-      cb: (
-        err: Error | null,
-        out: { stdout: string; stderr: string },
-      ) => void,
-    ) => {
-      const arr = args as string[];
-      if (arr.includes('fetch')) cb(null, { stdout: '', stderr: '' });
-      else if (arr.includes('rev-parse'))
-        cb(null, { stdout: 'deadbeef00112233445566778899aabbccddeeff\n', stderr: '' });
-      return undefined;
-    }) as unknown as typeof execFile);
+    mockedExec.mockImplementation(
+      (
+        _cmd: string,
+        args: readonly string[],
+        _opts: unknown,
+        cb: (err: Error | null, out: { stdout: string; stderr: string }) => void,
+      ) => {
+        const arr = args as string[];
+        if (arr.includes('fetch')) cb(null, { stdout: '', stderr: '' });
+        else if (arr.includes('rev-parse'))
+          cb(null, { stdout: 'deadbeef00112233445566778899aabbccddeeff\n', stderr: '' });
+        return undefined;
+      },
+    );
 
     const t = task({ base_branch: 'main' });
     const res = await resolveDiffBase(t);
@@ -63,19 +64,18 @@ describe('resolveDiffBase', () => {
   });
 
   it('falls back to base_sha and sets is_stale=true on fetch failure', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: readonly string[],
-      _opts: unknown,
-      cb: (
-        err: Error | null,
-        out: { stdout: string; stderr: string },
-      ) => void,
-    ) => {
-      const arr = args as string[];
-      if (arr.includes('fetch')) cb(new Error('network down'), { stdout: '', stderr: '' });
-      return undefined;
-    }) as unknown as typeof execFile);
+    mockedExec.mockImplementation(
+      (
+        _cmd: string,
+        args: readonly string[],
+        _opts: unknown,
+        cb: (err: Error | null, out: { stdout: string; stderr: string }) => void,
+      ) => {
+        const arr = args as string[];
+        if (arr.includes('fetch')) cb(new Error('network down'), { stdout: '', stderr: '' });
+        return undefined;
+      },
+    );
 
     const t = task({ base_branch: 'main', base_sha: 'cafebabe1234567890cafebabe1234567890cafe' });
     const res = await resolveDiffBase(t);
@@ -86,22 +86,63 @@ describe('resolveDiffBase', () => {
     });
   });
 
-  it('honours 5s timeout on fetch', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: readonly string[],
-      opts: { timeout?: number },
-    ) => {
-      if ((args as string[]).includes('fetch')) {
-        expect(opts.timeout).toBe(5000);
-      }
-      // Don't call cb — simulate hang. Caller should timeout via opts.
-      return undefined;
-    }) as unknown as typeof execFile);
+  describe('with fake timers', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
 
-    const t = task({ base_branch: 'main' });
-    // The helper times out the promise itself; assert it falls back.
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('honours 5s timeout on fetch', async () => {
+      mockedExec.mockImplementation(
+        (_cmd: string, args: readonly string[], opts: { timeout?: number }) => {
+          if ((args as string[]).includes('fetch')) {
+            expect(opts.timeout).toBe(5000);
+          }
+          // Don't call cb — simulate hang. Caller should timeout via the
+          // internal withTimeout wrapper (execFile's own timeout never fires
+          // because the mocked child is never killed).
+          return undefined;
+        },
+      );
+
+      const t = task({
+        base_branch: 'main',
+        base_sha: 'cafebabe1234567890cafebabe1234567890cafe',
+      });
+      const promise = resolveDiffBase(t);
+      // Advance past the internal timeout (FETCH_TIMEOUT_MS - 250 = 4750ms).
+      await vi.advanceTimersByTimeAsync(4751);
+      const res = await promise;
+      expect(res.is_stale).toBe(true);
+      expect(res.sha).toBe('cafebabe1234567890cafebabe1234567890cafe');
+    });
+  });
+
+  it('falls back to stale when rev-parse returns empty stdout', async () => {
+    mockedExec.mockImplementation(
+      (
+        _cmd: string,
+        args: readonly string[],
+        _opts: unknown,
+        cb: (err: Error | null, out: { stdout: string; stderr: string }) => void,
+      ) => {
+        const arr = args as string[];
+        if (arr.includes('fetch')) cb(null, { stdout: '', stderr: '' });
+        else if (arr.includes('rev-parse')) cb(null, { stdout: '\n', stderr: '' });
+        return undefined;
+      },
+    );
+
+    const t = task({
+      base_branch: 'main',
+      base_sha: 'cafebabe1234567890cafebabe1234567890cafe',
+    });
     const res = await resolveDiffBase(t);
     expect(res.is_stale).toBe(true);
+    expect(res.sha).toBe('cafebabe1234567890cafebabe1234567890cafe');
+    expect(res.ref).toBe('cafebab');
   });
 });
