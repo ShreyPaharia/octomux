@@ -21,10 +21,7 @@ export function CommentQueueDrawer({
       </header>
       <ul className="flex-1 overflow-auto">
         {comments.map((c) => (
-          <li
-            key={c.id}
-            className="p-3 border-b border-glass-border/50 flex gap-2 items-start"
-          >
+          <li key={c.id} className="p-3 border-b border-glass-border/50 flex gap-2 items-start">
             <button
               type="button"
               onClick={() => onJumpTo(c.filePath, c.line)}

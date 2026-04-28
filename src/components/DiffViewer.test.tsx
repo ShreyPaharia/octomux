@@ -314,12 +314,7 @@ describe('DiffViewer', () => {
       const user = userEvent.setup();
       const onAddComment = vi.fn();
       render(
-        <DiffViewer
-          oldContent="a"
-          newContent="aa"
-          path="src/foo.ts"
-          onAddComment={onAddComment}
-        />,
+        <DiffViewer oldContent="a" newContent="aa" path="src/foo.ts" onAddComment={onAddComment} />,
       );
       await user.click(screen.getByText('aa'));
       const input = screen.getByPlaceholderText(/leave a comment/i);
@@ -336,12 +331,7 @@ describe('DiffViewer', () => {
       const user = userEvent.setup();
       const onAddComment = vi.fn();
       render(
-        <DiffViewer
-          oldContent="a"
-          newContent="aa"
-          path="src/foo.ts"
-          onAddComment={onAddComment}
-        />,
+        <DiffViewer oldContent="a" newContent="aa" path="src/foo.ts" onAddComment={onAddComment} />,
       );
       await user.click(screen.getByText('aa'));
       const input = screen.getByPlaceholderText(/leave a comment/i);
