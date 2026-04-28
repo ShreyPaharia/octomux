@@ -899,7 +899,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
     try {
-      const summary = await diffMod.getDiffSummary({ worktree: cwd, base: task.base_sha });
+      const summary = await diffMod.getDiffSummary({ task });
       res.json(summary);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
