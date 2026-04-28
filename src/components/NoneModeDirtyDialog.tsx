@@ -41,8 +41,8 @@ export function NoneModeDirtyDialog({
           <DialogTitle>Uncommitted changes</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          You have {count} uncommitted change{count === 1 ? '' : 's'} on `{currentBranch}`.
-          Stash them to switch to `{targetBranch}`, or cancel and resolve manually.
+          You have {count} uncommitted change{count === 1 ? '' : 's'} on `{currentBranch}`. Stash
+          them to switch to `{targetBranch}`, or cancel and resolve manually.
         </p>
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">

@@ -466,52 +466,58 @@ describe('startTask', () => {
     describe('when current branch already equals base_branch', () => {
       beforeEach(() => {
         // Override --abbrev-ref to return 'feature-x' so currentBranch === target.
-        vi.mocked(execFile).mockImplementation(
-          ((_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
-            const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
-            if (args.includes('display-message')) {
-              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-            } else if (args.includes('list-windows')) {
-              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-            } else if (args.includes('new-window')) {
-              nextWindowIndex++;
-              cb(null, { stdout: '', stderr: '' });
-            } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
-              cb(null, { stdout: '', stderr: '' });
-            } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
-              cb(null, { stdout: 'feature-x\n', stderr: '' });
-            } else if (args.includes('rev-parse')) {
-              cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
-            } else {
-              cb(null, { stdout: 'true', stderr: '' });
-            }
-          }) as never,
-        );
+        vi.mocked(execFile).mockImplementation(((
+          _cmd: string,
+          args: string[],
+          optsOrCb: Function | object,
+          maybeCb?: Function,
+        ) => {
+          const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
+          if (args.includes('display-message')) {
+            cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+          } else if (args.includes('list-windows')) {
+            cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+          } else if (args.includes('new-window')) {
+            nextWindowIndex++;
+            cb(null, { stdout: '', stderr: '' });
+          } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
+            cb(null, { stdout: '', stderr: '' });
+          } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+            cb(null, { stdout: 'feature-x\n', stderr: '' });
+          } else if (args.includes('rev-parse')) {
+            cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
+          } else {
+            cb(null, { stdout: 'true', stderr: '' });
+          }
+        }) as never);
       });
 
       afterEach(() => {
         // Restore the default mock so subsequent tests don't see 'feature-x' from --abbrev-ref.
-        vi.mocked(execFile).mockImplementation(
-          ((_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
-            const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
-            if (args.includes('display-message')) {
-              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-            } else if (args.includes('list-windows')) {
-              cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-            } else if (args.includes('new-window')) {
-              nextWindowIndex++;
-              cb(null, { stdout: '', stderr: '' });
-            } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
-              cb(null, { stdout: '', stderr: '' });
-            } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
-              cb(null, { stdout: 'main\n', stderr: '' });
-            } else if (args.includes('rev-parse')) {
-              cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
-            } else {
-              cb(null, { stdout: 'true', stderr: '' });
-            }
-          }) as never,
-        );
+        vi.mocked(execFile).mockImplementation(((
+          _cmd: string,
+          args: string[],
+          optsOrCb: Function | object,
+          maybeCb?: Function,
+        ) => {
+          const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
+          if (args.includes('display-message')) {
+            cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+          } else if (args.includes('list-windows')) {
+            cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+          } else if (args.includes('new-window')) {
+            nextWindowIndex++;
+            cb(null, { stdout: '', stderr: '' });
+          } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
+            cb(null, { stdout: '', stderr: '' });
+          } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+            cb(null, { stdout: 'main\n', stderr: '' });
+          } else if (args.includes('rev-parse')) {
+            cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
+          } else {
+            cb(null, { stdout: 'true', stderr: '' });
+          }
+        }) as never);
       });
 
       it('skips checkout when current branch equals base_branch', async () => {
@@ -538,17 +544,20 @@ describe('startTask', () => {
     it('errors when current==target but another active task is on the same branch', async () => {
       // Override mock so abbrev-ref returns feature-x (already on target)
       const originalImpl = vi.mocked(execFile).getMockImplementation();
-      vi.mocked(execFile).mockImplementation(
-        ((_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
-          const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
-          if (args.includes('--abbrev-ref')) {
-            cb(null, { stdout: 'feature-x\n', stderr: '' });
-            return;
-          }
-          // delegate to the original baseline for everything else
-          if (originalImpl) (originalImpl as Function)(_cmd, args, optsOrCb, maybeCb);
-        }) as never,
-      );
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : (maybeCb as Function);
+        if (args.includes('--abbrev-ref')) {
+          cb(null, { stdout: 'feature-x\n', stderr: '' });
+          return;
+        }
+        // delegate to the original baseline for everything else
+        if (originalImpl) (originalImpl as Function)(_cmd, args, optsOrCb, maybeCb);
+      }) as never);
 
       try {
         db.prepare(

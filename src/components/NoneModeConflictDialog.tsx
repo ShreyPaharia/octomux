@@ -52,8 +52,7 @@ export function NoneModeConflictDialog({
           {conflicts.map((c) => (
             <li key={c.task_id} className="flex items-center justify-between gap-2">
               <span className="truncate">
-                {c.title}{' '}
-                <span className="text-xs text-muted-foreground">({c.status})</span>
+                {c.title} <span className="text-xs text-muted-foreground">({c.status})</span>
               </span>
               <Button
                 size="sm"

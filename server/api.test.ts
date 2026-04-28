@@ -527,15 +527,13 @@ describe('POST /api/tasks', () => {
   });
 
   it('allows run_mode=none with base_branch (new behavior)', async () => {
-    const res = await request(app)
-      .post('/api/tasks')
-      .send({
-        title: 't',
-        description: 'd',
-        run_mode: 'none',
-        repo_path: '/tmp/repo',
-        base_branch: 'feature-x',
-      });
+    const res = await request(app).post('/api/tasks').send({
+      title: 't',
+      description: 'd',
+      run_mode: 'none',
+      repo_path: '/tmp/repo',
+      base_branch: 'feature-x',
+    });
     // We allow the request to pass validation; downstream setup may still fail
     // when the repo path is fake. Accept any non-400 status.
     expect(res.status).not.toBe(400);
@@ -550,15 +548,13 @@ describe('POST /api/tasks', () => {
   });
 
   it('still rejects run_mode=none with worktree_path', async () => {
-    const res = await request(app)
-      .post('/api/tasks')
-      .send({
-        title: 't',
-        description: 'd',
-        run_mode: 'none',
-        repo_path: '/r',
-        worktree_path: '/r/.worktrees/x',
-      });
+    const res = await request(app).post('/api/tasks').send({
+      title: 't',
+      description: 'd',
+      run_mode: 'none',
+      repo_path: '/r',
+      worktree_path: '/r/.worktrees/x',
+    });
     expect(res.status).toBe(400);
   });
 
@@ -1885,9 +1881,7 @@ describe('POST /api/preflight/stash', () => {
   });
 
   it('400s when target_branch is missing', async () => {
-    const res = await request(app)
-      .post('/api/preflight/stash')
-      .send({ repo_path: '/r' });
+    const res = await request(app).post('/api/preflight/stash').send({ repo_path: '/r' });
     expect(res.status).toBe(400);
   });
 
