@@ -136,11 +136,21 @@ export interface DiffFileEntry {
   ignored?: boolean;
   tooLarge?: boolean;
   binary?: boolean;
+  post_blob_sha?: string | null;
+  reviewed?: boolean;
+  reviewed_at?: string | null;
+  reviewed_at_commit?: string | null;
+  changed_since_review?: boolean;
 }
 
 export interface DiffSummaryResponse {
   files: DiffFileEntry[];
   ignoredTruncated?: boolean;
+  base_sha: string;
+  base_ref: string;
+  base_is_stale: boolean;
+  reviewed_count: number;
+  total_count: number;
 }
 
 export interface FileDiffResponse {
@@ -185,6 +195,10 @@ export const api = {
     request<FileDiffResponse>(
       `/tasks/${id}/diff/${relPath.split('/').map(encodeURIComponent).join('/')}`,
     ),
+  markReviewed: (taskId: string, filePath: string) =>
+    request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'POST' }),
+  unmarkReviewed: (taskId: string, filePath: string) =>
+    request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'DELETE' }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
     request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
   stopAgent: (taskId: string, agentId: string) =>

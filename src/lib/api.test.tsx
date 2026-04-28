@@ -161,6 +161,24 @@ const apiCases = [
     response: undefined,
     status: 204,
   },
+  {
+    name: 'markReviewed',
+    call: () => api.markReviewed('t1', 'src/foo.ts'),
+    expectedUrl: '/api/tasks/t1/files/src/foo.ts/reviewed',
+    expectedMethod: 'POST',
+    expectedBody: undefined,
+    response: undefined,
+    status: 204,
+  },
+  {
+    name: 'unmarkReviewed',
+    call: () => api.unmarkReviewed('t1', 'src/foo.ts'),
+    expectedUrl: '/api/tasks/t1/files/src/foo.ts/reviewed',
+    expectedMethod: 'DELETE',
+    expectedBody: undefined,
+    response: undefined,
+    status: 204,
+  },
 ] as const;
 
 describe('api methods (table-driven)', () => {
