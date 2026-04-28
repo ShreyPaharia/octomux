@@ -86,11 +86,7 @@ export function DiffViewer(props: Props) {
 
   // Standalone / composer mode — renders the new-content lines as clickable
   // buttons with an inline comment composer. No taskId needed.
-  if (
-    standaloneNew !== undefined &&
-    standalonePath !== undefined &&
-    standaloneOld !== undefined
-  ) {
+  if (standaloneNew !== undefined && standalonePath !== undefined && standaloneOld !== undefined) {
     return (
       <InlineComposerDiff
         path={standalonePath}
@@ -156,9 +152,7 @@ function InlineComposerDiff({
     <div className="font-mono text-sm">
       {lines.map((lineText, idx) => {
         const lineNum = idx + 1; // 1-indexed
-        const pills = queuedComments.filter(
-          (c) => c.filePath === path && c.line === lineNum,
-        );
+        const pills = queuedComments.filter((c) => c.filePath === path && c.line === lineNum);
         return (
           <div key={lineNum} data-line={lineNum}>
             <button

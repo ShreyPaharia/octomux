@@ -17,9 +17,7 @@ describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
   });
 
   it('POST inserts a review-state row with current HEAD as commit', async () => {
-    const res = await request(app)
-      .post('/api/tasks/t1/files/src/foo.ts/reviewed')
-      .send();
+    const res = await request(app).post('/api/tasks/t1/files/src/foo.ts/reviewed').send();
     expect(res.status).toBe(204);
     const { listReviewState } = await import('./file-review-state.js');
     const rows = listReviewState('t1');
@@ -35,9 +33,7 @@ describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
   });
 
   it('rejects path traversal', async () => {
-    const res = await request(app)
-      .post('/api/tasks/t1/files/..%2Fetc%2Fpasswd/reviewed')
-      .send();
+    const res = await request(app).post('/api/tasks/t1/files/..%2Fetc%2Fpasswd/reviewed').send();
     expect(res.status).toBe(400);
   });
 
