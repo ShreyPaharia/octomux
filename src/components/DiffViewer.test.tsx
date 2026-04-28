@@ -292,6 +292,79 @@ describe('DiffViewer', () => {
     });
   });
 
+  // ─── Inline comment composer ────────────────────────────────────────────
+
+  describe('inline comment composer', () => {
+    it('clicking a line opens the composer below it', async () => {
+      const user = userEvent.setup();
+      const onAddComment = vi.fn();
+      render(
+        <DiffViewer
+          oldContent={'a\nb\nc'}
+          newContent={'a\nbb\nc'}
+          path="src/foo.ts"
+          onAddComment={onAddComment}
+        />,
+      );
+      await user.click(screen.getByText('bb'));
+      expect(screen.getByPlaceholderText(/leave a comment/i)).toBeInTheDocument();
+    });
+
+    it('Enter saves the comment with file path, line, and line text', async () => {
+      const user = userEvent.setup();
+      const onAddComment = vi.fn();
+      render(
+        <DiffViewer
+          oldContent="a"
+          newContent="aa"
+          path="src/foo.ts"
+          onAddComment={onAddComment}
+        />,
+      );
+      await user.click(screen.getByText('aa'));
+      const input = screen.getByPlaceholderText(/leave a comment/i);
+      await user.type(input, 'rename pls{Enter}');
+      expect(onAddComment).toHaveBeenCalledWith({
+        filePath: 'src/foo.ts',
+        line: 1,
+        lineText: 'aa',
+        body: 'rename pls',
+      });
+    });
+
+    it('Esc discards without calling onAddComment', async () => {
+      const user = userEvent.setup();
+      const onAddComment = vi.fn();
+      render(
+        <DiffViewer
+          oldContent="a"
+          newContent="aa"
+          path="src/foo.ts"
+          onAddComment={onAddComment}
+        />,
+      );
+      await user.click(screen.getByText('aa'));
+      const input = screen.getByPlaceholderText(/leave a comment/i);
+      await user.type(input, 'wip{Escape}');
+      expect(onAddComment).not.toHaveBeenCalled();
+    });
+
+    it('shows existing queued comments as pills under the line', () => {
+      render(
+        <DiffViewer
+          oldContent="a"
+          newContent="aa"
+          path="src/foo.ts"
+          onAddComment={() => {}}
+          queuedComments={[
+            { id: '1', filePath: 'src/foo.ts', line: 1, lineText: 'aa', body: 'rename' },
+          ]}
+        />,
+      );
+      expect(screen.getByText('rename')).toBeInTheDocument();
+    });
+  });
+
   it('reads stored expandedAll on mount and passes hideUnchangedRegions=false', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [{ path: 'src/a.ts', status: 'M', additions: 2, deletions: 1 }],

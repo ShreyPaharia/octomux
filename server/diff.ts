@@ -3,6 +3,9 @@ import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
+import { resolveDiffBase } from './diff-base.js';
+import { listReviewState } from './file-review-state.js';
+import type { Task } from './types.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('diff');
@@ -43,11 +46,21 @@ export interface DiffFileEntry {
   ignored?: boolean;
   tooLarge?: boolean;
   binary?: boolean;
+  post_blob_sha?: string | null;
+  reviewed?: boolean;
+  reviewed_at?: string | null;
+  reviewed_at_commit?: string | null;
+  changed_since_review?: boolean;
 }
 
 export interface DiffSummary {
   files: DiffFileEntry[];
   ignoredTruncated?: boolean;
+  base_sha: string;
+  base_ref: string;
+  base_is_stale: boolean;
+  reviewed_count: number;
+  total_count: number;
 }
 
 export interface FileDiff {
@@ -74,6 +87,25 @@ async function git(cwd: string, args: string[]): Promise<string> {
     env: gitEnv(),
   });
   return stdout;
+}
+
+export async function blobAt(opts: {
+  worktree: string;
+  commit: string;
+  relPath: string;
+}): Promise<string | null> {
+  const { worktree, commit, relPath } = opts;
+  try {
+    const stdout = await git(worktree, ['ls-tree', commit, '--', relPath]);
+    const line = stdout.trim();
+    if (!line) return null;
+    // format: "<mode> blob <sha>\t<path>"
+    const parts = line.split(/\s+/);
+    if (parts.length < 3 || parts[1] !== 'blob') return null;
+    return parts[2];
+  } catch {
+    return null;
+  }
 }
 
 function parseNumstat(
@@ -107,11 +139,13 @@ async function countLines(filePath: string): Promise<number> {
   return n;
 }
 
-export async function getDiffSummary(opts: {
-  worktree: string;
-  base: string;
-}): Promise<DiffSummary> {
-  const { worktree, base } = opts;
+export async function getDiffSummary(opts: { task: Task }): Promise<DiffSummary> {
+  const { task } = opts;
+  const worktree = task.run_mode === 'none' ? task.repo_path : task.worktree;
+  if (!worktree) throw new Error('Task has no worktree');
+
+  const resolved = await resolveDiffBase(task);
+  const base = resolved.sha;
 
   let committedNumstat = '';
   try {
@@ -192,10 +226,51 @@ export async function getDiffSummary(opts: {
       deletions = inCommitted.deletions;
     }
 
-    files.push({ path: p, status, additions, deletions });
+    const post_blob_sha =
+      status === 'D' ? null : await blobAt({ worktree, commit: 'HEAD', relPath: p });
+    files.push({ path: p, status, additions, deletions, post_blob_sha });
   }
 
-  const summary: DiffSummary = { files };
+  // Decorate with review state from the DB. Only non-ignored files
+  // (i.e. paths the agent actually changed) participate in the reviewed
+  // counter — ignored files are noise and shouldn't gate completion.
+  const reviewRows = listReviewState(task.id);
+  const reviewByPath = new Map(reviewRows.map((r) => [r.file_path, r]));
+  let reviewed_count = 0;
+
+  for (const entry of files) {
+    const row = reviewByPath.get(entry.path);
+    if (!row) {
+      entry.reviewed = false;
+      entry.reviewed_at = null;
+      entry.reviewed_at_commit = null;
+      entry.changed_since_review = false;
+      continue;
+    }
+    const blobAtReviewedCommit = await blobAt({
+      worktree,
+      commit: row.reviewed_at_commit,
+      relPath: entry.path,
+    });
+    const same =
+      blobAtReviewedCommit !== null &&
+      entry.post_blob_sha != null &&
+      blobAtReviewedCommit === entry.post_blob_sha;
+    entry.reviewed = same;
+    entry.reviewed_at = row.reviewed_at;
+    entry.reviewed_at_commit = row.reviewed_at_commit;
+    entry.changed_since_review = !same;
+    if (same) reviewed_count++;
+  }
+
+  const summary: DiffSummary = {
+    files,
+    base_sha: resolved.sha,
+    base_ref: resolved.ref,
+    base_is_stale: resolved.is_stale,
+    reviewed_count,
+    total_count: files.filter((f) => !f.ignored).length,
+  };
   await appendIgnoredFiles(summary, { worktree, knownPaths: paths });
 
   summary.files.sort((a, b) => a.path.localeCompare(b.path));

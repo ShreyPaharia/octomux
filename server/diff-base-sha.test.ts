@@ -5,6 +5,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { getDiffSummary } from './diff.js';
+import type { Task } from './types.js';
+import { createTestDb, DEFAULTS } from './test-helpers.js';
 
 const execFileRaw = promisify(execFileCb);
 
@@ -41,7 +43,17 @@ describe('diff module with captured base_sha', () => {
   let repo: string;
   let baseSha: string;
 
+  function makeTask(): Task {
+    return {
+      ...DEFAULTS.runningTask,
+      worktree: repo,
+      base_branch: null,
+      base_sha: baseSha,
+    } as Task;
+  }
+
   beforeEach(async () => {
+    createTestDb();
     repo = await makeRepo();
     baseSha = await headSha(repo);
   });
@@ -52,19 +64,37 @@ describe('diff module with captured base_sha', () => {
 
   it('computes diff against a captured SHA (new mode simulation)', async () => {
     await fs.promises.writeFile(path.join(repo, 'a.txt'), 'hello world\n');
-    const summary = await getDiffSummary({ worktree: repo, base: baseSha });
-    expect(summary.files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+    const summary = await getDiffSummary({ task: makeTask() });
+    expect(summary.files).toHaveLength(1);
+    expect(summary.files[0]).toMatchObject({
+      path: 'a.txt',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    });
   });
 
   it('computes diff against a captured SHA (existing mode simulation)', async () => {
     await fs.promises.writeFile(path.join(repo, 'b.txt'), 'new file\n');
-    const summary = await getDiffSummary({ worktree: repo, base: baseSha });
-    expect(summary.files).toEqual([{ path: 'b.txt', status: 'A', additions: 1, deletions: 0 }]);
+    const summary = await getDiffSummary({ task: makeTask() });
+    expect(summary.files).toHaveLength(1);
+    expect(summary.files[0]).toMatchObject({
+      path: 'b.txt',
+      status: 'A',
+      additions: 1,
+      deletions: 0,
+    });
   });
 
   it('computes diff against a captured SHA (none mode simulation)', async () => {
     await fs.promises.writeFile(path.join(repo, 'a.txt'), 'changed\n');
-    const summary = await getDiffSummary({ worktree: repo, base: baseSha });
-    expect(summary.files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+    const summary = await getDiffSummary({ task: makeTask() });
+    expect(summary.files).toHaveLength(1);
+    expect(summary.files[0]).toMatchObject({
+      path: 'a.txt',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    });
   });
 });
