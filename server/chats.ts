@@ -37,6 +37,11 @@ export interface CreateChatOptions {
   label?: string;
   cwd?: string;
   agent?: string | null;
+  prompt?: string | null;
+}
+
+function shellQuoteSingle(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
@@ -68,8 +73,25 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
 
     const flags = resolveClaudeFlags(await getSettings());
     const agentFlag = agent ? ` --agent ${agent}` : '';
-    const cmd = `claude${agentFlag} --session-id ${claudeSessionId}${flags}`;
+    let cmd = `claude${agentFlag} --session-id ${claudeSessionId}${flags}`;
+    let promptFile: string | null = null;
+    const initialPrompt = opts.prompt?.trim();
+    if (initialPrompt) {
+      promptFile = path.join(cwd, `.claude-prompt-${id}`);
+      fs.writeFileSync(promptFile, initialPrompt);
+      cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
+    }
     await execFile('tmux', ['send-keys', '-t', session, cmd, 'Enter']);
+    if (promptFile) {
+      const pf = promptFile;
+      setTimeout(() => {
+        try {
+          fs.unlinkSync(pf);
+        } catch {
+          // already removed
+        }
+      }, 30_000);
+    }
 
     logger.info(
       { chat_id: id, tmux_session: session, cwd, agent, operation: 'createChat' },
@@ -84,14 +106,14 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   return db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as Agent;
 }
 
-/** List all standalone agents (task_id IS NULL), pinned first. */
+/** List all standalone agents (task_id IS NULL), oldest first. */
 export function listChats(): Agent[] {
   const db = getDb();
   return db
     .prepare(
       `SELECT * FROM agents
          WHERE task_id IS NULL
-         ORDER BY pinned DESC, created_at ASC`,
+         ORDER BY created_at ASC`,
     )
     .all() as Agent[];
 }
