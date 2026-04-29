@@ -162,6 +162,7 @@ export interface FileDiffResponse {
   status: DiffFileStatus;
   tooLarge: boolean;
   binary: boolean;
+  isDirectory: boolean;
 }
 
 export interface InboxResponse {

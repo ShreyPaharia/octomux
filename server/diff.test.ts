@@ -127,6 +127,36 @@ describe('diff module', () => {
       });
     });
 
+    // Regression: when a directory contains tracked files but a sub-tree (e.g.
+    // docs/superpowers/) is partly gitignored with a `!` un-ignore for one file,
+    // `git status --porcelain=v1` (default -unormal) collapses the untracked
+    // sub-tree into a single trailing-slash entry. That used to leak through as
+    // a fake file with empty basename and crash the right pane with EISDIR.
+    it('expands partially-untracked directories into their real file paths', async () => {
+      await commit(repo, { 'docs/tracked.md': 'tracked\n' }, 'add docs/tracked.md');
+      await fs.promises.writeFile(
+        path.join(repo, '.gitignore'),
+        'docs/superpowers/*\n!docs/superpowers/README.md\n',
+      );
+      await fs.promises.mkdir(path.join(repo, 'docs/superpowers'), { recursive: true });
+      await fs.promises.writeFile(path.join(repo, 'docs/superpowers/README.md'), 'sp readme\n');
+
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
+      const paths = files.map((f) => f.path);
+      // No trailing-slash directory entry leaks through.
+      expect(paths.every((p) => !p.endsWith('/'))).toBe(true);
+      // The actual file is present with its real basename.
+      const readme = files.find((f) => f.path === 'docs/superpowers/README.md');
+      expect(readme).toBeDefined();
+      expect(readme?.status).toBe('A');
+      // Defensive: every emitted path has a non-empty basename so the tree
+      // builder produces visible nodes.
+      for (const p of paths) {
+        const basename = p.split('/').pop();
+        expect(basename).toBeTruthy();
+      }
+    });
+
     it('reports a deleted file', async () => {
       await fs.promises.unlink(path.join(repo, 'a.txt'));
       const { files } = await getDiffSummary({ task: makeTaskForRepo() });
@@ -217,6 +247,7 @@ describe('diff module', () => {
         status: 'M',
         tooLarge: false,
         binary: false,
+        isDirectory: false,
       });
     });
 
@@ -242,6 +273,15 @@ describe('diff module', () => {
       const diff = await getFileDiff({ worktree: repo, base: 'main', relPath: 'big.txt' });
       expect(diff.tooLarge).toBe(true);
       expect(diff.newContent).toBe('');
+    });
+
+    it('returns isDirectory=true for a directory path instead of throwing EISDIR', async () => {
+      await fs.promises.mkdir(path.join(repo, 'somedir'));
+      const diff = await getFileDiff({ worktree: repo, base: 'main', relPath: 'somedir' });
+      expect(diff.isDirectory).toBe(true);
+      expect(diff.newContent).toBe('');
+      expect(diff.tooLarge).toBe(false);
+      expect(diff.binary).toBe(false);
     });
   });
 

@@ -423,7 +423,12 @@ function ApiDiffViewer({
   }, [taskId, selected, expandedAll]);
 
   const showToolbar = Boolean(
-    selected && fileDiff && !fileDiff.tooLarge && !fileDiff.binary && !error,
+    selected &&
+    fileDiff &&
+    !fileDiff.tooLarge &&
+    !fileDiff.binary &&
+    !fileDiff.isDirectory &&
+    !error,
   );
   const showReviewToggle = Boolean(selectedFile && !selectedFile.ignored);
 
@@ -540,6 +545,10 @@ function ApiDiffViewer({
           ) : fileDiff?.tooLarge ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               {selected} is too large to display (&gt;1 MiB). Open the worktree directly.
+            </div>
+          ) : fileDiff?.isDirectory ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {selected} resolves to a directory; cannot show diff.
             </div>
           ) : fileDiff?.binary ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">

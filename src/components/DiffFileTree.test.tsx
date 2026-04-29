@@ -16,6 +16,20 @@ describe('DiffFileTree', () => {
     expect(screen.getByText('a.ts')).toBeInTheDocument();
   });
 
+  it('renders the real basename for deeply-nested files (e.g. docs/**)', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const files: DiffFileEntry[] = [
+      { path: 'docs/superpowers/README.md', status: 'A', additions: 12, deletions: 0 },
+    ];
+    render(<DiffFileTree files={files} selected={null} onSelect={onSelect} taskId="t1" />);
+    // Leaf node shows the actual filename, not an empty string.
+    expect(screen.getByText('README.md')).toBeInTheDocument();
+    // Clicking the leaf reports the full path back to the parent.
+    await user.click(screen.getByText('README.md'));
+    expect(onSelect).toHaveBeenCalledWith('docs/superpowers/README.md');
+  });
+
   it('renders the ignored group collapsed by default', () => {
     const files: DiffFileEntry[] = [
       { path: 'a.ts', status: 'M', additions: 1, deletions: 0 },

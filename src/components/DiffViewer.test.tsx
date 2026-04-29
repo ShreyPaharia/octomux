@@ -49,6 +49,7 @@ beforeEach(() => {
     status: 'M',
     tooLarge: false,
     binary: false,
+    isDirectory: false,
   });
   localStorage.clear();
   mountCounter = 0;
@@ -121,6 +122,24 @@ describe('DiffViewer', () => {
     });
     render(<DiffViewer taskId="t1" isRunning={false} />);
     await waitFor(() => expect(screen.getByText(/too large/i)).toBeInTheDocument());
+  });
+
+  it('shows a non-crashing directory message when the file resolves to a directory', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [{ path: 'docs/superpowers/somedir', status: 'A', additions: 0, deletions: 0 }],
+    });
+    apiMock.getTaskDiffFile.mockResolvedValue({
+      oldContent: '',
+      newContent: '',
+      status: 'A',
+      tooLarge: false,
+      binary: false,
+      isDirectory: true,
+    });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => expect(screen.getByText(/resolves to a directory/i)).toBeInTheDocument());
+    // Monaco must NOT mount for a directory entry.
+    expect(screen.queryByTestId('monaco-diff')).not.toBeInTheDocument();
   });
 
   it('switches file when a tree row is clicked', async () => {

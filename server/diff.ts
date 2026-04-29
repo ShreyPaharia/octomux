@@ -69,6 +69,7 @@ export interface FileDiff {
   status: FileStatus;
   tooLarge: boolean;
   binary: boolean;
+  isDirectory: boolean;
 }
 
 // Strip GIT_* env vars so our git calls target the worktree we pass via -C,
@@ -177,13 +178,21 @@ export async function getDiffSummary(opts: { task: Task }): Promise<DiffSummary>
   const workingNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', 'HEAD']);
   const working = parseNumstat(workingNumstat);
 
-  const porcelain = await git(worktree, ['status', '--porcelain=v1', '--no-renames']);
+  // -uall expands untracked directories into individual file entries. Without it,
+  // git collapses a partially-untracked directory (e.g. `docs/superpowers/` when
+  // `docs/` has tracked files but most of `docs/superpowers/` is gitignored) into
+  // a single trailing-slash entry, which produces an empty-basename node and an
+  // EISDIR when the viewer tries to read it.
+  const porcelain = await git(worktree, ['status', '--porcelain=v1', '--no-renames', '-uall']);
   const untrackedPaths: string[] = [];
   const deleted = new Set<string>();
   for (const line of porcelain.split('\n')) {
     if (!line) continue;
     const code = line.slice(0, 2);
     const p = line.slice(3);
+    // Belt-and-suspenders: skip any directory entries that slip through (e.g.
+    // submodule roots), so they never reach the tree builder as empty leaves.
+    if (!p || p.endsWith('/')) continue;
     if (code === '??') untrackedPaths.push(p);
     if (code.includes('D')) deleted.add(p);
   }
@@ -368,11 +377,14 @@ export async function getFileDiff(opts: {
   let newContent = '';
   let tooLarge = false;
   let binary = false;
+  let isDirectory = false;
   if (fs.existsSync(abs)) {
     const stat = await fs.promises.stat(abs);
-    if (stat.size > MAX_FILE_BYTES) {
+    if (stat.isDirectory()) {
+      isDirectory = true;
+    } else if (stat.size > MAX_FILE_BYTES) {
       tooLarge = true;
-    } else {
+    } else if (stat.isFile()) {
       const buf = await fs.promises.readFile(abs);
       const sniff = buf.subarray(0, Math.min(buf.length, 8192));
       binary = sniff.includes(0);
@@ -386,7 +398,7 @@ export async function getFileDiff(opts: {
   else if (oldContent === '') status = 'A';
   else status = 'M';
 
-  return { oldContent, newContent, status, tooLarge, binary };
+  return { oldContent, newContent, status, tooLarge, binary, isDirectory };
 }
 
 export function safeResolvePath(worktree: string, relPath: string): string {
