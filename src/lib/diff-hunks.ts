@@ -9,9 +9,7 @@ export function findHunkLine(
 ): number | null {
   if (!changes || changes.length === 0) return null;
 
-  const sorted = [...changes].sort(
-    (a, b) => a.modifiedStartLineNumber - b.modifiedStartLineNumber,
-  );
+  const sorted = [...changes].sort((a, b) => a.modifiedStartLineNumber - b.modifiedStartLineNumber);
 
   if (direction === 1) {
     for (const c of sorted) {
