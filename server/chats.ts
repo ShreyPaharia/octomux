@@ -125,3 +125,81 @@ export function getChat(id: string): Agent | null {
     | undefined;
   return row ?? null;
 }
+
+function isTmuxTargetMissing(err: unknown): boolean {
+  const stderr = (err as { stderr?: string } | null)?.stderr ?? '';
+  return /can't find (?:session|window|pane):/i.test(stderr);
+}
+
+async function killChatSession(id: string, session: string, op: string): Promise<void> {
+  try {
+    await execFile('tmux', ['kill-session', '-t', session]);
+    logger.info(
+      { chat_id: id, operation: op, tmux_session: session },
+      `${op}: tmux session killed`,
+    );
+  } catch (err) {
+    if (isTmuxTargetMissing(err)) {
+      logger.debug(
+        { chat_id: id, operation: op, tmux_session: session },
+        `${op}: tmux session already gone`,
+      );
+    } else {
+      logger.warn(
+        { chat_id: id, operation: op, tmux_session: session, err },
+        `${op}: tmux kill-session failed`,
+      );
+    }
+  }
+}
+
+/**
+ * Close a chat: stop the tmux session and mark the agent row stopped.
+ * Preserves the DB row + scratch dir so history remains visible.
+ */
+export async function closeChat(chat: Agent): Promise<void> {
+  const db = getDb();
+  logger.info({ chat_id: chat.id, operation: 'closeChat' }, 'closeChat: start');
+
+  db.prepare(
+    `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+       hook_activity_updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(chat.id);
+
+  if (chat.tmux_session) {
+    await killChatSession(chat.id, chat.tmux_session, 'closeChat');
+  }
+
+  logger.info({ chat_id: chat.id, operation: 'closeChat' }, 'closeChat: complete');
+}
+
+/**
+ * Delete a chat: kill tmux, remove scratch dir, delete DB row.
+ */
+export async function deleteChat(chat: Agent): Promise<void> {
+  const db = getDb();
+  logger.info({ chat_id: chat.id, operation: 'deleteChat' }, 'deleteChat: start');
+
+  if (chat.tmux_session) {
+    await killChatSession(chat.id, chat.tmux_session, 'deleteChat');
+  }
+
+  const dir = chatDirFor(chat.id);
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    logger.info(
+      { chat_id: chat.id, operation: 'deleteChat', chat_dir: dir },
+      'deleteChat: scratch dir removed',
+    );
+  } catch (err) {
+    logger.warn(
+      { chat_id: chat.id, operation: 'deleteChat', chat_dir: dir, err },
+      'deleteChat: scratch dir remove failed (may already be gone)',
+    );
+  }
+
+  db.prepare('DELETE FROM agents WHERE id = ?').run(chat.id);
+
+  logger.info({ chat_id: chat.id, operation: 'deleteChat' }, 'deleteChat: complete');
+}

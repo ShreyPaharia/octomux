@@ -135,6 +135,18 @@ vi.mock('./chats.js', async () => {
       const db = getDb();
       return db.prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) ?? null;
     }),
+    closeChat: vi.fn(async (chat: { id: string }) => {
+      const db = getDb();
+      db.prepare(
+        `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+            hook_activity_updated_at = datetime('now')
+          WHERE id = ?`,
+      ).run(chat.id);
+    }),
+    deleteChat: vi.fn(async (chat: { id: string }) => {
+      const db = getDb();
+      db.prepare('DELETE FROM agents WHERE id = ?').run(chat.id);
+    }),
   };
 });
 
@@ -1651,6 +1663,47 @@ describe('Chats API (standalone agents)', () => {
 
   it('GET /api/chats/:id returns 404 for unknown id', async () => {
     const res = await request(app).get('/api/chats/does-not-exist');
+    expect(res.status).toBe(404);
+  });
+
+  it("PATCH /api/chats/:id with status='stopped' closes the chat", async () => {
+    const created = await request(app).post('/api/chats').send({ label: 'To close' });
+    const id = created.body.id as string;
+
+    const res = await request(app).patch(`/api/chats/${id}`).send({ status: 'stopped' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('stopped');
+
+    const fetched = await request(app).get(`/api/chats/${id}`);
+    expect(fetched.body.status).toBe('stopped');
+  });
+
+  it('PATCH /api/chats/:id rejects unsupported status values', async () => {
+    const created = await request(app).post('/api/chats').send({ label: 'Bad patch' });
+    const res = await request(app)
+      .patch(`/api/chats/${created.body.id}`)
+      .send({ status: 'running' });
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH /api/chats/:id returns 404 for unknown id', async () => {
+    const res = await request(app).patch('/api/chats/missing').send({ status: 'stopped' });
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /api/chats/:id removes the chat row', async () => {
+    const created = await request(app).post('/api/chats').send({ label: 'To delete' });
+    const id = created.body.id as string;
+
+    const del = await request(app).delete(`/api/chats/${id}`);
+    expect(del.status).toBe(204);
+
+    const fetched = await request(app).get(`/api/chats/${id}`);
+    expect(fetched.status).toBe(404);
+  });
+
+  it('DELETE /api/chats/:id returns 404 for unknown id', async () => {
+    const res = await request(app).delete('/api/chats/missing');
     expect(res.status).toBe(404);
   });
 });

@@ -24,7 +24,7 @@ import {
 } from './task-runner.js';
 import * as diffMod from './diff.js';
 import { setReviewed, clearReviewed } from './file-review-state.js';
-import { createChat, listChats, getChat } from './chats.js';
+import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
@@ -1232,6 +1232,47 @@ export function setupRoutes(app: Express): void {
         prompt: body.prompt,
       });
       res.status(201).json(chat);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  /**
+   * Close a chat — stop the tmux session, mark the agent stopped.
+   * Body: `{ status: 'stopped' }`. Preserves the row so history stays visible.
+   */
+  app.patch('/api/chats/:id', async (req: Request, res: Response) => {
+    const chat = getChat(req.params.id as string);
+    if (!chat) {
+      res.status(404).json({ error: 'Chat not found' });
+      return;
+    }
+    const body = (req.body ?? {}) as { status?: string };
+    if (body.status !== 'stopped') {
+      res.status(400).json({ error: "Only status='stopped' is supported" });
+      return;
+    }
+    try {
+      await closeChat(chat);
+      const updated = getChat(chat.id);
+      broadcast({ type: 'chat:updated', payload: { chatId: chat.id } });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  /** Delete a chat — kill tmux, remove scratch dir, delete DB row. */
+  app.delete('/api/chats/:id', async (req: Request, res: Response) => {
+    const chat = getChat(req.params.id as string);
+    if (!chat) {
+      res.status(404).json({ error: 'Chat not found' });
+      return;
+    }
+    try {
+      await deleteChat(chat);
+      broadcast({ type: 'chat:deleted', payload: { chatId: chat.id } });
+      res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
