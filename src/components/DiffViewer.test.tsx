@@ -128,8 +128,10 @@ describe('DiffViewer', () => {
         binary: false,
       });
     render(<DiffViewer taskId="t1" isRunning={false} />);
-    await waitFor(() => expect(screen.getByText('a.ts')).toBeInTheDocument());
-    await user.click(screen.getByText('b.ts'));
+    await screen.findByTestId('diff-file-row-a.ts');
+    await user.click(
+      screen.getByTestId('diff-file-row-b.ts').querySelector('button') as HTMLElement,
+    );
     await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
   });
 
@@ -200,7 +202,9 @@ describe('DiffViewer', () => {
     const firstId = screen.getByTestId('monaco-diff').getAttribute('data-mount-id');
     expect(firstId).not.toBeNull();
 
-    await user.click(screen.getByText('b.ts'));
+    await user.click(
+      screen.getByTestId('diff-file-row-b.ts').querySelector('button') as HTMLElement,
+    );
     await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
     const secondId = screen.getByTestId('monaco-diff').getAttribute('data-mount-id');
     expect(secondId).not.toBeNull();
@@ -249,6 +253,7 @@ describe('DiffViewer', () => {
     render(<DiffViewer taskId="t1" isRunning={false} />);
 
     const progress = await screen.findByTestId('review-progress');
+    await screen.findByTestId('monaco-diff');
     expect(progress.textContent).toMatch(/0\s*\/\s*2\s*reviewed/);
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
 
@@ -258,10 +263,39 @@ describe('DiffViewer', () => {
     await waitFor(() => {
       expect(screen.getByTestId('review-progress').textContent).toMatch(/1\s*\/\s*2\s*reviewed/);
     });
+    expect(screen.getByTestId('monaco-diff')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show file contents/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hide file contents/i })).not.toBeInTheDocument();
 
     // Second click toggles off
     await user.click(screen.getByTestId('review-toggle-src/a.ts'));
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
+  });
+
+  it('renders the review checkbox in the selected file header only', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
+        { path: 'src/b.ts', status: 'A', additions: 1, deletions: 0 },
+      ],
+    });
+
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+
+    await screen.findByTestId('review-toggle-src/a.ts');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.queryByTestId('review-toggle-src/b.ts')).not.toBeInTheDocument();
+  });
+
+  it('uses API-backed reviewed state for the header checkbox', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [{ path: 'src/a.ts', status: 'M', additions: 1, deletions: 0, reviewed: true }],
+    });
+
+    render(<DiffViewer taskId="t1" isRunning={false} onToggleReviewed={() => {}} />);
+
+    const checkbox = (await screen.findByTestId('review-toggle-src/a.ts')) as HTMLInputElement;
+    await waitFor(() => expect(checkbox.checked).toBe(true));
   });
 
   it('reviewed files render dimmed (opacity-50) and the row carries a data-reviewed flag', async () => {

@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import {
   getDiffExpanded,
   setDiffExpanded,
@@ -217,14 +218,15 @@ function ApiDiffViewer({
   const expandedFallback = useRef<Record<string, boolean>>({});
   const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
 
-  // Hydrate reviewed set from localStorage whenever the file list changes.
+  // Hydrate reviewed set from the API in review-cockpit mode, otherwise localStorage.
   useEffect(() => {
     const next = new Set<string>();
     for (const f of files) {
-      if (getReviewed(taskId, f.path)) next.add(f.path);
+      const isReviewed = onToggleReviewedProp ? !!f.reviewed : getReviewed(taskId, f.path);
+      if (isReviewed) next.add(f.path);
     }
     setReviewedState(next);
-  }, [taskId, files]);
+  }, [taskId, files, onToggleReviewedProp]);
 
   const toggleReviewed = useCallback(
     (path: string) => {
@@ -296,6 +298,29 @@ function ApiDiffViewer({
     selectedRef.current = selected;
     onSelectionChange?.(selected);
   }, [selected, onSelectionChange]);
+
+  const selectedFile = useMemo(
+    () => files.find((f) => f.path === selected) ?? null,
+    [files, selected],
+  );
+  const selectedReviewed = selected ? reviewed.has(selected) : false;
+
+  const handleSelectedReviewToggle = useCallback(() => {
+    if (!selectedFile) return;
+    const path = selectedFile.path;
+    const currentlyReviewed = reviewed.has(path);
+    if (onToggleReviewedProp) {
+      setReviewedState((prev) => {
+        const next = new Set(prev);
+        if (currentlyReviewed) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      onToggleReviewedProp(path, currentlyReviewed);
+    } else {
+      toggleReviewed(path);
+    }
+  }, [onToggleReviewedProp, reviewed, selectedFile, toggleReviewed]);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -378,6 +403,7 @@ function ApiDiffViewer({
   const showToolbar = Boolean(
     selected && fileDiff && !fileDiff.tooLarge && !fileDiff.binary && !error,
   );
+  const showReviewToggle = Boolean(selectedFile && !selectedFile.ignored);
 
   if (baseShaUnavailable) {
     return (
@@ -411,8 +437,6 @@ function ApiDiffViewer({
             taskId={taskId}
             ignoredTruncated={ignoredTruncated}
             reviewed={reviewed}
-            onToggleReview={toggleReviewed}
-            onToggleReviewed={onToggleReviewedProp}
           />
         )}
       </aside>
@@ -429,8 +453,31 @@ function ApiDiffViewer({
           style={{ background: '#101217', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
         >
           <span className="flex min-w-0 items-center gap-3">
-            {showToolbar && selected ? (
-              <span className="truncate font-mono text-[11px] text-[#B5B5BD]">{selected}</span>
+            {selectedFile ? (
+              <label className="flex min-w-0 items-center gap-2">
+                {showReviewToggle ? (
+                  <input
+                    type="checkbox"
+                    checked={selectedReviewed}
+                    aria-label={
+                      selectedReviewed
+                        ? `Unmark ${selectedFile.path} as reviewed`
+                        : `Mark ${selectedFile.path} as reviewed`
+                    }
+                    data-testid={`review-toggle-${selectedFile.path}`}
+                    onChange={handleSelectedReviewToggle}
+                    className="h-3.5 w-3.5 shrink-0 cursor-pointer"
+                  />
+                ) : null}
+                <span
+                  className={cn(
+                    'truncate font-mono text-[11px] text-[#B5B5BD]',
+                    selectedReviewed && 'text-muted-foreground line-through',
+                  )}
+                >
+                  {selectedFile.path}
+                </span>
+              </label>
             ) : null}
           </span>
           <span className="flex shrink-0 items-center gap-2">
