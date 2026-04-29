@@ -530,7 +530,7 @@ function intentHeaderText(
       if (state.forkOf) {
         return `Forking from ${sourceTask?.title ?? state.forkOf}`;
       }
-      return `New task in ${repoBasename(state.repo)}`;
+      return null;
     case 'none':
       return null;
     case 'existing':

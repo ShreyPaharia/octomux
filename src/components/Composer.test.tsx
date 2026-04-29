@@ -67,9 +67,9 @@ describe('Composer / URL hydration', () => {
     expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
   });
 
-  it('?repo=/r&mode=new → New task in basename, worktree checkbox ON', () => {
+  it('?repo=/r&mode=new → no intent header, worktree checkbox ON', () => {
     renderComposer('/?repo=%2Fusers%2Fdev%2Focto&mode=new');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task in octo/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
   });
 
@@ -366,7 +366,7 @@ describe('Composer / intent dismiss', () => {
     });
     expect(screen.getByTestId('intent-header')).toHaveTextContent(/forking from source/i);
     await user.click(screen.getByRole('button', { name: /dismiss intent/i }));
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task in r/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
   });
 });
 
@@ -379,7 +379,7 @@ describe('Composer / chip interactions', () => {
     renderComposer('/?repo=%2Fr&mode=new&branch=main');
     const checkbox = screen.getByTestId('worktree-checkbox');
     expect(checkbox).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
 
     await user.click(checkbox);
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'false');
@@ -387,7 +387,7 @@ describe('Composer / chip interactions', () => {
 
     await user.click(screen.getByTestId('worktree-checkbox'));
     expect(screen.getByTestId('worktree-checkbox')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('intent-header')).toHaveTextContent(/new task/i);
+    expect(screen.queryByTestId('intent-header')).not.toBeInTheDocument();
   });
 
   it('removing repo chip switches to scratch mode', async () => {
