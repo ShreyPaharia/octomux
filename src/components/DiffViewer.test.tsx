@@ -89,6 +89,25 @@ describe('DiffViewer', () => {
     expect(screen.getByTestId('mod')).toHaveTextContent('new');
   });
 
+  it('auto-selects the first non-ignored file, skipping ignored entries', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: '.env', status: 'A', additions: 3, deletions: 0, ignored: true },
+        { path: 'src/real.ts', status: 'M', additions: 1, deletions: 0 },
+      ],
+    });
+    apiMock.getTaskDiffFile.mockResolvedValue({
+      oldContent: 'real-old',
+      newContent: 'real-new',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    });
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('real-new'));
+    expect(screen.getByTestId('orig')).toHaveTextContent('real-old');
+  });
+
   it('shows "too large" message for oversized files', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [{ path: 'big.bin', status: 'M', additions: 0, deletions: 0 }],

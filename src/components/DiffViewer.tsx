@@ -308,9 +308,10 @@ function ApiDiffViewer({
       setError(null);
       setBaseShaUnavailable(false);
       const cur = selectedRef.current;
-      if (!cur && s.files.length > 0) setSelected(s.files[0].path);
+      const firstVisible = s.files.find((f) => !f.ignored) ?? s.files[0];
+      if (!cur && firstVisible) setSelected(firstVisible.path);
       else if (cur && !s.files.find((f) => f.path === cur)) {
-        setSelected(s.files[0]?.path ?? null);
+        setSelected(firstVisible?.path ?? null);
       }
     } catch (err) {
       const msg = (err as Error).message;
