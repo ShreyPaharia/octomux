@@ -8,6 +8,8 @@ import {
   getReviewed,
   setReviewed as persistReviewed,
 } from '@/lib/diff-state';
+import { findHunkLine } from '@/lib/diff-hunks';
+import { useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { Button } from '@/components/ui/button';
 import { DiffFileTree } from './DiffFileTree';
 
@@ -363,6 +365,28 @@ function ApiDiffViewer({
       cancelled = true;
     };
   }, [taskId, selected]);
+
+  const navigateHunk = useCallback(
+    (direction: 1 | -1) => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      const changes = ed.getLineChanges();
+      if (!changes || changes.length === 0) return;
+      const modified = ed.getModifiedEditor();
+      const cursorLine = modified.getPosition()?.lineNumber ?? 1;
+      const target = findHunkLine(changes, cursorLine, direction);
+      if (target == null) return;
+      modified.setPosition({ lineNumber: target, column: 1 });
+      modified.revealLineInCenterIfOutsideViewport(target, 0);
+      modified.focus();
+    },
+    [],
+  );
+
+  useDiffKeyboardNav({
+    onNextHunk: () => navigateHunk(1),
+    onPrevHunk: () => navigateHunk(-1),
+  });
 
   const toggleExpandedAll = useCallback(() => {
     if (!selected) return;
