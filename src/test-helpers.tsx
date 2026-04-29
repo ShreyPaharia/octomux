@@ -176,6 +176,9 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
     updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
     deleteSkill: vi.fn().mockResolvedValue(undefined),
+    listChats: vi.fn().mockResolvedValue([]),
+    closeChat: vi.fn().mockResolvedValue(undefined),
+    deleteChat: vi.fn().mockResolvedValue(undefined),
   };
   return { ...defaults, ...overrides };
 }

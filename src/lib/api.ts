@@ -262,6 +262,16 @@ export const api = {
       body: JSON.stringify({ task_id: taskId }),
     }),
 
+  // Chats (standalone runtime agents)
+  listChats: () => request<Agent[]>('/chats'),
+  closeChat: (id: string) =>
+    request<Agent>(`/chats/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'stopped' }),
+    }),
+  deleteChat: (id: string) =>
+    request<void>(`/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // Worktrees
   listWorktrees: () => request<WorktreeSummary[]>('/worktrees'),
   getWorktree: (id: string) => request<WorktreeDetail>(`/worktrees/${encodeURIComponent(id)}`),

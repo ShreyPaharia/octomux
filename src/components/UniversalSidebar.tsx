@@ -9,6 +9,15 @@ import {
 } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { useTasksContext } from '@/lib/tasks-context';
 import {
   groupTasksForSidebar,
@@ -1244,6 +1253,8 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
 function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePath: string }) {
   const [chats, setChats] = useState<Agent[]>([]);
   const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const loadChats = useCallback(async () => {
     try {
@@ -1255,6 +1266,35 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
       // silent
     }
   }, []);
+
+  const handleClose = useCallback(
+    async (id: string) => {
+      try {
+        await api.closeChat(id);
+        await loadChats();
+      } catch (err) {
+        console.error('Failed to close chat:', err);
+      }
+    },
+    [loadChats],
+  );
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await api.deleteChat(id);
+        setDeleteTargetId(null);
+        await loadChats();
+        if (activePath === `/chats/${id}`) navigate('/');
+      } catch (err) {
+        console.error('Failed to delete chat:', err);
+        setDeleteTargetId(null);
+      }
+    },
+    [loadChats, activePath, navigate],
+  );
+
+  const deleteTarget = deleteTargetId ? chats.find((c) => c.id === deleteTargetId) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -1289,6 +1329,7 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
       {chats.map((chat) => {
         const to = `/chats/${chat.id}`;
         const isActive = activePath === to;
+        const isClosed = chat.status === 'stopped';
         if (collapsed) {
           return (
             <div key={chat.id} className="flex justify-center py-1">
@@ -1323,18 +1364,27 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
               <Link
                 to={to}
                 aria-current={isActive ? 'page' : undefined}
-                title={chat.label}
+                title={isClosed ? `${chat.label} (closed)` : chat.label}
                 aria-label={chat.label}
+                data-chat-status={chat.status}
                 className={`min-w-0 flex-1 truncate rounded-[4px] ${FOCUS_RING}`}
                 style={{
                   color: isActive ? '#3B82F6' : NAV_INACTIVE_FG,
                   fontWeight: isActive ? 600 : 500,
                   fontSize: 12,
+                  opacity: isClosed ? 0.5 : 1,
+                  fontStyle: isClosed ? 'italic' : 'normal',
                 }}
               >
                 {chat.label}
               </Link>
-              <ChatRowMenu chatId={chat.id} onMoveToTask={() => setMovingAgentId(chat.id)} />
+              <ChatRowMenu
+                chatId={chat.id}
+                isClosed={isClosed}
+                onMoveToTask={() => setMovingAgentId(chat.id)}
+                onClose={() => handleClose(chat.id)}
+                onDelete={() => setDeleteTargetId(chat.id)}
+              />
             </div>
           </div>
         );
@@ -1352,11 +1402,78 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
           }}
         />
       )}
+      {deleteTargetId && deleteTarget && (
+        <ConfirmDeleteChatDialog
+          open={!!deleteTargetId}
+          onOpenChange={(open) => !open && setDeleteTargetId(null)}
+          chatLabel={deleteTarget.label}
+          onConfirm={() => handleDelete(deleteTargetId)}
+        />
+      )}
     </div>
   );
 }
 
-function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: () => void }) {
+function ConfirmDeleteChatDialog({
+  open,
+  onOpenChange,
+  chatLabel,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  chatLabel: string;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="confirm-delete-chat" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete chat?</DialogTitle>
+          <DialogDescription>
+            This will permanently delete <span className="font-mono text-white">{chatLabel}</span>.
+            Its tmux session and scratch directory will be removed. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            data-testid="confirm-delete-chat-confirm"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ChatRowMenu({
+  chatId,
+  isClosed,
+  onMoveToTask,
+  onClose,
+  onDelete,
+}: {
+  chatId: string;
+  isClosed: boolean;
+  onMoveToTask: () => void;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -1413,6 +1530,33 @@ function ChatRowMenu({ chatId, onMoveToTask }: { chatId: string; onMoveToTask: (
             }}
           >
             Move to task…
+          </button>
+          {!isClosed && (
+            <button
+              role="menuitem"
+              data-testid={`chat-row-close-${chatId}`}
+              className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-white/[0.04]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onClose();
+              }}
+            >
+              Close
+            </button>
+          )}
+          <div className="my-1 h-px" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          <button
+            role="menuitem"
+            data-testid={`chat-row-delete-${chatId}`}
+            className="block w-full px-3 py-1.5 text-left text-[#EF4444] hover:bg-white/[0.04]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            Delete
           </button>
         </div>
       )}

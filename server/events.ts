@@ -2,10 +2,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 
-export interface ServerEvent {
-  type: 'task:updated' | 'task:created' | 'task:deleted';
-  payload: { taskId: string };
-}
+export type ServerEvent =
+  | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
+  | { type: 'chat:updated' | 'chat:deleted'; payload: { chatId: string } };
 
 const clients = new Set<WebSocket>();
 let wss: WebSocketServer;
