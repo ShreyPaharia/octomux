@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import pino from 'pino';
+import { setLogger } from './logger.js';
 
 vi.mock('fs', () => {
   const promises = {
@@ -17,6 +19,12 @@ vi.mock('fs', () => {
 vi.mock('os');
 
 const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
+
+function enoent(): NodeJS.ErrnoException {
+  const err = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
+  err.code = 'ENOENT';
+  return err;
+}
 
 const SKILLS_DIR = '/mock-home/.claude/skills';
 
@@ -86,6 +94,85 @@ describe('listSkills', () => {
     const result = await listSkills();
 
     expect(result).toEqual([{ name: 'bare-skill', description: '' }]);
+  });
+
+  it.each([
+    { hidden: '.claude' },
+    { hidden: '.git' },
+    { hidden: '.cache' },
+  ])('skips hidden directory $hidden', async ({ hidden }) => {
+    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
+    const entries = [
+      { name: hidden, isDirectory: () => true },
+      { name: 'real-skill', isDirectory: () => true },
+    ];
+    vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
+    vi.mocked(fs.promises.readFile).mockImplementation((filePath: any) => {
+      if (filePath === path.join(SKILLS_DIR, 'real-skill', 'SKILL.md')) {
+        return Promise.resolve('---\ndescription: real\n---\n');
+      }
+      return Promise.reject(enoent());
+    });
+
+    const result = await listSkills();
+
+    expect(result).toEqual([{ name: 'real-skill', description: 'real' }]);
+    expect(fs.promises.readFile).not.toHaveBeenCalledWith(
+      path.join(SKILLS_DIR, hidden, 'SKILL.md'),
+      'utf-8',
+    );
+  });
+
+  it('skips a non-hidden dir whose SKILL.md is missing and warns', async () => {
+    const logs: string[] = [];
+    const stream = { write: (msg: string) => logs.push(msg) };
+    setLogger(pino({ level: 'trace' }, stream));
+
+    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
+    const entries = [
+      { name: 'broken-skill', isDirectory: () => true },
+      { name: 'good-skill', isDirectory: () => true },
+    ];
+    vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
+    vi.mocked(fs.promises.readFile).mockImplementation((filePath: any) => {
+      if (filePath === path.join(SKILLS_DIR, 'good-skill', 'SKILL.md')) {
+        return Promise.resolve('---\ndescription: good\n---\n');
+      }
+      return Promise.reject(enoent());
+    });
+
+    const result = await listSkills();
+
+    expect(result).toEqual([{ name: 'good-skill', description: 'good' }]);
+    const warnLine = logs.find((l) => l.includes('"level":40'));
+    expect(warnLine).toBeDefined();
+    expect(warnLine).toContain('"skill":"broken-skill"');
+    expect(warnLine).toContain('"code":"ENOENT"');
+  });
+
+  it('returns [] when every entry is a hidden dir', async () => {
+    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
+    const entries = [
+      { name: '.claude', isDirectory: () => true },
+      { name: '.git', isDirectory: () => true },
+    ];
+    vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
+
+    const result = await listSkills();
+
+    expect(result).toEqual([]);
+    expect(fs.promises.readFile).not.toHaveBeenCalled();
+  });
+
+  it('rethrows non-ENOENT errors from readFile', async () => {
+    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
+    const entries = [{ name: 'unreadable', isDirectory: () => true }];
+    vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
+    const eacces = new Error('EACCES') as NodeJS.ErrnoException;
+    eacces.code = 'EACCES';
+    vi.mocked(fs.promises.readFile).mockRejectedValue(eacces);
+
+    await expect(listSkills()).rejects.toThrow('EACCES');
   });
 });
 

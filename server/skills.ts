@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { childLogger } from './logger.js';
+
+const logger = childLogger('skills');
 
 export interface Skill {
   name: string;
@@ -51,9 +54,19 @@ export async function listSkills(): Promise<Skill[]> {
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.')) continue;
     const skillFile = path.join(dir, entry.name, 'SKILL.md');
-    const content = await fs.promises.readFile(skillFile, 'utf-8');
-    skills.push({ name: entry.name, description: parseDescription(content) });
+    try {
+      const content = await fs.promises.readFile(skillFile, 'utf-8');
+      skills.push({ name: entry.name, description: parseDescription(content) });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EISDIR') {
+        logger.warn({ skill: entry.name, code }, 'skipping dir without readable SKILL.md');
+        continue;
+      }
+      throw err;
+    }
   }
 
   return skills.sort((a, b) => a.name.localeCompare(b.name));
