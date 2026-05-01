@@ -1133,8 +1133,7 @@ describe('resumeTask', () => {
         (c: any[]) =>
           c[0] === 'tmux' &&
           (c[1] as string[]).includes('send-keys') &&
-          ((c[1] as string[]).find((a) => typeof a === 'string' && a.includes('claude')) ??
-            false),
+          ((c[1] as string[]).find((a) => typeof a === 'string' && a.includes('claude')) ?? false),
       );
     expect(claudeLaunches.length).toBeGreaterThanOrEqual(2);
     const agents = getAgents(db, DEFAULTS.task.id);
