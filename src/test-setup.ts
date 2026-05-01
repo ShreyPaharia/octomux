@@ -65,3 +65,15 @@ if (typeof globalThis.IntersectionObserver === 'undefined') {
 if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () {};
 }
+
+// jsdom doesn't implement ResizeObserver — stub with a no-op so components
+// that resize-observe their host nodes don't crash.
+class TestResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+}

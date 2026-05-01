@@ -12,6 +12,8 @@ export interface ReviewBaseRefBannerProps {
   currentRangeLabel?: string;
   /** Optional slot for the range picker (rendered next to "Refresh base"). */
   rangePicker?: ReactNode;
+  /** Optional right-aligned slot for adjacent toolbar controls (e.g. a comments toggle). */
+  rightSlot?: ReactNode;
 }
 
 export function ReviewBaseRefBanner({
@@ -23,6 +25,7 @@ export function ReviewBaseRefBanner({
   onJumpToNextUnreviewed,
   currentRangeLabel,
   rangePicker,
+  rightSlot,
 }: ReviewBaseRefBannerProps) {
   return (
     <div className="flex items-center gap-3 px-3 py-2 text-xs border-b border-glass-border">
@@ -66,6 +69,7 @@ export function ReviewBaseRefBanner({
           ⚠ Using local base (offline)
         </span>
       )}
+      {rightSlot ? <span className={baseIsStale ? 'ml-1' : 'ml-auto'}>{rightSlot}</span> : null}
     </div>
   );
 }

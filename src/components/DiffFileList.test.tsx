@@ -24,7 +24,7 @@ vi.mock('@monaco-editor/react', () => ({
   },
 }));
 
-import { DiffFileList } from './DiffFileList';
+import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
 import type { DiffFileEntry } from '@/lib/api';
 
 // ─── Controllable IntersectionObserver stub ──────────────────────────────────
@@ -197,7 +197,7 @@ describe('DiffFileList', () => {
     Element.prototype.scrollIntoView = scrollSpy;
 
     function Wrapper() {
-      const ref = useRef<{ scrollToFile: (p: string) => void } | null>(null);
+      const ref = useRef<DiffFileListHandle | null>(null);
       return (
         <>
           <button data-testid="trigger" onClick={() => ref.current?.scrollToFile('b.ts')}>
@@ -241,6 +241,38 @@ describe('DiffFileList', () => {
 
     await screen.findByTestId('diff-row-b.ts');
     expect(scrollSpy).toHaveBeenCalled();
+  });
+
+  it('exposes revealLineInFile on the imperative handle', async () => {
+    installControllableIO();
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    function Wrapper() {
+      const ref = useRef<DiffFileListHandle | null>(null);
+      return (
+        <>
+          <button data-testid="trigger" onClick={() => ref.current?.revealLineInFile('b.ts', 5)}>
+            reveal
+          </button>
+          <DiffFileList
+            ref={ref}
+            taskId="t1"
+            files={FILES}
+            reviewed={new Set()}
+            onToggleReviewed={() => {}}
+          />
+        </>
+      );
+    }
+
+    render(<Wrapper />);
+    await screen.findByTestId('diff-row-b.ts');
+
+    await userEvent.click(screen.getByTestId('trigger'));
+
+    expect(scrollSpy).toHaveBeenCalled();
+    expect(window.location.hash).toBe('#file=b.ts');
   });
 
   it('skips fetching ignored, tooLarge, or binary files', async () => {

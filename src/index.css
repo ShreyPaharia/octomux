@@ -256,3 +256,23 @@
 .setting-up-pulse {
   animation: setting-up-pulse 1.2s ease-in-out infinite;
 }
+
+@keyframes octomux-comment-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+  20% {
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+.octomux-comment-flash {
+  animation: octomux-comment-flash 1.2s ease-out;
+}
+
+.octomux-comment-zone {
+  padding: 4px 0;
+}

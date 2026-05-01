@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { api, type DiffFileEntry, type DiffRange } from '@/lib/api';
+import type { Agent } from '../../server/types';
 import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
 import { DiffFileTree } from './DiffFileTree';
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
@@ -37,6 +38,16 @@ interface Props {
   onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
   // Diff range — selects which slice of history to view (default: full task diff).
   range?: DiffRange;
+  /** Forward an imperative handle for programmatic scroll/reveal — used by the
+   *  comments side panel. */
+  listRef?: RefObject<DiffFileListHandle | null>;
+  /** Opt-in to inline comment threads (uses TaskCommentsContext). When true,
+   *  callers must wrap with <TaskCommentsContext.Provider>. */
+  enableComments?: boolean;
+  agents?: Agent[];
+  /** Notifier fired whenever the list of files in the diff changes. The host
+   *  uses this to mark "no longer in diff" comments in the side panel. */
+  onFilesChange?: (paths: string[]) => void;
 }
 
 export function DiffViewer(props: Props) {
@@ -52,6 +63,10 @@ export function DiffViewer(props: Props) {
     onSummaryLoaded,
     onToggleReviewed,
     range,
+    listRef,
+    enableComments,
+    agents,
+    onFilesChange,
   } = props;
 
   // Standalone / composer mode — renders the new-content lines as clickable
@@ -79,6 +94,10 @@ export function DiffViewer(props: Props) {
       onSummaryLoaded={onSummaryLoaded}
       onToggleReviewed={onToggleReviewed}
       range={range}
+      listRef={listRef}
+      enableComments={enableComments}
+      agents={agents}
+      onFilesChange={onFilesChange}
     />
   );
 }
@@ -170,6 +189,10 @@ function ApiDiffViewer({
   onSummaryLoaded,
   onToggleReviewed: onToggleReviewedProp,
   range,
+  listRef: externalListRef,
+  enableComments = false,
+  agents = [],
+  onFilesChange,
 }: {
   taskId: string;
   isRunning: boolean;
@@ -177,6 +200,10 @@ function ApiDiffViewer({
   onSummaryLoaded?: (summary: import('@/lib/api').DiffSummaryResponse) => void;
   onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
   range?: DiffRange;
+  listRef?: RefObject<DiffFileListHandle | null>;
+  enableComments?: boolean;
+  agents?: Agent[];
+  onFilesChange?: (paths: string[]) => void;
 }) {
   const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
@@ -187,7 +214,13 @@ function ApiDiffViewer({
   const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
-  const listRef = useRef<DiffFileListHandle | null>(null);
+  const internalListRef = useRef<DiffFileListHandle | null>(null);
+  const listRef = externalListRef ?? internalListRef;
+
+  // Notify host when the file set changes.
+  useEffect(() => {
+    onFilesChange?.(files.map((f) => f.path));
+  }, [files, onFilesChange]);
 
   // Hydrate reviewed set from the API in review-cockpit mode, otherwise localStorage.
   useEffect(() => {
@@ -340,6 +373,9 @@ function ApiDiffViewer({
               onToggleReviewed={toggleReviewed}
               onActiveChange={setActiveFile}
               range={range}
+              agents={agents}
+              rangeIsBase={isBaseRange}
+              enableComments={enableComments}
             />
           )}
         </div>

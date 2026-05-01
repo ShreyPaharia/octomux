@@ -1,9 +1,12 @@
-import { Suspense, forwardRef, lazy, useCallback, useState } from 'react';
+import { Suspense, forwardRef, lazy, useCallback, useMemo, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type { DiffFileEntry, FileDiffResponse } from '@/lib/api';
+import type { Agent } from '../../server/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useInlineCommentZones } from '@/hooks/useInlineCommentZones';
+import { useTaskCommentsContext } from '@/hooks/useTaskComments';
 
 const MonacoDiff = lazy(() =>
   import('@monaco-editor/react').then((mod) => ({ default: mod.DiffEditor })),
@@ -53,6 +56,13 @@ export interface DiffFileRowProps {
   onToggleReviewed: () => void;
   onToggleExpanded: () => void;
   onEditorMount?: (path: string, ed: editor.IStandaloneDiffEditor) => void;
+  /** Agents on the task — used to attribute non-user comments. */
+  agents?: Agent[];
+  /** Whether the surrounding diff is showing the base range (controls outdated chip). */
+  rangeIsBase?: boolean;
+  /** When true, inline comment threads render. Defaults to true if a comments
+   *  context is available — false in standalone use. */
+  enableComments?: boolean;
 }
 
 export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function DiffFileRow(
@@ -69,12 +79,16 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
     onToggleReviewed,
     onToggleExpanded,
     onEditorMount,
+    agents = [],
+    rangeIsBase = true,
+    enableComments = false,
   },
   ref,
 ) {
   const path = file.path;
   const placeholderHeight = estimateHeight(file);
   const [height, setHeight] = useState<number>(placeholderHeight);
+  const [editorInstance, setEditorInstance] = useState<editor.IStandaloneDiffEditor | null>(null);
 
   const showEditor =
     !file.ignored && !file.tooLarge && !file.binary && !error && diff !== null && !diff.isDirectory;
@@ -93,9 +107,19 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
       ed.getOriginalEditor().onDidContentSizeChange(recompute);
       ed.getModifiedEditor().onDidContentSizeChange(recompute);
       recompute();
+      setEditorInstance(ed);
     },
     [path, onEditorMount],
   );
+
+  const portals = enableComments ? (
+    <CommentZonePortals
+      editor={editorInstance}
+      filePath={path}
+      agents={agents}
+      rangeIsBase={rangeIsBase}
+    />
+  ) : null;
 
   return (
     <section
@@ -207,11 +231,81 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
                 }}
               />
             </div>
+            {portals}
           </Suspense>
         ) : null}
       </div>
     </section>
   );
 });
+
+/**
+ * Inner component that subscribes to the comments context and drives the
+ * Monaco view-zone hook. Kept separate so DiffFileRow can opt out of the
+ * context (standalone usage in tests / composer mode) by setting
+ * enableComments=false.
+ */
+function CommentZonePortals({
+  editor: editorInstance,
+  filePath,
+  agents,
+  rangeIsBase,
+}: {
+  editor: editor.IStandaloneDiffEditor | null;
+  filePath: string;
+  agents: Agent[];
+  rangeIsBase: boolean;
+}) {
+  const ctx = useTaskCommentsContext();
+  const fileComments = useMemo(() => ctx.byFile(filePath), [ctx, filePath]);
+
+  const portals = useInlineCommentZones({
+    editor: editorInstance,
+    filePath,
+    comments: fileComments,
+    agents,
+    rangeIsBase,
+    outdatedUnavailable: ctx.outdatedUnavailable,
+    openComposer: ctx.openComposer,
+    onOpenComposer: useCallback(
+      (line: number, side: 'old' | 'new') => ctx.setOpenComposer({ filePath, line, side }),
+      [ctx, filePath],
+    ),
+    onCancelComposer: useCallback(() => ctx.setOpenComposer(null), [ctx]),
+    onPostComment: useCallback((input) => ctx.post(input), [ctx]),
+    onQueueDraft: useCallback((draft) => ctx.queueDraft(draft), [ctx]),
+    onReply: useCallback(
+      (parent, body) =>
+        ctx.post({
+          file_path: parent.file_path,
+          line: parent.line,
+          side: parent.side,
+          body,
+        }),
+      [ctx],
+    ),
+    onResolve: useCallback(
+      (commentId, resolved) => {
+        void ctx.update(commentId, { resolved });
+      },
+      [ctx],
+    ),
+    onDelete: useCallback(
+      (commentId) => {
+        void ctx.remove(commentId);
+      },
+      [ctx],
+    ),
+    onEdit: useCallback(
+      (commentId, body) => {
+        void ctx.update(commentId, { body });
+      },
+      [ctx],
+    ),
+    focusedId: ctx.focusedId,
+  });
+
+  return <>{portals}</>;
+}
 
 export default DiffFileRow;

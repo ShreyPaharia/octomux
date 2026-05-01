@@ -15,6 +15,7 @@ import {
   type DiffRange,
   type FileDiffResponse,
 } from '@/lib/api';
+import type { Agent } from '../../server/types';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
@@ -27,6 +28,9 @@ const PREFETCH_ROOT_MARGIN = '200% 0px';
 
 export interface DiffFileListHandle {
   scrollToFile: (path: string) => void;
+  /** Reveal a specific line on the modified side (or original side if `side==='old'`)
+   *  of the given file. Scrolls to the file first, then centers the line in the editor. */
+  revealLineInFile: (path: string, line: number, side?: 'old' | 'new') => void;
 }
 
 interface Props {
@@ -36,6 +40,9 @@ interface Props {
   onToggleReviewed: (path: string) => void;
   onActiveChange?: (path: string | null) => void;
   range?: DiffRange;
+  agents?: Agent[];
+  rangeIsBase?: boolean;
+  enableComments?: boolean;
 }
 
 function readHashPath(): string | null {
@@ -50,7 +57,17 @@ function readHashPath(): string | null {
 }
 
 export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffFileList(
-  { taskId, files, reviewed, onToggleReviewed, onActiveChange, range },
+  {
+    taskId,
+    files,
+    reviewed,
+    onToggleReviewed,
+    onActiveChange,
+    range,
+    agents = [],
+    rangeIsBase = true,
+    enableComments = false,
+  },
   ref,
 ) {
   const rangeKey = diffRangeToParam(range) ?? 'base';
@@ -273,7 +290,29 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     [spy],
   );
 
-  useImperativeHandle(ref, () => ({ scrollToFile }), [scrollToFile]);
+  const revealLineInFile = useCallback(
+    (path: string, line: number, side: 'old' | 'new' = 'new') => {
+      scrollToFile(path);
+      const reveal = (attempt = 0) => {
+        const ed = editorsRef.current.get(path);
+        if (!ed) {
+          if (attempt < 30) requestAnimationFrame(() => reveal(attempt + 1));
+          return;
+        }
+        const sub = side === 'old' ? ed.getOriginalEditor() : ed.getModifiedEditor();
+        sub.revealLineInCenter(line);
+        sub.setPosition({ lineNumber: line, column: 1 });
+      };
+      requestAnimationFrame(() => reveal());
+    },
+    [scrollToFile],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({ scrollToFile, revealLineInFile }),
+    [scrollToFile, revealLineInFile],
+  );
 
   // ─── Expanded state per file (persisted) ─────────────────────────────────
   const isExpanded = useCallback(
@@ -458,6 +497,9 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
             onToggleReviewed={() => onToggleReviewed(path)}
             onToggleExpanded={() => toggleExpanded(path)}
             onEditorMount={handleEditorMount}
+            agents={agents}
+            rangeIsBase={rangeIsBase}
+            enableComments={enableComments}
           />
         );
       })}
