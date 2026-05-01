@@ -308,11 +308,10 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     [scrollToFile],
   );
 
-  useImperativeHandle(
-    ref,
-    () => ({ scrollToFile, revealLineInFile }),
-    [scrollToFile, revealLineInFile],
-  );
+  useImperativeHandle(ref, () => ({ scrollToFile, revealLineInFile }), [
+    scrollToFile,
+    revealLineInFile,
+  ]);
 
   // ─── Expanded state per file (persisted) ─────────────────────────────────
   const isExpanded = useCallback(

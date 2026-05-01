@@ -131,7 +131,10 @@ export function InlineCommentThread({
                     Posted on {c.original_commit_sha.slice(0, 7)}
                   </Chip>
                 ) : outdatedUnavailable ? (
-                  <Chip tone="neutral" title="Worktree unavailable; cannot determine outdated state">
+                  <Chip
+                    tone="neutral"
+                    title="Worktree unavailable; cannot determine outdated state"
+                  >
                     Unknown
                   </Chip>
                 ) : c.outdated ? (

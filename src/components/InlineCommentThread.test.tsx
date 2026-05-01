@@ -215,10 +215,7 @@ describe('InlineCommentThread', () => {
   it('renders multiple comments in order', () => {
     render(
       <InlineCommentThread
-        comments={[
-          comment({ id: 'c1', body: 'first' }),
-          comment({ id: 'c2', body: 'second' }),
-        ]}
+        comments={[comment({ id: 'c1', body: 'first' }), comment({ id: 'c2', body: 'second' })]}
         agents={[]}
         rangeIsBase={true}
         outdatedUnavailable={false}

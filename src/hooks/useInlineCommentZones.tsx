@@ -109,22 +109,23 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
 
     if (toAdd.length === 0 && toRemove.length === 0) return;
 
-    const newDomNodes: { key: string; domNode: HTMLDivElement; side: 'old' | 'new'; line: number }[] =
-      toAdd.map((k) => {
-        const [side, lineStr] = k.split(':');
-        const line = Number(lineStr);
-        const domNode = document.createElement('div');
-        domNode.className = 'octomux-comment-zone';
-        domNode.dataset.zoneKey = k;
-        return { key: k, domNode, side: side as 'old' | 'new', line };
-      });
+    const newDomNodes: {
+      key: string;
+      domNode: HTMLDivElement;
+      side: 'old' | 'new';
+      line: number;
+    }[] = toAdd.map((k) => {
+      const [side, lineStr] = k.split(':');
+      const line = Number(lineStr);
+      const domNode = document.createElement('div');
+      domNode.className = 'octomux-comment-zone';
+      domNode.dataset.zoneKey = k;
+      return { key: k, domNode, side: side as 'old' | 'new', line };
+    });
 
     const newEntries = new Map<string, ZoneEntry>();
 
-    const apply = (
-      ed: MonacoEditor.ICodeEditor,
-      side: 'old' | 'new',
-    ) => {
+    const apply = (ed: MonacoEditor.ICodeEditor, side: 'old' | 'new') => {
       ed.changeViewZones((accessor) => {
         for (const k of toRemove) {
           const entry = existing.get(k);
@@ -178,9 +179,7 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
   useEffect(() => {
     if (!editor) return;
     const wantsComposer = openComposer && openComposer.filePath === filePath;
-    const composerKey = wantsComposer
-      ? `composer:${openComposer.side}:${openComposer.line}`
-      : null;
+    const composerKey = wantsComposer ? `composer:${openComposer.side}:${openComposer.line}` : null;
     const existing = composerZoneRef.current;
 
     if (!wantsComposer && !existing) return;
@@ -189,10 +188,9 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
 
     const removeExisting = () => {
       if (!existing) return;
-      const ed =
-        existing.key.startsWith('composer:new:')
-          ? editor.getModifiedEditor()
-          : editor.getOriginalEditor();
+      const ed = existing.key.startsWith('composer:new:')
+        ? editor.getModifiedEditor()
+        : editor.getOriginalEditor();
       ed.changeViewZones((accessor) => accessor.removeZone(existing.zoneId));
       composerZoneRef.current = null;
     };
@@ -259,8 +257,7 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
       if (!ed) return;
       const newSide: string[] = [];
       const oldSide: string[] = [];
-      for (const e of persistent.values())
-        (e.side === 'new' ? newSide : oldSide).push(e.zoneId);
+      for (const e of persistent.values()) (e.side === 'new' ? newSide : oldSide).push(e.zoneId);
       ed.getModifiedEditor().changeViewZones((accessor) => {
         for (const id of newSide) accessor.removeZone(id);
       });
@@ -270,10 +267,9 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
       persistent.clear();
       const composer = composerZoneRef.current;
       if (composer) {
-        const cEd =
-          composer.key.startsWith('composer:new:')
-            ? ed.getModifiedEditor()
-            : ed.getOriginalEditor();
+        const cEd = composer.key.startsWith('composer:new:')
+          ? ed.getModifiedEditor()
+          : ed.getOriginalEditor();
         cEd.changeViewZones((accessor) => accessor.removeZone(composer.zoneId));
         composerZoneRef.current = null;
       }

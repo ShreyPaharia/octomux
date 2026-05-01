@@ -222,7 +222,13 @@ export default function TaskDetail() {
   const focusClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleQueueDraft = useCallback(
-    (draft: { filePath: string; line: number; side: 'old' | 'new'; body: string; lineText: string }) => {
+    (draft: {
+      filePath: string;
+      line: number;
+      side: 'old' | 'new';
+      body: string;
+      lineText: string;
+    }) => {
       reviewQueue.add({
         filePath: draft.filePath,
         line: draft.line,

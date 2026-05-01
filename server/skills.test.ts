@@ -96,32 +96,31 @@ describe('listSkills', () => {
     expect(result).toEqual([{ name: 'bare-skill', description: '' }]);
   });
 
-  it.each([
-    { hidden: '.claude' },
-    { hidden: '.git' },
-    { hidden: '.cache' },
-  ])('skips hidden directory $hidden', async ({ hidden }) => {
-    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
-    const entries = [
-      { name: hidden, isDirectory: () => true },
-      { name: 'real-skill', isDirectory: () => true },
-    ];
-    vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
-    vi.mocked(fs.promises.readFile).mockImplementation((filePath: any) => {
-      if (filePath === path.join(SKILLS_DIR, 'real-skill', 'SKILL.md')) {
-        return Promise.resolve('---\ndescription: real\n---\n');
-      }
-      return Promise.reject(enoent());
-    });
+  it.each([{ hidden: '.claude' }, { hidden: '.git' }, { hidden: '.cache' }])(
+    'skips hidden directory $hidden',
+    async ({ hidden }) => {
+      vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
+      const entries = [
+        { name: hidden, isDirectory: () => true },
+        { name: 'real-skill', isDirectory: () => true },
+      ];
+      vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
+      vi.mocked(fs.promises.readFile).mockImplementation((filePath: any) => {
+        if (filePath === path.join(SKILLS_DIR, 'real-skill', 'SKILL.md')) {
+          return Promise.resolve('---\ndescription: real\n---\n');
+        }
+        return Promise.reject(enoent());
+      });
 
-    const result = await listSkills();
+      const result = await listSkills();
 
-    expect(result).toEqual([{ name: 'real-skill', description: 'real' }]);
-    expect(fs.promises.readFile).not.toHaveBeenCalledWith(
-      path.join(SKILLS_DIR, hidden, 'SKILL.md'),
-      'utf-8',
-    );
-  });
+      expect(result).toEqual([{ name: 'real-skill', description: 'real' }]);
+      expect(fs.promises.readFile).not.toHaveBeenCalledWith(
+        path.join(SKILLS_DIR, hidden, 'SKILL.md'),
+        'utf-8',
+      );
+    },
+  );
 
   it('skips a non-hidden dir whose SKILL.md is missing and warns', async () => {
     const logs: string[] = [];

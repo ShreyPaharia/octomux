@@ -4,7 +4,11 @@ import { useInlineCommentZones } from './useInlineCommentZones';
 import type { InlineCommentWithOutdated } from '@/lib/api';
 
 interface FakeAccessor {
-  addZone: (zone: { afterLineNumber: number; heightInPx?: number; domNode: HTMLDivElement }) => string;
+  addZone: (zone: {
+    afterLineNumber: number;
+    heightInPx?: number;
+    domNode: HTMLDivElement;
+  }) => string;
   removeZone: (id: string) => void;
   layoutZone: (id: string) => void;
 }
@@ -165,7 +169,11 @@ describe('useInlineCommentZones', () => {
           openComposer: props.open,
           ...noopHandlers,
         }),
-      { initialProps: { open: null as { filePath: string; line: number; side: 'old' | 'new' } | null } },
+      {
+        initialProps: {
+          open: null as { filePath: string; line: number; side: 'old' | 'new' } | null,
+        },
+      },
     );
     expect(fake.addZoneCalls.length).toBe(0);
 

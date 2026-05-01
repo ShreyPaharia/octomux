@@ -24,11 +24,7 @@ export interface QueueDraftInput {
 export interface TaskCommentsState {
   byId: Map<string, InlineCommentWithOutdated>;
   byFile: (path: string) => InlineCommentWithOutdated[];
-  byFileLineSide: (
-    path: string,
-    line: number,
-    side: 'old' | 'new',
-  ) => InlineCommentWithOutdated[];
+  byFileLineSide: (path: string, line: number, side: 'old' | 'new') => InlineCommentWithOutdated[];
   outdatedUnavailable: boolean;
   loading: boolean;
   error: string | null;

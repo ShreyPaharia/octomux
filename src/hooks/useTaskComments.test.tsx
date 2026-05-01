@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 
-const { apiMock, apiProxy } = await vi.hoisted(
-  async () => (await import('../test-helpers')).setupApiMock(),
+const { apiMock, apiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
 );
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
@@ -29,11 +29,12 @@ function withOutdated(r: InlineCommentRow, outdated = false): InlineCommentWithO
   return { ...r, outdated };
 }
 
-async function renderLoaded(initial: InlineCommentWithOutdated[] = [], outdatedUnavailable = false) {
+async function renderLoaded(
+  initial: InlineCommentWithOutdated[] = [],
+  outdatedUnavailable = false,
+) {
   apiMock.listComments.mockResolvedValue(
-    outdatedUnavailable
-      ? { comments: initial, outdated_unavailable: true }
-      : { comments: initial },
+    outdatedUnavailable ? { comments: initial, outdated_unavailable: true } : { comments: initial },
   );
   const hook = renderHook(() => useTaskComments('t1'));
   await waitFor(() => expect(hook.result.current.byId.size).toBe(initial.length));

@@ -113,9 +113,7 @@ export function CommentsSidePanel({
                     'sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-glass-edge bg-[#101217] px-3 py-1.5',
                   )}
                 >
-                  <span className="truncate font-mono text-[11px] text-[#B5B5BD]">
-                    {filePath}
-                  </span>
+                  <span className="truncate font-mono text-[11px] text-[#B5B5BD]">{filePath}</span>
                   {!inDiff ? (
                     <span
                       title="File no longer in diff"

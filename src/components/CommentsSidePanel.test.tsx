@@ -84,10 +84,7 @@ describe('CommentsSidePanel', () => {
 
   it('filter pills filter by unresolved', () => {
     renderPanel({
-      comments: [
-        comment({ id: 'c1' }),
-        comment({ id: 'c2', resolved_at: '2026-05-02 00:01:00' }),
-      ],
+      comments: [comment({ id: 'c1' }), comment({ id: 'c2', resolved_at: '2026-05-02 00:01:00' })],
     });
     fireEvent.click(screen.getByText('Unresolved'));
     expect(screen.getByTestId('side-panel-comment-c1')).toBeInTheDocument();
@@ -96,10 +93,7 @@ describe('CommentsSidePanel', () => {
 
   it('filter pills filter by outdated', () => {
     renderPanel({
-      comments: [
-        comment({ id: 'c1', outdated: false }),
-        comment({ id: 'c2', outdated: true }),
-      ],
+      comments: [comment({ id: 'c1', outdated: false }), comment({ id: 'c2', outdated: true })],
     });
     fireEvent.click(screen.getByRole('button', { name: 'Outdated' }));
     expect(screen.queryByTestId('side-panel-comment-c1')).not.toBeInTheDocument();
