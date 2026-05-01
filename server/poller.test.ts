@@ -851,7 +851,7 @@ describe('pollReviewerRequests', () => {
 
   it('deletes draft auto-review tasks when the reviewer request is resolved', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
-    insertTask(db, {
+    const stale = insertTask(db, {
       id: 'stale-review',
       repo_path: REPO,
       status: 'draft',
@@ -865,6 +865,10 @@ describe('pollReviewerRequests', () => {
     await pollReviewerRequests();
 
     expect(getTask(db, 'stale-review')).toBeUndefined();
+    // Worktree row created alongside the draft must also go — otherwise the
+    // workspaces list accumulates orphaned rows for every resolved PR review.
+    const wt = db.prepare('SELECT id FROM worktrees WHERE id = ?').get(stale.worktree_id);
+    expect(wt).toBeUndefined();
     expect(broadcast).toHaveBeenCalledWith({
       type: 'task:deleted',
       payload: { taskId: 'stale-review' },

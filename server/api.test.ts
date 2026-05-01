@@ -1729,6 +1729,76 @@ describe('GET /api/worktrees', () => {
     expect(res.body[0].task_count).toBe(1);
     expect(res.body[0].active_task_id).toBe('tX');
   });
+
+  it('collapses worktree rows that share repo_path/mode/branch/path', async () => {
+    // Three none-mode rows on the same physical workspace, accumulated over
+    // three task lifecycles. Workspaces page should show ONE entry, not three.
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status, created_at, last_used_at)
+       VALUES
+         ('wtA','/tmp/repo','/tmp/repo','main','main','none','available','2026-01-01 00:00:00','2026-01-01 00:00:00'),
+         ('wtB','/tmp/repo','/tmp/repo','main','main','none','available','2026-01-02 00:00:00','2026-01-02 00:00:00'),
+         ('wtC','/tmp/repo','/tmp/repo','main','main','none','in_use',   '2026-01-03 00:00:00','2026-01-03 00:00:00')`,
+    ).run();
+    insertTask(db, {
+      id: 'tA',
+      worktree_id: 'wtA',
+      status: 'closed',
+      updated_at: '2026-01-01 00:00:00',
+    });
+    insertTask(db, {
+      id: 'tB',
+      worktree_id: 'wtB',
+      status: 'closed',
+      updated_at: '2026-01-02 00:00:00',
+    });
+    insertTask(db, {
+      id: 'tC',
+      worktree_id: 'wtC',
+      status: 'running',
+      updated_at: '2026-01-03 00:00:00',
+    });
+
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    const row = res.body[0];
+    // Picks the most-recent row as the representative id (so detail nav
+    // lands on the active/freshest task).
+    expect(row.id).toBe('wtC');
+    // Aggregates across the group.
+    expect(row.task_count).toBe(3);
+    expect(row.status).toBe('in_use');
+    expect(row.active_task_id).toBe('tC');
+  });
+
+  it('keeps worktree rows separate when they differ on the group key', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, mode, status)
+       VALUES
+         ('wtMain','/tmp/repo','/tmp/repo','main','none','available'),
+         ('wtFeat','/tmp/repo','/tmp/repo','feature-x','none','available')`,
+    ).run();
+    insertTask(db, { id: 't1', worktree_id: 'wtMain', status: 'closed' });
+    insertTask(db, { id: 't2', worktree_id: 'wtFeat', status: 'closed' });
+
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('hides orphan worktree rows that no task references', async () => {
+    // Leftover from buggy code paths (e.g. resolved review-draft cleanup).
+    // They have no task pointing at them and shouldn't pollute the UI.
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, mode, status)
+       VALUES ('wtOrphan','','','','new','available')`,
+    ).run();
+
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(0);
+  });
 });
 
 describe('GET /api/worktrees/:id', () => {
