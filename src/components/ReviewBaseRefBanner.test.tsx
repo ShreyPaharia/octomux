@@ -49,6 +49,23 @@ describe('ReviewBaseRefBanner', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it('renders currentRangeLabel and rangePicker slot', () => {
+    render(
+      <ReviewBaseRefBanner
+        baseRef="origin/main"
+        baseIsStale={false}
+        totalCount={1}
+        reviewedCount={0}
+        onRefresh={() => {}}
+        onJumpToNextUnreviewed={() => {}}
+        currentRangeLabel="commit abc1234"
+        rangePicker={<button data-testid="picker-slot">Change base</button>}
+      />,
+    );
+    expect(screen.getByTestId('current-range-label')).toHaveTextContent(/commit abc1234/);
+    expect(screen.getByTestId('picker-slot')).toBeInTheDocument();
+  });
+
   it('clicking "X reviewed" jumps to next unreviewed', () => {
     const onJump = vi.fn();
     render(

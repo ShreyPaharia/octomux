@@ -23,7 +23,20 @@ import {
   hopAgent,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
+import { parseDiffRange } from './diff-range.js';
+import { resolveRef } from './diff-base.js';
+import { listBranches, listCommits } from './git-commits.js';
 import { setReviewed, clearReviewed } from './file-review-state.js';
+import {
+  addComment,
+  listComments,
+  getComment,
+  resolveComment,
+  unresolveComment,
+  updateCommentBody,
+  deleteComment,
+} from './inline-comments.js';
+import { computeOutdated, splitLines } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 
@@ -899,8 +912,15 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'Worktree no longer exists on disk' });
       return;
     }
+    let range;
     try {
-      const summary = await diffMod.getDiffSummary({ task });
+      range = parseDiffRange(typeof req.query.range === 'string' ? req.query.range : undefined);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    try {
+      const summary = await diffMod.getDiffSummary({ task, range });
       res.json(summary);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -936,12 +956,165 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'Invalid path' });
       return;
     }
+    let range;
     try {
-      const diff = await diffMod.getFileDiff({ worktree: cwd, base: task.base_sha, relPath });
+      range = parseDiffRange(typeof req.query.range === 'string' ? req.query.range : undefined);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    try {
+      const diff = await diffMod.getFileDiff({
+        worktree: cwd,
+        range,
+        taskBaseSha: task.base_sha,
+        relPath,
+      });
       res.json(diff);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
+  });
+
+  // ─── Branches / commits / base mutation ─────────────────────────────────────
+
+  app.get('/api/tasks/:id/branches', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd || !fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Task has no usable worktree' });
+      return;
+    }
+    try {
+      const result = await listBranches(cwd);
+      res.json(result);
+    } catch (err) {
+      apiLogger.warn({ task_id: task.id, err: (err as Error).message }, 'listBranches failed');
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/tasks/:id/commits', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd || !fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Task has no usable worktree' });
+      return;
+    }
+
+    // Determine the from/to refs. If `range=` is provided, derive from it; else
+    // default to base..HEAD when we have a base_sha, or just HEAD when we don't.
+    let from: string | undefined;
+    let to = 'HEAD';
+    const rangeParam = typeof req.query.range === 'string' ? req.query.range : undefined;
+    if (rangeParam) {
+      try {
+        const parsed = parseDiffRange(rangeParam);
+        switch (parsed.kind) {
+          case 'base':
+            from = task.base_sha ?? undefined;
+            to = 'HEAD';
+            break;
+          case 'commit':
+            from = `${parsed.sha}^`;
+            to = parsed.sha;
+            break;
+          case 'range':
+            from = parsed.from;
+            to = parsed.to;
+            break;
+          case 'working':
+            // No commits in a working-only range.
+            res.json({ commits: [], truncated: false });
+            return;
+        }
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    } else if (task.base_sha) {
+      from = task.base_sha;
+    }
+
+    const limitRaw = Number(req.query.limit ?? 200);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 200, 1), 1000);
+
+    try {
+      const result = await listCommits(cwd, { from, to, limit });
+      res.json(result);
+    } catch (err) {
+      apiLogger.warn({ task_id: task.id, err: (err as Error).message }, 'listCommits failed');
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.patch('/api/tasks/:id/base', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    if (task.status === 'draft') {
+      res.status(409).json({ error: 'cannot change base on a draft task' });
+      return;
+    }
+    if (!task.worktree_id) {
+      res.status(400).json({ error: 'task has no worktree row to update' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd || !fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Task has no usable worktree' });
+      return;
+    }
+
+    const baseBranch = (req.body as { base_branch?: unknown }).base_branch;
+    if (typeof baseBranch !== 'string' || !baseBranch.trim()) {
+      res.status(400).json({ error: 'base_branch is required' });
+      return;
+    }
+
+    let sha: string;
+    try {
+      sha = await resolveRef(cwd, baseBranch);
+    } catch (err) {
+      apiLogger.warn(
+        { task_id: task.id, base_branch: baseBranch, err: (err as Error).message },
+        'resolveRef failed',
+      );
+      res.status(400).json({ error: 'ref does not resolve' });
+      return;
+    }
+
+    // Persist the new base on the joined worktrees row (Phase 2a moved these
+    // columns off `tasks`). Bump the task's updated_at separately.
+    getDb()
+      .prepare(`UPDATE worktrees SET base_branch = ?, base_sha = ? WHERE id = ?`)
+      .run(baseBranch, sha, task.worktree_id);
+    getDb().prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`).run(task.id);
+
+    apiLogger.info(
+      { task_id: task.id, base_branch: baseBranch, base_sha: sha },
+      'task base changed',
+    );
+
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+
+    const reloaded = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id) as
+      | Task
+      | undefined;
+    res.json(reloaded);
   });
 
   // ─── File review state ─────────────────────────────────────────────────────
@@ -991,6 +1164,225 @@ export function setupRoutes(app: Express): void {
       return;
     }
     clearReviewed(task.id, relPath);
+    res.status(204).send();
+  });
+
+  // ─── Inline review comments ────────────────────────────────────────────────
+
+  app.post('/api/tasks/:id/comments', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd) {
+      res.status(400).json({ error: 'Task has no worktree' });
+      return;
+    }
+    if (!fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Worktree no longer exists on disk' });
+      return;
+    }
+
+    const body = req.body as {
+      file_path?: unknown;
+      line?: unknown;
+      side?: unknown;
+      body?: unknown;
+      agent_id?: unknown;
+      anchor_commit_sha?: unknown;
+    };
+
+    const filePath = typeof body.file_path === 'string' ? body.file_path : '';
+    const lineRaw = body.line;
+    const side = body.side;
+    const commentBody = typeof body.body === 'string' ? body.body : '';
+    const agentId = typeof body.agent_id === 'string' && body.agent_id ? body.agent_id : null;
+    const anchorRaw = body.anchor_commit_sha;
+
+    if (!filePath) {
+      res.status(400).json({ error: 'file_path is required' });
+      return;
+    }
+    if (typeof lineRaw !== 'number' || !Number.isInteger(lineRaw) || lineRaw < 1) {
+      res.status(400).json({ error: 'line must be a positive integer' });
+      return;
+    }
+    if (side !== 'old' && side !== 'new') {
+      res.status(400).json({ error: "side must be 'old' or 'new'" });
+      return;
+    }
+    if (!commentBody.trim()) {
+      res.status(400).json({ error: 'body is required' });
+      return;
+    }
+    if (anchorRaw !== undefined && typeof anchorRaw !== 'string') {
+      res.status(400).json({ error: 'anchor_commit_sha must be a string' });
+      return;
+    }
+
+    try {
+      diffMod.safeResolvePath(cwd, filePath);
+    } catch {
+      res.status(400).json({ error: 'Invalid path' });
+      return;
+    }
+
+    let anchorSha: string;
+    if (anchorRaw && typeof anchorRaw === 'string') {
+      anchorSha = anchorRaw;
+    } else {
+      try {
+        const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+        anchorSha = stdout.trim();
+      } catch (err) {
+        res.status(500).json({ error: (err as Error).message });
+        return;
+      }
+    }
+
+    if (!task.base_sha) {
+      res.status(400).json({ error: 'base_sha not available for this task' });
+      return;
+    }
+
+    let fileDiff: diffMod.FileDiff;
+    try {
+      fileDiff = await diffMod.getFileDiff({
+        worktree: cwd,
+        base: task.base_sha,
+        relPath: filePath,
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+      return;
+    }
+    if (fileDiff.binary) {
+      res.status(400).json({ error: 'cannot comment on binary file' });
+      return;
+    }
+
+    let anchoredContent: string;
+    try {
+      const { stdout } = await execFile('git', ['-C', cwd, 'show', `${anchorSha}:${filePath}`]);
+      anchoredContent = stdout;
+    } catch {
+      res.status(400).json({ error: 'file not found at anchor commit' });
+      return;
+    }
+
+    const anchoredLineCount = splitLines(anchoredContent).length;
+    if (lineRaw > anchoredLineCount) {
+      res.status(400).json({ error: 'line out of range at anchor commit' });
+      return;
+    }
+
+    try {
+      const row = addComment({
+        task_id: task.id,
+        agent_id: agentId,
+        file_path: filePath,
+        line: lineRaw,
+        side,
+        original_commit_sha: anchorSha,
+        body: commentBody,
+      });
+      res.status(201).json(row);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/tasks/:id/comments', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+
+    const fileFilter = typeof req.query.file === 'string' ? req.query.file : undefined;
+    const rows = listComments(task.id, fileFilter ? { file: fileFilter } : undefined);
+
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const haveWorktree = !!cwd && fs.existsSync(cwd) && task.run_mode !== 'scratch';
+
+    if (!haveWorktree || !task.base_sha) {
+      res.json({
+        comments: rows.map((r) => ({ ...r, outdated: false })),
+        outdated_unavailable: true,
+      });
+      return;
+    }
+
+    try {
+      const map = await computeOutdated(cwd!, task.base_sha, rows);
+      res.json({
+        comments: rows.map((r) => ({ ...r, outdated: map.get(r.id) ?? false })),
+      });
+    } catch (err) {
+      apiLogger.warn(
+        { task_id: task.id, err: (err as Error).message },
+        'computeOutdated failed; returning comments without outdated flag',
+      );
+      res.json({
+        comments: rows.map((r) => ({ ...r, outdated: false })),
+        outdated_unavailable: true,
+      });
+    }
+  });
+
+  app.patch('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+
+    const cid = (req.params as Record<string, string>).cid;
+    const existing = getComment(cid);
+    if (!existing || existing.task_id !== task.id) {
+      res.status(404).json({ error: 'Comment not found' });
+      return;
+    }
+
+    const body = req.body as { resolved?: unknown; body?: unknown };
+    const hasResolved = body.resolved !== undefined;
+    const hasBody = body.body !== undefined;
+
+    if (!hasResolved && !hasBody) {
+      res.status(400).json({ error: 'no fields to update' });
+      return;
+    }
+    if (hasResolved && typeof body.resolved !== 'boolean') {
+      res.status(400).json({ error: 'resolved must be a boolean' });
+      return;
+    }
+    if (hasBody && (typeof body.body !== 'string' || !body.body.trim())) {
+      res.status(400).json({ error: 'body must be a non-empty string' });
+      return;
+    }
+
+    let row = existing;
+    if (hasBody) {
+      const updated = updateCommentBody(cid, body.body as string);
+      if (updated) row = updated;
+    }
+    if (hasResolved) {
+      const updated = (body.resolved as boolean) ? resolveComment(cid) : unresolveComment(cid);
+      if (updated) row = updated;
+    }
+
+    res.json(row);
+  });
+
+  app.delete('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+
+    const cid = (req.params as Record<string, string>).cid;
+    const existing = getComment(cid);
+    if (!existing || existing.task_id !== task.id) {
+      res.status(404).json({ error: 'Comment not found' });
+      return;
+    }
+
+    deleteComment(cid);
     res.status(204).send();
   });
 

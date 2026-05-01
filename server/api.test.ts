@@ -934,6 +934,209 @@ describe('GET /api/tasks/:id/diff/:path', () => {
       expect.objectContaining({ relPath: 'src/lib/foo.ts' }),
     );
   });
+
+  it('forwards parsed range to getFileDiff', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    (diffModule.getFileDiff as any).mockResolvedValue({
+      oldContent: 'old\n',
+      newContent: 'new\n',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+    });
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt?range=working`,
+    );
+    expect(res.status).toBe(200);
+    expect(diffModule.getFileDiff).toHaveBeenCalledWith(
+      expect.objectContaining({ range: { kind: 'working' }, relPath: 'a.txt' }),
+    );
+  });
+
+  it('rejects malformed range param with 400', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt?range=garbage`,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+// ─── New range/base routes ───────────────────────────────────────────────────
+
+describe('GET /api/tasks/:id/branches', () => {
+  beforeEach(() => {
+    (fs.existsSync as any).mockReturnValue(true);
+  });
+
+  it('returns deduped branches with current and default', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (args.includes('branch')) {
+        cb(null, { stdout: 'main\nfeature\norigin/main\norigin/topic\n', stderr: '' });
+      } else if (args.includes('symbolic-ref')) {
+        if (args.includes('refs/remotes/origin/HEAD')) {
+          cb(null, { stdout: 'origin/main\n', stderr: '' });
+        } else {
+          cb(null, { stdout: 'feature\n', stderr: '' });
+        }
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/branches`);
+    expect(res.status).toBe(200);
+    expect(res.body.branches).toEqual(['feature', 'main', 'topic']);
+    expect(res.body.current).toBe('feature');
+    expect(res.body.default).toBe('main');
+  });
+
+  it('returns 400 for scratch task', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      run_mode: 'scratch',
+      base_sha: null,
+      worktree: '/scratch/x',
+    });
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/branches`);
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/tasks/:id/commits', () => {
+  beforeEach(() => {
+    (fs.existsSync as any).mockReturnValue(true);
+  });
+
+  it('parses TSV log output and respects limit', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const { execFile: execFileMock } = await import('child_process');
+    const sha = 'abcdef0123456789abcdef0123456789abcdef01';
+    const line = `${sha}\tabcdef0\tfix(diff): something\tAlice\talice@example.com\t2026-04-30T12:00:00Z`;
+    vi.mocked(execFileMock).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (args.includes('log')) {
+        cb(null, { stdout: `${line}\n${line}\n`, stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/commits?limit=1`);
+    expect(res.status).toBe(200);
+    expect(res.body.commits).toHaveLength(1);
+    expect(res.body.commits[0]).toEqual({
+      sha,
+      short_sha: 'abcdef0',
+      subject: 'fix(diff): something',
+      author: 'Alice',
+      author_email: 'alice@example.com',
+      authored_at: '2026-04-30T12:00:00Z',
+    });
+    expect(res.body.truncated).toBe(true);
+  });
+
+  it('returns empty for working range without calling git log', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/commits?range=working`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ commits: [], truncated: false });
+  });
+
+  it('rejects malformed range with 400', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/commits?range=commit:not-hex`,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('PATCH /api/tasks/:id/base', () => {
+  beforeEach(() => {
+    (fs.existsSync as any).mockReturnValue(true);
+  });
+
+  it('updates worktree.base_branch + base_sha and returns reloaded task', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const { execFile: execFileMock } = await import('child_process');
+    const newSha = '1111111111111111111111111111111111111111';
+    vi.mocked(execFileMock).mockImplementation(((cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (args.includes('rev-parse')) {
+        cb(null, { stdout: `${newSha}\n`, stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
+      .send({ base_branch: 'develop' });
+    expect(res.status).toBe(200);
+    expect(res.body.base_branch).toBe('develop');
+    expect(res.body.base_sha).toBe(newSha);
+
+    const wt = db
+      .prepare('SELECT base_branch, base_sha FROM worktrees WHERE id = ?')
+      .get(`wt-${DEFAULTS.runningTask.id}`) as { base_branch: string; base_sha: string };
+    expect(wt.base_branch).toBe('develop');
+    expect(wt.base_sha).toBe(newSha);
+  });
+
+  it('returns 400 when base_branch ref does not resolve', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const { execFile: execFileMock } = await import('child_process');
+    vi.mocked(execFileMock).mockImplementation(((_cmd: string, args: any, ...rest: any[]) => {
+      const cb = rest.find((a: any) => typeof a === 'function');
+      if (args.includes('rev-parse')) {
+        cb(new Error('unknown revision'), null);
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    }) as any);
+
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
+      .send({ base_branch: 'bogus' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for scratch task', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      run_mode: 'scratch',
+      base_sha: null,
+      worktree: '/scratch/x',
+    });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
+      .send({ base_branch: 'main' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 409 for draft task', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, status: 'draft' });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
+      .send({ base_branch: 'main' });
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 400 when base_branch is missing', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const res = await request(app).patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`).send({});
+    expect(res.status).toBe(400);
+  });
 });
 
 // ─── POST /api/tasks/:id/agents ──────────────────────────────────────────────

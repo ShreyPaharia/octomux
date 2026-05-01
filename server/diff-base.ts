@@ -108,3 +108,16 @@ export async function resolveDiffBase(task: Task): Promise<ResolvedBase> {
     return { sha: task.base_sha, ref: shortSha(task.base_sha), is_stale: true };
   }
 }
+
+/**
+ * Resolve a user-supplied ref (branch name, `origin/<x>`, raw SHA, or tag) to a
+ * full commit SHA in `cwd`. Throws if the ref doesn't resolve.
+ */
+export async function resolveRef(cwd: string, ref: string): Promise<string> {
+  const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', `${ref}^{commit}`], {
+    env: gitEnv(),
+  });
+  const sha = stdout.trim();
+  if (!sha) throw new Error(`empty rev-parse output for ${ref}`);
+  return sha;
+}

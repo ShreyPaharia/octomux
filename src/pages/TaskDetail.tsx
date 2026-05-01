@@ -11,13 +11,14 @@ import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import { TaskSettingUpView } from '@/components/TaskSettingUpView';
 import { TaskErrorView } from '@/components/TaskErrorView';
 import { ReviewBaseRefBanner } from '@/components/ReviewBaseRefBanner';
+import { DiffRangePicker } from '@/components/DiffRangePicker';
 import { CommentQueueDrawer } from '@/components/CommentQueueDrawer';
 import { useReviewQueue } from '@/hooks/useReviewQueue';
 import { DIFF_KEYBINDS, useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 import { useTask } from '@/lib/hooks';
-import { api, type DiffSummaryResponse } from '@/lib/api';
+import { api, diffRangeToParam, type DiffRange, type DiffSummaryResponse } from '@/lib/api';
 import { repoName } from '@/lib/utils';
 import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
 import type { RunMode } from '../../server/types';
@@ -92,8 +93,45 @@ export default function TaskDetail() {
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<'agents' | 'editor' | 'diff'>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const agentParam = searchParams.get('agent');
+
+  // ─── Diff range URL state ──────────────────────────────────────────────────
+  const range = useMemo<DiffRange>(() => {
+    const raw = searchParams.get('range');
+    if (!raw || raw === 'base') return { kind: 'base' };
+    if (raw === 'working') return { kind: 'working' };
+    if (raw.startsWith('commit:')) {
+      const sha = raw.slice('commit:'.length);
+      if (/^[0-9a-f]{4,40}$/i.test(sha)) return { kind: 'commit', sha };
+    }
+    if (raw.startsWith('range:')) {
+      const rest = raw.slice('range:'.length);
+      const idx = rest.indexOf('..');
+      if (idx > 0) {
+        const from = rest.slice(0, idx);
+        const to = rest.slice(idx + 2);
+        if (from && to) return { kind: 'range', from, to };
+      }
+    }
+    return { kind: 'base' };
+  }, [searchParams]);
+
+  const setRange = useCallback(
+    (next: DiffRange) => {
+      setSearchParams(
+        (prev) => {
+          const sp = new URLSearchParams(prev);
+          const param = diffRangeToParam(next);
+          if (param) sp.set('range', param);
+          else sp.delete('range');
+          return sp;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // Local override for user_window_index so we can set it immediately from
   // the createUserTerminal API response instead of waiting for the next poll.
@@ -183,12 +221,37 @@ export default function TaskDetail() {
   const refetchDiff = useCallback(async () => {
     if (!taskId) return;
     try {
-      const s = await api.getTaskDiffSummary(taskId);
+      const s = await api.getTaskDiffSummary(taskId, range);
       setDiffSummary(s);
     } catch {
       // swallow — banner is best-effort, DiffViewer surfaces its own errors
     }
-  }, [taskId]);
+  }, [taskId, range]);
+
+  const handleBaseChange = useCallback(
+    async (newBaseBranch: string) => {
+      if (!taskId) return;
+      await api.updateTaskBase(taskId, newBaseBranch);
+      // Reset range to full diff and refetch summary under the new base.
+      setRange({ kind: 'base' });
+      await refetchDiff();
+      refresh();
+    },
+    [taskId, refetchDiff, refresh, setRange],
+  );
+
+  const currentRangeLabel = useMemo(() => {
+    switch (range.kind) {
+      case 'base':
+        return 'full diff';
+      case 'working':
+        return 'working tree';
+      case 'commit':
+        return `commit ${range.sha.slice(0, 7)}`;
+      case 'range':
+        return `${range.from.slice(0, 7)}..${range.to.slice(0, 7)}`;
+    }
+  }, [range]);
 
   const handleToggleReviewed = useCallback(
     async (filePath: string, currentlyReviewed: boolean) => {
@@ -721,6 +784,16 @@ export default function TaskDetail() {
               reviewedCount={diffSummary.reviewed_count ?? 0}
               onRefresh={refetchDiff}
               onJumpToNextUnreviewed={jumpToNextUnreviewed}
+              currentRangeLabel={currentRangeLabel}
+              rangePicker={
+                <DiffRangePicker
+                  taskId={task.id}
+                  currentBaseBranch={task.base_branch}
+                  range={range}
+                  onRangeChange={setRange}
+                  onBaseChange={handleBaseChange}
+                />
+              }
             />
           ) : null}
           <div className="flex min-h-0 flex-1">
@@ -731,6 +804,7 @@ export default function TaskDetail() {
                 onSelectionChange={setActiveFilePath}
                 onSummaryLoaded={setDiffSummary}
                 onToggleReviewed={handleToggleReviewed}
+                range={range}
               />
             </div>
             {reviewQueue.comments.length > 0 ? (

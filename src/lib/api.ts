@@ -129,6 +129,39 @@ export interface PreflightResult {
   dirty: { count: number } | null;
 }
 
+export type DiffRange =
+  | { kind: 'base' }
+  | { kind: 'commit'; sha: string }
+  | { kind: 'range'; from: string; to: string }
+  | { kind: 'working' };
+
+export function diffRangeToParam(range: DiffRange | undefined): string | null {
+  if (!range || range.kind === 'base') return null;
+  if (range.kind === 'working') return 'working';
+  if (range.kind === 'commit') return `commit:${range.sha}`;
+  return `range:${range.from}..${range.to}`;
+}
+
+export interface TaskCommit {
+  sha: string;
+  short_sha: string;
+  subject: string;
+  author: string;
+  author_email: string;
+  authored_at: string;
+}
+
+export interface ListTaskCommitsResponse {
+  commits: TaskCommit[];
+  truncated: boolean;
+}
+
+export interface ListTaskBranchesResponse {
+  branches: string[];
+  current: string | null;
+  default: string | null;
+}
+
 export type DiffFileStatus = 'A' | 'M' | 'D' | 'B';
 
 export interface DiffFileEntry {
@@ -189,16 +222,37 @@ export const api = {
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   startTask: (id: string) => request<Task>(`/tasks/${id}/start`, { method: 'POST' }),
   deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-  getTaskDiffSummary: (id: string) => request<DiffSummaryResponse>(`/tasks/${id}/diff`),
+  getTaskDiffSummary: (id: string, range?: DiffRange) => {
+    const param = diffRangeToParam(range);
+    const qs = param ? `?range=${encodeURIComponent(param)}` : '';
+    return request<DiffSummaryResponse>(`/tasks/${id}/diff${qs}`);
+  },
   createPr: (id: string, data: { title: string; body: string; draft?: boolean }) =>
     request<{ ok: boolean; url?: string; number?: number }>(`/tasks/${id}/pr`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  getTaskDiffFile: (id: string, relPath: string) =>
-    request<FileDiffResponse>(
-      `/tasks/${id}/diff/${relPath.split('/').map(encodeURIComponent).join('/')}`,
-    ),
+  getTaskDiffFile: (id: string, relPath: string, range?: DiffRange) => {
+    const param = diffRangeToParam(range);
+    const qs = param ? `?range=${encodeURIComponent(param)}` : '';
+    return request<FileDiffResponse>(
+      `/tasks/${id}/diff/${relPath.split('/').map(encodeURIComponent).join('/')}${qs}`,
+    );
+  },
+  listTaskBranches: (id: string) => request<ListTaskBranchesResponse>(`/tasks/${id}/branches`),
+  listTaskCommits: (id: string, opts?: { range?: DiffRange; limit?: number }) => {
+    const sp = new URLSearchParams();
+    const param = diffRangeToParam(opts?.range);
+    if (param) sp.set('range', param);
+    if (opts?.limit) sp.set('limit', String(opts.limit));
+    const qs = sp.toString();
+    return request<ListTaskCommitsResponse>(`/tasks/${id}/commits${qs ? `?${qs}` : ''}`);
+  },
+  updateTaskBase: (id: string, baseBranch: string) =>
+    request<Task>(`/tasks/${id}/base`, {
+      method: 'PATCH',
+      body: JSON.stringify({ base_branch: baseBranch }),
+    }),
   markReviewed: (taskId: string, filePath: string) =>
     request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'POST' }),
   unmarkReviewed: (taskId: string, filePath: string) =>

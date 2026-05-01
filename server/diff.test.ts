@@ -397,6 +397,89 @@ describe('diff module', () => {
     });
   });
 
+  describe('range-aware diffs', () => {
+    async function commitOnBranch(files: Record<string, string>, msg: string): Promise<string> {
+      await commit(repo, files, msg);
+      const { stdout } = await execFile('git', ['-C', repo, 'rev-parse', 'HEAD']);
+      return stdout.trim();
+    }
+
+    it('range=working returns only uncommitted changes (no committed entries)', async () => {
+      // Commit something so base..HEAD has content; then write working-tree change.
+      await commitOnBranch({ 'a.txt': 'committed change\n' }, 'commit on feature');
+      await fs.promises.writeFile(path.join(repo, 'a.txt'), 'workdir tweak\n');
+      await fs.promises.writeFile(path.join(repo, 'untracked.txt'), 'fresh\n');
+
+      const summary = await getDiffSummary({
+        task: makeTaskForRepo(),
+        range: { kind: 'working' },
+      });
+      const paths = summary.files.map((f) => f.path).sort();
+      expect(paths).toContain('a.txt');
+      expect(paths).toContain('untracked.txt');
+      // a.txt's status should reflect working-tree mod only.
+      const aEntry = summary.files.find((f) => f.path === 'a.txt');
+      expect(aEntry?.status).toBe('M');
+    });
+
+    it('range=commit:<sha> shows just that commit and excludes working tree', async () => {
+      const sha1 = await commitOnBranch({ 'a.txt': 'first\n' }, 'first feature commit');
+      await commitOnBranch({ 'b.txt': 'second\n' }, 'second feature commit');
+      // Dirty working tree — must not leak into a single-commit view.
+      await fs.promises.writeFile(path.join(repo, 'workdir-only.txt'), 'noise\n');
+
+      const summary = await getDiffSummary({
+        task: makeTaskForRepo(),
+        range: { kind: 'commit', sha: sha1 },
+      });
+      const paths = summary.files.map((f) => f.path);
+      expect(paths).toEqual(['a.txt']);
+      expect(paths).not.toContain('workdir-only.txt');
+    });
+
+    it('range=range:<from>..<to> diffs the supplied range', async () => {
+      const sha1 = await commitOnBranch({ 'a.txt': 'first\n' }, 'first');
+      const sha2 = await commitOnBranch({ 'b.txt': 'second\n' }, 'second');
+
+      const summary = await getDiffSummary({
+        task: makeTaskForRepo(),
+        range: { kind: 'range', from: sha1, to: sha2 },
+      });
+      const paths = summary.files.map((f) => f.path);
+      expect(paths).toEqual(['b.txt']);
+    });
+
+    it('getFileDiff with range=commit reads old from sha^ and new from sha', async () => {
+      await fs.promises.writeFile(path.join(repo, 'a.txt'), 'first\n');
+      await execFile('git', ['-C', repo, 'add', '.']);
+      await execFile('git', ['-C', repo, 'commit', '-q', '-m', 'first feature']);
+      const { stdout } = await execFile('git', ['-C', repo, 'rev-parse', 'HEAD']);
+      const sha = stdout.trim();
+
+      const diff = await getFileDiff({
+        worktree: repo,
+        range: { kind: 'commit', sha },
+        taskBaseSha: baseSha,
+        relPath: 'a.txt',
+      });
+      expect(diff.oldContent).toBe('hello\n');
+      expect(diff.newContent).toBe('first\n');
+      expect(diff.status).toBe('M');
+    });
+
+    it('getFileDiff with range=working reads old from HEAD and new from disk', async () => {
+      await fs.promises.writeFile(path.join(repo, 'a.txt'), 'workdir-only\n');
+      const diff = await getFileDiff({
+        worktree: repo,
+        range: { kind: 'working' },
+        taskBaseSha: baseSha,
+        relPath: 'a.txt',
+      });
+      expect(diff.oldContent).toBe('hello\n');
+      expect(diff.newContent).toBe('workdir-only\n');
+    });
+  });
+
   describe('safeResolvePath', () => {
     it('resolves a normal relative path inside the worktree', () => {
       const out = safeResolvePath('/tmp/wt', 'src/a.ts');

@@ -145,3 +145,41 @@ export interface UpdateTaskRequest {
   run_mode?: RunMode;
   worktree_path?: string;
 }
+
+/** Request body for PATCH /api/tasks/:id/base — change a task's diff base. */
+export interface UpdateTaskBaseRequest {
+  base_branch: string;
+}
+
+/**
+ * Diff range selector — what slice of history a diff query targets.
+ * - `base`: full task diff (base..HEAD + working tree + untracked) — current default behavior
+ * - `commit`: a single commit (sha^..sha)
+ * - `range`: an arbitrary range (from..to)
+ * - `working`: uncommitted changes vs HEAD only (no committed diff)
+ */
+export type DiffRange =
+  | { kind: 'base' }
+  | { kind: 'commit'; sha: string }
+  | { kind: 'range'; from: string; to: string }
+  | { kind: 'working' };
+
+export interface TaskCommit {
+  sha: string;
+  short_sha: string;
+  subject: string;
+  author: string;
+  author_email: string;
+  authored_at: string;
+}
+
+export interface ListTaskCommitsResponse {
+  commits: TaskCommit[];
+  truncated: boolean;
+}
+
+export interface ListTaskBranchesResponse {
+  branches: string[];
+  current: string | null;
+  default: string | null;
+}

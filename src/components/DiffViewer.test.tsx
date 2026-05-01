@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useRef } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 
 const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api', async () => {
+  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
+  return { ...actual, api: apiProxy };
+});
 
 // Monaco's DiffEditor does real DOM work; replace with a stub that exposes
 // the original/modified content, options, and a per-mount id so tests can
@@ -41,9 +44,10 @@ vi.mock('@monaco-editor/react', () => ({
 import { DiffViewer } from './DiffViewer';
 
 beforeEach(() => {
-  // Reset mocks to their test-helpers defaults so cross-test state doesn't leak
-  apiMock.getTaskDiffSummary.mockResolvedValue({ files: [] });
-  apiMock.getTaskDiffFile.mockResolvedValue({
+  // Reset mocks (clears call history AND queued mockResolvedValueOnce) and
+  // re-establish defaults so cross-test state doesn't leak.
+  apiMock.getTaskDiffSummary.mockReset().mockResolvedValue({ files: [] });
+  apiMock.getTaskDiffFile.mockReset().mockResolvedValue({
     oldContent: '',
     newContent: '',
     status: 'M',
@@ -52,8 +56,13 @@ beforeEach(() => {
     isDirectory: false,
   });
   localStorage.clear();
+  history.replaceState(null, '', '/');
   mountCounter = 0;
 });
+
+function rowFor(path: string): HTMLElement {
+  return screen.getByTestId(`diff-row-${path}`);
+}
 
 describe('DiffViewer', () => {
   it('shows base_sha-unavailable empty state when server returns that error', async () => {
@@ -72,7 +81,7 @@ describe('DiffViewer', () => {
     });
   });
 
-  it('renders file tree and loads first file in Monaco', async () => {
+  it('lazy-mounts the first visible file in Monaco', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [{ path: 'src/a.ts', status: 'M', additions: 2, deletions: 1 }],
     });
@@ -90,7 +99,85 @@ describe('DiffViewer', () => {
     expect(screen.getByTestId('mod')).toHaveTextContent('new');
   });
 
-  it('auto-selects the first non-ignored file, skipping ignored entries', async () => {
+  it('renders multiple files stacked in sidebar order', async () => {
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: 'a.ts', status: 'M', additions: 1, deletions: 0 },
+        { path: 'b.ts', status: 'A', additions: 5, deletions: 0 },
+        { path: 'c.ts', status: 'M', additions: 2, deletions: 0 },
+      ],
+    });
+    apiMock.getTaskDiffFile.mockImplementation((_id: string, p: string) =>
+      Promise.resolve({
+        oldContent: `${p}-old`,
+        newContent: `${p}-new`,
+        status: 'M',
+        tooLarge: false,
+        binary: false,
+        isDirectory: false,
+      }),
+    );
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() => {
+      expect(screen.getAllByTestId('monaco-diff')).toHaveLength(3);
+    });
+    const rows = screen.getAllByTestId(/^diff-row-/);
+    expect(rows.map((r) => r.getAttribute('data-file-path'))).toEqual(['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('does not refetch loaded files on poll when post_blob_sha is unchanged', async () => {
+    apiMock.getTaskDiffSummary
+      .mockResolvedValueOnce({
+        files: [{ path: 'a.ts', status: 'M', additions: 1, deletions: 0, post_blob_sha: 'sha1' }],
+      })
+      .mockResolvedValueOnce({
+        files: [{ path: 'a.ts', status: 'M', additions: 1, deletions: 0, post_blob_sha: 'sha1' }],
+      });
+    apiMock.getTaskDiffFile.mockResolvedValue({
+      oldContent: 'old',
+      newContent: 'new',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+      isDirectory: false,
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<DiffViewer taskId="t1" isRunning={true} />);
+    await waitFor(() => expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(2500);
+    // Allow microtasks to settle.
+    await Promise.resolve();
+    expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('refetches a file on poll when its post_blob_sha changes', async () => {
+    apiMock.getTaskDiffSummary
+      .mockResolvedValueOnce({
+        files: [{ path: 'a.ts', status: 'M', additions: 1, deletions: 0, post_blob_sha: 'sha1' }],
+      })
+      .mockResolvedValueOnce({
+        files: [{ path: 'a.ts', status: 'M', additions: 1, deletions: 0, post_blob_sha: 'sha2' }],
+      });
+    apiMock.getTaskDiffFile.mockResolvedValue({
+      oldContent: 'old',
+      newContent: 'new',
+      status: 'M',
+      tooLarge: false,
+      binary: false,
+      isDirectory: false,
+    });
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<DiffViewer taskId="t1" isRunning={true} />);
+    await waitFor(() => expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(2500);
+    await waitFor(() => expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(2));
+    vi.useRealTimers();
+  });
+
+  it('auto-mounts non-ignored files; ignored files stay unmounted', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [
         { path: '.env', status: 'A', additions: 3, deletions: 0, ignored: true },
@@ -105,23 +192,19 @@ describe('DiffViewer', () => {
       binary: false,
     });
     render(<DiffViewer taskId="t1" isRunning={false} />);
-    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('real-new'));
-    expect(screen.getByTestId('orig')).toHaveTextContent('real-old');
+    await waitFor(() => expect(screen.getAllByTestId('monaco-diff')).toHaveLength(1));
+    expect(screen.getByTestId('mod')).toHaveTextContent('real-new');
+    // The ignored row exists but doesn't fetch a body.
+    expect(rowFor('.env')).toBeInTheDocument();
   });
 
-  it('shows "too large" message for oversized files', async () => {
+  it('shows "too large" message for oversized files without mounting Monaco', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
-      files: [{ path: 'big.bin', status: 'M', additions: 0, deletions: 0 }],
-    });
-    apiMock.getTaskDiffFile.mockResolvedValue({
-      oldContent: '',
-      newContent: '',
-      status: 'M',
-      tooLarge: true,
-      binary: false,
+      files: [{ path: 'big.bin', status: 'M', additions: 0, deletions: 0, tooLarge: true }],
     });
     render(<DiffViewer taskId="t1" isRunning={false} />);
     await waitFor(() => expect(screen.getByText(/too large/i)).toBeInTheDocument());
+    expect(screen.queryByTestId('monaco-diff')).not.toBeInTheDocument();
   });
 
   it('shows a non-crashing directory message when the file resolves to a directory', async () => {
@@ -142,7 +225,7 @@ describe('DiffViewer', () => {
     expect(screen.queryByTestId('monaco-diff')).not.toBeInTheDocument();
   });
 
-  it('switches file when a tree row is clicked', async () => {
+  it('clicking a sidebar tree row scrolls to that file and updates the URL hash', async () => {
     const user = userEvent.setup();
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [
@@ -150,106 +233,30 @@ describe('DiffViewer', () => {
         { path: 'b.ts', status: 'A', additions: 5, deletions: 0 },
       ],
     });
-    apiMock.getTaskDiffFile
-      .mockResolvedValueOnce({
-        oldContent: 'a-old',
-        newContent: 'a-new',
+    apiMock.getTaskDiffFile.mockImplementation((_id: string, p: string) =>
+      Promise.resolve({
+        oldContent: `${p}-old`,
+        newContent: `${p}-new`,
         status: 'M',
         tooLarge: false,
         binary: false,
-      })
-      .mockResolvedValueOnce({
-        oldContent: '',
-        newContent: 'b-new',
-        status: 'A',
-        tooLarge: false,
-        binary: false,
-      });
+        isDirectory: false,
+      }),
+    );
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+
     render(<DiffViewer taskId="t1" isRunning={false} />);
     await screen.findByTestId('diff-file-row-a.ts');
     await user.click(
       screen.getByTestId('diff-file-row-b.ts').querySelector('button') as HTMLElement,
     );
-    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
+
+    expect(scrollSpy).toHaveBeenCalled();
+    expect(window.location.hash).toBe('#file=b.ts');
   });
 
-  it('falls back to first file when the selected file disappears on poll', async () => {
-    // First summary: has a.ts (selected) and b.ts
-    apiMock.getTaskDiffSummary
-      .mockResolvedValueOnce({
-        files: [
-          { path: 'a.ts', status: 'M', additions: 1, deletions: 0 },
-          { path: 'b.ts', status: 'A', additions: 5, deletions: 0 },
-        ],
-      })
-      // Second summary (after poll): a.ts is gone, only b.ts remains
-      .mockResolvedValueOnce({
-        files: [{ path: 'b.ts', status: 'A', additions: 5, deletions: 0 }],
-      });
-
-    apiMock.getTaskDiffFile
-      .mockResolvedValueOnce({
-        oldContent: 'a-old',
-        newContent: 'a-new',
-        status: 'M',
-        tooLarge: false,
-        binary: false,
-      })
-      .mockResolvedValueOnce({
-        oldContent: '',
-        newContent: 'b-new',
-        status: 'A',
-        tooLarge: false,
-        binary: false,
-      });
-
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<DiffViewer taskId="t1" isRunning={true} />);
-    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('a-new'));
-    // Advance past one poll interval
-    await vi.advanceTimersByTimeAsync(2500);
-    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
-    vi.useRealTimers();
-  });
-
-  it('remounts MonacoDiff (new mount-id) when the selected file changes', async () => {
-    const user = userEvent.setup();
-    apiMock.getTaskDiffSummary.mockResolvedValue({
-      files: [
-        { path: 'a.ts', status: 'M', additions: 1, deletions: 0 },
-        { path: 'b.ts', status: 'A', additions: 5, deletions: 0 },
-      ],
-    });
-    apiMock.getTaskDiffFile
-      .mockResolvedValueOnce({
-        oldContent: 'a-old',
-        newContent: 'a-new',
-        status: 'M',
-        tooLarge: false,
-        binary: false,
-      })
-      .mockResolvedValueOnce({
-        oldContent: '',
-        newContent: 'b-new',
-        status: 'A',
-        tooLarge: false,
-        binary: false,
-      });
-    render(<DiffViewer taskId="t1" isRunning={false} />);
-    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('a-new'));
-    const firstId = screen.getByTestId('monaco-diff').getAttribute('data-mount-id');
-    expect(firstId).not.toBeNull();
-
-    await user.click(
-      screen.getByTestId('diff-file-row-b.ts').querySelector('button') as HTMLElement,
-    );
-    await waitFor(() => expect(screen.getByTestId('mod')).toHaveTextContent('b-new'));
-    const secondId = screen.getByTestId('monaco-diff').getAttribute('data-mount-id');
-    expect(secondId).not.toBeNull();
-    expect(secondId).not.toBe(firstId);
-  });
-
-  it('toolbar flips label and persists expandedAll to localStorage', async () => {
+  it('per-row toolbar flips Expand/Collapse label and persists per-file', async () => {
     const user = userEvent.setup();
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [{ path: 'src/a.ts', status: 'M', additions: 2, deletions: 1 }],
@@ -262,12 +269,12 @@ describe('DiffViewer', () => {
       binary: false,
     });
     render(<DiffViewer taskId="t1" isRunning={false} />);
-    const btn = await screen.findByRole('button', { name: 'Expand all' });
+    const btn = await screen.findByRole('button', { name: /Expand all in src\/a\.ts/i });
     expect(localStorage.getItem(diffExpandedKey('t1', 'src/a.ts'))).toBeNull();
 
     await user.click(btn);
 
-    await screen.findByRole('button', { name: 'Collapse all' });
+    await screen.findByRole('button', { name: /Collapse all in src\/a\.ts/i });
     expect(localStorage.getItem(diffExpandedKey('t1', 'src/a.ts'))).toBe('true');
 
     await waitFor(() => {
@@ -280,7 +287,7 @@ describe('DiffViewer', () => {
 
   // ─── Review flow ──────────────────────────────────────────────────────────
 
-  it('clicking the review checkbox persists to localStorage and updates the progress chip', async () => {
+  it('clicking the per-row review checkbox persists to localStorage and updates the progress chip', async () => {
     const user = userEvent.setup();
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [
@@ -288,29 +295,36 @@ describe('DiffViewer', () => {
         { path: 'src/b.ts', status: 'A', additions: 1, deletions: 0 },
       ],
     });
+    apiMock.getTaskDiffFile.mockImplementation((_id: string, p: string) =>
+      Promise.resolve({
+        oldContent: `${p}-old`,
+        newContent: `${p}-new`,
+        status: 'M',
+        tooLarge: false,
+        binary: false,
+        isDirectory: false,
+      }),
+    );
     render(<DiffViewer taskId="t1" isRunning={false} />);
 
     const progress = await screen.findByTestId('review-progress');
-    await screen.findByTestId('monaco-diff');
     expect(progress.textContent).toMatch(/0\s*\/\s*2\s*reviewed/);
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
 
-    await user.click(await screen.findByTestId('review-toggle-src/a.ts'));
+    const checkbox = within(rowFor('src/a.ts')).getByTestId('review-toggle-src/a.ts');
+    await user.click(checkbox);
 
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBe('true');
     await waitFor(() => {
       expect(screen.getByTestId('review-progress').textContent).toMatch(/1\s*\/\s*2\s*reviewed/);
     });
-    expect(screen.getByTestId('monaco-diff')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /show file contents/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /hide file contents/i })).not.toBeInTheDocument();
 
     // Second click toggles off
-    await user.click(screen.getByTestId('review-toggle-src/a.ts'));
+    await user.click(within(rowFor('src/a.ts')).getByTestId('review-toggle-src/a.ts'));
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
   });
 
-  it('renders the review checkbox in the selected file header only', async () => {
+  it('renders a review checkbox per row in the stacked file list', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [
         { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
@@ -320,19 +334,21 @@ describe('DiffViewer', () => {
 
     render(<DiffViewer taskId="t1" isRunning={false} />);
 
-    await screen.findByTestId('review-toggle-src/a.ts');
-    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
-    expect(screen.queryByTestId('review-toggle-src/b.ts')).not.toBeInTheDocument();
+    await screen.findByTestId('diff-row-src/a.ts');
+    expect(within(rowFor('src/a.ts')).getByTestId('review-toggle-src/a.ts')).toBeInTheDocument();
+    expect(within(rowFor('src/b.ts')).getByTestId('review-toggle-src/b.ts')).toBeInTheDocument();
   });
 
-  it('uses API-backed reviewed state for the header checkbox', async () => {
+  it('uses API-backed reviewed state for the per-row checkbox', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [{ path: 'src/a.ts', status: 'M', additions: 1, deletions: 0, reviewed: true }],
     });
 
     render(<DiffViewer taskId="t1" isRunning={false} onToggleReviewed={() => {}} />);
 
-    const checkbox = (await screen.findByTestId('review-toggle-src/a.ts')) as HTMLInputElement;
+    const checkbox = (await within(await screen.findByTestId('diff-row-src/a.ts')).findByTestId(
+      'review-toggle-src/a.ts',
+    )) as HTMLInputElement;
     await waitFor(() => expect(checkbox.checked).toBe(true));
   });
 
@@ -442,7 +458,7 @@ describe('DiffViewer', () => {
 
     render(<DiffViewer taskId="t1" isRunning={false} />);
 
-    await screen.findByRole('button', { name: 'Collapse all' });
+    await screen.findByRole('button', { name: /Collapse all in src\/a\.ts/i });
     const opts = JSON.parse(screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}');
     expect(opts.hideUnchangedRegions.enabled).toBe(false);
   });
