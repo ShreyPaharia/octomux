@@ -1095,6 +1095,15 @@ export async function resumeTask(task: Task): Promise<void> {
     await cleanupLinkedSessions(session);
     await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
 
+    // Killing the tmux session means every agent on this task is, by
+    // definition, no longer running. Reconcile the DB before we read it back —
+    // on the Mac-restart recovery path the poller hasn't yet flipped agents
+    // from 'running' to 'stopped', so without this they'd be filtered out
+    // below and we'd create the new tmux session with no claude in it.
+    db.prepare(
+      `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status != 'stopped'`,
+    ).run(task.id);
+
     const cwd = task.worktree!;
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);

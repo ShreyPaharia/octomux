@@ -1116,6 +1116,31 @@ describe('resumeTask', () => {
     expect(agents.every((a) => a.status === 'running')).toBe(true);
   });
 
+  // Mac restart recovery: tasks come back from a hard reboot with their tmux
+  // sessions gone but agents still flagged 'running' in the DB (the poller
+  // hasn't run yet — recoverTasks() runs first). resumeTask must still
+  // re-launch claude in those windows; otherwise users see empty terminals.
+  it('relaunches claude even when agents are still flagged running', async () => {
+    insertTask(db, { ...closedTask });
+    insertAgent(db, { status: 'running' });
+    insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2', status: 'idle' });
+
+    await resumeTask(closedTask);
+
+    const claudeLaunches = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: any[]) =>
+          c[0] === 'tmux' &&
+          (c[1] as string[]).includes('send-keys') &&
+          ((c[1] as string[]).find((a) => typeof a === 'string' && a.includes('claude')) ??
+            false),
+      );
+    expect(claudeLaunches.length).toBeGreaterThanOrEqual(2);
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.status === 'running')).toBe(true);
+  });
+
   // ─── Shell commands (table-driven) ──────────────────────────────────────
 
   const resumeShellCalls = [
