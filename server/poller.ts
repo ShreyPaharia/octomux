@@ -430,17 +430,23 @@ function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<numb
   const db = getDb();
   const drafts = db
     .prepare(
-      `SELECT t.id AS id, t.pr_number AS pr_number FROM tasks t
+      `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
          LEFT JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.status = 'draft'`,
     )
-    .all(repoPath) as Array<{ id: string; pr_number: number | null }>;
+    .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
 
   const deletedIds: string[] = [];
   for (const draft of drafts) {
     if (draft.pr_number === null) continue;
     if (activePrNumbers.has(draft.pr_number)) continue;
     db.prepare('DELETE FROM tasks WHERE id = ?').run(draft.id);
+    // The worktree row was minted alongside the draft (upsertReviewTask) and
+    // is unique to it — drop it too so the workspaces list doesn't accumulate
+    // an orphan row per resolved PR.
+    if (draft.worktree_id) {
+      db.prepare('DELETE FROM worktrees WHERE id = ?').run(draft.worktree_id);
+    }
     deletedIds.push(draft.id);
   }
   return deletedIds;
