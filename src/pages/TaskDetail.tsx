@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
@@ -13,7 +14,10 @@ import { TaskErrorView } from '@/components/TaskErrorView';
 import { ReviewBaseRefBanner } from '@/components/ReviewBaseRefBanner';
 import { DiffRangePicker } from '@/components/DiffRangePicker';
 import { CommentQueueDrawer } from '@/components/CommentQueueDrawer';
+import { CommentsSidePanel } from '@/components/CommentsSidePanel';
+import type { DiffFileListHandle } from '@/components/DiffFileList';
 import { useReviewQueue } from '@/hooks/useReviewQueue';
+import { useTaskComments, TaskCommentsContext } from '@/hooks/useTaskComments';
 import { DIFF_KEYBINDS, useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -212,6 +216,48 @@ export default function TaskDetail() {
   const reviewQueue = useReviewQueue(taskId);
   const [diffSummary, setDiffSummary] = useState<DiffSummaryResponse | null>(null);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
+  const [showCommentsPanel, setShowCommentsPanel] = useState(false);
+  const diffListRef = useRef<DiffFileListHandle | null>(null);
+  const focusClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleQueueDraft = useCallback(
+    (draft: { filePath: string; line: number; side: 'old' | 'new'; body: string; lineText: string }) => {
+      reviewQueue.add({
+        filePath: draft.filePath,
+        line: draft.line,
+        lineText: draft.lineText,
+        body: draft.body,
+      });
+    },
+    [reviewQueue],
+  );
+
+  const taskComments = useTaskComments(taskId, {
+    onError: (msg) => toast.error(msg),
+    onQueueDraft: handleQueueDraft,
+  });
+
+  useEffect(
+    () => () => {
+      if (focusClearTimer.current) clearTimeout(focusClearTimer.current);
+    },
+    [],
+  );
+
+  const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
+
+  const handleJumpToComment = useCallback(
+    (filePath: string, line: number, side: 'old' | 'new', commentId: string) => {
+      diffListRef.current?.revealLineInFile(filePath, line, side);
+      taskComments.setFocusedId(commentId);
+      if (focusClearTimer.current) clearTimeout(focusClearTimer.current);
+      focusClearTimer.current = setTimeout(() => {
+        taskComments.setFocusedId(null);
+      }, 1200);
+    },
+    [taskComments],
+  );
 
   const visibleFiles = useMemo(
     () => (diffSummary?.files ?? []).filter((f) => !f.ignored),
@@ -278,14 +324,36 @@ export default function TaskDetail() {
 
   const handleSendBatch = useCallback(async () => {
     if (!taskId || !activeAgentId || reviewQueue.comments.length === 0) return;
+    const body = reviewQueue.format();
+    const drafts = reviewQueue.comments;
+
+    // Persist each queued draft. Failures stay in the queue with a toast so the
+    // human can retry; successes are removed.
+    const failed: string[] = [];
+    await Promise.all(
+      drafts.map(async (d) => {
+        const row = await taskComments.post({
+          file_path: d.filePath,
+          line: d.line,
+          side: 'new',
+          body: d.body,
+        });
+        if (row) reviewQueue.remove(d.id);
+        else failed.push(d.id);
+      }),
+    );
+    if (failed.length > 0) {
+      toast.error(`Failed to save ${failed.length} of ${drafts.length} comments`);
+      return;
+    }
+
     try {
-      const body = reviewQueue.format();
       await api.sendAgentMessage(taskId, activeAgentId, body);
-      reviewQueue.clear();
     } catch (err) {
       console.error('Failed to send review batch:', err);
+      toast.error((err as Error).message);
     }
-  }, [taskId, activeAgentId, reviewQueue]);
+  }, [taskId, activeAgentId, reviewQueue, taskComments]);
 
   const moveActiveFile = useCallback(
     (delta: 1 | -1) => {
@@ -775,49 +843,80 @@ export default function TaskDetail() {
 
       {/* Diff view — review cockpit */}
       {mode === 'diff' && canShowDiff && (
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          {diffSummary && diffSummary.base_ref ? (
-            <ReviewBaseRefBanner
-              baseRef={diffSummary.base_ref}
-              baseIsStale={!!diffSummary.base_is_stale}
-              totalCount={diffSummary.total_count ?? 0}
-              reviewedCount={diffSummary.reviewed_count ?? 0}
-              onRefresh={refetchDiff}
-              onJumpToNextUnreviewed={jumpToNextUnreviewed}
-              currentRangeLabel={currentRangeLabel}
-              rangePicker={
-                <DiffRangePicker
-                  taskId={task.id}
-                  currentBaseBranch={task.base_branch}
-                  range={range}
-                  onRangeChange={setRange}
-                  onBaseChange={handleBaseChange}
-                />
-              }
-            />
-          ) : null}
-          <div className="flex min-h-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col">
-              <DiffViewer
-                taskId={task.id}
-                isRunning={task.status === 'running'}
-                onSelectionChange={setActiveFilePath}
-                onSummaryLoaded={setDiffSummary}
-                onToggleReviewed={handleToggleReviewed}
-                range={range}
-              />
-            </div>
-            {reviewQueue.comments.length > 0 ? (
-              <CommentQueueDrawer
-                comments={reviewQueue.comments}
-                onRemove={reviewQueue.remove}
-                onJumpTo={(p) => setActiveFilePath(p)}
-                onSend={handleSendBatch}
+        <TaskCommentsContext.Provider value={taskComments}>
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            {diffSummary && diffSummary.base_ref ? (
+              <ReviewBaseRefBanner
+                baseRef={diffSummary.base_ref}
+                baseIsStale={!!diffSummary.base_is_stale}
+                totalCount={diffSummary.total_count ?? 0}
+                reviewedCount={diffSummary.reviewed_count ?? 0}
+                onRefresh={refetchDiff}
+                onJumpToNextUnreviewed={jumpToNextUnreviewed}
+                currentRangeLabel={currentRangeLabel}
+                rangePicker={
+                  <DiffRangePicker
+                    taskId={task.id}
+                    currentBaseBranch={task.base_branch}
+                    range={range}
+                    onRangeChange={setRange}
+                    onBaseChange={handleBaseChange}
+                  />
+                }
+                rightSlot={
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    data-testid="comments-toggle"
+                    data-active={showCommentsPanel ? 'true' : undefined}
+                    className={
+                      showCommentsPanel
+                        ? 'border-[#22D3EE] bg-[#22D3EE1F] text-[#22D3EE]'
+                        : 'border-[#2f2f2f] text-[#8a8a8a]'
+                    }
+                    onClick={() => setShowCommentsPanel((v) => !v)}
+                  >
+                    Comments ({taskComments.byId.size})
+                  </Button>
+                }
               />
             ) : null}
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <DiffViewer
+                  taskId={task.id}
+                  isRunning={task.status === 'running'}
+                  onSelectionChange={setActiveFilePath}
+                  onSummaryLoaded={setDiffSummary}
+                  onToggleReviewed={handleToggleReviewed}
+                  range={range}
+                  listRef={diffListRef}
+                  enableComments={true}
+                  agents={task.agents ?? []}
+                  onFilesChange={setFilesInDiff}
+                />
+              </div>
+              {showCommentsPanel ? (
+                <CommentsSidePanel
+                  agents={task.agents ?? []}
+                  filesInDiff={filesInDiffSet}
+                  rangeIsBase={range.kind === 'base'}
+                  onJumpTo={handleJumpToComment}
+                  onClose={() => setShowCommentsPanel(false)}
+                />
+              ) : null}
+              {reviewQueue.comments.length > 0 ? (
+                <CommentQueueDrawer
+                  comments={reviewQueue.comments}
+                  onRemove={reviewQueue.remove}
+                  onJumpTo={(p) => setActiveFilePath(p)}
+                  onSend={handleSendBatch}
+                />
+              ) : null}
+            </div>
+            <DiffKeybindCheatSheet />
           </div>
-          <DiffKeybindCheatSheet />
-        </div>
+        </TaskCommentsContext.Provider>
       )}
 
       {/* Editor view — only shown for nvim (external editors stay on agents view) */}

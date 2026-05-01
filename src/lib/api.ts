@@ -203,6 +203,42 @@ export interface InboxResponse {
   activity: Task[];
 }
 
+export interface InlineCommentRow {
+  id: string;
+  task_id: string;
+  agent_id: string | null;
+  file_path: string;
+  line: number;
+  side: 'old' | 'new';
+  original_commit_sha: string;
+  body: string;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface InlineCommentWithOutdated extends InlineCommentRow {
+  outdated: boolean;
+}
+
+export interface PostCommentInput {
+  file_path: string;
+  line: number;
+  side: 'old' | 'new';
+  body: string;
+  agent_id?: string;
+  anchor_commit_sha?: string;
+}
+
+export interface ListCommentsResponse {
+  comments: InlineCommentWithOutdated[];
+  outdated_unavailable?: boolean;
+}
+
+export interface UpdateCommentInput {
+  resolved?: boolean;
+  body?: string;
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -257,6 +293,22 @@ export const api = {
     request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'POST' }),
   unmarkReviewed: (taskId: string, filePath: string) =>
     request<void>(`/tasks/${taskId}/files/${filePath}/reviewed`, { method: 'DELETE' }),
+  postComment: (taskId: string, data: PostCommentInput) =>
+    request<InlineCommentRow>(`/tasks/${taskId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listComments: (taskId: string, file?: string) => {
+    const qs = file ? `?file=${encodeURIComponent(file)}` : '';
+    return request<ListCommentsResponse>(`/tasks/${taskId}/comments${qs}`);
+  },
+  updateComment: (taskId: string, commentId: string, data: UpdateCommentInput) =>
+    request<InlineCommentRow>(`/tasks/${taskId}/comments/${commentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteComment: (taskId: string, commentId: string) =>
+    request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' }),
   sendAgentMessage: (taskId: string, agentId: string, message: string) =>
     request<{ ok: boolean }>(`/tasks/${taskId}/agents/${agentId}/message`, {
       method: 'POST',

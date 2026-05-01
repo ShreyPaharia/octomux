@@ -182,6 +182,32 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     listTaskBranches: vi.fn().mockResolvedValue({ branches: [], current: null, default: null }),
     listTaskCommits: vi.fn().mockResolvedValue({ commits: [], truncated: false }),
     updateTaskBase: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+    postComment: vi.fn().mockResolvedValue({
+      id: 'c1',
+      task_id: 'test-task-01',
+      agent_id: null,
+      file_path: 'src/foo.ts',
+      line: 1,
+      side: 'new',
+      original_commit_sha: '0000000',
+      body: 'mock comment',
+      created_at: '2026-01-01 00:00:00',
+      resolved_at: null,
+    }),
+    listComments: vi.fn().mockResolvedValue({ comments: [] }),
+    updateComment: vi.fn().mockResolvedValue({
+      id: 'c1',
+      task_id: 'test-task-01',
+      agent_id: null,
+      file_path: 'src/foo.ts',
+      line: 1,
+      side: 'new',
+      original_commit_sha: '0000000',
+      body: 'mock comment',
+      created_at: '2026-01-01 00:00:00',
+      resolved_at: null,
+    }),
+    deleteComment: vi.fn().mockResolvedValue(undefined),
   };
   return { ...defaults, ...overrides };
 }
