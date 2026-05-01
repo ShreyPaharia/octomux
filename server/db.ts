@@ -122,6 +122,22 @@ CREATE TABLE IF NOT EXISTS config (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS inline_comments (
+    id                   TEXT PRIMARY KEY,
+    task_id              TEXT NOT NULL,
+    agent_id             TEXT,
+    file_path            TEXT NOT NULL,
+    line                 INTEGER NOT NULL,
+    side                 TEXT NOT NULL CHECK(side IN ('old','new')),
+    original_commit_sha  TEXT NOT NULL,
+    body                 TEXT NOT NULL,
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at          TEXT,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_inline_comments_task_file
+    ON inline_comments(task_id, file_path);
+
 `;
 
 /**
