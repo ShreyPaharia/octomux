@@ -14,3 +14,54 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: () => false,
   }),
 });
+
+// jsdom doesn't implement IntersectionObserver — stub it with a default that
+// asynchronously reports every observed element as intersecting=true so any
+// component that lazy-mounts on visibility ends up rendering its content in
+// tests. Individual tests can replace `globalThis.IntersectionObserver` with
+// a controllable mock via `vi.stubGlobal` or by re-assigning the global.
+class TestIntersectionObserver implements IntersectionObserver {
+  readonly root: Element | Document | null = null;
+  readonly rootMargin: string = '';
+  readonly thresholds: readonly number[] = [];
+  private cb: IntersectionObserverCallback;
+  private targets = new Set<Element>();
+  constructor(cb: IntersectionObserverCallback) {
+    this.cb = cb;
+  }
+  observe(target: Element): void {
+    this.targets.add(target);
+    queueMicrotask(() => {
+      if (!this.targets.has(target)) return;
+      const entry: IntersectionObserverEntry = {
+        target,
+        isIntersecting: true,
+        intersectionRatio: 1,
+        boundingClientRect: target.getBoundingClientRect(),
+        intersectionRect: target.getBoundingClientRect(),
+        rootBounds: null,
+        time: 0,
+      };
+      this.cb([entry], this);
+    });
+  }
+  unobserve(target: Element): void {
+    this.targets.delete(target);
+  }
+  disconnect(): void {
+    this.targets.clear();
+  }
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver =
+    TestIntersectionObserver as unknown as typeof IntersectionObserver;
+}
+
+// jsdom doesn't implement scrollIntoView either.
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function () {};
+}

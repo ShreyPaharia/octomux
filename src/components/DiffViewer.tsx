@@ -1,22 +1,8 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DiffOnMount } from '@monaco-editor/react';
-import type { editor } from 'monaco-editor';
-import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import {
-  getDiffExpanded,
-  setDiffExpanded,
-  getReviewed,
-  setReviewed as persistReviewed,
-} from '@/lib/diff-state';
-import { findHunkLine } from '@/lib/diff-hunks';
-import { useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
-import { Button } from '@/components/ui/button';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, type DiffFileEntry } from '@/lib/api';
+import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
 import { DiffFileTree } from './DiffFileTree';
-
-const MonacoDiff = lazy(() =>
-  import('@monaco-editor/react').then((mod) => ({ default: mod.DiffEditor })),
-);
+import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -41,7 +27,7 @@ interface Props {
   onAddComment?: (c: { filePath: string; line: number; lineText: string; body: string }) => void;
   queuedComments?: QueuedReviewComment[];
   // Optional notifier so a parent (e.g. TaskDetail's review cockpit) can mirror
-  // the currently-selected file path for keyboard nav and the review banner.
+  // the currently-active file path for keyboard nav and the review banner.
   onSelectionChange?: (path: string | null) => void;
   // Optional notifier so a parent can refresh its own copy of the diff summary
   // after the API view fetches a new one (used for `reviewed_count` / banner).
@@ -49,28 +35,6 @@ interface Props {
   // When provided, the file tree's reviewed checkbox calls this instead of the
   // local-storage backed flow — TaskDetail uses the API.
   onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
-}
-
-function extToLanguage(p: string): string {
-  const ext = p.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    ts: 'typescript',
-    tsx: 'typescript',
-    js: 'javascript',
-    jsx: 'javascript',
-    json: 'json',
-    md: 'markdown',
-    css: 'css',
-    html: 'html',
-    py: 'python',
-    go: 'go',
-    rs: 'rust',
-    sh: 'shell',
-    yml: 'yaml',
-    yaml: 'yaml',
-    toml: 'ini',
-  };
-  return map[ext] ?? 'plaintext';
 }
 
 export function DiffViewer(props: Props) {
@@ -210,15 +174,13 @@ function ApiDiffViewer({
 }) {
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
   const [ignoredTruncated, setIgnoredTruncated] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [fileDiff, setFileDiff] = useState<FileDiffResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [baseShaUnavailable, setBaseShaUnavailable] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(true);
-  const [fileLoading, setFileLoading] = useState(false);
-  const [expandedAll, setExpandedAll] = useState(false);
-  const expandedFallback = useRef<Record<string, boolean>>({});
   const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+
+  const listRef = useRef<DiffFileListHandle | null>(null);
 
   // Hydrate reviewed set from the API in review-cockpit mode, otherwise localStorage.
   useEffect(() => {
@@ -232,6 +194,17 @@ function ApiDiffViewer({
 
   const toggleReviewed = useCallback(
     (path: string) => {
+      const currentlyReviewed = reviewed.has(path);
+      if (onToggleReviewedProp) {
+        setReviewedState((prev) => {
+          const next = new Set(prev);
+          if (currentlyReviewed) next.delete(path);
+          else next.add(path);
+          return next;
+        });
+        onToggleReviewedProp(path, currentlyReviewed);
+        return;
+      }
       setReviewedState((prev) => {
         const next = new Set(prev);
         if (next.has(path)) {
@@ -244,7 +217,7 @@ function ApiDiffViewer({
         return next;
       });
     },
-    [taskId],
+    [taskId, reviewed, onToggleReviewedProp],
   );
 
   const reviewCounts = useMemo(() => {
@@ -254,75 +227,9 @@ function ApiDiffViewer({
     return { done, total };
   }, [files, reviewed]);
 
-  const editorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
-  const editorKeyRef = useRef<string | null>(null);
-  const viewStates = useRef<Map<string, editor.IDiffEditorViewState>>(new Map());
-
-  const viewStateKey = useCallback(
-    (path: string, expanded: boolean) => `${taskId}::${path}::${expanded ? 'e' : 'c'}`,
-    [taskId],
-  );
-
-  const saveActiveViewState = useCallback(() => {
-    const ed = editorRef.current;
-    const k = editorKeyRef.current;
-    if (!ed || !k) return;
-    const s = ed.saveViewState();
-    if (s) viewStates.current.set(k, s);
-  }, []);
-
-  const handleSelect = useCallback(
-    (path: string) => {
-      saveActiveViewState();
-      setSelected(path);
-    },
-    [saveActiveViewState],
-  );
-
-  const handleEditorMount = useCallback<DiffOnMount>(
-    (ed) => {
-      editorRef.current = ed;
-      const k = selected ? viewStateKey(selected, expandedAll) : null;
-      editorKeyRef.current = k;
-      if (!k) return;
-      const saved = viewStates.current.get(k);
-      if (!saved) return;
-      const disposable = ed.onDidUpdateDiff(() => {
-        ed.restoreViewState(saved);
-        disposable.dispose();
-      });
-    },
-    [selected, expandedAll, viewStateKey],
-  );
-
-  const selectedRef = useRef<string | null>(null);
   useEffect(() => {
-    selectedRef.current = selected;
-    onSelectionChange?.(selected);
-  }, [selected, onSelectionChange]);
-
-  const selectedFile = useMemo(
-    () => files.find((f) => f.path === selected) ?? null,
-    [files, selected],
-  );
-  const selectedReviewed = selected ? reviewed.has(selected) : false;
-
-  const handleSelectedReviewToggle = useCallback(() => {
-    if (!selectedFile) return;
-    const path = selectedFile.path;
-    const currentlyReviewed = reviewed.has(path);
-    if (onToggleReviewedProp) {
-      setReviewedState((prev) => {
-        const next = new Set(prev);
-        if (currentlyReviewed) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-      onToggleReviewedProp(path, currentlyReviewed);
-    } else {
-      toggleReviewed(path);
-    }
-  }, [onToggleReviewedProp, reviewed, selectedFile, toggleReviewed]);
+    onSelectionChange?.(activeFile);
+  }, [activeFile, onSelectionChange]);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -332,12 +239,6 @@ function ApiDiffViewer({
       onSummaryLoaded?.(s);
       setError(null);
       setBaseShaUnavailable(false);
-      const cur = selectedRef.current;
-      const firstVisible = s.files.find((f) => !f.ignored) ?? s.files[0];
-      if (!cur && firstVisible) setSelected(firstVisible.path);
-      else if (cur && !s.files.find((f) => f.path === cur)) {
-        setSelected(firstVisible?.path ?? null);
-      }
     } catch (err) {
       const msg = (err as Error).message;
       if (msg.includes('base_sha not available')) {
@@ -359,78 +260,9 @@ function ApiDiffViewer({
     return () => clearInterval(t);
   }, [loadSummary, isRunning]);
 
-  useEffect(() => {
-    if (!selected) {
-      setFileDiff(null);
-      setExpandedAll(false);
-      return;
-    }
-    const stored = (() => {
-      try {
-        return getDiffExpanded(taskId, selected);
-      } catch {
-        return expandedFallback.current[selected] ?? false;
-      }
-    })();
-    setExpandedAll(stored);
-    let cancelled = false;
-    setFileLoading(true);
-    setError(null); // clear stale error on new selection
-    api
-      .getTaskDiffFile(taskId, selected)
-      .then((d) => {
-        if (!cancelled) setFileDiff(d);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setFileLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId, selected]);
-
-  const navigateHunk = useCallback((direction: 1 | -1) => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const changes = ed.getLineChanges();
-    if (!changes || changes.length === 0) return;
-    const modified = ed.getModifiedEditor();
-    const cursorLine = modified.getPosition()?.lineNumber ?? 1;
-    const target = findHunkLine(changes, cursorLine, direction);
-    if (target == null) return;
-    modified.setPosition({ lineNumber: target, column: 1 });
-    modified.revealLineInCenterIfOutsideViewport(target, 0);
-    modified.focus();
+  const handleSelect = useCallback((path: string) => {
+    listRef.current?.scrollToFile(path);
   }, []);
-
-  useDiffKeyboardNav({
-    onNextHunk: () => navigateHunk(1),
-    onPrevHunk: () => navigateHunk(-1),
-  });
-
-  const toggleExpandedAll = useCallback(() => {
-    if (!selected) return;
-    const next = !expandedAll;
-    setExpandedAll(next);
-    try {
-      setDiffExpanded(taskId, selected, next);
-    } catch {
-      expandedFallback.current[selected] = next;
-    }
-  }, [taskId, selected, expandedAll]);
-
-  const showToolbar = Boolean(
-    selected &&
-    fileDiff &&
-    !fileDiff.tooLarge &&
-    !fileDiff.binary &&
-    !fileDiff.isDirectory &&
-    !error,
-  );
-  const showReviewToggle = Boolean(selectedFile && !selectedFile.ignored);
 
   if (baseShaUnavailable) {
     return (
@@ -459,7 +291,7 @@ function ApiDiffViewer({
         ) : (
           <DiffFileTree
             files={files}
-            selected={selected}
+            selected={activeFile}
             onSelect={handleSelect}
             taskId={taskId}
             ignoredTruncated={ignoredTruncated}
@@ -475,111 +307,31 @@ function ApiDiffViewer({
           boxShadow: '0 8px 24px -6px rgba(0,0,0,0.5)',
         }}
       >
-        <div
-          className="flex items-center justify-between gap-3 px-4 py-[10px]"
-          style={{ background: '#101217', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
-        >
-          <span className="flex min-w-0 items-center gap-3">
-            {selectedFile ? (
-              <label className="flex min-w-0 items-center gap-2">
-                {showReviewToggle ? (
-                  <input
-                    type="checkbox"
-                    checked={selectedReviewed}
-                    aria-label={
-                      selectedReviewed
-                        ? `Unmark ${selectedFile.path} as reviewed`
-                        : `Mark ${selectedFile.path} as reviewed`
-                    }
-                    data-testid={`review-toggle-${selectedFile.path}`}
-                    onChange={handleSelectedReviewToggle}
-                    className="h-3.5 w-3.5 shrink-0 cursor-pointer"
-                  />
-                ) : null}
-                <span
-                  className={cn(
-                    'truncate font-mono text-[11px] text-[#B5B5BD]',
-                    selectedReviewed && 'text-muted-foreground line-through',
-                  )}
-                >
-                  {selectedFile.path}
-                </span>
-              </label>
-            ) : null}
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            {reviewCounts.total > 0 ? (
-              <span
-                data-testid="review-progress"
-                aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
-                className="bg-glass-l1 glass-blur-l1 inline-flex items-center gap-1 border border-[#22D3EE] px-1.5 py-0.5 font-mono text-[11px] tracking-wider text-[#22D3EE]"
-              >
-                {reviewCounts.done} / {reviewCounts.total} reviewed
-              </span>
-            ) : null}
-            {showToolbar && selected ? (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={toggleExpandedAll}
-                aria-label={expandedAll ? 'Collapse all' : 'Expand all'}
-              >
-                {expandedAll ? 'Collapse all' : 'Expand all'}
-              </Button>
-            ) : null}
-          </span>
-        </div>
-        <div className="min-h-0 flex-1">
-          {error && selected ? (
-            <div className="flex h-full items-center justify-center text-sm text-destructive">
-              {error}
-            </div>
-          ) : !selected ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Select a file to view its diff
-            </div>
-          ) : fileLoading && !fileDiff ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Loading {selected}...
-            </div>
-          ) : fileDiff?.tooLarge ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {selected} is too large to display (&gt;1 MiB). Open the worktree directly.
-            </div>
-          ) : fileDiff?.isDirectory ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {selected} resolves to a directory; cannot show diff.
-            </div>
-          ) : fileDiff?.binary ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {selected} is a binary file.
-            </div>
-          ) : fileDiff ? (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  Loading editor...
-                </div>
-              }
+        {reviewCounts.total > 0 ? (
+          <div
+            className="flex items-center justify-end gap-2 px-4 py-[10px]"
+            style={{ background: '#101217', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+          >
+            <span
+              data-testid="review-progress"
+              aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
+              className="bg-glass-l1 glass-blur-l1 inline-flex items-center gap-1 border border-[#22D3EE] px-1.5 py-0.5 font-mono text-[11px] tracking-wider text-[#22D3EE]"
             >
-              <MonacoDiff
-                key={`${selected}:${expandedAll ? 'expanded' : 'collapsed'}`}
-                height="100%"
-                original={fileDiff.oldContent}
-                modified={fileDiff.newContent}
-                language={extToLanguage(selected)}
-                theme="vs-dark"
-                onMount={handleEditorMount}
-                options={{
-                  readOnly: true,
-                  renderSideBySide: true,
-                  minimap: { enabled: true },
-                  hideUnchangedRegions: { enabled: !expandedAll },
-                  scrollBeyondLastLine: false,
-                }}
-              />
-            </Suspense>
-          ) : null}
+              {reviewCounts.done} / {reviewCounts.total} reviewed
+            </span>
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          {files.length === 0 ? null : (
+            <DiffFileList
+              ref={listRef}
+              taskId={taskId}
+              files={files}
+              reviewed={reviewed}
+              onToggleReviewed={toggleReviewed}
+              onActiveChange={setActiveFile}
+            />
+          )}
         </div>
       </main>
     </div>
