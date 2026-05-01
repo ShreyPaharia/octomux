@@ -36,6 +36,7 @@ export interface PreflightResult {
 export async function preflightNoneMode(
   repoPath: string,
   baseBranch: string,
+  excludeTaskId?: string,
 ): Promise<PreflightResult> {
   const { stdout: headOut } = await execFile('git', [
     '-C',
@@ -48,17 +49,34 @@ export async function preflightNoneMode(
 
   // Find every active task that is sharing this root worktree (mode='none').
   // 'new'-mode tasks have their own dedicated worktrees and don't conflict.
+  // `excludeTaskId` lets the caller skip its own row — needed when this is
+  // called as defense-in-depth from inside startTask, where the caller's row
+  // is already 'setting_up' but its w.branch is still null pending setup.
   const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT t.id AS task_id, t.title, t.status, w.branch
-         FROM tasks t
-         INNER JOIN worktrees w ON t.worktree_id = w.id
-        WHERE t.status IN ('running', 'setting_up')
-          AND w.repo_path = ?
-          AND w.mode = 'none'`,
-    )
-    .all(repoPath) as PreflightConflict[];
+  const rows = (
+    excludeTaskId
+      ? db
+          .prepare(
+            `SELECT t.id AS task_id, t.title, t.status, w.branch
+             FROM tasks t
+             INNER JOIN worktrees w ON t.worktree_id = w.id
+            WHERE t.status IN ('running', 'setting_up')
+              AND w.repo_path = ?
+              AND w.mode = 'none'
+              AND t.id != ?`,
+          )
+          .all(repoPath, excludeTaskId)
+      : db
+          .prepare(
+            `SELECT t.id AS task_id, t.title, t.status, w.branch
+             FROM tasks t
+             INNER JOIN worktrees w ON t.worktree_id = w.id
+            WHERE t.status IN ('running', 'setting_up')
+              AND w.repo_path = ?
+              AND w.mode = 'none'`,
+          )
+          .all(repoPath)
+  ) as PreflightConflict[];
 
   const conflicts: PreflightConflict[] = [];
   const warnings: PreflightConflict[] = [];

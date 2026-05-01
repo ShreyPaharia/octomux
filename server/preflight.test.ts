@@ -156,6 +156,31 @@ describe('preflightNoneMode', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it('with excludeTaskId, skips the caller’s own row even when its branch is null', async () => {
+    const db = getDb();
+    // Caller's own row — w.branch is null until setupNone finishes.
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+       VALUES ('wt-self', '/repo', '/repo', NULL, 'main', 'none', 'in_use')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, status, worktree_id)
+       VALUES ('self', 'me', '', 'setting_up', 'wt-self')`,
+    ).run();
+
+    mockedExec.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.includes('--abbrev-ref')) return Promise.resolve({ stdout: 'main\n', stderr: '' });
+      if (args.includes('--porcelain=v1')) return Promise.resolve({ stdout: '', stderr: '' });
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    });
+
+    const result = await preflightNoneMode('/repo', 'main', 'self');
+
+    expect(result.ok).toBe(true);
+    expect(result.conflicts).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
   it('skips dirty check while a different-branch conflict is present', async () => {
     const db = getDb();
     db.prepare(

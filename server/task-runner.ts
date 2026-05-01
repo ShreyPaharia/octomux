@@ -457,9 +457,11 @@ async function setupNone(task: Task): Promise<SetupResult> {
 
   if (targetBranch) {
     // Defense in depth: re-run preflight inside setup, in case state changed
-    // between the API preflight and now.
+    // between the API preflight and now. Exclude self — our own worktree row
+    // is already 'setting_up' with w.branch=null (it's only set to targetBranch
+    // after setup returns), and the row would otherwise self-conflict.
     const { preflightNoneMode } = await import('./preflight.js');
-    const pre = await preflightNoneMode(task.repo_path, targetBranch);
+    const pre = await preflightNoneMode(task.repo_path, targetBranch, task.id);
     if (!pre.ok) {
       const reason = pre.conflicts.length
         ? `another chat is active on a different branch at ${task.repo_path}: ${pre.conflicts
