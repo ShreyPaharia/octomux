@@ -23,6 +23,9 @@ import {
   hopAgent,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
+import { parseDiffRange } from './diff-range.js';
+import { resolveRef } from './diff-base.js';
+import { listBranches, listCommits } from './git-commits.js';
 import { setReviewed, clearReviewed } from './file-review-state.js';
 import {
   addComment,
@@ -909,8 +912,15 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'Worktree no longer exists on disk' });
       return;
     }
+    let range;
     try {
-      const summary = await diffMod.getDiffSummary({ task });
+      range = parseDiffRange(typeof req.query.range === 'string' ? req.query.range : undefined);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    try {
+      const summary = await diffMod.getDiffSummary({ task, range });
       res.json(summary);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -946,12 +956,165 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'Invalid path' });
       return;
     }
+    let range;
     try {
-      const diff = await diffMod.getFileDiff({ worktree: cwd, base: task.base_sha, relPath });
+      range = parseDiffRange(typeof req.query.range === 'string' ? req.query.range : undefined);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+    try {
+      const diff = await diffMod.getFileDiff({
+        worktree: cwd,
+        range,
+        taskBaseSha: task.base_sha,
+        relPath,
+      });
       res.json(diff);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
+  });
+
+  // ─── Branches / commits / base mutation ─────────────────────────────────────
+
+  app.get('/api/tasks/:id/branches', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd || !fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Task has no usable worktree' });
+      return;
+    }
+    try {
+      const result = await listBranches(cwd);
+      res.json(result);
+    } catch (err) {
+      apiLogger.warn({ task_id: task.id, err: (err as Error).message }, 'listBranches failed');
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/tasks/:id/commits', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd || !fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Task has no usable worktree' });
+      return;
+    }
+
+    // Determine the from/to refs. If `range=` is provided, derive from it; else
+    // default to base..HEAD when we have a base_sha, or just HEAD when we don't.
+    let from: string | undefined;
+    let to = 'HEAD';
+    const rangeParam = typeof req.query.range === 'string' ? req.query.range : undefined;
+    if (rangeParam) {
+      try {
+        const parsed = parseDiffRange(rangeParam);
+        switch (parsed.kind) {
+          case 'base':
+            from = task.base_sha ?? undefined;
+            to = 'HEAD';
+            break;
+          case 'commit':
+            from = `${parsed.sha}^`;
+            to = parsed.sha;
+            break;
+          case 'range':
+            from = parsed.from;
+            to = parsed.to;
+            break;
+          case 'working':
+            // No commits in a working-only range.
+            res.json({ commits: [], truncated: false });
+            return;
+        }
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    } else if (task.base_sha) {
+      from = task.base_sha;
+    }
+
+    const limitRaw = Number(req.query.limit ?? 200);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 200, 1), 1000);
+
+    try {
+      const result = await listCommits(cwd, { from, to, limit });
+      res.json(result);
+    } catch (err) {
+      apiLogger.warn({ task_id: task.id, err: (err as Error).message }, 'listCommits failed');
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.patch('/api/tasks/:id/base', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    if (task.run_mode === 'scratch') {
+      res.status(400).json({ error: 'no repo for scratch task' });
+      return;
+    }
+    if (task.status === 'draft') {
+      res.status(409).json({ error: 'cannot change base on a draft task' });
+      return;
+    }
+    if (!task.worktree_id) {
+      res.status(400).json({ error: 'task has no worktree row to update' });
+      return;
+    }
+    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    if (!cwd || !fs.existsSync(cwd)) {
+      res.status(400).json({ error: 'Task has no usable worktree' });
+      return;
+    }
+
+    const baseBranch = (req.body as { base_branch?: unknown }).base_branch;
+    if (typeof baseBranch !== 'string' || !baseBranch.trim()) {
+      res.status(400).json({ error: 'base_branch is required' });
+      return;
+    }
+
+    let sha: string;
+    try {
+      sha = await resolveRef(cwd, baseBranch);
+    } catch (err) {
+      apiLogger.warn(
+        { task_id: task.id, base_branch: baseBranch, err: (err as Error).message },
+        'resolveRef failed',
+      );
+      res.status(400).json({ error: 'ref does not resolve' });
+      return;
+    }
+
+    // Persist the new base on the joined worktrees row (Phase 2a moved these
+    // columns off `tasks`). Bump the task's updated_at separately.
+    getDb()
+      .prepare(`UPDATE worktrees SET base_branch = ?, base_sha = ? WHERE id = ?`)
+      .run(baseBranch, sha, task.worktree_id);
+    getDb().prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`).run(task.id);
+
+    apiLogger.info(
+      { task_id: task.id, base_branch: baseBranch, base_sha: sha },
+      'task base changed',
+    );
+
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+
+    const reloaded = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id) as
+      | Task
+      | undefined;
+    res.json(reloaded);
   });
 
   // ─── File review state ─────────────────────────────────────────────────────
@@ -1103,12 +1266,7 @@ export function setupRoutes(app: Express): void {
 
     let anchoredContent: string;
     try {
-      const { stdout } = await execFile('git', [
-        '-C',
-        cwd,
-        'show',
-        `${anchorSha}:${filePath}`,
-      ]);
+      const { stdout } = await execFile('git', ['-C', cwd, 'show', `${anchorSha}:${filePath}`]);
       anchoredContent = stdout;
     } catch {
       res.status(400).json({ error: 'file not found at anchor commit' });

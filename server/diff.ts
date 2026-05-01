@@ -4,8 +4,16 @@ import fs from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
 import { resolveDiffBase } from './diff-base.js';
+import {
+  WORKDIR,
+  rangeIncludesWorkingTree,
+  rangeNameStatusArgs,
+  rangeNewRef,
+  rangeNumstatArgs,
+  rangeOldRef,
+} from './diff-range.js';
 import { listReviewState } from './file-review-state.js';
-import type { Task } from './types.js';
+import type { DiffRange, Task } from './types.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('diff');
@@ -140,64 +148,99 @@ async function countLines(filePath: string): Promise<number> {
   return n;
 }
 
-export async function getDiffSummary(opts: { task: Task }): Promise<DiffSummary> {
-  const { task } = opts;
+export async function getDiffSummary(opts: {
+  task: Task;
+  range?: DiffRange;
+}): Promise<DiffSummary> {
+  const { task, range = { kind: 'base' as const } } = opts;
   const worktree = task.run_mode === 'none' ? task.repo_path : task.worktree;
   if (!worktree) throw new Error('Task has no worktree');
 
   const resolved = await resolveDiffBase(task);
   const base = resolved.sha;
 
-  let committedNumstat = '';
-  try {
-    committedNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', `${base}...HEAD`]);
-  } catch (err) {
-    logger.warn(
-      { worktree, base, err: (err as Error).message },
-      'three-dot diff failed, falling back',
-    );
-    committedNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', `${base}..HEAD`]);
-  }
-  const committed = parseNumstat(committedNumstat);
-
-  const committedNameStatus = await git(worktree, [
-    'diff',
-    '--name-status',
-    '--no-renames',
-    `${base}...HEAD`,
-  ]).catch(() => git(worktree, ['diff', '--name-status', '--no-renames', `${base}..HEAD`]));
+  // Committed numstat — null when range is `working` (only working-tree changes).
+  const numstatArgs = rangeNumstatArgs(range, base);
+  const committed = new Map<string, { additions: number; deletions: number; binary: boolean }>();
   const committedStatus = new Map<string, 'A' | 'M' | 'D'>();
-  for (const line of committedNameStatus.split('\n')) {
-    if (!line.trim()) continue;
-    const [code, ...rest] = line.split('\t');
-    const p = rest.join('\t');
-    if (!p) continue;
-    committedStatus.set(p, (code[0] as 'A' | 'M' | 'D') || 'M');
+  if (numstatArgs) {
+    let committedNumstat = '';
+    try {
+      committedNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', ...numstatArgs]);
+    } catch (err) {
+      // For `base`, fall back from three-dot to two-dot (existing behaviour).
+      // For commit/range, the args don't use `...`, so this branch is moot.
+      if (range.kind === 'base') {
+        logger.warn(
+          { worktree, base, err: (err as Error).message },
+          'three-dot diff failed, falling back',
+        );
+        committedNumstat = await git(worktree, [
+          'diff',
+          '--numstat',
+          '--no-renames',
+          `${base}..HEAD`,
+        ]);
+      } else {
+        throw err;
+      }
+    }
+    for (const [p, v] of parseNumstat(committedNumstat)) committed.set(p, v);
+
+    const nameStatusArgs = rangeNameStatusArgs(range, base);
+    const committedNameStatus = nameStatusArgs
+      ? await git(worktree, ['diff', '--name-status', '--no-renames', ...nameStatusArgs]).catch(
+          () => {
+            if (range.kind === 'base') {
+              return git(worktree, ['diff', '--name-status', '--no-renames', `${base}..HEAD`]);
+            }
+            throw new Error('name-status failed');
+          },
+        )
+      : '';
+    for (const line of committedNameStatus.split('\n')) {
+      if (!line.trim()) continue;
+      const [code, ...rest] = line.split('\t');
+      const p = rest.join('\t');
+      if (!p) continue;
+      committedStatus.set(p, (code[0] as 'A' | 'M' | 'D') || 'M');
+    }
   }
 
-  const workingNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', 'HEAD']);
-  const working = parseNumstat(workingNumstat);
-
-  // -uall expands untracked directories into individual file entries. Without it,
-  // git collapses a partially-untracked directory (e.g. `docs/superpowers/` when
-  // `docs/` has tracked files but most of `docs/superpowers/` is gitignored) into
-  // a single trailing-slash entry, which produces an empty-basename node and an
-  // EISDIR when the viewer tries to read it.
-  const porcelain = await git(worktree, ['status', '--porcelain=v1', '--no-renames', '-uall']);
+  // Working tree + untracked are only merged in for `base` (today's behavior)
+  // and `working` (uncommitted-only). Historical commit/range views skip them.
+  const includeWorking = rangeIncludesWorkingTree(range);
+  const working = new Map<string, { additions: number; deletions: number; binary: boolean }>();
   const untrackedPaths: string[] = [];
   const deleted = new Set<string>();
-  for (const line of porcelain.split('\n')) {
-    if (!line) continue;
-    const code = line.slice(0, 2);
-    const p = line.slice(3);
-    // Belt-and-suspenders: skip any directory entries that slip through (e.g.
-    // submodule roots), so they never reach the tree builder as empty leaves.
-    if (!p || p.endsWith('/')) continue;
-    if (code === '??') untrackedPaths.push(p);
-    if (code.includes('D')) deleted.add(p);
+  if (includeWorking) {
+    const workingNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', 'HEAD']);
+    for (const [p, v] of parseNumstat(workingNumstat)) working.set(p, v);
+
+    // -uall expands untracked directories into individual file entries. Without it,
+    // git collapses a partially-untracked directory (e.g. `docs/superpowers/` when
+    // `docs/` has tracked files but most of `docs/superpowers/` is gitignored) into
+    // a single trailing-slash entry, which produces an empty-basename node and an
+    // EISDIR when the viewer tries to read it.
+    const porcelain = await git(worktree, ['status', '--porcelain=v1', '--no-renames', '-uall']);
+    for (const line of porcelain.split('\n')) {
+      if (!line) continue;
+      const code = line.slice(0, 2);
+      const p = line.slice(3);
+      // Belt-and-suspenders: skip any directory entries that slip through (e.g.
+      // submodule roots), so they never reach the tree builder as empty leaves.
+      if (!p || p.endsWith('/')) continue;
+      if (code === '??') untrackedPaths.push(p);
+      if (code.includes('D')) deleted.add(p);
+    }
   }
 
   const paths = new Set<string>([...committed.keys(), ...working.keys(), ...untrackedPaths]);
+
+  // For post-image blob SHAs we read the range's "new" ref. For `working` the
+  // new side is the working tree (no committed blob), so we leave it null.
+  const newRef = rangeNewRef(range);
+  const newRefForBlob = newRef === WORKDIR ? null : newRef;
 
   const files: DiffFileEntry[] = [];
   for (const p of paths) {
@@ -236,7 +279,9 @@ export async function getDiffSummary(opts: { task: Task }): Promise<DiffSummary>
     }
 
     const post_blob_sha =
-      status === 'D' ? null : await blobAt({ worktree, commit: 'HEAD', relPath: p });
+      status === 'D' || newRefForBlob == null
+        ? null
+        : await blobAt({ worktree, commit: newRefForBlob, relPath: p });
     files.push({ path: p, status, additions, deletions, post_blob_sha });
   }
 
@@ -280,7 +325,11 @@ export async function getDiffSummary(opts: { task: Task }): Promise<DiffSummary>
     reviewed_count,
     total_count: files.filter((f) => !f.ignored).length,
   };
-  await appendIgnoredFiles(summary, { worktree, knownPaths: paths });
+  // Ignored files are only meaningful when viewing the working tree (`base`
+  // includes worktree+untracked; historical commit/range views don't).
+  if (range.kind === 'base') {
+    await appendIgnoredFiles(summary, { worktree, knownPaths: paths });
+  }
 
   summary.files.sort((a, b) => a.path.localeCompare(b.path));
   return summary;
@@ -358,15 +407,32 @@ async function appendIgnoredFiles(
 
 export async function getFileDiff(opts: {
   worktree: string;
-  base: string;
+  /** Range-aware mode. When provided alongside `taskBaseSha`, computes both sides per range. */
+  range?: DiffRange;
+  /** Resolved task base SHA (used when range.kind === 'base'). */
+  taskBaseSha?: string;
+  /** Legacy single-ref mode (used by callers that haven't migrated to ranges). */
+  base?: string;
   relPath: string;
 }): Promise<FileDiff> {
-  const { worktree, base, relPath } = opts;
+  const { worktree, relPath } = opts;
   const abs = safeResolvePath(worktree, relPath);
+
+  // Resolve old/new refs from either the range form or the legacy `base` form.
+  let oldRef: string;
+  let newRef: string | typeof WORKDIR;
+  if (opts.range) {
+    oldRef = rangeOldRef(opts.range, opts.taskBaseSha ?? '');
+    newRef = rangeNewRef(opts.range);
+  } else {
+    if (!opts.base) throw new Error('getFileDiff requires either `range` or `base`');
+    oldRef = opts.base;
+    newRef = WORKDIR;
+  }
 
   let oldContent = '';
   try {
-    oldContent = await git(worktree, ['show', `${base}:${relPath}`]);
+    oldContent = await git(worktree, ['show', `${oldRef}:${relPath}`]);
   } catch (err) {
     const code = (err as { code?: number | string }).code;
     if (code !== 128 && !String((err as Error).message).includes('exists on disk')) {
@@ -378,23 +444,38 @@ export async function getFileDiff(opts: {
   let tooLarge = false;
   let binary = false;
   let isDirectory = false;
-  if (fs.existsSync(abs)) {
-    const stat = await fs.promises.stat(abs);
-    if (stat.isDirectory()) {
-      isDirectory = true;
-    } else if (stat.size > MAX_FILE_BYTES) {
-      tooLarge = true;
-    } else if (stat.isFile()) {
-      const buf = await fs.promises.readFile(abs);
-      const sniff = buf.subarray(0, Math.min(buf.length, 8192));
-      binary = sniff.includes(0);
-      if (!binary) newContent = buf.toString('utf8');
+  let newExists = false;
+  if (newRef === WORKDIR) {
+    if (fs.existsSync(abs)) {
+      newExists = true;
+      const stat = await fs.promises.stat(abs);
+      if (stat.isDirectory()) {
+        isDirectory = true;
+      } else if (stat.size > MAX_FILE_BYTES) {
+        tooLarge = true;
+      } else if (stat.isFile()) {
+        const buf = await fs.promises.readFile(abs);
+        const sniff = buf.subarray(0, Math.min(buf.length, 8192));
+        binary = sniff.includes(0);
+        if (!binary) newContent = buf.toString('utf8');
+      }
+    }
+  } else {
+    try {
+      newContent = await git(worktree, ['show', `${newRef}:${relPath}`]);
+      newExists = true;
+    } catch (err) {
+      const code = (err as { code?: number | string }).code;
+      if (code !== 128 && !String((err as Error).message).includes('exists on disk')) {
+        throw err;
+      }
+      // exit 128 from `git show` means the path doesn't exist at that ref.
     }
   }
 
   let status: FileStatus;
   if (binary) status = 'B';
-  else if (!fs.existsSync(abs)) status = 'D';
+  else if (!newExists) status = 'D';
   else if (oldContent === '') status = 'A';
   else status = 'M';
 

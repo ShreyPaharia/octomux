@@ -8,7 +8,13 @@ import {
   useState,
 } from 'react';
 import type { editor } from 'monaco-editor';
-import { api, type DiffFileEntry, type FileDiffResponse } from '@/lib/api';
+import {
+  api,
+  diffRangeToParam,
+  type DiffFileEntry,
+  type DiffRange,
+  type FileDiffResponse,
+} from '@/lib/api';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
@@ -29,6 +35,7 @@ interface Props {
   reviewed: Set<string>;
   onToggleReviewed: (path: string) => void;
   onActiveChange?: (path: string | null) => void;
+  range?: DiffRange;
 }
 
 function readHashPath(): string | null {
@@ -43,9 +50,10 @@ function readHashPath(): string | null {
 }
 
 export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffFileList(
-  { taskId, files, reviewed, onToggleReviewed, onActiveChange },
+  { taskId, files, reviewed, onToggleReviewed, onActiveChange, range },
   ref,
 ) {
+  const rangeKey = diffRangeToParam(range) ?? 'base';
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
   const editorsRef = useRef<Map<string, editor.IStandaloneDiffEditor>>(new Map());
@@ -195,7 +203,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
       });
 
       api
-        .getTaskDiffFile(taskId, path)
+        .getTaskDiffFile(taskId, path, range)
         .then((d) => {
           setLoaded((prev) => {
             const next = new Map(prev);
@@ -220,7 +228,14 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
           });
         });
     }
-  }, [visible, filesByPath, loaded, loading, errors, taskId]);
+  }, [visible, filesByPath, loaded, loading, errors, taskId, range]);
+
+  // When the range changes, drop cached file bodies so we refetch under the new range.
+  useEffect(() => {
+    setLoaded(new Map());
+    setErrors(new Map());
+    loadedShas.current.clear();
+  }, [rangeKey]);
 
   // ─── Initial hash scroll ─────────────────────────────────────────────────
   const didInitialScrollRef = useRef(false);

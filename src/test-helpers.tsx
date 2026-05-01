@@ -179,6 +179,9 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     listChats: vi.fn().mockResolvedValue([]),
     closeChat: vi.fn().mockResolvedValue(undefined),
     deleteChat: vi.fn().mockResolvedValue(undefined),
+    listTaskBranches: vi.fn().mockResolvedValue({ branches: [], current: null, default: null }),
+    listTaskCommits: vi.fn().mockResolvedValue({ commits: [], truncated: false }),
+    updateTaskBase: vi.fn().mockResolvedValue(TASK_DEFAULTS),
   };
   return { ...defaults, ...overrides };
 }

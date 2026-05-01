@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type DiffFileEntry } from '@/lib/api';
+import { api, type DiffFileEntry, type DiffRange } from '@/lib/api';
 import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
 import { DiffFileTree } from './DiffFileTree';
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
@@ -35,6 +35,8 @@ interface Props {
   // When provided, the file tree's reviewed checkbox calls this instead of the
   // local-storage backed flow — TaskDetail uses the API.
   onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
+  // Diff range — selects which slice of history to view (default: full task diff).
+  range?: DiffRange;
 }
 
 export function DiffViewer(props: Props) {
@@ -49,6 +51,7 @@ export function DiffViewer(props: Props) {
     onSelectionChange,
     onSummaryLoaded,
     onToggleReviewed,
+    range,
   } = props;
 
   // Standalone / composer mode — renders the new-content lines as clickable
@@ -75,6 +78,7 @@ export function DiffViewer(props: Props) {
       onSelectionChange={onSelectionChange}
       onSummaryLoaded={onSummaryLoaded}
       onToggleReviewed={onToggleReviewed}
+      range={range}
     />
   );
 }
@@ -165,13 +169,16 @@ function ApiDiffViewer({
   onSelectionChange,
   onSummaryLoaded,
   onToggleReviewed: onToggleReviewedProp,
+  range,
 }: {
   taskId: string;
   isRunning: boolean;
   onSelectionChange?: (path: string | null) => void;
   onSummaryLoaded?: (summary: import('@/lib/api').DiffSummaryResponse) => void;
   onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
+  range?: DiffRange;
 }) {
+  const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
   const [ignoredTruncated, setIgnoredTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,7 +240,7 @@ function ApiDiffViewer({
 
   const loadSummary = useCallback(async () => {
     try {
-      const s = await api.getTaskDiffSummary(taskId);
+      const s = await api.getTaskDiffSummary(taskId, range);
       setFiles(s.files);
       setIgnoredTruncated(s.ignoredTruncated ?? false);
       onSummaryLoaded?.(s);
@@ -251,14 +258,16 @@ function ApiDiffViewer({
     } finally {
       setSummaryLoading(false);
     }
-  }, [taskId, onSummaryLoaded]);
+  }, [taskId, onSummaryLoaded, range]);
 
   useEffect(() => {
     loadSummary();
-    if (!isRunning) return;
+    // Polling only makes sense for the live full diff. Historical commit/range
+    // views don't change underneath us.
+    if (!isRunning || !isBaseRange) return;
     const t = setInterval(loadSummary, POLL_INTERVAL_MS);
     return () => clearInterval(t);
-  }, [loadSummary, isRunning]);
+  }, [loadSummary, isRunning, isBaseRange]);
 
   const handleSelect = useCallback((path: string) => {
     listRef.current?.scrollToFile(path);
@@ -330,6 +339,7 @@ function ApiDiffViewer({
               reviewed={reviewed}
               onToggleReviewed={toggleReviewed}
               onActiveChange={setActiveFile}
+              range={range}
             />
           )}
         </div>

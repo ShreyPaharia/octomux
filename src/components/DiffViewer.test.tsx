@@ -7,7 +7,10 @@ import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api', async () => {
+  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
+  return { ...actual, api: apiProxy };
+});
 
 // Monaco's DiffEditor does real DOM work; replace with a stub that exposes
 // the original/modified content, options, and a per-mount id so tests can

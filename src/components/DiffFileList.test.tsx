@@ -6,7 +6,10 @@ import userEvent from '@testing-library/user-event';
 const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api', async () => {
+  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
+  return { ...actual, api: apiProxy };
+});
 
 vi.mock('@monaco-editor/react', () => ({
   DiffEditor: ({ original, modified }: { original: string; modified: string }) => {
@@ -180,7 +183,7 @@ describe('DiffFileList', () => {
     });
 
     await waitFor(() => {
-      expect(apiMock.getTaskDiffFile).toHaveBeenCalledWith('t1', 'a.ts');
+      expect(apiMock.getTaskDiffFile).toHaveBeenCalledWith('t1', 'a.ts', undefined);
     });
     await waitFor(() => expect(screen.getAllByTestId('monaco-diff')).toHaveLength(1));
 

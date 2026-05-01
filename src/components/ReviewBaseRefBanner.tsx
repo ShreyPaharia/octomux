@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Button } from './ui/button.js';
 
 export interface ReviewBaseRefBannerProps {
@@ -7,6 +8,10 @@ export interface ReviewBaseRefBannerProps {
   reviewedCount: number;
   onRefresh: () => void;
   onJumpToNextUnreviewed: () => void;
+  /** Human-readable description of the current diff range (e.g. "full diff", "commit abc1234"). */
+  currentRangeLabel?: string;
+  /** Optional slot for the range picker (rendered next to "Refresh base"). */
+  rangePicker?: ReactNode;
 }
 
 export function ReviewBaseRefBanner({
@@ -16,6 +21,8 @@ export function ReviewBaseRefBanner({
   reviewedCount,
   onRefresh,
   onJumpToNextUnreviewed,
+  currentRangeLabel,
+  rangePicker,
 }: ReviewBaseRefBannerProps) {
   return (
     <div className="flex items-center gap-3 px-3 py-2 text-xs border-b border-glass-border">
@@ -37,12 +44,23 @@ export function ReviewBaseRefBanner({
       >
         {reviewedCount} reviewed
       </button>
+      {currentRangeLabel ? (
+        <>
+          <span aria-hidden="true" className="text-muted-foreground/50">
+            ·
+          </span>
+          <span className="text-muted-foreground" data-testid="current-range-label">
+            Showing: {currentRangeLabel}
+          </span>
+        </>
+      ) : null}
       <span aria-hidden="true" className="text-muted-foreground/50">
         ·
       </span>
       <Button variant="ghost" size="sm" onClick={onRefresh} aria-label="Refresh base">
         Refresh base
       </Button>
+      {rangePicker ? <span className="ml-1">{rangePicker}</span> : null}
       {baseIsStale && (
         <span className="ml-auto text-amber-500" role="status">
           ⚠ Using local base (offline)
