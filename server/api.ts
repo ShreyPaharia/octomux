@@ -1282,16 +1282,76 @@ export function setupRoutes(app: Express): void {
 
   app.get('/api/worktrees', (_req: Request, res: Response) => {
     const db = getDb();
+    // The worktrees table holds one row per task lifecycle, but the same
+    // physical workspace (same repo_path / mode / branch / path) may back
+    // many tasks over time — most visibly in `none` mode where every task
+    // points at the same repo checkout. Collapse those into a single row,
+    // pick the freshest member as the row id (so detail navigation lands on
+    // the active task), and aggregate task counts and recency. Rows that no
+    // task references are leftover state and stay hidden — the workspaces
+    // list mirrors actual user activity, not historical bookkeeping.
     const rows = db
       .prepare(
-        `SELECT w.*,
-                (SELECT COUNT(*) FROM tasks t WHERE t.worktree_id = w.id) as task_count,
+        `WITH grouped AS (
+           SELECT w.id,
+                  w.path,
+                  w.repo_path,
+                  w.branch,
+                  w.base_branch,
+                  w.base_sha,
+                  w.mode,
+                  w.status,
+                  w.created_at,
+                  w.last_used_at,
+                  COALESCE(w.repo_path, '') || '|' ||
+                  COALESCE(w.mode, '')      || '|' ||
+                  COALESCE(w.branch, '')    || '|' ||
+                  COALESCE(w.path, '')      AS group_key,
+                  COALESCE(w.last_used_at, w.created_at) AS recency,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY
+                      COALESCE(w.repo_path, ''),
+                      COALESCE(w.mode, ''),
+                      COALESCE(w.branch, ''),
+                      COALESCE(w.path, '')
+                    ORDER BY COALESCE(w.last_used_at, w.created_at) DESC, w.id DESC
+                  ) AS rn
+             FROM worktrees w
+            WHERE EXISTS (SELECT 1 FROM tasks t WHERE t.worktree_id = w.id)
+         ),
+         agg AS (
+           SELECT group_key,
+                  COUNT(*) FILTER (WHERE 1=1) AS row_count,
+                  SUM(
+                    (SELECT COUNT(*) FROM tasks t WHERE t.worktree_id = grouped.id)
+                  ) AS task_count,
+                  MAX(CASE WHEN status = 'in_use' THEN 1 ELSE 0 END) AS any_in_use,
+                  MAX(recency) AS recency
+             FROM grouped
+            GROUP BY group_key
+         )
+         SELECT g.id,
+                g.path,
+                g.repo_path,
+                g.branch,
+                g.base_branch,
+                g.base_sha,
+                g.mode,
+                CASE WHEN agg.any_in_use = 1 THEN 'in_use' ELSE 'available' END AS status,
+                g.created_at,
+                agg.recency AS last_used_at,
+                agg.task_count AS task_count,
                 (SELECT t.id FROM tasks t
-                   WHERE t.worktree_id = w.id
-                     AND t.status IN ('draft','setting_up','running')
-                   LIMIT 1) as active_task_id
-           FROM worktrees w
-          ORDER BY COALESCE(w.last_used_at, w.created_at) DESC`,
+                   INNER JOIN worktrees w2 ON w2.id = t.worktree_id
+                  WHERE COALESCE(w2.repo_path,'') || '|' || COALESCE(w2.mode,'') || '|'
+                     || COALESCE(w2.branch,'')   || '|' || COALESCE(w2.path,'')
+                      = g.group_key
+                    AND t.status IN ('draft','setting_up','running')
+                  LIMIT 1) AS active_task_id
+           FROM grouped g
+           INNER JOIN agg ON agg.group_key = g.group_key
+          WHERE g.rn = 1
+          ORDER BY agg.recency DESC`,
       )
       .all() as WorktreeSummary[];
     res.json(rows);
