@@ -34,6 +34,32 @@ export interface Agent {
   created_at: string;
 }
 
+export interface InlineCommentRow {
+  id: string;
+  task_id: string;
+  agent_id: string | null;
+  file_path: string;
+  line: number;
+  side: 'old' | 'new';
+  original_commit_sha: string;
+  body: string;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface InlineCommentWithOutdated extends InlineCommentRow {
+  outdated: boolean;
+}
+
+export interface PostCommentInput {
+  file_path: string;
+  line: number;
+  side: 'old' | 'new';
+  body: string;
+  agent_id?: string;
+  anchor_commit_sha?: string;
+}
+
 export interface OctomuxClient {
   createTask(data: {
     title: string;
@@ -69,6 +95,17 @@ export interface OctomuxClient {
     format_command: string;
     lint_command: string;
   }>;
+  postComment(taskId: string, data: PostCommentInput): Promise<InlineCommentRow>;
+  listComments(
+    taskId: string,
+    file?: string,
+  ): Promise<{ comments: InlineCommentWithOutdated[]; outdated_unavailable?: boolean }>;
+  updateComment(
+    taskId: string,
+    commentId: string,
+    data: { resolved?: boolean; body?: string },
+  ): Promise<InlineCommentRow>;
+  deleteComment(taskId: string, commentId: string): Promise<void>;
 }
 
 function qs(params: Record<string, string | undefined>): string {
@@ -171,6 +208,33 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     getRepoConfig(repoPath) {
       return request(baseUrl, `/repo-config${qs({ repo_path: repoPath })}`);
+    },
+    postComment(taskId, data) {
+      return request<InlineCommentRow>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/comments`,
+        { method: 'POST', body: JSON.stringify(data) },
+      );
+    },
+    listComments(taskId, file) {
+      return request<{ comments: InlineCommentWithOutdated[]; outdated_unavailable?: boolean }>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/comments${qs({ file })}`,
+      );
+    },
+    updateComment(taskId, commentId, data) {
+      return request<InlineCommentRow>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}`,
+        { method: 'PATCH', body: JSON.stringify(data) },
+      );
+    },
+    deleteComment(taskId, commentId) {
+      return request<void>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}`,
+        { method: 'DELETE' },
+      );
     },
   };
 }
