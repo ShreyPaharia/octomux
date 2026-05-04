@@ -1,3 +1,4 @@
+import '@/lib/monaco-env';
 import { Suspense, forwardRef, lazy, useCallback, useMemo, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
