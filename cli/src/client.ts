@@ -1,10 +1,38 @@
 export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
 
+export type WorkflowStatus =
+  | 'backlog'
+  | 'planned'
+  | 'in_progress'
+  | 'human_review'
+  | 'pr'
+  | 'done';
+
+export interface TaskUpdate {
+  id: string;
+  task_id: string;
+  kind: string;
+  payload: string | null;
+  author: string | null;
+  created_at: string;
+}
+
+export interface TaskExternalRef {
+  task_id: string;
+  integration: string;
+  external_id: string;
+  url: string | null;
+  title: string | null;
+  created_at: string;
+}
+
 export interface Task {
   id: string;
   title: string;
   description: string;
   status: string;
+  runtime_state: string;
+  workflow_status: WorkflowStatus;
   repo_path: string;
   branch: string | null;
   base_branch: string | null;
@@ -15,6 +43,7 @@ export interface Task {
   run_mode: RunMode;
   base_sha: string | null;
   last_viewed_at: string | null;
+  current_summary: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -106,6 +135,19 @@ export interface OctomuxClient {
     data: { resolved?: boolean; body?: string },
   ): Promise<InlineCommentRow>;
   deleteComment(taskId: string, commentId: string): Promise<void>;
+  moveTask(
+    taskId: string,
+    data: { workflow_status: WorkflowStatus; note?: string },
+  ): Promise<Task>;
+  postTaskSummary(taskId: string, data: { summary: string; author?: string }): Promise<Task>;
+  postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
+  addTaskRef(
+    taskId: string,
+    data: { integration: string; external_id: string; url?: string; title?: string },
+  ): Promise<TaskExternalRef>;
+  deleteTaskRef(taskId: string, integration: string): Promise<void>;
+  getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
+  getTaskRefs(taskId: string): Promise<{ refs: TaskExternalRef[] }>;
 }
 
 function qs(params: Record<string, string | undefined>): string {
@@ -233,6 +275,49 @@ export function createClient(serverUrl: string): OctomuxClient {
         baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}`,
         { method: 'DELETE' },
+      );
+    },
+    moveTask(taskId, data) {
+      return request<Task>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/move`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    postTaskSummary(taskId, data) {
+      return request<Task>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/summary`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    postTaskNote(taskId, data) {
+      return request<{ ok: boolean }>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/note`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    addTaskRef(taskId, data) {
+      return request<TaskExternalRef>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/refs`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    deleteTaskRef(taskId, integration) {
+      return request<void>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/refs/${encodeURIComponent(integration)}`,
+        { method: 'DELETE' },
+      );
+    },
+    getTaskUpdates(taskId) {
+      return request<{ updates: TaskUpdate[] }>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/updates`,
+      );
+    },
+    getTaskRefs(taskId) {
+      return request<{ refs: TaskExternalRef[] }>(
+        baseUrl,
+        `/tasks/${encodeURIComponent(taskId)}/refs`,
       );
     },
   };

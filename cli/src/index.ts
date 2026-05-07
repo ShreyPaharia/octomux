@@ -19,6 +19,12 @@ import { registerCreateSkill } from './commands/create-skill.js';
 import { registerDeleteSkill } from './commands/delete-skill.js';
 import { registerRecentRepos } from './commands/recent-repos.js';
 import { registerDefaultBranch } from './commands/default-branch.js';
+import { registerTaskMove } from './commands/task-move.js';
+import { registerTaskSummary } from './commands/task-summary.js';
+import { registerTaskNote } from './commands/task-note.js';
+import { registerTaskRefAdd } from './commands/task-ref-add.js';
+import { registerTaskRefRm } from './commands/task-ref-rm.js';
+import { registerTaskUpdates } from './commands/task-updates.js';
 
 const program = new Command();
 
@@ -49,6 +55,12 @@ registerCreateSkill(program);
 registerDeleteSkill(program);
 registerRecentRepos(program);
 registerDefaultBranch(program);
+registerTaskMove(program);
+registerTaskSummary(program);
+registerTaskNote(program);
+registerTaskRefAdd(program);
+registerTaskRefRm(program);
+registerTaskUpdates(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();
