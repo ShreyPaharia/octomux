@@ -1,4 +1,17 @@
 export type TaskStatus = 'draft' | 'setting_up' | 'running' | 'closed' | 'error';
+/** New runtime state — replaces TaskStatus for the runtime column. */
+export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error';
+/** Workflow status — human-facing board column. */
+export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
+export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
+  'backlog',
+  'planned',
+  'in_progress',
+  'human_review',
+  'pr',
+  'done',
+] as const;
+
 export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
 export type HookActivity = 'active' | 'idle' | 'waiting';
 export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
@@ -49,6 +62,10 @@ export interface Task {
   description: string;
   repo_path: string;
   status: TaskStatus;
+  /** Renamed from status — tracks runtime lifecycle. */
+  runtime_state: RuntimeState;
+  /** Human-facing board column. */
+  workflow_status: WorkflowStatus;
   branch: string | null;
   base_branch: string | null;
   worktree: string | null;
@@ -67,12 +84,17 @@ export interface Task {
   /** Optional agent name (matches `agents/<name>.md`); null launches plain `claude`. */
   agent: string | null;
   error: string | null;
+  /** Summary text set by agent or user. */
+  current_summary: string | null;
+  current_summary_updated_at: string | null;
   created_at: string;
   updated_at: string;
   agents?: Agent[];
   user_terminals?: UserTerminal[];
   pending_prompts?: PermissionPrompt[];
   derived_status?: DerivedTaskStatus | null;
+  external_refs?: TaskExternalRef[];
+  recent_updates?: TaskUpdate[];
 }
 
 export interface Agent {
@@ -116,6 +138,35 @@ export interface PermissionPrompt {
   resolved_at: string | null;
 }
 
+export interface TaskExternalRef {
+  task_id: string;
+  integration: string;
+  ref: string;
+  url: string | null;
+  created_at: string;
+}
+
+export interface TaskUpdate {
+  id: string;
+  task_id: string;
+  agent_id: string | null;
+  kind: 'transition' | 'summary' | 'note';
+  from_status: string | null;
+  to_status: string | null;
+  body: string | null;
+  created_at: string;
+}
+
+export interface Integration {
+  id: string;
+  kind: string;
+  name: string;
+  config_json: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateTaskRequest {
   title: string;
   description: string;
@@ -127,6 +178,7 @@ export interface CreateTaskRequest {
   run_mode?: RunMode;
   worktree_path?: string;
   agent?: string;
+  workflow_status?: WorkflowStatus;
 }
 
 export interface AddAgentRequest {
@@ -136,6 +188,8 @@ export interface AddAgentRequest {
 
 export interface UpdateTaskRequest {
   status?: 'closed' | 'running';
+  runtime_state?: RuntimeState;
+  workflow_status?: WorkflowStatus;
   title?: string;
   description?: string;
   repo_path?: string;
@@ -144,6 +198,25 @@ export interface UpdateTaskRequest {
   initial_prompt?: string;
   run_mode?: RunMode;
   worktree_path?: string;
+}
+
+export interface MoveTaskRequest {
+  workflow_status: WorkflowStatus;
+  note?: string;
+}
+
+export interface SummaryRequest {
+  summary: string;
+}
+
+export interface NoteRequest {
+  body: string;
+}
+
+export interface AddRefRequest {
+  integration: string;
+  ref: string;
+  url?: string;
 }
 
 /** Request body for PATCH /api/tasks/:id/base — change a task's diff base. */

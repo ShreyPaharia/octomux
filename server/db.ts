@@ -35,22 +35,57 @@ CREATE INDEX IF NOT EXISTS idx_worktrees_path ON worktrees(path);
 CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
 
 CREATE TABLE IF NOT EXISTS tasks (
-    id                TEXT PRIMARY KEY,
-    title             TEXT NOT NULL,
-    description       TEXT NOT NULL,
-    status            TEXT NOT NULL DEFAULT 'draft',
-    worktree_id       TEXT REFERENCES worktrees(id),
-    tmux_session      TEXT,
-    pr_url            TEXT,
-    pr_number         INTEGER,
-    pr_head_sha       TEXT,
-    user_window_index INTEGER,
-    initial_prompt    TEXT,
-    last_viewed_at    TEXT,
-    source            TEXT,
-    error             TEXT,
-    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+    id                           TEXT PRIMARY KEY,
+    title                        TEXT NOT NULL,
+    description                  TEXT NOT NULL,
+    status                       TEXT NOT NULL DEFAULT 'draft',
+    runtime_state                TEXT NOT NULL DEFAULT 'idle',
+    workflow_status              TEXT NOT NULL DEFAULT 'backlog',
+    worktree_id                  TEXT REFERENCES worktrees(id),
+    tmux_session                 TEXT,
+    pr_url                       TEXT,
+    pr_number                    INTEGER,
+    pr_head_sha                  TEXT,
+    user_window_index            INTEGER,
+    initial_prompt               TEXT,
+    last_viewed_at               TEXT,
+    source                       TEXT,
+    error                        TEXT,
+    current_summary              TEXT,
+    current_summary_updated_at   TEXT,
+    created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_updates (
+  id          TEXT PRIMARY KEY,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  agent_id    TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  kind        TEXT NOT NULL,
+  from_status TEXT,
+  to_status   TEXT,
+  body        TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_updates_task_created ON task_updates(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS task_external_refs (
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  integration TEXT NOT NULL,
+  ref         TEXT NOT NULL,
+  url         TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (task_id, integration)
+);
+
+CREATE TABLE IF NOT EXISTS integrations (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -413,18 +448,109 @@ export function initDb(instance: Database.Database): void {
       .default();
   }
 
-  // Partial unique index keyed to worktree_id — replaces the dropped ones.
-  instance.exec(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_active_worktree
-       ON tasks(worktree_id)
-       WHERE status IN ('draft','setting_up','running') AND worktree_id IS NOT NULL`,
-  );
+  // Drop old partial unique index first (it referenced status; we'll recreate
+  // it after runtime_state column is guaranteed to exist).
+  instance.exec(`DROP INDEX IF EXISTS idx_tasks_active_worktree`);
 
   // Drop the legacy seeded orchestrator agent row from older installs.
   instance.prepare(`DELETE FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`).run();
 
   // Data migrations
   instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);
+
+  // ─── Workflow / runtime_state migration ───────────────────────────────────
+  // Add new columns to tasks if they don't exist yet (pre-wave-1 DBs).
+  const taskColsV2 = columnsOf('tasks');
+  addColumn('tasks', 'runtime_state', `runtime_state TEXT NOT NULL DEFAULT 'idle'`, taskColsV2);
+  addColumn('tasks', 'workflow_status', `workflow_status TEXT NOT NULL DEFAULT 'backlog'`, taskColsV2);
+  addColumn('tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
+  addColumn('tasks', 'current_summary_updated_at', 'current_summary_updated_at TEXT', taskColsV2);
+
+  // Backfill runtime_state from status for tasks that still have the old
+  // status column values (fresh schema sets defaults; old rows need backfill).
+  instance
+    .transaction(() => {
+      // Only backfill rows that still have the default 'idle' (not yet set).
+      instance.exec(`
+        UPDATE tasks SET runtime_state = CASE
+          WHEN status = 'setting_up' THEN 'setting_up'
+          WHEN status = 'running'    THEN 'running'
+          WHEN status = 'error'      THEN 'error'
+          ELSE                            'idle'
+        END
+        WHERE runtime_state = 'idle'
+      `);
+
+      // Backfill workflow_status from old status + initial_prompt + pr_url.
+      instance.exec(`
+        UPDATE tasks SET workflow_status = CASE
+          WHEN status IN ('running', 'setting_up', 'error') THEN 'in_progress'
+          WHEN status = 'draft' AND initial_prompt IS NULL  THEN 'backlog'
+          WHEN status = 'draft' AND initial_prompt IS NOT NULL THEN 'planned'
+          WHEN status = 'closed' AND pr_url IS NOT NULL     THEN 'pr'
+          WHEN status = 'closed' AND pr_url IS NULL         THEN 'human_review'
+          ELSE 'backlog'
+        END
+        WHERE workflow_status = 'backlog'
+      `);
+    })
+    .default();
+
+  // ─── New tables (task_updates, task_external_refs, integrations) ──────────
+  // These are already created in SCHEMA above via CREATE TABLE IF NOT EXISTS,
+  // but for old DBs that ran SCHEMA before this migration block, we ensure
+  // the tables exist now by trying to create them if absent.
+  const existingTables = new Set(
+    (instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{name: string}>).map(r => r.name)
+  );
+  if (!existingTables.has('task_updates')) {
+    instance.exec(`
+      CREATE TABLE IF NOT EXISTS task_updates (
+        id          TEXT PRIMARY KEY,
+        task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        agent_id    TEXT REFERENCES agents(id) ON DELETE SET NULL,
+        kind        TEXT NOT NULL,
+        from_status TEXT,
+        to_status   TEXT,
+        body        TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_updates_task_created ON task_updates(task_id, created_at);
+    `);
+  }
+  if (!existingTables.has('task_external_refs')) {
+    instance.exec(`
+      CREATE TABLE IF NOT EXISTS task_external_refs (
+        task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        integration TEXT NOT NULL,
+        ref         TEXT NOT NULL,
+        url         TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (task_id, integration)
+      );
+    `);
+  }
+  if (!existingTables.has('integrations')) {
+    instance.exec(`
+      CREATE TABLE IF NOT EXISTS integrations (
+        id          TEXT PRIMARY KEY,
+        kind        TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        config_json TEXT NOT NULL,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  }
+
+  // Partial unique index keyed to worktree_id — now uses runtime_state.
+  // Created here (after column migration) to ensure runtime_state exists.
+  instance.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_active_worktree
+       ON tasks(worktree_id)
+       WHERE runtime_state IN ('setting_up','running') AND worktree_id IS NOT NULL`,
+  );
 
   // Resolve stale pending prompts and reset agents stuck in 'waiting'
   // (hook callbacks lost during the previous run's shutdown)
