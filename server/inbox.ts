@@ -16,7 +16,7 @@ export function getNeedsYou(): Task[] {
            WHERE pp.task_id = t.id AND pp.status = 'pending'
          )
        ) OR (
-         t.status = 'error'
+         t.runtime_state = 'error'
          AND (t.last_viewed_at IS NULL OR t.last_viewed_at < t.updated_at)
        )
        ORDER BY t.updated_at DESC`,
@@ -33,7 +33,7 @@ export function getActivity(): Task[] {
     .prepare(
       `SELECT t.*
        FROM tasks t
-       WHERE t.status = 'closed'
+       WHERE t.runtime_state = 'idle'
          AND (t.last_viewed_at IS NULL OR t.last_viewed_at < t.updated_at)
          AND t.updated_at > datetime('now', '-7 days')
          AND NOT EXISTS (

@@ -9,6 +9,7 @@ import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
 import { readGithubLogin } from './github-login.js';
 import { SELECT_TASK_SQL } from './task-select.js';
+import { fireHook } from './hook-dispatcher.js';
 import type { Task, UserTerminal } from './types.js';
 
 const logger = childLogger('poller');
@@ -42,7 +43,7 @@ export async function pollStatuses(): Promise<void> {
   // session column and mark the task 'Setup interrupted' prematurely.
   const runningTasks = db
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.status IN ('running', 'setting_up') AND t.tmux_session IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up') AND t.tmux_session IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -61,13 +62,14 @@ export async function pollStatuses(): Promise<void> {
     const { task, status } = result.value;
     if (status !== 'dead') continue;
 
-    if (task.status === 'running') {
+    const rs = task.runtime_state ?? task.status;
+    if (rs === 'running') {
       db.prepare(
-        `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET status = 'closed', runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-    } else if (task.status === 'setting_up') {
+    } else if (rs === 'setting_up') {
       db.prepare(
-        `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET status = 'error', runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
     } else {
       continue;
@@ -89,7 +91,7 @@ export function ensureHooksInstalled(): void {
   const db = getDb();
   const runningTasks = db
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.status IN ('running', 'setting_up') AND w.path IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up') AND w.path IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -128,7 +130,7 @@ export async function pollPRs(): Promise<void> {
   const db = getDb();
   const tasks = db
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.status IN ('running', 'closed') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.status != 'draft' AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -143,9 +145,27 @@ export async function pollPRs(): Promise<void> {
     if (result.status !== 'fulfilled') continue;
     const { task, pr } = result.value;
     if (pr) {
+      // Flip workflow_status to 'pr' if currently in_progress or human_review
+      const prevWorkflow = task.workflow_status;
+      const shouldFlipToPr =
+        prevWorkflow === 'in_progress' || prevWorkflow === 'human_review';
       db.prepare(
-        `UPDATE tasks SET pr_url = ?, pr_number = ?, updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET pr_url = ?, pr_number = ?,
+         workflow_status = CASE WHEN workflow_status IN ('in_progress','human_review') THEN 'pr' ELSE workflow_status END,
+         updated_at = datetime('now') WHERE id = ?`,
       ).run(pr.url, pr.number, task.id);
+
+      if (shouldFlipToPr) {
+        const updateId = nanoid(12);
+        db.prepare(
+          `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, 'pr', ?)`,
+        ).run(updateId, task.id, prevWorkflow, 'auto: PR opened');
+        fireHook('workflow_status_changed', {
+          event: 'workflow_status_changed',
+          task: { ...task, pr_url: pr.url, pr_number: pr.number, workflow_status: 'pr' as import('./types.js').WorkflowStatus },
+          data: { from: prevWorkflow, to: 'pr', note: 'auto: PR opened' },
+        });
+      }
       broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     }
   }
@@ -156,7 +176,7 @@ export async function pollPRs(): Promise<void> {
 export async function checkMergedPRs(): Promise<void> {
   const db = getDb();
   const tasks = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.status = 'running' AND t.pr_number IS NOT NULL`)
+    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
     .all() as Task[];
 
   const results = await Promise.allSettled(
@@ -178,7 +198,21 @@ export async function checkMergedPRs(): Promise<void> {
     const { task, state } = result.value;
     if (state === 'MERGED') {
       try {
+        const prevWorkflow = task.workflow_status;
         await closeTask(task);
+        // Flip workflow_status to 'done' after merge
+        db.prepare(
+          `UPDATE tasks SET workflow_status = 'done', updated_at = datetime('now') WHERE id = ?`,
+        ).run(task.id);
+        const updateId = nanoid(12);
+        db.prepare(
+          `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, 'done', ?)`,
+        ).run(updateId, task.id, prevWorkflow, 'auto: PR merged');
+        fireHook('workflow_status_changed', {
+          event: 'workflow_status_changed',
+          task: { ...task, workflow_status: 'done' as import('./types.js').WorkflowStatus },
+          data: { from: prevWorkflow, to: 'done', note: 'auto: PR merged' },
+        });
         broadcast({ type: 'task:updated', payload: { taskId: task.id } });
       } catch {
         // closeTask failure shouldn't stop processing other tasks
@@ -348,19 +382,21 @@ async function upsertReviewTask(
   const db = getDb();
   const existing = db
     .prepare(
-      `SELECT t.id AS id, t.status AS status, t.source AS source,
+      `SELECT t.id AS id, t.status AS status, t.runtime_state AS runtime_state,
+              t.source AS source,
               t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
               t.tmux_session AS tmux_session
          FROM tasks t
          INNER JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.pr_number = ?
-          AND t.status NOT IN ('closed', 'error')
+          AND t.runtime_state != 'error'
         ORDER BY t.created_at DESC LIMIT 1`,
     )
     .get(repoPath, pr.number) as
     | {
         id: string;
         status: string;
+        runtime_state: string;
         source: string | null;
         pr_head_sha: string | null;
         initial_prompt: string | null;
@@ -373,7 +409,7 @@ async function upsertReviewTask(
     if (existing.source !== 'auto_review') return { action: 'skipped' };
     if (existing.pr_head_sha === pr.headRefOid) return { action: 'skipped' };
 
-    if (existing.status === 'draft') {
+    if (existing.runtime_state === 'idle' || existing.status === 'draft') {
       const updatedPrompt = buildShaUpdateNote(
         existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString()),
         pr.headRefOid,
@@ -388,7 +424,7 @@ async function upsertReviewTask(
 
     // Task is running (or setting_up) — nudge the existing agent rather than
     // creating a duplicate. Record the new SHA so we don't re-nudge on every tick.
-    if (existing.status === 'running' || existing.status === 'setting_up') {
+    if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up' || existing.status === 'running' || existing.status === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
       const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
       if (!delivered) return { action: 'skipped' };
@@ -418,9 +454,9 @@ async function upsertReviewTask(
 
   db.prepare(
     `INSERT INTO tasks
-       (id, title, description, status, pr_url, pr_number, pr_head_sha,
+       (id, title, description, status, runtime_state, workflow_status, pr_url, pr_number, pr_head_sha,
         initial_prompt, source, worktree_id)
-     VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, 'auto_review', ?)`,
+     VALUES (?, ?, ?, 'draft', 'idle', 'backlog', ?, ?, ?, ?, 'auto_review', ?)`,
   ).run(id, title, description, pr.url, pr.number, pr.headRefOid, prompt, worktreeId);
   return { action: 'created', taskId: id };
 }
@@ -432,7 +468,7 @@ function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<numb
     .prepare(
       `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
          LEFT JOIN worktrees w ON t.worktree_id = w.id
-        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.status = 'draft'`,
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'`,
     )
     .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
 
@@ -522,7 +558,7 @@ export async function pollTerminalActivity(): Promise<void> {
       `SELECT ut.*, t.tmux_session
        FROM user_terminals ut
        JOIN tasks t ON t.id = ut.task_id
-       WHERE t.status = 'running' AND t.tmux_session IS NOT NULL`,
+       WHERE t.runtime_state = 'running' AND t.tmux_session IS NOT NULL`,
     )
     .all() as TerminalRow[];
 
