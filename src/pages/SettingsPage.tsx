@@ -833,6 +833,7 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
 }
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const [activeSection, setActiveSection] = useState<SectionId>('general');
 

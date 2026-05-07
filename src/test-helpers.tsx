@@ -212,6 +212,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       resolved_at: null,
     }),
     deleteComment: vi.fn().mockResolvedValue(undefined),
+    listIntegrations: vi.fn().mockResolvedValue([]),
     moveTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     postTaskSummary: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     postTaskNote: vi.fn().mockResolvedValue({

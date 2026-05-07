@@ -1,0 +1,4 @@
+{
+  "event": "workflow_status_changed",
+  "files": ["jira-status", "jira-status.config.json"]
+}

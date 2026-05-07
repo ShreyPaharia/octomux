@@ -27,6 +27,7 @@ import { repoName } from '@/lib/utils';
 import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
 import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
+import { JiraLinkHelper } from '@/components/integrations/JiraLinkHelper';
 import type { RunMode } from '../../server/types';
 
 export const SHIP_EVENT = 'octomux:open-pr-sheet';
@@ -945,7 +946,10 @@ export default function TaskDetail() {
         >
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <TaskActivityPanel taskId={task.id} />
-            <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
+            <div>
+              <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
+              <JiraLinkHelper taskId={task.id} />
+            </div>
           </div>
         </div>
       )}

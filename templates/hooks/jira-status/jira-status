@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENVELOPE="$(cat)"
+JIRA_KEY="$(jq -r '.external_refs[]? | select(.integration=="jira") | .ref' <<< "$ENVELOPE" | head -1)"
+[ -z "$JIRA_KEY" ] && exit 0
+
+TO_STATUS="$(jq -r '.to_status // empty' <<< "$ENVELOPE")"
+[ -z "$TO_STATUS" ] && exit 0
+
+CFG="$OCTOMUX_HOOK_DIR/jira-status.config.json"
+[ -f "$CFG" ] || { echo "missing $CFG" >&2; exit 1; }
+
+TRANSITION_ID="$(jq -r --arg s "$TO_STATUS" '.[$s] // empty' "$CFG")"
+[ -z "$TRANSITION_ID" ] && exit 0
+
+: "${JIRA_BASE_URL:?Set JIRA_BASE_URL}"
+: "${JIRA_TOKEN:?Set JIRA_TOKEN}"
+: "${JIRA_EMAIL:?Set JIRA_EMAIL}"
+
+curl -fsS -X POST \
+  -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"transition\":{\"id\":\"$TRANSITION_ID\"}}" \
+  "$JIRA_BASE_URL/rest/api/3/issue/$JIRA_KEY/transitions"

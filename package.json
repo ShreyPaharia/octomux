@@ -23,7 +23,8 @@
     "cli/package.json",
     "scripts/",
     "skills/",
-    "agents/"
+    "agents/",
+    "templates/"
   ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
