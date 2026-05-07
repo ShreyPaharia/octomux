@@ -13,12 +13,13 @@ const { apiMock, apiProxy } = await vi.hoisted(async () =>
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
 
 const mockTasksRef = { current: [] as Task[] };
+const mockRefresh = vi.fn();
 vi.mock('@/lib/hooks', () => ({
   useTasks: () => ({
     tasks: mockTasksRef.current,
     loading: false,
     error: null,
-    refresh: vi.fn(),
+    refresh: mockRefresh,
   }),
 }));
 
@@ -41,8 +42,10 @@ function renderPalette(tasks: Task[]) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockNavigate.mockReset();
+  mockRefresh.mockReset();
   mockTasksRef.current = [];
   apiMock.listTasks.mockResolvedValue([]);
+  apiMock.moveTask.mockResolvedValue(undefined);
 });
 
 describe('CommandPalette (inline search)', () => {
@@ -136,5 +139,65 @@ describe('CommandPalette (inline search)', () => {
     renderPalette([]);
     await user.type(screen.getByTestId('command-palette-input'), 'new');
     expect(screen.getByTestId('command-palette-action-new-task')).toBeInTheDocument();
+  });
+});
+
+describe('CommandPalette — move-task actions', () => {
+  const tasks: Task[] = [
+    makeTask({
+      id: 't-backlog',
+      title: 'Add login feature',
+      workflow_status: 'backlog',
+      status: 'draft',
+    }),
+    makeTask({
+      id: 't-inprogress',
+      title: 'Fix checkout bug',
+      workflow_status: 'in_progress',
+      status: 'running',
+    }),
+  ];
+
+  it('shows "Move task:" actions when querying "move"', async () => {
+    const user = userEvent.setup();
+    renderPalette(tasks);
+    await user.type(screen.getByTestId('command-palette-input'), 'move');
+    // Should show at least one action referencing "Move task:"
+    const results = screen.getAllByTestId(/^command-palette-action-move-task-/);
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('shows target column in the label', async () => {
+    const user = userEvent.setup();
+    renderPalette([makeTask({ id: 'tx', title: 'My Task', workflow_status: 'backlog' })]);
+    await user.type(screen.getByTestId('command-palette-input'), 'My Task In Progress');
+    const results = screen.queryAllByTestId(/^command-palette-action-move-task-tx-in_progress/);
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('calls api.moveTask when a move action is selected', async () => {
+    const user = userEvent.setup();
+    apiMock.moveTask.mockResolvedValue(makeTask({ id: 'tx', workflow_status: 'done' }));
+    renderPalette([makeTask({ id: 'tx', title: 'Deploy task', workflow_status: 'in_progress' })]);
+
+    await user.type(screen.getByTestId('command-palette-input'), 'Deploy task done');
+    // Find the "Move task: Deploy task → Done" action
+    const action = screen.queryByTestId('command-palette-action-move-task-tx-done');
+    expect(action).toBeInTheDocument();
+    await user.pointer([{ keys: '[MouseLeft>]', target: action! }, { keys: '[/MouseLeft]' }]);
+
+    await vi.waitFor(() => {
+      expect(apiMock.moveTask).toHaveBeenCalledWith('tx', { workflow_status: 'done' });
+    });
+  });
+
+  it('does not show a move action for the current workflow_status', async () => {
+    const user = userEvent.setup();
+    renderPalette([makeTask({ id: 'ty', title: 'Staged task', workflow_status: 'planned' })]);
+    await user.type(screen.getByTestId('command-palette-input'), 'move task');
+    // Should not have a "planned" action for a task already in planned
+    expect(
+      screen.queryByTestId('command-palette-action-move-task-ty-planned'),
+    ).not.toBeInTheDocument();
   });
 });

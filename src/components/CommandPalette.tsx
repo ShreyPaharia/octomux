@@ -1,9 +1,29 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import { repoName } from '@/lib/utils';
 import { StatusGlyph } from '@/components/ui/status-glyph';
+import { api } from '@/lib/api';
 import type { Task } from '../../server/types';
+import type { WorkflowStatus } from '../../server/types';
+
+const WORKFLOW_STATUS_LABELS: Record<WorkflowStatus, string> = {
+  backlog: 'Backlog',
+  planned: 'Planned',
+  in_progress: 'In Progress',
+  human_review: 'Human Review',
+  pr: 'PR',
+  done: 'Done',
+};
+
+const ALL_WORKFLOW_STATUSES: WorkflowStatus[] = [
+  'backlog',
+  'planned',
+  'in_progress',
+  'human_review',
+  'pr',
+  'done',
+];
 
 type SessionRow = { kind: 'session'; task: Task };
 type ActionRow = {
@@ -44,7 +64,7 @@ function GroupHeader({ label, count }: { label: string; count?: number }) {
 
 export function CommandPalette() {
   const navigate = useNavigate();
-  const { tasks } = useTasksContext();
+  const { tasks, refresh: refreshTasks } = useTasksContext();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,6 +95,20 @@ export function CommandPalette() {
     });
   };
 
+  const moveTask = useCallback(
+    async (task: Task, targetStatus: WorkflowStatus) => {
+      setQuery('');
+      setActive(0);
+      try {
+        await api.moveTask(task.id, { workflow_status: targetStatus });
+        refreshTasks?.();
+      } catch {
+        // swallow — UI will show current state
+      }
+    },
+    [refreshTasks],
+  );
+
   const sessionRows = useMemo<SessionRow[]>(() => {
     const openTasks = tasks.filter((t) => OPEN_STATUSES.has(t.status));
     if (!query) return [];
@@ -92,6 +126,21 @@ export function CommandPalette() {
     const base: ActionRow[] = [
       { kind: 'action', id: 'new-task', label: 'New task', run: actionNewTask },
     ];
+
+    // Add "Move task: <task> → <column>" entries for all tasks
+    for (const task of tasks) {
+      for (const status of ALL_WORKFLOW_STATUSES) {
+        if (task.workflow_status === status) continue;
+        const label = `Move task: ${task.title} → ${WORKFLOW_STATUS_LABELS[status]}`;
+        base.push({
+          kind: 'action',
+          id: `move-task-${task.id}-${status}`,
+          label,
+          run: () => moveTask(task, status),
+        });
+      }
+    }
+
     if (!query) return [];
     const scored: { row: ActionRow; score: number }[] = [];
     for (const row of base) {
@@ -101,7 +150,7 @@ export function CommandPalette() {
     scored.sort((a, b) => b.score - a.score);
     return scored.map((s) => s.row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, tasks, moveTask]);
 
   const rows = useMemo<Row[]>(() => {
     if (!query.trim()) return [];
