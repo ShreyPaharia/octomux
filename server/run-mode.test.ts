@@ -246,14 +246,14 @@ describe('partial unique indexes', () => {
        VALUES ('shared-wt', '/some/user/repo', 'existing', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
-       VALUES ('t1', 'T', 'D', 'running', 'shared-wt')`,
+      `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
+       VALUES ('t1', 'T', 'D', 'running', 'running', 'shared-wt')`,
     ).run();
     expect(() =>
       db
         .prepare(
-          `INSERT INTO tasks (id, title, description, status, worktree_id)
-           VALUES ('t2', 'T', 'D', 'setting_up', 'shared-wt')`,
+          `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
+           VALUES ('t2', 'T', 'D', 'setting_up', 'setting_up', 'shared-wt')`,
         )
         .run(),
     ).toThrow(/UNIQUE/i);
@@ -265,14 +265,14 @@ describe('partial unique indexes', () => {
        VALUES ('shared-wt-2', '/some/user/repo', 'existing', 'available')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
-       VALUES ('t-closed', 'T', 'D', 'closed', 'shared-wt-2')`,
+      `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
+       VALUES ('t-closed', 'T', 'D', 'closed', 'idle', 'shared-wt-2')`,
     ).run();
     expect(() =>
       db
         .prepare(
-          `INSERT INTO tasks (id, title, description, status, worktree_id)
-           VALUES ('t-running', 'T', 'D', 'running', 'shared-wt-2')`,
+          `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
+           VALUES ('t-running', 'T', 'D', 'running', 'running', 'shared-wt-2')`,
         )
         .run(),
     ).not.toThrow();

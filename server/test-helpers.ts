@@ -13,6 +13,8 @@ export const DEFAULTS = {
     description: 'Add negative quantity checks',
     repo_path: '/tmp/test-repo',
     status: 'draft' as const,
+    runtime_state: 'idle' as const,
+    workflow_status: 'backlog' as const,
     branch: null,
     base_branch: null,
     worktree: null,
@@ -28,6 +30,8 @@ export const DEFAULTS = {
     source: null,
     worktree_id: null,
     error: null,
+    current_summary: null,
+    current_summary_updated_at: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
   },
@@ -38,6 +42,8 @@ export const DEFAULTS = {
     description: 'Add negative quantity checks',
     repo_path: '/tmp/test-repo',
     status: 'running' as const,
+    runtime_state: 'running' as const,
+    workflow_status: 'in_progress' as const,
     branch: 'agents/fix-order-validation-test-t',
     base_branch: null,
     worktree: '/tmp/test-repo/.worktrees/fix-order-validation-test-t',
@@ -53,6 +59,8 @@ export const DEFAULTS = {
     source: null,
     worktree_id: null,
     error: null,
+    current_summary: null,
+    current_summary_updated_at: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
   },
@@ -139,14 +147,48 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     );
   }
 
+  // Derive runtime_state from status when:
+  //   (a) runtime_state was not explicitly set, OR
+  //   (b) status was explicitly overridden (status takes precedence so the two
+  //       fields stay consistent even when spread from DEFAULTS.runningTask)
+  const statusToRuntimeState: Record<string, string> = {
+    draft: 'idle',
+    setting_up: 'setting_up',
+    running: 'running',
+    closed: 'idle',
+    error: 'error',
+  };
+  const hasExplicitRuntimeState = 'runtime_state' in overrides;
+  const hasExplicitStatus = 'status' in overrides;
+  const runtimeState =
+    hasExplicitRuntimeState && !hasExplicitStatus
+      ? (task as any).runtime_state
+      : (statusToRuntimeState[task.status] ?? 'idle');
+
+  // Same logic for workflow_status.
+  const statusToWorkflowStatus: Record<string, string> = {
+    draft: 'backlog',
+    setting_up: 'in_progress',
+    running: 'in_progress',
+    closed: 'done',
+    error: 'backlog',
+  };
+  const hasExplicitWorkflowStatus = 'workflow_status' in overrides;
+  const workflowStatus =
+    hasExplicitWorkflowStatus && !hasExplicitStatus
+      ? (task as any).workflow_status
+      : (statusToWorkflowStatus[task.status] ?? 'backlog');
+
   db.prepare(
-    `INSERT INTO tasks (id, title, description, status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, status, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, current_summary, current_summary_updated_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
     task.description,
     task.status,
+    runtimeState,
+    workflowStatus,
     task.tmux_session,
     task.pr_url,
     task.pr_number,
@@ -157,6 +199,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.source ?? null,
     wtId,
     task.error,
+    (task as any).current_summary ?? null,
+    (task as any).current_summary_updated_at ?? null,
     task.created_at,
     task.updated_at,
   );
@@ -348,6 +392,8 @@ export const TASKS_TABLE_COLUMNS = [
   'title',
   'description',
   'status',
+  'runtime_state',
+  'workflow_status',
   'worktree_id',
   'tmux_session',
   'pr_url',
@@ -358,6 +404,8 @@ export const TASKS_TABLE_COLUMNS = [
   'last_viewed_at',
   'source',
   'error',
+  'current_summary',
+  'current_summary_updated_at',
   'created_at',
   'updated_at',
   'agent',

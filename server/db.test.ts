@@ -346,13 +346,13 @@ describe('Database', () => {
         `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt-1', '/tmp/wt', 'existing', 'in_use')`,
       ).run();
       db.prepare(
-        `INSERT INTO tasks (id, title, description, status, worktree_id)
-         VALUES ('t-1','T','D','running','wt-1')`,
+        `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
+         VALUES ('t-1','T','D','running','running','wt-1')`,
       ).run();
       expect(() => {
         db.prepare(
-          `INSERT INTO tasks (id, title, description, status, worktree_id)
-           VALUES ('t-2','T','D','running','wt-1')`,
+          `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
+           VALUES ('t-2','T','D','running','running','wt-1')`,
         ).run();
       }).toThrow();
     });
