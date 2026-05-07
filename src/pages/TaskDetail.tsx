@@ -25,6 +25,8 @@ import { useTask } from '@/lib/hooks';
 import { api, diffRangeToParam, type DiffRange, type DiffSummaryResponse } from '@/lib/api';
 import { repoName } from '@/lib/utils';
 import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
+import { TaskActivityPanel } from '@/components/TaskActivityPanel';
+import { TaskRefsPanel } from '@/components/TaskRefsPanel';
 import type { RunMode } from '../../server/types';
 
 export const SHIP_EVENT = 'octomux:open-pr-sheet';
@@ -930,6 +932,20 @@ export default function TaskDetail() {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-hidden p-1">
             <TerminalView taskId={task.id} windowIndex={userWindowIndex} />
+          </div>
+        </div>
+      )}
+
+      {/* Activity + Refs sidebar panels — collapsed into an expandable bottom strip */}
+      {mode !== 'diff' && (
+        <div
+          data-testid="task-detail-panels"
+          className="shrink-0 overflow-y-auto border-t border-glass-edge px-6 py-4"
+          style={{ maxHeight: '40vh' }}
+        >
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <TaskActivityPanel taskId={task.id} />
+            <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
           </div>
         </div>
       )}
