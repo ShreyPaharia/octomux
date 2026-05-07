@@ -796,6 +796,11 @@ const NAV_ITEMS: { id: SectionId; label: string }[] = [
   { id: 'agent-launch', label: 'AGENT LAUNCH' },
 ];
 
+// Extra items that navigate away (not in-page scroll)
+const NAV_EXTRA_ITEMS: { id: string; label: string; to: string }[] = [
+  { id: 'integrations', label: 'INTEGRATIONS', to: '/integrations' },
+];
+
 function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [notifications, setNotifications] = useState(
     () => localStorage.getItem('octomux-notifications') !== 'false',
@@ -893,6 +898,20 @@ export default function SettingsPage() {
                 </button>
               );
             })}
+            <div
+              style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '8px 0' }}
+            />
+            {NAV_EXTRA_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                data-testid={`settings-nav-${item.id}`}
+                onClick={() => navigate(item.to)}
+                className="focus-ring relative px-5 py-2 text-left text-[11px] font-bold uppercase tracking-wider text-[#b5b5bd] transition-colors hover:text-white"
+              >
+                {item.label} ↗
+              </button>
+            ))}
           </nav>
         </GlassPanel>
 

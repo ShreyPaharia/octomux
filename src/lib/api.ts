@@ -282,6 +282,25 @@ export interface UpdateCommentInput {
   body?: string;
 }
 
+// ─── Integrations types (Wave 2B) ────────────────────────────────────────────
+
+export interface IntegrationProvider {
+  kind: string;
+  displayName: string;
+  configSchema: Record<string, unknown>;
+  events: string[];
+}
+
+export interface IntegrationRow {
+  id: string;
+  kind: string;
+  name: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -463,4 +482,29 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ repo_path: repoPath, target_branch: targetBranch }),
     }),
+
+  // ─── Integrations (Wave 2B) ──────────────────────────────────────────────────
+
+  listProviders: () => request<IntegrationProvider[]>('/integrations/providers'),
+  listIntegrations: () => request<IntegrationRow[]>('/integrations'),
+  createIntegration: (kind: string, name: string, config: Record<string, unknown>) =>
+    request<IntegrationRow>('/integrations', {
+      method: 'POST',
+      body: JSON.stringify({ kind, name, config }),
+    }),
+  updateIntegration: (
+    id: string,
+    patch: { name?: string; config?: Record<string, unknown>; enabled?: boolean },
+  ) =>
+    request<IntegrationRow>(`/integrations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteIntegration: (id: string) =>
+    request<void>(`/integrations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testIntegration: (id: string) =>
+    request<{ ok: boolean; message: string }>(
+      `/integrations/${encodeURIComponent(id)}/test`,
+      { method: 'POST' },
+    ),
 };
