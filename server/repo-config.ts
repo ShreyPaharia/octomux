@@ -10,6 +10,8 @@ export interface RepoConfig {
   test_command: string;
   format_command: string;
   lint_command: string;
+  /** JSON array of RefInferenceRule — opt-in per-repo branch→ref auto-inference. */
+  ref_inference_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,7 +55,7 @@ export async function getOrCreateRepoConfig(repoPath: string): Promise<RepoConfi
 export function updateRepoConfig(
   repoPath: string,
   updates: Partial<
-    Pick<RepoConfig, 'base_branch' | 'test_command' | 'format_command' | 'lint_command'>
+    Pick<RepoConfig, 'base_branch' | 'test_command' | 'format_command' | 'lint_command' | 'ref_inference_json'>
   >,
 ): RepoConfig {
   const db = getDb();

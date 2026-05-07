@@ -502,6 +502,15 @@ export function initDb(instance: Database.Database): void {
     })
     .default();
 
+  // ─── ref_inference_json column on repo_configs (Wave 3) ──────────────────
+  const repoConfigCols = columnsOf('repo_configs');
+  addColumn(
+    'repo_configs',
+    'ref_inference_json',
+    'ref_inference_json TEXT',
+    repoConfigCols,
+  );
+
   // ─── New tables (task_updates, task_external_refs, integrations) ──────────
   // These are already created in SCHEMA above via CREATE TABLE IF NOT EXISTS,
   // but for old DBs that ran SCHEMA before this migration block, we ensure

@@ -9,6 +9,7 @@ import { getDb } from './db.js';
 import { installHookSettings } from './hook-settings.js';
 import { getSettings, resolveClaudeFlags } from './settings.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
+import { inferRefs } from './ref-inference.js';
 import { syncAgents } from './agents.js';
 import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
@@ -603,6 +604,31 @@ export async function startTask(task: Task): Promise<void> {
     );
 
     installHookSettings(setup.installHooksAt);
+
+    // ─── Branch-name ref inference ────────────────────────────────────────
+    // Run inference before preflight so refs are available when hooks fire.
+    if (setup.branch && task.repo_path) {
+      try {
+        const repoConfigForInference = await getOrCreateRepoConfig(task.repo_path);
+        const inferred = inferRefs(setup.branch, repoConfigForInference, id);
+        if (inferred.length > 0) {
+          const insertRef = db.prepare(
+            `INSERT OR IGNORE INTO task_external_refs (task_id, integration, ref, url, created_at)
+             VALUES (?, ?, ?, ?, datetime('now'))`,
+          );
+          for (const ref of inferred) {
+            insertRef.run(id, ref.integration, ref.ref, ref.url);
+            logger.info(
+              { task_id: id, integration: ref.integration, ref: ref.ref },
+              'ref-inference: inferred ref from branch name',
+            );
+          }
+        }
+      } catch (err) {
+        // Never block task startup for ref-inference failures
+        logger.warn({ task_id: id, err }, 'ref-inference: error during inference');
+      }
+    }
 
     if (setup.runPreflight) {
       stage = 'preflight';

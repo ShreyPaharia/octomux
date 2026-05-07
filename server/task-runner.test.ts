@@ -58,6 +58,7 @@ vi.mock('./repo-config.js', () => ({
     test_command: 'bun run test',
     format_command: 'bun run format',
     lint_command: 'bun run lint',
+    ref_inference_json: null,
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
   }),
@@ -1939,6 +1940,7 @@ describe('preflightWorktree', () => {
     test_command: 'bun run test',
     format_command: 'bun run format',
     lint_command: 'bun run lint',
+    ref_inference_json: null,
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
   };
