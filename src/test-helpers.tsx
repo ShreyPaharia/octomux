@@ -212,6 +212,28 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       resolved_at: null,
     }),
     deleteComment: vi.fn().mockResolvedValue(undefined),
+    moveTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+    postTaskSummary: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+    postTaskNote: vi.fn().mockResolvedValue({
+      id: 'u1',
+      task_id: 'test-task-01',
+      agent_id: null,
+      kind: 'note' as const,
+      from_status: null,
+      to_status: null,
+      body: 'test note',
+      created_at: '2026-01-01 00:00:00',
+    }),
+    addTaskRef: vi.fn().mockResolvedValue({
+      task_id: 'test-task-01',
+      integration: 'jira',
+      ref: 'PROJ-1',
+      url: null,
+      created_at: '2026-01-01 00:00:00',
+    }),
+    deleteTaskRef: vi.fn().mockResolvedValue(undefined),
+    getTaskUpdates: vi.fn().mockResolvedValue([]),
+    getTaskRefs: vi.fn().mockResolvedValue([]),
   };
   return { ...defaults, ...overrides };
 }

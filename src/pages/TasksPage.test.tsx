@@ -9,14 +9,14 @@ const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
 
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api', () => ({ api: apiProxy, adaptTask: (t: unknown) => t, adaptTasks: (ts: unknown[]) => ts }));
 
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
 
-const { routerMockFactory } = await vi.hoisted(async () =>
+const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
@@ -29,12 +29,13 @@ function renderDashboard() {
   );
 }
 
-describe('TasksPage', () => {
+describe('TasksPage (board layout)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
     apiMock.listTasks.mockResolvedValue([]);
     apiMock.deleteTask.mockResolvedValue(undefined);
+    apiMock.moveTask.mockResolvedValue(makeTask());
   });
 
   // ─── Initial render ───────────────────────────────────────────────────────
@@ -42,7 +43,6 @@ describe('TasksPage', () => {
   it('shows loading state initially', () => {
     apiMock.listTasks.mockReturnValue(new Promise(() => {})); // never resolves
     const { container } = renderDashboard();
-    // Loading state now shows skeleton cards instead of text
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
@@ -64,25 +64,45 @@ describe('TasksPage', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveClass('text-[32px]');
   });
 
-  // ─── Task list rendering ──────────────────────────────────────────────────
+  // ─── Board columns ────────────────────────────────────────────────────────
 
-  it('shows empty state when no tasks', async () => {
+  it('renders all 6 board columns', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByText('No tasks yet')).toBeInTheDocument();
+      expect(screen.getByTestId('board-column-backlog')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('board-column-planned')).toBeInTheDocument();
+    expect(screen.getByTestId('board-column-in_progress')).toBeInTheDocument();
+    expect(screen.getByTestId('board-column-human_review')).toBeInTheDocument();
+    expect(screen.getByTestId('board-column-pr')).toBeInTheDocument();
+    expect(screen.getByTestId('board-column-done')).toBeInTheDocument();
+  });
+
+  it('shows empty placeholder in each column when no tasks', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      const empties = screen.getAllByText('Empty');
+      expect(empties.length).toBeGreaterThanOrEqual(6);
     });
   });
 
-  it('renders task cards when tasks exist', async () => {
+  // ─── Task cards rendering ──────────────────────────────────────────────────
+
+  it('renders task cards in the appropriate column', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', title: 'Task Alpha' }),
-      makeTask({ id: 't2', title: 'Task Beta' }),
+      makeTask({ id: 't1', title: 'Backlog Task', workflow_status: 'backlog' }),
+      makeTask({ id: 't2', title: 'In Progress Task', workflow_status: 'in_progress' }),
     ]);
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByText('Task Alpha')).toBeInTheDocument();
-      expect(screen.getByText('Task Beta')).toBeInTheDocument();
+      expect(screen.getByText('Backlog Task')).toBeInTheDocument();
+      expect(screen.getByText('In Progress Task')).toBeInTheDocument();
     });
+    // Verify they're in the correct columns
+    const backlogCol = screen.getByTestId('board-column-backlog');
+    const inProgressCol = screen.getByTestId('board-column-in_progress');
+    expect(backlogCol).toHaveTextContent('Backlog Task');
+    expect(inProgressCol).toHaveTextContent('In Progress Task');
   });
 
   // ─── Error handling ───────────────────────────────────────────────────────
@@ -95,98 +115,72 @@ describe('TasksPage', () => {
     });
   });
 
-  // ─── Filter bar ─────────────────────────────────────────────────────────
+  // ─── Board filter bar ─────────────────────────────────────────────────────
 
-  it('shows All, Running, Needs You, Closed filter chips', async () => {
+  it('renders the board filter bar with needs attention toggle and search', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByTestId('filter-chip-all')).toBeInTheDocument();
+      expect(screen.getByTestId('board-filter-bar')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('filter-chip-running')).toBeInTheDocument();
-    expect(screen.getByTestId('filter-chip-needs_you')).toBeInTheDocument();
-    expect(screen.getByTestId('filter-chip-closed')).toBeInTheDocument();
+    expect(screen.getByTestId('filter-needs-attention')).toBeInTheDocument();
+    expect(screen.getByTestId('board-search')).toBeInTheDocument();
   });
 
-  it('defaults to All filter and shows all statuses', async () => {
+  it('filters to human_review and error tasks when needs attention is toggled', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
-      makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
+      makeTask({ id: 't1', title: 'Normal Task', workflow_status: 'in_progress', runtime_state: 'running' }),
+      makeTask({ id: 't2', title: 'Review Task', workflow_status: 'human_review', runtime_state: 'idle' }),
+      makeTask({ id: 't3', title: 'Error Task', workflow_status: 'backlog', runtime_state: 'error' }),
     ]);
+    const user = userEvent.setup();
     renderDashboard();
+
     await waitFor(() => {
-      expect(screen.getByText('Running Task')).toBeInTheDocument();
+      expect(screen.getByText('Normal Task')).toBeInTheDocument();
     });
-    expect(screen.getByText('Closed Task')).toBeInTheDocument();
-    expect(screen.getByTestId('filter-chip-all')).toHaveAttribute('data-active', 'true');
+
+    await user.click(screen.getByTestId('filter-needs-attention'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Normal Task')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Review Task')).toBeInTheDocument();
+    expect(screen.getByText('Error Task')).toBeInTheDocument();
   });
 
-  it('switches to Closed filter on chip click', async () => {
-    const user = userEvent.setup();
+  it('filters tasks by search text', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', title: 'Running Task', status: 'running' }),
-      makeTask({ id: 't2', title: 'Closed Task', status: 'closed' }),
+      makeTask({ id: 't1', title: 'Fix login bug' }),
+      makeTask({ id: 't2', title: 'Add dashboard' }),
     ]);
+    const user = userEvent.setup();
     renderDashboard();
+
     await waitFor(() => {
-      expect(screen.getByText('Running Task')).toBeInTheDocument();
+      expect(screen.getByText('Fix login bug')).toBeInTheDocument();
     });
-    await user.click(screen.getByTestId('filter-chip-closed'));
+
+    await user.type(screen.getByTestId('board-search'), 'login');
+
     await waitFor(() => {
-      expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
+      expect(screen.queryByText('Add dashboard')).not.toBeInTheDocument();
     });
-    expect(screen.getByText('Closed Task')).toBeInTheDocument();
+    expect(screen.getByText('Fix login bug')).toBeInTheDocument();
   });
 
-  it('shows errored tasks in Needs You filter', async () => {
-    const user = userEvent.setup();
+  // ─── Board card navigation ────────────────────────────────────────────────
+
+  it('navigates to task detail when card is clicked', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', title: 'Errored Task', status: 'error' }),
-      makeTask({ id: 't2', title: 'Running Task', status: 'running' }),
+      makeTask({ id: 'click-task', title: 'Clickable Task', workflow_status: 'backlog' }),
     ]);
-    renderDashboard();
-    await waitFor(() => {
-      expect(screen.getByText('Errored Task')).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId('filter-chip-needs_you'));
-    await waitFor(() => {
-      expect(screen.queryByText('Running Task')).not.toBeInTheDocument();
-    });
-    expect(screen.getByText('Errored Task')).toBeInTheDocument();
-  });
-
-  // ─── Close ───────────────────────────────────────────────────────────────
-
-  it('calls updateTask to close when close button is clicked on running task', async () => {
     const user = userEvent.setup();
-    apiMock.listTasks.mockResolvedValue([makeTask({ status: 'running' })]);
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+      expect(screen.getByText('Clickable Task')).toBeInTheDocument();
     });
-
-    await user.click(screen.getByTitle('Close task'));
-
-    await waitFor(() => {
-      expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', { status: 'closed' });
-    });
-  });
-
-  // ─── Delete ───────────────────────────────────────────────────────────────
-
-  it('calls deleteTask when delete button is clicked on closed task', async () => {
-    const user = userEvent.setup();
-    apiMock.listTasks.mockResolvedValue([makeTask({ status: 'closed' })]);
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTitle('Delete task'));
-
-    await waitFor(() => {
-      expect(apiMock.deleteTask).toHaveBeenCalledWith('test-task-01');
-    });
+    await user.click(screen.getByText('Clickable Task'));
+    expect(mockNavigate).toHaveBeenCalledWith('/tasks/click-task');
   });
 });
