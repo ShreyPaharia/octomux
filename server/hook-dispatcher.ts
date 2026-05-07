@@ -58,6 +58,50 @@ function discoverScripts(dir: string): string[] {
   }
 }
 
+/** Default number of log files to retain per (event, script-basename) combo. */
+const DEFAULT_LOG_RETAIN = 50;
+
+function logRetainCount(): number {
+  const v = parseInt(process.env.OCTOMUX_HOOK_LOG_RETAIN ?? String(DEFAULT_LOG_RETAIN), 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_LOG_RETAIN;
+}
+
+/**
+ * Prune oldest log files for a given event+script prefix, keeping the N most
+ * recent.  Idempotent; ignores any FS errors.
+ */
+function pruneOldLogs(logsDir: string, event: string, scriptBaseName: string): void {
+  try {
+    const retain = logRetainCount();
+    const prefix = `${event}-`;
+    // suffix pattern: "-<scriptBaseName>.log" (task_id suffix optional between script name and .log)
+    const suffix = `-${scriptBaseName}`;
+    const files = fs
+      .readdirSync(logsDir)
+      .filter((f) => f.startsWith(prefix) && (f.endsWith(`${suffix}.log`) || f.includes(`${suffix}-`)))
+      .map((f) => {
+        const fullPath = path.join(logsDir, f);
+        try {
+          return { name: f, mtime: fs.statSync(fullPath).mtimeMs };
+        } catch {
+          return { name: f, mtime: 0 };
+        }
+      })
+      .sort((a, b) => b.mtime - a.mtime); // newest first
+
+    if (files.length <= retain) return;
+    for (const f of files.slice(retain)) {
+      try {
+        fs.unlinkSync(path.join(logsDir, f.name));
+      } catch {
+        // best effort
+      }
+    }
+  } catch {
+    // never propagate
+  }
+}
+
 /** Run a single hook script. Never throws. */
 async function runScript(
   scriptPath: string,
@@ -67,9 +111,12 @@ async function runScript(
   logsDir: string,
 ): Promise<void> {
   const timeoutMs = parseInt(process.env.OCTOMUX_HOOK_TIMEOUT_MS ?? '30000', 10);
-  const timestamp = Date.now();
+  const startedAt = Date.now();
   const baseName = path.basename(scriptPath);
-  const logFile = path.join(logsDir, `${envelope.event}-${timestamp}-${baseName}.log`);
+  const taskId = envelope.task?.id;
+  // Include task_id in filename when available so the REST endpoint can filter by task.
+  const taskSuffix = taskId ? `-${taskId}` : '';
+  const logFile = path.join(logsDir, `${envelope.event}-${startedAt}-${baseName}${taskSuffix}.log`);
 
   return new Promise<void>((resolve) => {
     let timedOut = false;
@@ -78,6 +125,10 @@ async function runScript(
     try {
       fs.mkdirSync(logsDir, { recursive: true });
       const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+
+      // Write enriched header line for later parsing.
+      const headerLine = `[octomux] event=${envelope.event} script=${baseName} task_id=${taskId ?? ''} started_at=${startedAt}\n`;
+      logStream.write(headerLine);
 
       proc = spawn(scriptPath, [], {
         cwd,
@@ -96,26 +147,38 @@ async function runScript(
         timedOut = true;
         proc?.kill('SIGTERM');
         logger.warn(
-          { script: scriptPath, task_id: envelope.task?.id, event: envelope.event },
+          { script: scriptPath, task_id: taskId, event: envelope.event },
           'hook script timed out',
         );
+        // Append footer with timed-out indicator
+        try {
+          const duration = Date.now() - startedAt;
+          logStream.write(`\n[octomux] duration_ms=${duration} exit_code=timeout\n`);
+        } catch { /* best effort */ }
         resolve();
       }, timeoutMs);
 
       proc.on('close', (code) => {
         clearTimeout(timer);
         if (!timedOut) {
+          const duration = Date.now() - startedAt;
+          // Append footer with exit code and duration for later parsing.
+          try {
+            logStream.write(`\n[octomux] duration_ms=${duration} exit_code=${code ?? -1}\n`);
+          } catch { /* best effort */ }
           if (code !== 0) {
             logger.warn(
-              { script: scriptPath, task_id: envelope.task?.id, event: envelope.event, exit_code: code },
+              { script: scriptPath, task_id: taskId, event: envelope.event, exit_code: code },
               'hook script exited with non-zero code',
             );
           } else {
             logger.debug(
-              { script: scriptPath, task_id: envelope.task?.id, event: envelope.event },
+              { script: scriptPath, task_id: taskId, event: envelope.event },
               'hook script completed',
             );
           }
+          // Prune old logs after writing the new one.
+          pruneOldLogs(logsDir, envelope.event, baseName);
           resolve();
         }
       });
@@ -123,14 +186,18 @@ async function runScript(
       proc.on('error', (err) => {
         clearTimeout(timer);
         logger.warn(
-          { script: scriptPath, task_id: envelope.task?.id, event: envelope.event, err },
+          { script: scriptPath, task_id: taskId, event: envelope.event, err },
           'hook script spawn error',
         );
+        try {
+          logStream.write(`\n[octomux] duration_ms=${Date.now() - startedAt} exit_code=-1\n`);
+        } catch { /* best effort */ }
+        pruneOldLogs(logsDir, envelope.event, baseName);
         resolve();
       });
     } catch (err) {
       logger.warn(
-        { script: scriptPath, task_id: envelope.task?.id, event: envelope.event, err },
+        { script: scriptPath, task_id: taskId, event: envelope.event, err },
         'hook script setup error',
       );
       resolve();
@@ -189,6 +256,114 @@ async function fireIntegrationProviders(event: HookEventName, envelope: HookEnve
         'integration provider handler failed or timed out',
       );
     }
+  }
+}
+
+// ─── Hook execution log reader ────────────────────────────────────────────────
+
+export interface HookExecution {
+  event: string;
+  script: string;         // basename
+  started_at: string;     // ISO string derived from filename timestamp
+  duration_ms: number | null;
+  exit_code: number | null;
+  log_path: string;
+  stdout_excerpt: string; // first 500 chars after header
+  stderr_excerpt: string; // empty string (logs merge stdout+stderr)
+}
+
+/**
+ * Parse the enriched header line written by runScript.
+ * Header format: `[octomux] event=... script=... task_id=... started_at=...`
+ * Footer format: `[octomux] duration_ms=... exit_code=...`
+ */
+function parseHookLog(logPath: string): {
+  event: string;
+  script: string;
+  taskId: string;
+  startedAt: number;
+  durationMs: number | null;
+  exitCode: number | null;
+  excerpt: string;
+} | null {
+  try {
+    const content = fs.readFileSync(logPath, 'utf8');
+    const lines = content.split('\n');
+    // Find header line
+    const headerLine = lines.find((l) => l.startsWith('[octomux] event='));
+    if (!headerLine) return null;
+
+    const get = (key: string): string => {
+      const m = headerLine.match(new RegExp(`${key}=([^\\s]+)`));
+      return m?.[1] ?? '';
+    };
+
+    const event = get('event');
+    const script = get('script');
+    const taskId = get('task_id');
+    const startedAt = parseInt(get('started_at'), 10) || 0;
+
+    // Find footer line
+    const footerLine = lines.slice(1).find((l) => l.startsWith('[octomux] duration_ms='));
+    let durationMs: number | null = null;
+    let exitCode: number | null = null;
+    if (footerLine) {
+      const dm = footerLine.match(/duration_ms=(\d+)/);
+      const ec = footerLine.match(/exit_code=(-?\d+)/);
+      if (dm) durationMs = parseInt(dm[1], 10);
+      if (ec) exitCode = parseInt(ec[1], 10);
+    }
+
+    // excerpt = content between header and footer, first 500 chars
+    const bodyStart = content.indexOf('\n') + 1;
+    const footerIdx = content.lastIndexOf('\n[octomux] duration_ms=');
+    const body = footerIdx > bodyStart ? content.slice(bodyStart, footerIdx) : content.slice(bodyStart);
+    const excerpt = body.slice(0, 500);
+
+    return { event, script, taskId, startedAt, durationMs, exitCode, excerpt };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return recent hook executions for a given task, newest first.
+ * Reads log files from the hooks logs directory and filters to those tagged
+ * with the task_id (either in the filename or in the header line).
+ */
+export function getTaskHookExecutions(taskId: string, limit = 50): HookExecution[] {
+  const logsDir = resolveHooksLogsDir();
+  try {
+    if (!fs.existsSync(logsDir)) return [];
+    const files = fs.readdirSync(logsDir).filter((f) => f.endsWith('.log'));
+
+    const results: HookExecution[] = [];
+    for (const file of files) {
+      const logPath = path.join(logsDir, file);
+      // Quick filename filter: if task_id is in filename, accept; otherwise parse to check.
+      const likelyMatch = file.includes(taskId);
+      const parsed = parseHookLog(logPath);
+      if (!parsed) continue;
+      if (!likelyMatch && parsed.taskId !== taskId) continue;
+      if (parsed.taskId && parsed.taskId !== taskId) continue;
+
+      results.push({
+        event: parsed.event,
+        script: parsed.script,
+        started_at: new Date(parsed.startedAt).toISOString(),
+        duration_ms: parsed.durationMs,
+        exit_code: parsed.exitCode,
+        log_path: logPath,
+        stdout_excerpt: parsed.excerpt,
+        stderr_excerpt: '',
+      });
+    }
+
+    // Sort newest first by started_at
+    results.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
+    return results.slice(0, limit);
+  } catch {
+    return [];
   }
 }
 
