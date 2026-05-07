@@ -10,6 +10,7 @@ export type { HookEventName, HookEnvelope };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('hooks');
+const integLogger = childLogger('integrations');
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -138,11 +139,68 @@ async function runScript(
 }
 
 /**
+ * Fire UI-configured integration providers for the given event.
+ * Providers run first (in instance creation order), then shell scripts.
+ * All errors are isolated per provider; never throws.
+ */
+async function fireIntegrationProviders(event: HookEventName, envelope: HookEnvelope): Promise<void> {
+  // Lazily import to avoid circular dependency at module load time.
+  let listIntegrations: typeof import('./integrations/store.js').listIntegrations;
+  let getProvider: typeof import('./integrations/registry.js').getProvider;
+  try {
+    ({ listIntegrations } = await import('./integrations/store.js'));
+    ({ getProvider } = await import('./integrations/registry.js'));
+  } catch {
+    // integrations module not available (e.g. test env without DB)
+    return;
+  }
+
+  let integrations: import('./integrations/types.js').Integration[];
+  try {
+    integrations = listIntegrations();
+  } catch {
+    // DB may not be initialized yet
+    return;
+  }
+
+  const timeoutMs = parseInt(process.env.OCTOMUX_HOOK_TIMEOUT_MS ?? '30000', 10);
+
+  for (const integration of integrations) {
+    if (!integration.enabled) continue;
+    const provider = getProvider(integration.kind);
+    if (!provider) continue;
+    if (!provider.events.includes(event)) continue;
+
+    try {
+      await Promise.race([
+        provider.handler(envelope, integration.config),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('provider handler timed out')), timeoutMs),
+        ),
+      ]);
+    } catch (err) {
+      integLogger.warn(
+        {
+          integration_id: integration.id,
+          kind: integration.kind,
+          event,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'integration provider handler failed or timed out',
+      );
+    }
+  }
+}
+
+/**
  * Fire hook scripts for the given event. Non-blocking — callers should NOT await this.
  * All errors are isolated per script; fireHook never throws.
  */
 export async function fireHook(event: HookEventName, envelope: HookEnvelope): Promise<void> {
   try {
+    // Fire UI-configured providers first (in creation order).
+    await fireIntegrationProviders(event, envelope);
+
     const taskRepoPath = envelope.task?.repo_path ?? undefined;
     const worktreePath = (envelope.task as Record<string, unknown>)?.worktree as string | undefined;
     const cwd = worktreePath ?? taskRepoPath ?? os.homedir();

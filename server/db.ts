@@ -258,6 +258,12 @@ export function getDb(): Database.Database {
     }
 
     db = new Database(DB_PATH);
+    // Restrict DB file to owner-only access to protect stored credentials.
+    try {
+      fs.chmodSync(DB_PATH, 0o600);
+    } catch {
+      // Best-effort — may fail on non-POSIX systems or virtual filesystems.
+    }
     initDb(db);
   }
   return db;
