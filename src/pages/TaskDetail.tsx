@@ -27,6 +27,7 @@ import { repoName } from '@/lib/utils';
 import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
 import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
+import { TaskHooksPanel } from '@/components/TaskHooksPanel';
 import { JiraLinkHelper } from '@/components/integrations/JiraLinkHelper';
 import type { RunMode } from '../../server/types';
 
@@ -944,12 +945,13 @@ export default function TaskDetail() {
           className="shrink-0 overflow-y-auto border-t border-glass-edge px-6 py-4"
           style={{ maxHeight: '40vh' }}
         >
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <TaskActivityPanel taskId={task.id} />
             <div>
               <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
               <JiraLinkHelper taskId={task.id} />
             </div>
+            <TaskHooksPanel taskId={task.id} />
           </div>
         </div>
       )}

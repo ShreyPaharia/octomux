@@ -150,8 +150,16 @@ export interface RepoConfig {
   test_command: string;
   format_command: string;
   lint_command: string;
+  /** JSON array of RefInferenceRule — opt-in per-repo branch→ref auto-inference. */
+  ref_inference_json: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface RefInferenceRule {
+  integration: string;
+  pattern: string;
+  url_template?: string;
 }
 
 export interface PreflightConflict {
@@ -282,6 +290,19 @@ export interface UpdateCommentInput {
   body?: string;
 }
 
+// ─── Hook execution types (Wave 3) ───────────────────────────────────────────
+
+export interface HookExecution {
+  event: string;
+  script: string;
+  started_at: string;
+  duration_ms: number | null;
+  exit_code: number | null;
+  log_path: string;
+  stdout_excerpt: string;
+  stderr_excerpt: string;
+}
+
 // ─── Integrations types (Wave 2B) ────────────────────────────────────────────
 
 export interface IntegrationProvider {
@@ -406,6 +427,8 @@ export const api = {
   getTaskUpdates: (id: string, limit?: number) =>
     request<TaskUpdate[]>(`/tasks/${id}/updates${limit ? `?limit=${limit}` : ''}`),
   getTaskRefs: (id: string) => request<TaskExternalRef[]>(`/tasks/${id}/refs`),
+  getTaskHookExecutions: (id: string, limit?: number) =>
+    request<HookExecution[]>(`/tasks/${id}/hooks${limit ? `?limit=${limit}` : ''}`),
 
   getSettings: () => request<OctomuxSettings>('/settings'),
   updateSettings: (data: Partial<OctomuxSettings>) =>

@@ -235,6 +235,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     deleteTaskRef: vi.fn().mockResolvedValue(undefined),
     getTaskUpdates: vi.fn().mockResolvedValue([]),
     getTaskRefs: vi.fn().mockResolvedValue([]),
+    getTaskHookExecutions: vi.fn().mockResolvedValue([]),
   };
   return { ...defaults, ...overrides };
 }

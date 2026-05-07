@@ -86,7 +86,7 @@ import type {
   TaskUpdate,
 } from './types.js';
 import { RUN_MODES, WORKFLOW_STATUSES } from './types.js';
-import { fireHook } from './hook-dispatcher.js';
+import { fireHook, getTaskHookExecutions } from './hook-dispatcher.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
@@ -2074,6 +2074,15 @@ export function setupRoutes(app: Express): void {
       .prepare('SELECT * FROM task_external_refs WHERE task_id = ? ORDER BY created_at ASC')
       .all(task.id) as TaskExternalRef[];
     res.json(refs);
+  });
+
+  // ─── Hook executions for a task ──────────────────────────────────────────────
+  app.get('/api/tasks/:id/hooks', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 200);
+    const executions = getTaskHookExecutions(task.id, limit);
+    res.json(executions);
   });
 
   // ─── Skills ──────────────────────────────────────────────────────────────────
