@@ -67,8 +67,15 @@ import type {
   Worktree,
   WorktreeSummary,
   CreateChatRequest,
+  MoveTaskRequest,
+  SummaryRequest,
+  NoteRequest,
+  AddRefRequest,
+  TaskExternalRef,
+  TaskUpdate,
 } from './types.js';
-import { RUN_MODES } from './types.js';
+import { RUN_MODES, WORKFLOW_STATUSES } from './types.js';
+import { fireHook } from './hook-dispatcher.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
@@ -124,9 +131,11 @@ function fetchTaskBundle(taskId: string): Task {
 
 function derivedStatus(task: {
   status: string;
+  runtime_state?: string;
   agents: Array<{ status: string; hook_activity: string }>;
 }): DerivedTaskStatus | null {
-  if (task.status !== 'running') return null;
+  const rs = task.runtime_state ?? task.status;
+  if (rs !== 'running') return null;
   const activities = task.agents.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
   if (activities.length === 0) return 'done';
   if (activities.includes('active')) return 'working';
@@ -374,7 +383,7 @@ export function setupRoutes(app: Express): void {
         ...task,
         agents,
         pending_prompts: promptsByTask.get(task.id) || [],
-        derived_status: derivedStatus({ status: task.status, agents }),
+        derived_status: derivedStatus({ status: task.status, runtime_state: task.runtime_state, agents }),
         user_terminals: terminalsByTask.get(task.id) || [],
       };
     });
@@ -440,7 +449,7 @@ export function setupRoutes(app: Express): void {
       ...task,
       agents,
       pending_prompts: parsedPrompts,
-      derived_status: derivedStatus({ status: task.status, agents }),
+      derived_status: derivedStatus({ status: task.status, runtime_state: task.runtime_state, agents }),
       user_terminals: userTerminals,
       worktree_row: worktreeRow,
     });
@@ -535,15 +544,30 @@ export function setupRoutes(app: Express): void {
         runMode,
       );
 
+      // Determine workflow_status at creation time.
+      let initialWorkflowStatus: string;
+      if (body.workflow_status) {
+        initialWorkflowStatus = body.workflow_status;
+      } else if (isDraft && !body.initial_prompt) {
+        initialWorkflowStatus = 'backlog';
+      } else if (isDraft && body.initial_prompt) {
+        initialWorkflowStatus = 'planned';
+      } else {
+        // starting immediately — will be flipped to in_progress once running
+        initialWorkflowStatus = 'planned';
+      }
+
       db.prepare(
         `INSERT INTO tasks
-           (id, title, description, status, initial_prompt, worktree_id, agent)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, description, status, runtime_state, workflow_status, initial_prompt, worktree_id, agent)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         body.title,
         body.description,
         isDraft ? 'draft' : 'setting_up',
+        isDraft ? 'idle' : 'setting_up',
+        initialWorkflowStatus,
         body.initial_prompt ?? null,
         worktreeId,
         body.agent ?? null,
@@ -597,7 +621,9 @@ export function setupRoutes(app: Express): void {
     ].some((k) => (body as Record<string, unknown>)[k] !== undefined);
 
     if (hasDraftFields) {
-      if (task.status !== 'draft') {
+      const rs = (task as any).runtime_state ?? task.status;
+      const isDraft = rs === 'idle' || task.status === 'draft';
+      if (!isDraft) {
         res.status(400).json({ error: 'Can only edit fields on draft tasks' });
         return;
       }
@@ -679,9 +705,10 @@ export function setupRoutes(app: Express): void {
           ...worktreeValues,
         );
       }
-    } else if (body.status === 'running') {
+    } else if (body.status === 'running' || body.runtime_state === 'running') {
       // Resume task
-      if (task.status !== 'closed' && task.status !== 'error') {
+      const rs = task.runtime_state ?? task.status;
+      if (rs !== 'idle' && task.status !== 'closed' && task.status !== 'error') {
         res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
         return;
       }
@@ -697,8 +724,17 @@ export function setupRoutes(app: Express): void {
         }
       }
       await resumeTask(task);
-    } else if (body.status === 'closed') {
+    } else if (body.status === 'closed' || body.runtime_state === 'idle') {
       await closeTask(task);
+    } else if (body.workflow_status) {
+      // Direct workflow_status flip (simpler version without note/transition tracking)
+      if (!WORKFLOW_STATUSES.includes(body.workflow_status)) {
+        res.status(400).json({ error: `invalid workflow_status: ${body.workflow_status}` });
+        return;
+      }
+      getDb()
+        .prepare(`UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`)
+        .run(body.workflow_status, task.id);
     }
 
     const updated = fetchTaskBundle(task.id);
@@ -719,7 +755,7 @@ export function setupRoutes(app: Express): void {
 
     // Set status immediately so client sees setting_up
     db.prepare(
-      `UPDATE tasks SET status = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE tasks SET status = 'setting_up', runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
     const updated = fetchTaskBundle(task.id);
@@ -755,7 +791,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if (task.status !== 'running') {
+    if ((task.runtime_state ?? task.status) !== 'running') {
       res.status(400).json({ error: 'Can only add agents to running tasks' });
       return;
     }
@@ -789,7 +825,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if (task.status !== 'running') {
+    if ((task.runtime_state ?? task.status) !== 'running') {
       res.status(400).json({ error: 'Can only create user terminal for running tasks' });
       return;
     }
@@ -813,7 +849,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if (task.status !== 'running') {
+    if ((task.runtime_state ?? task.status) !== 'running') {
       res.status(400).json({ error: 'Can only create terminals for running tasks' });
       return;
     }
@@ -859,7 +895,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if (task.status !== 'running') {
+    if ((task.runtime_state ?? task.status) !== 'running') {
       res.status(400).json({ error: 'Task is not running' });
       return;
     }
@@ -1065,7 +1101,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    if (task.status === 'draft') {
+    if (task.status === 'draft' || (task.runtime_state ?? task.status) === 'idle') {
       res.status(409).json({ error: 'cannot change base on a draft task' });
       return;
     }
@@ -1580,8 +1616,9 @@ export function setupRoutes(app: Express): void {
         res.status(404).json({ error: `Task not found: ${targetTaskId}` });
         return;
       }
-      if (!(['draft', 'setting_up', 'running'] as const).includes(targetTask.status as 'running')) {
-        res.status(409).json({ error: `Target task is not active (status=${targetTask.status})` });
+      const trs = (targetTask as Task).runtime_state ?? targetTask.status;
+      if (!(['setting_up', 'running'] as const).includes(trs as 'running')) {
+        res.status(409).json({ error: `Target task is not active (runtime_state=${trs})` });
         return;
       }
       if (!targetTask.worktree_id) {
@@ -1761,9 +1798,10 @@ export function setupRoutes(app: Express): void {
     const tasks = db
       .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? ORDER BY t.updated_at DESC`)
       .all(worktree.id) as Task[];
-    const active = tasks.find((t) =>
-      (['draft', 'setting_up', 'running'] as const).includes(t.status as 'running'),
-    );
+    const active = tasks.find((t) => {
+      const rs = (t as any).runtime_state ?? t.status;
+      return (['setting_up', 'running'] as const).includes(rs as 'running');
+    });
     const history = tasks.filter((t) => t.id !== active?.id);
     res.json({
       worktree,
@@ -1789,7 +1827,7 @@ export function setupRoutes(app: Express): void {
       .prepare('SELECT id, status FROM tasks WHERE worktree_id = ?')
       .all(worktree.id) as Array<{ id: string; status: string }>;
     const activeRef = referencingTasks.find((t) =>
-      (['draft', 'setting_up', 'running'] as const).includes(t.status as 'running'),
+      (['draft', 'setting_up', 'running', 'idle'] as const).includes(t.status as 'running'),
     );
     if (activeRef) {
       res.status(409).json({ error: 'Worktree has an active task' });
@@ -1839,6 +1877,192 @@ export function setupRoutes(app: Express): void {
       'worktree deleted',
     );
     res.status(204).send();
+  });
+
+  // ─── Task Workflow Endpoints ──────────────────────────────────────────────────
+
+  // Move task to a new workflow_status
+  app.post('/api/tasks/:id/move', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const body = req.body as MoveTaskRequest;
+
+    if (!body.workflow_status || !WORKFLOW_STATUSES.includes(body.workflow_status)) {
+      res.status(400).json({ error: `invalid workflow_status: ${body.workflow_status}` });
+      return;
+    }
+    if ((body.workflow_status === 'human_review' || body.workflow_status === 'planned') && !body.note?.trim()) {
+      res.status(400).json({ error: `note is required when moving to ${body.workflow_status}` });
+      return;
+    }
+
+    const prevStatus = task.workflow_status;
+    db.prepare(
+      `UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run(body.workflow_status, task.id);
+
+    const updateId = nanoid(12);
+    db.prepare(
+      `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, ?, ?)`,
+    ).run(updateId, task.id, prevStatus, body.workflow_status, body.note ?? null);
+
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    fireHook('workflow_status_changed', {
+      event: 'workflow_status_changed',
+      task: { ...task, workflow_status: body.workflow_status as import('./types.js').WorkflowStatus },
+      data: { from: prevStatus, to: body.workflow_status, note: body.note },
+    });
+
+    const updated = fetchTaskBundle(task.id);
+    res.json(updated);
+  });
+
+  // Post a summary for a task
+  app.post('/api/tasks/:id/summary', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const body = req.body as SummaryRequest;
+
+    if (!body.summary?.trim()) {
+      res.status(400).json({ error: 'summary is required' });
+      return;
+    }
+
+    db.prepare(
+      `UPDATE tasks SET current_summary = ?, current_summary_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    ).run(body.summary, task.id);
+
+    const updateId = nanoid(12);
+    db.prepare(
+      `INSERT INTO task_updates (id, task_id, kind, body) VALUES (?, ?, 'summary', ?)`,
+    ).run(updateId, task.id, body.summary);
+
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    fireHook('summary_updated', {
+      event: 'summary_updated',
+      task: { ...task, current_summary: body.summary },
+      data: { summary: body.summary },
+    });
+
+    const updated = fetchTaskBundle(task.id);
+    res.json(updated);
+  });
+
+  // Add a note to a task
+  app.post('/api/tasks/:id/note', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const body = req.body as NoteRequest;
+
+    if (!body.body?.trim()) {
+      res.status(400).json({ error: 'body is required' });
+      return;
+    }
+
+    const updateId = nanoid(12);
+    db.prepare(
+      `INSERT INTO task_updates (id, task_id, kind, body) VALUES (?, ?, 'note', ?)`,
+    ).run(updateId, task.id, body.body);
+
+    fireHook('note_added', {
+      event: 'note_added',
+      task,
+      data: { body: body.body },
+    });
+
+    res.status(201).json({ id: updateId, task_id: task.id, kind: 'note', body: body.body });
+  });
+
+  // Add/replace an external ref
+  app.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const body = req.body as AddRefRequest;
+
+    if (!body.integration?.trim()) {
+      res.status(400).json({ error: 'integration is required' });
+      return;
+    }
+    if (!body.ref?.trim()) {
+      res.status(400).json({ error: 'ref is required' });
+      return;
+    }
+
+    db.prepare(
+      `INSERT OR REPLACE INTO task_external_refs (task_id, integration, ref, url, created_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`,
+    ).run(task.id, body.integration, body.ref, body.url ?? null);
+
+    fireHook('ref_added', {
+      event: 'ref_added',
+      task,
+      data: { integration: body.integration, ref: body.ref, url: body.url },
+    });
+
+    const row = db
+      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
+      .get(task.id, body.integration) as TaskExternalRef;
+    res.status(201).json(row);
+  });
+
+  // Delete an external ref
+  app.delete('/api/tasks/:id/refs/:integration', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const integration = (req.params as Record<string, string>).integration;
+
+    const existing = db
+      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
+      .get(task.id, integration) as TaskExternalRef | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Ref not found' });
+      return;
+    }
+
+    db.prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?').run(
+      task.id,
+      integration,
+    );
+
+    fireHook('ref_removed', {
+      event: 'ref_removed',
+      task,
+      data: { integration },
+    });
+
+    res.status(204).send();
+  });
+
+  // Get task updates (timeline)
+  app.get('/api/tasks/:id/updates', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const limitRaw = Number(req.query.limit ?? 100);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 1000);
+
+    const updates = db
+      .prepare(
+        `SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(task.id, limit) as TaskUpdate[];
+    res.json(updates);
+  });
+
+  // Get task external refs
+  app.get('/api/tasks/:id/refs', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+    const refs = db
+      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? ORDER BY created_at ASC')
+      .all(task.id) as TaskExternalRef[];
+    res.json(refs);
   });
 
   // ─── Skills ──────────────────────────────────────────────────────────────────
