@@ -29,6 +29,8 @@ export const TASK_DEFAULTS: Task = {
   description: 'Add negative quantity checks',
   repo_path: '/Users/dev/projects/my-repo',
   status: 'running',
+  runtime_state: 'running',
+  workflow_status: 'in_progress',
   branch: 'agents/test-task-01',
   base_branch: null,
   worktree: '/Users/dev/projects/my-repo/.worktrees/test-task-01',
@@ -45,6 +47,8 @@ export const TASK_DEFAULTS: Task = {
   worktree_id: null,
   agent: null,
   error: null,
+  current_summary: null,
+  current_summary_updated_at: null,
   created_at: '2026-01-01 00:00:00',
   updated_at: '2026-01-01 00:00:00',
 };

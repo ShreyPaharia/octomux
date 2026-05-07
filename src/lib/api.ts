@@ -8,7 +8,50 @@ import type {
   Worktree,
   WorktreeSummary,
   TaskStatus,
+  WorkflowStatus,
+  RuntimeState,
+  TaskExternalRef,
+  TaskUpdate,
+  MoveTaskRequest,
+  SummaryRequest,
+  NoteRequest,
+  AddRefRequest,
 } from '../../server/types';
+
+export type { WorkflowStatus, RuntimeState, TaskExternalRef, TaskUpdate };
+
+/**
+ * Back-compat adapter: the old UI expects `task.status` to contain
+ * 'draft'|'setting_up'|'running'|'closed'|'error'. After the wave-1 rename,
+ * the server returns `runtime_state` and `workflow_status`.  Map runtime_state
+ * back to a legacy TaskStatus so existing TaskCard/TaskFilterBar still work
+ * without changes.
+ *
+ * Call this on every Task returned by the server before handing it to
+ * existing React components.
+ */
+export function adaptTask(raw: Task): Task & { status: TaskStatus } {
+  const runtimeState: RuntimeState = raw.runtime_state ?? 'idle';
+  let legacyStatus: TaskStatus;
+  switch (runtimeState) {
+    case 'setting_up': legacyStatus = 'setting_up'; break;
+    case 'running':    legacyStatus = 'running'; break;
+    case 'error':      legacyStatus = 'error'; break;
+    case 'idle':
+    default:
+      // Was this a draft (no initial_prompt + never started) or closed?
+      legacyStatus = raw.status === 'draft' ? 'draft' : 'closed';
+  }
+  return {
+    ...raw,
+    status: legacyStatus,
+    runtime_state: runtimeState,
+  };
+}
+
+export function adaptTasks(raws: Task[]): Task[] {
+  return raws.map(adaptTask);
+}
 
 export interface WorktreeDetail {
   worktree: Worktree;
@@ -329,6 +372,21 @@ export const api = {
     }),
   closeTerminal: (taskId: string, terminalId: string) =>
     request<void>(`/tasks/${taskId}/terminals/${terminalId}`, { method: 'DELETE' }),
+
+  // Workflow endpoints
+  moveTask: (id: string, data: MoveTaskRequest) =>
+    request<Task>(`/tasks/${id}/move`, { method: 'POST', body: JSON.stringify(data) }),
+  postTaskSummary: (id: string, data: SummaryRequest) =>
+    request<Task>(`/tasks/${id}/summary`, { method: 'POST', body: JSON.stringify(data) }),
+  postTaskNote: (id: string, data: NoteRequest) =>
+    request<TaskUpdate>(`/tasks/${id}/note`, { method: 'POST', body: JSON.stringify(data) }),
+  addTaskRef: (id: string, data: AddRefRequest) =>
+    request<TaskExternalRef>(`/tasks/${id}/refs`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteTaskRef: (id: string, integration: string) =>
+    request<void>(`/tasks/${id}/refs/${encodeURIComponent(integration)}`, { method: 'DELETE' }),
+  getTaskUpdates: (id: string, limit?: number) =>
+    request<TaskUpdate[]>(`/tasks/${id}/updates${limit ? `?limit=${limit}` : ''}`),
+  getTaskRefs: (id: string) => request<TaskExternalRef[]>(`/tasks/${id}/refs`),
 
   getSettings: () => request<OctomuxSettings>('/settings'),
   updateSettings: (data: Partial<OctomuxSettings>) =>
