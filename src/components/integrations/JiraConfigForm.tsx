@@ -157,7 +157,8 @@ export function JiraConfigForm({
           autoComplete="off"
         />
         <p style={{ fontSize: 11, color: '#8a8a8a', marginTop: 4 }}>
-          Generate at Atlassian account settings → Security → API tokens
+          Generate at Atlassian account settings → Security → API tokens.
+          Use <code style={{ fontFamily: 'monospace' }}>${'{env:MY_VAR}'}</code> to read from an environment variable.
         </p>
       </div>
 

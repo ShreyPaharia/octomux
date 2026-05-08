@@ -238,9 +238,17 @@ async function fireIntegrationProviders(event: HookEventName, envelope: HookEnve
     if (!provider) continue;
     if (!provider.events.includes(event)) continue;
 
+    let resolvedConfig: unknown;
+    try {
+      const { resolveEnvVars } = await import('./integrations/resolve-env.js');
+      resolvedConfig = resolveEnvVars(integration.config);
+    } catch {
+      resolvedConfig = integration.config;
+    }
+
     try {
       await Promise.race([
-        provider.handler(envelope, integration.config),
+        provider.handler(envelope, resolvedConfig),
         new Promise<void>((_, reject) =>
           setTimeout(() => reject(new Error('provider handler timed out')), timeoutMs),
         ),
