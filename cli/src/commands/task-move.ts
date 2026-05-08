@@ -15,9 +15,7 @@ const VALID_STATUSES: WorkflowStatus[] = [
 export function registerTaskMove(program: Command): void {
   program
     .command('task-move <id> <workflow_status>')
-    .description(
-      `Move a task to a workflow column (${VALID_STATUSES.join(' | ')})`,
-    )
+    .description(`Move a task to a workflow column (${VALID_STATUSES.join(' | ')})`)
     .option('-n, --note <note>', 'optional note to attach to the move')
     .action(async (id: string, workflowStatus: string, opts, cmd) => {
       const { client, json } = getContext(cmd);

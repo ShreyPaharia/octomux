@@ -566,7 +566,8 @@ export default function TaskDetail() {
   const agents = task.agents || [];
   const isRunning = task.runtime_state === 'running';
   const isDraft = task.runtime_state === 'idle' && !task.initial_prompt;
-  const canResume = (task.runtime_state === 'idle' || task.runtime_state === 'error') && !!task.worktree;
+  const canResume =
+    (task.runtime_state === 'idle' || task.runtime_state === 'error') && !!task.worktree;
   const runMode: RunMode = task.run_mode ?? 'new';
   const isScratch = runMode === 'scratch';
   const canShowDiff = !isScratch && task.runtime_state !== 'idle';

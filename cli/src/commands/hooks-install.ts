@@ -108,7 +108,9 @@ export function registerHooksInstall(program: Command): void {
             ' and replace REPLACE_ME with your Jira transition IDs.',
         );
         console.log('  2. Set the following environment variables:');
-        console.log('     ' + chalk.yellow('export JIRA_BASE_URL=https://your-company.atlassian.net'));
+        console.log(
+          '     ' + chalk.yellow('export JIRA_BASE_URL=https://your-company.atlassian.net'),
+        );
         console.log('     ' + chalk.yellow('export JIRA_EMAIL=you@company.com'));
         console.log('     ' + chalk.yellow('export JIRA_TOKEN=your-api-token'));
         console.log('');

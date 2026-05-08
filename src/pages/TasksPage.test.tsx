@@ -9,7 +9,11 @@ const { apiMock, apiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
 
-vi.mock('@/lib/api', () => ({ api: apiProxy, adaptTask: (t: unknown) => t, adaptTasks: (ts: unknown[]) => ts }));
+vi.mock('@/lib/api', () => ({
+  api: apiProxy,
+  adaptTask: (t: unknown) => t,
+  adaptTasks: (ts: unknown[]) => ts,
+}));
 
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
@@ -128,9 +132,24 @@ describe('TasksPage (board layout)', () => {
 
   it('filters to human_review and error tasks when needs attention is toggled', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', title: 'Normal Task', workflow_status: 'in_progress', runtime_state: 'running' }),
-      makeTask({ id: 't2', title: 'Review Task', workflow_status: 'human_review', runtime_state: 'idle' }),
-      makeTask({ id: 't3', title: 'Error Task', workflow_status: 'backlog', runtime_state: 'error' }),
+      makeTask({
+        id: 't1',
+        title: 'Normal Task',
+        workflow_status: 'in_progress',
+        runtime_state: 'running',
+      }),
+      makeTask({
+        id: 't2',
+        title: 'Review Task',
+        workflow_status: 'human_review',
+        runtime_state: 'idle',
+      }),
+      makeTask({
+        id: 't3',
+        title: 'Error Task',
+        workflow_status: 'backlog',
+        runtime_state: 'error',
+      }),
     ]);
     const user = userEvent.setup();
     renderDashboard();

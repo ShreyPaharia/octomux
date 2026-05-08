@@ -154,9 +154,7 @@ export function JiraLinkHelper({ taskId, onLinked }: JiraLinkHelperProps) {
         </button>
       </div>
 
-      {error && (
-        <p style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{error}</p>
-      )}
+      {error && <p style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{error}</p>}
       {success && (
         <p style={{ fontSize: 11, color: '#4ade80', marginTop: 4 }}>Linked successfully!</p>
       )}

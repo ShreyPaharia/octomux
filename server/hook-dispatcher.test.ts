@@ -37,7 +37,10 @@ vi.mock('fs', () => ({
  * the test registers a listener for that event (synchronously on next
  * microtask tick, safely after the caller sets up all listeners).
  */
-function makeAutoProc({ exitCode = 0, spawnError }: { exitCode?: number; spawnError?: Error } = {}) {
+function makeAutoProc({
+  exitCode = 0,
+  spawnError,
+}: { exitCode?: number; spawnError?: Error } = {}) {
   const listeners: Record<string, ((...args: any[]) => void)[]> = {};
   const proc = {
     stdin: { write: vi.fn(), end: vi.fn() },
@@ -232,7 +235,15 @@ describe('getTaskHookExecutions', () => {
     exitCode?: number;
     body?: string;
   }) => {
-    const { event, script, taskId, startedAt, durationMs = 123, exitCode = 0, body = 'output' } = opts;
+    const {
+      event,
+      script,
+      taskId,
+      startedAt,
+      durationMs = 123,
+      exitCode = 0,
+      body = 'output',
+    } = opts;
     return [
       `[octomux] event=${event} script=${script} task_id=${taskId} started_at=${startedAt}`,
       body,
@@ -290,7 +301,10 @@ describe('getTaskHookExecutions', () => {
 
   it('respects the limit parameter', async () => {
     mockExistsSync.mockReturnValue(true);
-    const files = Array.from({ length: 10 }, (_, i) => `workflow_status_changed-${i}-notify.sh-task-abc.log`);
+    const files = Array.from(
+      { length: 10 },
+      (_, i) => `workflow_status_changed-${i}-notify.sh-task-abc.log`,
+    );
     mockReaddirSync.mockReturnValue(files);
     mockReadFileSync.mockImplementation((_p: string) =>
       makeLogContent({

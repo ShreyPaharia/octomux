@@ -200,8 +200,7 @@ export default function TasksPage() {
     return tasks.filter((t) => {
       if (activeRepo && t.repo_path !== activeRepo) return false;
       if (needsAttention) {
-        const isAttention =
-          t.workflow_status === 'human_review' || t.runtime_state === 'error';
+        const isAttention = t.workflow_status === 'human_review' || t.runtime_state === 'error';
         if (!isAttention) return false;
       }
       if (search.trim()) {

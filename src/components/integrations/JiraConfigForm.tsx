@@ -153,12 +153,15 @@ export function JiraConfigForm({
           type="password"
           value={apiToken}
           onChange={(e) => setApiToken(e.target.value)}
-          placeholder={apiToken === '••••' ? 'Leave as-is to keep stored token' : 'Atlassian API token'}
+          placeholder={
+            apiToken === '••••' ? 'Leave as-is to keep stored token' : 'Atlassian API token'
+          }
           autoComplete="off"
         />
         <p style={{ fontSize: 11, color: '#8a8a8a', marginTop: 4 }}>
-          Generate at Atlassian account settings → Security → API tokens.
-          Use <code style={{ fontFamily: 'monospace' }}>${'{env:MY_VAR}'}</code> to read from an environment variable.
+          Generate at Atlassian account settings → Security → API tokens. Use{' '}
+          <code style={{ fontFamily: 'monospace' }}>${'{env:MY_VAR}'}</code> to read from an
+          environment variable.
         </p>
       </div>
 
@@ -173,9 +176,7 @@ export function JiraConfigForm({
       </div>
 
       <div>
-        <label style={{ ...LABEL_STYLE, marginBottom: 8 }}>
-          Workflow → Jira transition ID map
-        </label>
+        <label style={{ ...LABEL_STYLE, marginBottom: 8 }}>Workflow → Jira transition ID map</label>
         <p style={{ fontSize: 11, color: '#8a8a8a', marginBottom: 8 }}>
           Map each octomux workflow status to a Jira transition ID (numeric). Leave blank to skip.
         </p>
@@ -204,9 +205,7 @@ export function JiraConfigForm({
         </div>
       </div>
 
-      {error && (
-        <p style={{ fontSize: 12, color: '#f87171', margin: 0 }}>{error}</p>
-      )}
+      {error && <p style={{ fontSize: 12, color: '#f87171', margin: 0 }}>{error}</p>}
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
         <button

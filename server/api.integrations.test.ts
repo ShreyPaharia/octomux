@@ -118,16 +118,18 @@ describe('GET /api/integrations', () => {
   it('returns created integration with masked secret', async () => {
     const app = createApp();
     // Create one first
-    await request(app).post('/api/integrations').send({
-      kind: 'jira',
-      name: 'Test Jira',
-      config: {
-        base_url: 'https://test.atlassian.net',
-        email: 'test@test.com',
-        api_token: 'mysecret',
-        status_map: {},
-      },
-    });
+    await request(app)
+      .post('/api/integrations')
+      .send({
+        kind: 'jira',
+        name: 'Test Jira',
+        config: {
+          base_url: 'https://test.atlassian.net',
+          email: 'test@test.com',
+          api_token: 'mysecret',
+          status_map: {},
+        },
+      });
 
     const res = await request(app).get('/api/integrations');
     expect(res.status).toBe(200);
@@ -148,16 +150,18 @@ describe('PATCH /api/integrations/:id', () => {
   });
 
   async function createJira(app: ReturnType<typeof createApp>) {
-    const res = await request(app).post('/api/integrations').send({
-      kind: 'jira',
-      name: 'My Jira',
-      config: {
-        base_url: 'https://acme.atlassian.net',
-        email: 'dev@acme.com',
-        api_token: 'originaltoken',
-        status_map: { done: '41' },
-      },
-    });
+    const res = await request(app)
+      .post('/api/integrations')
+      .send({
+        kind: 'jira',
+        name: 'My Jira',
+        config: {
+          base_url: 'https://acme.atlassian.net',
+          email: 'dev@acme.com',
+          api_token: 'originaltoken',
+          status_map: { done: '41' },
+        },
+      });
     return res.body as { id: string; config: Record<string, unknown> };
   }
 
@@ -225,16 +229,18 @@ describe('DELETE /api/integrations/:id', () => {
 
   it('deletes the integration and returns 204', async () => {
     const app = createApp();
-    const createRes = await request(app).post('/api/integrations').send({
-      kind: 'jira',
-      name: 'To Delete',
-      config: {
-        base_url: 'https://x.atlassian.net',
-        email: 'a@b.com',
-        api_token: 'tok',
-        status_map: {},
-      },
-    });
+    const createRes = await request(app)
+      .post('/api/integrations')
+      .send({
+        kind: 'jira',
+        name: 'To Delete',
+        config: {
+          base_url: 'https://x.atlassian.net',
+          email: 'a@b.com',
+          api_token: 'tok',
+          status_map: {},
+        },
+      });
     const id = createRes.body.id as string;
 
     const deleteRes = await request(app).delete(`/api/integrations/${id}`);

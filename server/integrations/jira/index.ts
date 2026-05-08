@@ -116,9 +116,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
 
   // Find a matching external ref for Jira
   const refs = (task.external_refs ?? []) as Array<{ integration: string; ref: string }>;
-  const jiraRef = refs.find(
-    (r) => r.integration === 'jira' || r.integration.startsWith('jira:'),
-  );
+  const jiraRef = refs.find((r) => r.integration === 'jira' || r.integration.startsWith('jira:'));
 
   if (!jiraRef) {
     logger.debug(

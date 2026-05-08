@@ -684,23 +684,20 @@ describe('PATCH /api/tasks/:id', () => {
     expect(resumeTask).toHaveBeenCalledOnce();
   });
 
-  it.each(resumableStates)(
-    'resumes run_mode=none %s task when repo_path exists',
-    async (state) => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      insertTask(db, {
-        ...DEFAULTS.runningTask,
-        runtime_state: state,
-        run_mode: 'none',
-        worktree: DEFAULTS.runningTask.repo_path,
-      });
-      const res = await request(app)
-        .patch(`/api/tasks/${DEFAULTS.task.id}`)
-        .send({ status: 'running' });
-      expect(res.status).toBe(200);
-      expect(resumeTask).toHaveBeenCalledOnce();
-    },
-  );
+  it.each(resumableStates)('resumes run_mode=none %s task when repo_path exists', async (state) => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      runtime_state: state,
+      run_mode: 'none',
+      worktree: DEFAULTS.runningTask.repo_path,
+    });
+    const res = await request(app)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ status: 'running' });
+    expect(res.status).toBe(200);
+    expect(resumeTask).toHaveBeenCalledOnce();
+  });
 
   it.each(resumableStates)(
     'refuses resume of run_mode=none %s task when repo_path missing',

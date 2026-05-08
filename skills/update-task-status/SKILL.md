@@ -11,14 +11,14 @@ Move a task through the workflow board, add notes, post progress summaries, or l
 
 Tasks flow through these columns in order (though any transition is allowed):
 
-| Column | When to use |
-|--------|-------------|
-| `backlog` | Idea captured, not yet planned |
-| `planned` | Scoped and ready to start |
-| `in_progress` | Active work underway |
+| Column         | When to use                        |
+| -------------- | ---------------------------------- |
+| `backlog`      | Idea captured, not yet planned     |
+| `planned`      | Scoped and ready to start          |
+| `in_progress`  | Active work underway               |
 | `human_review` | Blocked on human review / feedback |
-| `pr` | PR open, awaiting merge |
-| `done` | Merged / shipped |
+| `pr`           | PR open, awaiting merge            |
+| `done`         | Merged / shipped                   |
 
 ## Moving a task to a different column
 
@@ -40,6 +40,7 @@ octomux task-move abc123 done
 ```
 
 **Notes:**
+
 - Moving to `human_review` or `planned` requires `--note` explaining why
 - The move is recorded in the task activity log automatically
 

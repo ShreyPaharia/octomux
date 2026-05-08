@@ -23,9 +23,7 @@ vi.mock('react-router-dom', routerMockFactory);
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 function makeTasks(overrides: Partial<Task>[] = []): Task[] {
-  return overrides.map((o, i) =>
-    makeTask({ id: `task-${i}`, title: `Task ${i}`, ...o }),
-  );
+  return overrides.map((o, i) => makeTask({ id: `task-${i}`, title: `Task ${i}`, ...o }));
 }
 
 function renderBoard(tasks: Task[] = []) {
@@ -123,7 +121,9 @@ describe('TaskBoard', () => {
 
   it('navigates to task detail on card click', async () => {
     const user = userEvent.setup();
-    const tasks = makeTasks([{ id: 'nav-task', title: 'Navigate to me', workflow_status: 'backlog' }]);
+    const tasks = makeTasks([
+      { id: 'nav-task', title: 'Navigate to me', workflow_status: 'backlog' },
+    ]);
     renderBoard(tasks);
     await user.click(screen.getByText('Navigate to me'));
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/nav-task');

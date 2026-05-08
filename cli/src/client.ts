@@ -1,12 +1,6 @@
 export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
 
-export type WorkflowStatus =
-  | 'backlog'
-  | 'planned'
-  | 'in_progress'
-  | 'human_review'
-  | 'pr'
-  | 'done';
+export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
 
 export interface TaskUpdate {
   id: string;
@@ -135,10 +129,7 @@ export interface OctomuxClient {
     data: { resolved?: boolean; body?: string },
   ): Promise<InlineCommentRow>;
   deleteComment(taskId: string, commentId: string): Promise<void>;
-  moveTask(
-    taskId: string,
-    data: { workflow_status: WorkflowStatus; note?: string },
-  ): Promise<Task>;
+  moveTask(taskId: string, data: { workflow_status: WorkflowStatus; note?: string }): Promise<Task>;
   postTaskSummary(taskId: string, data: { summary: string; author?: string }): Promise<Task>;
   postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
   addTaskRef(

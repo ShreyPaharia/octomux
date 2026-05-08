@@ -31,7 +31,12 @@ function makeIntegration(overrides: Partial<Integration> = {}): Integration {
     id: 'int-abc123',
     kind: 'jira',
     name: 'My Jira',
-    config: { base_url: 'https://x.atlassian.net', email: 'a@b.com', api_token: 'tok', status_map: {} },
+    config: {
+      base_url: 'https://x.atlassian.net',
+      email: 'a@b.com',
+      api_token: 'tok',
+      status_map: {},
+    },
     enabled: true,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
@@ -145,9 +150,7 @@ describe('fireHook — integration providers', () => {
     process.env.OCTOMUX_HOOK_TIMEOUT_MS = '50';
 
     try {
-      const slowHandler = vi.fn(
-        () => new Promise<void>((resolve) => setTimeout(resolve, 5000)),
-      );
+      const slowHandler = vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, 5000)));
       const provider = makeProvider({ handler: slowHandler });
       const integration = makeIntegration();
 

@@ -160,10 +160,7 @@ export function TaskBoard({ tasks, onTasksChange }: TaskBoardProps) {
   return (
     <>
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div
-          data-testid="task-board"
-          className="flex h-full gap-4 overflow-x-auto px-1 pb-4"
-        >
+        <div data-testid="task-board" className="flex h-full gap-4 overflow-x-auto px-1 pb-4">
           {COLUMN_DEFS.map((col) => (
             <TaskBoardColumn
               key={col.id}

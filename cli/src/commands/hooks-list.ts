@@ -85,18 +85,16 @@ function parseLogMeta(logPath: string): ParsedMeta | null {
 }
 
 /** Find the most recent log entry for a given event + script-basename pair. */
-function findLastRun(
-  logsDir: string,
-  event: string,
-  scriptName: string,
-): ParsedMeta | null {
+function findLastRun(logsDir: string, event: string, scriptName: string): ParsedMeta | null {
   try {
     if (!fs.existsSync(logsDir)) return null;
     const prefix = `${event}-`;
     const suffix = `-${scriptName}`;
     const files = fs
       .readdirSync(logsDir)
-      .filter((f) => f.startsWith(prefix) && (f.endsWith(`${suffix}.log`) || f.includes(`${suffix}-`)))
+      .filter(
+        (f) => f.startsWith(prefix) && (f.endsWith(`${suffix}.log`) || f.includes(`${suffix}-`)),
+      )
       .map((f) => {
         try {
           return { f, mtime: fs.statSync(path.join(logsDir, f)).mtimeMs };
@@ -152,7 +150,9 @@ function printHooksFor(
           lastRun.startedAt > 0
             ? chalk.dim(` last run: ${timeAgo(lastRun.startedAt)}`) +
               (lastRun.exitCode !== null ? chalk.dim(` (exit ${lastRun.exitCode}`) : '') +
-              (lastRun.durationMs !== null ? chalk.dim(`, ${lastRun.durationMs}ms)`) : chalk.dim(')'))
+              (lastRun.durationMs !== null
+                ? chalk.dim(`, ${lastRun.durationMs}ms)`)
+                : chalk.dim(')'))
             : '';
         console.log(`    ${exitBadge} ${script.name}${runMeta}`);
       }

@@ -492,8 +492,7 @@ export const api = {
   deleteIntegration: (id: string) =>
     request<void>(`/integrations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testIntegration: (id: string) =>
-    request<{ ok: boolean; message: string }>(
-      `/integrations/${encodeURIComponent(id)}/test`,
-      { method: 'POST' },
-    ),
+    request<{ ok: boolean; message: string }>(`/integrations/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+    }),
 };

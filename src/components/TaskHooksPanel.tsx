@@ -27,8 +27,7 @@ export function TaskHooksPanel({ taskId }: TaskHooksPanelProps) {
   useEffect(() => {
     load();
     return subscribe((event) => {
-      const affectedId =
-        (event.payload as { taskId?: string }).taskId;
+      const affectedId = (event.payload as { taskId?: string }).taskId;
       if (affectedId === taskId) {
         load();
       }
@@ -50,9 +49,7 @@ export function TaskHooksPanel({ taskId }: TaskHooksPanelProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">
-          Hook Runs
-        </h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">Hook Runs</h2>
         <button
           type="button"
           onClick={load}

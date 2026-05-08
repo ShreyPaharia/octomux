@@ -85,11 +85,7 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
           <EmptyColumnPlaceholder isOver={isOver} />
         ) : (
           tasks.map((task) => (
-            <DraggableBoardCard
-              key={task.id}
-              task={task}
-              isDragging={activeTaskId === task.id}
-            />
+            <DraggableBoardCard key={task.id} task={task} isDragging={activeTaskId === task.id} />
           ))
         )}
       </div>

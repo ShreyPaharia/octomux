@@ -279,7 +279,10 @@ export function SessionsInbox() {
     return { awaitingReply, errored };
   }, [needsYou]);
 
-  const runningCount = useMemo(() => tasks.filter((t) => t.runtime_state === 'running').length, [tasks]);
+  const runningCount = useMemo(
+    () => tasks.filter((t) => t.runtime_state === 'running').length,
+    [tasks],
+  );
 
   const isEmpty =
     !loading && awaitingReply.length === 0 && errored.length === 0 && activity.length === 0;

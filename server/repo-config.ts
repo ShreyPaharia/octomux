@@ -55,7 +55,10 @@ export async function getOrCreateRepoConfig(repoPath: string): Promise<RepoConfi
 export function updateRepoConfig(
   repoPath: string,
   updates: Partial<
-    Pick<RepoConfig, 'base_branch' | 'test_command' | 'format_command' | 'lint_command' | 'ref_inference_json'>
+    Pick<
+      RepoConfig,
+      'base_branch' | 'test_command' | 'format_command' | 'lint_command' | 'ref_inference_json'
+    >
   >,
 ): RepoConfig {
   const db = getDb();

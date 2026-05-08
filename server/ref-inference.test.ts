@@ -47,16 +47,12 @@ describe('inferRefs', () => {
   });
 
   it('returns empty when branch does not match', () => {
-    const config = makeConfig([
-      { integration: 'jira', pattern: '^(?:agents/)?(IN-\\d+)' },
-    ]);
+    const config = makeConfig([{ integration: 'jira', pattern: '^(?:agents/)?(IN-\\d+)' }]);
     expect(inferRefs('feature/my-feature', config, TASK_ID)).toEqual([]);
   });
 
   it('matches branch and extracts capture group', () => {
-    const config = makeConfig([
-      { integration: 'jira', pattern: '^(?:agents/)?(IN-\\d+)' },
-    ]);
+    const config = makeConfig([{ integration: 'jira', pattern: '^(?:agents/)?(IN-\\d+)' }]);
     const refs = inferRefs('agents/IN-456', config, TASK_ID);
     expect(refs).toHaveLength(1);
     expect(refs[0].integration).toBe('jira');
@@ -65,9 +61,7 @@ describe('inferRefs', () => {
   });
 
   it('uses full match when no capture group', () => {
-    const config = makeConfig([
-      { integration: 'custom', pattern: 'TICKET-\\d+' },
-    ]);
+    const config = makeConfig([{ integration: 'custom', pattern: 'TICKET-\\d+' }]);
     const refs = inferRefs('fix/TICKET-789-some-bug', config, TASK_ID);
     expect(refs).toHaveLength(1);
     expect(refs[0].ref).toBe('TICKET-789');
@@ -86,9 +80,7 @@ describe('inferRefs', () => {
   });
 
   it('leaves url null when no url_template', () => {
-    const config = makeConfig([
-      { integration: 'jira', pattern: '^(?:agents/)?(IN-\\d+)' },
-    ]);
+    const config = makeConfig([{ integration: 'jira', pattern: '^(?:agents/)?(IN-\\d+)' }]);
     const refs = inferRefs('agents/IN-100', config, TASK_ID);
     expect(refs[0].url).toBeNull();
   });

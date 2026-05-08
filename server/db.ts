@@ -463,7 +463,12 @@ export function initDb(instance: Database.Database): void {
   // Add new columns to tasks if they don't exist yet (pre-wave-1 DBs).
   const taskColsV2 = columnsOf('tasks');
   addColumn('tasks', 'runtime_state', `runtime_state TEXT NOT NULL DEFAULT 'idle'`, taskColsV2);
-  addColumn('tasks', 'workflow_status', `workflow_status TEXT NOT NULL DEFAULT 'backlog'`, taskColsV2);
+  addColumn(
+    'tasks',
+    'workflow_status',
+    `workflow_status TEXT NOT NULL DEFAULT 'backlog'`,
+    taskColsV2,
+  );
   addColumn('tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
   addColumn('tasks', 'current_summary_updated_at', 'current_summary_updated_at TEXT', taskColsV2);
 
@@ -486,19 +491,18 @@ export function initDb(instance: Database.Database): void {
 
   // ─── ref_inference_json column on repo_configs (Wave 3) ──────────────────
   const repoConfigCols = columnsOf('repo_configs');
-  addColumn(
-    'repo_configs',
-    'ref_inference_json',
-    'ref_inference_json TEXT',
-    repoConfigCols,
-  );
+  addColumn('repo_configs', 'ref_inference_json', 'ref_inference_json TEXT', repoConfigCols);
 
   // ─── New tables (task_updates, task_external_refs, integrations) ──────────
   // These are already created in SCHEMA above via CREATE TABLE IF NOT EXISTS,
   // but for old DBs that ran SCHEMA before this migration block, we ensure
   // the tables exist now by trying to create them if absent.
   const existingTables = new Set(
-    (instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{name: string}>).map(r => r.name)
+    (
+      instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name),
   );
   if (!existingTables.has('task_updates')) {
     instance.exec(`

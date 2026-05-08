@@ -157,9 +157,9 @@ describe('jiraProvider.handler', () => {
     expect(url).toBe('https://acme.atlassian.net/rest/api/3/issue/PROJ-123/transitions');
     expect(opts.method).toBe('POST');
     expect(JSON.parse(opts.body as string)).toEqual({ transition: { id: '41' } });
-    const expectedCreds = Buffer.from(
-      `${VALID_CONFIG.email}:${VALID_CONFIG.api_token}`,
-    ).toString('base64');
+    const expectedCreds = Buffer.from(`${VALID_CONFIG.email}:${VALID_CONFIG.api_token}`).toString(
+      'base64',
+    );
     expect((opts.headers as Record<string, string>)['Authorization']).toBe(
       `Basic ${expectedCreds}`,
     );

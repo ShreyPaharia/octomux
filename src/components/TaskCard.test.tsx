@@ -103,7 +103,11 @@ describe('TaskCard', () => {
 
   it('shows close button for setting_up tasks', () => {
     renderWithRouter(
-      <TaskCard task={makeTask({ runtime_state: 'setting_up' })} onClose={onClose} onDelete={onDelete} />,
+      <TaskCard
+        task={makeTask({ runtime_state: 'setting_up' })}
+        onClose={onClose}
+        onDelete={onDelete}
+      />,
     );
     expect(screen.getByTitle('Close task')).toBeInTheDocument();
     expect(screen.queryByTitle('Delete task')).not.toBeInTheDocument();

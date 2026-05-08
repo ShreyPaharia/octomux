@@ -70,9 +70,7 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">
-        Linked Refs
-      </h2>
+      <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">Linked Refs</h2>
 
       {/* Existing refs list */}
       {refs.length === 0 ? (

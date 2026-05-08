@@ -78,7 +78,9 @@ function pruneOldLogs(logsDir: string, event: string, scriptBaseName: string): v
     const suffix = `-${scriptBaseName}`;
     const files = fs
       .readdirSync(logsDir)
-      .filter((f) => f.startsWith(prefix) && (f.endsWith(`${suffix}.log`) || f.includes(`${suffix}-`)))
+      .filter(
+        (f) => f.startsWith(prefix) && (f.endsWith(`${suffix}.log`) || f.includes(`${suffix}-`)),
+      )
       .map((f) => {
         const fullPath = path.join(logsDir, f);
         try {
@@ -154,7 +156,9 @@ async function runScript(
         try {
           const duration = Date.now() - startedAt;
           logStream.write(`\n[octomux] duration_ms=${duration} exit_code=timeout\n`);
-        } catch { /* best effort */ }
+        } catch {
+          /* best effort */
+        }
         resolve();
       }, timeoutMs);
 
@@ -165,7 +169,9 @@ async function runScript(
           // Append footer with exit code and duration for later parsing.
           try {
             logStream.write(`\n[octomux] duration_ms=${duration} exit_code=${code ?? -1}\n`);
-          } catch { /* best effort */ }
+          } catch {
+            /* best effort */
+          }
           if (code !== 0) {
             logger.warn(
               { script: scriptPath, task_id: taskId, event: envelope.event, exit_code: code },
@@ -191,7 +197,9 @@ async function runScript(
         );
         try {
           logStream.write(`\n[octomux] duration_ms=${Date.now() - startedAt} exit_code=-1\n`);
-        } catch { /* best effort */ }
+        } catch {
+          /* best effort */
+        }
         pruneOldLogs(logsDir, envelope.event, baseName);
         resolve();
       });
@@ -210,7 +218,10 @@ async function runScript(
  * Providers run first (in instance creation order), then shell scripts.
  * All errors are isolated per provider; never throws.
  */
-async function fireIntegrationProviders(event: HookEventName, envelope: HookEnvelope): Promise<void> {
+async function fireIntegrationProviders(
+  event: HookEventName,
+  envelope: HookEnvelope,
+): Promise<void> {
   // Lazily import to avoid circular dependency at module load time.
   let listIntegrations: typeof import('./integrations/store.js').listIntegrations;
   let getProvider: typeof import('./integrations/registry.js').getProvider;
@@ -271,8 +282,8 @@ async function fireIntegrationProviders(event: HookEventName, envelope: HookEnve
 
 export interface HookExecution {
   event: string;
-  script: string;         // basename
-  started_at: string;     // ISO string derived from filename timestamp
+  script: string; // basename
+  started_at: string; // ISO string derived from filename timestamp
   duration_ms: number | null;
   exit_code: number | null;
   log_path: string;
@@ -325,7 +336,8 @@ function parseHookLog(logPath: string): {
     // excerpt = content between header and footer, first 500 chars
     const bodyStart = content.indexOf('\n') + 1;
     const footerIdx = content.lastIndexOf('\n[octomux] duration_ms=');
-    const body = footerIdx > bodyStart ? content.slice(bodyStart, footerIdx) : content.slice(bodyStart);
+    const body =
+      footerIdx > bodyStart ? content.slice(bodyStart, footerIdx) : content.slice(bodyStart);
     const excerpt = body.slice(0, 500);
 
     return { event, script, taskId, startedAt, durationMs, exitCode, excerpt };

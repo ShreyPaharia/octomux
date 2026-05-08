@@ -43,9 +43,7 @@ export function mergeMaskedConfig(
 ): Record<string, unknown> {
   if (typeof incoming !== 'object' || incoming === null) return {};
   const existingObj =
-    typeof existing === 'object' && existing !== null
-      ? (existing as Record<string, unknown>)
-      : {};
+    typeof existing === 'object' && existing !== null ? (existing as Record<string, unknown>) : {};
   const incomingObj = incoming as Record<string, unknown>;
   const result: Record<string, unknown> = { ...incomingObj };
 

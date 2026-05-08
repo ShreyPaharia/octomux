@@ -300,7 +300,11 @@ describe('TaskDetail', () => {
 
   it('hides the Ship button for a scratch task (no repo)', async () => {
     apiMock.getTask.mockResolvedValue(
-      makeTask({ run_mode: 'scratch', runtime_state: 'running', agents: [makeAgent({ id: 'a1' })] }),
+      makeTask({
+        run_mode: 'scratch',
+        runtime_state: 'running',
+        agents: [makeAgent({ id: 'a1' })],
+      }),
     );
     renderDetail();
     await waitFor(() => {

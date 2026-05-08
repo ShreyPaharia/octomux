@@ -184,7 +184,10 @@ describe('SessionsInbox', () => {
   it('mark-all-read calls API and refetches', async () => {
     const user = userEvent.setup();
     apiMock.getInbox
-      .mockResolvedValueOnce({ needs_you: [makeTask({ id: 'n1', runtime_state: 'error' })], activity: [] })
+      .mockResolvedValueOnce({
+        needs_you: [makeTask({ id: 'n1', runtime_state: 'error' })],
+        activity: [],
+      })
       .mockResolvedValueOnce({ needs_you: [], activity: [] });
 
     renderInbox();

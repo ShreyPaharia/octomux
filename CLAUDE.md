@@ -113,6 +113,7 @@ verified end-to-end, default to **sequential dispatch** — one sub-agent at a t
 a single agent for an entire wave.
 
 If you must run agents in parallel:
+
 - After dispatch, capture each agent's actual worktree path with `git worktree list`.
 - Pass the absolute path explicitly in the prompt and tell the agent to `cd` there
   before any file or git operation.

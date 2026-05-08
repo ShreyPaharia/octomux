@@ -95,8 +95,18 @@ describe('TaskActivityPanel', () => {
 
   it('renders multiple updates in order', async () => {
     apiMock.getTaskUpdates.mockResolvedValue([
-      makeUpdate({ id: 'first', kind: 'note', body: 'First note', created_at: '2026-01-01 01:00:00' }),
-      makeUpdate({ id: 'second', kind: 'note', body: 'Second note', created_at: '2026-01-01 02:00:00' }),
+      makeUpdate({
+        id: 'first',
+        kind: 'note',
+        body: 'First note',
+        created_at: '2026-01-01 01:00:00',
+      }),
+      makeUpdate({
+        id: 'second',
+        kind: 'note',
+        body: 'Second note',
+        created_at: '2026-01-01 02:00:00',
+      }),
     ]);
     renderWithRouter(<TaskActivityPanel taskId="task-1" />);
     await waitFor(() => {

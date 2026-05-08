@@ -86,10 +86,7 @@ function IntegrationCard({
 
       <div className="flex items-center gap-3">
         {testResult && (
-          <span
-            className="text-xs"
-            style={{ color: testResult.ok ? '#4ade80' : '#f87171' }}
-          >
+          <span className="text-xs" style={{ color: testResult.ok ? '#4ade80' : '#f87171' }}>
             {testResult.ok ? '✓' : '✗'} {testResult.message}
           </span>
         )}
@@ -123,7 +120,15 @@ function IntegrationCard({
 
 // ─── Modal wrapper ────────────────────────────────────────────────────────────
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
@@ -160,12 +165,12 @@ export default function IntegrationsPage() {
   const [integrations, setIntegrations] = useState<IntegrationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<
-    | { kind: 'create-jira' }
-    | { kind: 'edit-jira'; integration: IntegrationRow }
-    | null
+    { kind: 'create-jira' } | { kind: 'edit-jira'; integration: IntegrationRow } | null
   >(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>(
+    {},
+  );
   const [testing, setTesting] = useState<Record<string, boolean>>({});
 
   const refresh = useCallback(async () => {
@@ -241,18 +246,21 @@ export default function IntegrationsPage() {
             Integrations
           </h1>
           <p className="mt-1 font-mono text-[11px] text-[#8a8a8a]">
-            // connect octomux to external systems · workflow column changes fire to enabled integrations
+            // connect octomux to external systems · workflow column changes fire to enabled
+            integrations
           </p>
         </div>
       </GlassPanel>
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
         <div className="mx-auto max-w-3xl space-y-6">
-
           {/* ─── Available providers ─── */}
           <section>
             <GlassPanel level={2} className="px-5">
-              <header className="flex items-center justify-between" style={{ ...ROW_DIVIDER, padding: '18px 0' }}>
+              <header
+                className="flex items-center justify-between"
+                style={{ ...ROW_DIVIDER, padding: '18px 0' }}
+              >
                 <h2 className="text-[11px] font-bold uppercase tracking-wider text-white">
                   Available providers
                 </h2>
@@ -276,9 +284,7 @@ export default function IntegrationsPage() {
                         </span>
                         <div>
                           <p className="text-sm font-medium text-white">{p.displayName}</p>
-                          <p className="text-xs text-[#8a8a8a]">
-                            Events: {p.events.join(', ')}
-                          </p>
+                          <p className="text-xs text-[#8a8a8a]">Events: {p.events.join(', ')}</p>
                         </div>
                       </div>
                       {p.kind === 'jira' && (
@@ -301,7 +307,10 @@ export default function IntegrationsPage() {
           {/* ─── Configured integrations ─── */}
           <section>
             <GlassPanel level={2} className="px-5">
-              <header className="flex items-center justify-between" style={{ ...ROW_DIVIDER, padding: '18px 0' }}>
+              <header
+                className="flex items-center justify-between"
+                style={{ ...ROW_DIVIDER, padding: '18px 0' }}
+              >
                 <div className="flex items-center gap-3">
                   <h2 className="text-[11px] font-bold uppercase tracking-wider text-white">
                     Configured

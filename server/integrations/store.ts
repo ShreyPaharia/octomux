@@ -30,17 +30,17 @@ function rowToIntegration(row: {
 
 export function listIntegrations(): Integration[] {
   const db = getDb();
-  const rows = db
-    .prepare('SELECT * FROM integrations ORDER BY created_at ASC')
-    .all() as Parameters<typeof rowToIntegration>[0][];
+  const rows = db.prepare('SELECT * FROM integrations ORDER BY created_at ASC').all() as Parameters<
+    typeof rowToIntegration
+  >[0][];
   return rows.map(rowToIntegration);
 }
 
 export function getIntegration(id: string): Integration | undefined {
   const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM integrations WHERE id = ?')
-    .get(id) as Parameters<typeof rowToIntegration>[0] | undefined;
+  const row = db.prepare('SELECT * FROM integrations WHERE id = ?').get(id) as
+    | Parameters<typeof rowToIntegration>[0]
+    | undefined;
   if (!row) return undefined;
   return rowToIntegration(row);
 }

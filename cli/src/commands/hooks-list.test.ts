@@ -35,7 +35,14 @@ function writeLogFile(
   },
 ): void {
   fs.mkdirSync(logsDir, { recursive: true });
-  const { event, script, taskId = '', startedAt = Date.now(), durationMs = 100, exitCode = 0 } = opts;
+  const {
+    event,
+    script,
+    taskId = '',
+    startedAt = Date.now(),
+    durationMs = 100,
+    exitCode = 0,
+  } = opts;
   const taskSuffix = taskId ? `-${taskId}` : '';
   const fileName = `${event}-${startedAt}-${script}${taskSuffix}.log`;
   const content = [

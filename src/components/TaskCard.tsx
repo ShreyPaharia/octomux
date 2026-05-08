@@ -74,7 +74,8 @@ export const TaskCard = memo(function TaskCard({
   onResume,
 }: TaskCardProps) {
   const navigate = useNavigate();
-  const canResume = (task.runtime_state === 'idle' || task.runtime_state === 'error') && !!task.worktree;
+  const canResume =
+    (task.runtime_state === 'idle' || task.runtime_state === 'error') && !!task.worktree;
   const isActive = task.runtime_state === 'running' || task.runtime_state === 'setting_up';
   const displayStatus = task.derived_status || task.runtime_state;
 

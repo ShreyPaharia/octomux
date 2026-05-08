@@ -899,9 +899,7 @@ export default function SettingsPage() {
                 </button>
               );
             })}
-            <div
-              style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '8px 0' }}
-            />
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '8px 0' }} />
             {NAV_EXTRA_ITEMS.map((item) => (
               <button
                 key={item.id}

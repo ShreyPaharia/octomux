@@ -1902,7 +1902,10 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: `invalid workflow_status: ${body.workflow_status}` });
       return;
     }
-    if ((body.workflow_status === 'human_review' || body.workflow_status === 'planned') && !body.note?.trim()) {
+    if (
+      (body.workflow_status === 'human_review' || body.workflow_status === 'planned') &&
+      !body.note?.trim()
+    ) {
       res.status(400).json({ error: `note is required when moving to ${body.workflow_status}` });
       return;
     }
@@ -1920,7 +1923,10 @@ export function setupRoutes(app: Express): void {
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     fireHook('workflow_status_changed', {
       event: 'workflow_status_changed',
-      task: { ...task, workflow_status: body.workflow_status as import('./types.js').WorkflowStatus },
+      task: {
+        ...task,
+        workflow_status: body.workflow_status as import('./types.js').WorkflowStatus,
+      },
       data: { from: prevStatus, to: body.workflow_status, note: body.note },
     });
 
@@ -1973,9 +1979,11 @@ export function setupRoutes(app: Express): void {
     }
 
     const updateId = nanoid(12);
-    db.prepare(
-      `INSERT INTO task_updates (id, task_id, kind, body) VALUES (?, ?, 'note', ?)`,
-    ).run(updateId, task.id, body.body);
+    db.prepare(`INSERT INTO task_updates (id, task_id, kind, body) VALUES (?, ?, 'note', ?)`).run(
+      updateId,
+      task.id,
+      body.body,
+    );
 
     fireHook('note_added', {
       event: 'note_added',
@@ -2057,9 +2065,7 @@ export function setupRoutes(app: Express): void {
     const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 1000);
 
     const updates = db
-      .prepare(
-        `SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
-      )
+      .prepare(`SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`)
       .all(task.id, limit) as TaskUpdate[];
     res.json(updates);
   });
@@ -2211,7 +2217,12 @@ export function setupRoutes(app: Express): void {
         : (body.config as Record<string, unknown>);
       const validation = provider ? provider.validate(mergedConfig) : { ok: true };
       if (!validation.ok) {
-        res.status(400).json({ error: 'config validation failed', details: (validation as { errors?: string[] }).errors });
+        res
+          .status(400)
+          .json({
+            error: 'config validation failed',
+            details: (validation as { errors?: string[] }).errors,
+          });
         return;
       }
       patch.config = mergedConfig;

@@ -396,7 +396,11 @@ describe('deleteTask safety', () => {
 describe('reconcileOrphanSettingUp', () => {
   it('transitions setting_up tasks with dead tmux session to error', async () => {
     execState.hasSession = () => false;
-    insertTask(db, { id: 'ghost', runtime_state: 'setting_up', tmux_session: 'octomux-agent-ghost' });
+    insertTask(db, {
+      id: 'ghost',
+      runtime_state: 'setting_up',
+      tmux_session: 'octomux-agent-ghost',
+    });
     await reconcileOrphanSettingUp();
     const t = getTask(db, 'ghost')!;
     expect(t.runtime_state).toBe('error');
@@ -405,7 +409,11 @@ describe('reconcileOrphanSettingUp', () => {
 
   it('leaves setting_up tasks with live tmux session alone', async () => {
     execState.hasSession = () => true;
-    insertTask(db, { id: 'alive', runtime_state: 'setting_up', tmux_session: 'octomux-agent-alive' });
+    insertTask(db, {
+      id: 'alive',
+      runtime_state: 'setting_up',
+      tmux_session: 'octomux-agent-alive',
+    });
     await reconcileOrphanSettingUp();
     const t = getTask(db, 'alive')!;
     expect(t.runtime_state).toBe('setting_up');

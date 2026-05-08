@@ -147,8 +147,7 @@ export async function pollPRs(): Promise<void> {
     if (pr) {
       // Flip workflow_status to 'pr' if currently in_progress or human_review
       const prevWorkflow = task.workflow_status;
-      const shouldFlipToPr =
-        prevWorkflow === 'in_progress' || prevWorkflow === 'human_review';
+      const shouldFlipToPr = prevWorkflow === 'in_progress' || prevWorkflow === 'human_review';
       db.prepare(
         `UPDATE tasks SET pr_url = ?, pr_number = ?,
          workflow_status = CASE WHEN workflow_status IN ('in_progress','human_review') THEN 'pr' ELSE workflow_status END,
@@ -162,7 +161,12 @@ export async function pollPRs(): Promise<void> {
         ).run(updateId, task.id, prevWorkflow, 'auto: PR opened');
         fireHook('workflow_status_changed', {
           event: 'workflow_status_changed',
-          task: { ...task, pr_url: pr.url, pr_number: pr.number, workflow_status: 'pr' as import('./types.js').WorkflowStatus },
+          task: {
+            ...task,
+            pr_url: pr.url,
+            pr_number: pr.number,
+            workflow_status: 'pr' as import('./types.js').WorkflowStatus,
+          },
           data: { from: prevWorkflow, to: 'pr', note: 'auto: PR opened' },
         });
       }

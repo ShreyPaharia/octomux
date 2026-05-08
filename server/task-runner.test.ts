@@ -1400,7 +1400,10 @@ describe('claude launch flags', () => {
       dangerouslySkipPermissions: true,
       claudeFlags: '',
     });
-    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
+    const closedTask = {
+      ...DEFAULTS.runningTask,
+      runtime_state: 'idle' as const,
+    } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped', claude_session_id: 'abc-123' });
     await resumeTask(closedTask);
@@ -1414,7 +1417,10 @@ describe('claude launch flags', () => {
       dangerouslySkipPermissions: false,
       claudeFlags: '--model opus',
     });
-    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
+    const closedTask = {
+      ...DEFAULTS.runningTask,
+      runtime_state: 'idle' as const,
+    } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped', claude_session_id: null });
     await resumeTask(closedTask);
@@ -1610,7 +1616,10 @@ describe('hook integration', () => {
   });
 
   it('resumeTask generates session ID for --continue agents', async () => {
-    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
+    const closedTask = {
+      ...DEFAULTS.runningTask,
+      runtime_state: 'idle' as const,
+    } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped', claude_session_id: null });
 
@@ -1625,7 +1634,10 @@ describe('hook integration', () => {
   });
 
   it('resumeTask installs hook settings', async () => {
-    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
+    const closedTask = {
+      ...DEFAULTS.runningTask,
+      runtime_state: 'idle' as const,
+    } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped' });
 
