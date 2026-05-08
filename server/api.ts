@@ -2246,12 +2246,10 @@ export function setupRoutes(app: Express): void {
         : (body.config as Record<string, unknown>);
       const validation = provider ? provider.validate(mergedConfig) : { ok: true };
       if (!validation.ok) {
-        res
-          .status(400)
-          .json({
-            error: 'config validation failed',
-            details: (validation as { errors?: string[] }).errors,
-          });
+        res.status(400).json({
+          error: 'config validation failed',
+          details: (validation as { errors?: string[] }).errors,
+        });
         return;
       }
       patch.config = mergedConfig;

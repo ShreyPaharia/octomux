@@ -834,10 +834,7 @@ export default function TaskDetail() {
       ) : isDraft ? (
         <div className={mode === 'agents' ? 'min-h-0 flex-1 overflow-y-auto' : 'hidden'}>
           <DraftEditForm task={task} onSaved={refresh} onStart={handleStart} />
-          <div
-            data-testid="task-detail-panels"
-            className="border-t border-glass-edge px-6 py-4"
-          >
+          <div data-testid="task-detail-panels" className="border-t border-glass-edge px-6 py-4">
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
               <TaskActivityPanel taskId={task.id} />
               <div>
@@ -972,10 +969,7 @@ export default function TaskDetail() {
 
       {/* Info view — Activity / Refs / Hooks panels, opened via the INFO toolbar button */}
       {mode === 'info' && !isDraft && (
-        <div
-          data-testid="task-detail-panels"
-          className="min-h-0 flex-1 overflow-y-auto px-6 py-4"
-        >
+        <div data-testid="task-detail-panels" className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <TaskActivityPanel taskId={task.id} />
             <div>
