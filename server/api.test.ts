@@ -811,6 +811,94 @@ describe('DELETE /api/tasks/:id', () => {
   });
 });
 
+// ─── POST /api/tasks/:id/move ────────────────────────────────────────────────
+
+describe('POST /api/tasks/:id/move', () => {
+  it('updates workflow_status without auto-starting for non-in_progress moves', async () => {
+    insertTask(db, { workflow_status: 'backlog', initial_prompt: 'do the thing' });
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/move`)
+      .send({ workflow_status: 'planned', note: 'queued for next sprint' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.workflow_status).toBe('planned');
+    expect(startTask).not.toHaveBeenCalled();
+    expect(resumeTask).not.toHaveBeenCalled();
+  });
+
+  it('triggers startTask when moving to in_progress from idle without worktree', async () => {
+    insertTask(db, {
+      workflow_status: 'planned',
+      initial_prompt: 'do the thing',
+      runtime_state: 'idle',
+      worktree: null,
+    });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/move`)
+      .send({ workflow_status: 'in_progress' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.workflow_status).toBe('in_progress');
+    // Synchronous flip to setting_up; the fire-and-forget startTask completes
+    // afterwards (its mock would later flip to running) but isn't observable
+    // in this response.
+    expect(res.body.runtime_state).toBe('setting_up');
+    expect(startTask).toHaveBeenCalledOnce();
+    expect(resumeTask).not.toHaveBeenCalled();
+  });
+
+  it('triggers resumeTask when moving to in_progress from idle with existing worktree', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      runtime_state: 'idle',
+      workflow_status: 'planned',
+    });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/move`)
+      .send({ workflow_status: 'in_progress' });
+
+    expect(res.status).toBe(200);
+    expect(resumeTask).toHaveBeenCalledOnce();
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it('triggers resumeTask when moving to in_progress from error with worktree', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      runtime_state: 'error',
+      workflow_status: 'in_progress',
+      error: 'previous failure',
+    });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/move`)
+      .send({ workflow_status: 'in_progress', note: 'retry it' });
+
+    // Same column move is a no-op in the dnd-kit board, but the API itself
+    // doesn't reject it — exercise the error-retry branch via a real transition.
+    expect(res.status).toBe(200);
+    expect(resumeTask).toHaveBeenCalledOnce();
+
+    // Verify error column was cleared as part of the auto-start setup flip.
+    const updated = getTask(db, DEFAULTS.task.id);
+    expect(updated?.error).toBeNull();
+  });
+
+  it('does not auto-start when task is already running', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask, workflow_status: 'planned' });
+
+    const res = await request(app)
+      .post(`/api/tasks/${DEFAULTS.task.id}/move`)
+      .send({ workflow_status: 'in_progress' });
+
+    expect(res.status).toBe(200);
+    expect(startTask).not.toHaveBeenCalled();
+    expect(resumeTask).not.toHaveBeenCalled();
+  });
+});
+
 // ─── GET /api/tasks/:id/diff ─────────────────────────────────────────────────
 
 describe('GET /api/tasks/:id/diff', () => {

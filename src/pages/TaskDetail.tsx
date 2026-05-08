@@ -47,10 +47,12 @@ const MODE_TOOLTIP: Record<RunMode, string> = {
   scratch: 'scratch',
 };
 
+type TaskMode = 'agents' | 'editor' | 'diff' | 'info';
+
 // Per-task UI state preserved across task switches (session-only, not persisted to disk).
 interface PerTaskUiState {
   activeWindow: number | null;
-  mode: 'agents' | 'editor' | 'diff';
+  mode: TaskMode;
 }
 const perTaskUiState = new Map<string, PerTaskUiState>();
 
@@ -99,7 +101,7 @@ export default function TaskDetail() {
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
 
   const [resuming, setResuming] = useState(false);
-  const [mode, setMode] = useState<'agents' | 'editor' | 'diff'>('agents');
+  const [mode, setMode] = useState<TaskMode>('agents');
   const [creatingEditor, setCreatingEditor] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const agentParam = searchParams.get('agent');
@@ -646,6 +648,22 @@ export default function TaskDetail() {
               DIFF
             </Button>
           )}
+          {!isDraft && (
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="info-toggle"
+              data-active={mode === 'info' ? 'true' : undefined}
+              className={
+                mode === 'info'
+                  ? 'border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6] hover:bg-[#3B82F633] hover:text-[#3B82F6]'
+                  : 'border-[#2f2f2f] text-[#8a8a8a]'
+              }
+              onClick={() => setMode(mode === 'info' ? 'agents' : 'info')}
+            >
+              INFO
+            </Button>
+          )}
           {isDraft && (
             <Button variant="default" size="sm" onClick={handleStart}>
               Start
@@ -816,6 +834,19 @@ export default function TaskDetail() {
       ) : isDraft ? (
         <div className={mode === 'agents' ? 'min-h-0 flex-1 overflow-y-auto' : 'hidden'}>
           <DraftEditForm task={task} onSaved={refresh} onStart={handleStart} />
+          <div
+            data-testid="task-detail-panels"
+            className="border-t border-glass-edge px-6 py-4"
+          >
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              <TaskActivityPanel taskId={task.id} />
+              <div>
+                <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
+                <JiraLinkHelper taskId={task.id} />
+              </div>
+              <TaskHooksPanel taskId={task.id} />
+            </div>
+          </div>
         </div>
       ) : (
         <div
@@ -939,12 +970,11 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Activity + Refs sidebar panels — collapsed into an expandable bottom strip */}
-      {mode !== 'diff' && (
+      {/* Info view — Activity / Refs / Hooks panels, opened via the INFO toolbar button */}
+      {mode === 'info' && !isDraft && (
         <div
           data-testid="task-detail-panels"
-          className="shrink-0 overflow-y-auto border-t border-glass-edge px-6 py-4"
-          style={{ maxHeight: '40vh' }}
+          className="min-h-0 flex-1 overflow-y-auto px-6 py-4"
         >
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <TaskActivityPanel taskId={task.id} />

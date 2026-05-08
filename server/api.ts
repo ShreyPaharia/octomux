@@ -1920,6 +1920,22 @@ export function setupRoutes(app: Express): void {
       `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, ?, ?)`,
     ).run(updateId, task.id, prevStatus, body.workflow_status, body.note ?? null);
 
+    // Auto-start: moving to in_progress should kick the task into setting_up
+    // if it isn't already running. Mirrors POST /api/tasks/:id/start and the
+    // resume branch of PATCH /api/tasks/:id, but triggered by a board move.
+    let autoStart: 'start' | 'resume' | null = null;
+    if (
+      body.workflow_status === 'in_progress' &&
+      (task.runtime_state === 'idle' || task.runtime_state === 'error')
+    ) {
+      autoStart = task.worktree ? 'resume' : 'start';
+    }
+    if (autoStart) {
+      db.prepare(
+        `UPDATE tasks SET runtime_state = 'setting_up', error = NULL, updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+    }
+
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     fireHook('workflow_status_changed', {
       event: 'workflow_status_changed',
@@ -1932,6 +1948,19 @@ export function setupRoutes(app: Express): void {
 
     const updated = fetchTaskBundle(task.id);
     res.json(updated);
+
+    // Fire-and-forget after responding so the client gets the optimistic
+    // setting_up state immediately and a follow-up task:updated broadcast
+    // surfaces success or error.
+    if (autoStart === 'start') {
+      startTask(task)
+        .then(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }))
+        .catch(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }));
+    } else if (autoStart === 'resume') {
+      resumeTask(task)
+        .then(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }))
+        .catch(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }));
+    }
   });
 
   // Post a summary for a task
