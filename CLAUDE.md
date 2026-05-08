@@ -104,18 +104,20 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - logger path resolution is lazy — tests that stub `os`/`fs` must not expect the log
   dir to exist at module-load time (pino is silent in NODE_ENV=test anyway)
 
-## Dispatching agents
+## Dispatching parallel Claude Code sub-agents in this repo
 
-When creating a new agent task from a worktree issue or user request, prefer creating
-a **draft task** (`runtime_state: 'idle'`, `initial_prompt` set) and then starting it
-via `startTask()` rather than writing directly to the DB.  This ensures the full
-lifecycle hooks (worktree creation, tmux session launch, hook installation) run in order.
+When working on this codebase via Claude Code, parallel `Agent({ isolation: "worktree" })`
+dispatches have proved unreliable: agents leaked back into the parent worktree and
+clobbered each other's commits during the wave-2 implementation. Until that's
+verified end-to-end, default to **sequential dispatch** — one sub-agent at a time, or
+a single agent for an entire wave.
 
-Key rules:
-- `runtime_state: 'idle'` — both drafts (no prompt) and closed tasks share this state.
-  A task is a draft when `runtime_state === 'idle' && !initial_prompt`.
-- Only `setting_up` and `running` tasks are considered "active" for conflict detection
-  (e.g., the partial-unique-index on `worktree_id` covers those two states).
-- Integration config values may contain `${env:VAR_NAME}` placeholders; these are
-  resolved at dispatch time by `server/integrations/resolve-env.ts` before the config
-  is forwarded to the provider handler.
+If you must run agents in parallel:
+- After dispatch, capture each agent's actual worktree path with `git worktree list`.
+- Pass the absolute path explicitly in the prompt and tell the agent to `cd` there
+  before any file or git operation.
+- Verify both agents are on distinct branches before they start committing.
+
+This is unrelated to octomux's own runtime tasks (worktree + tmux + agents) — see
+"Task Lifecycle" above for that. The note here is purely about Claude Code's
+sub-agent harness.
