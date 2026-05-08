@@ -141,12 +141,10 @@ function fetchTaskBundle(taskId: string): Task {
 }
 
 function derivedStatus(task: {
-  status: string;
-  runtime_state?: string;
+  runtime_state: string;
   agents: Array<{ status: string; hook_activity: string }>;
 }): DerivedTaskStatus | null {
-  const rs = task.runtime_state ?? task.status;
-  if (rs !== 'running') return null;
+  if (task.runtime_state !== 'running') return null;
   const activities = task.agents.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
   if (activities.length === 0) return 'done';
   if (activities.includes('active')) return 'working';
@@ -394,7 +392,7 @@ export function setupRoutes(app: Express): void {
         ...task,
         agents,
         pending_prompts: promptsByTask.get(task.id) || [],
-        derived_status: derivedStatus({ status: task.status, runtime_state: task.runtime_state, agents }),
+        derived_status: derivedStatus({ runtime_state: task.runtime_state, agents }),
         user_terminals: terminalsByTask.get(task.id) || [],
       };
     });
@@ -460,7 +458,7 @@ export function setupRoutes(app: Express): void {
       ...task,
       agents,
       pending_prompts: parsedPrompts,
-      derived_status: derivedStatus({ status: task.status, runtime_state: task.runtime_state, agents }),
+      derived_status: derivedStatus({ runtime_state: task.runtime_state, agents }),
       user_terminals: userTerminals,
       worktree_row: worktreeRow,
     });
@@ -570,13 +568,12 @@ export function setupRoutes(app: Express): void {
 
       db.prepare(
         `INSERT INTO tasks
-           (id, title, description, status, runtime_state, workflow_status, initial_prompt, worktree_id, agent)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         body.title,
         body.description,
-        isDraft ? 'draft' : 'setting_up',
         isDraft ? 'idle' : 'setting_up',
         initialWorkflowStatus,
         body.initial_prompt ?? null,
@@ -632,8 +629,7 @@ export function setupRoutes(app: Express): void {
     ].some((k) => (body as Record<string, unknown>)[k] !== undefined);
 
     if (hasDraftFields) {
-      const rs = (task as any).runtime_state ?? task.status;
-      const isDraft = rs === 'idle' || task.status === 'draft';
+      const isDraft = task.runtime_state === 'idle';
       if (!isDraft) {
         res.status(400).json({ error: 'Can only edit fields on draft tasks' });
         return;
@@ -718,8 +714,7 @@ export function setupRoutes(app: Express): void {
       }
     } else if (body.status === 'running' || body.runtime_state === 'running') {
       // Resume task
-      const rs = task.runtime_state ?? task.status;
-      if (rs !== 'idle' && task.status !== 'closed' && task.status !== 'error') {
+      if (task.runtime_state !== 'idle' && task.runtime_state !== 'error') {
         res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
         return;
       }
@@ -759,14 +754,14 @@ export function setupRoutes(app: Express): void {
     if (!task) return;
     const db = getDb();
 
-    if (task.status !== 'draft') {
+    if (task.runtime_state !== 'idle') {
       res.status(400).json({ error: 'Only draft tasks can be started' });
       return;
     }
 
     // Set status immediately so client sees setting_up
     db.prepare(
-      `UPDATE tasks SET status = 'setting_up', runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE tasks SET runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
     const updated = fetchTaskBundle(task.id);
@@ -802,7 +797,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if ((task.runtime_state ?? task.status) !== 'running') {
+    if (task.runtime_state !== 'running') {
       res.status(400).json({ error: 'Can only add agents to running tasks' });
       return;
     }
@@ -836,7 +831,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if ((task.runtime_state ?? task.status) !== 'running') {
+    if (task.runtime_state !== 'running') {
       res.status(400).json({ error: 'Can only create user terminal for running tasks' });
       return;
     }
@@ -860,7 +855,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if ((task.runtime_state ?? task.status) !== 'running') {
+    if (task.runtime_state !== 'running') {
       res.status(400).json({ error: 'Can only create terminals for running tasks' });
       return;
     }
@@ -906,7 +901,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    if ((task.runtime_state ?? task.status) !== 'running') {
+    if (task.runtime_state !== 'running') {
       res.status(400).json({ error: 'Task is not running' });
       return;
     }
@@ -1112,7 +1107,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    if (task.status === 'draft' || (task.runtime_state ?? task.status) === 'idle') {
+    if (task.runtime_state === 'idle') {
       res.status(409).json({ error: 'cannot change base on a draft task' });
       return;
     }
@@ -1627,7 +1622,7 @@ export function setupRoutes(app: Express): void {
         res.status(404).json({ error: `Task not found: ${targetTaskId}` });
         return;
       }
-      const trs = (targetTask as Task).runtime_state ?? targetTask.status;
+      const trs = (targetTask as Task).runtime_state;
       if (!(['setting_up', 'running'] as const).includes(trs as 'running')) {
         res.status(409).json({ error: `Target task is not active (runtime_state=${trs})` });
         return;
@@ -1786,7 +1781,12 @@ export function setupRoutes(app: Express): void {
                   WHERE COALESCE(w2.repo_path,'') || '|' || COALESCE(w2.mode,'') || '|'
                      || COALESCE(w2.branch,'')   || '|' || COALESCE(w2.path,'')
                       = g.group_key
-                    AND t.status IN ('draft','setting_up','running')
+                    AND t.runtime_state IN ('idle','setting_up','running')
+                  ORDER BY CASE t.runtime_state
+                             WHEN 'running'    THEN 0
+                             WHEN 'setting_up' THEN 1
+                             ELSE 2
+                           END, t.updated_at DESC
                   LIMIT 1) AS active_task_id
            FROM grouped g
            INNER JOIN agg ON agg.group_key = g.group_key
@@ -1810,8 +1810,7 @@ export function setupRoutes(app: Express): void {
       .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? ORDER BY t.updated_at DESC`)
       .all(worktree.id) as Task[];
     const active = tasks.find((t) => {
-      const rs = (t as any).runtime_state ?? t.status;
-      return (['setting_up', 'running'] as const).includes(rs as 'running');
+      return (['setting_up', 'running'] as const).includes(t.runtime_state as 'running');
     });
     const history = tasks.filter((t) => t.id !== active?.id);
     res.json({
@@ -1835,10 +1834,10 @@ export function setupRoutes(app: Express): void {
       return;
     }
     const referencingTasks = db
-      .prepare('SELECT id, status FROM tasks WHERE worktree_id = ?')
-      .all(worktree.id) as Array<{ id: string; status: string }>;
+      .prepare('SELECT id, runtime_state FROM tasks WHERE worktree_id = ?')
+      .all(worktree.id) as Array<{ id: string; runtime_state: string }>;
     const activeRef = referencingTasks.find((t) =>
-      (['draft', 'setting_up', 'running', 'idle'] as const).includes(t.status as 'running'),
+      (['setting_up', 'running'] as const).includes(t.runtime_state as 'running'),
     );
     if (activeRef) {
       res.status(409).json({ error: 'Worktree has an active task' });

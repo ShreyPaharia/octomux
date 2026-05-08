@@ -74,9 +74,9 @@ export const TaskCard = memo(function TaskCard({
   onResume,
 }: TaskCardProps) {
   const navigate = useNavigate();
-  const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
-  const isActive = task.status === 'running' || task.status === 'setting_up';
-  const displayStatus = task.derived_status || task.status;
+  const canResume = (task.runtime_state === 'idle' || task.runtime_state === 'error') && !!task.worktree;
+  const isActive = task.runtime_state === 'running' || task.runtime_state === 'setting_up';
+  const displayStatus = task.derived_status || task.runtime_state;
 
   return (
     <GlassPanel
@@ -169,7 +169,7 @@ export const TaskCard = memo(function TaskCard({
             </div>
           )}
 
-          {task.agents && task.agents.length > 0 && task.status === 'running' && (
+          {task.agents && task.agents.length > 0 && task.runtime_state === 'running' && (
             <div className="mt-2">
               <AgentActivitySummary agents={task.agents} pendingPrompts={task.pending_prompts} />
             </div>

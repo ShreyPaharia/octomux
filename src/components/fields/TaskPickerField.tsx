@@ -10,7 +10,7 @@ interface TaskPickerFieldProps {
   onChange: (value: string) => void;
 }
 
-const ALLOWED_STATUSES = new Set(['running', 'closed']);
+const ALLOWED_STATUSES = new Set(['running', 'idle']);
 
 export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -22,7 +22,7 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
     setLoading(true);
     api
       .listTasks()
-      .then((all) => setTasks(all.filter((t) => ALLOWED_STATUSES.has(t.status))))
+      .then((all) => setTasks(all.filter((t) => ALLOWED_STATUSES.has(t.runtime_state))))
       .catch(() => setTasks([]))
       .finally(() => setLoading(false));
   }, []);

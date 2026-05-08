@@ -17,7 +17,7 @@ const RUNNING_STATUSES = ['setting_up', 'running'];
 const STATUS_TABS: readonly StatusTab[] = ['all', 'running', 'needs_you', 'closed'];
 
 function isNeedsYou(t: Task): boolean {
-  if (t.status === 'error') return true;
+  if (t.runtime_state === 'error') return true;
   if ((t.pending_prompts?.length ?? 0) > 0) return true;
   if (t.derived_status === 'needs_attention') return true;
   return false;
@@ -45,9 +45,9 @@ export function useTaskFilters(tasks: Task[]) {
     const repoFiltered = filters.repo ? tasks.filter((t) => t.repo_path === filters.repo) : tasks;
     return {
       all: repoFiltered.length,
-      running: repoFiltered.filter((t) => RUNNING_STATUSES.includes(t.status)).length,
+      running: repoFiltered.filter((t) => RUNNING_STATUSES.includes(t.runtime_state)).length,
       needs_you: repoFiltered.filter(isNeedsYou).length,
-      closed: repoFiltered.filter((t) => t.status === 'closed').length,
+      closed: repoFiltered.filter((t) => t.runtime_state === 'idle').length,
     };
   }, [tasks, filters.repo]);
 
@@ -57,11 +57,11 @@ export function useTaskFilters(tasks: Task[]) {
       if (filters.status === 'all') {
         statusMatch = true;
       } else if (filters.status === 'running') {
-        statusMatch = RUNNING_STATUSES.includes(t.status);
+        statusMatch = RUNNING_STATUSES.includes(t.runtime_state);
       } else if (filters.status === 'needs_you') {
         statusMatch = isNeedsYou(t);
       } else {
-        statusMatch = t.status === 'closed';
+        statusMatch = t.runtime_state === 'idle';
       }
       const repoMatch = !filters.repo || t.repo_path === filters.repo;
       return statusMatch && repoMatch;
@@ -77,8 +77,8 @@ export function useTaskFilters(tasks: Task[]) {
       draft: 5,
     };
     result.sort((a, b) => {
-      const aPriority = priorityOrder[a.derived_status ?? a.status] ?? 9;
-      const bPriority = priorityOrder[b.derived_status ?? b.status] ?? 9;
+      const aPriority = priorityOrder[a.derived_status ?? a.runtime_state] ?? 9;
+      const bPriority = priorityOrder[b.derived_status ?? b.runtime_state] ?? 9;
       if (aPriority !== bPriority) return aPriority - bPriority;
       return b.created_at.localeCompare(a.created_at);
     });

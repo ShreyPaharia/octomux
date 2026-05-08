@@ -7,7 +7,6 @@ import type {
   UserTerminal,
   Worktree,
   WorktreeSummary,
-  TaskStatus,
   WorkflowStatus,
   RuntimeState,
   TaskExternalRef,
@@ -19,39 +18,6 @@ import type {
 } from '../../server/types';
 
 export type { WorkflowStatus, RuntimeState, TaskExternalRef, TaskUpdate };
-
-/**
- * Back-compat adapter: the old UI expects `task.status` to contain
- * 'draft'|'setting_up'|'running'|'closed'|'error'. After the wave-1 rename,
- * the server returns `runtime_state` and `workflow_status`.  Map runtime_state
- * back to a legacy TaskStatus so existing TaskCard/TaskFilterBar still work
- * without changes.
- *
- * Call this on every Task returned by the server before handing it to
- * existing React components.
- */
-export function adaptTask(raw: Task): Task & { status: TaskStatus } {
-  const runtimeState: RuntimeState = raw.runtime_state ?? 'idle';
-  let legacyStatus: TaskStatus;
-  switch (runtimeState) {
-    case 'setting_up': legacyStatus = 'setting_up'; break;
-    case 'running':    legacyStatus = 'running'; break;
-    case 'error':      legacyStatus = 'error'; break;
-    case 'idle':
-    default:
-      // Was this a draft (no initial_prompt + never started) or closed?
-      legacyStatus = raw.status === 'draft' ? 'draft' : 'closed';
-  }
-  return {
-    ...raw,
-    status: legacyStatus,
-    runtime_state: runtimeState,
-  };
-}
-
-export function adaptTasks(raws: Task[]): Task[] {
-  return raws.map(adaptTask);
-}
 
 export interface WorktreeDetail {
   worktree: Worktree;
@@ -165,7 +131,7 @@ export interface RefInferenceRule {
 export interface PreflightConflict {
   task_id: string;
   title: string;
-  status: TaskStatus;
+  status: RuntimeState;
   branch: string | null;
 }
 

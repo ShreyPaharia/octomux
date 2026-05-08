@@ -46,7 +46,7 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 async function recoverTasks(): Promise<void> {
   const db = getDb();
   const staleTasks = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.status IN ('running', 'setting_up')`)
+    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up')`)
     .all() as Task[];
 
   for (const task of staleTasks) {
@@ -61,15 +61,15 @@ async function recoverTasks(): Promise<void> {
       resumeTask(task).catch((err) => {
         logger.error({ task_id: task.id, err }, 'Recovery: resumeTask failed');
       });
-    } else if (task.status === 'setting_up') {
+    } else if (task.runtime_state === 'setting_up') {
       logger.warn({ task_id: task.id, title: task.title }, 'Recovery: setup was interrupted');
       db.prepare(
-        `UPDATE tasks SET status = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
     } else {
       logger.warn({ task_id: task.id, title: task.title }, 'Recovery: worktree missing');
       db.prepare(
-        `UPDATE tasks SET status = 'error', error = 'Worktree missing after restart', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'error', error = 'Worktree missing after restart', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
     }
   }

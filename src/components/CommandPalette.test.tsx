@@ -56,9 +56,9 @@ describe('CommandPalette (inline search)', () => {
       id: 't3',
       title: 'Auth telemetry',
       repo_path: '/u/dev/octo',
-      status: 'setting_up',
+      runtime_state: 'setting_up',
     }),
-    makeTask({ id: 't-closed', title: 'Closed one', status: 'closed' }),
+    makeTask({ id: 't-closed', title: 'Closed one', runtime_state: 'idle' }),
   ];
 
   it('renders a search input that is always visible', () => {
@@ -148,13 +148,13 @@ describe('CommandPalette — move-task actions', () => {
       id: 't-backlog',
       title: 'Add login feature',
       workflow_status: 'backlog',
-      status: 'draft',
+      runtime_state: 'idle',
     }),
     makeTask({
       id: 't-inprogress',
       title: 'Fix checkout bug',
       workflow_status: 'in_progress',
-      status: 'running',
+      runtime_state: 'running',
     }),
   ];
 

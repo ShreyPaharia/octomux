@@ -7,7 +7,7 @@
  * row. Every reader in the codebase uses this to keep consumers unchanged.
  */
 export const SELECT_TASK_SQL = `
-  SELECT t.id, t.title, t.description, t.status, t.runtime_state, t.workflow_status,
+  SELECT t.id, t.title, t.description, t.runtime_state, t.workflow_status,
          t.tmux_session,
          t.pr_url, t.pr_number, t.pr_head_sha, t.user_window_index,
          t.initial_prompt, t.last_viewed_at, t.source, t.worktree_id,

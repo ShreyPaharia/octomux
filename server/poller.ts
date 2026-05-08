@@ -62,14 +62,14 @@ export async function pollStatuses(): Promise<void> {
     const { task, status } = result.value;
     if (status !== 'dead') continue;
 
-    const rs = task.runtime_state ?? task.status;
+    const rs = task.runtime_state;
     if (rs === 'running') {
       db.prepare(
-        `UPDATE tasks SET status = 'closed', runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
     } else if (rs === 'setting_up') {
       db.prepare(
-        `UPDATE tasks SET status = 'error', runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
     } else {
       continue;
@@ -130,7 +130,7 @@ export async function pollPRs(): Promise<void> {
   const db = getDb();
   const tasks = db
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.status != 'draft' AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
     )
     .all() as Task[];
 
@@ -382,7 +382,7 @@ async function upsertReviewTask(
   const db = getDb();
   const existing = db
     .prepare(
-      `SELECT t.id AS id, t.status AS status, t.runtime_state AS runtime_state,
+      `SELECT t.id AS id, t.runtime_state AS runtime_state,
               t.source AS source,
               t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
               t.tmux_session AS tmux_session
@@ -395,7 +395,6 @@ async function upsertReviewTask(
     .get(repoPath, pr.number) as
     | {
         id: string;
-        status: string;
         runtime_state: string;
         source: string | null;
         pr_head_sha: string | null;
@@ -409,7 +408,7 @@ async function upsertReviewTask(
     if (existing.source !== 'auto_review') return { action: 'skipped' };
     if (existing.pr_head_sha === pr.headRefOid) return { action: 'skipped' };
 
-    if (existing.runtime_state === 'idle' || existing.status === 'draft') {
+    if (existing.runtime_state === 'idle') {
       const updatedPrompt = buildShaUpdateNote(
         existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString()),
         pr.headRefOid,
@@ -424,7 +423,7 @@ async function upsertReviewTask(
 
     // Task is running (or setting_up) — nudge the existing agent rather than
     // creating a duplicate. Record the new SHA so we don't re-nudge on every tick.
-    if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up' || existing.status === 'running' || existing.status === 'setting_up') {
+    if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
       const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
       if (!delivered) return { action: 'skipped' };
@@ -454,9 +453,9 @@ async function upsertReviewTask(
 
   db.prepare(
     `INSERT INTO tasks
-       (id, title, description, status, runtime_state, workflow_status, pr_url, pr_number, pr_head_sha,
+       (id, title, description, runtime_state, workflow_status, pr_url, pr_number, pr_head_sha,
         initial_prompt, source, worktree_id)
-     VALUES (?, ?, ?, 'draft', 'idle', 'backlog', ?, ?, ?, ?, 'auto_review', ?)`,
+     VALUES (?, ?, ?, 'idle', 'backlog', ?, ?, ?, ?, 'auto_review', ?)`,
   ).run(id, title, description, pr.url, pr.number, pr.headRefOid, prompt, worktreeId);
   return { action: 'created', taskId: id };
 }

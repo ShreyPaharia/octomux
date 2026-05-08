@@ -113,7 +113,7 @@ function noneTask(id: string): Task {
      VALUES (?, ?, ?, NULL, 'main', 'none', 'available')`,
   ).run(wtId, '/repo', '/repo');
   db.prepare(
-    `INSERT INTO tasks (id, title, description, status, worktree_id)
+    `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
      VALUES (?, 'T', 'D', 'setting_up', ?)`,
   ).run(id, wtId);
 
@@ -123,9 +123,9 @@ function noneTask(id: string): Task {
     run_mode: 'none' as const,
     repo_path: '/repo',
     base_branch: 'main',
-    status: 'setting_up' as const,
+    runtime_state: 'setting_up' as const,
     worktree_id: wtId,
-  } as Task;
+  } as unknown as Task;
 }
 
 describe('two none-mode tasks on the same repo + base_branch', () => {
@@ -135,7 +135,7 @@ describe('two none-mode tasks on the same repo + base_branch', () => {
     await startTask(a);
 
     const updated = getTask(db, 'task-a')!;
-    expect(updated.status).toBe('running');
+    expect(updated.runtime_state).toBe('running');
     expect(updated.tmux_session).toBe('octomux-agent-task-a');
     expect(updated.error).toBeNull();
   });
@@ -144,13 +144,13 @@ describe('two none-mode tasks on the same repo + base_branch', () => {
     const a = noneTask('task-a');
     await startTask(a);
     const aFinal = getTask(db, 'task-a')!;
-    expect(aFinal.status).toBe('running');
+    expect(aFinal.runtime_state).toBe('running');
 
     const b = noneTask('task-b');
     await startTask(b);
 
     const bFinal = getTask(db, 'task-b')!;
-    expect(bFinal.status).toBe('running');
+    expect(bFinal.runtime_state).toBe('running');
     expect(bFinal.tmux_session).toBe('octomux-agent-task-b');
     expect(bFinal.error).toBeNull();
     expect(aFinal.tmux_session).not.toBe(bFinal.tmux_session);

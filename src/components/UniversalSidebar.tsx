@@ -26,7 +26,7 @@ import {
   type SidebarGroup,
 } from '@/lib/sidebar-utils';
 import { api } from '@/lib/api';
-import type { RunMode, TaskStatus, Agent } from '../../server/types';
+import type { RunMode, Agent } from '../../server/types';
 
 const STORAGE_KEY = 'octomux-sidebar-collapsed';
 const GROUP_COLLAPSE_PREFIX = 'octomux:sidebar:collapsed:';
@@ -324,7 +324,7 @@ export function forkDisabledReason(item: SidebarItem): string | null {
   if (item.runMode === 'scratch') return 'Cannot fork a scratch task (no repo).';
   if (item.runMode === 'none')
     return 'Cannot fork a task that runs on the working tree (no branch).';
-  if (item.status === 'draft') return 'Cannot fork a draft task (no branch yet).';
+  if (item.status === 'idle') return 'Cannot fork a draft task (no branch yet).';
   return null;
 }
 
@@ -386,7 +386,7 @@ interface RowMenuProps {
 
 function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete }: RowMenuProps) {
   const forkDisabled = forkDisabledReason(item);
-  const closeDisabled = (['closed', 'draft'] as TaskStatus[]).includes(item.status);
+  const closeDisabled = item.status === 'idle';
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -614,7 +614,7 @@ export function UniversalSidebar() {
         .flatMap((g) => g.items)
         .filter((item) => {
           const s = item.derivedStatus ?? item.status;
-          return s !== 'closed';
+          return s !== 'idle';
         })
         .slice(0, 6),
     [groups],

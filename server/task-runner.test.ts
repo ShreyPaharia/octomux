@@ -159,7 +159,7 @@ describe('startTask', () => {
     });
 
     const expectedFields = [
-      { field: 'status', expected: 'running' },
+      { field: 'runtime_state', expected: 'running' },
       { field: 'tmux_session', expected: `octomux-agent-${DEFAULTS.task.id}` },
       { field: 'branch', expected: 'agents/fix-order-validation-test-t' },
       {
@@ -379,7 +379,7 @@ describe('startTask', () => {
     await startTask({ ...DEFAULTS.task } as Task);
 
     const updated = getTask(db, DEFAULTS.task.id)!;
-    expect(updated.status).toBe('error');
+    expect(updated.runtime_state).toBe('error');
     expect(updated.error).toContain(errorContains);
   });
 
@@ -403,9 +403,9 @@ describe('startTask', () => {
       expect(updated.branch).toBe('main');
     });
 
-    it('sets status to running', () => {
+    it('sets runtime_state to running', () => {
       const updated = getTask(db, DEFAULTS.task.id)!;
-      expect(updated.status).toBe('running');
+      expect(updated.runtime_state).toBe('running');
     });
 
     it('does not create a git worktree', () => {
@@ -460,7 +460,7 @@ describe('startTask', () => {
       expect(checkoutCall).toBeDefined();
 
       const updated = getTask(db, DEFAULTS.task.id)!;
-      expect(updated.status).toBe('running');
+      expect(updated.runtime_state).toBe('running');
       expect(updated.branch).toBe('feature-x');
     });
 
@@ -566,7 +566,7 @@ describe('startTask', () => {
            VALUES ('wt-other', '/tmp/test-repo', '/tmp/test-repo', 'feature-x', 'feature-x', 'none', 'in_use')`,
         ).run();
         db.prepare(
-          `INSERT INTO tasks (id, title, description, status, worktree_id)
+          `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
            VALUES ('other', 'other', '', 'running', 'wt-other')`,
         ).run();
 
@@ -579,7 +579,7 @@ describe('startTask', () => {
         await startTask(noneTask);
 
         const updated = getTask(db, DEFAULTS.task.id)!;
-        expect(updated.status).toBe('running');
+        expect(updated.runtime_state).toBe('running');
         expect(updated.error).toBeNull();
         // No checkout needed when current already equals target
         expect(
@@ -600,7 +600,7 @@ describe('startTask', () => {
          VALUES ('wt-other', '/tmp/test-repo', '/tmp/test-repo', 'main', 'main', 'none', 'in_use')`,
       ).run();
       db.prepare(
-        `INSERT INTO tasks (id, title, description, status, worktree_id)
+        `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
          VALUES ('other-task', 'other', '', 'running', 'wt-other')`,
       ).run();
 
@@ -613,7 +613,7 @@ describe('startTask', () => {
       await startTask(noneTask);
 
       const updated = getTask(db, DEFAULTS.task.id)!;
-      expect(updated.status).toBe('error');
+      expect(updated.runtime_state).toBe('error');
       expect(updated.error).toMatch(/another chat is active on a different branch/);
       expect(
         findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['checkout', 'feature-x'] }),
@@ -627,7 +627,7 @@ describe('startTask', () => {
     insertTask(db, { error: 'Setup interrupted' });
     await startTask({ ...DEFAULTS.task } as Task);
     const updated = getTask(db, DEFAULTS.task.id)!;
-    expect(updated.status).toBe('running');
+    expect(updated.runtime_state).toBe('running');
     expect(updated.error).toBeNull();
   });
 
@@ -648,7 +648,7 @@ describe('startTask', () => {
     await startTask({ ...DEFAULTS.task } as Task);
 
     const updated = getTask(db, DEFAULTS.task.id)!;
-    expect(updated.status).toBe('error');
+    expect(updated.runtime_state).toBe('error');
     // Crucial: pollStatuses would misread this as a live-but-dead session
     // and stamp 'Setup interrupted' on top — keep it NULL until the session
     // is actually created.
@@ -1083,24 +1083,24 @@ describe('stopAgent', () => {
 describe('resumeTask', () => {
   const closedTask = {
     ...DEFAULTS.runningTask,
-    status: 'closed' as const,
-  } as Task;
+    runtime_state: 'idle' as const,
+  } as unknown as Task;
 
-  it('sets status to setting_up then running on success', async () => {
+  it('sets runtime_state to setting_up then running on success', async () => {
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped' });
 
     await resumeTask(closedTask);
 
     const updated = getTask(db, DEFAULTS.task.id)!;
-    expect(updated.status).toBe('running');
+    expect(updated.runtime_state).toBe('running');
   });
 
   it('clears error field on resume', async () => {
-    insertTask(db, { ...closedTask, status: 'error', error: 'Previous error' });
+    insertTask(db, { ...closedTask, runtime_state: 'error', error: 'Previous error' });
     insertAgent(db, { status: 'stopped' });
 
-    await resumeTask({ ...closedTask, status: 'error' as any } as Task);
+    await resumeTask({ ...closedTask, runtime_state: 'error' as any } as unknown as Task);
 
     const updated = getTask(db, DEFAULTS.task.id)!;
     expect(updated.error).toBeNull();
@@ -1215,7 +1215,7 @@ describe('resumeTask', () => {
     await resumeTask(closedTask);
 
     const updated = getTask(db, DEFAULTS.task.id)!;
-    expect(updated.status).toBe('error');
+    expect(updated.runtime_state).toBe('error');
     expect(updated.error).toContain('tmux not found');
   });
 
@@ -1232,11 +1232,11 @@ describe('resumeTask', () => {
   describe('run_mode=none', () => {
     const noneClosedTask = {
       ...DEFAULTS.runningTask,
-      status: 'closed' as const,
+      runtime_state: 'idle' as const,
       run_mode: 'none' as const,
       worktree: DEFAULTS.runningTask.repo_path,
       branch: null,
-    } as Task;
+    } as unknown as Task;
 
     beforeEach(() => {
       vi.mocked(execFile).mockImplementation(((
@@ -1268,7 +1268,7 @@ describe('resumeTask', () => {
       await resumeTask(noneClosedTask);
 
       const updated = getTask(db, DEFAULTS.task.id)!;
-      expect(updated.status).toBe('running');
+      expect(updated.runtime_state).toBe('running');
     });
 
     it('creates tmux session with repo_path as cwd', async () => {
@@ -1400,7 +1400,7 @@ describe('claude launch flags', () => {
       dangerouslySkipPermissions: true,
       claudeFlags: '',
     });
-    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped', claude_session_id: 'abc-123' });
     await resumeTask(closedTask);
@@ -1414,7 +1414,7 @@ describe('claude launch flags', () => {
       dangerouslySkipPermissions: false,
       claudeFlags: '--model opus',
     });
-    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped', claude_session_id: null });
     await resumeTask(closedTask);
@@ -1610,7 +1610,7 @@ describe('hook integration', () => {
   });
 
   it('resumeTask generates session ID for --continue agents', async () => {
-    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped', claude_session_id: null });
 
@@ -1625,7 +1625,7 @@ describe('hook integration', () => {
   });
 
   it('resumeTask installs hook settings', async () => {
-    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const } as Task;
+    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const } as unknown as Task;
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped' });
 
@@ -1868,11 +1868,11 @@ describe('closeTask — user terminal cleanup', () => {
 
 describe('resumeTask — user terminal cleanup', () => {
   it('deletes user_terminals rows on resume', async () => {
-    const closedTask = { ...DEFAULTS.runningTask, status: 'closed' as const };
+    const closedTask = { ...DEFAULTS.runningTask, runtime_state: 'idle' as const };
     insertTask(db, closedTask);
     insertAgent(db, { status: 'stopped' });
     insertUserTerminal(db, { task_id: closedTask.id });
-    await resumeTask(closedTask as Task);
+    await resumeTask(closedTask as unknown as Task);
     expect(getUserTerminals(db, closedTask.id)).toHaveLength(0);
   });
 });
@@ -2047,7 +2047,7 @@ describe('hopAgent', () => {
   it('detaches a task agent to a standalone chat session', async () => {
     insertTask(db, {
       id: 'tFrom',
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-tFrom',
     });
     const agent = insertAgent(db, { id: 'agDet', task_id: 'tFrom', window_index: 3 });
@@ -2081,10 +2081,10 @@ describe('hopAgent', () => {
   });
 
   it('moves a task agent between tasks', async () => {
-    insertTask(db, { id: 'tA', status: 'running', tmux_session: 'octomux-agent-tA' });
+    insertTask(db, { id: 'tA', runtime_state: 'running', tmux_session: 'octomux-agent-tA' });
     insertTask(db, {
       id: 'tB',
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-tB',
       worktree: '/tmp/wt-b',
     });
@@ -2104,7 +2104,7 @@ describe('hopAgent', () => {
   it('attaches a standalone chat to a task (kills the chat session)', async () => {
     insertTask(db, {
       id: 'tT',
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-tT',
       worktree: '/tmp/wt-t',
     });

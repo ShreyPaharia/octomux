@@ -5,10 +5,10 @@ import { makeTask } from '@/test-helpers';
 describe('groupTasksForSidebar', () => {
   it('excludes draft and closed tasks', () => {
     const tasks = [
-      makeTask({ id: '1', status: 'running', title: 'A' }),
-      makeTask({ id: '2', status: 'draft', title: 'B' }),
-      makeTask({ id: '3', status: 'closed', title: 'C' }),
-      makeTask({ id: '4', status: 'error', title: 'D' }),
+      makeTask({ id: '1', runtime_state: 'running', title: 'A' }),
+      makeTask({ id: '2', runtime_state: 'idle', title: 'B' }),
+      makeTask({ id: '3', runtime_state: 'idle', title: 'C' }),
+      makeTask({ id: '4', runtime_state: 'error', title: 'D' }),
     ];
     const groups = groupTasksForSidebar(tasks);
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));
@@ -17,9 +17,9 @@ describe('groupTasksForSidebar', () => {
 
   it('groups by repo basename', () => {
     const tasks = [
-      makeTask({ id: '1', status: 'running', repo_path: '/home/dev/repo-a' }),
-      makeTask({ id: '2', status: 'running', repo_path: '/home/dev/repo-b' }),
-      makeTask({ id: '3', status: 'error', repo_path: '/home/dev/repo-a' }),
+      makeTask({ id: '1', runtime_state: 'running', repo_path: '/home/dev/repo-a' }),
+      makeTask({ id: '2', runtime_state: 'running', repo_path: '/home/dev/repo-b' }),
+      makeTask({ id: '3', runtime_state: 'error', repo_path: '/home/dev/repo-a' }),
     ];
     const groups = groupTasksForSidebar(tasks);
     expect(groups.map((g) => g.repo)).toEqual(['repo-a', 'repo-b']);
@@ -30,27 +30,27 @@ describe('groupTasksForSidebar', () => {
   it.each([
     {
       name: 'running before error',
-      tasks: [makeTask({ id: '1', status: 'error' }), makeTask({ id: '2', status: 'running' })],
+      tasks: [makeTask({ id: '1', runtime_state: 'error' }), makeTask({ id: '2', runtime_state: 'running' })],
       expectedOrder: ['2', '1'],
     },
     {
       name: 'setting_up before error',
-      tasks: [makeTask({ id: '1', status: 'error' }), makeTask({ id: '2', status: 'setting_up' })],
+      tasks: [makeTask({ id: '1', runtime_state: 'error' }), makeTask({ id: '2', runtime_state: 'setting_up' })],
       expectedOrder: ['2', '1'],
     },
     {
       name: 'running before needs_attention',
       tasks: [
-        makeTask({ id: '1', status: 'running', derived_status: 'needs_attention' }),
-        makeTask({ id: '2', status: 'running', derived_status: 'working' }),
+        makeTask({ id: '1', runtime_state: 'running', derived_status: 'needs_attention' }),
+        makeTask({ id: '2', runtime_state: 'running', derived_status: 'working' }),
       ],
       expectedOrder: ['2', '1'],
     },
     {
       name: 'needs_attention before error',
       tasks: [
-        makeTask({ id: '1', status: 'error' }),
-        makeTask({ id: '2', status: 'running', derived_status: 'needs_attention' }),
+        makeTask({ id: '1', runtime_state: 'error' }),
+        makeTask({ id: '2', runtime_state: 'running', derived_status: 'needs_attention' }),
       ],
       expectedOrder: ['2', '1'],
     },
@@ -62,8 +62,8 @@ describe('groupTasksForSidebar', () => {
 
   it('uses recency as tiebreaker within same priority', () => {
     const tasks = [
-      makeTask({ id: '1', status: 'running', created_at: '2026-01-01 00:00:00' }),
-      makeTask({ id: '2', status: 'running', created_at: '2026-01-02 00:00:00' }),
+      makeTask({ id: '1', runtime_state: 'running', created_at: '2026-01-01 00:00:00' }),
+      makeTask({ id: '2', runtime_state: 'running', created_at: '2026-01-02 00:00:00' }),
     ];
     const groups = groupTasksForSidebar(tasks);
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));
@@ -71,7 +71,7 @@ describe('groupTasksForSidebar', () => {
   });
 
   it('returns empty array for no active tasks', () => {
-    const tasks = [makeTask({ id: '1', status: 'draft' })];
+    const tasks = [makeTask({ id: '1', runtime_state: 'idle' })];
     expect(groupTasksForSidebar(tasks)).toEqual([]);
   });
 
@@ -83,7 +83,7 @@ describe('groupTasksForSidebar', () => {
     const tasks = [
       makeTask({
         id: '1',
-        status: 'running',
+        runtime_state: 'running',
         title: 'My Task',
         repo_path: '/home/dev/repo',
         derived_status: 'needs_attention',
@@ -103,9 +103,9 @@ describe('groupTasksForSidebar', () => {
 
   it('sorts groups alphabetically by repo name', () => {
     const tasks = [
-      makeTask({ id: '1', status: 'running', repo_path: '/home/dev/zebra' }),
-      makeTask({ id: '2', status: 'running', repo_path: '/home/dev/alpha' }),
-      makeTask({ id: '3', status: 'running', repo_path: '/home/dev/middle' }),
+      makeTask({ id: '1', runtime_state: 'running', repo_path: '/home/dev/zebra' }),
+      makeTask({ id: '2', runtime_state: 'running', repo_path: '/home/dev/alpha' }),
+      makeTask({ id: '3', runtime_state: 'running', repo_path: '/home/dev/middle' }),
     ];
     const groups = groupTasksForSidebar(tasks);
     expect(groups.map((g) => g.repo)).toEqual(['alpha', 'middle', 'zebra']);
@@ -127,10 +127,10 @@ describe('groupTasksForSidebar', () => {
 
   it('places scratch-mode tasks in the Other group (sorted last)', () => {
     const tasks = [
-      makeTask({ id: '1', status: 'running', repo_path: '/home/dev/alpha' }),
+      makeTask({ id: '1', runtime_state: 'running', repo_path: '/home/dev/alpha' }),
       makeTask({
         id: '2',
-        status: 'running',
+        runtime_state: 'running',
         repo_path: '',
         run_mode: 'scratch',
         title: 'Scratch work',
@@ -144,7 +144,7 @@ describe('groupTasksForSidebar', () => {
   });
 
   it('places repo-less non-scratch tasks in the Other group', () => {
-    const tasks = [makeTask({ id: '1', status: 'running', repo_path: '', run_mode: 'new' })];
+    const tasks = [makeTask({ id: '1', runtime_state: 'running', repo_path: '', run_mode: 'new' })];
     const groups = groupTasksForSidebar(tasks);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe('__other__');
@@ -152,8 +152,8 @@ describe('groupTasksForSidebar', () => {
 
   it('surfaces runMode on each item', () => {
     const tasks = [
-      makeTask({ id: '1', status: 'running', run_mode: 'existing' }),
-      makeTask({ id: '2', status: 'running', run_mode: 'none' }),
+      makeTask({ id: '1', runtime_state: 'running', run_mode: 'existing' }),
+      makeTask({ id: '2', runtime_state: 'running', run_mode: 'none' }),
     ];
     const items = groupTasksForSidebar(tasks).flatMap((g) => g.items);
     const modes = Object.fromEntries(items.map((i) => [i.id, i.runMode]));

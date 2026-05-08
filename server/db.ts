@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     id                           TEXT PRIMARY KEY,
     title                        TEXT NOT NULL,
     description                  TEXT NOT NULL,
-    status                       TEXT NOT NULL DEFAULT 'draft',
     runtime_state                TEXT NOT NULL DEFAULT 'idle',
     workflow_status              TEXT NOT NULL DEFAULT 'backlog',
     worktree_id                  TEXT REFERENCES worktrees(id),
@@ -112,7 +111,6 @@ CREATE TABLE IF NOT EXISTS permission_prompts (
     FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status);
@@ -461,9 +459,6 @@ export function initDb(instance: Database.Database): void {
   // Drop the legacy seeded orchestrator agent row from older installs.
   instance.prepare(`DELETE FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`).run();
 
-  // Data migrations
-  instance.exec(`UPDATE tasks SET status = 'draft' WHERE status = 'created'`);
-
   // ─── Workflow / runtime_state migration ───────────────────────────────────
   // Add new columns to tasks if they don't exist yet (pre-wave-1 DBs).
   const taskColsV2 = columnsOf('tasks');
@@ -472,35 +467,22 @@ export function initDb(instance: Database.Database): void {
   addColumn('tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
   addColumn('tasks', 'current_summary_updated_at', 'current_summary_updated_at TEXT', taskColsV2);
 
-  // Backfill runtime_state from status for tasks that still have the old
-  // status column values (fresh schema sets defaults; old rows need backfill).
-  instance
-    .transaction(() => {
-      // Only backfill rows that still have the default 'idle' (not yet set).
-      instance.exec(`
-        UPDATE tasks SET runtime_state = CASE
-          WHEN status = 'setting_up' THEN 'setting_up'
-          WHEN status = 'running'    THEN 'running'
-          WHEN status = 'error'      THEN 'error'
-          ELSE                            'idle'
-        END
-        WHERE runtime_state = 'idle'
-      `);
-
-      // Backfill workflow_status from old status + initial_prompt + pr_url.
-      instance.exec(`
-        UPDATE tasks SET workflow_status = CASE
-          WHEN status IN ('running', 'setting_up', 'error') THEN 'in_progress'
-          WHEN status = 'draft' AND initial_prompt IS NULL  THEN 'backlog'
-          WHEN status = 'draft' AND initial_prompt IS NOT NULL THEN 'planned'
-          WHEN status = 'closed' AND pr_url IS NOT NULL     THEN 'pr'
-          WHEN status = 'closed' AND pr_url IS NULL         THEN 'human_review'
-          ELSE 'backlog'
-        END
-        WHERE workflow_status = 'backlog'
-      `);
-    })
-    .default();
+  // Backfill workflow_status from initial_prompt + pr_url for old rows that
+  // still have the default 'backlog' and no context to derive from.
+  // The status-based backfill was removed in Wave 4 (status column dropped).
+  const taskColsV2Check = columnsOf('tasks');
+  if (taskColsV2Check.has('workflow_status')) {
+    instance.exec(`
+      UPDATE tasks SET workflow_status = CASE
+        WHEN runtime_state IN ('running', 'setting_up', 'error') THEN 'in_progress'
+        WHEN runtime_state = 'idle' AND initial_prompt IS NULL   THEN 'backlog'
+        WHEN runtime_state = 'idle' AND initial_prompt IS NOT NULL THEN 'planned'
+        WHEN pr_url IS NOT NULL                                  THEN 'pr'
+        ELSE 'backlog'
+      END
+      WHERE workflow_status = 'backlog'
+    `);
+  }
 
   // ─── ref_inference_json column on repo_configs (Wave 3) ──────────────────
   const repoConfigCols = columnsOf('repo_configs');
@@ -557,6 +539,30 @@ export function initDb(instance: Database.Database): void {
         updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
+  }
+
+  // ─── Wave 4: drop legacy tasks.status column ────────────────────────────
+  // Backfill any tasks where runtime_state is NULL from the legacy status
+  // column (one-shot safety net for very old DBs), then drop the column.
+  const taskColsV4 = columnsOf('tasks');
+  if (taskColsV4.has('status')) {
+    instance
+      .transaction(() => {
+        // Safety backfill: if runtime_state somehow got NULL, restore from status.
+        instance.exec(`
+          UPDATE tasks SET runtime_state = CASE
+            WHEN status = 'setting_up' THEN 'setting_up'
+            WHEN status = 'running'    THEN 'running'
+            WHEN status = 'error'      THEN 'error'
+            ELSE                            'idle'
+          END
+          WHERE runtime_state IS NULL
+        `);
+        // Drop the index that referenced status, then the column itself.
+        instance.exec(`DROP INDEX IF EXISTS idx_tasks_status`);
+        instance.exec(`ALTER TABLE tasks DROP COLUMN status`);
+      })
+      .default();
   }
 
   // Partial unique index keyed to worktree_id — now uses runtime_state.

@@ -50,7 +50,7 @@ describe('TaskCard', () => {
   // ─── Error display ────────────────────────────────────────────────────────
 
   it('shows error span when error is set', () => {
-    const task = makeTask({ status: 'error', error: 'Something failed' });
+    const task = makeTask({ runtime_state: 'error', error: 'Something failed' });
     renderWithRouter(<TaskCard task={task} onClose={onClose} onDelete={onDelete} />);
     const errorSpan = screen.getByTitle('Something failed');
     expect(errorSpan).toBeInTheDocument();
@@ -103,7 +103,7 @@ describe('TaskCard', () => {
 
   it('shows close button for setting_up tasks', () => {
     renderWithRouter(
-      <TaskCard task={makeTask({ status: 'setting_up' })} onClose={onClose} onDelete={onDelete} />,
+      <TaskCard task={makeTask({ runtime_state: 'setting_up' })} onClose={onClose} onDelete={onDelete} />,
     );
     expect(screen.getByTitle('Close task')).toBeInTheDocument();
     expect(screen.queryByTitle('Delete task')).not.toBeInTheDocument();
@@ -111,9 +111,9 @@ describe('TaskCard', () => {
 
   // ─── Delete (closed/error/draft tasks) ──────────────────────────────────
 
-  it.each(['closed', 'error', 'draft'] as const)('shows delete button for %s tasks', (status) => {
+  it.each(['idle', 'error'] as const)('shows delete button for %s tasks', (runtime_state) => {
     renderWithRouter(
-      <TaskCard task={makeTask({ status })} onClose={onClose} onDelete={onDelete} />,
+      <TaskCard task={makeTask({ runtime_state })} onClose={onClose} onDelete={onDelete} />,
     );
     expect(screen.getByTitle('Delete task')).toBeInTheDocument();
     expect(screen.queryByTitle('Close task')).not.toBeInTheDocument();
@@ -122,7 +122,7 @@ describe('TaskCard', () => {
   it('calls onDelete with task id when delete button clicked on closed task', async () => {
     const user = userEvent.setup();
     renderWithRouter(
-      <TaskCard task={makeTask({ status: 'closed' })} onClose={onClose} onDelete={onDelete} />,
+      <TaskCard task={makeTask({ runtime_state: 'idle' })} onClose={onClose} onDelete={onDelete} />,
     );
     await user.click(screen.getByTitle('Delete task'));
     expect(onDelete).toHaveBeenCalledWith('test-task-01');

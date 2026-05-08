@@ -43,7 +43,7 @@ describe('Database', () => {
     });
 
     const indexCases = [
-      { table: 'tasks', index: 'idx_tasks_status' },
+      { table: 'tasks', index: 'idx_tasks_active_worktree' },
       { table: 'agents', index: 'idx_agents_task' },
     ];
 
@@ -80,7 +80,7 @@ describe('Database', () => {
 
   describe('defaults', () => {
     const defaultCases = [
-      { table: 'task', field: 'status', expected: 'draft' },
+      { table: 'task', field: 'runtime_state', expected: 'idle' },
       { table: 'agent', field: 'status', expected: 'running' },
     ] as const;
 
@@ -161,6 +161,15 @@ describe('Database', () => {
       expect(() => initDb(db)).not.toThrow();
     });
 
+    it('Wave 4 drop-status migration is idempotent — tasks.status column is absent', () => {
+      // initDb already ran via createTestDb(); calling it again must not throw
+      // even though the status column no longer exists.
+      expect(() => initDb(db)).not.toThrow();
+      const cols = (db.pragma('table_info(tasks)') as { name: string }[]).map((c) => c.name);
+      expect(cols).not.toContain('status');
+      expect(cols).toContain('runtime_state');
+    });
+
     const migrationColumns = [
       { table: 'tasks', column: 'initial_prompt' },
       { table: 'tasks', column: 'worktree_id' },
@@ -190,7 +199,7 @@ describe('Database', () => {
     });
 
     it('resolves stale pending prompts on startup', () => {
-      insertTask(db, { id: 't1', status: 'running' });
+      insertTask(db, { id: 't1', runtime_state: 'running' });
       insertAgent(db, { id: 'a1', task_id: 't1' });
       insertPermissionPrompt(db, { id: 'pp1', task_id: 't1', agent_id: 'a1', status: 'pending' });
 
@@ -218,7 +227,7 @@ describe('Database', () => {
     ];
 
     it.each(startupActivityCases)('$desc on startup', ({ initial, status, expected }) => {
-      insertTask(db, { id: 't1', status: 'running' });
+      insertTask(db, { id: 't1', runtime_state: 'running' });
       insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: initial, status });
 
       initDb(db);
@@ -346,13 +355,13 @@ describe('Database', () => {
         `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt-1', '/tmp/wt', 'existing', 'in_use')`,
       ).run();
       db.prepare(
-        `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
-         VALUES ('t-1','T','D','running','running','wt-1')`,
+        `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+         VALUES ('t-1','T','D','running','wt-1')`,
       ).run();
       expect(() => {
         db.prepare(
-          `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
-           VALUES ('t-2','T','D','running','running','wt-1')`,
+          `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+           VALUES ('t-2','T','D','running','wt-1')`,
         ).run();
       }).toThrow();
     });

@@ -32,7 +32,7 @@ describe('DraftEditForm', () => {
   it('shows branch/repo/base fields for non-scratch modes', () => {
     render(
       <DraftEditForm
-        task={makeTask({ status: 'draft', run_mode: 'new' })}
+        task={makeTask({ runtime_state: 'idle', run_mode: 'new' })}
         onSaved={() => {}}
         onStart={() => {}}
       />,
@@ -45,7 +45,7 @@ describe('DraftEditForm', () => {
   it('hides branch/repo/base fields for scratch mode', () => {
     render(
       <DraftEditForm
-        task={makeTask({ status: 'draft', run_mode: 'scratch', repo_path: '', branch: null })}
+        task={makeTask({ runtime_state: 'idle', run_mode: 'scratch', repo_path: '', branch: null })}
         onSaved={() => {}}
         onStart={() => {}}
       />,
@@ -61,7 +61,7 @@ describe('DraftEditForm', () => {
     render(
       <DraftEditForm
         task={makeTask({
-          status: 'draft',
+          runtime_state: 'idle',
           run_mode: 'scratch',
           repo_path: '',
           branch: null,

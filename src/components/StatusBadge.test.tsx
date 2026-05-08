@@ -2,16 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { StatusBadge } from './StatusBadge';
 import { renderWithRouter, TASK_STATUSES } from '../test-helpers';
-import type { TaskStatus } from '../../server/types';
+import type { RuntimeState } from '../../server/types';
 
 describe('StatusBadge', () => {
   // ─── Renders all statuses with glyph + label ──────────────────────────────
 
-  const statusLabels: [TaskStatus, string, string][] = [
-    ['draft', 'DRAFT', '○'],
+  const statusLabels: [RuntimeState, string, string][] = [
+    ['idle', 'IDLE', '○'],
     ['setting_up', 'SETTING_UP', '◐'],
     ['running', 'RUNNING', '●'],
-    ['closed', 'CLOSED', '○'],
     ['error', 'ERROR', '✕'],
   ];
 

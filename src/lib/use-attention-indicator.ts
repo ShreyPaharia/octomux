@@ -6,7 +6,7 @@ const NORMAL_FAVICON = '/logo.png';
 
 function countAttention(tasks: Task[]): number {
   return tasks.filter((t) => {
-    const effective = t.derived_status ?? t.status;
+    const effective = t.derived_status ?? t.runtime_state;
     return effective === 'error' || effective === 'needs_attention';
   }).length;
 }

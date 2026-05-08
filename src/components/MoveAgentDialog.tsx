@@ -41,7 +41,7 @@ export function MoveAgentDialog({
         const all = await api.listTasks();
         if (cancelled) return;
         const active = all.filter((t) =>
-          (['draft', 'setting_up', 'running'] as const).includes(t.status as 'running'),
+          (['setting_up', 'running'] as const).includes(t.runtime_state as 'running'),
         );
         setTasks(active);
         setSelected(STANDALONE_OPTION);
@@ -126,7 +126,7 @@ export function MoveAgentDialog({
                     />
                     <span className="min-w-0 flex-1 truncate">{t.title}</span>
                     <span className="shrink-0 text-[10px] uppercase text-[#8a8a8a]">
-                      {t.status}
+                      {t.runtime_state}
                     </span>
                   </label>
                 ))}

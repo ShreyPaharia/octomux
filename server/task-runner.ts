@@ -263,7 +263,7 @@ export async function reconcileOrphanSettingUp(): Promise<void> {
     }
     if (!alive) {
       db.prepare(
-        `UPDATE tasks SET status = 'error', runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
       ).run('orphan setting_up on boot', row.id);
       logger.warn(
         { task_id: row.id, operation: 'reconcileOrphanSettingUp' },
@@ -554,8 +554,8 @@ export async function startTask(task: Task): Promise<void> {
     // linked worktree row (existing/none/draft-edited), update it. Otherwise
     // create a fresh one.
     db.prepare(
-      `UPDATE tasks SET status = ?, runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
-    ).run('setting_up', id);
+      `UPDATE tasks SET runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
+    ).run(id);
 
     const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
     if (task.worktree_id) {
@@ -686,13 +686,13 @@ export async function startTask(task: Task): Promise<void> {
     // attempt) would otherwise linger on a successfully running task.
     // Also flip workflow_status to in_progress when starting from backlog/planned.
     db.prepare(
-      `UPDATE tasks SET status = ?, runtime_state = 'running', error = NULL,
+      `UPDATE tasks SET runtime_state = 'running', error = NULL,
        workflow_status = CASE
          WHEN workflow_status IN ('backlog', 'planned') THEN 'in_progress'
          ELSE workflow_status
        END,
        updated_at = datetime('now') WHERE id = ?`,
-    ).run('running', id);
+    ).run(id);
     logger.info({ task_id: id, operation: 'createTask' }, 'createTask: complete');
   } catch (err) {
     logger.error(
@@ -700,8 +700,8 @@ export async function startTask(task: Task): Promise<void> {
       'createTask: failed during setup stage',
     );
     db.prepare(
-      `UPDATE tasks SET status = ?, runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run('error', (err as Error).message, id);
+      `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run((err as Error).message, id);
   }
 }
 
@@ -808,7 +808,7 @@ export async function closeTask(task: Task): Promise<void> {
   db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
 
   db.prepare(
-    `UPDATE tasks SET status = 'closed', runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
+    `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
   ).run(task.id);
   db.prepare(
     `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
@@ -1120,7 +1120,7 @@ export async function resumeTask(task: Task): Promise<void> {
     }
 
     db.prepare(
-      `UPDATE tasks SET status = 'setting_up', runtime_state = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE tasks SET runtime_state = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
     db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
@@ -1207,7 +1207,7 @@ export async function resumeTask(task: Task): Promise<void> {
     );
 
     db.prepare(
-      `UPDATE tasks SET status = 'running', runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE tasks SET runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
     ).run(task.id);
 
     logger.info(
@@ -1217,7 +1217,7 @@ export async function resumeTask(task: Task): Promise<void> {
   } catch (err) {
     logger.error({ task_id: task.id, operation: 'resumeTask', err }, 'resumeTask: failed');
     db.prepare(
-      `UPDATE tasks SET status = 'error', runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run((err as Error).message, task.id);
   }
 }

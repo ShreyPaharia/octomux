@@ -110,7 +110,7 @@ export function CommandPalette() {
   );
 
   const sessionRows = useMemo<SessionRow[]>(() => {
-    const openTasks = tasks.filter((t) => OPEN_STATUSES.has(t.status));
+    const openTasks = tasks.filter((t) => OPEN_STATUSES.has(t.runtime_state));
     if (!query) return [];
     const scored: { task: Task; score: number }[] = [];
     for (const t of openTasks) {
@@ -314,7 +314,7 @@ function SessionRowView({
       style={active ? SELECTED_ROW_STYLE : undefined}
     >
       <div className="flex items-center gap-2">
-        <StatusGlyph status={task.status} size={10} />
+        <StatusGlyph status={task.derived_status || task.runtime_state} size={10} />
         <span
           className="min-w-0 flex-1 truncate font-medium"
           title={task.title}

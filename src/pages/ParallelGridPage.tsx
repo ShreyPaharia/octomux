@@ -12,7 +12,7 @@ interface MiniPaneProps {
 
 function hasAttention(task: Task): boolean {
   const d = task.derived_status;
-  return d === 'needs_attention' || task.status === 'error';
+  return d === 'needs_attention' || task.runtime_state === 'error';
 }
 
 function formatElapsed(startedAt: string): string {
@@ -31,7 +31,7 @@ function MiniPane({ task, onOpen }: MiniPaneProps) {
   const running = agents.filter((a) => a.status === 'running').length;
   const bodyLines: string[] = [
     `$ branch ${task.branch ?? '—'}`,
-    `  status ${task.derived_status || task.status}`,
+    `  status ${task.derived_status || task.runtime_state}`,
     `  agents ${agents.length} (${running} running)`,
     activeAgent ? `  active ${activeAgent.label}` : '',
     activeAgent?.hook_activity ? `  hook   ${activeAgent.hook_activity}` : '',
@@ -58,7 +58,7 @@ function MiniPane({ task, onOpen }: MiniPaneProps) {
         >
           {task.branch || task.title}
         </span>
-        <StatusGlyph status={task.derived_status || task.status} size={10} />
+        <StatusGlyph status={task.derived_status || task.runtime_state} size={10} />
       </header>
       <div className="flex-1 overflow-hidden px-4 py-3 font-mono text-[11px] leading-snug text-[#8a8a8a]">
         {bodyLines.map((line, idx) => (
@@ -89,9 +89,9 @@ export default function ParallelGridPage() {
     const waiting: Task[] = [];
     const errored: Task[] = [];
     for (const t of tasks) {
-      if (t.status === 'error') errored.push(t);
+      if (t.runtime_state === 'error') errored.push(t);
       else if (hasAttention(t)) waiting.push(t);
-      else if (t.status === 'running' || t.status === 'setting_up') running.push(t);
+      else if (t.runtime_state === 'running' || t.runtime_state === 'setting_up') running.push(t);
     }
     return { running, waiting, errored };
   }, [tasks]);

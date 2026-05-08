@@ -65,11 +65,11 @@ describe('SessionsInbox', () => {
   it('buckets errored tasks into ERRORED, not AWAITING REPLY', async () => {
     apiMock.getInbox.mockResolvedValue({
       needs_you: [
-        makeTask({ id: 'err1', title: 'Failed Task', status: 'error', error: 'Boom' }),
+        makeTask({ id: 'err1', title: 'Failed Task', runtime_state: 'error', error: 'Boom' }),
         makeTask({
           id: 'wait1',
           title: 'Waiting Task',
-          status: 'running',
+          runtime_state: 'running',
           pending_prompts: [
             {
               id: 'pp1',
@@ -111,7 +111,7 @@ describe('SessionsInbox', () => {
       needs_you: [
         makeTask({
           id: 'wait1',
-          status: 'running',
+          runtime_state: 'running',
           pending_prompts: [
             {
               id: 'pp1',
@@ -145,11 +145,11 @@ describe('SessionsInbox', () => {
     apiMock.getInbox.mockResolvedValue({
       needs_you: [],
       activity: [
-        makeTask({ id: 'a1', status: 'closed' }),
-        makeTask({ id: 'a2', status: 'closed' }),
-        makeTask({ id: 'a3', status: 'closed' }),
-        makeTask({ id: 'a4', status: 'closed' }),
-        makeTask({ id: 'a5', status: 'closed' }),
+        makeTask({ id: 'a1', runtime_state: 'idle' }),
+        makeTask({ id: 'a2', runtime_state: 'idle' }),
+        makeTask({ id: 'a3', runtime_state: 'idle' }),
+        makeTask({ id: 'a4', runtime_state: 'idle' }),
+        makeTask({ id: 'a5', runtime_state: 'idle' }),
       ],
     });
 
@@ -169,7 +169,7 @@ describe('SessionsInbox', () => {
   it('clicking a row navigates to the task', async () => {
     const user = userEvent.setup();
     apiMock.getInbox.mockResolvedValue({
-      needs_you: [makeTask({ id: 'n1', status: 'error' })],
+      needs_you: [makeTask({ id: 'n1', runtime_state: 'error' })],
       activity: [],
     });
 
@@ -184,7 +184,7 @@ describe('SessionsInbox', () => {
   it('mark-all-read calls API and refetches', async () => {
     const user = userEvent.setup();
     apiMock.getInbox
-      .mockResolvedValueOnce({ needs_you: [makeTask({ id: 'n1', status: 'error' })], activity: [] })
+      .mockResolvedValueOnce({ needs_you: [makeTask({ id: 'n1', runtime_state: 'error' })], activity: [] })
       .mockResolvedValueOnce({ needs_you: [], activity: [] });
 
     renderInbox();

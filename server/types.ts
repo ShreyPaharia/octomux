@@ -61,8 +61,7 @@ export interface Task {
   title: string;
   description: string;
   repo_path: string;
-  status: TaskStatus;
-  /** Renamed from status — tracks runtime lifecycle. */
+  /** Tracks runtime lifecycle. */
   runtime_state: RuntimeState;
   /** Human-facing board column. */
   workflow_status: WorkflowStatus;

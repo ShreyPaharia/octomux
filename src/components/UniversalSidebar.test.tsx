@@ -72,9 +72,9 @@ describe('UniversalSidebar nav', () => {
 describe('UniversalSidebar grouping', () => {
   it('groups sessions by repo basename', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/nucleus', title: 'Alpha' }),
-      makeTask({ id: 't2', status: 'running', repo_path: '/dev/octomux', title: 'Beta' }),
-      makeTask({ id: 't3', status: 'running', repo_path: '/dev/nucleus', title: 'Gamma' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/nucleus', title: 'Alpha' }),
+      makeTask({ id: 't2', runtime_state: 'running', repo_path: '/dev/octomux', title: 'Beta' }),
+      makeTask({ id: 't3', runtime_state: 'running', repo_path: '/dev/nucleus', title: 'Gamma' }),
     ]);
     renderSidebar();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
@@ -84,10 +84,10 @@ describe('UniversalSidebar grouping', () => {
 
   it('renders an Other group for scratch / repo-less tasks', async () => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/alpha' }),
       makeTask({
         id: 'scratch-1',
-        status: 'running',
+        runtime_state: 'running',
         repo_path: '',
         run_mode: 'scratch',
         title: 'Scratchwork',
@@ -102,7 +102,7 @@ describe('UniversalSidebar grouping', () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({
         id: 'scratch-1',
-        status: 'running',
+        runtime_state: 'running',
         repo_path: '',
         run_mode: 'scratch',
         title: 'Scratchwork',
@@ -116,7 +116,7 @@ describe('UniversalSidebar grouping', () => {
   it('navigates to the composer with repo + mode on + click', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/nucleus' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/nucleus' }),
     ]);
     renderSidebar();
     await waitFor(() =>
@@ -139,7 +139,7 @@ describe('UniversalSidebar status glyph + run-mode badge', () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({
         id: `t-${mode}`,
-        status: 'running',
+        runtime_state: 'running',
         run_mode: mode,
         repo_path: mode === 'scratch' ? '' : '/dev/alpha',
       }),
@@ -153,23 +153,23 @@ describe('UniversalSidebar status glyph + run-mode badge', () => {
   });
 
   it.each([
-    { name: 'running', status: 'running' as const, derived: null, glyph: 'running' },
+    { name: 'running', runtime_state: 'running' as const, derived: null, glyph: 'running' },
     {
       name: 'needs_attention',
-      status: 'running' as const,
+      runtime_state: 'running' as const,
       derived: 'needs_attention' as const,
       glyph: 'needs-you',
     },
-    { name: 'error', status: 'error' as const, derived: null, glyph: 'error' },
+    { name: 'error', runtime_state: 'error' as const, derived: null, glyph: 'error' },
     {
       name: 'setting_up',
-      status: 'setting_up' as const,
+      runtime_state: 'setting_up' as const,
       derived: null,
       glyph: 'setting_up',
     },
-  ])('maps $name → glyph=$glyph', async ({ status, derived, glyph }) => {
+  ])('maps $name → glyph=$glyph', async ({ runtime_state, derived, glyph }) => {
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status, derived_status: derived, repo_path: '/dev/alpha' }),
+      makeTask({ id: 't1', runtime_state, derived_status: derived, repo_path: '/dev/alpha' }),
     ]);
     renderSidebar();
     await waitFor(() => expect(rowFor('t1')).toBeInTheDocument());
@@ -181,7 +181,7 @@ describe('UniversalSidebar group collapse persistence', () => {
   it('persists collapsed state per-group and rehydrates on re-render', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/nucleus', title: 'Alpha' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/nucleus', title: 'Alpha' }),
     ]);
     const { unmount } = renderSidebar();
     await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument());
@@ -216,7 +216,7 @@ describe('UniversalSidebar row menu', () => {
   it('Open navigates to /tasks/<id>', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/alpha' }),
     ]);
     renderSidebar();
     const menu = await openMenu(user, 't1');
@@ -229,7 +229,7 @@ describe('UniversalSidebar row menu', () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({
         id: 't1',
-        status: 'running',
+        runtime_state: 'running',
         run_mode: 'new',
         repo_path: '/dev/nucleus',
       }),
@@ -249,7 +249,7 @@ describe('UniversalSidebar row menu', () => {
   it('Add agent navigates to Home with add_agent=<id>', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/alpha' }),
     ]);
     renderSidebar();
     const menu = await openMenu(user, 't1');
@@ -260,7 +260,7 @@ describe('UniversalSidebar row menu', () => {
   it('Close calls updateTask({status:closed})', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/alpha' }),
     ]);
     renderSidebar();
     const menu = await openMenu(user, 't1');
@@ -273,7 +273,7 @@ describe('UniversalSidebar row menu', () => {
   it('Delete calls deleteTask', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', repo_path: '/dev/alpha' }),
+      makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/alpha' }),
     ]);
     renderSidebar();
     const menu = await openMenu(user, 't1');
@@ -286,7 +286,7 @@ describe('UniversalSidebar row menu', () => {
     apiMock.listTasks.mockResolvedValue([
       makeTask({
         id: 't1',
-        status: 'running',
+        runtime_state: 'running',
         repo_path: '/dev/alpha',
         title: 'Old Title',
       }),
@@ -374,7 +374,7 @@ describe('forkDisabledReason', () => {
     { name: 'allows existing', item: { runMode: 'existing' }, expected: null },
     { name: 'disallows scratch', item: { runMode: 'scratch' }, expected: 'scratch' },
     { name: 'disallows none', item: { runMode: 'none' }, expected: 'working tree' },
-    { name: 'disallows draft', item: { status: 'draft' }, expected: 'draft' },
+    { name: 'disallows draft', item: { status: 'idle' as const }, expected: 'draft' },
   ])('$name', ({ item: overrides, expected }) => {
     const reason = forkDisabledReason(item(overrides));
     if (expected === null) expect(reason).toBeNull();
@@ -397,7 +397,7 @@ describe('UniversalSidebar row menu — Fork refusal', () => {
   ])('disables Fork for run_mode=$name', async ({ runMode, repoPath }) => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
-      makeTask({ id: 't1', status: 'running', run_mode: runMode, repo_path: repoPath }),
+      makeTask({ id: 't1', runtime_state: 'running', run_mode: runMode, repo_path: repoPath }),
     ]);
     renderSidebar();
     const menu = await openMenu(user, 't1');

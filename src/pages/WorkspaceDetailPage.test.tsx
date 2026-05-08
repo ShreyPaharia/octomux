@@ -32,8 +32,8 @@ const worktree = (overrides: Partial<Worktree> = {}): Worktree => ({
 
 const detail = (overrides: Partial<WorktreeDetail> = {}): WorktreeDetail => ({
   worktree: worktree(),
-  active_task: makeTask({ id: 't-active', title: 'Active work', status: 'running' }),
-  history: [makeTask({ id: 't-old', title: 'Old work', status: 'closed' })],
+  active_task: makeTask({ id: 't-active', title: 'Active work', runtime_state: 'running' }),
+  history: [makeTask({ id: 't-old', title: 'Old work', runtime_state: 'idle' })],
   ...overrides,
 });
 

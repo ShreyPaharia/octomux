@@ -7,9 +7,9 @@ import { renderWithRouter } from '../../test-helpers';
 vi.mock('@/lib/api', async () => {
   const { makeTask: mt } = await import('../../test-helpers');
   const tasks = [
-    mt({ id: 'abc123456789', title: 'Fix login bug', status: 'running' }),
-    mt({ id: 'def987654321', title: 'Add auth middleware', status: 'closed' }),
-    mt({ id: 'ghi111222333', title: 'Draft task', status: 'draft' }),
+    mt({ id: 'abc123456789', title: 'Fix login bug', runtime_state: 'running' }),
+    mt({ id: 'def987654321', title: 'Add auth middleware', runtime_state: 'idle' }),
+    mt({ id: 'ghi111222333', title: 'Draft task', runtime_state: 'error' }),
   ];
   return {
     api: {

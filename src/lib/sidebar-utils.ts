@@ -1,4 +1,4 @@
-import type { Task, TaskStatus, DerivedTaskStatus, RunMode } from '../../server/types';
+import type { Task, DerivedTaskStatus, RunMode, RuntimeState } from '../../server/types';
 import { repoName } from './utils';
 
 export const OTHER_GROUP_KEY = '__other__';
@@ -7,7 +7,7 @@ export const OTHER_GROUP_LABEL = 'Other';
 export interface SidebarItem {
   id: string;
   title: string;
-  status: TaskStatus;
+  status: RuntimeState;
   derivedStatus: DerivedTaskStatus | null;
   runMode: RunMode;
   repoPath: string | null;
@@ -21,7 +21,7 @@ export interface SidebarGroup {
   items: SidebarItem[];
 }
 
-const ACTIVE_STATUSES: TaskStatus[] = ['running', 'setting_up', 'error'];
+const ACTIVE_STATUSES: RuntimeState[] = ['running', 'setting_up', 'error'];
 
 /** Sort priority: running/setting_up (0), needs_attention (1), error (2), rest (3). */
 function sortPriority(item: SidebarItem): number {
@@ -35,7 +35,7 @@ function itemFromTask(task: Task): SidebarItem {
   return {
     id: task.id,
     title: task.title,
-    status: task.status,
+    status: task.runtime_state,
     derivedStatus: task.derived_status ?? null,
     runMode: task.run_mode,
     repoPath: task.repo_path || null,
@@ -50,7 +50,7 @@ function groupKeyFor(task: Task): { key: string; label: string } {
 }
 
 export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
-  const active = tasks.filter((t) => ACTIVE_STATUSES.includes(t.status));
+  const active = tasks.filter((t) => ACTIVE_STATUSES.includes(t.runtime_state));
 
   const grouped = new Map<string, { label: string; items: SidebarItem[]; tasks: Task[] }>();
 

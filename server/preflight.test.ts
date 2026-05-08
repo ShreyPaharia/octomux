@@ -77,7 +77,7 @@ describe('preflightNoneMode', () => {
        VALUES ('wt1', '/repo', '/repo', 'feature-x', 'feature-x', 'none', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
        VALUES ('t1', 'Other chat', '', 'running', 'wt1')`,
     ).run();
 
@@ -92,7 +92,7 @@ describe('preflightNoneMode', () => {
     expect(result.ok).toBe(true);
     expect(result.conflicts).toEqual([]);
     expect(result.warnings).toEqual([
-      { task_id: 't1', title: 'Other chat', status: 'running', branch: 'feature-x' },
+      { task_id: 't1', title: 'Other chat', runtime_state: 'running', branch: 'feature-x' },
     ]);
   });
 
@@ -103,7 +103,7 @@ describe('preflightNoneMode', () => {
        VALUES ('wt-main', '/repo', '/repo', 'main', 'main', 'none', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
        VALUES ('t-main', 'main task', '', 'running', 'wt-main')`,
     ).run();
 
@@ -117,7 +117,7 @@ describe('preflightNoneMode', () => {
 
     expect(result.ok).toBe(false);
     expect(result.conflicts).toEqual([
-      { task_id: 't-main', title: 'main task', status: 'running', branch: 'main' },
+      { task_id: 't-main', title: 'main task', runtime_state: 'running', branch: 'main' },
     ]);
     expect(result.warnings).toEqual([]);
   });
@@ -130,8 +130,8 @@ describe('preflightNoneMode', () => {
        VALUES ('wt-closed', '/repo', '/repo', 'feature-x', 'none', 'available')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
-       VALUES ('closed1', 'closed', '', 'closed', 'wt-closed')`,
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+       VALUES ('closed1', 'closed', '', 'idle', 'wt-closed')`,
     ).run();
     // active 'new'-mode task on the same branch → ignored (its own worktree)
     db.prepare(
@@ -139,7 +139,7 @@ describe('preflightNoneMode', () => {
        VALUES ('wt-new', '/repo/.worktrees/x', '/repo', 'feature-x', 'new', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
        VALUES ('new1', 'new wt task', '', 'running', 'wt-new')`,
     ).run();
 
@@ -164,7 +164,7 @@ describe('preflightNoneMode', () => {
        VALUES ('wt-self', '/repo', '/repo', NULL, 'main', 'none', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
        VALUES ('self', 'me', '', 'setting_up', 'wt-self')`,
     ).run();
 
@@ -188,7 +188,7 @@ describe('preflightNoneMode', () => {
        VALUES ('wt-main', '/repo', '/repo', 'main', 'none', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, worktree_id)
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
        VALUES ('t-main', 'main task', '', 'running', 'wt-main')`,
     ).run();
 

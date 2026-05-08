@@ -19,7 +19,7 @@ function pendingPromptCount(task: Task): number {
 }
 
 function isErrored(task: Task): boolean {
-  if (task.status === 'error') return true;
+  if (task.runtime_state === 'error') return true;
   const derived = task.derived_status as string | null | undefined;
   return derived === 'error';
 }
@@ -116,9 +116,9 @@ function InboxCard({ task, kind }: { task: Task; kind: RowKind }) {
 }
 
 function activityStatusKey(task: Task): string {
-  if (task.status === 'running') return 'running';
-  if (task.status === 'setting_up') return 'setting_up';
-  if (task.status === 'error') return 'error';
+  if (task.runtime_state === 'running') return 'running';
+  if (task.runtime_state === 'setting_up') return 'setting_up';
+  if (task.runtime_state === 'error') return 'error';
   return 'closed';
 }
 
@@ -279,7 +279,7 @@ export function SessionsInbox() {
     return { awaitingReply, errored };
   }, [needsYou]);
 
-  const runningCount = useMemo(() => tasks.filter((t) => t.status === 'running').length, [tasks]);
+  const runningCount = useMemo(() => tasks.filter((t) => t.runtime_state === 'running').length, [tasks]);
 
   const isEmpty =
     !loading && awaitingReply.length === 0 && errored.length === 0 && activity.length === 0;

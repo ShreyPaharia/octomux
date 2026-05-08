@@ -113,34 +113,34 @@ describe('pollStatuses', () => {
   // ─── Session death scenarios (table-driven) ────────────────────────────────
 
   const sessionDeathCases = [
-    { taskStatus: 'running' as const, expectedStatus: 'closed', expectedError: undefined },
+    { taskState: 'running' as const, expectedState: 'idle' as const, expectedError: undefined },
     {
-      taskStatus: 'setting_up' as const,
-      expectedStatus: 'error',
+      taskState: 'setting_up' as const,
+      expectedState: 'error' as const,
       expectedError: 'Setup interrupted',
     },
   ];
 
   describe.each(sessionDeathCases)(
-    'when $taskStatus task session dies',
-    ({ taskStatus, expectedStatus, expectedError }) => {
+    'when $taskState task session dies',
+    ({ taskState, expectedState, expectedError }) => {
       beforeEach(() => {
         vi.mocked(execFile).mockImplementation(deadSessionMock as any);
       });
 
-      it(`sets task status to ${expectedStatus}`, async () => {
-        insertTask(db, { ...DEFAULTS.runningTask, status: taskStatus });
+      it(`sets task runtime_state to ${expectedState}`, async () => {
+        insertTask(db, { ...DEFAULTS.runningTask, runtime_state: taskState });
         insertAgent(db);
 
         await pollStatuses();
 
         const task = getTask(db, DEFAULTS.task.id)!;
-        expect(task.status).toBe(expectedStatus);
+        expect(task.runtime_state).toBe(expectedState);
         if (expectedError) expect(task.error).toBe(expectedError);
       });
 
       it('marks all agents as stopped', async () => {
-        insertTask(db, { ...DEFAULTS.runningTask, status: taskStatus });
+        insertTask(db, { ...DEFAULTS.runningTask, runtime_state: taskState });
         insertAgent(db);
         insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
@@ -151,7 +151,7 @@ describe('pollStatuses', () => {
       });
 
       it('sets hook_activity to idle for all agents', async () => {
-        insertTask(db, { ...DEFAULTS.runningTask, status: taskStatus });
+        insertTask(db, { ...DEFAULTS.runningTask, runtime_state: taskState });
         insertAgent(db, { hook_activity: 'active' });
         insertAgent(db, {
           id: 'agent-02',
@@ -174,22 +174,22 @@ describe('pollStatuses', () => {
     await pollStatuses();
 
     const task = getTask(db, DEFAULTS.task.id)!;
-    expect(task.status).toBe('running');
+    expect(task.runtime_state).toBe('running');
   });
 
   // ─── Status filtering (table-driven) ──────────────────────────────────────
 
-  const ignoredStatuses = ['draft', 'closed', 'error'] as const;
+  const ignoredStates = ['idle', 'error'] as const;
 
-  it.each(ignoredStatuses)('ignores tasks with status "%s"', async (status) => {
-    insertTask(db, { ...DEFAULTS.runningTask, status });
+  it.each(ignoredStates)('ignores tasks with runtime_state "%s"', async (state) => {
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
 
     vi.mocked(execFile).mockImplementation(deadSessionMock as any);
 
     await pollStatuses();
 
     const task = getTask(db, DEFAULTS.task.id)!;
-    expect(task.status).toBe(status);
+    expect(task.runtime_state).toBe(state);
   });
 
   it('handles multiple running tasks', async () => {
@@ -205,20 +205,20 @@ describe('pollStatuses', () => {
     await pollStatuses();
 
     // Both should still be running (mock returns success)
-    expect(getTask(db, DEFAULTS.task.id)!.status).toBe('running');
-    expect(getTask(db, 'task-02')!.status).toBe('running');
+    expect(getTask(db, DEFAULTS.task.id)!.runtime_state).toBe('running');
+    expect(getTask(db, 'task-02')!.runtime_state).toBe('running');
   });
 
   it('does not mark "setting_up" as Setup interrupted when tmux_session is null', async () => {
-    // Reproduces the race where startTask has written status='setting_up' but
+    // Reproduces the race where startTask has written runtime_state='setting_up' but
     // hasn't yet created the tmux session. Poller must leave the task alone.
-    insertTask(db, { ...DEFAULTS.runningTask, status: 'setting_up', tmux_session: null });
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'setting_up', tmux_session: null });
     vi.mocked(execFile).mockImplementation(deadSessionMock as any);
 
     await pollStatuses();
 
     const task = getTask(db, DEFAULTS.task.id)!;
-    expect(task.status).toBe('setting_up');
+    expect(task.runtime_state).toBe('setting_up');
     expect(task.error).toBeNull();
   });
 });
@@ -248,7 +248,7 @@ describe('ensureHooksInstalled', () => {
   });
 
   const skipCases = [
-    { name: 'non-running tasks', overrides: { status: 'closed' as const } },
+    { name: 'non-running tasks', overrides: { runtime_state: 'idle' as const } },
     { name: 'tasks without worktree', overrides: { worktree: null } },
   ];
 
@@ -360,18 +360,17 @@ describe('pollPRs', () => {
 
   // ─── Status filtering for PR poll (table-driven) ──────────────────────────
 
-  const prPollStatuses = [
-    { status: 'running', shouldPoll: true },
-    { status: 'closed', shouldPoll: true },
-    { status: 'draft', shouldPoll: false },
-    { status: 'setting_up', shouldPoll: false },
-    { status: 'error', shouldPoll: false },
+  const prPollStates = [
+    { state: 'running', shouldPoll: true },
+    { state: 'idle', shouldPoll: true },
+    { state: 'setting_up', shouldPoll: false },
+    { state: 'error', shouldPoll: false },
   ] as const;
 
-  it.each(prPollStatuses)(
-    'status "$status" → shouldPoll=$shouldPoll',
-    async ({ status, shouldPoll }) => {
-      insertTask(db, { ...DEFAULTS.runningTask, status });
+  it.each(prPollStates)(
+    'runtime_state "$state" → shouldPoll=$shouldPoll',
+    async ({ state, shouldPoll }) => {
+      insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
 
       await pollPRs();
 
@@ -486,12 +485,12 @@ describe('checkMergedPRs', () => {
     );
   });
 
-  const nonRunningStatuses = ['draft', 'closed', 'error', 'setting_up'] as const;
+  const nonRunningStates = ['idle', 'error', 'setting_up'] as const;
 
-  it.each(nonRunningStatuses)('skips tasks with status "%s"', async (status) => {
+  it.each(nonRunningStates)('skips tasks with runtime_state "%s"', async (state) => {
     insertTask(db, {
       ...DEFAULTS.runningTask,
-      status,
+      runtime_state: state,
       pr_number: 42,
       pr_url: 'https://github.com/org/repo/pull/42',
     });
@@ -646,14 +645,14 @@ describe('pollReviewerRequests', () => {
 
     const created = db
       .prepare(
-        `SELECT t.id, t.status, t.title, t.pr_number, t.pr_head_sha, t.initial_prompt,
+        `SELECT t.id, t.runtime_state, t.title, t.pr_number, t.pr_head_sha, t.initial_prompt,
                 w.branch AS branch, w.base_branch AS base_branch
            FROM tasks t LEFT JOIN worktrees w ON t.worktree_id = w.id
           WHERE t.source = 'auto_review'`,
       )
       .get() as Record<string, unknown> | undefined;
     expect(created).toBeDefined();
-    expect(created!.status).toBe('draft');
+    expect(created!.runtime_state).toBe('idle');
     expect(created!.pr_number).toBe(42);
     expect(created!.pr_head_sha).toBe('sha-aaa');
     expect(created!.base_branch).toBe('main');
@@ -684,7 +683,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'existing-review',
       repo_path: REPO,
-      status: 'draft',
+      runtime_state: 'idle',
       pr_number: 42,
       pr_head_sha: 'sha-aaa',
       source: 'auto_review',
@@ -704,7 +703,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'existing-review',
       repo_path: REPO,
-      status: 'draft',
+      runtime_state: 'idle',
       pr_number: 42,
       pr_head_sha: 'sha-old',
       initial_prompt: '/review-pr https://github.com/org/repo/pull/42\n\nold body',
@@ -728,7 +727,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'manual',
       repo_path: REPO,
-      status: 'draft',
+      runtime_state: 'idle',
       pr_number: 42,
       pr_head_sha: 'sha-old',
       initial_prompt: 'manual-prompt',
@@ -753,7 +752,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'running-review',
       repo_path: REPO,
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-running-review',
       pr_number: 42,
       pr_head_sha: 'sha-old',
@@ -796,7 +795,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'running-review',
       repo_path: REPO,
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-running-review',
       pr_number: 42,
       pr_head_sha: 'sha-aaa',
@@ -824,7 +823,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'manual-running',
       repo_path: REPO,
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-manual-running',
       pr_number: 42,
       pr_head_sha: 'sha-old',
@@ -854,7 +853,7 @@ describe('pollReviewerRequests', () => {
     const stale = insertTask(db, {
       id: 'stale-review',
       repo_path: REPO,
-      status: 'draft',
+      runtime_state: 'idle',
       pr_number: 99,
       pr_head_sha: 'sha-old',
       source: 'auto_review',
@@ -880,7 +879,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, {
       id: 'running-review',
       repo_path: REPO,
-      status: 'running',
+      runtime_state: 'running',
       tmux_session: 'octomux-agent-running-review',
       pr_number: 99,
       pr_head_sha: 'sha-old',

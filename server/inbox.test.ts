@@ -16,7 +16,7 @@ describe('inbox queries', () => {
 
   describe('getNeedsYou', () => {
     it('returns task with a pending permission prompt', () => {
-      insertTask(db, { id: 'task-pp', status: 'running' });
+      insertTask(db, { id: 'task-pp', runtime_state: 'running' });
       insertPermissionPrompt(db, {
         id: 'pp1',
         task_id: 'task-pp',
@@ -31,7 +31,7 @@ describe('inbox queries', () => {
     it('returns errored + unviewed task', () => {
       insertTask(db, {
         id: 'task-err',
-        status: 'error',
+        runtime_state: 'error',
         last_viewed_at: null,
         updated_at: '2026-04-23 10:00:00',
       });
@@ -43,7 +43,7 @@ describe('inbox queries', () => {
     it('returns errored task whose view is stale (viewed before latest update)', () => {
       insertTask(db, {
         id: 'task-err-stale',
-        status: 'error',
+        runtime_state: 'error',
         last_viewed_at: '2026-04-20 10:00:00',
         updated_at: '2026-04-23 10:00:00',
       });
@@ -55,7 +55,7 @@ describe('inbox queries', () => {
     it('omits errored task that has been viewed since update', () => {
       insertTask(db, {
         id: 'task-err-viewed',
-        status: 'error',
+        runtime_state: 'error',
         last_viewed_at: '2026-04-23 11:00:00',
         updated_at: '2026-04-23 10:00:00',
       });
@@ -65,13 +65,13 @@ describe('inbox queries', () => {
     });
 
     it('omits running task with no pending prompts and no error', () => {
-      insertTask(db, { id: 'task-run', status: 'running' });
+      insertTask(db, { id: 'task-run', runtime_state: 'running' });
       const rows = getNeedsYou();
       expect(rows.map((t) => t.id)).not.toContain('task-run');
     });
 
     it('does not double-count when a task has multiple pending prompts', () => {
-      insertTask(db, { id: 'task-many-pp', status: 'running' });
+      insertTask(db, { id: 'task-many-pp', runtime_state: 'running' });
       insertPermissionPrompt(db, {
         id: 'pp-a',
         task_id: 'task-many-pp',
@@ -91,12 +91,12 @@ describe('inbox queries', () => {
     it('orders by updated_at DESC', () => {
       insertTask(db, {
         id: 'task-old',
-        status: 'error',
+        runtime_state: 'error',
         updated_at: '2026-04-20 00:00:00',
       });
       insertTask(db, {
         id: 'task-new',
-        status: 'error',
+        runtime_state: 'error',
         updated_at: '2026-04-23 00:00:00',
       });
       const rows = getNeedsYou();
@@ -109,7 +109,7 @@ describe('inbox queries', () => {
     it('returns closed + unviewed task within 7 days', () => {
       insertTask(db, {
         id: 'task-closed',
-        status: 'closed',
+        runtime_state: 'idle',
         last_viewed_at: null,
         updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
       });
@@ -120,7 +120,7 @@ describe('inbox queries', () => {
     it('omits closed task older than 7 days', () => {
       insertTask(db, {
         id: 'task-stale',
-        status: 'closed',
+        runtime_state: 'idle',
         last_viewed_at: null,
         updated_at: '2026-04-01 00:00:00',
       });
@@ -132,7 +132,7 @@ describe('inbox queries', () => {
       const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
       insertTask(db, {
         id: 'task-seen',
-        status: 'closed',
+        runtime_state: 'idle',
         updated_at: now,
         last_viewed_at: '2099-01-01 00:00:00',
       });
@@ -144,7 +144,7 @@ describe('inbox queries', () => {
       const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
       insertTask(db, {
         id: 'task-run',
-        status: 'running',
+        runtime_state: 'running',
         updated_at: now,
         last_viewed_at: null,
       });
@@ -156,7 +156,7 @@ describe('inbox queries', () => {
       const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
       insertTask(db, {
         id: 'task-err',
-        status: 'error',
+        runtime_state: 'error',
         updated_at: now,
         last_viewed_at: null,
       });
@@ -168,7 +168,7 @@ describe('inbox queries', () => {
       const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
       insertTask(db, {
         id: 'task-both',
-        status: 'closed',
+        runtime_state: 'idle',
         updated_at: now,
         last_viewed_at: null,
       });
@@ -188,7 +188,7 @@ describe('inbox queries', () => {
       for (let i = 0; i < 60; i++) {
         insertTask(db, {
           id: `task-${i}`,
-          status: 'closed',
+          runtime_state: 'idle',
           updated_at: now,
           last_viewed_at: null,
         });

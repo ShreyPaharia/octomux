@@ -20,9 +20,9 @@ beforeEach(() => {
   (apiMock as unknown as Record<string, ReturnType<typeof vi.fn>>).listTasks = vi
     .fn()
     .mockResolvedValue([
-      makeTask({ id: 't-running', title: 'Running work', status: 'running' }),
-      makeTask({ id: 't-current', title: 'Current task', status: 'running' }),
-      makeTask({ id: 't-closed', title: 'Closed', status: 'closed' }),
+      makeTask({ id: 't-running', title: 'Running work', runtime_state: 'running' }),
+      makeTask({ id: 't-current', title: 'Current task', runtime_state: 'running' }),
+      makeTask({ id: 't-closed', title: 'Closed', runtime_state: 'idle' }),
     ]);
   (apiMock as unknown as Record<string, ReturnType<typeof vi.fn>>).moveAgentToTask = vi
     .fn()

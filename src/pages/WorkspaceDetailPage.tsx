@@ -204,7 +204,7 @@ function TaskRow({ task, onClick }: { task: Task; onClick: () => void }) {
       className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 text-left hover:bg-[#141414]"
     >
       <div className="min-w-0 flex-1 truncate text-sm text-foreground">{task.title}</div>
-      <div className="shrink-0 text-xs text-[#8a8a8a]">{task.status}</div>
+      <div className="shrink-0 text-xs text-[#8a8a8a]">{task.runtime_state}</div>
     </button>
   );
 }

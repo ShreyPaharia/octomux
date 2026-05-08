@@ -21,7 +21,7 @@ vi.mock('./task-runner.js', async () => {
       const db = getDb();
       const branch = task.branch || `agents/${task.id}`;
       db.prepare(
-        `UPDATE tasks SET status = 'running', tmux_session = ?, updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'running', tmux_session = ?, updated_at = datetime('now') WHERE id = ?`,
       ).run(`octomux-agent-${task.id}`, task.id);
       if (task.worktree_id) {
         db.prepare(`UPDATE worktrees SET path = ?, branch = COALESCE(branch, ?) WHERE id = ?`).run(
@@ -34,7 +34,7 @@ vi.mock('./task-runner.js', async () => {
     closeTask: vi.fn(async (task: any) => {
       const db = getDb();
       db.prepare(
-        `UPDATE tasks SET status = 'closed', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
       db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
     }),
@@ -42,7 +42,7 @@ vi.mock('./task-runner.js', async () => {
     resumeTask: vi.fn(async (task: any) => {
       const db = getDb();
       db.prepare(
-        `UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
       db.prepare(
         "UPDATE agents SET status = 'running' WHERE task_id = ? AND status = 'stopped'",
@@ -338,8 +338,8 @@ describe('GET /api/tasks', () => {
 describe('GET /api/tasks/inbox', () => {
   it('returns both buckets', async () => {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    insertTask(db, { id: 'err', status: 'error', last_viewed_at: null, updated_at: now });
-    insertTask(db, { id: 'closed', status: 'closed', last_viewed_at: null, updated_at: now });
+    insertTask(db, { id: 'err', runtime_state: 'error', last_viewed_at: null, updated_at: now });
+    insertTask(db, { id: 'closed', runtime_state: 'idle', last_viewed_at: null, updated_at: now });
 
     const res = await request(app).get('/api/tasks/inbox');
     expect(res.status).toBe(200);
@@ -438,7 +438,7 @@ describe('POST /api/tasks', () => {
     expect(res.body.title).toBe(validPayload.title);
     expect(res.body.description).toBe(validPayload.description);
     expect(res.body.repo_path).toBe(validPayload.repo_path);
-    expect(res.body.status).toBe('setting_up');
+    expect(res.body.runtime_state).toBe('setting_up');
   });
 
   it('generates 12-char nanoid', async () => {
@@ -480,7 +480,7 @@ describe('POST /api/tasks', () => {
       .send({ ...validPayload, draft: true });
 
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe('draft');
+    expect(res.body.runtime_state).toBe('idle');
     expect(startTask).not.toHaveBeenCalled();
   });
 
@@ -591,10 +591,10 @@ describe('POST /api/tasks/:id/start', () => {
     expect(vi.mocked(startTask).mock.calls[0][0].id).toBe(DEFAULTS.task.id);
   });
 
-  const nonDraftStatuses = ['setting_up', 'running', 'closed', 'error'];
+  const nonDraftStates = ['setting_up', 'running', 'error'];
 
-  it.each(nonDraftStatuses)('returns 400 when task status is %s', async (status) => {
-    insertTask(db, { status: status as any });
+  it.each(nonDraftStates)('returns 400 when task runtime_state is %s', async (state) => {
+    insertTask(db, { runtime_state: state as any });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/start`);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('draft');
@@ -613,7 +613,7 @@ describe('PATCH /api/tasks/:id', () => {
       .send({ status: 'closed' });
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('closed');
+    expect(res.body.runtime_state).toBe('idle');
     expect(res.body.agents).toHaveLength(1);
   });
 
@@ -647,7 +647,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('running'); // unchanged
+    expect(res.body.runtime_state).toBe('running'); // unchanged
     expect(closeTask).not.toHaveBeenCalled();
   });
 
@@ -662,11 +662,11 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.error).toContain('resume');
   });
 
-  const resumableStatuses = ['closed', 'error'] as const;
+  const resumableStates = ['idle', 'error'] as const;
 
-  it.each(resumableStatuses)('returns 400 when worktree missing for %s task', async (status) => {
+  it.each(resumableStates)('returns 400 when worktree missing for %s task', async (state) => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
-    insertTask(db, { ...DEFAULTS.runningTask, status });
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ status: 'running' });
@@ -674,9 +674,9 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.error).toContain('Worktree');
   });
 
-  it.each(resumableStatuses)('calls resumeTask for %s task with valid worktree', async (status) => {
+  it.each(resumableStates)('calls resumeTask for %s task with valid worktree', async (state) => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    insertTask(db, { ...DEFAULTS.runningTask, status });
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ status: 'running' });
@@ -684,13 +684,13 @@ describe('PATCH /api/tasks/:id', () => {
     expect(resumeTask).toHaveBeenCalledOnce();
   });
 
-  it.each(resumableStatuses)(
+  it.each(resumableStates)(
     'resumes run_mode=none %s task when repo_path exists',
-    async (status) => {
+    async (state) => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       insertTask(db, {
         ...DEFAULTS.runningTask,
-        status,
+        runtime_state: state,
         run_mode: 'none',
         worktree: DEFAULTS.runningTask.repo_path,
       });
@@ -702,13 +702,13 @@ describe('PATCH /api/tasks/:id', () => {
     },
   );
 
-  it.each(resumableStatuses)(
+  it.each(resumableStates)(
     'refuses resume of run_mode=none %s task when repo_path missing',
-    async (status) => {
+    async (state) => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       insertTask(db, {
         ...DEFAULTS.runningTask,
-        status,
+        runtime_state: state,
         run_mode: 'none',
         worktree: DEFAULTS.runningTask.repo_path,
       });
@@ -723,7 +723,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('updates draft task fields', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    insertTask(db); // default status is 'draft'
+    insertTask(db); // default runtime_state is 'idle' (draft)
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ title: 'Updated title', description: 'Updated desc', repo_path: '/tmp/other-repo' });
@@ -1125,7 +1125,7 @@ describe('PATCH /api/tasks/:id/base', () => {
   });
 
   it('returns 409 for draft task', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask, status: 'draft' });
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'idle' });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
       .send({ base_branch: 'main' });
@@ -1144,10 +1144,10 @@ describe('PATCH /api/tasks/:id/base', () => {
 describe('POST /api/tasks/:id/agents', () => {
   // ─── Status gating (table-driven) ──────────────────────────────────────
 
-  const nonRunningStatuses = ['draft', 'setting_up', 'closed', 'error'];
+  const nonRunningStates = ['idle', 'setting_up', 'error'];
 
-  it.each(nonRunningStatuses)('returns 400 when task status is %s', async (status) => {
-    insertTask(db, { status: status as any });
+  it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
+    insertTask(db, { runtime_state: state as any });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('running');
@@ -1436,16 +1436,16 @@ describe('POST /api/tasks/:id/user-terminal', () => {
   });
 
   it('returns 400 when task has no tmux session', async () => {
-    insertTask(db, { tmux_session: null, status: 'running' });
+    insertTask(db, { tmux_session: null, runtime_state: 'running' });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('tmux');
   });
 
-  const nonRunningStatuses = ['draft', 'setting_up', 'closed', 'error'] as const;
+  const nonRunningStates = ['idle', 'setting_up', 'error'] as const;
 
-  it.each(nonRunningStatuses)('returns 400 when task status is %s', async (status) => {
-    insertTask(db, { ...DEFAULTS.runningTask, status });
+  it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
     expect(res.status).toBe(400);
   });
@@ -1515,7 +1515,7 @@ describe('GET /api/tasks/:id — user_terminals', () => {
 
 describe('GET /api/tasks with permission prompts', () => {
   it('includes pending_prompts in task response', async () => {
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-1' });
     insertPermissionPrompt(db, {
       id: 'pp1',
@@ -1534,7 +1534,7 @@ describe('GET /api/tasks with permission prompts', () => {
   });
 
   it('does not include resolved prompts', async () => {
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1' });
     insertPermissionPrompt(db, {
       id: 'pp1',
@@ -1558,7 +1558,7 @@ describe('GET /api/tasks with permission prompts', () => {
   ])(
     'derived_status is $expected when activities are $activities',
     async ({ activities, expected }) => {
-      insertTask(db, { id: 't1', status: 'running' });
+      insertTask(db, { id: 't1', runtime_state: 'running' });
       activities.forEach((activity, i) => {
         insertAgent(db, {
           id: `a${i}`,
@@ -1574,7 +1574,7 @@ describe('GET /api/tasks with permission prompts', () => {
   );
 
   it('derived_status is done when all agents are stopped', async () => {
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' });
 
     const res = await request(app).get('/api/tasks').expect(200);
@@ -1582,14 +1582,14 @@ describe('GET /api/tasks with permission prompts', () => {
   });
 
   it('derived_status is done when task has no agents', async () => {
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
 
     const res = await request(app).get('/api/tasks').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
   it('derived_status ignores stopped agents in activity calculation', async () => {
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'active' });
     insertAgent(db, { id: 'a2', task_id: 't1', window_index: 1, hook_activity: 'waiting' });
 
@@ -1599,14 +1599,14 @@ describe('GET /api/tasks with permission prompts', () => {
   });
 
   it('derived_status is null for non-running tasks', async () => {
-    insertTask(db, { id: 't1', status: 'closed' });
+    insertTask(db, { id: 't1', runtime_state: 'idle' });
 
     const res = await request(app).get('/api/tasks').expect(200);
     expect(res.body[0].derived_status).toBeNull();
   });
 
   it('includes pending_prompts in single task response', async () => {
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1' });
     insertPermissionPrompt(db, {
       id: 'pp1',
@@ -1668,7 +1668,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
   });
 
   it('returns 400 when task is not running', async () => {
-    insertTask(db, { status: 'closed' });
+    insertTask(db, { runtime_state: 'idle' });
     insertAgent(db);
 
     const res = await request(app)
@@ -1923,7 +1923,7 @@ describe('GET /api/worktrees', () => {
     db.prepare(
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt1','/tmp/wt1','new','in_use')`,
     ).run();
-    insertTask(db, { id: 'tX', worktree_id: 'wt1', status: 'running' });
+    insertTask(db, { id: 'tX', worktree_id: 'wt1', runtime_state: 'running' });
 
     const res = await request(app).get('/api/worktrees');
     expect(res.status).toBe(200);
@@ -1946,19 +1946,19 @@ describe('GET /api/worktrees', () => {
     insertTask(db, {
       id: 'tA',
       worktree_id: 'wtA',
-      status: 'closed',
+      runtime_state: 'idle',
       updated_at: '2026-01-01 00:00:00',
     });
     insertTask(db, {
       id: 'tB',
       worktree_id: 'wtB',
-      status: 'closed',
+      runtime_state: 'idle',
       updated_at: '2026-01-02 00:00:00',
     });
     insertTask(db, {
       id: 'tC',
       worktree_id: 'wtC',
-      status: 'running',
+      runtime_state: 'running',
       updated_at: '2026-01-03 00:00:00',
     });
 
@@ -1982,8 +1982,8 @@ describe('GET /api/worktrees', () => {
          ('wtMain','/tmp/repo','/tmp/repo','main','none','available'),
          ('wtFeat','/tmp/repo','/tmp/repo','feature-x','none','available')`,
     ).run();
-    insertTask(db, { id: 't1', worktree_id: 'wtMain', status: 'closed' });
-    insertTask(db, { id: 't2', worktree_id: 'wtFeat', status: 'closed' });
+    insertTask(db, { id: 't1', worktree_id: 'wtMain', runtime_state: 'idle' });
+    insertTask(db, { id: 't2', worktree_id: 'wtFeat', runtime_state: 'idle' });
 
     const res = await request(app).get('/api/worktrees');
     expect(res.status).toBe(200);
@@ -2015,11 +2015,11 @@ describe('GET /api/worktrees/:id', () => {
       `INSERT INTO worktrees (id, path, repo_path, mode, status)
        VALUES ('wtD1','/tmp/wtD1','/repo','new','in_use')`,
     ).run();
-    insertTask(db, { id: 'tActive', worktree_id: 'wtD1', status: 'running' });
+    insertTask(db, { id: 'tActive', worktree_id: 'wtD1', runtime_state: 'running' });
     insertTask(db, {
       id: 'tClosed',
       worktree_id: 'wtD1',
-      status: 'closed',
+      runtime_state: 'idle',
       updated_at: '2026-01-01 00:00:00',
     });
 
@@ -2034,7 +2034,7 @@ describe('GET /api/worktrees/:id', () => {
     db.prepare(
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtD2','/tmp/wtD2','new','available')`,
     ).run();
-    insertTask(db, { id: 'tX', worktree_id: 'wtD2', status: 'closed' });
+    insertTask(db, { id: 'tX', worktree_id: 'wtD2', runtime_state: 'idle' });
 
     const res = await request(app).get('/api/worktrees/wtD2');
     expect(res.status).toBe(200);
@@ -2061,7 +2061,7 @@ describe('DELETE /api/worktrees/:id', () => {
     db.prepare(
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtA1','/tmp/wtA1','new','available')`,
     ).run();
-    insertTask(db, { id: 'tRun', worktree_id: 'wtA1', status: 'running' });
+    insertTask(db, { id: 'tRun', worktree_id: 'wtA1', runtime_state: 'running' });
 
     const res = await request(app).delete('/api/worktrees/wtA1');
     expect(res.status).toBe(409);
@@ -2071,7 +2071,7 @@ describe('DELETE /api/worktrees/:id', () => {
     db.prepare(
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtOK','/tmp/wtOK','existing','available')`,
     ).run();
-    insertTask(db, { id: 'tTerm', worktree_id: 'wtOK', status: 'closed' });
+    insertTask(db, { id: 'tTerm', worktree_id: 'wtOK', runtime_state: 'idle' });
 
     const res = await request(app).delete('/api/worktrees/wtOK');
     expect(res.status).toBe(204);
@@ -2097,7 +2097,7 @@ describe('PATCH /api/agents/:id/task', () => {
   });
 
   it('400 when task_id equals current task_id (no-op)', async () => {
-    insertTask(db, { id: 'tSame', status: 'running' });
+    insertTask(db, { id: 'tSame', runtime_state: 'running' });
     insertAgent(db, { id: 'aSame', task_id: 'tSame' });
     const res = await request(app).patch('/api/agents/aSame/task').send({ task_id: 'tSame' });
     expect(res.status).toBe(400);
@@ -2112,14 +2112,14 @@ describe('PATCH /api/agents/:id/task', () => {
   });
 
   it('409 when target task is not active', async () => {
-    insertTask(db, { id: 'tClosed', status: 'closed' });
+    insertTask(db, { id: 'tClosed', runtime_state: 'idle' });
     insertAgent(db, { id: 'aC', task_id: null });
     const res = await request(app).patch('/api/agents/aC/task').send({ task_id: 'tClosed' });
     expect(res.status).toBe(409);
   });
 
   it('detaches to standalone (task_id=null)', async () => {
-    insertTask(db, { id: 'tFrom', status: 'running' });
+    insertTask(db, { id: 'tFrom', runtime_state: 'running' });
     insertAgent(db, { id: 'aDet', task_id: 'tFrom' });
 
     const res = await request(app).patch('/api/agents/aDet/task').send({ task_id: null });
@@ -2129,8 +2129,8 @@ describe('PATCH /api/agents/:id/task', () => {
   });
 
   it('moves between tasks', async () => {
-    insertTask(db, { id: 'tA', status: 'running' });
-    insertTask(db, { id: 'tB', status: 'running' });
+    insertTask(db, { id: 'tA', runtime_state: 'running' });
+    insertTask(db, { id: 'tB', runtime_state: 'running' });
     insertAgent(db, { id: 'aMove', task_id: 'tA' });
 
     const res = await request(app).patch('/api/agents/aMove/task').send({ task_id: 'tB' });
@@ -2139,7 +2139,7 @@ describe('PATCH /api/agents/:id/task', () => {
   });
 
   it('attaches a standalone chat agent to a task', async () => {
-    insertTask(db, { id: 'tTarget', status: 'running' });
+    insertTask(db, { id: 'tTarget', runtime_state: 'running' });
     insertAgent(db, { id: 'aChat', task_id: null });
     // Standalone agents carry their own tmux_session.
     db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-aChat' WHERE id = 'aChat'`).run();

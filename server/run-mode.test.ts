@@ -246,14 +246,14 @@ describe('partial unique indexes', () => {
        VALUES ('shared-wt', '/some/user/repo', 'existing', 'in_use')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
-       VALUES ('t1', 'T', 'D', 'running', 'running', 'shared-wt')`,
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+       VALUES ('t1', 'T', 'D', 'running', 'shared-wt')`,
     ).run();
     expect(() =>
       db
         .prepare(
-          `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
-           VALUES ('t2', 'T', 'D', 'setting_up', 'setting_up', 'shared-wt')`,
+          `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+           VALUES ('t2', 'T', 'D', 'setting_up', 'shared-wt')`,
         )
         .run(),
     ).toThrow(/UNIQUE/i);
@@ -265,14 +265,14 @@ describe('partial unique indexes', () => {
        VALUES ('shared-wt-2', '/some/user/repo', 'existing', 'available')`,
     ).run();
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
-       VALUES ('t-closed', 'T', 'D', 'closed', 'idle', 'shared-wt-2')`,
+      `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+       VALUES ('t-closed', 'T', 'D', 'idle', 'shared-wt-2')`,
     ).run();
     expect(() =>
       db
         .prepare(
-          `INSERT INTO tasks (id, title, description, status, runtime_state, worktree_id)
-           VALUES ('t-running', 'T', 'D', 'running', 'running', 'shared-wt-2')`,
+          `INSERT INTO tasks (id, title, description, runtime_state, worktree_id)
+           VALUES ('t-running', 'T', 'D', 'running', 'shared-wt-2')`,
         )
         .run(),
     ).not.toThrow();
@@ -349,7 +349,7 @@ describe('none mode dirty checkout refusal', () => {
     await startTask(task);
 
     const updated = getTask(db, DEFAULTS.task.id)!;
-    expect(updated.status).toBe('error');
+    expect(updated.runtime_state).toBe('error');
     expect(updated.error).toMatch(/dirty/i);
     expect(updated.error).toContain('foo.ts');
   });
@@ -396,19 +396,19 @@ describe('deleteTask safety', () => {
 describe('reconcileOrphanSettingUp', () => {
   it('transitions setting_up tasks with dead tmux session to error', async () => {
     execState.hasSession = () => false;
-    insertTask(db, { id: 'ghost', status: 'setting_up', tmux_session: 'octomux-agent-ghost' });
+    insertTask(db, { id: 'ghost', runtime_state: 'setting_up', tmux_session: 'octomux-agent-ghost' });
     await reconcileOrphanSettingUp();
     const t = getTask(db, 'ghost')!;
-    expect(t.status).toBe('error');
+    expect(t.runtime_state).toBe('error');
     expect(t.error).toContain('orphan setting_up');
   });
 
   it('leaves setting_up tasks with live tmux session alone', async () => {
     execState.hasSession = () => true;
-    insertTask(db, { id: 'alive', status: 'setting_up', tmux_session: 'octomux-agent-alive' });
+    insertTask(db, { id: 'alive', runtime_state: 'setting_up', tmux_session: 'octomux-agent-alive' });
     await reconcileOrphanSettingUp();
     const t = getTask(db, 'alive')!;
-    expect(t.status).toBe('setting_up');
+    expect(t.runtime_state).toBe('setting_up');
   });
 });
 
@@ -439,7 +439,7 @@ describe('gcScratchDirs', () => {
     insertTask(db, {
       id: 'alive-scratch',
       run_mode: 'scratch',
-      status: 'running',
+      runtime_state: 'running',
       repo_path: '',
       worktree: path.join(os.homedir(), '.octomux', 'scratch', 'alive-scratch'),
     });

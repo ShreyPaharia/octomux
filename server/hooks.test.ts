@@ -18,7 +18,7 @@ describe('Hook endpoints', () => {
   beforeEach(() => {
     db = createTestDb();
     app = createApp();
-    insertTask(db, { id: 't1', status: 'running' });
+    insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-123' });
   });
 

@@ -3,6 +3,7 @@ import { memo, type CSSProperties } from 'react';
 import { StatusGlyph } from './ui/status-glyph';
 
 const labels: Record<string, string> = {
+  idle: 'IDLE',
   draft: 'DRAFT',
   setting_up: 'SETTING_UP',
   running: 'RUNNING',
@@ -14,6 +15,7 @@ const labels: Record<string, string> = {
 };
 
 const colors: Record<string, string> = {
+  idle: 'text-[#6a6a6a]',
   draft: 'text-[#6a6a6a]',
   setting_up: 'text-[#FFB800]',
   running: 'text-[#22C55E]',
@@ -33,6 +35,7 @@ const toneByStatus: Record<string, PillTone> = {
   setting_up: 'amber',
   needs_attention: 'amber',
   error: 'red',
+  idle: 'grey',
   draft: 'grey',
   closed: 'grey',
 };

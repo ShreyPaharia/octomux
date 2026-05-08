@@ -100,14 +100,14 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
       for (const task of tasks) {
         if (task.id === viewingTaskId) continue;
 
-        if (task.status === 'closed' || task.status === 'error') {
+        if (task.runtime_state === 'idle' || task.runtime_state === 'error') {
           const hadActiveAgents = task.agents?.some((a) => {
             const prev = prevAgents.current.get(a.id);
             return prev && prev.status !== 'stopped';
           });
           if (hadActiveAgents) {
             const taskId = task.id;
-            if (task.status === 'error') {
+            if (task.runtime_state === 'error') {
               showToast('error', task.title, 'Task errored', {
                 label: 'View',
                 onClick: () => navigate(`/tasks/${taskId}`),

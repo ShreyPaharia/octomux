@@ -51,8 +51,8 @@ beforeEach(() => {
 describe('ParallelGridPage', () => {
   it('renders a pane per running task', () => {
     renderGrid([
-      makeTask({ id: 'a', title: 'one', status: 'running', branch: 'agents/one' }),
-      makeTask({ id: 'b', title: 'two', status: 'running', branch: 'agents/two' }),
+      makeTask({ id: 'a', title: 'one', runtime_state: 'running', branch: 'agents/one' }),
+      makeTask({ id: 'b', title: 'two', runtime_state: 'running', branch: 'agents/two' }),
     ]);
     expect(screen.getByTestId('grid-pane-a')).toBeInTheDocument();
     expect(screen.getByTestId('grid-pane-b')).toBeInTheDocument();
@@ -60,7 +60,7 @@ describe('ParallelGridPage', () => {
 
   it('clicking a pane navigates to the task detail', async () => {
     const user = userEvent.setup();
-    renderGrid([makeTask({ id: 'x', title: 'foo', status: 'running' })]);
+    renderGrid([makeTask({ id: 'x', title: 'foo', runtime_state: 'running' })]);
     await user.click(screen.getByTestId('grid-pane-x'));
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/x');
   });

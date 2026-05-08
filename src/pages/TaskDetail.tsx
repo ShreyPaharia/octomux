@@ -207,11 +207,11 @@ export default function TaskDetail() {
   // Auto-switch back to agents when task enters non-running state.
   // Diff mode is allowed to persist so users can keep reviewing a closed task's diff.
   useEffect(() => {
-    if (task && task.status !== 'running') {
+    if (task && task.runtime_state !== 'running') {
       setMode((m) => (m === 'editor' ? 'agents' : m));
       setLocalUserWindowIndex(null);
     }
-  }, [task?.status]);
+  }, [task?.runtime_state]);
 
   const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
   const [closeConfirm, setCloseConfirm] = useState(false);
@@ -564,14 +564,14 @@ export default function TaskDetail() {
   }
 
   const agents = task.agents || [];
-  const isRunning = task.status === 'running';
-  const isDraft = task.status === 'draft';
-  const canResume = (task.status === 'closed' || task.status === 'error') && !!task.worktree;
+  const isRunning = task.runtime_state === 'running';
+  const isDraft = task.runtime_state === 'idle' && !task.initial_prompt;
+  const canResume = (task.runtime_state === 'idle' || task.runtime_state === 'error') && !!task.worktree;
   const runMode: RunMode = task.run_mode ?? 'new';
   const isScratch = runMode === 'scratch';
-  const canShowDiff = !isScratch && task.status !== 'draft';
+  const canShowDiff = !isScratch && task.runtime_state !== 'idle';
 
-  const isTerminalAlive = task.status === 'running' || task.status === 'setting_up';
+  const isTerminalAlive = task.runtime_state === 'running' || task.runtime_state === 'setting_up';
   const hasTerminal =
     !!task.tmux_session && agents.length > 0 && activeWindow !== null && isTerminalAlive;
 
@@ -598,7 +598,7 @@ export default function TaskDetail() {
           >
             {MODE_LABEL[runMode]}
           </span>
-          <StatusBadge status={task.derived_status || task.status} />
+          <StatusBadge status={task.derived_status || task.runtime_state} />
         </div>
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {canResume && (
@@ -687,7 +687,7 @@ export default function TaskDetail() {
       </div>
 
       {/* Error display — only when status !== 'error' (dedicated error view shows error) */}
-      {task.error && task.status !== 'error' && (
+      {task.error && task.runtime_state !== 'error' && (
         <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {task.error}
         </div>
@@ -753,19 +753,19 @@ export default function TaskDetail() {
       )}
 
       {/* Dedicated lifecycle state: setting_up */}
-      {task.status === 'setting_up' && !hasTerminal && mode === 'agents' && (
+      {task.runtime_state === 'setting_up' && !hasTerminal && mode === 'agents' && (
         <TaskSettingUpView task={task} />
       )}
 
       {/* Dedicated lifecycle state: error */}
-      {task.status === 'error' && mode === 'agents' && (
+      {task.runtime_state === 'error' && mode === 'agents' && (
         <TaskErrorView task={task} onRetry={handleResume} onDelete={handleDelete} />
       )}
 
       {/* Agent view — shown in agents mode. Skip entirely when a dedicated
           lifecycle state (setting_up / error) is rendering above. */}
-      {task.status === 'error' ||
-      (task.status === 'setting_up' && !hasTerminal) ? null : hasTerminal ? (
+      {task.runtime_state === 'error' ||
+      (task.runtime_state === 'setting_up' && !hasTerminal) ? null : hasTerminal ? (
         <div className={mode === 'agents' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           <AgentTabs
             agents={agents}
@@ -824,7 +824,7 @@ export default function TaskDetail() {
               : 'hidden'
           }
         >
-          {task.status === 'closed' ? (
+          {task.runtime_state === 'idle' && !isDraft ? (
             <>
               <TerminalRectIcon size={32} className="text-muted-foreground/50" />
               <span className="text-sm">Terminal session ended</span>
@@ -895,7 +895,7 @@ export default function TaskDetail() {
               <div className="flex min-w-0 flex-1 flex-col">
                 <DiffViewer
                   taskId={task.id}
-                  isRunning={task.status === 'running'}
+                  isRunning={task.runtime_state === 'running'}
                   onSelectionChange={setActiveFilePath}
                   onSummaryLoaded={setDiffSummary}
                   onToggleReviewed={handleToggleReviewed}

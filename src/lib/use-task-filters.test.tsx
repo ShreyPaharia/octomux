@@ -10,10 +10,10 @@ beforeEach(() => {
 
 describe('useTaskFilters', () => {
   const tasks: Task[] = [
-    makeTask({ id: 't1', status: 'running', repo_path: '/tmp/alpha' }),
-    makeTask({ id: 't2', status: 'draft', repo_path: '/tmp/beta' }),
-    makeTask({ id: 't3', status: 'closed', repo_path: '/tmp/alpha' }),
-    makeTask({ id: 't4', status: 'error', repo_path: '/tmp/beta' }),
+    makeTask({ id: 't1', runtime_state: 'running', repo_path: '/tmp/alpha' }),
+    makeTask({ id: 't2', runtime_state: 'idle', repo_path: '/tmp/beta' }),
+    makeTask({ id: 't3', runtime_state: 'idle', repo_path: '/tmp/alpha' }),
+    makeTask({ id: 't4', runtime_state: 'error', repo_path: '/tmp/beta' }),
   ];
 
   it('defaults to All filter showing every task', () => {
@@ -40,7 +40,7 @@ describe('useTaskFilters', () => {
   it('Needs You includes tasks with pending prompts', () => {
     const extra = makeTask({
       id: 't5',
-      status: 'running',
+      runtime_state: 'running',
       repo_path: '/tmp/beta',
       pending_prompts: [
         {
@@ -63,11 +63,11 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t4', 't5']);
   });
 
-  it('Closed chip shows only closed tasks', () => {
+  it('Closed chip shows idle (closed/draft) tasks', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     act(() => result.current.setFilter('status', 'closed'));
-    const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t3']);
+    const ids = result.current.filtered.map((t) => t.id).sort();
+    expect(ids).toEqual(['t2', 't3']);
   });
 
   it('provides status counts for all chips', () => {
@@ -75,7 +75,7 @@ describe('useTaskFilters', () => {
     expect(result.current.counts.all).toBe(4);
     expect(result.current.counts.running).toBe(1);
     expect(result.current.counts.needs_you).toBe(1);
-    expect(result.current.counts.closed).toBe(1);
+    expect(result.current.counts.closed).toBe(2); // both idle tasks (t2+t3)
   });
 
   // ─── Repo filtering ─────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ describe('useTaskFilters', () => {
     expect(result.current.counts.all).toBe(2);
     expect(result.current.counts.running).toBe(1);
     expect(result.current.counts.needs_you).toBe(0);
-    expect(result.current.counts.closed).toBe(1);
+    expect(result.current.counts.closed).toBe(1); // only t3 (idle) in /tmp/alpha
   });
 
   it('shows all tasks for selected repo when switching status tabs', () => {
@@ -126,8 +126,8 @@ describe('useTaskFilters', () => {
     localStorage.setItem('octomux-status-filter', 'closed');
     const { result } = renderHook(() => useTaskFilters(tasks));
     expect(result.current.filters.status).toBe('closed');
-    const ids = result.current.filtered.map((t) => t.id);
-    expect(ids).toEqual(['t3']);
+    const ids = result.current.filtered.map((t) => t.id).sort();
+    expect(ids).toEqual(['t2', 't3']); // both idle tasks (t2 was closed, t3 was draft)
   });
 
   it('restores needs_you status filter from localStorage', () => {

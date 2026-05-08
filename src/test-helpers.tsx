@@ -1,7 +1,7 @@
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
-import type { Task, TaskStatus, Agent } from '../server/types';
+import type { Task, Agent } from '../server/types';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 
@@ -28,7 +28,6 @@ export const TASK_DEFAULTS: Task = {
   title: 'Fix order validation',
   description: 'Add negative quantity checks',
   repo_path: '/Users/dev/projects/my-repo',
-  status: 'running',
   runtime_state: 'running',
   workflow_status: 'in_progress',
   branch: 'agents/test-task-01',
@@ -57,7 +56,8 @@ export function makeTask(overrides: Partial<Task> = {}): Task {
   return { ...TASK_DEFAULTS, ...overrides };
 }
 
-export const TASK_STATUSES: TaskStatus[] = ['draft', 'setting_up', 'running', 'closed', 'error'];
+/** @deprecated status column was removed in Wave 4; use runtime_state directly */
+export const TASK_STATUSES: string[] = ['idle', 'setting_up', 'running', 'error'];
 
 // ─── Router-Wrapped Render ───────────────────────────────────────────────────
 
