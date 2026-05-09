@@ -9,7 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
 import { api } from '@/lib/api';
-import type { RepoConfig } from '@/lib/api';
+import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { GlassPanel } from '@/components/ui/glass-panel';
@@ -785,12 +785,144 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
   );
 }
 
-type SectionId = 'general' | 'agents' | 'skills' | 'repositories' | 'editor' | 'agent-launch';
+function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
+  const [hooks, setHooks] = useState<HookRegistryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api
+      .getHooksRegistry()
+      .then((r) => setHooks(r.hooks))
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleToggle = useCallback(async (entry: HookRegistryEntry, next: boolean) => {
+    // Optimistic update
+    setHooks((prev) =>
+      prev.map((h) =>
+        h.scope === entry.scope && h.key === entry.key ? { ...h, enabled: next } : h,
+      ),
+    );
+    try {
+      await api.updateHookEnabled(entry.scope, entry.key, next);
+    } catch (err) {
+      // Revert
+      setHooks((prev) =>
+        prev.map((h) =>
+          h.scope === entry.scope && h.key === entry.key ? { ...h, enabled: !next } : h,
+        ),
+      );
+      showToast('error', 'HOOKS', (err as Error).message);
+    }
+  }, []);
+
+  const builtins = hooks.filter((h) => h.scope === 'builtin');
+  const globals = hooks.filter((h) => h.scope === 'global');
+  const repos = hooks.filter((h) => h.scope !== 'builtin' && h.scope !== 'global');
+
+  function HookGroup({
+    title,
+    entries,
+    emptyMsg,
+  }: {
+    title: string;
+    entries: HookRegistryEntry[];
+    emptyMsg: string;
+  }) {
+    return (
+      <div className="mb-4">
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a]">
+          {title}
+        </div>
+        {entries.length === 0 ? (
+          <div className="py-3 text-xs text-[#8a8a8a]">{emptyMsg}</div>
+        ) : (
+          <div>
+            {entries.map((entry, i) => (
+              <div key={`${entry.scope}::${entry.key}`}>
+                <SettingRow
+                  label={entry.key}
+                  description={
+                    entry.description ?? (entry.script_path ? entry.script_path : undefined)
+                  }
+                  lastRow={i === entries.length - 1}
+                >
+                  <ToggleSwitch checked={entry.enabled} onChange={(v) => handleToggle(entry, v)} />
+                </SettingRow>
+                {entry.requires_env && (
+                  <div className="mb-1 border border-[#FFB800]/40 bg-[#FFB800]/5 px-3 py-1.5 text-xs text-[#FFB800]">
+                    Set <span className="font-mono">{entry.requires_env}</span> to enable Haiku
+                    summaries.
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <SectionCard
+      id="hooks"
+      title="HOOKS"
+      count={!loading && !error ? hooks.length : undefined}
+      scrollRef={scrollRef}
+    >
+      {loading && (
+        <div className="space-y-2">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
+          <span className="text-sm text-red-400">{error}</span>
+          <button
+            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
+            onClick={load}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <>
+          <HookGroup title="Built-in" entries={builtins} emptyMsg="No built-in hooks." />
+          <HookGroup title="Global" entries={globals} emptyMsg="No global hooks installed." />
+          <HookGroup title="Repo" entries={repos} emptyMsg="No repo hooks from active tasks." />
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+type SectionId =
+  | 'general'
+  | 'agents'
+  | 'skills'
+  | 'hooks'
+  | 'repositories'
+  | 'editor'
+  | 'agent-launch';
 
 const NAV_ITEMS: { id: SectionId; label: string }[] = [
   { id: 'general', label: 'GENERAL' },
   { id: 'agents', label: 'AGENTS' },
   { id: 'skills', label: 'SKILLS' },
+  { id: 'hooks', label: 'HOOKS' },
   { id: 'repositories', label: 'REPOSITORIES' },
   { id: 'editor', label: 'EDITOR' },
   { id: 'agent-launch', label: 'AGENT LAUNCH' },
@@ -919,6 +1051,7 @@ export default function SettingsPage() {
             <GeneralSection scrollRef={setRef('general')} />
             <AgentsSection scrollRef={setRef('agents')} />
             <SkillsSection scrollRef={setRef('skills')} />
+            <HooksSection scrollRef={setRef('hooks')} />
             <RepoConfigsSection scrollRef={setRef('repositories')} />
             <EditorSection scrollRef={setRef('editor')} />
             <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
