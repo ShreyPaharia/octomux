@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import type { Task, WorkflowStatus } from '../../server/types';
 import { BoardCard } from './BoardCard';
@@ -12,6 +12,7 @@ interface ColumnDef {
   label: string;
   accentClass: string;
   countClass: string;
+  muted?: boolean;
 }
 
 export const COLUMN_DEFS: ColumnDef[] = [
@@ -41,25 +42,45 @@ export const COLUMN_DEFS: ColumnDef[] = [
     accentClass: 'text-[#4a4a4a]',
     countClass: 'text-[#3a3a3a]',
   },
+  {
+    id: 'archived',
+    label: 'Archived',
+    accentClass: 'text-[#5a5a5a]',
+    countClass: 'text-[#3a3a3a]',
+    muted: true,
+  },
 ];
 
 interface TaskBoardColumnProps {
   column: ColumnDef;
   tasks: Task[];
   activeTaskId: string | null;
+  onArchiveDone?: () => void;
 }
 
 export const TaskBoardColumn = memo(function TaskBoardColumn({
   column,
   tasks,
   activeTaskId,
+  onArchiveDone,
 }: TaskBoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const [archiving, setArchiving] = useState(false);
+
+  const handleArchiveDone = async () => {
+    if (!onArchiveDone || tasks.length === 0) return;
+    setArchiving(true);
+    try {
+      onArchiveDone();
+    } finally {
+      setArchiving(false);
+    }
+  };
 
   return (
     <div
       data-testid={`board-column-${column.id}`}
-      className="flex h-full w-[260px] flex-none flex-col"
+      className={`flex h-full w-[260px] flex-none flex-col${column.muted ? ' opacity-60' : ''}`}
     >
       {/* Column header */}
       <div
@@ -69,7 +90,20 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
         <span className={`text-[11px] font-bold uppercase tracking-wider ${column.accentClass}`}>
           {column.label}
         </span>
-        <span className={`text-[11px] tabular-nums ${column.countClass}`}>{tasks.length}</span>
+        <div className="flex items-center gap-2">
+          {column.id === 'done' && onArchiveDone && (
+            <button
+              type="button"
+              data-testid="archive-all-done-btn"
+              disabled={tasks.length === 0 || archiving}
+              onClick={handleArchiveDone}
+              className="text-[10px] text-[#6a6a6a] transition-colors hover:text-[#8a8a8a] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Archive all ({tasks.length})
+            </button>
+          )}
+          <span className={`text-[11px] tabular-nums ${column.countClass}`}>{tasks.length}</span>
+        </div>
       </div>
 
       {/* Droppable card list */}

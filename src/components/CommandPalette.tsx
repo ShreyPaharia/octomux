@@ -14,6 +14,7 @@ const WORKFLOW_STATUS_LABELS: Record<WorkflowStatus, string> = {
   human_review: 'Human Review',
   pr: 'PR',
   done: 'Done',
+  archived: 'Archived',
 };
 
 const ALL_WORKFLOW_STATUSES: WorkflowStatus[] = [
@@ -23,6 +24,7 @@ const ALL_WORKFLOW_STATUSES: WorkflowStatus[] = [
   'human_review',
   'pr',
   'done',
+  'archived',
 ];
 
 type SessionRow = { kind: 'session'; task: Task };
