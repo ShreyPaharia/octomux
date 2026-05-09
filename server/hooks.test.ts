@@ -139,6 +139,77 @@ describe('Hook endpoints', () => {
 
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
+
+    const summaryCases = [
+      {
+        name: 'Bash → command',
+        body: { tool_name: 'Bash', tool_input: { command: 'npm test' } },
+        expected: 'Bash: npm test',
+      },
+      {
+        name: 'Edit → file_path',
+        body: {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/abs/repo/src/foo.ts', old_string: 'a', new_string: 'b' },
+        },
+        expected: 'Edit: /abs/repo/src/foo.ts',
+      },
+      {
+        name: 'Grep → pattern',
+        body: { tool_name: 'Grep', tool_input: { pattern: 'TODO', path: '.' } },
+        expected: 'Grep: TODO',
+      },
+      {
+        name: 'WebFetch → url',
+        body: { tool_name: 'WebFetch', tool_input: { url: 'https://example.com', prompt: 'x' } },
+        expected: 'WebFetch: https://example.com',
+      },
+      {
+        name: 'falls back to tool name when no recognized field',
+        body: { tool_name: 'TodoWrite', tool_input: { todos: [] } },
+        expected: 'TodoWrite',
+      },
+    ];
+
+    it.each(summaryCases)('populates current_summary: $name', async ({ body, expected }) => {
+      await request(app)
+        .post('/api/hooks/post-tool-use')
+        .send({ session_id: 'sess-123', ...body })
+        .expect(200);
+
+      const row = db
+        .prepare(`SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?`)
+        .get('t1') as { current_summary: string | null; current_summary_updated_at: string | null };
+      expect(row.current_summary).toBe(expected);
+      expect(row.current_summary_updated_at).not.toBeNull();
+    });
+
+    it('truncates very long tool details to ≤ 100 chars with ellipsis', async () => {
+      const long = 'echo ' + 'x'.repeat(500);
+      await request(app)
+        .post('/api/hooks/post-tool-use')
+        .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: long } })
+        .expect(200);
+
+      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
+        current_summary: string;
+      };
+      expect(row.current_summary.length).toBeLessThanOrEqual(100);
+      expect(row.current_summary.startsWith('Bash: ')).toBe(true);
+      expect(row.current_summary.endsWith('…')).toBe(true);
+    });
+
+    it('leaves current_summary unchanged when tool_name is missing', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use')
+        .send({ session_id: 'sess-123', tool_input: { command: 'noop' } })
+        .expect(200);
+
+      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
+        current_summary: string | null;
+      };
+      expect(row.current_summary).toBeNull();
+    });
   });
 
   describe('POST /api/hooks/stop', () => {

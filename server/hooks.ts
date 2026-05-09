@@ -15,6 +15,42 @@ function findAgentBySessionId(sessionId: string) {
     .get(sessionId) as { id: string; task_id: string } | undefined;
 }
 
+const SUMMARY_FIELD_PRIORITY = [
+  'command', // Bash
+  'file_path', // Read / Write / Edit / NotebookEdit
+  'notebook_path',
+  'pattern', // Grep / Glob
+  'url', // WebFetch
+  'query', // WebSearch
+  'description', // Task (Agent)
+  'path',
+];
+
+const SUMMARY_MAX_LEN = 100;
+
+export function deriveSummaryFromToolUse(toolName: unknown, toolInput: unknown): string | null {
+  if (typeof toolName !== 'string' || !toolName.trim()) return null;
+  const name = toolName.trim();
+
+  let detail = '';
+  if (toolInput && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
+    const obj = toolInput as Record<string, unknown>;
+    for (const key of SUMMARY_FIELD_PRIORITY) {
+      const v = obj[key];
+      if (typeof v === 'string' && v.trim()) {
+        detail = v.replace(/\s+/g, ' ').trim();
+        break;
+      }
+    }
+  }
+
+  if (!detail) return name;
+  const room = SUMMARY_MAX_LEN - name.length - 2;
+  if (room <= 1) return name;
+  const truncated = detail.length > room ? detail.slice(0, room - 1) + '…' : detail;
+  return `${name}: ${truncated}`;
+}
+
 // POST /api/hooks/user-prompt-submit
 // Fires when the user submits a prompt — agent resumes working
 router.post('/user-prompt-submit', (req, res) => {
@@ -85,7 +121,7 @@ router.post('/permission-request', (req, res) => {
 
 // POST /api/hooks/post-tool-use
 router.post('/post-tool-use', (req, res) => {
-  const { session_id } = req.body;
+  const { session_id, tool_name, tool_input } = req.body;
   if (!session_id) {
     res.status(200).send();
     return;
@@ -96,6 +132,8 @@ router.post('/post-tool-use', (req, res) => {
     res.status(200).send();
     return;
   }
+
+  const summary = deriveSummaryFromToolUse(tool_name, tool_input);
 
   const txn = getDb().transaction(() => {
     // Resolve oldest pending prompt (FIFO)
@@ -117,6 +155,15 @@ router.post('/post-tool-use', (req, res) => {
          WHERE id = ? AND hook_activity != 'idle'`,
       )
       .run(agent.id);
+
+    if (summary) {
+      getDb()
+        .prepare(
+          `UPDATE tasks SET current_summary = ?, current_summary_updated_at = datetime('now'), updated_at = datetime('now')
+           WHERE id = ?`,
+        )
+        .run(summary, agent.task_id);
+    }
   });
   txn();
 
