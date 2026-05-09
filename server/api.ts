@@ -66,6 +66,7 @@ import { getSettings, updateSettings } from './settings.js';
 import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
+import { generateTitleAndDescription } from './title-gen.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -469,7 +470,7 @@ export function setupRoutes(app: Express): void {
     const body = req.body as CreateTaskRequest;
     const runMode: RunMode = body.run_mode ?? 'new';
 
-    if (!body.title || !body.description) {
+    if ((!body.title || !body.description) && !body.initial_prompt) {
       res.status(400).json({ error: 'title and description are required' });
       return;
     }
@@ -528,6 +529,19 @@ export function setupRoutes(app: Express): void {
       storedWorktree = null;
     }
 
+    // B5: server-side title/description generation
+    let resolvedTitle = body.title;
+    let resolvedDescription = body.description;
+    if (body.initial_prompt && (!resolvedTitle || !resolvedDescription)) {
+      const generated = await generateTitleAndDescription(body.initial_prompt);
+      if (!resolvedTitle) resolvedTitle = generated.title;
+      if (!resolvedDescription) resolvedDescription = generated.description;
+    }
+    // Fallback to ensure non-empty strings
+    resolvedTitle =
+      resolvedTitle || body.initial_prompt?.split('\n')[0]?.slice(0, 80) || 'Untitled task';
+    resolvedDescription = resolvedDescription || body.initial_prompt || '';
+
     const db = getDb();
     const id = nanoid(12);
     const isDraft = !!body.draft;
@@ -572,8 +586,8 @@ export function setupRoutes(app: Express): void {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
-        body.title,
-        body.description,
+        resolvedTitle,
+        resolvedDescription,
         isDraft ? 'idle' : 'setting_up',
         initialWorkflowStatus,
         body.initial_prompt ?? null,
@@ -1891,6 +1905,37 @@ export function setupRoutes(app: Express): void {
 
   // ─── Task Workflow Endpoints ──────────────────────────────────────────────────
 
+  // B3: Bulk-archive all done tasks
+  app.post('/api/tasks/archive-done', async (req: Request, res: Response) => {
+    const db = getDb();
+    const doneTasks = db
+      .prepare(`${SELECT_TASK_SQL} WHERE t.workflow_status = 'done'`)
+      .all() as Task[];
+
+    let archivedCount = 0;
+    for (const task of doneTasks) {
+      // Close running tasks before archiving
+      if (task.runtime_state === 'running' || task.runtime_state === 'setting_up') {
+        await closeTask(task);
+      }
+
+      const updateId = nanoid(12);
+      db.prepare(
+        `UPDATE tasks SET workflow_status = 'archived', updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+
+      db.prepare(
+        `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', 'done', 'archived', ?)`,
+      ).run(updateId, task.id, 'auto: bulk archive');
+
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+      archivedCount++;
+    }
+
+    apiLogger.info({ operation: 'archive_done', archived: archivedCount }, 'bulk archive done');
+    res.json({ archived: archivedCount });
+  });
+
   // Move task to a new workflow_status
   app.post('/api/tasks/:id/move', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
@@ -1908,6 +1953,14 @@ export function setupRoutes(app: Express): void {
     ) {
       res.status(400).json({ error: `note is required when moving to ${body.workflow_status}` });
       return;
+    }
+
+    // B2: auto-close before archiving if the task is actively running
+    if (
+      body.workflow_status === 'archived' &&
+      (task.runtime_state === 'running' || task.runtime_state === 'setting_up')
+    ) {
+      await closeTask(task);
     }
 
     const prevStatus = task.workflow_status;

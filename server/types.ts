@@ -2,7 +2,14 @@ export type TaskStatus = 'draft' | 'setting_up' | 'running' | 'closed' | 'error'
 /** New runtime state — replaces TaskStatus for the runtime column. */
 export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error';
 /** Workflow status — human-facing board column. */
-export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
+export type WorkflowStatus =
+  | 'backlog'
+  | 'planned'
+  | 'in_progress'
+  | 'human_review'
+  | 'pr'
+  | 'done'
+  | 'archived';
 export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
   'backlog',
   'planned',
@@ -10,6 +17,7 @@ export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
   'human_review',
   'pr',
   'done',
+  'archived',
 ] as const;
 
 export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
@@ -167,8 +175,8 @@ export interface Integration {
 }
 
 export interface CreateTaskRequest {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   repo_path?: string;
   branch?: string;
   base_branch?: string;

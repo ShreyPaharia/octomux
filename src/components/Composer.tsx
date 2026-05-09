@@ -200,10 +200,11 @@ export function Composer({ onSubmitted }: Props = {}) {
           refresh();
           navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
-          const title = deriveTitleFromPrompt(trimmed);
+          // B5: when initial_prompt is set, let the server generate title/description.
+          // We omit title here so the server-side generator takes precedence.
+          // The deriveTitleFromPrompt fallback is used as safety net inside server/api.ts.
           const payload: Parameters<typeof api.createTask>[0] = {
-            title,
-            description: trimmed,
+            title: deriveTitleFromPrompt(trimmed), // fallback — server overrides when key is set
             initial_prompt: trimmed,
           };
           if (state.mode === 'new') {
