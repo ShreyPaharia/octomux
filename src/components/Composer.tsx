@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type FormEvent,
 } from 'react';
+import { repoBasename } from '@/lib/utils';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
   reduce,
@@ -45,10 +46,7 @@ async function createChatRequest(body: {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-function repoBasename(path: string): string {
-  const parts = path.replace(/\/$/, '').split('/');
-  return parts[parts.length - 1] || path;
-}
+const DRAFT_KEY = 'octomux-composer-draft-prompt';
 
 function deriveTitleFromPrompt(prompt: string): string {
   const firstLine = prompt.trim().split('\n')[0] ?? '';
@@ -71,7 +69,9 @@ export function Composer({ onSubmitted }: Props = {}) {
     hydrateFromUrl(params),
   );
 
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState<string>(
+    () => localStorage.getItem(DRAFT_KEY) ?? '',
+  );
   const [submitting, setSubmitting] = useState(false);
   const [preflightBlock, setPreflightBlock] = useState<{
     result: PreflightResult;
@@ -82,6 +82,18 @@ export function Composer({ onSubmitted }: Props = {}) {
     conflictTaskId?: string | null;
   } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Persist prompt draft to localStorage (debounced 250 ms).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (prompt) {
+        localStorage.setItem(DRAFT_KEY, prompt);
+      } else {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [prompt]);
 
   // Re-hydrate when the URL is changed externally.
   const lastHydratedRef = useRef(searchParams.toString());
@@ -150,7 +162,11 @@ export function Composer({ onSubmitted }: Props = {}) {
     [],
   );
 
-  const onClearIntent = useCallback(() => dispatch({ type: 'clearIntent' }), []);
+  const onClearIntent = useCallback(() => {
+    dispatch({ type: 'clearIntent' });
+    localStorage.removeItem(DRAFT_KEY);
+    setPrompt('');
+  }, []);
 
   // ─── Submit ──────────────────────────────────────────────────────────
 
@@ -171,6 +187,8 @@ export function Composer({ onSubmitted }: Props = {}) {
             prompt: trimmed,
             ...(pickedAgent ? { agent: pickedAgent } : {}),
           });
+          localStorage.removeItem(DRAFT_KEY);
+          setPrompt('');
           refresh();
           navigate(`/tasks/${state.sessionId}`);
         } else if (state.mode === 'scratch') {
@@ -179,6 +197,8 @@ export function Composer({ onSubmitted }: Props = {}) {
             agent: pickedAgent,
             prompt: trimmed,
           });
+          localStorage.removeItem(DRAFT_KEY);
+          setPrompt('');
           refresh();
           navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
@@ -217,6 +237,8 @@ export function Composer({ onSubmitted }: Props = {}) {
           }
 
           const created = await api.createTask(payload);
+          localStorage.removeItem(DRAFT_KEY);
+          setPrompt('');
           refresh();
           onSubmitted?.(created);
           navigate(`/tasks/${created.id}`);

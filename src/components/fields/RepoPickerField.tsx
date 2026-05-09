@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
 import type { BrowseResult, RecentRepo } from '@/lib/api';
 import { ChevronLeftIcon, CloseIcon } from '@/components/icons';
+import { repoBasename } from '@/lib/utils';
 
 export type RepoValidation = 'idle' | 'loading' | 'valid' | 'invalid';
 
@@ -198,25 +199,67 @@ export function RepoPickerField({ value, onChange, onValidationChange }: RepoPic
 
       {/* Recent repos */}
       {!value.trim() && recentRepos.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground font-medium">Recent</span>
-          <div className="flex flex-col gap-1 rounded-lg border border-glass-edge bg-glass-l1 p-1">
-            {recentRepos.slice(0, 5).map((repo) => (
-              <button
-                key={repo.repo_path}
-                type="button"
-                className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-glass-l2"
-                onClick={() => onChange(repo.repo_path)}
-              >
-                <span className="font-mono text-xs truncate mr-3">{repo.repo_path}</span>
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {timeAgo(repo.last_used)}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <RecentRepoList repos={recentRepos.slice(0, 5)} onChange={onChange} />
       )}
+    </div>
+  );
+}
+
+/**
+ * Returns the parent directory name (second-to-last path segment) of a path.
+ * Used for collision disambiguation in the recent repos list.
+ */
+function repoParent(path: string): string {
+  const parts = path.replace(/\/$/, '').split('/').filter(Boolean);
+  return parts.length >= 2 ? (parts[parts.length - 2] ?? '') : '';
+}
+
+function RecentRepoList({
+  repos,
+  onChange,
+}: {
+  repos: RecentRepo[];
+  onChange: (path: string) => void;
+}) {
+  // Detect collisions: basenames that appear more than once in the visible list.
+  const basenameCounts = new Map<string, number>();
+  for (const repo of repos) {
+    const base = repoBasename(repo.repo_path);
+    basenameCounts.set(base, (basenameCounts.get(base) ?? 0) + 1);
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground font-medium">Recent</span>
+      <div className="flex flex-col gap-1 rounded-lg border border-glass-edge bg-glass-l1 p-1">
+        {repos.map((repo) => {
+          const base = repoBasename(repo.repo_path);
+          const collides = (basenameCounts.get(base) ?? 0) > 1;
+          const parent = collides ? repoParent(repo.repo_path) : '';
+          return (
+            <button
+              key={repo.repo_path}
+              type="button"
+              title={repo.repo_path}
+              className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-glass-l2"
+              onClick={() => onChange(repo.repo_path)}
+            >
+              <span className="font-mono text-xs truncate mr-3">
+                {base}
+                {collides && parent && (
+                  <>
+                    <span className="text-muted-foreground"> · </span>
+                    <span className="text-muted-foreground">{parent}</span>
+                  </>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground shrink-0">
+                {timeAgo(repo.last_used)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
