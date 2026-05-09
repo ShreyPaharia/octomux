@@ -269,6 +269,20 @@ export interface HookExecution {
   stderr_excerpt: string;
 }
 
+// ─── Hook registry types (C4) ────────────────────────────────────────────────
+
+export interface HookRegistryEntry {
+  scope: 'global' | `repo:${string}` | 'builtin';
+  key: string;
+  event: string | null;
+  script_path: string | null;
+  description: string | null;
+  enabled: boolean;
+  requires_env: string | null;
+  last_run_at: string | null;
+  last_exit_code: number | null;
+}
+
 // ─── Integrations types (Wave 2B) ────────────────────────────────────────────
 
 export interface IntegrationProvider {
@@ -496,4 +510,12 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/integrations/${encodeURIComponent(id)}/test`, {
       method: 'POST',
     }),
+
+  // ─── Hooks registry (C4) ─────────────────────────────────────────────────────
+  getHooksRegistry: () => request<{ hooks: HookRegistryEntry[] }>('/hooks/registry'),
+  updateHookEnabled: (scope: string, key: string, enabled: boolean) =>
+    request<{ scope: string; key: string; enabled: boolean }>(
+      `/hooks/registry/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }) },
+    ),
 };

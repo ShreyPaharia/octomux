@@ -44,7 +44,15 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('settings-nav-general')).toBeInTheDocument();
     });
-    for (const id of ['general', 'agents', 'skills', 'repositories', 'editor', 'agent-launch']) {
+    for (const id of [
+      'general',
+      'agents',
+      'skills',
+      'hooks',
+      'repositories',
+      'editor',
+      'agent-launch',
+    ]) {
       expect(screen.getByTestId(`settings-nav-${id}`)).toBeInTheDocument();
     }
     expect(screen.queryByTestId('settings-nav-orchestrator')).not.toBeInTheDocument();
