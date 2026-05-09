@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
+import { getDb } from './db.js';
 import type { HookEventName, HookEnvelope } from './hook-types.js';
 
 export type { HookEventName, HookEnvelope };
@@ -11,6 +12,49 @@ export type { HookEventName, HookEnvelope };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('hooks');
 const integLogger = childLogger('integrations');
+
+// ─── Hook enabled/disabled cache ─────────────────────────────────────────────
+
+/** In-memory cache: `${scope}::${key}` → enabled boolean. Invalidated on PATCH. */
+const hookEnabledCache = new Map<string, boolean>();
+
+/**
+ * Look up whether a given (scope, key) pair is enabled.
+ * Missing rows = enabled (back-compat default).
+ * Results are cached until `invalidateHookEnabledCache` is called.
+ */
+export function isHookEnabled(scope: string, key: string): boolean {
+  const cacheKey = `${scope}::${key}`;
+  if (hookEnabledCache.has(cacheKey)) {
+    return hookEnabledCache.get(cacheKey)!;
+  }
+  let result = true;
+  try {
+    const row = getDb()
+      .prepare(`SELECT enabled FROM hook_settings WHERE scope = ? AND key = ?`)
+      .get(scope, key) as { enabled: number } | undefined;
+    if (row !== undefined) {
+      result = row.enabled !== 0;
+    }
+  } catch {
+    // DB may not be ready (test env without DB) — treat as enabled.
+    result = true;
+  }
+  hookEnabledCache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * Invalidate the cache for a specific (scope, key) pair, or the entire cache
+ * when called with no arguments. Called after PATCH /api/hooks/registry.
+ */
+export function invalidateHookEnabledCache(scope?: string, key?: string): void {
+  if (scope !== undefined && key !== undefined) {
+    hookEnabledCache.delete(`${scope}::${key}`);
+  } else {
+    hookEnabledCache.clear();
+  }
+}
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -401,13 +445,21 @@ export async function fireHook(event: HookEventName, envelope: HookEnvelope): Pr
     const cwd = worktreePath ?? taskRepoPath ?? os.homedir();
     const logsDir = resolveHooksLogsDir();
 
+    const globalHooksBase = path.join(os.homedir(), '.octomux', 'hooks');
     const hookDirs = resolveHookDirs(event, taskRepoPath);
-    const scripts: string[] = [];
+    // Track which dir each script came from so we can build the correct scope.
+    const scriptsWithScope: Array<{ script: string; scope: string }> = [];
     for (const dir of hookDirs) {
-      scripts.push(...discoverScripts(dir));
+      const discovered = discoverScripts(dir);
+      for (const script of discovered) {
+        // Determine scope: global or repo:<absolute-path>
+        const isGlobal = dir.startsWith(globalHooksBase);
+        const scope = isGlobal ? 'global' : taskRepoPath ? `repo:${taskRepoPath}` : 'global';
+        scriptsWithScope.push({ script, scope });
+      }
     }
 
-    if (scripts.length === 0) return;
+    if (scriptsWithScope.length === 0) return;
 
     const env: NodeJS.ProcessEnv = {
       OCTOMUX_EVENT: event,
@@ -416,11 +468,16 @@ export async function fireHook(event: HookEventName, envelope: HookEnvelope): Pr
     };
 
     logger.debug(
-      { event, task_id: envelope.task?.id, script_count: scripts.length },
+      { event, task_id: envelope.task?.id, script_count: scriptsWithScope.length },
       'firing hooks',
     );
 
-    for (const script of scripts) {
+    for (const { script, scope } of scriptsWithScope) {
+      const key = `${event}/${path.basename(script)}`;
+      if (!isHookEnabled(scope, key)) {
+        logger.debug({ scope, key, event }, 'hook skipped (disabled)');
+        continue;
+      }
       await runScript(script, envelope, env, cwd, logsDir);
     }
   } catch (err) {

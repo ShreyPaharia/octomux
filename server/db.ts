@@ -171,6 +171,14 @@ CREATE TABLE IF NOT EXISTS inline_comments (
 CREATE INDEX IF NOT EXISTS idx_inline_comments_task_file
     ON inline_comments(task_id, file_path);
 
+CREATE TABLE IF NOT EXISTS hook_settings (
+  scope      TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (scope, key)
+);
+
 `;
 
 /**
@@ -541,6 +549,17 @@ export function initDb(instance: Database.Database): void {
         enabled     INTEGER NOT NULL DEFAULT 1,
         created_at  TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  }
+  if (!existingTables.has('hook_settings')) {
+    instance.exec(`
+      CREATE TABLE IF NOT EXISTS hook_settings (
+        scope      TEXT NOT NULL,
+        key        TEXT NOT NULL,
+        enabled    INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (scope, key)
       );
     `);
   }
