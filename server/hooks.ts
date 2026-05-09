@@ -4,6 +4,7 @@ import { getDb } from './db.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
+import { summarizeAgentProgress } from './summarize.js';
 
 const hooksLogger = childLogger('hooks');
 
@@ -254,6 +255,9 @@ router.post('/stop', (req, res) => {
       });
     }
   }
+
+  // C3: fire-and-forget Haiku summarizer (only when builtin is enabled + API key set)
+  void summarizeAgentProgress(agent.task_id, agent.id);
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();

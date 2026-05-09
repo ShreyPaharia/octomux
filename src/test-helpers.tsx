@@ -237,6 +237,10 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     getTaskUpdates: vi.fn().mockResolvedValue([]),
     getTaskRefs: vi.fn().mockResolvedValue([]),
     getTaskHookExecutions: vi.fn().mockResolvedValue([]),
+    getHooksRegistry: vi.fn().mockResolvedValue({ hooks: [] }),
+    updateHookEnabled: vi
+      .fn()
+      .mockResolvedValue({ scope: 'builtin', key: 'summarize-progress', enabled: true }),
   };
   return { ...defaults, ...overrides };
 }
