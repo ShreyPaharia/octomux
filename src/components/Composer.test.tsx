@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '@testing-library/react';
@@ -464,5 +464,56 @@ describe('Composer / URL mirror', () => {
     // Draft is local flag; we don't require it to appear in URL. Just make sure the
     // URL still starts with mode=scratch.
     expect(window.location.search.includes('mode=scratch') || true).toBe(true);
+  });
+});
+
+// ─── localStorage draft persistence ──────────────────────────────────────
+
+describe('Composer / localStorage draft', () => {
+  const DRAFT_KEY = 'octomux-composer-draft-prompt';
+  const user = userEvent.setup();
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('reads saved draft from localStorage on mount', () => {
+    localStorage.setItem(DRAFT_KEY, 'my saved draft');
+    renderComposer('/');
+    expect(screen.getByTestId('composer-prompt')).toHaveValue('my saved draft');
+  });
+
+  it('writes prompt to localStorage after debounce (250 ms)', async () => {
+    vi.useFakeTimers();
+    renderComposer('/');
+    const textarea = screen.getByTestId('composer-prompt');
+    // Use fireEvent directly to avoid fake-timer issues with userEvent
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.change(textarea, { target: { value: 'hello debounce' } });
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+    vi.advanceTimersByTime(250);
+    expect(localStorage.getItem(DRAFT_KEY)).toBe('hello debounce');
+    vi.useRealTimers();
+  });
+
+  it('clears localStorage on successful submit', async () => {
+    localStorage.setItem(DRAFT_KEY, 'clear on submit');
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'chat-x' }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+    renderComposer('/?mode=scratch');
+    await waitFor(() => {
+      expect(screen.getByTestId('composer-prompt')).toHaveValue('clear on submit');
+    });
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 });
