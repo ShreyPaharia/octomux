@@ -2,6 +2,10 @@ import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { broadcast } from './events.js';
+import { fireHook } from './hook-dispatcher.js';
+import { childLogger } from './logger.js';
+
+const hooksLogger = childLogger('hooks');
 
 const router = Router();
 
@@ -209,6 +213,47 @@ router.post('/stop', (req, res) => {
       .run(agent.id);
   });
   txn();
+
+  // B4: Auto-transition in_progress → human_review when the last agent stops
+  const db = getDb();
+  const task = db
+    .prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`)
+    .get(agent.task_id) as { id: string; workflow_status: string } | undefined;
+
+  if (task && task.workflow_status === 'in_progress') {
+    const otherRunning = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM agents WHERE task_id = ? AND status = 'running' AND id != ?`,
+      )
+      .get(agent.task_id, agent.id) as { n: number };
+
+    const pendingPrompts = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM permission_prompts WHERE task_id = ? AND status = 'pending'`,
+      )
+      .get(agent.task_id) as { n: number };
+
+    if (otherRunning.n === 0 && pendingPrompts.n === 0) {
+      const updateId = nanoid(12);
+      db.prepare(
+        `UPDATE tasks SET workflow_status = 'human_review', updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+      db.prepare(
+        `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', 'in_progress', 'human_review', ?)`,
+      ).run(updateId, task.id, 'auto: agent stopped');
+
+      hooksLogger.info(
+        { task_id: task.id, agent_id: agent.id, operation: 'auto_human_review' },
+        'auto-transitioned to human_review',
+      );
+
+      fireHook('workflow_status_changed', {
+        event: 'workflow_status_changed',
+        task: { id: task.id, workflow_status: 'human_review' as const },
+        data: { from: 'in_progress', to: 'human_review', note: 'auto: agent stopped' },
+      });
+    }
+  }
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();

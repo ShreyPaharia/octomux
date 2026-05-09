@@ -380,6 +380,7 @@ export const api = {
     request<void>(`/tasks/${taskId}/terminals/${terminalId}`, { method: 'DELETE' }),
 
   // Workflow endpoints
+  archiveDone: () => request<{ archived: number }>('/tasks/archive-done', { method: 'POST' }),
   moveTask: (id: string, data: MoveTaskRequest) =>
     request<Task>(`/tasks/${id}/move`, { method: 'POST', body: JSON.stringify(data) }),
   postTaskSummary: (id: string, data: SummaryRequest) =>
