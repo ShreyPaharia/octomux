@@ -27,6 +27,7 @@ import { registerTaskRefRm } from './commands/task-ref-rm.js';
 import { registerTaskUpdates } from './commands/task-updates.js';
 import { registerHooksInstall } from './commands/hooks-install.js';
 import { registerHooksList } from './commands/hooks-list.js';
+import { registerInit } from './commands/init.js';
 
 const program = new Command();
 
@@ -65,6 +66,7 @@ registerTaskRefRm(program);
 registerTaskUpdates(program);
 registerHooksInstall(program);
 registerHooksList(program);
+registerInit(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();

@@ -8,6 +8,11 @@ export interface OctomuxSettings {
   editor: EditorChoice;
   dangerouslySkipPermissions: boolean;
   claudeFlags: string;
+  // Optional defaults populated by `octomux init`. Consumed by skills (which
+  // read this file directly) rather than the server runtime.
+  defaultJiraBaseUrl?: string;
+  defaultJiraProjectKey?: string;
+  defaultBaseBranch?: string;
 }
 
 export const DEFAULT_SETTINGS: OctomuxSettings = {
