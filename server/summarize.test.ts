@@ -1,22 +1,22 @@
 /**
  * C3: Tests for server/summarize.ts + integration with hooks Stop handler.
  *
- * Covers: no-key fallback, builtin-disabled fallback, success path, error swallowed.
+ * Covers: builtin-disabled fallback, success path, error swallowed, CLI args.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import request from 'supertest';
-import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
+import { createTestDb, insertTask, insertAgent, findCallback } from './test-helpers.js';
 import { createApp } from './app.js';
 
-// ─── SDK Mock ────────────────────────────────────────────────────────────────
+// ─── child_process mock ──────────────────────────────────────────────────────
 
-const mockCreate = vi.fn();
-
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    messages: { create: mockCreate },
-  })),
+vi.mock('child_process', () => ({
+  execFile: vi.fn((..._args: unknown[]) => {
+    const cb = findCallback(..._args);
+    if (cb) cb(null, { stdout: '', stderr: '' });
+    return undefined as never;
+  }),
 }));
 
 vi.mock('./hook-dispatcher.js', () => ({
@@ -26,8 +26,9 @@ vi.mock('./hook-dispatcher.js', () => ({
   invalidateHookEnabledCache: vi.fn(),
 }));
 
-// ─── Import the module under test (no resetModules needed) ────────────────────
 import { summarizeAgentProgress } from './summarize.js';
+import { execFile } from 'child_process';
+const mockedExecFile = vi.mocked(execFile);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,11 +47,26 @@ function getTaskSummary(db: Database.Database, taskId: string): string | null {
   return row?.current_summary ?? null;
 }
 
+function mockClaudeOk(stdout: string) {
+  mockedExecFile.mockImplementationOnce(((...args: unknown[]) => {
+    const cb = findCallback(...args);
+    if (cb) cb(null, { stdout, stderr: '' });
+    return undefined as never;
+  }) as never);
+}
+
+function mockClaudeFail(err: Error) {
+  mockedExecFile.mockImplementationOnce(((...args: unknown[]) => {
+    const cb = findCallback(...args);
+    if (cb) cb(err);
+    return undefined as never;
+  }) as never);
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('C3: summarizeAgentProgress', () => {
   let db: Database.Database;
-  const originalKey = process.env.ANTHROPIC_API_KEY;
 
   beforeEach(() => {
     db = createTestDb();
@@ -58,53 +74,37 @@ describe('C3: summarizeAgentProgress', () => {
   });
 
   afterEach(() => {
-    if (originalKey === undefined) {
-      delete process.env.ANTHROPIC_API_KEY;
-    } else {
-      process.env.ANTHROPIC_API_KEY = originalKey;
-    }
     db.close();
   });
 
   it('does nothing when builtin hook is disabled (missing row = disabled)', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     // No hook_settings row → defaults to disabled for builtin
     await summarizeAgentProgress('task1', 'agent1');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  it('does nothing when ANTHROPIC_API_KEY is not set', async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-    enableBuiltin(db, true);
-    await summarizeAgentProgress('task1', 'agent1');
-    expect(mockCreate).not.toHaveBeenCalled();
+    const claudeCalls = mockedExecFile.mock.calls.filter((c) => c[0] === 'claude');
+    expect(claudeCalls).toHaveLength(0);
   });
 
   it('writes summary to DB on success', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     enableBuiltin(db, true);
 
     insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
     insertAgent(db, { id: 'agent1', task_id: 'task1', status: 'running' });
 
-    // Add some task_updates so transcript is non-empty
     db.prepare(
       `INSERT INTO task_updates (id, task_id, agent_id, kind, body) VALUES ('u1', 'task1', 'agent1', 'summary', 'Read server/api.ts')`,
     ).run();
 
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: 'text', text: 'Implemented hook registry endpoints.' }],
-    });
+    mockClaudeOk('Implemented hook registry endpoints.');
 
     await summarizeAgentProgress('task1', 'agent1');
 
     const summary = getTaskSummary(db, 'task1');
     expect(summary).toBe('Implemented hook registry endpoints.');
-    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const claudeCalls = mockedExecFile.mock.calls.filter((c) => c[0] === 'claude');
+    expect(claudeCalls).toHaveLength(1);
   });
 
-  it('swallows SDK errors — never throws', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
+  it('swallows CLI errors — never throws', async () => {
     enableBuiltin(db, true);
 
     insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
@@ -112,14 +112,13 @@ describe('C3: summarizeAgentProgress', () => {
       `INSERT INTO task_updates (id, task_id, kind, body) VALUES ('u1', 'task1', 'summary', 'Did something')`,
     ).run();
 
-    mockCreate.mockRejectedValueOnce(new Error('Rate limited'));
+    mockClaudeFail(new Error('claude not found'));
 
     await expect(summarizeAgentProgress('task1', 'agent1')).resolves.toBeUndefined();
-    expect(getTaskSummary(db, 'task1')).toBeNull(); // unchanged
+    expect(getTaskSummary(db, 'task1')).toBeNull();
   });
 
   it('truncates summary to 120 chars', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     enableBuiltin(db, true);
 
     insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
@@ -127,10 +126,7 @@ describe('C3: summarizeAgentProgress', () => {
       `INSERT INTO task_updates (id, task_id, kind, body) VALUES ('u1', 'task1', 'summary', 'content')`,
     ).run();
 
-    const longText = 'A'.repeat(200);
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: 'text', text: longText }],
-    });
+    mockClaudeOk('A'.repeat(200));
 
     await summarizeAgentProgress('task1', 'agent1');
 
@@ -139,14 +135,12 @@ describe('C3: summarizeAgentProgress', () => {
     expect(summary!.length).toBeLessThanOrEqual(120);
   });
 
-  it('builds transcript from task_updates', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key';
+  it('passes transcript and haiku flags to claude -p', async () => {
     enableBuiltin(db, true);
 
     insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
     insertAgent(db, { id: 'agent1', task_id: 'task1', status: 'running' });
 
-    // Multiple task_updates entries
     db.prepare(
       `INSERT INTO task_updates (id, task_id, agent_id, kind, body) VALUES ('u1', 'task1', 'agent1', 'summary', 'Called Bash: ls -la')`,
     ).run();
@@ -154,17 +148,22 @@ describe('C3: summarizeAgentProgress', () => {
       `INSERT INTO task_updates (id, task_id, kind, from_status, to_status) VALUES ('u2', 'task1', 'transition', 'in_progress', 'human_review')`,
     ).run();
 
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: 'text', text: 'Agent ran ls and transitioned to human review.' }],
-    });
+    mockClaudeOk('Agent ran ls and transitioned to human review.');
 
     await summarizeAgentProgress('task1', 'agent1');
 
-    // Verify mockCreate was called with a non-empty transcript
-    expect(mockCreate).toHaveBeenCalledTimes(1);
-    const callArg = mockCreate.mock.calls[0][0];
-    const messageContent = callArg.messages[0].content[0].text as string;
-    expect(messageContent).toContain('ls -la');
+    const claudeCalls = mockedExecFile.mock.calls.filter((c) => c[0] === 'claude');
+    expect(claudeCalls).toHaveLength(1);
+    const args = claudeCalls[0][1] as string[];
+    expect(args).toContain('-p');
+    expect(args).toContain('--model');
+    expect(args).toContain('haiku');
+    expect(args).toContain('--tools');
+    expect(args).toContain('--no-session-persistence');
+    expect(args).toContain('--disable-slash-commands');
+    // The transcript is concatenated into the positional prompt (last arg)
+    const promptArg = args[args.length - 1];
+    expect(promptArg).toContain('ls -la');
   });
 });
 
@@ -190,19 +189,7 @@ describe('C3: Stop hook calls summarizeAgentProgress when enabled', () => {
     await request(app).post('/api/hooks/stop').send({ session_id: 'sess-sum' }).expect(200);
     // Give the void fire-and-forget a tick to run
     await new Promise((r) => setTimeout(r, 50));
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  it('does NOT call Haiku when API key is missing', async () => {
-    const saved = process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    enableBuiltin(db, true);
-    try {
-      await request(app).post('/api/hooks/stop').send({ session_id: 'sess-sum' }).expect(200);
-      await new Promise((r) => setTimeout(r, 50));
-      expect(mockCreate).not.toHaveBeenCalled();
-    } finally {
-      if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
-    }
+    const claudeCalls = mockedExecFile.mock.calls.filter((c) => c[0] === 'claude');
+    expect(claudeCalls).toHaveLength(0);
   });
 });
