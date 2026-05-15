@@ -108,18 +108,20 @@ Permission prompts surface in the dashboard with tool name and input details. Ag
 
 ```bash
 npm install -g octomux
+octomux init                                     # one-time setup: defaults for Jira, base branch, etc.
 cd your-project
 octomux start                                    # opens dashboard at localhost:7777
 octomux create-task -t "Add auth flow" -r .      # create a task from the CLI
 ```
 
-Open [http://localhost:7777](http://localhost:7777) to watch agents work, or keep using the CLI.
+Open [http://localhost:7777](http://localhost:7777) to watch agents work, or keep using the CLI. See [ONBOARDING.md](./ONBOARDING.md) for the full walkthrough — including optional `gh` and Jira hook setup.
 
 ## CLI Commands
 
 | Command                                           | Description                                     |
 | ------------------------------------------------- | ----------------------------------------------- |
 | `octomux start`                                   | Launch the local web dashboard                  |
+| `octomux init`                                    | Interactive setup wizard for defaults           |
 | `octomux create-task`                             | Create a new task                               |
 | `octomux list-tasks`                              | List all tasks                                  |
 | `octomux get-task <id>`                           | Get task details                                |
