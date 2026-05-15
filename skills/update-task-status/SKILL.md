@@ -71,7 +71,7 @@ octomux task-note <task-id> "<note text>"
 **Example:**
 
 ```bash
-octomux task-note abc123 "Decided to defer DB migration to a follow-up task (see IN-999)"
+octomux task-note abc123 "Decided to defer DB migration to a follow-up task (see PROJ-999)"
 ```
 
 ## Linking external references
@@ -85,9 +85,9 @@ octomux task-ref-add <task-id> <integration> <external-id> [--url <url>] [--titl
 **Examples:**
 
 ```bash
-# Link a Jira ticket
-octomux task-ref-add abc123 jira IN-843 \
-  --url "https://ostium.atlassian.net/browse/IN-843" \
+# Link a Jira ticket (substitute your project key + Jira host)
+octomux task-ref-add abc123 jira PROJ-843 \
+  --url "https://your-company.atlassian.net/browse/PROJ-843" \
   --title "Add position sync to backend"
 
 # Link a GitHub issue

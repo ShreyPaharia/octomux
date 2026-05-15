@@ -78,7 +78,7 @@ Create a GitHub pull request directly using `gh pr create`. The octomux dashboar
    **Linking tickets/issues:**
    - If the task was created from a **Jira ticket**, include the Jira link
    - If the task was created from a **GitHub issue**, include: `Resolves #<issue-number>`
-   - Infer the ticket/issue from the branch name (e.g., `feat/IN-123-...` -> IN-123, `fix/42-...` -> #42)
+   - Infer the ticket/issue from the branch name. Jira-style keys match `[A-Z][A-Z0-9]+-\d+` (e.g., `feat/PROJ-123-...` -> `PROJ-123`); numeric branches resolve to GitHub issues (`fix/42-...` -> `#42`).
    - If no ticket/issue is associated, omit the `Resolves` line
 
    **IMPORTANT: Present the title and body to the user and WAIT for their confirmation before creating the PR.** Do NOT create the PR without explicit user approval. The user may want to adjust the title, description, or add context.

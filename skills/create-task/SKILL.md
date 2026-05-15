@@ -11,10 +11,10 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
 
 1. **Understand the goal:**
    - Ask the user what they want built/fixed, or infer from context (e.g. a Jira ticket URL, a bug description, a feature request)
-   - If given a Jira ticket URL or key (e.g. IN-843), fetch the ticket details:
+   - If given a Jira ticket URL or key (e.g. `PROJ-843`), fetch the ticket details. Jira keys match `[A-Z][A-Z0-9]+-\d+`. If `~/.octomux/settings.json` has `defaultJiraBaseUrl` / `defaultJiraProjectKey`, treat those as the user's defaults when inferring a URL or assuming a project key.
 
    **Fetching Jira ticket details:**
-   1. Extract the ticket key from the URL (e.g., IN-843 from `https://ostium.atlassian.net/browse/IN-843`)
+   1. Extract the ticket key from the URL (e.g., `PROJ-843` from `https://your-company.atlassian.net/browse/PROJ-843`)
    2. Use Atlassian MCP tools:
       - `getAccessibleAtlassianResources()` to get `cloudId`
       - `getJiraIssue(cloudId, issueKey, fields=["summary","description","priority","labels","status"])` to get ticket details
@@ -44,11 +44,11 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    - `<type>` = `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `perf` (match the nature of the work)
    - `<scope>` = kebab-case short description (max ~40 chars, no task ID suffix)
 
-   **From a Jira ticket** (e.g. IN-123):
+   **From a Jira ticket** (e.g. `PROJ-123` — substitute your project key):
 
    ```
-   feat/IN-123-add-position-sync
-   fix/IN-456-decimal-exponent-bloat
+   feat/PROJ-123-add-position-sync
+   fix/PROJ-456-decimal-exponent-bloat
    ```
 
    **From a GitHub issue** (e.g. #42):
