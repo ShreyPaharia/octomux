@@ -2,22 +2,26 @@
  * C3: Built-in summarize-progress hook.
  *
  * Called fire-and-forget after the Stop hook handler resolves.
- * Reads recent task_updates + permission_prompts, calls Haiku to produce a
- * one-sentence narrative, writes it to tasks.current_summary, broadcasts, and
- * fires the 'summary_updated' hook. All errors are swallowed.
+ * Reads recent task_updates + permission_prompts, shells out to `claude -p`
+ * (Haiku) to produce a one-sentence narrative, writes it to
+ * tasks.current_summary, broadcasts, and fires the 'summary_updated' hook.
+ * All errors are swallowed.
  */
 import { childLogger } from './logger.js';
 import { getDb } from './db.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
+import { runClaudePrint } from './claude-cli.js';
 
 const logger = childLogger('summarize');
 
-const MODEL = 'claude-haiku-4-5-20251001';
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = 30_000;
 const MAX_TRANSCRIPT_CHARS = 4000;
 const BUILTIN_SCOPE = 'builtin';
 const BUILTIN_KEY = 'summarize-progress';
+
+const SYSTEM_PROMPT =
+  'You are a concise technical summarizer. Return only the requested summary — no preamble, no trailing period unless it ends a sentence.';
 
 /**
  * Check whether the built-in summarize-progress hook is enabled.
@@ -28,7 +32,6 @@ function isBuiltinEnabled(): boolean {
     const row = getDb()
       .prepare(`SELECT enabled FROM hook_settings WHERE scope = ? AND key = ?`)
       .get(BUILTIN_SCOPE, BUILTIN_KEY) as { enabled: number } | undefined;
-    // Missing row → disabled (built-in exception to the "missing = enabled" rule)
     if (row === undefined) return false;
     return row.enabled !== 0;
   } catch {
@@ -44,7 +47,6 @@ function buildTranscript(taskId: string, agentId: string): string {
   const lines: string[] = [];
 
   try {
-    // Last 30 task_updates rows (summary / transition / note kinds)
     const updates = getDb()
       .prepare(
         `SELECT kind, from_status, to_status, body, created_at
@@ -69,7 +71,6 @@ function buildTranscript(taskId: string, agentId: string): string {
       }
     }
 
-    // Permission prompts resolved in the last 10 minutes
     const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ');
     const prompts = getDb()
       .prepare(
@@ -100,7 +101,6 @@ function buildTranscript(taskId: string, agentId: string): string {
   }
 
   const full = lines.join('\n');
-  // Trim to MAX_TRANSCRIPT_CHARS from the END (most recent events are most useful)
   return full.length > MAX_TRANSCRIPT_CHARS ? full.slice(full.length - MAX_TRANSCRIPT_CHARS) : full;
 }
 
@@ -110,55 +110,22 @@ function buildTranscript(taskId: string, agentId: string): string {
  */
 export async function summarizeAgentProgress(taskId: string, agentId: string): Promise<void> {
   try {
-    // 1. Guard: must be enabled AND have an API key
     if (!isBuiltinEnabled()) return;
-    if (!process.env.ANTHROPIC_API_KEY) return;
 
     const transcript = buildTranscript(taskId, agentId);
     if (!transcript.trim()) return;
 
-    // 2. Call Haiku with timeout
-    const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const prompt = `Summarize what this agent just did in one sentence, ≤120 chars, present tense, no preamble.\n\nAgent activity log:\n${transcript}`;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const stdout = await runClaudePrint({
+      prompt,
+      systemPrompt: SYSTEM_PROMPT,
+      timeoutMs: TIMEOUT_MS,
+    });
 
-    let summary: string;
-    try {
-      const response = await client.messages.create(
-        {
-          model: MODEL,
-          max_tokens: 150,
-          system:
-            'You are a concise technical summarizer. Return only the requested summary — no preamble, no trailing period unless it ends a sentence.',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `Summarize what this agent just did in one sentence, ≤120 chars, present tense, no preamble.\n\nAgent activity log:\n${transcript}`,
-                  cache_control: { type: 'ephemeral' },
-                },
-              ],
-            },
-          ],
-        },
-        { signal: controller.signal },
-      );
-      clearTimeout(timer);
-
-      const text = response.content[0]?.type === 'text' ? (response.content[0].text ?? '') : '';
-      summary = text.trim().slice(0, 120);
-    } catch (innerErr) {
-      clearTimeout(timer);
-      throw innerErr;
-    }
-
+    const summary = stdout.slice(0, 120);
     if (!summary) return;
 
-    // 3. Write to tasks.current_summary
     getDb()
       .prepare(
         `UPDATE tasks
@@ -169,10 +136,8 @@ export async function summarizeAgentProgress(taskId: string, agentId: string): P
       )
       .run(summary, taskId);
 
-    // 4. Broadcast
     broadcast({ type: 'task:updated', payload: { taskId } });
 
-    // 5. Fire summary_updated hook
     void fireHook('summary_updated', {
       event: 'summary_updated',
       task: { id: taskId },
@@ -181,7 +146,6 @@ export async function summarizeAgentProgress(taskId: string, agentId: string): P
 
     logger.info({ task_id: taskId, agent_id: agentId }, 'progress summary written');
   } catch (err) {
-    // All errors swallowed — never propagate
     logger.warn({ task_id: taskId, agent_id: agentId, err }, 'summarizeAgentProgress failed');
   }
 }
