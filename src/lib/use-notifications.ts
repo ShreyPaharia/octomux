@@ -37,11 +37,27 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
     if (tasks.length === 0) return;
 
     const currentAgents = new Map<string, AgentSnapshot>();
+    // Tasks transitioning to closed/error this tick. We pre-compute this so
+    // we can suppress redundant per-agent toasts below — a single "Task closed"
+    // is clearer than N "Agent stopped" toasts saying the same thing.
+    const taskTransitioning = new Set<string>();
+    if (initialized.current) {
+      for (const task of tasks) {
+        if (task.id === viewingTaskId) continue;
+        if (task.runtime_state !== 'idle' && task.runtime_state !== 'error') continue;
+        const hadActiveAgents = task.agents?.some((a) => {
+          const prev = prevAgents.current.get(a.id);
+          return prev && prev.status !== 'stopped';
+        });
+        if (hadActiveAgents) taskTransitioning.add(task.id);
+      }
+    }
 
     for (const task of tasks) {
       if (!task.agents) continue;
 
       const isViewing = task.id === viewingTaskId;
+      const suppressAgentToasts = taskTransitioning.has(task.id);
 
       for (const agent of task.agents) {
         currentAgents.set(agent.id, {
@@ -57,6 +73,9 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
 
         // Skip notifications for the task the user is currently viewing
         if (isViewing) continue;
+
+        // The task-level "Task closed/errored" toast already covers this.
+        if (suppressAgentToasts) continue;
 
         // Agent stopped transition
         if (prev.status !== 'stopped' && agent.status === 'stopped') {
@@ -95,31 +114,21 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
       }
     }
 
-    // Task-level transitions (closed/error)
-    if (initialized.current) {
-      for (const task of tasks) {
-        if (task.id === viewingTaskId) continue;
-
-        if (task.runtime_state === 'idle' || task.runtime_state === 'error') {
-          const hadActiveAgents = task.agents?.some((a) => {
-            const prev = prevAgents.current.get(a.id);
-            return prev && prev.status !== 'stopped';
-          });
-          if (hadActiveAgents) {
-            const taskId = task.id;
-            if (task.runtime_state === 'error') {
-              showToast('error', task.title, 'Task errored', {
-                label: 'View',
-                onClick: () => navigate(`/tasks/${taskId}`),
-              });
-            } else {
-              showToast('success', task.title, 'Task closed', {
-                label: 'View',
-                onClick: () => navigate(`/tasks/${taskId}`),
-              });
-            }
-          }
-        }
+    // Fire task-level transition toasts after the agent loop so they appear
+    // last in the stack (most recently fired = most visible in Sonner).
+    for (const taskId of taskTransitioning) {
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) continue;
+      if (task.runtime_state === 'error') {
+        showToast('error', task.title, 'Task errored', {
+          label: 'View',
+          onClick: () => navigate(`/tasks/${taskId}`),
+        });
+      } else {
+        showToast('success', task.title, 'Task closed', {
+          label: 'View',
+          onClick: () => navigate(`/tasks/${taskId}`),
+        });
       }
     }
 
