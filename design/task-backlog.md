@@ -10,7 +10,7 @@ states into surfaces touched by earlier tasks).
 
 **All tasks share these constraints:**
 
-- Repo: `/Users/shreypaharia/Documents/Projects/Ostium/octomux-agents`, base branch `main`.
+- Repo: `<your-octomux-checkout>` (the directory you cloned `octomux` into), base branch `main`.
 - `bun run lint`, `bun run typecheck`, `bun run test` must pass.
 - Conventional commits. No `Co-Authored-By` lines.
 - Open a PR via `gh pr create` when done.
@@ -152,7 +152,7 @@ Tried dispatching via `octomux create-task` — the running server (main branch)
 octomux create-task \
   --title '<title from above>' \
   --description '<1-line summary>' \
-  --repo-path /Users/shreypaharia/Documents/Projects/Ostium/octomux-agents \
+  --repo-path <your-octomux-checkout> \
   --branch <branch from above> \
   --base-branch main \
   --initial-prompt "$(cat <<'EOF'

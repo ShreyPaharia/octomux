@@ -11,6 +11,13 @@ import { test, expect } from '@playwright/test';
 const API = 'http://localhost:7777/api';
 const SCREENSHOTS = 'ui-review/screenshots';
 
+// Repo paths for screenshot fixtures. Override via env vars for CI / other machines.
+// SCREENSHOT_REPO_PATH defaults to the current working directory (this repo);
+// SCREENSHOT_OTHER_REPO_PATH is used to fill the create-task dialog and falls back
+// to the same value when unset.
+const REPO_PATH = process.env.SCREENSHOT_REPO_PATH ?? process.cwd();
+const OTHER_REPO_PATH = process.env.SCREENSHOT_OTHER_REPO_PATH ?? REPO_PATH;
+
 const DESKTOP = { width: 1920, height: 1080 };
 const TABLET = { width: 768, height: 1024 };
 const MOBILE = { width: 375, height: 812 };
@@ -27,8 +34,7 @@ async function createDraftTask(
     data: {
       title: overrides.title ?? 'Test Task',
       description: overrides.description ?? 'A test task',
-      repo_path:
-        overrides.repo_path ?? '/Users/shreypaharia/Documents/Projects/Ostium/octomux-agents',
+      repo_path: overrides.repo_path ?? REPO_PATH,
       branch: overrides.branch ?? undefined,
       base_branch: overrides.base_branch ?? undefined,
       draft: true,
@@ -116,9 +122,7 @@ test.describe.serial('UI Screenshots', () => {
       );
 
     await page.locator('#repo-path').click({ force: true });
-    await page
-      .locator('#repo-path')
-      .pressSequentially('/Users/shreypaharia/Documents/Projects/Ostium/nucleus', { delay: 5 });
+    await page.locator('#repo-path').pressSequentially(OTHER_REPO_PATH, { delay: 5 });
 
     await page.locator('#branch').click({ force: true });
     await page.locator('#branch').pressSequentially('feat/rate-limiting', { delay: 8 });
