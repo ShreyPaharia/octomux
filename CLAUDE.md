@@ -31,13 +31,24 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
   - `api.ts` — REST routes mounted on Express app
   - `app.ts` — extracted `createApp()` for testability
-  - `task-runner.ts` — worktree + tmux + claude lifecycle (closeTask, deleteTask)
+  - `task-runner.ts` — worktree + tmux + harness lifecycle (closeTask, deleteTask)
   - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
   - `logger.ts` — pino root + `childLogger('<module>')` helper
   - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
+  - `harnesses/` — pluggable harness implementations (Claude Code today; Cursor planned).
+    Each `Harness` exports `id`, `displayName`, `sessionIdMode`, command builders,
+    `installHooks`, `syncAgents`, `resolveFlags`, `validateSettings`. Spec at
+    `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
+  - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
 - `src/` — React SPA (pages, components, lib/api.ts)
 - `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
 - `e2e/` — Playwright E2E tests
+
+DB migrations are forward-only. Back up `~/.octomux/octomux.sqlite` (prod) or
+`./data/octomux.sqlite` (dev) before upgrading across the harness-abstraction
+migration (renames `agents.claude_session_id` → `harness_session_id`, adds
+`tasks.harness_id` / `agents.harness_id` / `agents.hook_token`, relaxes
+`permission_prompts.session_id` to nullable).
 
 ## Logging
 

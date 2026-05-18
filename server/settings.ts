@@ -56,7 +56,10 @@ export async function getSettings(): Promise<OctomuxSettings> {
     cc.dangerouslySkipPermissions = parsed.dangerouslySkipPermissions;
     deprecatedSeen = true;
   }
-  const mergedHarnesses = { ...harnesses, 'claude-code': cc };
+  const mergedHarnesses: Record<string, Record<string, unknown>> = {
+    ...harnesses,
+    'claude-code': cc,
+  };
 
   // Validate registered harnesses' blobs (drop invalid blob keys with a warn).
   const { listHarnesses } = await import('./harnesses/index.js');

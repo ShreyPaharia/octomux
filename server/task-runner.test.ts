@@ -108,7 +108,6 @@ const {
 } = await import('./task-runner.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
-const { installHookSettings } = await import('./hook-settings.js');
 const { setLogger, getLogger } = await import('./logger.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -1537,8 +1536,8 @@ describe('createUserTerminal', () => {
   it('opens vscode when editor setting is vscode', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'vscode',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
     });
     insertTask(db, { ...DEFAULTS.runningTask });
     const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
@@ -1552,8 +1551,8 @@ describe('createUserTerminal', () => {
   it('opens cursor when editor setting is cursor', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'cursor',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
     });
     insertTask(db, { ...DEFAULTS.runningTask });
     const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
@@ -1567,8 +1566,8 @@ describe('createUserTerminal', () => {
   it('creates tmux window with nvim when editor setting is nvim', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
     });
     insertTask(db, { ...DEFAULTS.runningTask });
     const result = await createUserTerminal(runningTask);

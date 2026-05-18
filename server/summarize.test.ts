@@ -177,7 +177,13 @@ describe('C3: Stop hook calls summarizeAgentProgress when enabled', () => {
     vi.clearAllMocks();
 
     insertTask(db, { id: 't1', runtime_state: 'running', workflow_status: 'in_progress' });
-    insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-sum', status: 'running' });
+    insertAgent(db, {
+      id: 'a1',
+      task_id: 't1',
+      harness_session_id: 'sess-sum',
+      hook_token: 'tok-sum',
+      status: 'running',
+    });
   });
 
   afterEach(() => {
@@ -186,7 +192,10 @@ describe('C3: Stop hook calls summarizeAgentProgress when enabled', () => {
 
   it('does NOT call Haiku when builtin is disabled (no row = disabled)', async () => {
     // No hook_settings row → builtin disabled by default
-    await request(app).post('/api/hooks/stop').send({ session_id: 'sess-sum' }).expect(200);
+    await request(app)
+      .post('/api/hooks/stop?token=tok-sum')
+      .send({ session_id: 'sess-sum' })
+      .expect(200);
     // Give the void fire-and-forget a tick to run
     await new Promise((r) => setTimeout(r, 50));
     const claudeCalls = mockedExecFile.mock.calls.filter((c) => c[0] === 'claude');

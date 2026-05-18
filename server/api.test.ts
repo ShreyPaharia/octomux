@@ -1601,7 +1601,7 @@ describe('GET /api/tasks/:id — user_terminals', () => {
 describe('GET /api/tasks with permission prompts', () => {
   it('includes pending_prompts in task response', async () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
-    insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-1' });
+    insertAgent(db, { id: 'a1', task_id: 't1', harness_session_id: 'sess-1' });
     insertPermissionPrompt(db, {
       id: 'pp1',
       task_id: 't1',
@@ -1892,8 +1892,8 @@ describe('PATCH /api/settings', () => {
   it('updates editor setting', async () => {
     vi.mocked(updateSettings).mockResolvedValue({
       editor: 'cursor',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
     });
     const res = await request(app).patch('/api/settings').send({ editor: 'cursor' });
     expect(res.status).toBe(200);
