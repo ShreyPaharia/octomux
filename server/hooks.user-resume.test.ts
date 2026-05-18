@@ -24,12 +24,18 @@ describe('POST /api/hooks/user-prompt-submit → in_progress transition', () => 
     app = createApp();
     vi.clearAllMocks();
     insertTask(db, { id: 't1', runtime_state: 'running', workflow_status: 'human_review' });
-    insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-123', status: 'running' });
+    insertAgent(db, {
+      id: 'a1',
+      task_id: 't1',
+      harness_session_id: 'sess-123',
+      hook_token: 'tok-123',
+      status: 'running',
+    });
   });
 
   it('transitions human_review → in_progress when user submits a prompt', async () => {
     await request(app)
-      .post('/api/hooks/user-prompt-submit')
+      .post('/api/hooks/user-prompt-submit?token=tok-123')
       .send({ session_id: 'sess-123' })
       .expect(200);
 
@@ -51,7 +57,7 @@ describe('POST /api/hooks/user-prompt-submit → in_progress transition', () => 
     const { fireHook } = await import('./hook-dispatcher.js');
 
     await request(app)
-      .post('/api/hooks/user-prompt-submit')
+      .post('/api/hooks/user-prompt-submit?token=tok-123')
       .send({ session_id: 'sess-123' })
       .expect(200);
 
@@ -75,7 +81,7 @@ describe('POST /api/hooks/user-prompt-submit → in_progress transition', () => 
     db.prepare('UPDATE tasks SET workflow_status = ? WHERE id = ?').run(workflow_status, 't1');
 
     await request(app)
-      .post('/api/hooks/user-prompt-submit')
+      .post('/api/hooks/user-prompt-submit?token=tok-123')
       .send({ session_id: 'sess-123' })
       .expect(200);
 
@@ -95,7 +101,7 @@ describe('POST /api/hooks/user-prompt-submit → in_progress transition', () => 
     const { fireHook } = await import('./hook-dispatcher.js');
 
     await request(app)
-      .post('/api/hooks/user-prompt-submit')
+      .post('/api/hooks/user-prompt-submit?token=tok-123')
       .send({ session_id: 'sess-123' })
       .expect(200);
 
