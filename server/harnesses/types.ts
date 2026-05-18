@@ -1,7 +1,8 @@
-// server/harnesses/types.ts
 import type { OctomuxSettings } from '../settings.js';
 
 const AGENT_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+// Forbidden shell metacharacters: backtick, `;`, `|`, `&`, `>`, `<`, newline,
+// and `$(...)` command substitution.
 const FLAG_FORBIDDEN_RE = /[`;|&><\n\r]|\$\(/;
 
 /**
