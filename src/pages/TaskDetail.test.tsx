@@ -139,50 +139,52 @@ describe('TaskDetail', () => {
 
   // ─── Running task controls ────────────────────────────────────────────────
 
-  it('shows Close button for running task', async () => {
+  it('shows Done button for running task', async () => {
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('CLOSE')).toBeInTheDocument();
+      expect(screen.getByText('DONE')).toBeInTheDocument();
     });
   });
 
-  it('clicking Close opens an inline confirm sheet (no native dialog)', async () => {
+  it('clicking Done opens an inline confirm sheet (no native dialog)', async () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('CLOSE')).toBeInTheDocument();
+      expect(screen.getByText('DONE')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('CLOSE'));
+    await user.click(screen.getByText('DONE'));
     expect(await screen.findByTestId('close-confirm')).toBeInTheDocument();
     // Not called until confirmed
-    expect(apiMock.updateTask).not.toHaveBeenCalled();
+    expect(apiMock.moveTask).not.toHaveBeenCalled();
   });
 
-  it('confirming the Close sheet calls updateTask with status "closed"', async () => {
+  it('confirming the Done sheet calls moveTask with workflow_status "done"', async () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('CLOSE')).toBeInTheDocument();
+      expect(screen.getByText('DONE')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('CLOSE'));
+    await user.click(screen.getByText('DONE'));
     await user.click(await screen.findByTestId('close-confirm-accept'));
     await waitFor(() => {
-      expect(apiMock.updateTask).toHaveBeenCalledWith('test-task-01', { status: 'closed' });
+      expect(apiMock.moveTask).toHaveBeenCalledWith('test-task-01', {
+        workflow_status: 'done',
+      });
     });
   });
 
-  it('cancel in Close confirm sheet dismisses without calling updateTask', async () => {
+  it('cancel in Done confirm sheet dismisses without calling moveTask', async () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('CLOSE')).toBeInTheDocument();
+      expect(screen.getByText('DONE')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('CLOSE'));
+    await user.click(screen.getByText('DONE'));
     await user.click(screen.getByText('Cancel'));
     await waitFor(() => {
       expect(screen.queryByTestId('close-confirm')).not.toBeInTheDocument();
     });
-    expect(apiMock.updateTask).not.toHaveBeenCalled();
+    expect(apiMock.moveTask).not.toHaveBeenCalled();
   });
 
   // ─── Draft task controls ────────────────────────────────────────────────

@@ -448,11 +448,11 @@ export default function TaskDetail() {
   const handleClose = useCallback(async () => {
     if (!taskId) return;
     try {
-      await api.updateTask(taskId, { status: 'closed' });
+      await api.moveTask(taskId, { workflow_status: 'done' });
       setCloseConfirm(false);
       refresh();
     } catch (err) {
-      console.error('Failed to close task:', err);
+      console.error('Failed to mark task done:', err);
     }
   }, [taskId, refresh]);
 
@@ -673,11 +673,11 @@ export default function TaskDetail() {
             (closeConfirm ? (
               <div
                 role="alertdialog"
-                aria-label="Confirm close task"
+                aria-label="Confirm mark task done"
                 data-testid="close-confirm"
-                className="bg-glass-l2 glass-blur-l2 flex items-center gap-2 border border-[#EF4444AA] px-2 py-1 text-[11px] text-[#FEE2E2]"
+                className="bg-glass-l2 glass-blur-l2 flex items-center gap-2 border border-[#22C55EAA] px-2 py-1 text-[11px] text-[#DCFCE7]"
               >
-                <span className="font-semibold tracking-wider uppercase">Close task?</span>
+                <span className="font-semibold tracking-wider uppercase">Mark done?</span>
                 <button
                   className="px-1.5 py-0.5 text-[#b5b5bd] hover:text-white"
                   onClick={() => setCloseConfirm(false)}
@@ -686,7 +686,7 @@ export default function TaskDetail() {
                 </button>
                 <button
                   data-testid="close-confirm-accept"
-                  className="border border-[#EF4444AA] bg-[#EF44441F] px-1.5 py-0.5 font-bold uppercase text-[#FEE2E2] hover:bg-[#EF444433]"
+                  className="border border-[#22C55EAA] bg-[#22C55E1F] px-1.5 py-0.5 font-bold uppercase text-[#DCFCE7] hover:bg-[#22C55E33]"
                   onClick={handleClose}
                 >
                   Confirm
@@ -696,10 +696,10 @@ export default function TaskDetail() {
               <Button
                 variant="outline"
                 size="sm"
-                className="border-[#EF4444AA] bg-[#EF44441F] text-[#FEE2E2] hover:bg-[#EF444433] hover:text-white"
+                className="border-[#22C55EAA] bg-[#22C55E1F] text-[#DCFCE7] hover:bg-[#22C55E33] hover:text-white"
                 onClick={() => setCloseConfirm(true)}
               >
-                CLOSE
+                DONE
               </Button>
             ))}
         </div>
