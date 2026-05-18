@@ -120,9 +120,9 @@ vi.mock('./chats.js', async () => {
         const id = `chat-test-${counter.toString().padStart(2, '0')}`;
         db.prepare(
           `INSERT INTO agents
-             (id, task_id, window_index, label, status, claude_session_id,
-              hook_activity, tmux_session, agent, created_at)
-           VALUES (?, NULL, 0, ?, 'running', ?, 'active', ?, ?, datetime('now'))`,
+             (id, task_id, window_index, label, status, harness_id, harness_session_id,
+              hook_token, hook_activity, tmux_session, agent, created_at)
+           VALUES (?, NULL, 0, ?, 'running', 'claude-code', ?, '', 'active', ?, ?, datetime('now'))`,
         ).run(id, opts.label ?? 'Chat', `sid-${id}`, `octomux-chat-${id}`, opts.agent ?? null);
         return db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
       },
