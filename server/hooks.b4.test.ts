@@ -24,11 +24,20 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
     app = createApp();
     vi.clearAllMocks();
     insertTask(db, { id: 't1', runtime_state: 'running', workflow_status: 'in_progress' });
-    insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-123', status: 'running' });
+    insertAgent(db, {
+      id: 'a1',
+      task_id: 't1',
+      harness_session_id: 'sess-123',
+      hook_token: 'tok-b4',
+      status: 'running',
+    } as any);
   });
 
   it('transitions in_progress → human_review when last agent stops', async () => {
-    await request(app).post('/api/hooks/stop').send({ session_id: 'sess-123' }).expect(200);
+    await request(app)
+      .post('/api/hooks/stop?token=tok-b4')
+      .send({ session_id: 'sess-123' })
+      .expect(200);
 
     const task = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get('t1') as {
       workflow_status: string;
@@ -47,7 +56,10 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
   it('fires workflow_status_changed hook on transition', async () => {
     const { fireHook } = await import('./hook-dispatcher.js');
 
-    await request(app).post('/api/hooks/stop').send({ session_id: 'sess-123' }).expect(200);
+    await request(app)
+      .post('/api/hooks/stop?token=tok-b4')
+      .send({ session_id: 'sess-123' })
+      .expect(200);
 
     expect(fireHook).toHaveBeenCalledWith(
       'workflow_status_changed',
@@ -63,12 +75,16 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
     insertAgent(db, {
       id: 'a2',
       task_id: 't1',
-      claude_session_id: 'sess-456',
+      harness_session_id: 'sess-456',
+      hook_token: 'tok-b4-2',
       status: 'running',
       window_index: 1,
-    });
+    } as any);
 
-    await request(app).post('/api/hooks/stop').send({ session_id: 'sess-123' }).expect(200);
+    await request(app)
+      .post('/api/hooks/stop?token=tok-b4')
+      .send({ session_id: 'sess-123' })
+      .expect(200);
 
     const task = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get('t1') as {
       workflow_status: string;
@@ -86,7 +102,10 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
       status: 'pending',
     });
 
-    await request(app).post('/api/hooks/stop').send({ session_id: 'sess-123' }).expect(200);
+    await request(app)
+      .post('/api/hooks/stop?token=tok-b4')
+      .send({ session_id: 'sess-123' })
+      .expect(200);
 
     const task = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get('t1') as {
       workflow_status: string;
@@ -103,7 +122,10 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
   ])('skips transition when task is in $workflow_status', async ({ workflow_status }) => {
     db.prepare('UPDATE tasks SET workflow_status = ? WHERE id = ?').run(workflow_status, 't1');
 
-    await request(app).post('/api/hooks/stop').send({ session_id: 'sess-123' }).expect(200);
+    await request(app)
+      .post('/api/hooks/stop?token=tok-b4')
+      .send({ session_id: 'sess-123' })
+      .expect(200);
 
     const task = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get('t1') as {
       workflow_status: string;

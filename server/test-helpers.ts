@@ -188,7 +188,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
@@ -197,6 +197,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
     agent.status,
     (agent as any).harness_session_id ?? (agent as any).claude_session_id ?? null,
     (agent as any).hook_activity || 'active',
+    (agent as any).hook_token ?? '',
   );
 
   return agent;
