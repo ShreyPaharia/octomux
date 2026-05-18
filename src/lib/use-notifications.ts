@@ -28,6 +28,7 @@ function useViewingTaskId(): string | null {
  */
 export function useNotifications(tasks: Task[], navigate: (path: string) => void) {
   const prevAgents = useRef<Map<string, AgentSnapshot>>(new Map());
+  const prevTaskStates = useRef<Map<string, Task['runtime_state']>>(new Map());
   const notifiedPrompts = useRef<Set<string>>(new Set());
   const initialized = useRef(false);
   const viewingTaskId = useViewingTaskId();
@@ -37,23 +38,29 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
     if (tasks.length === 0) return;
 
     const currentAgents = new Map<string, AgentSnapshot>();
+    const currentTaskStates = new Map<string, Task['runtime_state']>();
     // Tasks transitioning to closed/error this tick. We pre-compute this so
     // we can suppress redundant per-agent toasts below — a single "Task closed"
     // is clearer than N "Agent stopped" toasts saying the same thing.
+    //
+    // The transition is detected from the task's previous runtime_state rather
+    // than from agent.status — agent rows can be stale (status='running' on an
+    // already-idle task from an interrupted close), and inferring transitions
+    // from those re-fired "Task closed" on every WS refresh forever.
     const taskTransitioning = new Set<string>();
     if (initialized.current) {
       for (const task of tasks) {
         if (task.id === viewingTaskId) continue;
         if (task.runtime_state !== 'idle' && task.runtime_state !== 'error') continue;
-        const hadActiveAgents = task.agents?.some((a) => {
-          const prev = prevAgents.current.get(a.id);
-          return prev && prev.status !== 'stopped';
-        });
-        if (hadActiveAgents) taskTransitioning.add(task.id);
+        const prevState = prevTaskStates.current.get(task.id);
+        if (prevState && prevState !== 'idle' && prevState !== 'error') {
+          taskTransitioning.add(task.id);
+        }
       }
     }
 
     for (const task of tasks) {
+      currentTaskStates.set(task.id, task.runtime_state);
       if (!task.agents) continue;
 
       const isViewing = task.id === viewingTaskId;
@@ -133,6 +140,7 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
     }
 
     prevAgents.current = currentAgents;
+    prevTaskStates.current = currentTaskStates;
 
     // Seed initial prompts so we don't notify for pre-existing ones
     if (!initialized.current) {

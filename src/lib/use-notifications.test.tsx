@@ -292,6 +292,32 @@ describe('useNotifications', () => {
     expect(promptCalls[0][2]).toBe('Needs permission: Bash');
   });
 
+  it('does not fire "Task closed" for an already-idle task whose agent row is stuck at status=running', () => {
+    // Stale-data scenario found in production: task.runtime_state='idle' but
+    // the agent row still has status='running' (cleanup was missed at some
+    // point — e.g. server crash mid-close). Previously the transition
+    // detector inferred "task was running" from agent.status, so every WS
+    // refresh re-fired "Task closed". The detector now compares the task's
+    // previous runtime_state instead, so an already-idle task stays quiet.
+    const stale = makeTask({
+      id: 't1',
+      title: 'Stuck task',
+      runtime_state: 'idle',
+      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'idle' })],
+    });
+    const { rerender } = renderHook(({ t }) => useNotifications(t, navigate), {
+      initialProps: { t: [stale] },
+      wrapper,
+    });
+
+    // Three WS-triggered refreshes with no real change — only updated_at jitters.
+    rerender({ t: [{ ...stale, updated_at: '2026-01-02' }] });
+    rerender({ t: [{ ...stale, updated_at: '2026-01-03' }] });
+    rerender({ t: [{ ...stale, updated_at: '2026-01-04' }] });
+
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
   it('does not re-fire permission prompt toasts for prompts already present at load time', () => {
     const tasks = [
       makeTask({
