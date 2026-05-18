@@ -28,14 +28,27 @@ vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
 }));
 
+vi.mock('./harnesses/claude-code.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('./harnesses/claude-code.js')>('./harnesses/claude-code.js');
+  return {
+    ...actual,
+    claudeCodeHarness: {
+      ...actual.claudeCodeHarness,
+      installHooks: vi.fn().mockResolvedValue(undefined),
+      syncAgents: vi.fn().mockResolvedValue(undefined),
+    },
+  };
+});
+
 vi.mock('./settings.js', async () => {
   const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
   return {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
     }),
   };
 });
