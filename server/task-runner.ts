@@ -6,8 +6,9 @@ import os from 'os';
 import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
-import { installHookSettings } from './hook-settings.js';
-import { getSettings, resolveClaudeFlags } from './settings.js';
+import { getSettings } from './settings.js';
+import { getHarness } from './harnesses/index.js';
+import { hookBaseUrl } from './hook-base-url.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
 import { inferRefs } from './ref-inference.js';
 import { syncAgents } from './agents.js';
@@ -32,14 +33,6 @@ export function scratchRoot(): string {
 
 export function scratchDirFor(taskId: string): string {
   return path.join(scratchRoot(), taskId);
-}
-
-/**
- * Resolve extra claude CLI flags from env var (if set) or settings.
- * Returns a string with a leading space, or '' when empty.
- */
-async function getClaudeFlags(): Promise<string> {
-  return resolveClaudeFlags(await getSettings());
 }
 
 /**
@@ -102,7 +95,7 @@ function writeAgentLocalSettings(worktreePath: string): void {
  * as a tmux send-keys to `target`, then clean up the file after a delay. If `prompt`
  * is absent, sends `baseCmd` as-is.
  */
-async function sendClaudeCommand(args: {
+async function sendHarnessCommand(args: {
   target: string;
   baseCmd: string;
   prompt?: string | null;
@@ -603,8 +596,6 @@ export async function startTask(task: Task): Promise<void> {
       'createTask: setup complete',
     );
 
-    installHookSettings(setup.installHooksAt);
-
     // ─── Branch-name ref inference ────────────────────────────────────────
     // Run inference before preflight so refs are available when hooks fire.
     if (setup.branch && task.repo_path) {
@@ -652,20 +643,40 @@ export async function startTask(task: Task): Promise<void> {
     const windowIndex = await getActiveWindowIndex(session);
 
     stage = 'launch_agent';
+    const harness = getHarness(task.harness_id);
     const agentId = nanoid(12);
-    const claudeSessionId = crypto.randomUUID();
     const agentName = task.agent ?? null;
+    const hookToken = crypto.randomBytes(32).toString('hex');
+    const flags = harness.resolveFlags(await getSettings());
+
+    let sessionIdForDb: string | null;
+    let sessionIdForLaunch: string;
+    if (harness.sessionIdMode === 'orchestrator-assigned') {
+      const sid = harness.newSessionId();
+      sessionIdForDb = sid;
+      sessionIdForLaunch = sid;
+    } else {
+      sessionIdForDb = null;
+      sessionIdForLaunch = harness.newSessionId();
+    }
+
     db.prepare(
-      'INSERT INTO agents (id, task_id, window_index, label, claude_session_id, agent) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(agentId, id, windowIndex, 'Agent 1', claudeSessionId, agentName);
+      `INSERT INTO agents
+         (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(agentId, id, windowIndex, 'Agent 1', harness.id, sessionIdForDb, hookToken, agentName);
 
-    if (agentName) await syncAgents(setup.worktreePath);
+    await harness.syncAgents(setup.worktreePath);
+    await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
-    const flags = await getClaudeFlags();
-    const agentFlag = agentName ? ` --agent ${agentName}` : '';
-    await sendClaudeCommand({
+    const baseCmd = harness.buildLaunchCommand({
+      sessionId: sessionIdForLaunch,
+      agent: agentName,
+      flags,
+    });
+    await sendHarnessCommand({
       target: `${session}:${windowIndex}`,
-      baseCmd: `claude${agentFlag} --session-id ${claudeSessionId}${flags}`,
+      baseCmd,
       prompt: task.initial_prompt,
       worktreePath: setup.worktreePath,
       agentId,
@@ -676,7 +687,8 @@ export async function startTask(task: Task): Promise<void> {
         agent_id: agentId,
         operation: 'createTask',
         window_index: windowIndex,
-        claude_session_id: claudeSessionId,
+        harness: harness.id,
+        harness_session_id: sessionIdForDb,
       },
       'createTask: first agent launched',
     );
@@ -741,7 +753,7 @@ export async function addAgent(
   const agentFlag = resolvedAgent ? ` --agent ${resolvedAgent}` : '';
   (async () => {
     try {
-      await sendClaudeCommand({
+      await sendHarnessCommand({
         target: addTarget,
         baseCmd: `claude${agentFlag} --session-id ${claudeSessionId}${flags}`,
         prompt,
@@ -1187,7 +1199,7 @@ export async function resumeTask(task: Task): Promise<void> {
           );
         }
 
-        await sendClaudeCommand({ target, baseCmd });
+        await sendHarnessCommand({ target, baseCmd });
 
         db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
           windowIndex,
@@ -1328,7 +1340,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     baseCmd = `claude --session-id ${newId}${flags}`;
     db.prepare(`UPDATE agents SET claude_session_id = ? WHERE id = ?`).run(newId, agent.id);
   }
-  await sendClaudeCommand({ target, baseCmd });
+  await sendHarnessCommand({ target, baseCmd });
 
   // Update DB row. For standalone agents we persist tmux_session; for
   // task-scoped ones we read the session via the task join.
