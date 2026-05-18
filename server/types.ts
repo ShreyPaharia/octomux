@@ -90,6 +90,7 @@ export interface Task {
   worktree_id: string | null;
   /** Optional agent name (matches `agents/<name>.md`); null launches plain `claude`. */
   agent: string | null;
+  harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */
   current_summary: string | null;
@@ -111,7 +112,10 @@ export interface Agent {
   window_index: number;
   label: string;
   status: AgentStatus;
-  claude_session_id: string | null;
+  harness_id: string;
+  harness_session_id: string | null;
+  /** Per-agent token used to authenticate hook callbacks. */
+  hook_token: string;
   hook_activity: HookActivity;
   hook_activity_updated_at: string | null;
   /** Phase 2a: populated for standalone agents; task-scoped agents read via task.tmux_session. */
