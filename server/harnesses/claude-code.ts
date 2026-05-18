@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
-import { validateAgentName } from './types.js';
+import { validateAgentName, validateFlagString } from './types.js';
 import type { OctomuxSettings } from '../settings.js';
 
 function buildHookEvents(baseUrl: string, token: string) {
@@ -92,12 +92,42 @@ export const claudeCodeHarness: Harness = {
     }
   },
 
-  resolveFlags(_settings: OctomuxSettings): string {
-    throw new Error('claudeCodeHarness.resolveFlags not yet ported');
+  resolveFlags(settings: OctomuxSettings): string {
+    const envFlagsRaw = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
+    if (envFlagsRaw) {
+      const envFlags = validateFlagString(envFlagsRaw, 'OCTOMUX_CLAUDE_FLAGS');
+      return ` ${envFlags}`;
+    }
+
+    const sub = (settings.harnesses?.['claude-code'] ?? {}) as {
+      flags?: string;
+      dangerouslySkipPermissions?: boolean;
+    };
+
+    const parts: string[] = [];
+    if (sub.dangerouslySkipPermissions) parts.push('--dangerously-skip-permissions');
+    if (sub.flags) {
+      parts.push(validateFlagString(sub.flags, 'harnesses.claude-code.flags'));
+    }
+    return parts.length > 0 ? ` ${parts.join(' ')}` : '';
   },
 
-  validateSettings(_blob: unknown): Record<string, unknown> {
-    throw new Error('claudeCodeHarness.validateSettings not yet ported');
+  validateSettings(blob: unknown): Record<string, unknown> {
+    if (typeof blob !== 'object' || blob === null || Array.isArray(blob)) {
+      throw new Error('Invalid claude-code settings: expected object');
+    }
+    const obj = blob as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    if (obj.flags !== undefined) {
+      out.flags = validateFlagString(obj.flags as string, 'harnesses.claude-code.flags');
+    }
+    if (obj.dangerouslySkipPermissions !== undefined) {
+      if (typeof obj.dangerouslySkipPermissions !== 'boolean') {
+        throw new Error('Invalid claude-code.dangerouslySkipPermissions: expected boolean');
+      }
+      out.dangerouslySkipPermissions = obj.dangerouslySkipPermissions;
+    }
+    return out;
   },
 
   validateAgentName(name: string): string {
