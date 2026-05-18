@@ -460,7 +460,7 @@ function RowMenu({ item, onOpen, onFork, onAddAgent, onRename, onClose, onDelete
           <MenuItemRow onClick={() => choose(onAddAgent)} label="Add agent…" />
           <div className="my-1 h-px" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }} />
           <MenuItemRow onClick={() => choose(onRename)} label="Rename" />
-          <MenuItemRow onClick={() => choose(onClose)} disabled={closeDisabled} label="Close" />
+          <MenuItemRow onClick={() => choose(onClose)} disabled={closeDisabled} label="Done" />
           <MenuItemRow onClick={() => choose(onDelete)} label="Delete" destructive />
         </div>
       )}
@@ -571,10 +571,10 @@ export function UniversalSidebar() {
   const handleClose = useCallback(
     async (id: string) => {
       try {
-        await api.updateTask(id, { status: 'closed' });
+        await api.moveTask(id, { workflow_status: 'done' });
         refresh();
       } catch (err) {
-        console.error('Failed to close task:', err);
+        console.error('Failed to mark task done:', err);
       }
     },
     [refresh],

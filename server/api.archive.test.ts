@@ -162,6 +162,52 @@ describe('POST /api/tasks/:id/move to archived (B2)', () => {
   });
 });
 
+describe('POST /api/tasks/:id/move to done', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    vi.clearAllMocks();
+  });
+
+  it('calls closeTask when moving a running task to done', async () => {
+    insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
+
+    const { closeTask } = await import('./task-runner.js');
+
+    const res = await request(app)
+      .post('/api/tasks/t1/move')
+      .send({ workflow_status: 'done' })
+      .expect(200);
+
+    expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
+    expect(res.body.workflow_status).toBe('done');
+  });
+
+  it('calls closeTask when moving a setting_up task to done', async () => {
+    insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'setting_up' });
+
+    const { closeTask } = await import('./task-runner.js');
+
+    await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
+
+    expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
+  });
+
+  it('does not call closeTask when moving an idle task to done', async () => {
+    insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'idle' });
+
+    const { closeTask } = await import('./task-runner.js');
+
+    await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
+
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /api/tasks createTask with title-gen (B5)', () => {
   let _db: Database.Database;
   let app: ReturnType<typeof createApp>;

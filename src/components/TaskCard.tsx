@@ -220,8 +220,8 @@ export const TaskCard = memo(function TaskCard({
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="text-muted-foreground hover:text-yellow-500"
-                title="Close task"
+                className="text-muted-foreground hover:text-green-500"
+                title="Mark done"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose(task.id);
@@ -238,8 +238,7 @@ export const TaskCard = memo(function TaskCard({
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
-                  <rect x="6" y="4" width="4" height="16" />
-                  <rect x="14" y="4" width="4" height="16" />
+                  <path d="M20 6 9 17l-5-5" />
                 </svg>
               </Button>
             ) : (

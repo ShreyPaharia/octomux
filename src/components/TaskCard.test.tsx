@@ -79,29 +79,29 @@ describe('TaskCard', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/test-task-01');
   });
 
-  // ─── Close (running tasks) ────────────────────────────────────────────────
+  // ─── Done (running tasks) ─────────────────────────────────────────────────
 
-  it('shows close button for running tasks', () => {
+  it('shows done button for running tasks', () => {
     renderWithRouter(<TaskCard task={makeTask()} onClose={onClose} onDelete={onDelete} />);
-    expect(screen.getByTitle('Close task')).toBeInTheDocument();
+    expect(screen.getByTitle('Mark done')).toBeInTheDocument();
     expect(screen.queryByTitle('Delete task')).not.toBeInTheDocument();
   });
 
-  it('calls onClose with task id when close button clicked', async () => {
+  it('calls onClose with task id when done button clicked', async () => {
     const user = userEvent.setup();
     renderWithRouter(<TaskCard task={makeTask()} onClose={onClose} onDelete={onDelete} />);
-    await user.click(screen.getByTitle('Close task'));
+    await user.click(screen.getByTitle('Mark done'));
     expect(onClose).toHaveBeenCalledWith('test-task-01');
   });
 
-  it('close click does not trigger navigation', async () => {
+  it('done click does not trigger navigation', async () => {
     const user = userEvent.setup();
     renderWithRouter(<TaskCard task={makeTask()} onClose={onClose} onDelete={onDelete} />);
-    await user.click(screen.getByTitle('Close task'));
+    await user.click(screen.getByTitle('Mark done'));
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it('shows close button for setting_up tasks', () => {
+  it('shows done button for setting_up tasks', () => {
     renderWithRouter(
       <TaskCard
         task={makeTask({ runtime_state: 'setting_up' })}
@@ -109,7 +109,7 @@ describe('TaskCard', () => {
         onDelete={onDelete}
       />,
     );
-    expect(screen.getByTitle('Close task')).toBeInTheDocument();
+    expect(screen.getByTitle('Mark done')).toBeInTheDocument();
     expect(screen.queryByTitle('Delete task')).not.toBeInTheDocument();
   });
 
@@ -120,7 +120,7 @@ describe('TaskCard', () => {
       <TaskCard task={makeTask({ runtime_state })} onClose={onClose} onDelete={onDelete} />,
     );
     expect(screen.getByTitle('Delete task')).toBeInTheDocument();
-    expect(screen.queryByTitle('Close task')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Mark done')).not.toBeInTheDocument();
   });
 
   it('calls onDelete with task id when delete button clicked on closed task', async () => {

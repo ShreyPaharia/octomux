@@ -1956,9 +1956,10 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    // B2: auto-close before archiving if the task is actively running
+    // Auto-close runtime when moving to a terminal column (done or archived) if
+    // the task is still actively running. Keeps the worktree/branch (close, not delete).
     if (
-      body.workflow_status === 'archived' &&
+      (body.workflow_status === 'done' || body.workflow_status === 'archived') &&
       (task.runtime_state === 'running' || task.runtime_state === 'setting_up')
     ) {
       await closeTask(task);

@@ -257,16 +257,16 @@ describe('UniversalSidebar row menu', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/?add_agent=t1');
   });
 
-  it('Close calls updateTask({status:closed})', async () => {
+  it('Done calls moveTask({workflow_status:done})', async () => {
     const user = userEvent.setup();
     apiMock.listTasks.mockResolvedValue([
       makeTask({ id: 't1', runtime_state: 'running', repo_path: '/dev/alpha' }),
     ]);
     renderSidebar();
     const menu = await openMenu(user, 't1');
-    await user.click(within(menu).getByText('Close'));
+    await user.click(within(menu).getByText('Done'));
     await waitFor(() =>
-      expect(apiMock.updateTask).toHaveBeenCalledWith('t1', { status: 'closed' }),
+      expect(apiMock.moveTask).toHaveBeenCalledWith('t1', { workflow_status: 'done' }),
     );
   });
 
