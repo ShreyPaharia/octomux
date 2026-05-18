@@ -210,6 +210,7 @@ function ApiDiffViewer({
   const [ignoredTruncated, setIgnoredTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [baseShaUnavailable, setBaseShaUnavailable] = useState(false);
+  const [baseUnavailable, setBaseUnavailable] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -279,11 +280,18 @@ function ApiDiffViewer({
       onSummaryLoaded?.(s);
       setError(null);
       setBaseShaUnavailable(false);
+      setBaseUnavailable(false);
     } catch (err) {
       const msg = (err as Error).message;
       if (msg.includes('base_sha not available')) {
         setFiles([]);
         setBaseShaUnavailable(true);
+        setError(null);
+      } else if (msg.includes('base_unavailable')) {
+        // Transient: couldn't reach origin AND no cached base SHA. Keep any
+        // previously-rendered files visible so we don't flash empty; the next
+        // poll should recover.
+        setBaseUnavailable(true);
         setError(null);
       } else {
         setError(msg);
@@ -310,6 +318,14 @@ function ApiDiffViewer({
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Diff unavailable (base_sha not captured)
+      </div>
+    );
+  }
+
+  if (baseUnavailable && files.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Couldn&rsquo;t reach origin to resolve diff base &mdash; retrying&hellip;
       </div>
     );
   }
