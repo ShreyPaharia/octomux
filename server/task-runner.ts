@@ -11,7 +11,6 @@ import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
 import { inferRefs } from './ref-inference.js';
-import { syncAgents } from './agents.js';
 import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
@@ -1176,8 +1175,6 @@ export async function resumeTask(task: Task): Promise<void> {
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
-    installHookSettings(cwd);
-
     const agents = db
       .prepare(
         `SELECT * FROM agents WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`,
@@ -1204,22 +1201,36 @@ export async function resumeTask(task: Task): Promise<void> {
       });
     }
 
-    const flags = await getClaudeFlags();
     const needsAgentSync = agentTargets.some(({ agent }) => !!agent.agent);
-    if (needsAgentSync) await syncAgents(cwd);
     await Promise.all(
       agentTargets.map(async ({ agent, windowIndex, target }) => {
-        const agentFlag = agent.agent ? ` --agent ${agent.agent}` : '';
+        const harness = getHarness(agent.harness_id);
+        const flags = harness.resolveFlags(await getSettings());
+
+        if (needsAgentSync && agent.agent) await harness.syncAgents(cwd);
+        await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
+
         let baseCmd: string;
-        if (agent.claude_session_id) {
-          baseCmd = `claude${agentFlag} --resume ${agent.claude_session_id}${flags}`;
+        if (agent.harness_session_id) {
+          baseCmd = harness.buildResumeCommand({ sessionId: agent.harness_session_id, flags });
         } else {
-          const newSessionId = crypto.randomUUID();
-          baseCmd = `claude${agentFlag} --continue --session-id ${newSessionId}${flags}`;
-          db.prepare('UPDATE agents SET claude_session_id = ? WHERE id = ?').run(
-            newSessionId,
-            agent.id,
-          );
+          const newId = harness.newSessionId();
+          const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags });
+          if (continueCmd !== null) {
+            baseCmd = continueCmd;
+          } else {
+            baseCmd = harness.buildLaunchCommand({ sessionId: newId, flags });
+            logger.warn(
+              { agent_id: agent.id, harness: harness.id },
+              'continue unsupported, launching fresh',
+            );
+          }
+          if (harness.sessionIdMode === 'orchestrator-assigned') {
+            db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(
+              newId,
+              agent.id,
+            );
+          }
         }
 
         await sendHarnessCommand({ target, baseCmd });
@@ -1234,7 +1245,8 @@ export async function resumeTask(task: Task): Promise<void> {
             agent_id: agent.id,
             operation: 'resumeTask',
             window_index: windowIndex,
-            claude_session_id: agent.claude_session_id,
+            harness: harness.id,
+            harness_session_id: agent.harness_session_id,
           },
           'resumeTask: agent recovered',
         );
@@ -1354,14 +1366,27 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
 
   // Resume claude in the new target.
   const target = `${newSession}:${newWindowIndex}`;
-  const flags = await getClaudeFlags();
+  const harness = getHarness(agent.harness_id);
+  const flags = harness.resolveFlags(await getSettings());
+
   let baseCmd: string;
-  if (agent.claude_session_id) {
-    baseCmd = `claude --resume ${agent.claude_session_id}${flags}`;
+  if (agent.harness_session_id) {
+    baseCmd = harness.buildResumeCommand({ sessionId: agent.harness_session_id, flags });
   } else {
-    const newId = crypto.randomUUID();
-    baseCmd = `claude --session-id ${newId}${flags}`;
-    db.prepare(`UPDATE agents SET claude_session_id = ? WHERE id = ?`).run(newId, agent.id);
+    const newId = harness.newSessionId();
+    const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags });
+    if (continueCmd !== null) {
+      baseCmd = continueCmd;
+    } else {
+      baseCmd = harness.buildLaunchCommand({ sessionId: newId, flags });
+      logger.warn(
+        { agent_id: agent.id, harness: harness.id },
+        'continue unsupported, launching fresh',
+      );
+    }
+    if (harness.sessionIdMode === 'orchestrator-assigned') {
+      db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
+    }
   }
   await sendHarnessCommand({ target, baseCmd });
 
