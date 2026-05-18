@@ -80,8 +80,16 @@ export const claudeCodeHarness: Harness = {
     fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
   },
 
-  async syncAgents(_worktreePath: string) {
-    throw new Error('claudeCodeHarness.syncAgents not yet ported');
+  async syncAgents(worktreePath: string) {
+    const { listAgents, getAgent } = await import('../agents.js');
+    const targetDir = path.join(worktreePath, '.claude', 'agents');
+    await fs.promises.mkdir(targetDir, { recursive: true });
+
+    const agents = await listAgents();
+    for (const def of agents) {
+      const agent = await getAgent(def.name);
+      await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
+    }
   },
 
   resolveFlags(_settings: OctomuxSettings): string {
