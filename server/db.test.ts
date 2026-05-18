@@ -440,6 +440,66 @@ describe('Database', () => {
   });
 });
 
+describe('permission_prompts.session_id nullability', () => {
+  it('relaxes permission_prompts.session_id to nullable', () => {
+    const db = createTestDb();
+    const cols = db.pragma('table_info(permission_prompts)') as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    const sid = cols.find((c) => c.name === 'session_id');
+    expect(sid?.notnull).toBe(0);
+  });
+
+  it('preserves existing permission_prompts rows across the relax migration', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
+        runtime_state TEXT NOT NULL DEFAULT 'idle',
+        workflow_status TEXT NOT NULL DEFAULT 'backlog',
+        worktree_id TEXT, tmux_session TEXT, pr_url TEXT, pr_number INTEGER,
+        pr_head_sha TEXT, user_window_index INTEGER, initial_prompt TEXT,
+        last_viewed_at TEXT, source TEXT, error TEXT, current_summary TEXT,
+        current_summary_updated_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY, task_id TEXT, window_index INTEGER NOT NULL,
+        label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'running',
+        harness_session_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE permission_prompts (
+        id          TEXT PRIMARY KEY,
+        task_id     TEXT NOT NULL,
+        agent_id    TEXT,
+        session_id  TEXT NOT NULL,
+        tool_name   TEXT NOT NULL,
+        tool_input  TEXT NOT NULL DEFAULT '{}',
+        status      TEXT NOT NULL DEFAULT 'pending',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        resolved_at TEXT,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+      );
+      CREATE TABLE repo_configs (repo_path TEXT PRIMARY KEY);
+      CREATE TABLE config (id INTEGER PRIMARY KEY CHECK (id = 1));
+    `);
+    db.prepare(`INSERT INTO tasks (id, title, description) VALUES ('t1', 'Test', 'Desc')`).run();
+    db.prepare(
+      `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input)
+       VALUES ('p1', 't1', NULL, 'sess-1', 'Bash', '{}')`,
+    ).run();
+    initDb(db);
+    const row = db.prepare(`SELECT session_id FROM permission_prompts WHERE id = ?`).get('p1') as {
+      session_id: string;
+    };
+    expect(row.session_id).toBe('sess-1');
+  });
+});
+
 describe('claude_session_id rename', () => {
   it('renames the column on an existing DB with old column', () => {
     // Simulate a pre-rename DB by manually creating the old schema.

@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS permission_prompts (
     id         TEXT PRIMARY KEY,
     task_id    TEXT NOT NULL,
     agent_id   TEXT,
-    session_id TEXT NOT NULL,
+    session_id TEXT,
     tool_name  TEXT NOT NULL,
     tool_input TEXT NOT NULL DEFAULT '{}',
     status     TEXT NOT NULL DEFAULT 'pending',
@@ -628,6 +628,53 @@ export function initDb(instance: Database.Database): void {
        ON tasks(worktree_id)
        WHERE runtime_state IN ('setting_up','running') AND worktree_id IS NOT NULL`,
   );
+
+  // ─── Relax permission_prompts.session_id NOT NULL → nullable ─────────────
+  // Required for step 2 (harness-issued session ids): prompts may be created
+  // before the session id is bound. Idempotent: gated on the current column
+  // nullability via PRAGMA. SQLite can't ALTER a NOT NULL in-place; table
+  // rebuild is the only safe path.
+  const ppCols = instance.pragma('table_info(permission_prompts)') as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const sidCol = ppCols.find((c) => c.name === 'session_id');
+  if (sidCol && sidCol.notnull === 1) {
+    instance
+      .transaction(() => {
+        instance.exec(`ALTER TABLE permission_prompts RENAME TO permission_prompts_old`);
+        instance.exec(`
+          CREATE TABLE permission_prompts (
+            id          TEXT PRIMARY KEY,
+            task_id     TEXT NOT NULL,
+            agent_id    TEXT,
+            session_id  TEXT,
+            tool_name   TEXT NOT NULL,
+            tool_input  TEXT NOT NULL DEFAULT '{}',
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            resolved_at TEXT,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+          )
+        `);
+        instance.exec(`INSERT INTO permission_prompts SELECT * FROM permission_prompts_old`);
+        instance.exec(`DROP TABLE permission_prompts_old`);
+        instance.exec(
+          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id)`,
+        );
+        instance.exec(
+          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status)`,
+        );
+        instance.exec(
+          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status)`,
+        );
+        instance.exec(
+          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status_created ON permission_prompts(agent_id, status, created_at)`,
+        );
+      })
+      .default();
+  }
 
   // Resolve stale pending prompts and reset agents stuck in 'waiting'
   // (hook callbacks lost during the previous run's shutdown)
