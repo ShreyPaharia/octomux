@@ -47,8 +47,8 @@ vi.mock('./settings.js', async () => {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: false, flags: '' } },
     }),
   };
 });
@@ -1191,7 +1191,7 @@ describe('resumeTask', () => {
     'uses $expectedFlag when $name',
     async ({ sessionId, expectedFlag, expectedId }) => {
       insertTask(db, { ...closedTask });
-      insertAgent(db, { status: 'stopped', claude_session_id: sessionId });
+      insertAgent(db, { status: 'stopped', harness_session_id: sessionId });
 
       await resumeTask(closedTask);
 
@@ -1357,8 +1357,8 @@ describe('claude launch flags', () => {
     delete process.env.OCTOMUX_CLAUDE_FLAGS;
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: false, flags: '' } },
     });
   });
 
@@ -1366,8 +1366,10 @@ describe('claude launch flags', () => {
     process.env.OCTOMUX_CLAUDE_FLAGS = '--from-env';
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: true,
-      claudeFlags: '--from-settings',
+      defaultHarnessId: 'claude-code',
+      harnesses: {
+        'claude-code': { dangerouslySkipPermissions: true, flags: '--from-settings' },
+      },
     });
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
@@ -1380,8 +1382,8 @@ describe('claude launch flags', () => {
   it('appends --dangerously-skip-permissions when setting is enabled', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: true,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: true, flags: '' } },
     });
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
@@ -1392,8 +1394,8 @@ describe('claude launch flags', () => {
   it('appends claudeFlags from settings when env var unset', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '--model opus',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: false, flags: '--model opus' } },
     });
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
@@ -1404,8 +1406,10 @@ describe('claude launch flags', () => {
   it('composes dangerouslySkipPermissions before claudeFlags', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: true,
-      claudeFlags: '--model opus',
+      defaultHarnessId: 'claude-code',
+      harnesses: {
+        'claude-code': { dangerouslySkipPermissions: true, flags: '--model opus' },
+      },
     });
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
@@ -1416,15 +1420,15 @@ describe('claude launch flags', () => {
   it('applies flags in resumeTask --resume branch', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: true,
-      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: true, flags: '' } },
     });
     const closedTask = {
       ...DEFAULTS.runningTask,
       runtime_state: 'idle' as const,
     } as unknown as Task;
     insertTask(db, { ...closedTask });
-    insertAgent(db, { status: 'stopped', claude_session_id: 'abc-123' });
+    insertAgent(db, { status: 'stopped', harness_session_id: 'abc-123' });
     await resumeTask(closedTask);
     const claudeCmd = findClaudeCmd();
     expect(claudeCmd).toContain('--resume abc-123 --dangerously-skip-permissions');
@@ -1433,15 +1437,15 @@ describe('claude launch flags', () => {
   it('applies flags in resumeTask --continue branch', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: false,
-      claudeFlags: '--model opus',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: false, flags: '--model opus' } },
     });
     const closedTask = {
       ...DEFAULTS.runningTask,
       runtime_state: 'idle' as const,
     } as unknown as Task;
     insertTask(db, { ...closedTask });
-    insertAgent(db, { status: 'stopped', claude_session_id: null });
+    insertAgent(db, { status: 'stopped', harness_session_id: null });
     await resumeTask(closedTask);
     const claudeCmd = findClaudeCmd();
     expect(claudeCmd).toContain('--continue --session-id');
@@ -1451,8 +1455,10 @@ describe('claude launch flags', () => {
   it('applies flags in addAgent', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       editor: 'nvim',
-      dangerouslySkipPermissions: true,
-      claudeFlags: '--model opus',
+      defaultHarnessId: 'claude-code',
+      harnesses: {
+        'claude-code': { dangerouslySkipPermissions: true, flags: '--model opus' },
+      },
     });
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent({ ...DEFAULTS.runningTask } as Task);
@@ -1670,14 +1676,14 @@ describe('hook integration', () => {
       runtime_state: 'idle' as const,
     } as unknown as Task;
     insertTask(db, { ...closedTask });
-    insertAgent(db, { status: 'stopped', claude_session_id: null });
+    insertAgent(db, { status: 'stopped', harness_session_id: null });
 
     await resumeTask(closedTask);
 
     const agents = getAgents(db, DEFAULTS.task.id);
-    expect(agents[0].claude_session_id).toBeTruthy();
+    expect(agents[0].harness_session_id).toBeTruthy();
     // UUID format check
-    expect(agents[0].claude_session_id).toMatch(
+    expect(agents[0].harness_session_id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
   });
@@ -1692,7 +1698,12 @@ describe('hook integration', () => {
 
     await resumeTask(closedTask);
 
-    expect(vi.mocked(installHookSettings)).toHaveBeenCalledWith(DEFAULTS.runningTask.worktree);
+    // harness.installHooks writes .claude/settings.local.json directly
+    const writeCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+    expect(writeCall).toBeDefined();
+    expect(String(writeCall![0])).toContain(DEFAULTS.runningTask.worktree!);
   });
 
   it('addAgent returns hook_activity fields', async () => {
