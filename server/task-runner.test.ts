@@ -37,6 +37,8 @@ let nextWindowIndex = 0;
 
 vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
+  ALLOWED_TOOLS: [],
+  DENIED_TOOLS: [],
 }));
 
 vi.mock('./settings.js', async () => {
@@ -227,7 +229,11 @@ describe('startTask', () => {
       a.includes('claude --session-id'),
     );
     expect(claudeCmd).not.toContain('$(cat ');
-    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled();
+    // No .claude-prompt-* temp file should be written (hook settings file is OK)
+    const promptFileCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-'));
+    expect(promptFileCall).toBeUndefined();
   });
 
   // ─── Custom branch and base branch ─────────────────────────────────────
@@ -324,7 +330,7 @@ describe('startTask', () => {
       expect(parsed.plugins['remember@claude-plugins-official']).toBe(false);
     });
 
-    it('does not write settings.local.json in run_mode=none', async () => {
+    it('does not write plugin-disabling settings in run_mode=none', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p: any) => {
         return !String(p).includes('settings.local.json');
       });
@@ -332,22 +338,30 @@ describe('startTask', () => {
       insertTask(db, { run_mode: 'none' });
       await startTask({ ...DEFAULTS.task, run_mode: 'none' as const } as Task);
 
+      // harness.installHooks always writes hook settings, but should NOT inject
+      // the plugin-disabling key (that's writeAgentLocalSettings, which skips run_mode=none).
       const writeCall = vi
         .mocked(fs.writeFileSync)
         .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
-      expect(writeCall).toBeUndefined();
+      if (writeCall) {
+        const parsed = JSON.parse(String(writeCall[1]));
+        expect(parsed.plugins).toBeUndefined();
+      }
     });
 
-    it('leaves an existing settings.local.json alone', async () => {
+    it('writes merged hook settings even when settings.local.json exists', async () => {
       // Default existsSync returns true for all paths, so the destination is
-      // treated as already present.
+      // treated as already present. harness.installHooks always merges and writes.
       insertTask(db);
       await startTask({ ...DEFAULTS.task } as Task);
 
+      // harness.installHooks should have written the hook settings file
       const writeCall = vi
         .mocked(fs.writeFileSync)
         .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
-      expect(writeCall).toBeUndefined();
+      expect(writeCall).toBeDefined();
+      const parsed = JSON.parse(String(writeCall![1]));
+      expect(parsed.hooks).toBeDefined();
     });
   });
 
@@ -437,7 +451,12 @@ describe('startTask', () => {
     });
 
     it('installs hook settings in repo_path', () => {
-      expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.task.repo_path);
+      // harness.installHooks writes .claude/settings.local.json directly
+      const writeCall = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+      expect(writeCall).toBeDefined();
+      expect(String(writeCall![0])).toContain(DEFAULTS.task.repo_path);
     });
   });
 
@@ -1552,13 +1571,43 @@ describe('createUserTerminal', () => {
 // ─── hook integration ─────────────────────────────────────────────────────────
 
 describe('hook integration', () => {
+  beforeEach(() => {
+    // Restore the standard execFile mock so startTask can run cleanly.
+    // (Earlier describe blocks may have left a custom implementation.)
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      if (args.includes('display-message')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+        cb(null, { stdout: 'main\n', stderr: '' });
+      } else if (args.includes('rev-parse')) {
+        cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
+      } else {
+        cb(null, { stdout: 'true', stderr: '' });
+      }
+    }) as any);
+  });
+
   it('startTask installs hook settings in worktree', async () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
 
-    expect(vi.mocked(installHookSettings)).toHaveBeenCalledWith(
-      expect.stringContaining('.worktrees/'),
-    );
+    // harness.installHooks writes .claude/settings.local.json directly
+    const writeCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).endsWith('/.claude/settings.local.json'));
+    expect(writeCall).toBeDefined();
+    expect(String(writeCall![0])).toContain('.worktrees/');
   });
 
   it('closeTask resolves all pending permission prompts', async () => {
