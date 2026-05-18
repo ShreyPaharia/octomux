@@ -52,7 +52,9 @@ export interface Agent {
   window_index: number;
   label: string;
   status: string;
-  claude_session_id: string | null;
+  harness_id: string;
+  harness_session_id: string | null;
+  hook_token: string;
   hook_activity: string;
   created_at: string;
 }

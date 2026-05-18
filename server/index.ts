@@ -30,7 +30,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
 const app = createApp();
 const server = createServer(app);
-const PORT = process.env.PORT || 7777;
+const PORT = process.env.OCTOMUX_PORT || process.env.PORT || 7777;
 
 // WebSocket setup
 setupTerminalWebSocket();
