@@ -739,23 +739,43 @@ export async function addAgent(
     'addAgent: tmux window created',
   );
 
+  const harness = getHarness(task.harness_id);
   const agentId = nanoid(12);
-  const claudeSessionId = crypto.randomUUID();
+  const hookToken = crypto.randomBytes(32).toString('hex');
+  const flags = harness.resolveFlags(await getSettings());
   const resolvedAgent = agentName ?? null;
-  db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, claude_session_id, agent) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(agentId, task.id, windowIndex, label, claudeSessionId, resolvedAgent);
 
-  if (resolvedAgent) await syncAgents(task.worktree!);
+  let sessionIdForDb: string | null;
+  let sessionIdForLaunch: string;
+  if (harness.sessionIdMode === 'orchestrator-assigned') {
+    const sid = harness.newSessionId();
+    sessionIdForDb = sid;
+    sessionIdForLaunch = sid;
+  } else {
+    sessionIdForDb = null;
+    sessionIdForLaunch = harness.newSessionId();
+  }
+
+  db.prepare(
+    `INSERT INTO agents
+       (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(agentId, task.id, windowIndex, label, harness.id, sessionIdForDb, hookToken, resolvedAgent);
+
+  if (resolvedAgent) await harness.syncAgents(task.worktree!);
+  await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const addTarget = `${task.tmux_session}:${windowIndex}`;
-  const flags = await getClaudeFlags();
-  const agentFlag = resolvedAgent ? ` --agent ${resolvedAgent}` : '';
+  const baseCmd = harness.buildLaunchCommand({
+    sessionId: sessionIdForLaunch,
+    agent: resolvedAgent,
+    flags,
+  });
   (async () => {
     try {
       await sendHarnessCommand({
         target: addTarget,
-        baseCmd: `claude${agentFlag} --session-id ${claudeSessionId}${flags}`,
+        baseCmd,
         prompt,
         worktreePath: task.worktree!,
         agentId,
@@ -766,7 +786,8 @@ export async function addAgent(
           agent_id: agentId,
           operation: 'addAgent',
           window_index: windowIndex,
-          claude_session_id: claudeSessionId,
+          harness: harness.id,
+          harness_session_id: sessionIdForDb,
         },
         'addAgent: claude launched',
       );
@@ -795,7 +816,9 @@ export async function addAgent(
     window_index: windowIndex,
     label,
     status: 'running',
-    claude_session_id: claudeSessionId,
+    harness_id: harness.id,
+    harness_session_id: sessionIdForDb,
+    hook_token: hookToken,
     hook_activity: 'active' as const,
     hook_activity_updated_at: null,
     tmux_session: null,
