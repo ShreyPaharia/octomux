@@ -1,0 +1,23 @@
+import { describe, it, expect } from 'vitest';
+import { getHarness, listHarnesses, DEFAULT_HARNESS_ID } from './registry.js';
+
+describe('registry', () => {
+  it('returns claude-code by id', () => {
+    const h = getHarness('claude-code');
+    expect(h.id).toBe('claude-code');
+  });
+
+  it('returns the default when id is null/undefined', () => {
+    expect(getHarness(null).id).toBe(DEFAULT_HARNESS_ID);
+    expect(getHarness(undefined).id).toBe(DEFAULT_HARNESS_ID);
+  });
+
+  it('throws on unknown id', () => {
+    expect(() => getHarness('nonexistent')).toThrow(/Unknown harness/);
+  });
+
+  it('lists registered harnesses', () => {
+    const ids = listHarnesses().map((h) => h.id);
+    expect(ids).toContain('claude-code');
+  });
+});
