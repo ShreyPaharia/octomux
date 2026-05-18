@@ -71,12 +71,38 @@ router.post('/user-prompt-submit', (req, res) => {
     return;
   }
 
-  getDb()
-    .prepare(
-      `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+  const db = getDb();
+
+  db.prepare(
+    `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
        WHERE id = ?`,
-    )
-    .run(agent.id);
+  ).run(agent.id);
+
+  // Inverse of B4: auto-transition human_review → in_progress when the user resumes the agent
+  const task = db
+    .prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`)
+    .get(agent.task_id) as { id: string; workflow_status: string } | undefined;
+
+  if (task && task.workflow_status === 'human_review') {
+    const updateId = nanoid(12);
+    db.prepare(
+      `UPDATE tasks SET workflow_status = 'in_progress', updated_at = datetime('now') WHERE id = ?`,
+    ).run(task.id);
+    db.prepare(
+      `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', 'human_review', 'in_progress', ?)`,
+    ).run(updateId, task.id, 'auto: user replied');
+
+    hooksLogger.info(
+      { task_id: task.id, agent_id: agent.id, operation: 'auto_in_progress' },
+      'auto-transitioned to in_progress',
+    );
+
+    fireHook('workflow_status_changed', {
+      event: 'workflow_status_changed',
+      task: { id: task.id, workflow_status: 'in_progress' as const },
+      data: { from: 'human_review', to: 'in_progress', note: 'auto: user replied' },
+    });
+  }
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
