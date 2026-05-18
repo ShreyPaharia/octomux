@@ -98,7 +98,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     const initialPrompt = opts.prompt?.trim();
     if (initialPrompt) {
       promptFile = path.join(cwd, `.claude-prompt-${agentId}`);
-      fs.writeFileSync(promptFile, initialPrompt);
+      fs.writeFileSync(promptFile, initialPrompt, { mode: 0o600, flag: 'wx' });
       cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
     }
     await execFile('tmux', ['send-keys', '-t', session, cmd, 'Enter']);

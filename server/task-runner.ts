@@ -105,7 +105,7 @@ async function sendHarnessCommand(args: {
   let promptFile: string | null = null;
   if (args.prompt && args.worktreePath && args.agentId) {
     promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
-    fs.writeFileSync(promptFile, args.prompt);
+    fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
     cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
   }
   await waitForShellReady(args.target);

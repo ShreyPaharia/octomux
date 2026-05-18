@@ -214,6 +214,7 @@ describe('startTask', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Do the thing',
+      { mode: 0o600, flag: 'wx' },
     );
   });
 
@@ -753,6 +754,7 @@ describe('addAgent', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Write tests',
+      { mode: 0o600, flag: 'wx' },
     );
   });
 
