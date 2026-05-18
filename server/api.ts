@@ -74,6 +74,7 @@ import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
 import { generateTitleAndDescription } from './title-gen.js';
 import { invalidateHookEnabledCache } from './hook-dispatcher.js';
+import { ensureHookToken } from './hook-token.js';
 import type {
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -436,13 +437,21 @@ export function setupRoutes(app: Express): void {
   });
 
   // Get single task with agents
-  app.get('/api/tasks/:id', (req: Request, res: Response) => {
+  app.get('/api/tasks/:id', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
     const db = getDb();
-    const agents = db
+    const rawAgents = db
       .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
       .all(task.id) as Agent[];
+    // Backfill hook_token for pre-step-1 agents that have an empty token.
+    const agents = await Promise.all(
+      rawAgents.map(async (agent) => {
+        if (agent.hook_token !== '') return agent;
+        const token = await ensureHookToken(agent, task.worktree ?? null);
+        return { ...agent, hook_token: token };
+      }),
+    );
     const pendingPrompts = db
       .prepare(
         `SELECT pp.*, a.label as agent_label
