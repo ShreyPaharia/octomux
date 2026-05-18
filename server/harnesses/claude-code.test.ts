@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { claudeCodeHarness } from './claude-code.js';
 
 describe('claudeCodeHarness', () => {
@@ -55,5 +58,30 @@ describe('claudeCodeHarness', () => {
         'claude --continue --session-id s1 --verbose',
       );
     });
+  });
+});
+
+describe('claudeCodeHarness.installHooks', () => {
+  it('writes settings.local.json with token in URLs', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok-abc');
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(written.hooks.Stop[0].hooks[0].url).toBe(
+      'http://127.0.0.1:7777/api/hooks/stop?token=tok-abc',
+    );
+    expect(written.permissions.allow).toContain('Bash(git diff:*)');
+  });
+
+  it('uri-encodes the token', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok&special=value');
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(written.hooks.Stop[0].hooks[0].url).toBe(
+      'http://127.0.0.1:7777/api/hooks/stop?token=tok%26special%3Dvalue',
+    );
   });
 });
