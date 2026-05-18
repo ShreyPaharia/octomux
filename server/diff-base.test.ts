@@ -122,7 +122,11 @@ describe('resolveDiffBase', () => {
 
   it('serves expired cache marked stale when all retries fail', async () => {
     // First call: populate cache with sha X.
-    programExec({ fetch: ['ok'], revParse: ['ok'], sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    programExec({
+      fetch: ['ok'],
+      revParse: ['ok'],
+      sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
     const t = task({ base_branch: 'main' });
     const first = await resolveDiffBase(t);
     expect(first.sha).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
@@ -202,9 +206,9 @@ describe('resolveDiffBase', () => {
       });
       const t = task({ base_branch: 'main' });
       const promise = resolveDiffBase(t).catch((e) => e);
-      // Internal per-attempt timeout = ATTEMPT_TIMEOUT_MS (2000) - 250 = 1750ms.
-      // Two attempts + 200ms backoff ⇒ advance ~4s to drain.
-      await vi.advanceTimersByTimeAsync(4000);
+      // Internal per-attempt timeout = ATTEMPT_TIMEOUT_MS (5000) - 250 = 4750ms.
+      // Two attempts + 200ms backoff ⇒ advance ~10s to drain.
+      await vi.advanceTimersByTimeAsync(10000);
       const err = await promise;
       expect(err).toBeInstanceOf(BaseUnavailableError);
     });
