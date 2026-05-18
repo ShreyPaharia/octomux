@@ -138,14 +138,8 @@ export async function createAgent(name: string, content: string): Promise<void> 
  * resolves them when launched in that directory.
  */
 export async function syncAgents(cwd?: string): Promise<void> {
-  const targetDir = path.join(cwd ?? process.cwd(), '.claude', 'agents');
-  await fs.promises.mkdir(targetDir, { recursive: true });
-
-  const agents = await listAgents();
-  for (const def of agents) {
-    const agent = await getAgent(def.name);
-    await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
-  }
+  const { claudeCodeHarness } = await import('./harnesses/claude-code.js');
+  await claudeCodeHarness.syncAgents(cwd ?? process.cwd());
 }
 
 export async function deleteAgent(name: string): Promise<void> {
