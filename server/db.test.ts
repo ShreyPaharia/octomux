@@ -383,4 +383,59 @@ describe('Database', () => {
       expect(getUserTerminals(db, DEFAULTS.runningTask.id)).toHaveLength(0);
     });
   });
+
+  // ─── harness step-1 migration ────────────────────────────────────────────
+
+  describe('harness step-1 migration', () => {
+    it('adds harness_id to tasks with default claude-code', () => {
+      const db = createTestDb();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, created_at, updated_at)
+         VALUES ('t1', 'Test', '', datetime('now'), datetime('now'))`,
+      ).run();
+      const row = db.prepare(`SELECT harness_id FROM tasks WHERE id = ?`).get('t1') as {
+        harness_id: string;
+      };
+      expect(row.harness_id).toBe('claude-code');
+    });
+
+    it('adds harness_id and hook_token to agents with defaults', () => {
+      const db = createTestDb();
+      db.prepare(
+        `INSERT INTO agents (id, task_id, window_index, label, claude_session_id, agent)
+         VALUES ('a1', NULL, 0, 'Agent 1', 'old-session-uuid', NULL)`,
+      ).run();
+      const row = db
+        .prepare(`SELECT harness_id, hook_token FROM agents WHERE id = ?`)
+        .get('a1') as {
+        harness_id: string;
+        hook_token: string;
+      };
+      expect(row.harness_id).toBe('claude-code');
+      expect(row.hook_token).toBe('');
+    });
+
+    it('is idempotent (running migration twice is a no-op)', () => {
+      const db = createTestDb();
+      initDb(db);
+      initDb(db);
+      const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+      const names = cols.map((c) => c.name);
+      expect(names.filter((n) => n === 'harness_id')).toHaveLength(1);
+      expect(names.filter((n) => n === 'hook_token')).toHaveLength(1);
+    });
+
+    it('preserves a pre-existing non-default harness_id', () => {
+      const db = createTestDb();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, created_at, updated_at, harness_id)
+         VALUES ('t2', 'Test', '', datetime('now'), datetime('now'), 'cursor')`,
+      ).run();
+      initDb(db); // re-run
+      const row = db.prepare(`SELECT harness_id FROM tasks WHERE id = ?`).get('t2') as {
+        harness_id: string;
+      };
+      expect(row.harness_id).toBe('cursor');
+    });
+  });
 });

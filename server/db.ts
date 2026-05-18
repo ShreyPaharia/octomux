@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     error                        TEXT,
     current_summary              TEXT,
     current_summary_updated_at   TEXT,
+    harness_id                   TEXT NOT NULL DEFAULT 'claude-code',
     created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -89,11 +90,13 @@ CREATE TABLE IF NOT EXISTS integrations (
 
 CREATE TABLE IF NOT EXISTS agents (
     id                TEXT PRIMARY KEY,
-    task_id           TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    task_id           TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     window_index      INTEGER NOT NULL,
     label             TEXT NOT NULL,
     status            TEXT NOT NULL DEFAULT 'running',
     claude_session_id TEXT,
+    harness_id        TEXT NOT NULL DEFAULT 'claude-code',
+    hook_token        TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -218,6 +221,8 @@ function rebuildAgentsTable(instance: Database.Database): void {
           claude_session_id        TEXT,
           hook_activity            TEXT NOT NULL DEFAULT 'active',
           hook_activity_updated_at TEXT,
+          harness_id               TEXT NOT NULL DEFAULT 'claude-code',
+          hook_token               TEXT NOT NULL DEFAULT '',
           created_at               TEXT NOT NULL DEFAULT (datetime('now'))
         );
       `);
@@ -233,6 +238,8 @@ function rebuildAgentsTable(instance: Database.Database): void {
         has('hook_activity_updated_at')
           ? 'hook_activity_updated_at'
           : 'NULL AS hook_activity_updated_at',
+        has('harness_id') ? 'harness_id' : `'claude-code' AS harness_id`,
+        has('hook_token') ? 'hook_token' : `'' AS hook_token`,
         'created_at',
       ].join(', ');
 
@@ -307,6 +314,8 @@ export function initDb(instance: Database.Database): void {
   addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);
   addColumn('agents', 'hook_activity', "hook_activity TEXT NOT NULL DEFAULT 'active'", agentCols);
   addColumn('agents', 'hook_activity_updated_at', 'hook_activity_updated_at TEXT', agentCols);
+  addColumn('agents', 'harness_id', `harness_id TEXT NOT NULL DEFAULT 'claude-code'`, agentCols);
+  addColumn('agents', 'hook_token', `hook_token TEXT NOT NULL DEFAULT ''`, agentCols);
 
   // ─── Legacy pre-Phase-2a shim: add run_mode / backfill from no_worktree ──
   // Needed only for very old DBs that predate run_mode. The Phase 2a backfill
@@ -433,6 +442,12 @@ export function initDb(instance: Database.Database): void {
   // Add tasks.agent column (idempotent).
   const taskColsForAgent = columnsOf('tasks');
   addColumn('tasks', 'agent', 'agent TEXT', taskColsForAgent);
+  addColumn(
+    'tasks',
+    'harness_id',
+    `harness_id TEXT NOT NULL DEFAULT 'claude-code'`,
+    taskColsForAgent,
+  );
 
   // ─── Drop legacy columns from tasks ──────────────────────────────────────
   // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),
