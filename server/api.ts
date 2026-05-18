@@ -24,7 +24,12 @@ import {
 } from './task-runner.js';
 import * as diffMod from './diff.js';
 import { parseDiffRange } from './diff-range.js';
-import { BaseUnavailableError, clearDiffBaseCache, resolveDiffBase, resolveRef } from './diff-base.js';
+import {
+  BaseUnavailableError,
+  clearDiffBaseCache,
+  resolveDiffBase,
+  resolveRef,
+} from './diff-base.js';
 import { listBranches, listCommits } from './git-commits.js';
 import { setReviewed, clearReviewed } from './file-review-state.js';
 import {
