@@ -24,7 +24,7 @@ import {
 } from './task-runner.js';
 import * as diffMod from './diff.js';
 import { parseDiffRange } from './diff-range.js';
-import { resolveRef } from './diff-base.js';
+import { BaseUnavailableError, clearDiffBaseCache, resolveDiffBase, resolveRef } from './diff-base.js';
 import { listBranches, listCommits } from './git-commits.js';
 import { setReviewed, clearReviewed } from './file-review-state.js';
 import {
@@ -980,6 +980,10 @@ export function setupRoutes(app: Express): void {
       const summary = await diffMod.getDiffSummary({ task, range });
       res.json(summary);
     } catch (err) {
+      if (err instanceof BaseUnavailableError) {
+        res.status(503).json({ error: 'base_unavailable', message: err.message });
+        return;
+      }
       res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -1021,14 +1025,21 @@ export function setupRoutes(app: Express): void {
       return;
     }
     try {
+      // Resolve the live base so the per-file diff agrees with the summary
+      // (both go through resolveDiffBase, which shares an in-process cache).
+      const resolved = await resolveDiffBase(task);
       const diff = await diffMod.getFileDiff({
         worktree: cwd,
         range,
-        taskBaseSha: task.base_sha,
+        taskBaseSha: resolved.sha,
         relPath,
       });
       res.json(diff);
     } catch (err) {
+      if (err instanceof BaseUnavailableError) {
+        res.status(503).json({ error: 'base_unavailable', message: err.message });
+        return;
+      }
       res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -1160,6 +1171,11 @@ export function setupRoutes(app: Express): void {
       .prepare(`UPDATE worktrees SET base_branch = ?, base_sha = ? WHERE id = ?`)
       .run(baseBranch, sha, task.worktree_id);
     getDb().prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`).run(task.id);
+
+    // Invalidate any cached origin tip for old/new branch on this worktree so
+    // the next diff fetch resolves fresh.
+    if (task.base_branch) clearDiffBaseCache(cwd, task.base_branch);
+    clearDiffBaseCache(cwd, baseBranch);
 
     apiLogger.info(
       { task_id: task.id, base_branch: baseBranch, base_sha: sha },
