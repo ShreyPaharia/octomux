@@ -67,6 +67,7 @@ import {
   isBuiltInAgent,
   syncAgents,
 } from './agents.js';
+import { validateAgentName } from './harnesses/types.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
 import { hookRoutes } from './hooks.js';
@@ -521,6 +522,15 @@ export function setupRoutes(app: Express): void {
       }
     }
 
+    if (body.agent != null) {
+      try {
+        validateAgentName(body.agent);
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    }
+
     // Derive stored repo_path / worktree
     let storedRepoPath: string;
     let storedWorktree: string | null;
@@ -823,6 +833,16 @@ export function setupRoutes(app: Express): void {
     }
 
     const body = req.body as AddAgentRequest;
+
+    if (body.agent != null) {
+      try {
+        validateAgentName(body.agent);
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    }
+
     const agent = await addAgent(task, body.prompt, body.agent);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.status(201).json(agent);
@@ -1695,6 +1715,16 @@ export function setupRoutes(app: Express): void {
 
   app.post('/api/chats', async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as CreateChatRequest;
+
+    if (body.agent != null) {
+      try {
+        validateAgentName(body.agent);
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    }
+
     try {
       const chat = await createChat({
         label: body.label,

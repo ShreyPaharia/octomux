@@ -2304,3 +2304,43 @@ describe('POST /api/preflight/stash', () => {
     expect(res.status).not.toBe(404);
   });
 });
+
+describe('agent name validation', () => {
+  const invalidAgentCases = [
+    { name: 'semicolon injection', agent: 'foo; rm -rf /' },
+    { name: 'space in name', agent: 'has space' },
+    { name: 'path traversal', agent: '../etc/passwd' },
+    { name: 'slash', agent: 'some/path' },
+    { name: 'empty string', agent: '' },
+    { name: 'null byte', agent: 'foo\0bar' },
+  ];
+
+  describe('POST /api/tasks', () => {
+    it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
+      const res = await request(app)
+        .post('/api/tasks')
+        .send({ title: 'T', description: 'D', repo_path: '/tmp', agent });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid agent name/);
+    });
+  });
+
+  describe('POST /api/tasks/:id/agents', () => {
+    it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
+      insertTask(db, { ...DEFAULTS.runningTask });
+      const res = await request(app)
+        .post(`/api/tasks/${DEFAULTS.runningTask.id}/agents`)
+        .send({ agent });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid agent name/);
+    });
+  });
+
+  describe('POST /api/chats', () => {
+    it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
+      const res = await request(app).post('/api/chats').send({ agent });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Invalid agent name/);
+    });
+  });
+});
