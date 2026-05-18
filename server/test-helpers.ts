@@ -69,7 +69,7 @@ export const DEFAULTS = {
     window_index: 0,
     label: 'Agent 1',
     status: 'running' as const,
-    claude_session_id: 'test-session-uuid-01',
+    harness_session_id: 'test-session-uuid-01',
     tmux_session: null,
     agent: null as string | null,
     created_at: '2026-01-01 00:00:00',
@@ -188,14 +188,14 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, claude_session_id, hook_activity) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
     agent.window_index,
     agent.label,
     agent.status,
-    agent.claude_session_id,
+    (agent as any).harness_session_id ?? (agent as any).claude_session_id ?? null,
     (agent as any).hook_activity || 'active',
   );
 
@@ -387,7 +387,7 @@ export const AGENTS_TABLE_COLUMNS = [
   'window_index',
   'label',
   'status',
-  'claude_session_id',
+  'harness_session_id',
   'hook_activity',
   'hook_activity_updated_at',
   'tmux_session',

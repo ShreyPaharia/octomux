@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS agents (
     window_index      INTEGER NOT NULL,
     label             TEXT NOT NULL,
     status            TEXT NOT NULL DEFAULT 'running',
-    claude_session_id TEXT,
+    harness_session_id TEXT,
     harness_id        TEXT NOT NULL DEFAULT 'claude-code',
     hook_token        TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
@@ -129,7 +129,6 @@ CREATE TABLE IF NOT EXISTS user_terminals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_terminals_task ON user_terminals(task_id);
-CREATE INDEX IF NOT EXISTS idx_agents_claude_session_id ON agents(claude_session_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status_created ON permission_prompts(agent_id, status, created_at);
 
 CREATE TABLE IF NOT EXISTS repo_configs (
@@ -218,7 +217,7 @@ function rebuildAgentsTable(instance: Database.Database): void {
           window_index             INTEGER NOT NULL,
           label                    TEXT NOT NULL,
           status                   TEXT NOT NULL DEFAULT 'running',
-          claude_session_id        TEXT,
+          harness_session_id       TEXT,
           hook_activity            TEXT NOT NULL DEFAULT 'active',
           hook_activity_updated_at TEXT,
           harness_id               TEXT NOT NULL DEFAULT 'claude-code',
@@ -233,7 +232,7 @@ function rebuildAgentsTable(instance: Database.Database): void {
         'window_index',
         'label',
         'status',
-        has('claude_session_id') ? 'claude_session_id' : 'NULL AS claude_session_id',
+        has('harness_session_id') ? 'harness_session_id' : 'NULL AS harness_session_id',
         has('hook_activity') ? 'hook_activity' : `'active' AS hook_activity`,
         has('hook_activity_updated_at')
           ? 'hook_activity_updated_at'
@@ -250,7 +249,7 @@ function rebuildAgentsTable(instance: Database.Database): void {
       // Recreate indexes (idempotent CREATE IF NOT EXISTS).
       instance.exec(`CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id)`);
       instance.exec(
-        `CREATE INDEX IF NOT EXISTS idx_agents_claude_session_id ON agents(claude_session_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_agents_harness_session_id ON agents(harness_session_id)`,
       );
     })
     .default();
@@ -311,11 +310,30 @@ export function initDb(instance: Database.Database): void {
   const taskCols = columnsOf('tasks');
 
   const agentCols = columnsOf('agents');
-  addColumn('agents', 'claude_session_id', 'claude_session_id TEXT', agentCols);
+
+  // Rename agents.claude_session_id -> agents.harness_session_id (step-1 of
+  // the harness abstraction). Must run BEFORE addColumn for harness_session_id
+  // so the rename fires on old DBs before we try to add the new-named column.
+  // Idempotent: only runs when the old column still exists.
+  // SQLite 3.25+ supports RENAME COLUMN.
+  if (agentCols.has('claude_session_id') && !agentCols.has('harness_session_id')) {
+    instance.exec(`ALTER TABLE agents RENAME COLUMN claude_session_id TO harness_session_id`);
+    instance.exec(`DROP INDEX IF EXISTS idx_agents_claude_session_id`);
+    agentCols.delete('claude_session_id');
+    agentCols.add('harness_session_id');
+  }
+
+  addColumn('agents', 'harness_session_id', 'harness_session_id TEXT', agentCols);
   addColumn('agents', 'hook_activity', "hook_activity TEXT NOT NULL DEFAULT 'active'", agentCols);
   addColumn('agents', 'hook_activity_updated_at', 'hook_activity_updated_at TEXT', agentCols);
   addColumn('agents', 'harness_id', `harness_id TEXT NOT NULL DEFAULT 'claude-code'`, agentCols);
   addColumn('agents', 'hook_token', `hook_token TEXT NOT NULL DEFAULT ''`, agentCols);
+
+  // Ensure the index exists (created here rather than SCHEMA to avoid ordering
+  // issues when the old column is still named claude_session_id at SCHEMA time).
+  instance.exec(
+    `CREATE INDEX IF NOT EXISTS idx_agents_harness_session_id ON agents(harness_session_id)`,
+  );
 
   // ─── Legacy pre-Phase-2a shim: add run_mode / backfill from no_worktree ──
   // Needed only for very old DBs that predate run_mode. The Phase 2a backfill

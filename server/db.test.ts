@@ -173,7 +173,7 @@ describe('Database', () => {
     const migrationColumns = [
       { table: 'tasks', column: 'initial_prompt' },
       { table: 'tasks', column: 'worktree_id' },
-      { table: 'agents', column: 'claude_session_id' },
+      { table: 'agents', column: 'harness_session_id' },
     ];
 
     it.each(migrationColumns)('$table has $column column (migration)', ({ table, column }) => {
@@ -402,7 +402,7 @@ describe('Database', () => {
     it('adds harness_id and hook_token to agents with defaults', () => {
       const db = createTestDb();
       db.prepare(
-        `INSERT INTO agents (id, task_id, window_index, label, claude_session_id, agent)
+        `INSERT INTO agents (id, task_id, window_index, label, harness_session_id, agent)
          VALUES ('a1', NULL, 0, 'Agent 1', 'old-session-uuid', NULL)`,
       ).run();
       const row = db
@@ -437,5 +437,52 @@ describe('Database', () => {
       };
       expect(row.harness_id).toBe('cursor');
     });
+  });
+});
+
+describe('claude_session_id rename', () => {
+  it('renames the column on an existing DB with old column', () => {
+    // Simulate a pre-rename DB by manually creating the old schema.
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
+        runtime_state TEXT NOT NULL DEFAULT 'idle',
+        workflow_status TEXT NOT NULL DEFAULT 'backlog',
+        worktree_id TEXT, tmux_session TEXT, pr_url TEXT, pr_number INTEGER,
+        pr_head_sha TEXT, user_window_index INTEGER, initial_prompt TEXT,
+        last_viewed_at TEXT, source TEXT, error TEXT, current_summary TEXT,
+        current_summary_updated_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY, task_id TEXT, window_index INTEGER NOT NULL,
+        label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'running',
+        claude_session_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_agents_claude_session_id ON agents(claude_session_id);
+    `);
+    db.prepare(
+      `INSERT INTO agents (id, task_id, window_index, label, claude_session_id)
+       VALUES ('a1', NULL, 0, 'Agent 1', 'old-uuid')`,
+    ).run();
+
+    initDb(db);
+
+    const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+    const names = cols.map((c) => c.name);
+    expect(names).toContain('harness_session_id');
+    expect(names).not.toContain('claude_session_id');
+
+    const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+      harness_session_id: string;
+    };
+    expect(row.harness_session_id).toBe('old-uuid');
+
+    const indexes = db.pragma('index_list(agents)') as Array<{ name: string }>;
+    expect(indexes.map((i) => i.name)).toContain('idx_agents_harness_session_id');
+    expect(indexes.map((i) => i.name)).not.toContain('idx_agents_claude_session_id');
   });
 });
