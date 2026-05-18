@@ -31,7 +31,7 @@ export class BaseUnavailableError extends Error {
 }
 
 const CACHE_TTL_MS = 30_000;
-const ATTEMPT_TIMEOUT_MS = 2_000;
+const ATTEMPT_TIMEOUT_MS = 5_000;
 // Internal promise-level timeout fires slightly before the execFile timeout
 // so the wrapper wins deterministically (e.g. when execFile is mocked in tests
 // and never resolves, or in production if child kill is delayed).
