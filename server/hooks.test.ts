@@ -19,7 +19,12 @@ describe('Hook endpoints', () => {
     db = createTestDb();
     app = createApp();
     insertTask(db, { id: 't1', runtime_state: 'running' });
-    insertAgent(db, { id: 'a1', task_id: 't1', claude_session_id: 'sess-123' });
+    insertAgent(db, {
+      id: 'a1',
+      task_id: 't1',
+      harness_session_id: 'sess-123',
+      hook_token: 'tok-test',
+    } as any);
   });
 
   describe('POST /api/hooks/user-prompt-submit', () => {
@@ -34,7 +39,7 @@ describe('Hook endpoints', () => {
         db.prepare(`UPDATE agents SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
 
         await request(app)
-          .post('/api/hooks/user-prompt-submit')
+          .post('/api/hooks/user-prompt-submit?token=tok-test')
           .send({ session_id: 'sess-123' })
           .expect(200);
 
@@ -48,14 +53,17 @@ describe('Hook endpoints', () => {
     ];
 
     it.each(ignoreCases)('ignores request with $name', async ({ body }) => {
-      await request(app).post('/api/hooks/user-prompt-submit').send(body).expect(200);
+      await request(app)
+        .post('/api/hooks/user-prompt-submit?token=tok-test')
+        .send(body)
+        .expect(401);
     });
   });
 
   describe('POST /api/hooks/permission-request', () => {
     it('creates pending permission prompt and sets agent to waiting', async () => {
       await request(app)
-        .post('/api/hooks/permission-request')
+        .post('/api/hooks/permission-request?token=tok-test')
         .send({
           session_id: 'sess-123',
           hook_event_name: 'PermissionRequest',
@@ -82,7 +90,10 @@ describe('Hook endpoints', () => {
     ];
 
     it.each(ignoreCases)('ignores request with $name', async ({ body }) => {
-      await request(app).post('/api/hooks/permission-request').send(body).expect(200);
+      await request(app)
+        .post('/api/hooks/permission-request?token=tok-test')
+        .send(body)
+        .expect(401);
 
       const prompts = getPermissionPrompts(db, 't1');
       expect(prompts).toHaveLength(0);
@@ -107,7 +118,7 @@ describe('Hook endpoints', () => {
       });
 
       await request(app)
-        .post('/api/hooks/post-tool-use')
+        .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
         .expect(200);
 
@@ -122,7 +133,7 @@ describe('Hook endpoints', () => {
 
     it('no-ops when no pending prompts exist', async () => {
       await request(app)
-        .post('/api/hooks/post-tool-use')
+        .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
         .expect(200);
 
@@ -133,7 +144,7 @@ describe('Hook endpoints', () => {
       db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
-        .post('/api/hooks/post-tool-use')
+        .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: {} })
         .expect(200);
 
@@ -173,7 +184,7 @@ describe('Hook endpoints', () => {
 
     it.each(summaryCases)('populates current_summary: $name', async ({ body, expected }) => {
       await request(app)
-        .post('/api/hooks/post-tool-use')
+        .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', ...body })
         .expect(200);
 
@@ -187,7 +198,7 @@ describe('Hook endpoints', () => {
     it('truncates very long tool details to ≤ 100 chars with ellipsis', async () => {
       const long = 'echo ' + 'x'.repeat(500);
       await request(app)
-        .post('/api/hooks/post-tool-use')
+        .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: long } })
         .expect(200);
 
@@ -201,7 +212,7 @@ describe('Hook endpoints', () => {
 
     it('leaves current_summary unchanged when tool_name is missing', async () => {
       await request(app)
-        .post('/api/hooks/post-tool-use')
+        .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', tool_input: { command: 'noop' } })
         .expect(200);
 
@@ -228,7 +239,7 @@ describe('Hook endpoints', () => {
       });
 
       await request(app)
-        .post('/api/hooks/stop')
+        .post('/api/hooks/stop?token=tok-test')
         .send({ session_id: 'sess-123', stop_hook_active: false })
         .expect(200);
 
@@ -246,6 +257,27 @@ describe('Hook endpoints', () => {
 
       // Agent should remain active — subagent stop must not set it to idle
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
+    });
+  });
+
+  describe('hook token auth', () => {
+    it('rejects requests without token (401)', async () => {
+      const res = await request(app).post('/api/hooks/stop').send({ session_id: 'sess-123' });
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects requests with wrong token (401)', async () => {
+      const res = await request(app)
+        .post('/api/hooks/stop?token=wrong')
+        .send({ session_id: 'sess-123' });
+      expect(res.status).toBe(401);
+    });
+
+    it('accepts requests with correct token', async () => {
+      const res = await request(app)
+        .post('/api/hooks/stop?token=tok-test')
+        .send({ session_id: 'sess-123' });
+      expect(res.status).toBe(200);
     });
   });
 });
