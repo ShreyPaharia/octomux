@@ -110,8 +110,8 @@ server.on('error', (err: NodeJS.ErrnoException) => {
   throw err;
 });
 
-server.listen(PORT, () => {
-  logger.info({ port: PORT }, `octomux running at http://localhost:${PORT}`);
+server.listen(PORT, '127.0.0.1', () => {
+  logger.info({ port: PORT }, 'octomux listening on 127.0.0.1');
 });
 
 // ─── Graceful Shutdown ──────────────────────────────────────────────────────
