@@ -87,7 +87,7 @@ export async function pollStatuses(): Promise<void> {
  * Ensure hooks are installed in all running task worktrees.
  * Handles tasks created before the hook feature existed.
  */
-export function ensureHooksInstalled(): void {
+export async function ensureHooksInstalled(): Promise<void> {
   const db = getDb();
   const runningTasks = db
     .prepare(
@@ -97,7 +97,17 @@ export function ensureHooksInstalled(): void {
 
   for (const task of runningTasks) {
     try {
-      installHookSettings(task.worktree!);
+      // Worktree settings.local.json is shared across all agents in this task.
+      // Pick any agent's hook_token (createTask + addAgent ensure they're all
+      // equal). Skip the task if no agent has a token yet — the next agent's
+      // creation will install hooks correctly.
+      const row = db
+        .prepare(
+          `SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`,
+        )
+        .get(task.id) as { hook_token: string } | undefined;
+      if (!row) continue;
+      await installHookSettings(task.worktree!, task.harness_id, row.hook_token);
     } catch {
       // Non-critical — don't crash the poller
     }

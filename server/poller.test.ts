@@ -226,23 +226,34 @@ describe('pollStatuses', () => {
 // ─── ensureHooksInstalled ───────────────────────────────────────────────────
 
 describe('ensureHooksInstalled', () => {
-  it('installs hooks for running tasks with worktrees', () => {
+  it('installs hooks for running tasks with worktrees', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, {
+      id: 'a1',
+      task_id: DEFAULTS.runningTask.id,
+      hook_token: 'tok-1',
+    });
 
-    ensureHooksInstalled();
+    await ensureHooksInstalled();
 
-    expect(installHookSettings).toHaveBeenCalledWith(DEFAULTS.runningTask.worktree);
+    expect(installHookSettings).toHaveBeenCalledWith(
+      DEFAULTS.runningTask.worktree,
+      DEFAULTS.runningTask.harness_id,
+      'tok-1',
+    );
   });
 
-  it('installs hooks for multiple running tasks', () => {
+  it('installs hooks for multiple running tasks', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, { id: 'a1', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-1' });
     insertTask(db, {
       ...DEFAULTS.runningTask,
       id: 'task-02',
       worktree: '/tmp/test-repo/.worktrees/task-02',
     });
+    insertAgent(db, { id: 'a2', task_id: 'task-02', hook_token: 'tok-2' });
 
-    ensureHooksInstalled();
+    await ensureHooksInstalled();
 
     expect(installHookSettings).toHaveBeenCalledTimes(2);
   });
@@ -252,21 +263,31 @@ describe('ensureHooksInstalled', () => {
     { name: 'tasks without worktree', overrides: { worktree: null } },
   ];
 
-  it.each(skipCases)('skips $name', ({ overrides }) => {
+  it.each(skipCases)('skips $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
-    ensureHooksInstalled();
+    await ensureHooksInstalled();
 
     expect(installHookSettings).not.toHaveBeenCalled();
   });
 
-  it('does not crash when installHookSettings throws', () => {
+  it('skips tasks with no tokenized agent', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
+    // No agents inserted — task is in running state but nobody has a token yet.
+
+    await ensureHooksInstalled();
+
+    expect(installHookSettings).not.toHaveBeenCalled();
+  });
+
+  it('does not crash when installHookSettings throws', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, { id: 'a1', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-1' });
     vi.mocked(installHookSettings).mockImplementation(() => {
       throw new Error('permission denied');
     });
 
-    expect(() => ensureHooksInstalled()).not.toThrow();
+    await expect(ensureHooksInstalled()).resolves.not.toThrow();
   });
 });
 

@@ -740,7 +740,16 @@ export async function addAgent(
 
   const harness = getHarness(task.harness_id);
   const agentId = nanoid(12);
-  const hookToken = crypto.randomBytes(32).toString('hex');
+  // All agents in one task share a single worktree settings.local.json, so
+  // they must share one hook_token. Reuse the existing token from any agent
+  // in the task; only mint a new one if none exist (shouldn't happen since
+  // createTask always seeds Agent 1).
+  const existingTokenRow = db
+    .prepare(
+      `SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`,
+    )
+    .get(task.id) as { hook_token: string } | undefined;
+  const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
   const flags = harness.resolveFlags(await getSettings());
   const resolvedAgent = agentName ?? null;
 
