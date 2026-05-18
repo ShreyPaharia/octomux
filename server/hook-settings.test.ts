@@ -15,8 +15,8 @@ afterEach(() => {
 });
 
 describe('installHookSettings', () => {
-  it('creates .claude/settings.local.json with all 4 hook events and permissions', () => {
-    installHookSettings(tmpDir);
+  it('creates .claude/settings.local.json with all 4 hook events and permissions', async () => {
+    await installHookSettings(tmpDir);
 
     const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
@@ -26,7 +26,7 @@ describe('installHookSettings', () => {
         hooks: [
           {
             type: 'http',
-            url: 'http://localhost:7777/api/hooks/user-prompt-submit',
+            url: 'http://127.0.0.1:7777/api/hooks/user-prompt-submit?token=',
             timeout: 5,
           },
         ],
@@ -35,18 +35,28 @@ describe('installHookSettings', () => {
     expect(settings.hooks.PermissionRequest).toEqual([
       {
         hooks: [
-          { type: 'http', url: 'http://localhost:7777/api/hooks/permission-request', timeout: 5 },
+          {
+            type: 'http',
+            url: 'http://127.0.0.1:7777/api/hooks/permission-request?token=',
+            timeout: 5,
+          },
         ],
       },
     ]);
     expect(settings.hooks.PostToolUse).toEqual([
       {
-        hooks: [{ type: 'http', url: 'http://localhost:7777/api/hooks/post-tool-use', timeout: 5 }],
+        hooks: [
+          {
+            type: 'http',
+            url: 'http://127.0.0.1:7777/api/hooks/post-tool-use?token=',
+            timeout: 5,
+          },
+        ],
       },
     ]);
     expect(settings.hooks.Stop).toEqual([
       {
-        hooks: [{ type: 'http', url: 'http://localhost:7777/api/hooks/stop', timeout: 5 }],
+        hooks: [{ type: 'http', url: 'http://127.0.0.1:7777/api/hooks/stop?token=', timeout: 5 }],
       },
     ]);
 
@@ -74,7 +84,7 @@ describe('installHookSettings', () => {
     );
   });
 
-  it('merges with existing settings preserving non-hook keys', () => {
+  it('merges with existing settings preserving non-hook keys', async () => {
     const claudeDir = path.join(tmpDir, '.claude');
     fs.mkdirSync(claudeDir, { recursive: true });
     fs.writeFileSync(
@@ -82,7 +92,7 @@ describe('installHookSettings', () => {
       JSON.stringify({ allowedTools: ['Bash'], customKey: 42 }),
     );
 
-    installHookSettings(tmpDir);
+    await installHookSettings(tmpDir);
 
     const settings = JSON.parse(
       fs.readFileSync(path.join(claudeDir, 'settings.local.json'), 'utf-8'),
@@ -93,7 +103,7 @@ describe('installHookSettings', () => {
     expect(settings.permissions.allow).toContain('Bash(git diff:*)');
   });
 
-  it('merges existing permissions.allow with new allowed tools (deduplicated)', () => {
+  it('merges existing permissions.allow with new allowed tools (deduplicated)', async () => {
     const claudeDir = path.join(tmpDir, '.claude');
     fs.mkdirSync(claudeDir, { recursive: true });
     fs.writeFileSync(
@@ -103,7 +113,7 @@ describe('installHookSettings', () => {
       }),
     );
 
-    installHookSettings(tmpDir);
+    await installHookSettings(tmpDir);
 
     const settings = JSON.parse(
       fs.readFileSync(path.join(claudeDir, 'settings.local.json'), 'utf-8'),
@@ -122,7 +132,7 @@ describe('installHookSettings', () => {
     expect(diffCount).toBe(1);
   });
 
-  it('preserves existing hook events like PreToolUse', () => {
+  it('preserves existing hook events like PreToolUse', async () => {
     const claudeDir = path.join(tmpDir, '.claude');
     fs.mkdirSync(claudeDir, { recursive: true });
     const existingHooks = {
@@ -132,7 +142,7 @@ describe('installHookSettings', () => {
     };
     fs.writeFileSync(path.join(claudeDir, 'settings.local.json'), JSON.stringify(existingHooks));
 
-    installHookSettings(tmpDir);
+    await installHookSettings(tmpDir);
 
     const settings = JSON.parse(
       fs.readFileSync(path.join(claudeDir, 'settings.local.json'), 'utf-8'),
@@ -144,12 +154,12 @@ describe('installHookSettings', () => {
     expect(settings.hooks.Stop).toBeDefined();
   });
 
-  it('handles corrupted existing file gracefully', () => {
+  it('handles corrupted existing file gracefully', async () => {
     const claudeDir = path.join(tmpDir, '.claude');
     fs.mkdirSync(claudeDir, { recursive: true });
     fs.writeFileSync(path.join(claudeDir, 'settings.local.json'), '{not valid json!!!');
 
-    installHookSettings(tmpDir);
+    await installHookSettings(tmpDir);
 
     const settings = JSON.parse(
       fs.readFileSync(path.join(claudeDir, 'settings.local.json'), 'utf-8'),
@@ -157,11 +167,11 @@ describe('installHookSettings', () => {
     expect(settings.hooks.PermissionRequest).toBeDefined();
   });
 
-  it('creates .claude directory if it does not exist', () => {
+  it('creates .claude directory if it does not exist', async () => {
     const claudeDir = path.join(tmpDir, '.claude');
     expect(fs.existsSync(claudeDir)).toBe(false);
 
-    installHookSettings(tmpDir);
+    await installHookSettings(tmpDir);
 
     expect(fs.existsSync(claudeDir)).toBe(true);
     const settings = JSON.parse(
@@ -170,15 +180,17 @@ describe('installHookSettings', () => {
     expect(settings.hooks).toBeDefined();
   });
 
-  it('honors OCTOMUX_PORT env var for hook URLs', () => {
+  it('honors OCTOMUX_PORT env var for hook URLs', async () => {
     const prev = process.env.OCTOMUX_PORT;
     process.env.OCTOMUX_PORT = '8080';
     try {
-      installHookSettings(tmpDir);
+      await installHookSettings(tmpDir);
       const settings = JSON.parse(
         fs.readFileSync(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf-8'),
       );
-      expect(settings.hooks.Stop[0].hooks[0].url).toBe('http://localhost:8080/api/hooks/stop');
+      expect(settings.hooks.Stop[0].hooks[0].url).toBe(
+        'http://127.0.0.1:8080/api/hooks/stop?token=',
+      );
     } finally {
       if (prev === undefined) delete process.env.OCTOMUX_PORT;
       else process.env.OCTOMUX_PORT = prev;

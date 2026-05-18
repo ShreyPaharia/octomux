@@ -1,5 +1,5 @@
-import path from 'path';
-import fs from 'fs';
+import { hookBaseUrl } from './hook-base-url.js';
+import { getHarness } from './harnesses/index.js';
 
 /**
  * Tools that agents are allowed to use without permission prompts.
@@ -11,14 +11,14 @@ import fs from 'fs';
 // git commit and gh pr create are intentionally omitted from both lists so agents
 // must get explicit approval before committing or creating PRs.
 
-const DENIED_TOOLS = [
+export const DENIED_TOOLS = [
   // Destructive operations — always blocked
   'Bash(git push --force:*)',
   'Bash(git reset --hard:*)',
   'Bash(rm -rf:*)',
 ];
 
-const ALLOWED_TOOLS = [
+export const ALLOWED_TOOLS = [
   // --- Read-only shell commands ---
   'Bash(cat:*)',
   'Bash(cd:*)',
@@ -118,71 +118,15 @@ const ALLOWED_TOOLS = [
   'mcp__plugin_playwright_playwright__browser_type',
 ];
 
-/** Port the server listens on. Honors OCTOMUX_PORT / PORT with a 7777 default. */
-function hookPort(): string | number {
-  return process.env.OCTOMUX_PORT || process.env.PORT || 7777;
-}
-
-function buildHookEvents(port: string | number) {
-  const base = `http://localhost:${port}/api/hooks`;
-  return {
-    UserPromptSubmit: [
-      { hooks: [{ type: 'http', url: `${base}/user-prompt-submit`, timeout: 5 }] },
-    ],
-    PermissionRequest: [
-      { hooks: [{ type: 'http', url: `${base}/permission-request`, timeout: 5 }] },
-    ],
-    PostToolUse: [{ hooks: [{ type: 'http', url: `${base}/post-tool-use`, timeout: 5 }] }],
-    Stop: [{ hooks: [{ type: 'http', url: `${base}/stop`, timeout: 5 }] }],
-  };
-}
-
 /**
- * Install Claude Code hook settings into a worktree's `.claude/settings.local.json`.
- * Merges with any existing settings, preserving non-hook keys and non-overlapping hook events.
+ * Install hook settings into a worktree. Dispatches to the per-task harness.
+ * The legacy signature (single arg) defaults to Claude with no token; callers
+ * should be updated to pass `harnessId` and `hookToken` explicitly.
  */
-export function installHookSettings(worktreePath: string): void {
-  const claudeDir = path.join(worktreePath, '.claude');
-  const settingsPath = path.join(claudeDir, 'settings.local.json');
-
-  // Ensure .claude/ directory exists
-  fs.mkdirSync(claudeDir, { recursive: true });
-
-  // Read existing settings (if any)
-  let existing: Record<string, unknown> = {};
-  try {
-    const raw = fs.readFileSync(settingsPath, 'utf-8');
-    existing = JSON.parse(raw);
-    if (typeof existing !== 'object' || existing === null || Array.isArray(existing)) {
-      existing = {};
-    }
-  } catch {
-    // File doesn't exist or is corrupted — start fresh
-    existing = {};
-  }
-
-  // Merge hooks: our events override, but preserve other hook events
-  const existingHooks =
-    typeof existing.hooks === 'object' && existing.hooks !== null && !Array.isArray(existing.hooks)
-      ? (existing.hooks as Record<string, unknown>)
-      : {};
-
-  const mergedHooks = { ...existingHooks, ...buildHookEvents(hookPort()) };
-
-  // Merge permissions: combine our allowed tools with any existing ones (deduplicated)
-  const existingPerms =
-    typeof existing.permissions === 'object' &&
-    existing.permissions !== null &&
-    !Array.isArray(existing.permissions)
-      ? (existing.permissions as Record<string, unknown>)
-      : {};
-  const existingAllow = Array.isArray(existingPerms.allow) ? (existingPerms.allow as string[]) : [];
-  const mergedAllow = [...new Set([...ALLOWED_TOOLS, ...existingAllow])];
-  const existingDeny = Array.isArray(existingPerms.deny) ? (existingPerms.deny as string[]) : [];
-  const mergedDeny = [...new Set([...DENIED_TOOLS, ...existingDeny])];
-  const mergedPermissions = { ...existingPerms, allow: mergedAllow, deny: mergedDeny };
-
-  const merged = { ...existing, permissions: mergedPermissions, hooks: mergedHooks };
-
-  fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
+export async function installHookSettings(
+  worktreePath: string,
+  harnessId: string = 'claude-code',
+  hookToken: string = '',
+): Promise<void> {
+  await getHarness(harnessId).installHooks(worktreePath, hookBaseUrl(), hookToken);
 }
