@@ -6,8 +6,9 @@ import os from 'os';
 import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
-import { getSettings, resolveClaudeFlags } from './settings.js';
-import { syncAgents } from './agents.js';
+import { getSettings } from './settings.js';
+import { getHarness } from './harnesses/index.js';
+import { hookBaseUrl } from './hook-base-url.js';
 import { childLogger } from './logger.js';
 import type { Agent } from './types.js';
 
@@ -56,28 +57,47 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   fs.mkdirSync(cwd, { recursive: true });
 
   const session = chatSessionName(id);
-  const claudeSessionId = crypto.randomUUID();
+
+  const harness = getHarness(null); // null = default (claude-code)
+  const agentId = id; // for standalone chats, agent row id == chat id
+  const hookToken = crypto.randomBytes(32).toString('hex');
+  const flags = harness.resolveFlags(await getSettings());
+
+  let sessionIdForDb: string | null;
+  let sessionIdForLaunch: string;
+  if (harness.sessionIdMode === 'orchestrator-assigned') {
+    const sid = harness.newSessionId();
+    sessionIdForDb = sid;
+    sessionIdForLaunch = sid;
+  } else {
+    sessionIdForDb = null;
+    sessionIdForLaunch = harness.newSessionId();
+  }
 
   db.prepare(
     `INSERT INTO agents
-       (id, task_id, window_index, label, status, claude_session_id,
-        hook_activity, tmux_session, agent, created_at)
-     VALUES (?, NULL, 0, ?, 'running', ?, 'active', ?, ?, datetime('now'))`,
-  ).run(id, label, claudeSessionId, session, agent);
+       (id, task_id, window_index, label, status, harness_id, harness_session_id,
+        hook_token, hook_activity, tmux_session, agent, created_at)
+     VALUES (?, NULL, 0, ?, 'running', ?, ?, ?, 'active', ?, ?, datetime('now'))`,
+  ).run(id, label, harness.id, sessionIdForDb, hookToken, session, agent);
 
   try {
-    if (agent) await syncAgents(cwd);
+    if (agent) await harness.syncAgents(cwd);
+    await harness.installHooks(cwd, hookBaseUrl(), hookToken);
 
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
-    const flags = resolveClaudeFlags(await getSettings());
-    const agentFlag = agent ? ` --agent ${agent}` : '';
-    let cmd = `claude${agentFlag} --session-id ${claudeSessionId}${flags}`;
+    const baseCmd = harness.buildLaunchCommand({
+      sessionId: sessionIdForLaunch,
+      agent,
+      flags,
+    });
+    let cmd = baseCmd;
     let promptFile: string | null = null;
     const initialPrompt = opts.prompt?.trim();
     if (initialPrompt) {
-      promptFile = path.join(cwd, `.claude-prompt-${id}`);
+      promptFile = path.join(cwd, `.claude-prompt-${agentId}`);
       fs.writeFileSync(promptFile, initialPrompt);
       cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
     }
@@ -94,7 +114,15 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     }
 
     logger.info(
-      { chat_id: id, tmux_session: session, cwd, agent, operation: 'createChat' },
+      {
+        chat_id: id,
+        tmux_session: session,
+        cwd,
+        agent,
+        harness: harness.id,
+        harness_session_id: sessionIdForDb,
+        operation: 'createChat',
+      },
       'createChat: complete',
     );
   } catch (err) {
