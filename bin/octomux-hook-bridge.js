@@ -144,11 +144,27 @@ async function main() {
     }
     writeStdout({ permission: 'allow' });
   } else if (eventName === 'postToolUse' || eventName === 'afterFileEdit') {
-    try {
-      await postJson(baseUrl + '/api/hooks/post-tool-use', token, {
+    // Normalize both events to the {tool_name, tool_input} shape that
+    // /api/hooks/post-tool-use expects (Claude's PostToolUse shape).
+    // - postToolUse already carries tool_name + tool_input, pass through.
+    // - afterFileEdit carries file_path at top-level; synthesize a tool_use
+    //   so the server's current_summary deriver picks up the file path.
+    let body;
+    if (eventName === 'afterFileEdit') {
+      body = {
         conversation_id: event.conversation_id,
-        ...event,
-      });
+        tool_name: 'Edit',
+        tool_input: { file_path: event.file_path },
+      };
+    } else {
+      body = {
+        conversation_id: event.conversation_id,
+        tool_name: event.tool_name,
+        tool_input: event.tool_input,
+      };
+    }
+    try {
+      await postJson(baseUrl + '/api/hooks/post-tool-use', token, body);
     } catch (err) {
       console.error('[octomux-hook-bridge] postToolUse/afterFileEdit HTTP error:', err);
     }
