@@ -62,6 +62,7 @@ export interface CreateChatRequest {
   cwd?: string;
   agent?: string;
   prompt?: string;
+  harness_id?: string;
 }
 
 export interface Task {

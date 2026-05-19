@@ -96,6 +96,7 @@ export interface OctomuxClient {
     draft?: boolean;
     run_mode?: RunMode;
     worktree_path?: string;
+    harness_id?: string;
   }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
