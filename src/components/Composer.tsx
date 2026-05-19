@@ -19,6 +19,7 @@ import {
 import { RepoPickerField } from './fields/RepoPickerField';
 import { BranchPickerField } from './fields/BranchPickerField';
 import { AgentPickerField } from './fields/AgentPickerField';
+import { HarnessPicker } from './HarnessPicker';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
@@ -34,6 +35,7 @@ async function createChatRequest(body: {
   label?: string;
   agent?: string | null;
   prompt?: string;
+  harness_id?: string;
 }): Promise<Agent> {
   const res = await fetch('/api/chats', {
     method: 'POST',
@@ -70,6 +72,7 @@ export function Composer({ onSubmitted }: Props = {}) {
   );
 
   const [prompt, setPrompt] = useState<string>(() => localStorage.getItem(DRAFT_KEY) ?? '');
+  const [harnessId, setHarnessId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [preflightBlock, setPreflightBlock] = useState<{
     result: PreflightResult;
@@ -194,6 +197,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             label: deriveTitleFromPrompt(trimmed),
             agent: pickedAgent,
             prompt: trimmed,
+            ...(harnessId ? { harness_id: harnessId } : {}),
           });
           localStorage.removeItem(DRAFT_KEY);
           setPrompt('');
@@ -222,6 +226,7 @@ export function Composer({ onSubmitted }: Props = {}) {
           }
           if ('isDraft' in state && state.isDraft) payload.draft = true;
           if (pickedAgent) payload.agent = pickedAgent;
+          if (harnessId) payload.harness_id = harnessId;
 
           // Preflight only for none-mode + base_branch
           if (state.mode === 'none' && state.branch) {
@@ -253,7 +258,7 @@ export function Composer({ onSubmitted }: Props = {}) {
         setSubmitting(false);
       }
     },
-    [canSubmit, prompt, state, navigate, onSubmitted, refresh],
+    [canSubmit, prompt, state, navigate, onSubmitted, refresh, harnessId],
   );
 
   const onTextareaKeyDown = useCallback(
@@ -374,6 +379,10 @@ export function Composer({ onSubmitted }: Props = {}) {
         )}
 
         {showAgentChip && <AgentChip value={pickedAgent} onChange={onPickAgent} />}
+
+        {state.mode !== 'add-agent' && (
+          <HarnessChip value={harnessId} onChange={setHarnessId} />
+        )}
 
         <DraftToggle
           checked={'isDraft' in state ? state.isDraft : false}
@@ -827,6 +836,33 @@ function AgentChip({ value, onChange }: AgentChipProps) {
           ×
         </span>
       </button>
+    </div>
+  );
+}
+
+interface HarnessChipProps {
+  value: string | null;
+  onChange: (id: string) => void;
+}
+
+/** Compact chip showing the selected coding agent (harness). */
+function HarnessChip({ value, onChange }: HarnessChipProps) {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-[3px] text-[11px] font-mono"
+      data-testid="harness-chip"
+      title="Coding agent"
+    >
+      <span aria-hidden className="text-[11px] text-muted-foreground">
+        ⚙
+      </span>
+      <div className="min-w-[80px] max-w-[160px]">
+        <HarnessPicker
+          value={value}
+          onChange={onChange}
+          triggerClassName="focus-ring flex w-full items-center justify-between gap-1.5 bg-transparent font-mono text-[11px] text-[#D0D0D0] outline-none hover:text-white disabled:opacity-60"
+        />
+      </div>
     </div>
   );
 }

@@ -21,6 +21,19 @@ vi.mock('@/lib/hooks', () => ({
     refresh: vi.fn(),
   }),
   useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
+  useHarnesses: () => ({
+    harnesses: [
+      {
+        id: 'claude-code',
+        displayName: 'Claude Code',
+        sessionIdMode: 'orchestrator-assigned',
+      },
+      { id: 'cursor', displayName: 'Cursor', sessionIdMode: 'harness-issued' },
+    ],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }));
 
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>

@@ -244,6 +244,26 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     updateHookEnabled: vi
       .fn()
       .mockResolvedValue({ scope: 'builtin', key: 'summarize-progress', enabled: true }),
+    getSettings: vi.fn().mockResolvedValue({
+      editor: 'nvim',
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
+      envOverrides: { claudeFlags: null },
+    }),
+    updateSettings: vi.fn().mockResolvedValue({
+      editor: 'nvim',
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
+      envOverrides: { claudeFlags: null },
+    }),
+    listHarnesses: vi.fn().mockResolvedValue([
+      { id: 'claude-code', displayName: 'Claude Code', sessionIdMode: 'orchestrator-assigned' },
+      { id: 'cursor', displayName: 'Cursor', sessionIdMode: 'harness-issued' },
+    ]),
   };
   return { ...defaults, ...overrides };
 }

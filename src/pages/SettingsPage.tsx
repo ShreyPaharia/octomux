@@ -7,7 +7,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSkills, useRepoConfigs, useAgents } from '../lib/hooks';
+import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
@@ -785,6 +785,171 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
   );
 }
 
+function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
+  const { harnesses, loading: harnessesLoading } = useHarnesses();
+  const [defaultHarnessId, setDefaultHarnessIdState] = useState<string>('claude-code');
+  const [cursorForce, setCursorForce] = useState(false);
+  const [cursorFlagsSaved, setCursorFlagsSaved] = useState('');
+  const [cursorFlagsBuffer, setCursorFlagsBuffer] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [savingFlags, setSavingFlags] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setDefaultHarnessIdState(s.defaultHarnessId ?? 'claude-code');
+        const sub = (s.harnesses?.cursor ?? {}) as { flags?: string; force?: boolean };
+        setCursorForce(Boolean(sub.force));
+        setCursorFlagsSaved(sub.flags ?? '');
+        setCursorFlagsBuffer(sub.flags ?? '');
+      })
+      .catch((err) => {
+        if (!cancelled) showToast('error', 'ERROR', err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDefaultChange = async (value: string) => {
+    const prev = defaultHarnessId;
+    setDefaultHarnessIdState(value);
+    try {
+      await api.updateSettings({ defaultHarnessId: value });
+      showToast('success', 'CODING AGENT', `Default set to ${value}`);
+    } catch (err) {
+      setDefaultHarnessIdState(prev);
+      showToast(
+        'error',
+        'ERROR',
+        err instanceof Error ? err.message : 'Failed to update default agent',
+      );
+    }
+  };
+
+  const handleCursorForceToggle = async (next: boolean) => {
+    const prev = cursorForce;
+    setCursorForce(next);
+    try {
+      await api.updateSettings({
+        harnesses: {
+          cursor: { force: next, ...(cursorFlagsSaved ? { flags: cursorFlagsSaved } : {}) },
+        },
+      });
+      showToast(
+        'success',
+        'CURSOR',
+        next ? '--force enabled (skip permissions)' : '--force disabled',
+      );
+    } catch (err) {
+      setCursorForce(prev);
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  const cursorFlagsDirty = cursorFlagsBuffer !== cursorFlagsSaved;
+  const saveCursorFlags = useCallback(async () => {
+    if (!cursorFlagsDirty || savingFlags) return;
+    setSavingFlags(true);
+    try {
+      const result = await api.updateSettings({
+        harnesses: {
+          cursor: {
+            ...(cursorForce ? { force: true } : {}),
+            ...(cursorFlagsBuffer.trim() ? { flags: cursorFlagsBuffer.trim() } : {}),
+          },
+        },
+      });
+      const sub = (result.harnesses?.cursor ?? {}) as { flags?: string };
+      setCursorFlagsSaved(sub.flags ?? '');
+      setCursorFlagsBuffer(sub.flags ?? '');
+      showToast('success', 'CURSOR', 'Cursor flags saved');
+    } catch (err) {
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to save flags');
+    } finally {
+      setSavingFlags(false);
+    }
+  }, [cursorFlagsDirty, savingFlags, cursorFlagsBuffer, cursorForce]);
+
+  if (loading || harnessesLoading) return null;
+
+  return (
+    <SectionCard id="coding-agent" title="CODING AGENT" scrollRef={scrollRef}>
+      <SettingRow
+        label="Default coding agent"
+        description="New tasks and chats use this coding agent unless overridden in the composer"
+      >
+        <select
+          data-testid="default-harness-select"
+          value={defaultHarnessId}
+          onChange={(e) => handleDefaultChange(e.target.value)}
+          className="focus-ring bg-[#0B0C0F] border border-glass-edge px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
+        >
+          {harnesses.map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.displayName}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
+
+      <div className="mt-4 mb-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a]">
+        Cursor
+      </div>
+
+      <SettingRow
+        label="--force (skip permissions)"
+        description="Launch cursor-agent with --force so it never blocks on per-tool permission prompts."
+      >
+        <ToggleSwitch checked={cursorForce} onChange={handleCursorForceToggle} />
+      </SettingRow>
+
+      {cursorForce && (
+        <div className="mb-3 mt-3 border border-red-400/40 bg-red-400/5 px-3 py-2 text-xs text-red-400">
+          ⚠ DANGER: Cursor will execute shell commands without confirmation. Only enable in trusted
+          environments.
+        </div>
+      )}
+
+      <div className="py-3" style={ROW_DIVIDER}>
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <span className="text-sm">Advanced flags</span>
+            <p className="text-xs text-[#b5b5bd]">
+              Extra flags appended to the cursor-agent launch command
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {cursorFlagsDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
+            <button
+              onClick={saveCursorFlags}
+              disabled={!cursorFlagsDirty || savingFlags}
+              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
+            >
+              {savingFlags ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+        <input
+          type="text"
+          data-testid="cursor-flags-input"
+          value={cursorFlagsBuffer}
+          onChange={(e) => setCursorFlagsBuffer(e.target.value)}
+          placeholder="--model gpt-5 --print"
+          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+          spellCheck={false}
+        />
+      </div>
+    </SectionCard>
+  );
+}
+
 function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [hooks, setHooks] = useState<HookRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -916,6 +1081,7 @@ type SectionId =
   | 'hooks'
   | 'repositories'
   | 'editor'
+  | 'coding-agent'
   | 'agent-launch';
 
 const NAV_ITEMS: { id: SectionId; label: string }[] = [
@@ -925,6 +1091,7 @@ const NAV_ITEMS: { id: SectionId; label: string }[] = [
   { id: 'hooks', label: 'HOOKS' },
   { id: 'repositories', label: 'REPOSITORIES' },
   { id: 'editor', label: 'EDITOR' },
+  { id: 'coding-agent', label: 'CODING AGENT' },
   { id: 'agent-launch', label: 'AGENT LAUNCH' },
 ];
 
@@ -1054,6 +1221,7 @@ export default function SettingsPage() {
             <HooksSection scrollRef={setRef('hooks')} />
             <RepoConfigsSection scrollRef={setRef('repositories')} />
             <EditorSection scrollRef={setRef('editor')} />
+            <CodingAgentSection scrollRef={setRef('coding-agent')} />
             <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
           </div>
         </div>

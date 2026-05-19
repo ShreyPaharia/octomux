@@ -105,9 +105,17 @@ export interface OctomuxSettings {
   editor: 'nvim' | 'vscode' | 'cursor';
   dangerouslySkipPermissions: boolean;
   claudeFlags: string;
+  defaultHarnessId?: string;
+  harnesses?: Record<string, Record<string, unknown>>;
   envOverrides?: {
     claudeFlags: string | null;
   };
+}
+
+export interface HarnessSummary {
+  id: string;
+  displayName: string;
+  sessionIdMode: 'orchestrator-assigned' | 'harness-issued';
 }
 
 export interface RepoConfig {
@@ -414,6 +422,9 @@ export const api = {
   getSettings: () => request<OctomuxSettings>('/settings'),
   updateSettings: (data: Partial<OctomuxSettings>) =>
     request<OctomuxSettings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // Harnesses (coding agent runtimes — Claude Code, Cursor, ...)
+  listHarnesses: () => request<HarnessSummary[]>('/harnesses'),
 
   // Skills
   listSkills: () => request<Skill[]>('/skills'),
