@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
-import type { Skill, RepoConfig, AgentDefinition } from './api';
+import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api';
 import { api } from './api';
 import { subscribe } from './event-source';
 
@@ -144,4 +144,28 @@ export function useAgents() {
   }, [refresh]);
 
   return { agents, loading, error, refresh };
+}
+
+export function useHarnesses() {
+  const [harnesses, setHarnesses] = useState<HarnessSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api.listHarnesses();
+      setHarnesses(data);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { harnesses, loading, error, refresh };
 }

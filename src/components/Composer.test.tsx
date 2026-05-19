@@ -24,6 +24,19 @@ vi.mock('@/lib/hooks', () => ({
     refresh: vi.fn(),
   }),
   useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
+  useHarnesses: () => ({
+    harnesses: [
+      {
+        id: 'claude-code',
+        displayName: 'Claude Code',
+        sessionIdMode: 'orchestrator-assigned',
+      },
+      { id: 'cursor', displayName: 'Cursor', sessionIdMode: 'harness-issued' },
+    ],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }));
 
 const mockTasksRef = { current: [] as Task[] };
@@ -159,6 +172,21 @@ describe('Composer / submit', () => {
           repo_path: '/r',
           base_branch: 'main',
         }),
+      );
+    });
+  });
+
+  it('forwards harness_id when a non-default harness is picked', async () => {
+    apiMock.createTask.mockResolvedValueOnce(makeTask({ id: 'new-h' }));
+    renderComposer('/?repo=%2Fr&mode=new&branch=main');
+    // Open the harness picker and pick Cursor.
+    await user.click(screen.getByTestId('harness-picker-trigger'));
+    await user.click(await screen.findByTestId('harness-picker-option-cursor'));
+    await user.type(screen.getByTestId('composer-prompt'), 'pick cursor');
+    await user.click(screen.getByTestId('composer-submit'));
+    await waitFor(() => {
+      expect(apiMock.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ harness_id: 'cursor' }),
       );
     });
   });
