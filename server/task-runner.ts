@@ -680,6 +680,8 @@ export async function startTask(task: Task): Promise<void> {
       worktreePath: setup.worktreePath,
       agentId,
     });
+    // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
+    void harness.postLaunch?.(`${session}:${windowIndex}`);
     logger.info(
       {
         task_id: id,
@@ -745,9 +747,7 @@ export async function addAgent(
   // in the task; only mint a new one if none exist (shouldn't happen since
   // createTask always seeds Agent 1).
   const existingTokenRow = db
-    .prepare(
-      `SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`,
-    )
+    .prepare(`SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`)
     .get(task.id) as { hook_token: string } | undefined;
   const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
   const flags = harness.resolveFlags(await getSettings());
@@ -788,6 +788,7 @@ export async function addAgent(
         worktreePath: task.worktree!,
         agentId,
       });
+      void harness.postLaunch?.(addTarget);
       logger.info(
         {
           task_id: task.id,

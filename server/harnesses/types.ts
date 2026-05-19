@@ -62,6 +62,13 @@ export interface Harness {
   buildContinueCommand(opts: HarnessResumeOpts): string | null;
   installHooks(worktreePath: string, baseUrl: string, hookToken: string): Promise<void>;
   syncAgents(worktreePath: string): Promise<void>;
+  /**
+   * Optional post-launch hook called after the launch command is sent to the
+   * tmux pane. Used by harnesses with an interactive first-run gate (e.g.
+   * Cursor's "Trust this workspace" prompt). Receives the tmux target so the
+   * harness can capture and/or send keys.
+   */
+  postLaunch?(target: string): Promise<void>;
   resolveFlags(settings: OctomuxSettings): string;
   validateSettings(blob: unknown): Record<string, unknown>;
   validateAgentName(name: string): string;
