@@ -180,6 +180,47 @@ describe('Hook endpoints', () => {
         body: { tool_name: 'TodoWrite', tool_input: { todos: [] } },
         expected: 'TodoWrite',
       },
+      {
+        name: 'Cursor edit_file → target_file',
+        body: {
+          tool_name: 'edit_file',
+          tool_input: {
+            target_file: 'src/server/foo.ts',
+            code_edit: 'export {}',
+            instructions: 'add',
+          },
+        },
+        expected: 'edit_file: src/server/foo.ts',
+      },
+      {
+        name: 'Cursor read_file → target_file',
+        body: {
+          tool_name: 'read_file',
+          tool_input: { target_file: 'README.md', should_read_entire_file: true },
+        },
+        expected: 'read_file: README.md',
+      },
+      {
+        name: 'Cursor run_terminal_cmd → command',
+        body: {
+          tool_name: 'run_terminal_cmd',
+          tool_input: { command: 'bun run test', is_background: false },
+        },
+        expected: 'run_terminal_cmd: bun run test',
+      },
+      {
+        name: 'Cursor web_search → search_term',
+        body: {
+          tool_name: 'web_search',
+          tool_input: { search_term: 'octomux hook bridge' },
+        },
+        expected: 'web_search: octomux hook bridge',
+      },
+      {
+        name: 'synthesized afterFileEdit → tool_name=Edit, file_path',
+        body: { tool_name: 'Edit', tool_input: { file_path: '/tmp/cursor-edit.ts' } },
+        expected: 'Edit: /tmp/cursor-edit.ts',
+      },
     ];
 
     it.each(summaryCases)('populates current_summary: $name', async ({ body, expected }) => {

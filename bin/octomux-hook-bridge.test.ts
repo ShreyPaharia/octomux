@@ -205,12 +205,13 @@ describe('beforeShellExecution', () => {
 
 // ─── 7. postToolUse ───────────────────────────────────────────────────────────
 
-it('postToolUse: POSTs to /api/hooks/post-tool-use and returns {}', async () => {
+it('postToolUse: POSTs to /api/hooks/post-tool-use with normalized {tool_name, tool_input}', async () => {
   const event = {
     hook_event_name: 'postToolUse',
     conversation_id: 'conv-abc',
-    tool_name: 'bash',
-    tool_output: 'hello',
+    tool_name: 'run_terminal_cmd',
+    tool_input: { command: 'ls -la', is_background: false },
+    tool_response: 'hello',
   };
   const result = await runBridge(JSON.stringify(event));
 
@@ -223,12 +224,13 @@ it('postToolUse: POSTs to /api/hooks/post-tool-use and returns {}', async () => 
   expect(req.url).toBe('/api/hooks/post-tool-use?token=test-token');
   const body = JSON.parse(req.body);
   expect(body.conversation_id).toBe('conv-abc');
-  expect(body.hook_event_name).toBe('postToolUse');
+  expect(body.tool_name).toBe('run_terminal_cmd');
+  expect(body.tool_input).toEqual({ command: 'ls -la', is_background: false });
 });
 
 // ─── 8. afterFileEdit ────────────────────────────────────────────────────────
 
-it('afterFileEdit: POSTs to /api/hooks/post-tool-use and returns {}', async () => {
+it('afterFileEdit: POSTs to /api/hooks/post-tool-use with synthesized tool_input.file_path', async () => {
   const event = {
     hook_event_name: 'afterFileEdit',
     conversation_id: 'conv-def',
@@ -245,7 +247,8 @@ it('afterFileEdit: POSTs to /api/hooks/post-tool-use and returns {}', async () =
   expect(req.url).toBe('/api/hooks/post-tool-use?token=test-token');
   const body = JSON.parse(req.body);
   expect(body.conversation_id).toBe('conv-def');
-  expect(body.hook_event_name).toBe('afterFileEdit');
+  expect(body.tool_name).toBe('Edit');
+  expect(body.tool_input).toEqual({ file_path: '/tmp/foo.txt' });
 });
 
 // ─── 9. Unknown event ─────────────────────────────────────────────────────────

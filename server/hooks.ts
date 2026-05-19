@@ -74,12 +74,14 @@ export function findAgentByTokenAndSession(
 }
 
 const SUMMARY_FIELD_PRIORITY = [
-  'command', // Bash
-  'file_path', // Read / Write / Edit / NotebookEdit
+  'command', // Bash (Claude) / run_terminal_cmd (Cursor)
+  'file_path', // Read / Write / Edit / NotebookEdit (Claude) / synthesized afterFileEdit
+  'target_file', // edit_file / read_file (Cursor)
   'notebook_path',
-  'pattern', // Grep / Glob
+  'pattern', // Grep / Glob (Claude)
   'url', // WebFetch
-  'query', // WebSearch
+  'query', // WebSearch (Claude) / grep_search (Cursor)
+  'search_term', // web_search (Cursor)
   'description', // Task (Agent)
   'path',
 ];
