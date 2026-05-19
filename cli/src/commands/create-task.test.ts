@@ -205,4 +205,41 @@ describe('create-task command', () => {
       }),
     );
   });
+
+  it('forwards --harness as harness_id when provided', async () => {
+    const createTask = vi.fn(async () => makeTask({ id: 'cursor-task' }));
+    const client = makeClient({ createTask });
+    const program = buildProgram(client);
+
+    await program.parseAsync(
+      [
+        'create-task',
+        '--title',
+        't',
+        '--description',
+        'd',
+        '--mode',
+        'scratch',
+        '--harness',
+        'cursor',
+      ],
+      { from: 'user' },
+    );
+
+    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ harness_id: 'cursor' }));
+  });
+
+  it('omits harness_id when --harness is not provided', async () => {
+    const createTask = vi.fn(async () => makeTask({ id: 'default-task' }));
+    const client = makeClient({ createTask });
+    const program = buildProgram(client);
+
+    await program.parseAsync(
+      ['create-task', '--title', 't', '--description', 'd', '--mode', 'scratch'],
+      { from: 'user' },
+    );
+
+    const args = createTask.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(args).not.toHaveProperty('harness_id');
+  });
 });

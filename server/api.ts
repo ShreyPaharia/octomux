@@ -1756,12 +1756,22 @@ export function setupRoutes(app: Express): void {
       }
     }
 
+    if (body.harness_id != null) {
+      try {
+        getHarness(body.harness_id);
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    }
+
     try {
       const chat = await createChat({
         label: body.label,
         cwd: body.cwd,
         agent: body.agent,
         prompt: body.prompt,
+        harnessId: body.harness_id,
       });
       res.status(201).json(chat);
     } catch (err) {

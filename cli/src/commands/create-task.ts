@@ -92,6 +92,10 @@ export function registerCreateTask(program: Command): void {
       'fork from an existing new-mode task (sets base_branch to agents/<id>)',
     )
     .option('--draft', 'create as draft without starting')
+    .option(
+      '--harness <id>',
+      'coding agent (harness id): claude-code | cursor (default: server setting)',
+    )
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
@@ -155,6 +159,7 @@ export function registerCreateTask(program: Command): void {
         draft: opts.draft,
         run_mode: mode,
         worktree_path: opts.worktreePath,
+        ...(opts.harness ? { harness_id: opts.harness } : {}),
       });
 
       if (json) {

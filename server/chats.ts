@@ -39,6 +39,7 @@ export interface CreateChatOptions {
   cwd?: string;
   agent?: string | null;
   prompt?: string | null;
+  harnessId?: string | null;
 }
 
 function shellQuoteSingle(s: string): string {
@@ -58,7 +59,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
 
   const session = chatSessionName(id);
 
-  const harness = getHarness(null); // null = default (claude-code)
+  const harness = getHarness(opts.harnessId ?? null);
   const agentId = id; // for standalone chats, agent row id == chat id
   const hookToken = crypto.randomBytes(32).toString('hex');
   const flags = harness.resolveFlags(await getSettings());
