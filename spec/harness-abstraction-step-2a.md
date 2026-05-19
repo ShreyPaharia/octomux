@@ -279,7 +279,7 @@ Single helper used by every hook endpoint (Claude and Cursor):
    If a row exists, return it.
 2. Otherwise (no row matched or conversationId omitted), try
    `SELECT * FROM agents WHERE hook_token = ? AND harness_session_id IS NULL
- ORDER BY created_at DESC LIMIT 1`.
+ORDER BY created_at DESC LIMIT 1`.
    If a row exists AND `conversationId` is provided:
    `UPDATE agents SET harness_session_id = ? WHERE id = ?` to bind, then
    return the bound row.
