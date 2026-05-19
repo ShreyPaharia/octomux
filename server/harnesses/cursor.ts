@@ -1,10 +1,33 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { execFile as execFileCb } from 'child_process';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import type { OctomuxSettings } from '../settings.js';
+
+const execFile = promisify(execFileCb);
+
+/**
+ * Locate the bridge script. The source layout is `<root>/bin/octomux-hook-bridge.js`
+ * but `import.meta.url` differs between dev (`<root>/server/harnesses/cursor.ts`
+ * under tsx) and bundled production (`<root>/dist-server/harnesses-*.js`). Walk up
+ * from the running module looking for the bin/ sibling.
+ */
+function resolveBridgeSource(): string {
+  const startDir = path.dirname(fileURLToPath(import.meta.url));
+  let dir = startDir;
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, 'bin', 'octomux-hook-bridge.js');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Cannot locate bin/octomux-hook-bridge.js from ${startDir} (walked up 6 levels)`);
+}
 
 export const cursorHarness: Harness = {
   id: 'cursor',
@@ -34,7 +57,7 @@ export const cursorHarness: Harness = {
     fs.chmodSync(hooksDir, 0o700);
 
     // 2. Copy bridge.js (0500)
-    const bridgeSrc = fileURLToPath(new URL('../../bin/octomux-hook-bridge.js', import.meta.url));
+    const bridgeSrc = resolveBridgeSource();
     const bridgeDest = path.join(hooksDir, 'bridge.js');
     fs.copyFileSync(bridgeSrc, bridgeDest);
     fs.chmodSync(bridgeDest, 0o500);
@@ -63,6 +86,23 @@ export const cursorHarness: Harness = {
 
   async syncAgents(_worktreePath: string): Promise<void> {
     // No-op: Cursor has no first-class custom-agents concept.
+  },
+
+  async postLaunch(target: string): Promise<void> {
+    // Cursor shows a one-time "Trust this workspace" gate per new worktree.
+    // --trust only works in --print mode, so we accept it interactively.
+    // The presence check on captured pane content prevents stray 'a' input
+    // when the workspace is already trusted.
+    if (process.env.NODE_ENV === 'test') return;
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
+      if (/Trust this workspace/.test(stdout)) {
+        await execFile('tmux', ['send-keys', '-t', target, 'a']);
+      }
+    } catch {
+      // tmux unreachable — ignore; the prompt is recoverable manually.
+    }
   },
 
   resolveFlags(settings: OctomuxSettings): string {
