@@ -7,8 +7,22 @@ import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import type { OctomuxSettings } from '../settings.js';
+import { childLogger } from '../logger.js';
 
 const execFile = promisify(execFileCb);
+const logger = childLogger('harness:cursor');
+
+/**
+ * Regex matching the various wordings of Cursor's Workspace Trust prompt.
+ * Cursor versions have used phrasings like:
+ *   - "Trust this workspace?"
+ *   - "Do you trust the authors of files in this folder?"
+ *   - "Trust this folder?"
+ * We match generously so we don't miss future minor reword variations.
+ */
+const TRUST_PROMPT_RE = /trust this (?:workspace|folder)|do you trust/i;
+const TRUST_POLL_INTERVAL_MS = 200;
+const TRUST_POLL_TIMEOUT_MS = 5000;
 
 /**
  * Locate the bridge script. The source layout is `<root>/bin/octomux-hook-bridge.js`
@@ -91,18 +105,43 @@ export const cursorHarness: Harness = {
   async postLaunch(target: string): Promise<void> {
     // Cursor shows a one-time "Trust this workspace" gate per new worktree.
     // --trust only works in --print mode, so we accept it interactively.
-    // The presence check on captured pane content prevents stray 'a' input
-    // when the workspace is already trusted.
+    // cursor-agent startup time varies (cold cache, npm shim, etc.) so we
+    // poll the pane until we see the prompt or hit a timeout, instead of
+    // a fixed sleep that misses slow starts.
     if (process.env.NODE_ENV === 'test') return;
-    await new Promise((r) => setTimeout(r, 1500));
-    try {
-      const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      if (/Trust this workspace/.test(stdout)) {
-        await execFile('tmux', ['send-keys', '-t', target, 'a']);
+    const start = Date.now();
+    while (Date.now() - start < TRUST_POLL_TIMEOUT_MS) {
+      let stdout: string;
+      try {
+        ({ stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']));
+      } catch (err) {
+        logger.warn(
+          { target, err: (err as Error).message },
+          'cursor postLaunch: tmux capture-pane failed; abandoning trust auto-accept',
+        );
+        return;
       }
-    } catch {
-      // tmux unreachable — ignore; the prompt is recoverable manually.
+      if (TRUST_PROMPT_RE.test(stdout)) {
+        try {
+          await execFile('tmux', ['send-keys', '-t', target, 'a']);
+          logger.info(
+            { target, elapsed_ms: Date.now() - start },
+            'cursor postLaunch: accepted Workspace Trust prompt',
+          );
+        } catch (err) {
+          logger.warn(
+            { target, err: (err as Error).message },
+            'cursor postLaunch: tmux send-keys failed while accepting trust prompt',
+          );
+        }
+        return;
+      }
+      await new Promise((r) => setTimeout(r, TRUST_POLL_INTERVAL_MS));
     }
+    logger.info(
+      { target, timeout_ms: TRUST_POLL_TIMEOUT_MS },
+      'cursor postLaunch: no Workspace Trust prompt detected within timeout (workspace probably already trusted)',
+    );
   },
 
   resolveFlags(settings: OctomuxSettings): string {
