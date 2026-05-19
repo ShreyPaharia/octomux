@@ -380,9 +380,7 @@ export function Composer({ onSubmitted }: Props = {}) {
 
         {showAgentChip && <AgentChip value={pickedAgent} onChange={onPickAgent} />}
 
-        {state.mode !== 'add-agent' && (
-          <HarnessChip value={harnessId} onChange={setHarnessId} />
-        )}
+        {state.mode !== 'add-agent' && <HarnessChip value={harnessId} onChange={setHarnessId} />}
 
         <DraftToggle
           checked={'isDraft' in state ? state.isDraft : false}
