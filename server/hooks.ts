@@ -21,6 +21,58 @@ function findAgentBySessionId(sessionId: string) {
     .get(sessionId) as { id: string; task_id: string } | undefined;
 }
 
+/**
+ * Look up an agent by hook_token, optionally constrained to a specific
+ * harness_session_id (conversation id). Used by harness-issued sessions
+ * (Cursor) where the session id is captured from a hook event rather than
+ * minted up front.
+ *
+ * 1. If conversationId is provided, try exact match on
+ *    (hook_token, harness_session_id).
+ * 2. If step 1 misses (or conversationId was absent), find the most-recent
+ *    agent with this token and NULL harness_session_id; if conversationId is
+ *    provided, bind it to that row before returning.
+ * 3. Otherwise return null.
+ */
+export function findAgentByTokenAndSession(
+  token: string,
+  conversationId?: string | null,
+): { id: string; task_id: string } | null {
+  if (!token) return null;
+  const db = getDb();
+
+  if (conversationId) {
+    const exact = db
+      .prepare(
+        `SELECT id, task_id FROM agents
+         WHERE hook_token = ? AND harness_session_id = ?
+         LIMIT 1`,
+      )
+      .get(token, conversationId) as { id: string; task_id: string } | undefined;
+    if (exact) return exact;
+  }
+
+  const nullSessionRow = db
+    .prepare(
+      `SELECT id, task_id FROM agents
+       WHERE hook_token = ? AND harness_session_id IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(token) as { id: string; task_id: string } | undefined;
+
+  if (!nullSessionRow) return null;
+
+  if (conversationId) {
+    db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(
+      conversationId,
+      nullSessionRow.id,
+    );
+  }
+
+  return nullSessionRow;
+}
+
 const SUMMARY_FIELD_PRIORITY = [
   'command', // Bash
   'file_path', // Read / Write / Edit / NotebookEdit
@@ -89,24 +141,26 @@ function requireHookToken(getAgentId: (req: Request) => Promise<string | null>) 
 }
 
 function getAgentIdFromBody(req: Request): Promise<string | null> {
-  const { session_id } = req.body ?? {};
-  if (!session_id) return Promise.resolve(null);
+  const { session_id, conversation_id } = req.body ?? {};
+  const sid = (session_id ?? conversation_id) as string | undefined;
+  if (!sid) return Promise.resolve(null);
   const agent = getDb()
     .prepare(`SELECT id FROM agents WHERE harness_session_id = ? AND status != 'stopped'`)
-    .get(session_id) as { id: string } | undefined;
+    .get(sid) as { id: string } | undefined;
   return Promise.resolve(agent?.id ?? null);
 }
 
 // POST /api/hooks/user-prompt-submit
 // Fires when the user submits a prompt — agent resumes working
 router.post('/user-prompt-submit', requireHookToken(getAgentIdFromBody), (req, res) => {
-  const { session_id } = req.body;
-  if (!session_id) {
+  const { session_id, conversation_id } = req.body;
+  const sid = (session_id ?? conversation_id) as string | undefined;
+  if (!sid) {
     res.status(200).send();
     return;
   }
 
-  const agent = findAgentBySessionId(session_id);
+  const agent = findAgentBySessionId(sid);
   if (!agent) {
     res.status(200).send();
     return;
@@ -151,13 +205,14 @@ router.post('/user-prompt-submit', requireHookToken(getAgentIdFromBody), (req, r
 
 // POST /api/hooks/permission-request
 router.post('/permission-request', requireHookToken(getAgentIdFromBody), (req, res) => {
-  const { session_id, tool_name, tool_input } = req.body;
-  if (!session_id || !tool_name) {
+  const { session_id, conversation_id, tool_name, tool_input } = req.body;
+  const sid = (session_id ?? conversation_id) as string | undefined;
+  if (!sid || !tool_name) {
     res.status(200).send();
     return;
   }
 
-  const agent = findAgentBySessionId(session_id);
+  const agent = findAgentBySessionId(sid);
   if (!agent) {
     res.status(200).send();
     return;
@@ -169,14 +224,7 @@ router.post('/permission-request', requireHookToken(getAgentIdFromBody), (req, r
         `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`,
       )
-      .run(
-        nanoid(12),
-        agent.task_id,
-        agent.id,
-        session_id,
-        tool_name,
-        JSON.stringify(tool_input || {}),
-      );
+      .run(nanoid(12), agent.task_id, agent.id, sid, tool_name, JSON.stringify(tool_input || {}));
 
     getDb()
       .prepare(
@@ -193,13 +241,14 @@ router.post('/permission-request', requireHookToken(getAgentIdFromBody), (req, r
 
 // POST /api/hooks/post-tool-use
 router.post('/post-tool-use', requireHookToken(getAgentIdFromBody), (req, res) => {
-  const { session_id, tool_name, tool_input } = req.body;
-  if (!session_id) {
+  const { session_id, conversation_id, tool_name, tool_input } = req.body;
+  const sid = (session_id ?? conversation_id) as string | undefined;
+  if (!sid) {
     res.status(200).send();
     return;
   }
 
-  const agent = findAgentBySessionId(session_id);
+  const agent = findAgentBySessionId(sid);
   if (!agent) {
     res.status(200).send();
     return;
@@ -255,21 +304,23 @@ router.post(
     next();
   },
   requireHookToken(async (req) => {
-    const { session_id } = req.body ?? {};
-    if (!session_id) return null;
+    const { session_id, conversation_id } = req.body ?? {};
+    const sid = (session_id ?? conversation_id) as string | undefined;
+    if (!sid) return null;
     const agent = getDb()
       .prepare(`SELECT id FROM agents WHERE harness_session_id = ? AND status != 'stopped'`)
-      .get(session_id) as { id: string } | undefined;
+      .get(sid) as { id: string } | undefined;
     return agent?.id ?? null;
   }),
   (req, res) => {
-    const { session_id } = req.body;
-    if (!session_id) {
+    const { session_id, conversation_id } = req.body;
+    const sid = (session_id ?? conversation_id) as string | undefined;
+    if (!sid) {
       res.status(200).send();
       return;
     }
 
-    const agent = findAgentBySessionId(session_id);
+    const agent = findAgentBySessionId(sid);
     if (!agent) {
       res.status(200).send();
       return;
@@ -341,5 +392,35 @@ router.post(
     res.status(200).send();
   },
 );
+
+// POST /api/hooks/session-start
+// Cursor (harness-issued) fires this on chat creation. Used to bind a
+// conversation id to the agent row when harness_session_id is still NULL.
+// Always responds 200 with `{}` on success (Cursor's sessionStart expects
+// a JSON body), 401 on missing/invalid token.
+router.post('/session-start', (req: Request, res: Response) => {
+  const token = (req.query.token ?? '') as string;
+  if (!token) {
+    logger.warn({ path: req.path, ip: req.ip }, 'session-start: missing token');
+    res.status(401).send();
+    return;
+  }
+
+  const { conversation_id, session_id } = req.body ?? {};
+  const resolvedId = (conversation_id ?? session_id ?? null) as string | null;
+
+  const agent = findAgentByTokenAndSession(token, resolvedId);
+  if (!agent) {
+    logger.warn(
+      { path: req.path, ip: req.ip, has_session: !!resolvedId },
+      'session-start: no matching agent',
+    );
+    res.status(401).send();
+    return;
+  }
+
+  broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
+  res.status(200).json({});
+});
 
 export { router as hookRoutes };

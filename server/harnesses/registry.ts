@@ -1,7 +1,11 @@
 import { claudeCodeHarness } from './claude-code.js';
+import { cursorHarness } from './cursor.js';
 import type { Harness } from './types.js';
 
-const HARNESSES = new Map<string, Harness>([[claudeCodeHarness.id, claudeCodeHarness]]);
+const HARNESSES = new Map<string, Harness>([
+  [claudeCodeHarness.id, claudeCodeHarness],
+  [cursorHarness.id, cursorHarness],
+]);
 
 export const DEFAULT_HARNESS_ID = claudeCodeHarness.id;
 

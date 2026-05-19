@@ -190,6 +190,7 @@ export interface CreateTaskRequest {
   worktree_path?: string;
   agent?: string;
   workflow_status?: WorkflowStatus;
+  harness_id?: string;
 }
 
 export interface AddAgentRequest {

@@ -2343,4 +2343,63 @@ describe('agent name validation', () => {
       expect(res.body.error).toMatch(/Invalid agent name/);
     });
   });
+
+  describe('GET /api/harnesses', () => {
+    it('returns registered harnesses with id, displayName, sessionIdMode', async () => {
+      const res = await request(app).get('/api/harnesses');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'claude-code',
+            displayName: 'Claude Code',
+            sessionIdMode: 'orchestrator-assigned',
+          }),
+          expect.objectContaining({
+            id: 'cursor',
+            displayName: 'Cursor',
+            sessionIdMode: 'harness-issued',
+          }),
+        ]),
+      );
+    });
+  });
+
+  describe('POST /api/tasks with harness_id', () => {
+    it('accepts harness_id: "cursor" and persists it', async () => {
+      const res = await request(app).post('/api/tasks').send({
+        title: 'Cursor task',
+        description: 'd',
+        repo_path: '/tmp/x',
+        harness_id: 'cursor',
+        draft: true,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.harness_id).toBe('cursor');
+    });
+
+    it('defaults to claude-code when harness_id is omitted', async () => {
+      const res = await request(app).post('/api/tasks').send({
+        title: 'Default task',
+        description: 'd',
+        repo_path: '/tmp/x',
+        draft: true,
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.harness_id).toBe('claude-code');
+    });
+
+    it('rejects unknown harness_id with 400', async () => {
+      const res = await request(app).post('/api/tasks').send({
+        title: 'Bad task',
+        description: 'd',
+        repo_path: '/tmp/x',
+        harness_id: 'not-a-real-harness',
+        draft: true,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Unknown harness/);
+    });
+  });
 });

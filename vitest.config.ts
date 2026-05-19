@@ -42,6 +42,14 @@ export default defineConfig({
           include: ['cli/src/**/*.test.ts'],
         },
       },
+      {
+        test: {
+          name: 'bin',
+          globals: true,
+          environment: 'node',
+          include: ['bin/**/*.test.ts'],
+        },
+      },
     ],
   },
 });
