@@ -29,8 +29,9 @@ vi.mock('./hook-settings.js', () => ({
 }));
 
 vi.mock('./harnesses/claude-code.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('./harnesses/claude-code.js')>('./harnesses/claude-code.js');
+  const actual = await vi.importActual<typeof import('./harnesses/claude-code.js')>(
+    './harnesses/claude-code.js',
+  );
   return {
     ...actual,
     claudeCodeHarness: {

@@ -102,9 +102,7 @@ export async function ensureHooksInstalled(): Promise<void> {
       // equal). Skip the task if no agent has a token yet — the next agent's
       // creation will install hooks correctly.
       const row = db
-        .prepare(
-          `SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`,
-        )
+        .prepare(`SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`)
         .get(task.id) as { hook_token: string } | undefined;
       if (!row) continue;
       await installHookSettings(task.worktree!, task.harness_id, row.hook_token);

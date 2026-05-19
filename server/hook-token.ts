@@ -19,10 +19,7 @@ const logger = childLogger('hook-token');
  * been closed have runtime_state = 'idle'. We gate on that to avoid
  * spurious writes to worktrees that are no longer actively running.
  */
-export async function ensureHookToken(
-  agent: Agent,
-  worktreePath: string | null,
-): Promise<string> {
+export async function ensureHookToken(agent: Agent, worktreePath: string | null): Promise<string> {
   if (agent.hook_token && agent.hook_token !== '') return agent.hook_token;
 
   if (agent.task_id) {

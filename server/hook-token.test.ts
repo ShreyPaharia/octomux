@@ -6,9 +6,8 @@ import type { Agent } from './types.js';
 
 // Stub the harness's installHooks so the test doesn't write real files.
 vi.mock('./harnesses/index.js', async () => {
-  const actual = await vi.importActual<typeof import('./harnesses/index.js')>(
-    './harnesses/index.js',
-  );
+  const actual =
+    await vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
   return {
     ...actual,
     getHarness: () => ({
