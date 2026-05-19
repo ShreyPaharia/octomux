@@ -20,6 +20,7 @@ adds three corrections that shape the implementation.
    it would clobber the user's interactive Cursor configuration.
 
 2. **Top-level schema:**
+
    ```json
    {
      "version": 1,
@@ -37,23 +38,28 @@ adds three corrections that shape the implementation.
      }
    }
    ```
+
    Exit-code semantics: `0` → use stdout JSON; `2` → block (`permission:
-   "deny"` equivalent); other → fail-open unless `failClosed: true`.
+"deny"` equivalent); other → fail-open unless `failClosed: true`.
 
 3. **Common stdin base** (every event except `workspaceOpen`):
    `conversation_id`, `generation_id`, `model`, `hook_event_name`,
    `cursor_version`, `workspace_roots`, `user_email`, `transcript_path`.
    Event-specific fields are layered on top.
 
-4. **Env passed to hook scripts** — *correction to the parent spec*.
+4. **Env passed to hook scripts** — _correction to the parent spec_.
    Decompiled `agent-cli/hooks-exec` builds a fresh env object:
+
    ```js
-   Object.assign({CURSOR_PROJECT_DIR, CURSOR_VERSION},
-     user_email && {CURSOR_USER_EMAIL},
-     transcript_path && {CURSOR_TRANSCRIPT_PATH},
-     {CLAUDE_PROJECT_DIR},
-     sessionEnv)
+   Object.assign(
+     { CURSOR_PROJECT_DIR, CURSOR_VERSION },
+     user_email && { CURSOR_USER_EMAIL },
+     transcript_path && { CURSOR_TRANSCRIPT_PATH },
+     { CLAUDE_PROJECT_DIR },
+     sessionEnv,
+   );
    ```
+
    No spread of `process.env`. **Variables exported in the shell that
    launched `cursor-agent` do NOT reach the bridge.** The parent spec's
    `OCTOMUX_AGENT_ID` env-var correlation channel is therefore not
@@ -147,7 +153,7 @@ export const cursorHarness: Harness = {
 `newSessionId()` deliberately returns a UUID rather than `''`. Callers in
 `task-runner.ts` need a non-empty placeholder to pass through code paths that
 expect a string; the value is consumed for internal correlation only and is
-explicitly *not* written to `agents.harness_session_id` (which stays NULL until
+explicitly _not_ written to `agents.harness_session_id` (which stays NULL until
 the first hook event arrives) because the parent spec specifies
 `sessionIdMode: 'harness-issued'` requires NULL-until-bound.
 
@@ -178,11 +184,11 @@ own deny semantics on exit code 2).
 {
   "version": 1,
   "hooks": {
-    "sessionStart":         [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
-    "beforeSubmitPrompt":   [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
+    "sessionStart": [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
+    "beforeSubmitPrompt": [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
     "beforeShellExecution": [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
-    "postToolUse":          [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
-    "afterFileEdit":        [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }]
+    "postToolUse": [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }],
+    "afterFileEdit": [{ "command": "<abs>/bridge.js", "type": "command", "timeout": 5 }]
   }
 }
 ```
@@ -256,6 +262,7 @@ events but JSON is more explicit and works uniformly for all event types.)
 ### Why a sibling `config.json` rather than baking values into bridge.js
 
 Two reasons:
+
 1. The bridge script is a copy of `bin/octomux-hook-bridge.js`. Keeping it
    immutable (script logic) plus a separate mutable `config.json` means we
    don't need to template the script per worktree — `fs.copyFile` suffices.
@@ -272,7 +279,7 @@ Single helper used by every hook endpoint (Claude and Cursor):
    If a row exists, return it.
 2. Otherwise (no row matched or conversationId omitted), try
    `SELECT * FROM agents WHERE hook_token = ? AND harness_session_id IS NULL
-    ORDER BY created_at DESC LIMIT 1`.
+ ORDER BY created_at DESC LIMIT 1`.
    If a row exists AND `conversationId` is provided:
    `UPDATE agents SET harness_session_id = ? WHERE id = ?` to bind, then
    return the bound row.
@@ -327,6 +334,7 @@ Consumed by step 2b's frontend.
 ```
 
 `validateSettings`:
+
 - Rejects unknown keys.
 - `flags` runs through the same `validateFlagString` rule set as Claude
   (no `;`, `|`, `&`, `>`, `<`, backtick, `$(`, newline; balanced quotes).
@@ -340,6 +348,7 @@ Fake `cursor-agent` stub installed at `<worktree>/bin-stub/cursor-agent`
 (prepended to `PATH` for the tmux session via the launch command).
 
 Stub script (bash):
+
 ```bash
 #!/bin/bash
 set -euo pipefail
@@ -352,6 +361,7 @@ exec sleep 3600
 ```
 
 Test (Playwright API test, no UI):
+
 1. POST `/api/tasks` with `harness_id: "cursor"`. Assert 200.
 2. Wait for status `running` (existing `waitForStatus` helper).
 3. Assert `agents.harness_id = 'cursor'` and `agents.harness_session_id`
@@ -370,6 +380,7 @@ the two during the plan.
 ## Tests
 
 Unit:
+
 - `server/harnesses/cursor.test.ts` — table-driven for the command builders,
   `resolveFlags`, `validateSettings`, plus `installHooks` (writes correct
   files at correct modes — use a `tmp` dir).
@@ -383,6 +394,7 @@ Unit:
   unwired event + a malformed stdin + the denylist regex set.
 
 E2E:
+
 - `e2e/cursor-harness.spec.ts` as above.
 
 ## Out of scope (step 2a)
