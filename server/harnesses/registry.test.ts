@@ -16,8 +16,15 @@ describe('registry', () => {
     expect(() => getHarness('nonexistent')).toThrow(/Unknown harness/);
   });
 
+  it('returns cursor by id', () => {
+    const h = getHarness('cursor');
+    expect(h.id).toBe('cursor');
+    expect(h.sessionIdMode).toBe('harness-issued');
+  });
+
   it('lists registered harnesses', () => {
     const ids = listHarnesses().map((h) => h.id);
     expect(ids).toContain('claude-code');
+    expect(ids).toContain('cursor');
   });
 });

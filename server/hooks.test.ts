@@ -281,3 +281,120 @@ describe('Hook endpoints', () => {
     });
   });
 });
+
+describe('findAgentByTokenAndSession', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+    insertTask(db, { id: 't1', runtime_state: 'running' });
+  });
+
+  it('exact match by (token, session)', async () => {
+    insertAgent(db, {
+      id: 'a1',
+      task_id: 't1',
+      harness_session_id: 'sess-A',
+      hook_token: 'tok-1',
+    } as any);
+    const { findAgentByTokenAndSession } = await import('./hooks.js');
+    const row = findAgentByTokenAndSession('tok-1', 'sess-A');
+    expect(row).toMatchObject({ id: 'a1', task_id: 't1' });
+  });
+
+  it('binds session id on first event when row has NULL harness_session_id', async () => {
+    insertAgent(db, {
+      id: 'a2',
+      task_id: 't1',
+      harness_session_id: null,
+      hook_token: 'tok-2',
+    } as any);
+
+    const { findAgentByTokenAndSession } = await import('./hooks.js');
+    const row = findAgentByTokenAndSession('tok-2', 'sess-bound');
+    expect(row).toMatchObject({ id: 'a2', task_id: 't1' });
+
+    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a2') as {
+      harness_session_id: string;
+    };
+    expect(reread.harness_session_id).toBe('sess-bound');
+  });
+
+  it('returns null on unknown token', async () => {
+    insertAgent(db, {
+      id: 'a3',
+      task_id: 't1',
+      harness_session_id: 'sess-C',
+      hook_token: 'tok-3',
+    } as any);
+    const { findAgentByTokenAndSession } = await import('./hooks.js');
+    expect(findAgentByTokenAndSession('wrong-token', 'sess-C')).toBeNull();
+  });
+
+  it('returns null when token+session row missing and no NULL-session fallback row', async () => {
+    insertAgent(db, {
+      id: 'a4',
+      task_id: 't1',
+      harness_session_id: 'sess-D',
+      hook_token: 'tok-4',
+    } as any);
+    const { findAgentByTokenAndSession } = await import('./hooks.js');
+    expect(findAgentByTokenAndSession('tok-4', 'unrelated-session')).toBeNull();
+  });
+});
+
+describe('POST /api/hooks/session-start', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 't-ss', runtime_state: 'running' });
+    insertAgent(db, {
+      id: 'a-ss',
+      task_id: 't-ss',
+      harness_session_id: null,
+      hook_token: 'tok-ss',
+    } as any);
+  });
+
+  it('binds session id and returns 200 with empty object', async () => {
+    const res = await request(app)
+      .post('/api/hooks/session-start?token=tok-ss')
+      .send({ conversation_id: 'chat-xyz', is_background_agent: false });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({});
+
+    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+      harness_session_id: string;
+    };
+    expect(reread.harness_session_id).toBe('chat-xyz');
+  });
+
+  it('returns 401 when token is missing', async () => {
+    const res = await request(app)
+      .post('/api/hooks/session-start')
+      .send({ conversation_id: 'chat-xyz' });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 when no agent matches the token', async () => {
+    const res = await request(app)
+      .post('/api/hooks/session-start?token=wrong-token')
+      .send({ conversation_id: 'chat-xyz' });
+    expect(res.status).toBe(401);
+  });
+
+  it('falls back to session_id when conversation_id is absent', async () => {
+    const res = await request(app)
+      .post('/api/hooks/session-start?token=tok-ss')
+      .send({ session_id: 'sess-from-fallback' });
+    expect(res.status).toBe(200);
+
+    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+      harness_session_id: string;
+    };
+    expect(reread.harness_session_id).toBe('sess-from-fallback');
+  });
+});

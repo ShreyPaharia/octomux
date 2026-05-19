@@ -68,6 +68,7 @@ import {
   syncAgents,
 } from './agents.js';
 import { validateAgentName } from './harnesses/types.js';
+import { listHarnesses, getHarness } from './harnesses/index.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
 import { hookRoutes } from './hooks.js';
@@ -163,6 +164,17 @@ function derivedStatus(task: {
 
 export function setupRoutes(app: Express): void {
   app.use('/api/hooks', hookRoutes);
+
+  // GET /api/harnesses — list registered harness implementations
+  app.get('/api/harnesses', (_req: Request, res: Response) => {
+    res.json(
+      listHarnesses().map(({ id, displayName, sessionIdMode }) => ({
+        id,
+        displayName,
+        sessionIdMode,
+      })),
+    );
+  });
 
   // Browse directories for folder picker
   app.get('/api/browse', async (req: Request, res: Response) => {
@@ -540,6 +552,15 @@ export function setupRoutes(app: Express): void {
       }
     }
 
+    if (body.harness_id != null) {
+      try {
+        getHarness(body.harness_id);
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+    }
+
     // Derive stored repo_path / worktree
     let storedRepoPath: string;
     let storedWorktree: string | null;
@@ -607,8 +628,8 @@ export function setupRoutes(app: Express): void {
 
       db.prepare(
         `INSERT INTO tasks
-           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         resolvedTitle,
@@ -618,6 +639,7 @@ export function setupRoutes(app: Express): void {
         body.initial_prompt ?? null,
         worktreeId,
         body.agent ?? null,
+        body.harness_id ?? 'claude-code',
       );
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
