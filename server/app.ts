@@ -19,14 +19,23 @@ export function createApp(): express.Express {
     next();
   });
 
-  // CORS deny on /api/hooks/*. Any cross-origin request is rejected.
+  // CORS deny on /api/hooks/*. Browsers send Origin on all non-GET requests
+  // including same-origin, so we only reject Origins whose hostname isn't a
+  // loopback address. Server-to-server callers (Claude Code subprocesses) send
+  // no Origin at all and pass through unaffected.
   app.use('/api/hooks', (req, res, next) => {
-    if (req.headers.origin) {
-      logger.warn(
-        { origin: req.headers.origin, path: req.path },
-        'rejected: cross-origin hook request',
-      );
-      return res.status(403).send();
+    const origin = req.headers.origin;
+    if (origin) {
+      let hostname = '';
+      try {
+        hostname = new URL(origin).hostname;
+      } catch {
+        // Malformed Origin → treat as cross-origin
+      }
+      if (hostname !== '127.0.0.1' && hostname !== 'localhost') {
+        logger.warn({ origin, path: req.path }, 'rejected: cross-origin hook request');
+        return res.status(403).send();
+      }
     }
     next();
   });
