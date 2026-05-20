@@ -83,7 +83,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   ).run(id, label, harness.id, sessionIdForDb, hookToken, session, agent);
 
   try {
-    if (agent) await harness.syncAgents(cwd);
+    await harness.syncAgents(cwd);
     await harness.installHooks(cwd, hookBaseUrl(), hookToken);
 
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
@@ -93,6 +93,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
       sessionId: sessionIdForLaunch,
       agent,
       flags,
+      workspacePath: cwd,
     });
     let cmd = baseCmd;
     let promptFile: string | null = null;

@@ -655,9 +655,11 @@ existing API/CLI before any UI changes.
     octomux's inbox-mediated approve flow remains Claude-only until a
     later step extends the bridge with a polling loop.
 
-  - `syncAgents` is a no-op for step 2a. Cursor doesn't expose a
-    first-class `~/.cursor/agents/` equivalent (binary has no such
-    string). Document this and revisit if Cursor adds the feature.
+  - `syncAgents` mirrors octomux agent Markdown definitions into `<worktree>/.cursor/rules/`
+    as `.mdc` files (`octomux-agent-{name}.mdc`) so **Cursor CLI** picks them up alongside
+    project rules (`alwaysApply: false`). There is still no Cursor-native `--agent` CLI flag like
+    Claude's; personas are carried via workspace rules plus optional Cursor harness flags (`--resume`,
+    `--model`, `--force`).
   - `validateSettings` validates Cursor's own flags string with the same
     metacharacter ruleset as Claude.
 

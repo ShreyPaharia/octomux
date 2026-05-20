@@ -152,9 +152,9 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
  */
 async function waitForShellReady(
   target: string,
-  timeoutMs = 5000,
-  intervalMs = 250,
-  initialDelayMs = 200,
+  timeoutMs = 4500,
+  intervalMs = 100,
+  initialDelayMs = 75,
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
   await sleep(initialDelayMs);
@@ -672,6 +672,7 @@ export async function startTask(task: Task): Promise<void> {
       sessionId: sessionIdForLaunch,
       agent: agentName,
       flags,
+      workspacePath: setup.worktreePath,
     });
     await sendHarnessCommand({
       target: `${session}:${windowIndex}`,
@@ -770,7 +771,7 @@ export async function addAgent(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(agentId, task.id, windowIndex, label, harness.id, sessionIdForDb, hookToken, resolvedAgent);
 
-  if (resolvedAgent) await harness.syncAgents(task.worktree!);
+  await harness.syncAgents(task.worktree!);
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const addTarget = `${task.tmux_session}:${windowIndex}`;
@@ -778,6 +779,7 @@ export async function addAgent(
     sessionId: sessionIdForLaunch,
     agent: resolvedAgent,
     flags,
+    workspacePath: task.worktree!,
   });
   (async () => {
     try {
@@ -1211,25 +1213,36 @@ export async function resumeTask(task: Task): Promise<void> {
       });
     }
 
-    const needsAgentSync = agentTargets.some(({ agent }) => !!agent.agent);
+    if (agentTargets.length > 0) {
+      const bootstrapHarness = getHarness(agentTargets[0]!.agent.harness_id);
+      await bootstrapHarness.syncAgents(cwd);
+      await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agentTargets[0]!.agent.hook_token);
+    }
+
     await Promise.all(
       agentTargets.map(async ({ agent, windowIndex, target }) => {
         const harness = getHarness(agent.harness_id);
         const flags = harness.resolveFlags(await getSettings());
 
-        if (needsAgentSync && agent.agent) await harness.syncAgents(cwd);
-        await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
-
         let baseCmd: string;
         if (agent.harness_session_id) {
-          baseCmd = harness.buildResumeCommand({ sessionId: agent.harness_session_id, flags });
+          baseCmd = harness.buildResumeCommand({
+            sessionId: agent.harness_session_id,
+            flags,
+            workspacePath: cwd,
+          });
         } else {
           const newId = harness.newSessionId();
-          const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags });
+          const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags, workspacePath: cwd });
           if (continueCmd !== null) {
             baseCmd = continueCmd;
           } else {
-            baseCmd = harness.buildLaunchCommand({ sessionId: newId, flags });
+            baseCmd = harness.buildLaunchCommand({
+              sessionId: newId,
+              agent: agent.agent,
+              flags,
+              workspacePath: cwd,
+            });
             logger.warn(
               { agent_id: agent.id, harness: harness.id },
               'continue unsupported, launching fresh',
@@ -1244,6 +1257,7 @@ export async function resumeTask(task: Task): Promise<void> {
         }
 
         await sendHarnessCommand({ target, baseCmd });
+        void harness.postLaunch?.(target);
 
         db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
           windowIndex,
@@ -1379,16 +1393,28 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   const harness = getHarness(agent.harness_id);
   const flags = harness.resolveFlags(await getSettings());
 
+  await harness.syncAgents(cwd);
+  await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
+
   let baseCmd: string;
   if (agent.harness_session_id) {
-    baseCmd = harness.buildResumeCommand({ sessionId: agent.harness_session_id, flags });
+    baseCmd = harness.buildResumeCommand({
+      sessionId: agent.harness_session_id,
+      flags,
+      workspacePath: cwd,
+    });
   } else {
     const newId = harness.newSessionId();
-    const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags });
+    const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags, workspacePath: cwd });
     if (continueCmd !== null) {
       baseCmd = continueCmd;
     } else {
-      baseCmd = harness.buildLaunchCommand({ sessionId: newId, flags });
+      baseCmd = harness.buildLaunchCommand({
+        sessionId: newId,
+        agent: agent.agent,
+        flags,
+        workspacePath: cwd,
+      });
       logger.warn(
         { agent_id: agent.id, harness: harness.id },
         'continue unsupported, launching fresh',
@@ -1399,6 +1425,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     }
   }
   await sendHarnessCommand({ target, baseCmd });
+  void harness.postLaunch?.(target);
 
   // Update DB row. For standalone agents we persist tmux_session; for
   // task-scoped ones we read the session via the task join.

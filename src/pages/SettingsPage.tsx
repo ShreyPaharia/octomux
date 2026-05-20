@@ -905,7 +905,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
 
       <SettingRow
         label="--force (skip permissions)"
-        description="Launch cursor-agent with --force so it never blocks on per-tool permission prompts."
+        description="Maps to cursor-agent --force (CLI also exposes --yolo as an alias): auto-run tools instead of approving each step."
       >
         <ToggleSwitch checked={cursorForce} onChange={handleCursorForceToggle} />
       </SettingRow>
@@ -922,7 +922,9 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           <div>
             <span className="text-sm">Advanced flags</span>
             <p className="text-xs text-[#b5b5bd]">
-              Extra flags appended to the cursor-agent launch command
+              Extra flags appended to each cursor-agent launch (e.g. --model, --resume &lt;chatId&gt;,
+              --print). Octomux also passes --workspace and mirrors Settings → Agents into
+              .cursor/rules for Cursor CLI.
             </p>
           </div>
           <div className="flex items-center gap-2">

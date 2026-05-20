@@ -50,8 +50,25 @@ describe('cursorHarness', () => {
     it.each([
       [{ sessionId: 's1' }, 'cursor-agent'],
       [{ sessionId: 's1', flags: ' --verbose' }, 'cursor-agent --verbose'],
+      [
+        {
+          sessionId: 's1',
+          workspacePath: '/tmp/wt/a',
+          flags: ' --verbose',
+        },
+        `cursor-agent --workspace '/tmp/wt/a' --verbose`,
+      ],
     ])('builds %j -> %s', (opts, expected) => {
       expect(cursorHarness.buildLaunchCommand(opts)).toBe(expected);
+    });
+
+    it('quotes workspace paths that contain apostrophes', () => {
+      expect(
+        cursorHarness.buildLaunchCommand({
+          sessionId: 's1',
+          workspacePath: "/tmp/it's-fine",
+        }),
+      ).toBe(`cursor-agent --workspace '/tmp/it'\\''s-fine'`);
     });
   });
 
@@ -63,6 +80,14 @@ describe('cursorHarness', () => {
     it.each([
       [{ sessionId: 'chat-abc' }, 'cursor-agent --resume chat-abc'],
       [{ sessionId: 'chat-abc', flags: ' --verbose' }, 'cursor-agent --resume chat-abc --verbose'],
+      [
+        {
+          sessionId: 'chat-abc',
+          workspacePath: '/tmp/repo',
+          flags: ' --force',
+        },
+        `cursor-agent --workspace '/tmp/repo' --resume chat-abc --force`,
+      ],
     ])('builds %j -> %s', (opts, expected) => {
       expect(cursorHarness.buildResumeCommand(opts)).toBe(expected);
     });
@@ -129,8 +154,23 @@ describe('cursorHarness', () => {
   // syncAgents
   // -------------------------------------------------------------------------
 
-  it('syncAgents resolves without error', async () => {
-    await expect(cursorHarness.syncAgents('/tmp/some-path')).resolves.toBeUndefined();
+  it('syncAgents mirrors octomux agent definitions under .cursor/rules', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-sync-'));
+    try {
+      await cursorHarness.syncAgents(tmpDir);
+      const rulesDir = path.join(tmpDir, '.cursor', 'rules');
+      const names = fs.readdirSync(rulesDir).filter((f) => f.startsWith('octomux-agent-'));
+      expect(names.length).toBeGreaterThan(0);
+      const sample = fs.readFileSync(path.join(rulesDir, names[0]!), 'utf-8');
+      expect(sample).toMatch(/^---\s*\ndescription:/m);
+      expect(sample).toMatch(/alwaysApply: false/m);
+      await cursorHarness.syncAgents(tmpDir);
+      expect(fs.readdirSync(rulesDir).filter((f) => f.startsWith('octomux-agent-')).length).toBe(
+        names.length,
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -173,6 +213,22 @@ describe('cursorHarness.installHooks', () => {
         expect(hooksJson.hooks[event]).toHaveLength(1);
         expect(hooksJson.hooks[event][0].command).toBe(bridgeDest);
       }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('installHooks leaves config and hooks.json unchanged when inputs match', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-idem-'));
+    try {
+      await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
+      const configPath = path.join(tmpDir, '.octomux-hooks', 'config.json');
+      const hooksPath = path.join(tmpDir, '.cursor', 'hooks.json');
+      const configBefore = fs.readFileSync(configPath, 'utf-8');
+      const hooksBefore = fs.readFileSync(hooksPath, 'utf-8');
+      await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
+      expect(fs.readFileSync(configPath, 'utf-8')).toBe(configBefore);
+      expect(fs.readFileSync(hooksPath, 'utf-8')).toBe(hooksBefore);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

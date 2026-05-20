@@ -124,9 +124,10 @@ export const cursorHarness: Harness = {
     //    events at the absolute bridge.js path
   },
 
-  async syncAgents() {
-    // No-op: Cursor has no first-class custom-agents concept (verified
-    // against the binary — no `.cursor/agents/` references).
+  async syncAgents(worktreePath) {
+    // Mirror octomux agent defs to <worktree>/.cursor/rules/octomux-agent-{name}.mdc
+    // (.mdc with description + alwaysApply: false). Cursor CLI loads project rules — there is still
+    // no `--agent` CLI flag like Claude Code.
   },
 
   resolveFlags(settings) {

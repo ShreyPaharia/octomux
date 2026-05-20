@@ -44,11 +44,14 @@ export interface HarnessLaunchOpts {
   sessionId: string;
   agent?: string | null;
   flags?: string;
+  /** Absolute cwd for harnesses where the CLI needs an explicit `--workspace` (Cursor). */
+  workspacePath?: string;
 }
 
 export interface HarnessResumeOpts {
   sessionId: string;
   flags?: string;
+  workspacePath?: string;
 }
 
 export interface Harness {
