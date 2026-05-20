@@ -204,11 +204,10 @@ export function Composer({ onSubmitted }: Props = {}) {
           refresh();
           navigate(`/chats/${chat.id}`);
         } else if (state.mode !== 'empty') {
-          // B5: when initial_prompt is set, let the server generate title/description.
-          // We omit title here so the server-side generator takes precedence.
-          // The deriveTitleFromPrompt fallback is used as safety net inside server/api.ts.
+          // Title pre-filled from prompt for fast CREATE (no Claude CLI round-trip).
+          // Description omitted so the API stores the full initial_prompt body.
           const payload: Parameters<typeof api.createTask>[0] = {
-            title: deriveTitleFromPrompt(trimmed), // fallback — server overrides when key is set
+            title: deriveTitleFromPrompt(trimmed),
             initial_prompt: trimmed,
           };
           if (state.mode === 'new') {
