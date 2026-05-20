@@ -69,7 +69,7 @@ import {
 } from './agents.js';
 import { validateAgentName } from './harnesses/types.js';
 import { listHarnesses, getHarness } from './harnesses/index.js';
-import { getSettings, updateSettings } from './settings.js';
+import { getSettings, updateSettings, type OctomuxSettings } from './settings.js';
 import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
@@ -160,6 +160,21 @@ function derivedStatus(task: {
   if (activities.includes('active')) return 'working';
   if (activities.includes('waiting')) return 'needs_attention';
   return 'done';
+}
+
+/** Flat Claude launch aliases for `/api/settings` responses (dashboard reads these keys). */
+function augmentDashboardSettings(settings: OctomuxSettings): OctomuxSettings & {
+  dangerouslySkipPermissions: boolean;
+  claudeFlags: string;
+} {
+  const cc = settings.harnesses?.['claude-code'] ?? {};
+  const dsp = (cc as { dangerouslySkipPermissions?: unknown }).dangerouslySkipPermissions;
+  const flagsRaw = (cc as { flags?: unknown }).flags;
+  return {
+    ...settings,
+    dangerouslySkipPermissions: typeof dsp === 'boolean' ? dsp : Boolean(dsp),
+    claudeFlags: typeof flagsRaw === 'string' ? flagsRaw : '',
+  };
 }
 
 export function setupRoutes(app: Express): void {
@@ -1542,14 +1557,12 @@ export function setupRoutes(app: Express): void {
     res.status(204).send();
   });
 
-  // ─── Settings ──────────────────────────────────────────────────────────────
-
   app.get('/api/settings', async (_req: Request, res: Response) => {
     try {
       const settings = await getSettings();
       const envClaudeFlags = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
       res.json({
-        ...settings,
+        ...augmentDashboardSettings(settings),
         envOverrides: {
           claudeFlags: envClaudeFlags ? envClaudeFlags : null,
         },
@@ -1562,10 +1575,15 @@ export function setupRoutes(app: Express): void {
   app.patch('/api/settings', async (req: Request, res: Response) => {
     try {
       const settings = await updateSettings(req.body);
-      res.json(settings);
+      res.json(augmentDashboardSettings(settings));
     } catch (err) {
       const message = (err as Error).message;
-      if (message.startsWith('Invalid editor') || message.startsWith('Invalid claudeFlags')) {
+      const clientInputError =
+        message.startsWith('Invalid editor') ||
+        message.startsWith('Invalid claudeFlags') ||
+        message.includes('Invalid claude-code') ||
+        message.includes('Invalid harnesses.claude-code');
+      if (clientInputError) {
         res.status(400).json({ error: message });
       } else {
         res.status(500).json({ error: message });

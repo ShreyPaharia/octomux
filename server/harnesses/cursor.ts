@@ -164,8 +164,7 @@ export const cursorHarness: Harness = {
     fs.copyFileSync(bridgeSrc, bridgeDest);
     fs.chmodSync(bridgeDest, 0o500);
 
-    const expectedConfig =
-      JSON.stringify({ baseUrl, token: hookToken }, null, 2) + '\n';
+    const expectedConfig = JSON.stringify({ baseUrl, token: hookToken }, null, 2) + '\n';
     const configPath = path.join(hooksDir, 'config.json');
     try {
       if (!fs.existsSync(configPath) || fs.readFileSync(configPath, 'utf-8') !== expectedConfig) {
@@ -181,7 +180,10 @@ export const cursorHarness: Harness = {
     fs.mkdirSync(cursorDir, { recursive: true });
     const hooksJsonPath = path.join(cursorDir, 'hooks.json');
     try {
-      if (!fs.existsSync(hooksJsonPath) || fs.readFileSync(hooksJsonPath, 'utf-8') !== hooksJsonExpected) {
+      if (
+        !fs.existsSync(hooksJsonPath) ||
+        fs.readFileSync(hooksJsonPath, 'utf-8') !== hooksJsonExpected
+      ) {
         fs.writeFileSync(hooksJsonPath, hooksJsonExpected);
       }
     } catch {
@@ -255,13 +257,24 @@ export const cursorHarness: Harness = {
   },
 
   resolveFlags(settings: OctomuxSettings): string {
+    const ccHarness = settings.harnesses?.['claude-code'] as
+      | { dangerouslySkipPermissions?: unknown }
+      | undefined;
+    const dangerouslyFromHarness =
+      typeof ccHarness?.dangerouslySkipPermissions === 'boolean'
+        ? ccHarness.dangerouslySkipPermissions
+        : false;
+    const dangerousAllow = dangerouslyFromHarness || Boolean(settings.dangerouslySkipPermissions);
+
     const sub = (settings.harnesses?.['cursor'] ?? {}) as {
       flags?: string;
       force?: boolean;
     };
 
     const parts: string[] = [];
-    if (sub.force) parts.push('--force');
+    if (sub.force || dangerousAllow) {
+      parts.push('--force');
+    }
     if (sub.flags) {
       parts.push(validateFlagString(sub.flags, 'harnesses.cursor.flags'));
     }

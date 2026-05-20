@@ -169,13 +169,13 @@ vi.mock('./skills.js', () => ({
 vi.mock('./settings.js', () => ({
   getSettings: vi.fn(async () => ({
     editor: 'nvim',
-    dangerouslySkipPermissions: false,
-    claudeFlags: '',
+    defaultHarnessId: 'claude-code',
+    harnesses: {},
   })),
   updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({
     editor: 'nvim',
-    dangerouslySkipPermissions: false,
-    claudeFlags: '',
+    defaultHarnessId: 'claude-code',
+    harnesses: {},
     ...patch,
   })),
 }));
@@ -1874,6 +1874,8 @@ describe('GET /api/settings', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       editor: 'nvim',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
       dangerouslySkipPermissions: false,
       claudeFlags: '',
       envOverrides: { claudeFlags: null },

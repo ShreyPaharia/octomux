@@ -199,6 +199,22 @@ describe('settings', () => {
       expect(written.harnesses['claude-code'].dangerouslySkipPermissions).toBe(true);
     });
 
+    it('merges PATCH dangerouslySkipPermissions into harnesses.claude-code', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify({ harnesses: {} }));
+      await updateSettings({ dangerouslySkipPermissions: true });
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      const written = JSON.parse(writtenJson);
+      expect(written.harnesses['claude-code'].dangerouslySkipPermissions).toBe(true);
+    });
+
+    it('merges PATCH claudeFlags into harnesses.claude-code', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify({ harnesses: {} }));
+      await updateSettings({ claudeFlags: '--verbose' });
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      const written = JSON.parse(writtenJson);
+      expect(written.harnesses['claude-code'].flags).toBe('--verbose');
+    });
+
     it('rejects malicious flags via validateSettings', async () => {
       await expect(
         updateSettings({ harnesses: { 'claude-code': { flags: '`whoami`' } } }),

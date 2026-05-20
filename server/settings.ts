@@ -98,8 +98,9 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
 
   const current = await getSettings();
   const mergedHarnesses = { ...current.harnesses };
+  const { listHarnesses, getHarness } = await import('./harnesses/index.js');
+
   if (patch.harnesses) {
-    const { listHarnesses, getHarness } = await import('./harnesses/index.js');
     const registered = new Set(listHarnesses().map((h) => h.id));
     for (const [id, blob] of Object.entries(patch.harnesses)) {
       if (registered.has(id)) {
@@ -109,6 +110,18 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
         mergedHarnesses[id] = blob;
       }
     }
+  }
+
+  if (patch.claudeFlags !== undefined || patch.dangerouslySkipPermissions !== undefined) {
+    const prev = mergedHarnesses['claude-code'] ?? {};
+    const candidate = { ...prev } as Record<string, unknown>;
+    if (patch.claudeFlags !== undefined) {
+      candidate.flags = patch.claudeFlags;
+    }
+    if (patch.dangerouslySkipPermissions !== undefined) {
+      candidate.dangerouslySkipPermissions = patch.dangerouslySkipPermissions;
+    }
+    mergedHarnesses['claude-code'] = getHarness('claude-code').validateSettings(candidate);
   }
 
   const merged: OctomuxSettings = {

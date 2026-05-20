@@ -741,7 +741,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
 
       <SettingRow
         label="--dangerously-skip-permissions"
-        description="Launch claude without permission prompts. Agents can run arbitrary shell commands without asking."
+        description="Also adds cursor-agent --force for Cursor harness tasks — same permissive stance as Claude. Cursor CLI calls this behavior --force (--yolo is an alias)."
       >
         <ToggleSwitch checked={dangerouslySkip} onChange={handleToggle} />
       </SettingRow>
@@ -788,6 +788,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
 function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { harnesses, loading: harnessesLoading } = useHarnesses();
   const [defaultHarnessId, setDefaultHarnessIdState] = useState<string>('claude-code');
+  const [dangerousLaunchGlobal, setDangerousLaunchGlobal] = useState(false);
   const [cursorForce, setCursorForce] = useState(false);
   const [cursorFlagsSaved, setCursorFlagsSaved] = useState('');
   const [cursorFlagsBuffer, setCursorFlagsBuffer] = useState('');
@@ -801,6 +802,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
       .then((s) => {
         if (cancelled) return;
         setDefaultHarnessIdState(s.defaultHarnessId ?? 'claude-code');
+        setDangerousLaunchGlobal(Boolean(s.dangerouslySkipPermissions));
         const sub = (s.harnesses?.cursor ?? {}) as { flags?: string; force?: boolean };
         setCursorForce(Boolean(sub.force));
         setCursorFlagsSaved(sub.flags ?? '');
@@ -905,12 +907,19 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
 
       <SettingRow
         label="--force (skip permissions)"
-        description="Maps to cursor-agent --force (CLI also exposes --yolo as an alias): auto-run tools instead of approving each step."
+        description="Adds --force only from this switch. The Agent launch section’s --dangerously-skip-permissions toggle also implies --force for cursor-agent (--yolo is a CLI alias), even when this is off."
       >
         <ToggleSwitch checked={cursorForce} onChange={handleCursorForceToggle} />
       </SettingRow>
 
-      {cursorForce && (
+      {dangerousLaunchGlobal && !cursorForce && (
+        <div className="mb-2 px-1 text-xs text-[#FFB800]">
+          Agent launch ▸ --dangerously-skip-permissions is on, so Cursor still runs with{' '}
+          <span className="font-mono">--force</span> even when this switch is off.
+        </div>
+      )}
+
+      {(cursorForce || dangerousLaunchGlobal) && (
         <div className="mb-3 mt-3 border border-red-400/40 bg-red-400/5 px-3 py-2 text-xs text-red-400">
           ⚠ DANGER: Cursor will execute shell commands without confirmation. Only enable in trusted
           environments.
@@ -922,9 +931,9 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           <div>
             <span className="text-sm">Advanced flags</span>
             <p className="text-xs text-[#b5b5bd]">
-              Extra flags appended to each cursor-agent launch (e.g. --model, --resume &lt;chatId&gt;,
-              --print). Octomux also passes --workspace and mirrors Settings → Agents into
-              .cursor/rules for Cursor CLI.
+              Extra flags appended to each cursor-agent launch (e.g. --model, --resume
+              &lt;chatId&gt;, --print). Octomux also passes --workspace and mirrors Settings →
+              Agents into .cursor/rules for Cursor CLI.
             </p>
           </div>
           <div className="flex items-center gap-2">

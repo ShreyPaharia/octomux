@@ -113,6 +113,21 @@ describe('cursorHarness', () => {
       [{ harnesses: { cursor: { force: true } } }, ' --force'],
       [{ harnesses: { cursor: { flags: '--mode plan' } } }, ' --mode plan'],
       [{ harnesses: { cursor: { force: true, flags: '--mode plan' } } }, ' --force --mode plan'],
+      [
+        {
+          harnesses: { 'claude-code': { dangerouslySkipPermissions: true } },
+        },
+        ' --force',
+      ],
+      [
+        {
+          harnesses: {
+            'claude-code': { dangerouslySkipPermissions: true },
+            cursor: { flags: '--mode plan' },
+          },
+        },
+        ' --force --mode plan',
+      ],
     ])('settings %j -> %s', (settings, expected) => {
       expect(cursorHarness.resolveFlags(settings as any)).toBe(expected);
     });
