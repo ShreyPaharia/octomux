@@ -86,6 +86,7 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
 - `CLAUDE_INIT_DELAY` is 0 in test env to avoid 3s sleeps
+- `OCTOMUX_AI_TASK_NAMING=1` (or `true`) — optional: on task create with `initial_prompt`, run Claude CLI to polish omitted title/description; off by default so POST `/api/tasks` returns immediately without that subprocess
 - E2E: Playwright tests in `e2e/`, config in `playwright.config.ts`
 - E2E: `webServer` config auto-starts Express + Vite, reuses running servers in dev
 - E2E: helpers in `e2e/helpers.ts` — `createTaskViaAPI`, `waitForStatus`, `deleteAllTasks`, `fillCreateDialog`

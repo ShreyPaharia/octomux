@@ -575,17 +575,44 @@ export function setupRoutes(app: Express): void {
       storedWorktree = null;
     }
 
-    // B5: server-side title/description generation
-    let resolvedTitle = body.title;
-    let resolvedDescription = body.description;
-    if (body.initial_prompt && (!resolvedTitle || !resolvedDescription)) {
-      const generated = await generateTitleAndDescription(body.initial_prompt);
-      if (!resolvedTitle) resolvedTitle = generated.title;
-      if (!resolvedDescription) resolvedDescription = generated.description;
+    // Title/description resolution
+    //
+    // Fast path: fill blanks from initial_prompt locally (never blocks on Claude CLI).
+    // Optional polish: OCTOMUX_AI_TASK_NAMING=1 / true restores the old behaviour of
+    // calling generateTitleAndDescription for whichever of title/description the client omitted.
+    const hadExplicitTitle = Boolean(body.title?.trim());
+    const hadExplicitDescription = Boolean(body.description?.trim());
+    let resolvedTitle = body.title?.trim();
+    let resolvedDescription = body.description?.trim();
+
+    const initialPromptTrimmed = body.initial_prompt?.trim() ?? '';
+    if (initialPromptTrimmed) {
+      const firstLine = initialPromptTrimmed.split('\n')[0] ?? '';
+      if (!resolvedTitle) {
+        resolvedTitle = firstLine.slice(0, 80) || 'Untitled task';
+      }
+      if (!resolvedDescription) {
+        resolvedDescription = initialPromptTrimmed;
+      }
     }
-    // Fallback to ensure non-empty strings
+
+    const aiNamingEnv = process.env.OCTOMUX_AI_TASK_NAMING ?? '';
+    const aiTaskNamingEnabled = aiNamingEnv === '1' || aiNamingEnv.toLowerCase() === 'true';
+    if (
+      initialPromptTrimmed &&
+      aiTaskNamingEnabled &&
+      (!hadExplicitTitle || !hadExplicitDescription)
+    ) {
+      const generated = await generateTitleAndDescription(body.initial_prompt!);
+      if (!hadExplicitTitle) resolvedTitle = generated.title;
+      if (!hadExplicitDescription) resolvedDescription = generated.description;
+    }
+
     resolvedTitle =
-      resolvedTitle || body.initial_prompt?.split('\n')[0]?.slice(0, 80) || 'Untitled task';
+      resolvedTitle ||
+      initialPromptTrimmed.split('\n')[0]?.slice(0, 80) ||
+      body.initial_prompt?.split('\n')[0]?.slice(0, 80) ||
+      'Untitled task';
     resolvedDescription = resolvedDescription || body.initial_prompt || '';
 
     const db = getDb();
