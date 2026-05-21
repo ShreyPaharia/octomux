@@ -476,7 +476,10 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
   }
 
   return (
-    <div ref={scrollContainerRef} className="flex h-full flex-col gap-2 overflow-y-auto p-2">
+    <div
+      ref={scrollContainerRef}
+      className="flex h-full min-w-0 flex-col gap-2 overflow-x-hidden overflow-y-auto p-2"
+    >
       {orderedFiles.map((file) => {
         const path = file.path;
         const exp = isExpanded(path);

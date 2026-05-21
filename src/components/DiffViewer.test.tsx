@@ -361,7 +361,7 @@ describe('DiffViewer', () => {
     await waitFor(() => {
       expect(screen.getByTestId('diff-file-row-src/a.ts')).toHaveAttribute('data-reviewed', 'true');
     });
-    expect(screen.getByTestId('diff-file-row-src/a.ts').className).toMatch(/opacity-50/);
+    expect(screen.getByTestId('diff-file-row-src/a.ts').className).toMatch(/opacity-60/);
   });
 
   it('groups files by top-level directory in the file tree', async () => {

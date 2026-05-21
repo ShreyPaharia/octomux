@@ -123,11 +123,7 @@ function TreeRow({
         data-testid={`diff-file-row-${f.path}`}
         data-reviewed={isReviewed ? 'true' : 'false'}
         data-active={active ? 'true' : undefined}
-        className={cn(
-          DIFF_TREE_ROW,
-          active && DIFF_TREE_ACTIVE,
-          'data-[reviewed=true]:opacity-50 data-[reviewed=true]:line-through',
-        )}
+        className={cn(DIFF_TREE_ROW, active && DIFF_TREE_ACTIVE, 'data-[reviewed=true]:opacity-60')}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         {showCheckbox ? (
@@ -171,7 +167,7 @@ function TreeRow({
           <span className={cn('font-mono text-[10px] font-bold', statusColor[f.status])}>
             {f.status}
           </span>
-          <span className="truncate">{node.name}</span>
+          <span className={cn('truncate', isReviewed && 'text-muted-soft')}>{node.name}</span>
         </button>
         <span className="shrink-0 font-mono text-[10px] tabular-nums">
           <span className="text-green-500">+{f.additions}</span>

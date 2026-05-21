@@ -91,10 +91,11 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
   const [height, setHeight] = useState<number>(placeholderHeight);
   const [editorInstance, setEditorInstance] = useState<editor.IStandaloneDiffEditor | null>(null);
 
-  const showEditor =
-    !file.ignored && !file.tooLarge && !file.binary && !error && diff !== null && !diff.isDirectory;
-  const showLoadingPlaceholder =
-    !file.ignored && !file.tooLarge && !file.binary && !error && (!mounted || loading || !diff);
+  const canRenderDiffBody =
+    !file.ignored && !file.tooLarge && !file.binary && !error && !diff?.isDirectory;
+  const showEditor = canRenderDiffBody && diff !== null;
+  const awaitingMount = canRenderDiffBody && !mounted;
+  const showLoadingPlaceholder = canRenderDiffBody && mounted && (loading || !diff);
 
   const handleMount = useCallback<DiffOnMount>(
     (ed) => {
@@ -132,11 +133,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
       id={`file-${encodeURIComponent(path)}`}
       className="overflow-hidden rounded-lg border border-glass-edge bg-glass-l0"
     >
-      <header
-        className={cn(
-          'diff-pane-header sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-2.5',
-        )}
-      >
+      <header className="diff-pane-header relative z-[1] flex items-center justify-between gap-3 px-4 py-2.5">
         <span className="flex min-w-0 items-center gap-2">
           {showReviewToggle ? (
             <input
@@ -151,7 +148,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
           <span
             className={cn(
               'truncate font-mono text-[11px] text-muted-foreground',
-              reviewed && 'text-muted-foreground line-through',
+              reviewed && 'opacity-60',
             )}
           >
             {path}
@@ -192,12 +189,11 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
           <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
             {path} resolves to a directory; cannot show diff.
           </div>
+        ) : awaitingMount ? (
+          <div className="h-px" aria-hidden />
         ) : showLoadingPlaceholder ? (
-          <div
-            className="flex items-center justify-center text-xs text-muted-foreground"
-            style={{ height: placeholderHeight }}
-          >
-            {loading ? `Loading ${path}…` : ''}
+          <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">
+            {loading ? `Loading ${path}…` : null}
           </div>
         ) : showEditor && diff ? (
           <Suspense
@@ -210,7 +206,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
               </div>
             }
           >
-            <div style={{ height }}>
+            <div className="min-w-0 w-full overflow-hidden" style={{ height }}>
               <MonacoDiff
                 key={`${path}:${expanded ? 'e' : 'c'}`}
                 height="100%"
@@ -226,7 +222,13 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
                   minimap: { enabled: false },
                   hideUnchangedRegions: { enabled: !expanded },
                   scrollBeyondLastLine: false,
-                  scrollbar: { alwaysConsumeMouseWheel: false },
+                  scrollBeyondLastColumn: 0,
+                  fixedOverflowWidgets: true,
+                  scrollbar: {
+                    alwaysConsumeMouseWheel: false,
+                    vertical: 'auto',
+                    horizontal: 'auto',
+                  },
                 }}
               />
             </div>
