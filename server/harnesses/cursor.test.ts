@@ -109,15 +109,18 @@ describe('cursorHarness', () => {
 
   describe('resolveFlags', () => {
     it.each([
-      [{ harnesses: {} }, ''],
-      [{ harnesses: { cursor: { force: true } } }, ' --force'],
-      [{ harnesses: { cursor: { flags: '--mode plan' } } }, ' --mode plan'],
-      [{ harnesses: { cursor: { force: true, flags: '--mode plan' } } }, ' --force --mode plan'],
+      [{ harnesses: {} }, ' --model composer-2.5'],
+      [{ harnesses: { cursor: { force: true } } }, ' --force --model composer-2.5'],
+      [{ harnesses: { cursor: { flags: '--mode plan' } } }, ' --mode plan --model composer-2.5'],
+      [
+        { harnesses: { cursor: { force: true, flags: '--mode plan' } } },
+        ' --force --mode plan --model composer-2.5',
+      ],
       [
         {
           harnesses: { 'claude-code': { dangerouslySkipPermissions: true } },
         },
-        ' --force',
+        ' --force --model composer-2.5',
       ],
       [
         {
@@ -126,7 +129,13 @@ describe('cursorHarness', () => {
             cursor: { flags: '--mode plan' },
           },
         },
-        ' --force --mode plan',
+        ' --force --mode plan --model composer-2.5',
+      ],
+      [{ harnesses: { cursor: { flags: '--model gpt-5' } } }, ' --model gpt-5'],
+      [{ harnesses: { cursor: { model: 'composer-2.5-fast' } } }, ' --model composer-2.5-fast'],
+      [
+        { harnesses: { cursor: { model: 'gpt-5.4-high', force: true } } },
+        ' --force --model gpt-5.4-high',
       ],
     ])('settings %j -> %s', (settings, expected) => {
       expect(cursorHarness.resolveFlags(settings as any)).toBe(expected);
@@ -148,12 +157,18 @@ describe('cursorHarness', () => {
       [{}, {}],
       [{ flags: '--x' }, { flags: '--x' }],
       [{ force: true }, { force: true }],
+      [{ model: 'composer-2.5' }, { model: 'composer-2.5' }],
+      [{ model: '  gpt-5.4-high  ' }, { model: 'gpt-5.4-high' }],
     ])('accepts %j -> %j', (input, expected) => {
       expect(cursorHarness.validateSettings(input)).toEqual(expected);
     });
 
     it('throws on wrong type for force', () => {
       expect(() => cursorHarness.validateSettings({ force: 'yes' })).toThrow(/force/);
+    });
+
+    it('throws on invalid model id', () => {
+      expect(() => cursorHarness.validateSettings({ model: 'bad model' })).toThrow(/model/);
     });
 
     it('throws on unknown key', () => {

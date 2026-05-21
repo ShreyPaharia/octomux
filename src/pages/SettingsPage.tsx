@@ -785,15 +785,34 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
   );
 }
 
+const CURSOR_DEFAULT_MODEL = 'composer-2.5';
+
+function buildCursorHarnessBlob(opts: {
+  force: boolean;
+  model: string;
+  flags: string;
+}): Record<string, unknown> {
+  const cursor: Record<string, unknown> = {};
+  if (opts.force) cursor.force = true;
+  const model = opts.model.trim();
+  if (model) cursor.model = model;
+  const flags = opts.flags.trim();
+  if (flags) cursor.flags = flags;
+  return cursor;
+}
+
 function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { harnesses, loading: harnessesLoading } = useHarnesses();
   const [defaultHarnessId, setDefaultHarnessIdState] = useState<string>('claude-code');
   const [dangerousLaunchGlobal, setDangerousLaunchGlobal] = useState(false);
   const [cursorForce, setCursorForce] = useState(false);
+  const [cursorModelSaved, setCursorModelSaved] = useState(CURSOR_DEFAULT_MODEL);
+  const [cursorModelBuffer, setCursorModelBuffer] = useState(CURSOR_DEFAULT_MODEL);
   const [cursorFlagsSaved, setCursorFlagsSaved] = useState('');
   const [cursorFlagsBuffer, setCursorFlagsBuffer] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingFlags, setSavingFlags] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -803,8 +822,15 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
         if (cancelled) return;
         setDefaultHarnessIdState(s.defaultHarnessId ?? 'claude-code');
         setDangerousLaunchGlobal(Boolean(s.dangerouslySkipPermissions));
-        const sub = (s.harnesses?.cursor ?? {}) as { flags?: string; force?: boolean };
+        const sub = (s.harnesses?.cursor ?? {}) as {
+          flags?: string;
+          force?: boolean;
+          model?: string;
+        };
         setCursorForce(Boolean(sub.force));
+        const model = (sub.model?.trim() || CURSOR_DEFAULT_MODEL) as string;
+        setCursorModelSaved(model);
+        setCursorModelBuffer(model);
         setCursorFlagsSaved(sub.flags ?? '');
         setCursorFlagsBuffer(sub.flags ?? '');
       })
@@ -835,13 +861,43 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     }
   };
 
+  const handleCursorModelSave = useCallback(async () => {
+    const next = cursorModelBuffer.trim();
+    if (!next || next === cursorModelSaved || savingModel) return;
+    setSavingModel(true);
+    const prev = cursorModelSaved;
+    setCursorModelSaved(next);
+    try {
+      await api.updateSettings({
+        harnesses: {
+          cursor: buildCursorHarnessBlob({
+            force: cursorForce,
+            model: next,
+            flags: cursorFlagsSaved,
+          }),
+        },
+      });
+      showToast('success', 'CURSOR', `Default model set to ${next}`);
+    } catch (err) {
+      setCursorModelSaved(prev);
+      setCursorModelBuffer(prev);
+      showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to save model');
+    } finally {
+      setSavingModel(false);
+    }
+  }, [cursorModelBuffer, cursorModelSaved, cursorForce, cursorFlagsSaved, savingModel]);
+
   const handleCursorForceToggle = async (next: boolean) => {
     const prev = cursorForce;
     setCursorForce(next);
     try {
       await api.updateSettings({
         harnesses: {
-          cursor: { force: next, ...(cursorFlagsSaved ? { flags: cursorFlagsSaved } : {}) },
+          cursor: buildCursorHarnessBlob({
+            force: next,
+            model: cursorModelSaved,
+            flags: cursorFlagsSaved,
+          }),
         },
       });
       showToast(
@@ -862,22 +918,29 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     try {
       const result = await api.updateSettings({
         harnesses: {
-          cursor: {
-            ...(cursorForce ? { force: true } : {}),
-            ...(cursorFlagsBuffer.trim() ? { flags: cursorFlagsBuffer.trim() } : {}),
-          },
+          cursor: buildCursorHarnessBlob({
+            force: cursorForce,
+            model: cursorModelSaved,
+            flags: cursorFlagsBuffer.trim(),
+          }),
         },
       });
-      const sub = (result.harnesses?.cursor ?? {}) as { flags?: string };
+      const sub = (result.harnesses?.cursor ?? {}) as { flags?: string; model?: string };
       setCursorFlagsSaved(sub.flags ?? '');
       setCursorFlagsBuffer(sub.flags ?? '');
+      if (sub.model) {
+        setCursorModelSaved(sub.model);
+        setCursorModelBuffer(sub.model);
+      }
       showToast('success', 'CURSOR', 'Cursor flags saved');
     } catch (err) {
       showToast('error', 'ERROR', err instanceof Error ? err.message : 'Failed to save flags');
     } finally {
       setSavingFlags(false);
     }
-  }, [cursorFlagsDirty, savingFlags, cursorFlagsBuffer, cursorForce]);
+  }, [cursorFlagsDirty, savingFlags, cursorFlagsBuffer, cursorForce, cursorModelSaved]);
+
+  const cursorModelDirty = cursorModelBuffer.trim() !== cursorModelSaved;
 
   if (loading || harnessesLoading) return null;
 
@@ -903,6 +966,41 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
 
       <div className="mt-4 mb-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a]">
         Cursor
+      </div>
+
+      <div className="py-3" style={ROW_DIVIDER}>
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <span className="text-sm">Default model</span>
+            <p className="text-xs text-[#b5b5bd]">
+              Passed as <span className="font-mono">--model</span> on each cursor-agent launch. Run{' '}
+              <span className="font-mono">cursor-agent --list-models</span> for ids.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {cursorModelDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
+            <button
+              type="button"
+              onClick={handleCursorModelSave}
+              disabled={!cursorModelDirty || savingModel}
+              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
+            >
+              {savingModel ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+        <input
+          type="text"
+          data-testid="cursor-model-input"
+          value={cursorModelBuffer}
+          onChange={(e) => setCursorModelBuffer(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void handleCursorModelSave();
+          }}
+          placeholder={CURSOR_DEFAULT_MODEL}
+          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+          spellCheck={false}
+        />
       </div>
 
       <SettingRow
@@ -931,9 +1029,8 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           <div>
             <span className="text-sm">Advanced flags</span>
             <p className="text-xs text-[#b5b5bd]">
-              Extra flags appended to each cursor-agent launch (e.g. --model, --resume
-              &lt;chatId&gt;, --print). Octomux also passes --workspace and mirrors Settings →
-              Agents into .cursor/rules for Cursor CLI.
+              Extra flags appended after --model (e.g. --print). Octomux also passes --workspace and
+              mirrors Settings → Agents into .cursor/rules.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -952,7 +1049,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           data-testid="cursor-flags-input"
           value={cursorFlagsBuffer}
           onChange={(e) => setCursorFlagsBuffer(e.target.value)}
-          placeholder="--model gpt-5 --print"
+          placeholder="--print"
           className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
           spellCheck={false}
         />
