@@ -13,7 +13,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 const PROD_DB_DIR = path.join(os.homedir(), '.octomux', 'data');
 const DEV_DB_DIR = path.join(__dirname, '..', 'data');
 const DB_DIR = isProduction ? PROD_DB_DIR : DEV_DB_DIR;
-const DB_PATH = path.join(DB_DIR, 'tasks.db');
+/** Override for docs screenshots / isolated demo data (`scripts/seed-docs-demo.ts`). */
+const DB_PATH = process.env.OCTOMUX_DB_PATH ?? path.join(DB_DIR, 'tasks.db');
 
 /** Path to the old package-relative database (for migration detection). */
 const OLD_DB_PATH = path.join(__dirname, '..', 'data', 'tasks.db');

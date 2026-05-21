@@ -1,128 +1,125 @@
 # Getting Started with octomux
 
-This guide walks you through installing octomux, configuring optional integrations
-(Jira, GitHub), and creating your first task. If you already have `octomux start`
-working and just want to set defaults, skip to [Configure defaults](#configure-defaults).
+Install once, open the dashboard, dispatch your first agent. Optional sections cover harness choice (Claude vs Cursor), Jira, and GitHub.
 
-## 1. Install prerequisites
-
-octomux runs on macOS (ARM64 or x64) and needs Node.js 20+. The `octomux start`
-preflight will check for the binaries below and tell you what's missing, but you
-can install them up front:
+## 1. Prerequisites
 
 ```bash
 brew install tmux git neovim lazygit
-npm install -g @anthropic-ai/claude-code   # the `claude` CLI
-```
-
-If `better-sqlite3` or `node-pty` fail to install, run
-`xcode-select --install` and retry.
-
-## 2. Install octomux
-
-```bash
+npm install -g @anthropic-ai/claude-code   # Claude Code harness
 npm install -g octomux
 ```
 
-## 3. Configure defaults
+**Cursor harness (optional):** install the [Cursor CLI](https://cursor.com/docs/cli) so `cursor-agent` is on your PATH. You can run Claude-only, Cursor-only, or both and switch per task.
 
-Run the interactive setup wizard. It writes optional defaults to
-`~/.octomux/settings.json` so skills (`create-task`, `create-pr`, etc.) know how
-to format branch names, Jira URLs, and base branches for your projects.
+`octomux start` runs a preflight for missing binaries. If native modules fail to build, run `xcode-select --install` and retry.
+
+## 2. Defaults (`octomux init`)
+
+Writes `~/.octomux/settings.json` (Jira base URL, project key, default base branch). All fields are optional.
 
 ```bash
 octomux init
-```
-
-You'll be prompted for:
-
-| Field               | Example                              | Used for                                                                        |
-| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
-| Jira base URL       | `https://your-company.atlassian.net` | Linking and inferring Jira tickets when an agent only has a key like `PROJ-123` |
-| Jira project key    | `PROJ`                               | Default project for branch naming + ticket inference                            |
-| Default base branch | `main`                               | Fallback base branch when creating tasks                                        |
-
-All fields are optional — press Enter to skip. To run non-interactively (e.g.
-in a provisioning script):
-
-```bash
+# non-interactive:
 octomux init --jira-url https://your-co.atlassian.net \
              --jira-project PROJ \
              --base-branch main \
              --non-interactive
 ```
 
-## 4. Authenticate the GitHub CLI (optional, for PR workflows)
+## 3. Choose your coding agent (harness)
 
-The `create-pr` skill and PR poller use `gh`. If you don't already have it set
-up:
+Open **Settings** after first launch:
+
+| Setting | What it does |
+| ------- | ------------ |
+| **Default harness** | Composer and new tasks default to Claude Code or Cursor |
+| **Claude Code** | CLI flags, dangerously-skip-permissions |
+| **Cursor** | Default model (`cursor-agent --list-models`), `--force`, extra flags |
+
+In the **composer** (home dock), use the **Coding agent** control to override the default for a single task.
+
+**CLI:**
 
 ```bash
-brew install gh
-gh auth login
+octomux create-task -t "Fix bug" -r .                    # default harness
+octomux create-task -t "Spike UI" -r . --harness cursor  # Cursor CLI
 ```
 
-octomux auto-detects your GitHub login from `gh api user`. If you want it to
-watch a different account (for "added as reviewer" tasks), set
-`OCTOMUX_GITHUB_LOGIN`:
+**Per-agent mix:** on a running task, **Add agent** can attach a second window under either harness (e.g. Claude plans, Cursor implements).
+
+Custom agent personas live under **Settings → Agents** (`.md` files). Claude uses them via `--agent`; Cursor gets matching rules under each worktree’s `.cursor/rules/`.
+
+## 4. GitHub CLI (optional)
 
 ```bash
-export OCTOMUX_GITHUB_LOGIN=your-handle
+brew install gh && gh auth login
 ```
 
-## 5. Set Jira credentials (optional, for Jira intake / hooks)
+PR linking and auto-close on merge use `gh`. Override the watched account with `OCTOMUX_GITHUB_LOGIN` if needed.
 
-Skills that fetch Jira tickets via the Atlassian MCP need the MCP to be
-authenticated, which you do once from inside Claude Code. The `jira-status`
-hook (which transitions Jira tickets as octomux tasks move columns) uses three
-environment variables instead — add these to your shell config (`~/.zshrc` or
-`~/.bashrc`):
+## 5. Jira (optional)
+
+**MCP (ticket fetch in agents):** authenticate once inside Claude Code (or your agent tool of choice).
+
+**`jira-status` hook (ticket transitions):**
 
 ```bash
 export JIRA_BASE_URL=https://your-company.atlassian.net
 export JIRA_EMAIL=you@company.com
-export JIRA_TOKEN=your-api-token   # from id.atlassian.com/manage-profile/security/api-tokens
-```
-
-Then install the hook:
-
-```bash
+export JIRA_TOKEN=your-api-token
 octomux hooks-install jira-status
 ```
 
-## 6. Launch the dashboard
+## 6. Launch
 
 ```bash
 cd path/to/your/repo
-octomux start          # opens http://localhost:7777 in your browser
+octomux start    # http://localhost:7777
 ```
 
-## 7. Create your first task
+### First session
 
-From the CLI:
+1. **Home** (`/`) — **Sessions inbox** + floating **composer**; pick **Claude Code** or **Cursor** in the coding-agent chip.
+2. **Command center** (`/tasks`) — kanban board; drag tasks across workflow columns.
+3. **Workspaces** (sidebar → More) — list worktrees created for tasks.
+4. **Settings** → **Coding agent** — default harness, Cursor model / `--force`; **Integrations** for Jira.
+5. **Task detail** — agent terminals, **Diff** review, **Editor** (lazygit), **Info** panels.
+
+Create from CLI anytime:
 
 ```bash
 octomux create-task -t "Add auth flow" -r .
+octomux create-task -t "Try Cursor on this" -r . --harness cursor
 ```
 
-Or click **New Task** in the dashboard. See the [README](./README.md#cli-commands)
-for the full command reference.
+Draft first if you want to edit title, prompt, and branch before agents start — check **Save as draft** in the composer.
 
-## Where things live
+## 7. Where things live
 
-| Path                          | What                                                           |
-| ----------------------------- | -------------------------------------------------------------- |
-| `~/.octomux/settings.json`    | Your defaults (editor, Jira, base branch, claude flags)        |
-| `~/.octomux/data/tasks.db`    | Task state (SQLite)                                            |
-| `~/.octomux/logs/`            | Server + hook logs                                             |
-| `~/.octomux/hooks/<event>.d/` | Lifecycle hook scripts (installed via `octomux hooks-install`) |
-| `~/.claude/skills/`           | Skills installed for Claude Code (auto-installed on first run) |
-| `<repo>/.worktrees/<task-id>` | Per-task git worktree                                          |
+| Path | Purpose |
+| ---- | ------- |
+| `~/.octomux/settings.json` | Defaults (editor, Jira, harness flags, default harness) |
+| `~/.octomux/data/tasks.db` | Task state (production) |
+| `./data/tasks.db` | Task state (development) |
+| `~/.octomux/logs/` | Server + hook logs |
+| `~/.octomux/hooks/<event>.d/` | Lifecycle hooks |
+| `~/.octomux/agents/` | Custom agent definitions (Claude + Cursor) |
+| `~/.claude/skills/` | Skills installed for Claude Code |
+| `<repo>/.worktrees/<task-id>` | Per-task git worktree |
+| `<worktree>/.octomux-hooks/` | Cursor hook bridge (Cursor tasks) |
+| `<worktree>/.cursor/rules/` | Cursor rules synced from agent definitions |
 
 ## Troubleshooting
 
-- **`octomux start` says a binary is missing** — install it with `brew install <name>` and re-run.
-- **`gh` says "not authenticated"** — `gh auth login`.
-- **Jira MCP says "not authenticated"** — open Claude Code and follow the Atlassian MCP auth prompt; this is independent of `JIRA_TOKEN` (which is only for the `jira-status` hook).
-- **`default-branch` fails** — your repo may have no remote. Pass `--base-branch main` explicitly when creating tasks.
-- **Worktree leftovers** — `octomux delete-task <id>` removes the worktree + branch; `close-task` keeps them for resume.
+| Issue | Fix |
+| ----- | --- |
+| Missing binary on start | `brew install <name>` or install Claude / Cursor CLI |
+| `cursor-agent` not found | Install [Cursor CLI](https://cursor.com/docs/cli); verify with `cursor-agent --version` |
+| Wrong harness on new tasks | Settings → default harness, or pass `--harness cursor` |
+| `gh` not authenticated | `gh auth login` |
+| Jira MCP not authenticated | Auth inside your agent IDE (separate from `JIRA_TOKEN`) |
+| No default branch | Pass `--base-branch main` when creating tasks |
+| Leftover worktree | `octomux delete-task <id>` (full cleanup) vs `close-task` (keeps branch for resume) |
+
+More detail: [README](./README.md).

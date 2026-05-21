@@ -4,187 +4,142 @@
 
 # octomux
 
-**Your local command center for autonomous Claude Code agents.**
-
-Pull tasks from Jira, GitHub, or any source your agent can read. Agents work in isolated worktrees. Get notified when they need you. PRs auto-link and tasks auto-close on merge. Review diffs with built-in lazygit. Survives restarts.
-
-![octomux dashboard](assets/screenshots/dashboard-hero.png)
-
-## The Loop
-
-```
-1. INTAKE      Pull Jira tickets or GitHub issues — auto-creates tasks with prompts
-2. EXECUTE     Each task gets its own worktree, branch, and Claude Code agents
-3. SUPERVISE   Live terminals + notifications when agents finish or need attention
-4. REVIEW      Built-in lazygit & lazyvim — check diffs without leaving octomux
-5. MERGE       PRs auto-detected and linked — tasks auto-close when PRs merge
-6. RESUME      Close your laptop. Reboot. Everything picks back up automatically.
-```
-
-> The orchestrator agent can drive this entire loop autonomously — or you can control each step from the CLI and dashboard.
-
-## Features
-
-### Orchestrator: agents managing agents
-
-A dedicated Claude Code instance that orchestrates your entire workflow. Create tasks, monitor status, add agents, create PRs — all via slash commands (`/create-task`, `/list-tasks`, `/status`, `/create-pr`).
-
-Wire it to Jira MCP, GitHub CLI, or any source — the orchestrator pulls context and creates properly named tasks with initial prompts. Ships with Claude Code skills (`create-task`, `create-pr`, `create-commit`) that any agent can use directly.
-
-![orchestrator](assets/screenshots/orchestrator.png)
-
-### Intake from anywhere
-
-- Any Claude Code agent can create tasks via `octomux create-task`
-- Works with Jira MCP, GitHub CLI, or anything your agent can read
-- Auto-generates task names and initial prompts from ticket context
-- Draft tasks: create in draft mode, edit title/prompt/branch before starting
-
-### Auto-review from reviewer requests
-
-- When you're added as a reviewer on a PR in any tracked repo (any repo that
-  appears in `octomux recent-repos`), octomux stages a **draft** review task
-  prefilled with `/review-pr <url>` and PR context
-- Tasks stay in draft until you approve — no agents start automatically
-- If you haven't approved and the request is withdrawn (review submitted / PR
-  closed / reviewer removed), the draft is cleaned up on the next poll
-- If the review is already running when new commits arrive, the existing agent
-  is nudged via a tmux message — no duplicate task is created
-- Owner identity is resolved once via `gh api user` and cached; override with
-  `OCTOMUX_GITHUB_LOGIN` if you want octomux to watch a different account
-
-### Isolated execution
-
-- Each task gets its own git worktree, branch, and tmux session
-- Multiple agents per task, working in parallel
-- Custom base branches supported (work from `develop`, not just `main`)
-- Your main working tree stays untouched
-
-### Smart supervision
-
-- Live terminals in the dashboard via xterm.js
-- Color-coded agent activity: green (active), gray (idle), amber (waiting for input)
-- Notifications when agents finish, stop unexpectedly, or hit permission prompts
-- Browser tab shows `(N) octomux` + red favicon dot when tasks need attention
-- Toast notifications with "View" button — one click to the relevant agent
-- Send messages to running agents via `octomux send-message`
-- Smart status: tasks needing attention surface before idle tasks
-
-![task detail](assets/screenshots/task-detail.png)
-
-### Built-in review
-
-- Lazygit and lazyvim integrated — review diffs inside octomux
-- Open ad-hoc shell terminals in any task's worktree from the dashboard
-- No context switching to a separate terminal or IDE
-- Clean branches ready to push and PR when you're satisfied
-
-![lazygit review](assets/screenshots/lazygit-review.png)
-
-### Auto PR detection + merge
-
-- Background poller detects PRs on task branches via `gh pr list`
-- PR URLs auto-linked in task cards — visible from the dashboard
-- Tasks auto-close when their PRs are merged
-- Zero manual status updates from task creation to merged code
-
-### Survives restarts
-
-- Full state persistence in SQLite across reboots
-- On next `octomux start`, running tasks are recovered and agent sessions resume
-- Close your laptop, come back tomorrow, run `octomux start`, keep going
-
-### Safety: graduated trust
-
-Each task worktree gets a permission config (`.claude/settings.local.json`) with three tiers:
-
-- **Denied**: `git push --force`, `rm -rf`, `git reset --hard` — always blocked
-- **Allowed**: read-only ops, safe writes, non-force `git push` — auto-approved
-- **Prompted**: everything else requires explicit user permission
-
-Permission prompts surface in the dashboard with tool name and input details. Agents can't destroy things without asking first.
-
-## Quick Start
+**Mission control for Claude Code and Cursor agents** — spin up isolated worktrees, run real agent sessions in tmux, and supervise everything from one dashboard until you’re ready to ship. Terminals, an inbox when agents need you, kanban for the fleet, and in-app diff review before merge.
 
 ```bash
-npm install -g octomux
-octomux init                                     # one-time setup: defaults for Jira, base branch, etc.
-cd your-project
-octomux start                                    # opens dashboard at localhost:7777
-octomux create-task -t "Add auth flow" -r .      # create a task from the CLI
+npm install -g octomux && octomux init && cd your-repo && octomux start
 ```
 
-Open [http://localhost:7777](http://localhost:7777) to watch agents work, or keep using the CLI. See [ONBOARDING.md](./ONBOARDING.md) for the full walkthrough — including optional `gh` and Jira hook setup.
-
-## CLI Commands
-
-| Command                                           | Description                                     |
-| ------------------------------------------------- | ----------------------------------------------- |
-| `octomux start`                                   | Launch the local web dashboard                  |
-| `octomux init`                                    | Interactive setup wizard for defaults           |
-| `octomux create-task`                             | Create a new task                               |
-| `octomux list-tasks`                              | List all tasks                                  |
-| `octomux get-task <id>`                           | Get task details                                |
-| `octomux close-task <id>`                         | Stop agents and preserve the worktree           |
-| `octomux delete-task <id>`                        | Fully clean up task state, branch, and worktree |
-| `octomux resume-task <id>`                        | Resume a previously closed task                 |
-| `octomux add-agent <task-id>`                     | Add an agent to an existing task                |
-| `octomux send-message <task-id> <agent-id> "msg"` | Send a message to an agent                      |
+Open [http://localhost:7777](http://localhost:7777) — describe a task in the composer, pick **Claude Code** or **Cursor**, and watch agents work in place.
 
 ## Why octomux?
 
-|                      | Without octomux          | With octomux                             |
-| -------------------- | ------------------------ | ---------------------------------------- |
-| Git isolation        | Manual worktrees         | Automatic per task                       |
-| Agent visibility     | Tab-switching            | Single dashboard with activity dots      |
-| Backlog intake       | Copy-paste prompts       | Agent-driven from Jira/GH                |
-| PR tracking          | Manual                   | Auto-detected and linked                 |
-| Task completion      | Manual status updates    | Auto-closes on PR merge                  |
-| After a reboot       | Start over               | Auto-resumes                             |
-| Reviewing changes    | Switch to terminal + git | Built-in lazygit                         |
-| Agent safety         | Hope for the best        | Graduated trust: denied/allowed/prompted |
-| Lifecycle management | None                     | draft → running → closed                 |
+Running agents in separate terminal tabs doesn’t scale. octomux gives you a repeatable loop from dispatch to merge:
 
-## How It Works
+- **Isolated** — Each task gets its own git worktree, branch, and tmux session. Parallel agents don’t stomp the same tree.
+- **Supervised** — Permission prompts land in a **Sessions inbox**; reply once and the agent resumes. No polling twenty panes for “allow this tool?”
+- **Reviewable** — Diff tab, per-file reviewed state, inline comments, and **Ship** / **Done** when the branch is ready — without leaving the dashboard.
+
+One SQLite-backed state machine survives reboots: `octomux start` recovers tasks, worktrees, and sessions.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png) |
+| **Command center** — kanban from backlog → done | ![Command center](assets/screenshots/command-center.png) |
+| **Harness picker** — Claude Code or Cursor per task | ![Harness picker](assets/screenshots/composer-harness.png) |
+| **Settings** — default harness, Cursor model & `--force` | ![Settings](assets/screenshots/settings-harnesses.png) |
+| **Task cockpit** — agent tabs, live Claude session, Ship, Done | ![Task detail](assets/screenshots/task-detail.png) |
+| **Diff review** — file tree, reviewed state, inline comments | ![Diff](assets/screenshots/diff-review.png) |
+
+## Features
+
+- **Dual harnesses** — Run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**
+- **Git worktree isolation** — Automatic worktree + `agents/<task-id>` branch per task; safe parallel work on one repo
+- **Live terminals** — xterm.js streams each agent’s tmux pane; attach the same session from the CLI if you prefer
+- **Sessions inbox** — Human-in-the-loop for permission prompts; tab title shows `(N) octomux` when something needs you
+- **Command center** — Kanban columns, drag status, archive, workflow from draft → ship
+- **In-app diff review** — Compare to `main`, mark files reviewed, queue comments, open lazygit in-editor
+- **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake
+- **CLI + dashboard** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows
+- **Recovery** — WAL SQLite + preserved worktrees across restarts
+
+## Quick start
+
+```bash
+brew install tmux git
+npm install -g @anthropic-ai/claude-code    # and/or Cursor CLI
+npm install -g octomux
+octomux init
+cd your-project
+octomux start
+```
+
+```bash
+octomux create-task -t "Add OAuth login" -r .
+octomux create-task -t "Spike with Cursor" -r . --harness cursor
+```
+
+Step-by-step setup, Jira, and orchestrator skills: [ONBOARDING.md](./ONBOARDING.md)
+
+## How it works
+
+```
+INTAKE → EXECUTE → SUPERVISE → REVIEW → MERGE → RESUME
+```
+
+| Phase | What happens |
+| ----- | ------------ |
+| **Intake** | Composer, CLI, orchestrator skills, or Jira/GitHub drafts |
+| **Execute** | Worktree + branch + tmux; harness launches `claude` or `cursor-agent` |
+| **Supervise** | Inbox for permissions; command center for fleet status |
+| **Review** | Diff tab, lazygit terminal, mark reviewed, **Done** |
+| **Merge** | PR poller links branches; tasks close when PRs merge |
+| **Resume** | DB + worktrees survive reboot — `octomux start` picks up |
+
+## CLI
+
+| Command | Description |
+| ------- | ----------- |
+| `octomux start` | Dashboard at `:7777` |
+| `octomux init` | Defaults wizard (Jira, base branch, harness prefs) |
+| `octomux create-task` | New task (`--harness cursor` optional) |
+| `octomux list-tasks` / `get-task` | Inspect tasks |
+| `octomux close-task` / `delete-task` | Stop or fully remove |
+| `octomux resume-task` | Resume a closed task |
+| `octomux add-agent` | Another agent window |
+| `octomux send-message` | Message a running agent |
+
+## Architecture
 
 ```mermaid
-graph LR
-    O[Orchestrator Agent] -->|octomux create-task| B[Dashboard / API]
-    A[Any Claude Code Agent] -->|octomux create-task| B
-    B --> C[Git Worktree]
-    B --> D[tmux Session]
-    B --> H[(SQLite DB)]
-    D --> E[Claude Code Agent]
-    E -->|done / permission| F[Notifications]
-    C --> G[lazygit Review]
-    H -->|recovery on restart| D
-    E -->|git push| P[GitHub PR]
-    P -->|poller detects merge| B
+flowchart LR
+  subgraph intake [Intake]
+    C[Composer]
+    CLI[CLI / skills]
+  end
+  subgraph core [octomux]
+    API[API + SQLite]
+    IN[Inbox]
+    BC[Command center]
+  end
+  subgraph run [Per task]
+    WT[Worktree]
+    TM[tmux]
+    H[Claude or Cursor]
+  end
+  C --> API
+  CLI --> API
+  API --> WT
+  API --> TM
+  TM --> H
+  H -->|hooks| API
+  API --> IN
+  API --> BC
+  WT --> DIFF[Diff review]
+  H --> GH[GitHub PR]
+  GH -->|poller| API
 ```
 
 ## Requirements
 
-- **macOS** (ARM64 or x64)
-- **Node.js 20+**
-- **tmux**: `brew install tmux`
-- **git**: `brew install git`
-- **Claude Code CLI**: `npm install -g @anthropic-ai/claude-code`
-
-> Xcode Command Line Tools (`xcode-select --install`) may be needed if native dependencies (`better-sqlite3`, `node-pty`) require local compilation.
+- macOS (ARM64 or x64), Node.js 20+
+- `tmux`, `git`
+- At least one harness: **Claude Code** (`claude`) and/or **Cursor CLI** (`cursor-agent`)
+- Recommended: `lazygit`, `neovim`
 
 ## Configuration
 
-| Option          | Description                     | Default                 |
-| --------------- | ------------------------------- | ----------------------- |
-| `--port <port>` | Port for the dashboard          | `7777`                  |
-| `--no-open`     | Do not auto-open the browser    | —                       |
-| `PORT`          | Alternative to `--port`         | `7777`                  |
-| `OCTOMUX_URL`   | Server URL used by CLI commands | `http://localhost:7777` |
+| Variable / flag | Purpose |
+| --------------- | ------- |
+| `OCTOMUX_PORT` / `--port` | Dashboard port (default `7777`) |
+| `OCTOMUX_URL` | CLI → API base URL |
+| `OCTOMUX_DB_PATH` | Override task DB path |
+| `OCTOMUX_GITHUB_LOGIN` | Reviewer-request polling account |
 
 ## Links
 
-- GitHub: [github.com/ShreyPaharia/octomux](https://github.com/ShreyPaharia/octomux)
-- npm: [npmjs.com/package/octomux](https://www.npmjs.com/package/octomux)
-- Landing page: [octomux.com](https://octomux.com)
+- [GitHub](https://github.com/ShreyPaharia/octomux) · [npm](https://www.npmjs.com/package/octomux) · [octomux.com](https://octomux.com)
 
-Contributions welcome — [open an issue](https://github.com/ShreyPaharia/octomux/issues) or submit a PR.
+Issues and PRs welcome.

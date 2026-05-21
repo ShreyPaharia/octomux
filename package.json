@@ -37,6 +37,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "screenshots:docs": "tsx scripts/seed-docs-demo.ts && OCTOMUX_SCREENSHOTS=1 OCTOMUX_DB_PATH=./data/docs-demo/tasks.db playwright test e2e/docs-screenshots.spec.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
