@@ -58,6 +58,11 @@
   --glass-edge-strong: rgba(255, 255, 255, 0.26);
   --glass-specular: rgba(255, 255, 255, 0.22);
 
+  /* Chrome (sidebar, app shell) — dark vibrancy, distinct from content glass tints */
+  --glass-chrome: rgba(14, 15, 20, 0.88);
+  --glass-chrome-footer: rgba(14, 15, 20, 0.72);
+  --glass-chrome-popover: rgba(20, 21, 28, 0.95);
+
   /* Ambient tint blobs (content canvas only — not terminal panes) */
   --ambient-cyan: rgba(59, 130, 246, 0.18);
   --ambient-purple: rgba(124, 58, 237, 0.12);
@@ -100,7 +105,8 @@
 }
 
 @theme inline {
-  --font-sans: 'JetBrains Mono Variable', monospace;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', monospace;
   --font-display: 'Space Grotesk', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
@@ -144,6 +150,8 @@
   --color-glass-edge: var(--glass-edge);
   --color-glass-edge-strong: var(--glass-edge-strong);
   --color-glass-specular: var(--glass-specular);
+  --color-glass-chrome: var(--glass-chrome);
+  --color-glass-chrome-footer: var(--glass-chrome-footer);
   --color-ambient-cyan: var(--ambient-cyan);
   --color-ambient-purple: var(--ambient-purple);
   --radius-sm: 4px;
@@ -160,11 +168,84 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background font-sans text-foreground;
   }
   html {
     @apply font-sans;
   }
+  code,
+  kbd,
+  pre,
+  samp {
+    @apply font-mono;
+  }
+}
+
+@utility btn-primary-glow {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.35),
+    0 0 24px 0 rgba(59, 130, 246, 0.35);
+}
+
+/** App chrome — sidebar shell (dark vibrancy + specular top edge). */
+@utility glass-chrome {
+  background-color: var(--glass-chrome);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+@utility glass-chrome-footer {
+  background-color: var(--glass-chrome-footer);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+@utility glass-chrome-menu {
+  background-color: var(--glass-chrome-popover);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@utility motion-sidebar {
+  transition:
+    width 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@utility motion-fade-in {
+  animation: octomux-fade-in 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@utility composer-shell {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 24px 60px -12px rgba(0, 0, 0, 0.5);
+}
+
+@utility composer-toolbar {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.04);
+  padding: 8px 10px;
+}
+
+@utility composer-prompt-well {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: #0b0c0f;
+}
+
+@utility inbox-card-hot {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 20px 40px -10px rgba(0, 0, 0, 0.38);
+}
+
+@utility inbox-card-muted {
+  box-shadow: 0 16px 32px -12px rgba(0, 0, 0, 0.35);
+}
+
+@utility board-column-drop {
+  border-radius: 12px;
+  transition: background-color 150ms ease;
 }
 
 @utility glass-blur-l1 {
@@ -225,6 +306,17 @@
     bottom: -200px;
     left: -150px;
     background: radial-gradient(circle, var(--ambient-purple) 0%, transparent 70%);
+  }
+}
+
+@keyframes octomux-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

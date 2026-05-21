@@ -39,33 +39,34 @@ beforeEach(() => {
 describe('UniversalSidebar nav', () => {
   it('renders Home, Tasks, Settings nav items', async () => {
     renderSidebar('/');
-    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
-    expect(screen.getByText('TASKS')).toBeInTheDocument();
-    expect(screen.getByText('SETTINGS')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Home')).toBeInTheDocument());
+    expect(screen.getByText('Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Settings')).toBeInTheDocument();
     expect(screen.queryByText('ORCHESTRATOR')).not.toBeInTheDocument();
   });
 
   it('points Tasks to /tasks and Home to /', async () => {
     renderSidebar('/');
-    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
-    expect(screen.getByText('HOME').closest('a')).toHaveAttribute('href', '/');
-    expect(screen.getByText('TASKS').closest('a')).toHaveAttribute('href', '/tasks');
+    await waitFor(() => expect(screen.getByText('Home')).toBeInTheDocument());
+    expect(screen.getByText('Home').closest('a')).toHaveAttribute('href', '/');
+    expect(screen.getByText('Tasks').closest('a')).toHaveAttribute('href', '/tasks');
   });
 
   it('nav links carry an aria-label matching the nav label', async () => {
     renderSidebar('/');
-    await waitFor(() => expect(screen.getByText('HOME')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Home')).toBeInTheDocument());
     expect(screen.getByLabelText('Home')).toBeInTheDocument();
     expect(screen.getByLabelText('Tasks')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
   });
 
-  it('active nav row carries the cyan tint + 2px left accent bar', async () => {
+  it('active nav row carries primary tint + left accent bar classes', async () => {
     renderSidebar('/tasks');
     const row = await screen.findByTestId('sidebar-nav-tasks');
     expect(row).toHaveAttribute('data-active', 'true');
-    expect(row.style.backgroundColor).toBe('rgba(59, 130, 246, 0.14)');
-    expect(row.style.borderLeft).toBe('2px solid rgb(59, 130, 246)');
+    expect(row.className).toMatch(/border-primary/);
+    expect(row.className).toMatch(/bg-primary\/15/);
+    expect(row.className).toMatch(/text-primary/);
   });
 });
 
@@ -95,7 +96,7 @@ describe('UniversalSidebar grouping', () => {
     ]);
     renderSidebar();
     await waitFor(() => expect(screen.getByText('Scratchwork')).toBeInTheDocument());
-    expect(screen.getByText('OTHER')).toBeInTheDocument();
+    expect(screen.getByText('Other')).toBeInTheDocument();
   });
 
   it('does not render a + button on the Other group', async () => {
@@ -109,7 +110,7 @@ describe('UniversalSidebar grouping', () => {
       }),
     ]);
     renderSidebar();
-    await waitFor(() => expect(screen.getByText('OTHER')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Other')).toBeInTheDocument());
     expect(screen.queryByTestId('sidebar-group-add-__other__')).toBeNull();
   });
 

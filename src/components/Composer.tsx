@@ -22,6 +22,14 @@ import { AgentPickerField } from './fields/AgentPickerField';
 import { HarnessPicker } from './HarnessPicker';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
+import {
+  composerChipAddClass,
+  composerChipNeutralClass,
+  composerChipPrimaryClass,
+  composerChipWarningClass,
+  composerWorktreeToggleClass,
+} from '@/lib/composer-styles';
+import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import type { PreflightResult } from '@/lib/api';
 import { useTasksContext } from '@/lib/tasks-context';
@@ -304,14 +312,9 @@ export function Composer({ onSubmitted }: Props = {}) {
   return (
     <GlassPanel
       level={3}
-      className="flex flex-col gap-2 rounded-[20px] px-4 py-3"
+      specular
+      className="composer-shell flex flex-col gap-3 rounded-2xl px-4 py-3"
       data-testid="composer"
-      style={{
-        backgroundColor: 'rgba(255, 255, 255, 0.078)',
-        borderColor: 'rgba(255, 255, 255, 0.15)',
-        boxShadow:
-          'inset 0 1px 0 0 rgba(255, 255, 255, 0.25), 0 24px 60px -12px rgba(0, 0, 0, 0.56)',
-      }}
     >
       <IntentHeader
         state={state}
@@ -324,7 +327,7 @@ export function Composer({ onSubmitted }: Props = {}) {
         <div
           role="alert"
           data-testid="composer-error"
-          className="flex items-center justify-between border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          className="flex items-center justify-between rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
         >
           <span>{errorBanner.message}</span>
           {errorBanner.conflictTaskId && (
@@ -338,9 +341,11 @@ export function Composer({ onSubmitted }: Props = {}) {
         </div>
       )}
 
-      {/* Chip row — derives run_mode from (repo ∧ worktree). */}
       <div
-        className={`flex flex-wrap items-center gap-2 ${disabledByAddAgent ? 'pointer-events-none opacity-40' : ''}`}
+        className={cn(
+          'composer-toolbar flex flex-wrap items-center gap-2',
+          disabledByAddAgent && 'pointer-events-none opacity-40',
+        )}
         data-testid="chip-row"
       >
         {!hasRepo ? (
@@ -400,11 +405,7 @@ export function Composer({ onSubmitted }: Props = {}) {
       </div>
 
       {/* Prompt + submit — opaque block (terminal rule). */}
-      <form
-        onSubmit={handleSubmit}
-        className="flex flex-col gap-3 rounded-2xl border border-white/10 p-3"
-        style={{ backgroundColor: '#0B0C0F' }}
-      >
+      <form onSubmit={handleSubmit} className="composer-prompt-well flex flex-col gap-3 p-3">
         <textarea
           ref={textareaRef}
           data-testid="composer-prompt"
@@ -427,8 +428,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             disabled={!canSubmit}
             data-testid="composer-submit"
             title={blockedReason ?? undefined}
-            className="bg-cyan-500 text-white hover:bg-cyan-400"
-            style={{ boxShadow: canSubmit ? '0 0 20px rgba(59,130,246,0.45)' : undefined }}
+            className={canSubmit ? 'btn-primary-glow' : undefined}
           >
             {submitting ? 'Starting…' : 'Start task'}
           </Button>
@@ -523,11 +523,12 @@ function IntentHeader({
   return (
     <div
       data-testid="intent-header"
-      className={`flex items-center justify-between border px-3 py-1.5 text-xs ${
+      className={cn(
+        'flex items-center justify-between rounded-lg border px-3 py-1.5 text-xs',
         isError
           ? 'border-destructive/40 bg-destructive/10 text-destructive'
-          : 'border-border bg-muted/40 text-muted-foreground'
-      }`}
+          : 'border-glass-edge bg-glass-l1/50 text-muted-foreground',
+      )}
     >
       <span>{text}</span>
       <button
@@ -593,7 +594,7 @@ function RepoChip({ value, onChange, onClear }: RepoChipProps) {
         type="button"
         onClick={() => setExpanded(true)}
         data-testid="repo-chip-picker"
-        className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/20 bg-white/[0.03] px-3 py-1 text-[11px] font-mono text-muted-foreground hover:border-foreground hover:text-foreground"
+        className={composerChipAddClass}
       >
         <span aria-hidden>+</span>
         <span>Add repo or folder</span>
@@ -620,23 +621,17 @@ function RepoChip({ value, onChange, onClear }: RepoChipProps) {
     <div
       data-testid="repo-chip"
       title={value}
-      className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-mono"
-      style={{
-        backgroundColor: 'rgba(59, 130, 246, 0.12)',
-        borderColor: 'rgba(59, 130, 246, 0.4)',
-        color: '#3B82F6',
-      }}
+      className={composerChipPrimaryClass()}
     >
       <button
         type="button"
         onClick={onClear}
         aria-label="Remove"
-        className="inline-flex items-center gap-1.5 font-semibold hover:opacity-80"
-        style={{ color: '#3B82F6' }}
+        className="inline-flex items-center gap-1.5 font-semibold text-primary hover:opacity-80"
       >
         <span aria-hidden>📁</span>
         <span>{repoBasename(value)}</span>
-        <span aria-hidden style={{ color: 'rgba(59, 130, 246, 0.7)' }}>
+        <span aria-hidden className="text-primary/70">
           ×
         </span>
       </button>
@@ -653,7 +648,7 @@ interface BranchChipProps {
 function BranchChip({ repoPath, value, onChange }: BranchChipProps) {
   return (
     <div
-      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-[3px] text-[11px] font-mono"
+      className={composerChipNeutralClass}
       data-testid="branch-chip"
     >
       <span className="text-[11px] text-muted-foreground" aria-hidden>
@@ -691,21 +686,14 @@ function WorktreeCheckbox({ checked, onChange }: WorktreeCheckboxProps) {
       onClick={() => onChange(!checked)}
       data-testid="worktree-checkbox"
       data-state={checked ? 'checked' : 'unchecked'}
-      className="focus-ring inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[11px] font-mono transition-colors"
-      style={{
-        borderColor: checked ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.18)',
-        backgroundColor: checked ? 'rgba(59,130,246,0.12)' : 'transparent',
-        color: checked ? '#3B82F6' : 'var(--muted-foreground)',
-        fontWeight: checked ? 600 : 500,
-      }}
+      className={composerWorktreeToggleClass(checked)}
     >
       <span
         aria-hidden
-        className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-sm border"
-        style={{
-          borderColor: checked ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.22)',
-          backgroundColor: checked ? 'rgb(59,130,246)' : 'transparent',
-        }}
+        className={cn(
+          'inline-flex size-3.5 items-center justify-center rounded-sm border',
+          checked ? 'border-primary/60 bg-primary' : 'border-glass-edge bg-transparent',
+        )}
       >
         {checked && (
           <svg
@@ -804,7 +792,7 @@ function AgentChip({ value, onChange }: AgentChipProps) {
           value={null}
           onChange={onChange}
           triggerLabel="+ run as agent"
-          triggerClassName="focus-ring inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/20 bg-white/[0.03] px-3 py-1 text-[11px] font-mono text-muted-foreground hover:border-foreground hover:text-foreground"
+          triggerClassName={composerChipAddClass}
         />
       </div>
     );
@@ -813,23 +801,17 @@ function AgentChip({ value, onChange }: AgentChipProps) {
     <div
       data-testid="agent-chip"
       title={value}
-      className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-mono"
-      style={{
-        backgroundColor: 'rgba(245, 158, 11, 0.12)',
-        borderColor: 'rgba(245, 158, 11, 0.4)',
-        color: '#F59E0B',
-      }}
+      className={composerChipWarningClass()}
     >
       <button
         type="button"
         onClick={() => onChange(null)}
         aria-label="Clear agent"
-        className="inline-flex items-center gap-1.5 font-semibold hover:opacity-80"
-        style={{ color: '#F59E0B' }}
+        className="inline-flex items-center gap-1.5 font-semibold text-warning hover:opacity-80"
       >
         <span aria-hidden>🤖</span>
         <span>{value}</span>
-        <span aria-hidden style={{ color: 'rgba(245, 158, 11, 0.7)' }}>
+        <span aria-hidden className="text-warning/70">
           ×
         </span>
       </button>
@@ -846,7 +828,7 @@ interface HarnessChipProps {
 function HarnessChip({ value, onChange }: HarnessChipProps) {
   return (
     <div
-      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-[3px] text-[11px] font-mono"
+      className={composerChipNeutralClass}
       data-testid="harness-chip"
       title="Coding agent"
     >
@@ -898,7 +880,7 @@ function ChipButton({ children, onClick, ...rest }: React.ButtonHTMLAttributes<H
     <button
       type="button"
       onClick={onClick}
-      className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-white/[0.15] bg-white/[0.03] px-3 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground hover:bg-white/[0.08]"
+      className={cn(composerChipAddClass, 'border-solid hover:bg-glass-l2/50')}
       {...rest}
     >
       {children}
@@ -920,7 +902,7 @@ function ChipRemovable({
     <div
       {...rest}
       title={title}
-      className="inline-flex items-center gap-1 rounded-full border border-white/[0.15] bg-white/[0.06] px-3 py-1 text-[11px] font-mono"
+      className={composerChipNeutralClass}
     >
       <button
         type="button"

@@ -1,18 +1,20 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  type ReactNode,
-  type CSSProperties,
-} from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
+import { AddChip } from '@/components/layout/add-chip';
+import { SectionCard } from '@/components/layout/section-card';
+import { SettingRow } from '@/components/layout/setting-row';
+import {
+  SettingsLayout,
+  type SettingsScrollSection,
+} from '@/components/layout/settings-layout';
 import { GlassPanel } from '@/components/ui/glass-panel';
+import { Switch } from '@/components/ui/switch';
+import { ROW_DIVIDER } from '@/lib/design-tokens';
 import {
   Dialog,
   DialogContent,
@@ -20,92 +22,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-
-const ROW_DIVIDER: CSSProperties = { borderBottom: '1px solid rgba(255,255,255,0.10)' };
-
-const TOGGLE_ON_STYLE: CSSProperties = {
-  background: 'linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%)',
-  boxShadow: '0 0 12px rgba(59,130,246,0.45), inset 0 1px 0 rgba(255,255,255,0.35)',
-};
-
-const TOGGLE_OFF_STYLE: CSSProperties = {
-  backgroundColor: 'rgba(255,255,255,0.08)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14)',
-  border: '1px solid rgba(255,255,255,0.14)',
-};
-
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className="focus-ring relative h-5 w-9 transition-colors disabled:opacity-40"
-      style={checked ? TOGGLE_ON_STYLE : TOGGLE_OFF_STYLE}
-      onClick={() => onChange(!checked)}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 bg-white transition-transform ${checked ? 'translate-x-4' : ''}`}
-      />
-    </button>
-  );
-}
-
-function SettingRow({
-  label,
-  description,
-  children,
-  lastRow = false,
-}: {
-  label: string;
-  description?: string;
-  children: ReactNode;
-  lastRow?: boolean;
-}) {
-  return (
-    <div
-      className="flex items-center justify-between py-3"
-      style={lastRow ? undefined : ROW_DIVIDER}
-    >
-      <div>
-        <span className="text-sm">{label}</span>
-        {description && <p className="text-xs text-[#b5b5bd]">{description}</p>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-interface SectionCardProps {
-  id: string;
-  title: string;
-  count?: string | number;
-  help?: string;
-  trailing?: ReactNode;
-  children: ReactNode;
-  scrollRef: (el: HTMLElement | null) => void;
-}
-
-function SectionCard({ id, title, count, help, trailing, children, scrollRef }: SectionCardProps) {
-  return (
-    <section id={`section-${id}`} ref={scrollRef} className="mb-6 scroll-mt-6">
-      <GlassPanel level={2} className="px-5">
-        <header
-          className="flex items-center justify-between"
-          style={{ ...ROW_DIVIDER, padding: '18px 0' }}
-        >
-          <div className="flex items-center gap-3">
-            <h2 className="text-[11px] font-bold uppercase tracking-wider text-white">{title}</h2>
-            {count !== undefined && <span className="text-xs text-[#8a8a8a]">{count}</span>}
-            {help && <span className="text-xs text-[#8a8a8a]">{help}</span>}
-          </div>
-          {trailing}
-        </header>
-        <div className="py-2">{children}</div>
-      </GlassPanel>
-    </section>
-  );
-}
 
 function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { agents, loading, error, refresh } = useAgents();
@@ -134,7 +50,7 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
   return (
     <SectionCard
       id="agents"
-      title="AGENTS"
+      title="Agents"
       count={!loading && !error ? agents.length : undefined}
       scrollRef={scrollRef}
       trailing={<AddChip label="+ New agent" onClick={() => setShowCreate(true)} />}
@@ -263,7 +179,7 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
   return (
     <SectionCard
       id="skills"
-      title="SKILLS"
+      title="Skills"
       count={!loading && !error ? skills.length : undefined}
       scrollRef={scrollRef}
       trailing={<AddChip label="+ New skill" onClick={() => setShowCreate(true)} />}
@@ -394,19 +310,6 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
   );
 }
 
-function AddChip({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="focus-ring inline-flex items-center gap-1 rounded-md border border-[#3B82F6]/40 px-2.5 py-1 text-xs font-medium text-[#60a5fa] transition-colors hover:bg-[#3B82F6]/20 active:bg-[#3B82F6]/30 disabled:opacity-40"
-      style={{ backgroundColor: 'rgba(59,130,246,0.12)' }}
-    >
-      {label}
-    </button>
-  );
-}
-
 function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () => void }) {
   const [showMenu, setShowMenu] = useState(false);
   const navigate = useNavigate();
@@ -507,7 +410,7 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
   return (
     <SectionCard
       id="repositories"
-      title="REPOSITORIES"
+      title="Repositories"
       count={!loading && !error ? configs.length : undefined}
       scrollRef={scrollRef}
       trailing={
@@ -644,7 +547,7 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
   if (loading) return null;
 
   return (
-    <SectionCard id="editor" title="EDITOR" scrollRef={scrollRef}>
+    <SectionCard id="editor" title="Editor" scrollRef={scrollRef}>
       <SettingRow
         label="Editor"
         description="Editor to open when clicking the Editor button on tasks"
@@ -731,7 +634,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
   if (loading) return null;
 
   return (
-    <SectionCard id="agent-launch" title="AGENT LAUNCH FLAGS" scrollRef={scrollRef}>
+    <SectionCard id="agent-launch" title="Agent launch" scrollRef={scrollRef}>
       {envOverride !== null && (
         <div className="mb-3 border border-[#FFB800]/40 bg-[#FFB800]/5 px-3 py-2 text-xs text-[#FFB800]">
           Overridden by OCTOMUX_CLAUDE_FLAGS env var:{' '}
@@ -743,7 +646,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
         label="--dangerously-skip-permissions"
         description="Also adds cursor-agent --force for Cursor harness tasks — same permissive stance as Claude. Cursor CLI calls this behavior --force (--yolo is an alias)."
       >
-        <ToggleSwitch checked={dangerouslySkip} onChange={handleToggle} />
+        <Switch checked={dangerouslySkip} onChange={handleToggle} />
       </SettingRow>
 
       {dangerouslySkip && (
@@ -945,7 +848,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
   if (loading || harnessesLoading) return null;
 
   return (
-    <SectionCard id="coding-agent" title="CODING AGENT" scrollRef={scrollRef}>
+    <SectionCard id="coding-agent" title="Coding agent" scrollRef={scrollRef}>
       <SettingRow
         label="Default coding agent"
         description="New tasks and chats use this coding agent unless overridden in the composer"
@@ -1007,7 +910,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
         label="--force (skip permissions)"
         description="Adds --force only from this switch. The Agent launch section’s --dangerously-skip-permissions toggle also implies --force for cursor-agent (--yolo is a CLI alias), even when this is off."
       >
-        <ToggleSwitch checked={cursorForce} onChange={handleCursorForceToggle} />
+        <Switch checked={cursorForce} onChange={handleCursorForceToggle} />
       </SettingRow>
 
       {dangerousLaunchGlobal && !cursorForce && (
@@ -1128,7 +1031,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
                   }
                   lastRow={i === entries.length - 1}
                 >
-                  <ToggleSwitch checked={entry.enabled} onChange={(v) => handleToggle(entry, v)} />
+                  <Switch checked={entry.enabled} onChange={(v) => handleToggle(entry, v)} />
                 </SettingRow>
                 {entry.requires_env && (
                   <div className="mb-1 border border-[#FFB800]/40 bg-[#FFB800]/5 px-3 py-1.5 text-xs text-[#FFB800]">
@@ -1147,7 +1050,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
   return (
     <SectionCard
       id="hooks"
-      title="HOOKS"
+      title="Hooks"
       count={!loading && !error ? hooks.length : undefined}
       scrollRef={scrollRef}
     >
@@ -1182,32 +1085,6 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
   );
 }
 
-type SectionId =
-  | 'general'
-  | 'agents'
-  | 'skills'
-  | 'hooks'
-  | 'repositories'
-  | 'editor'
-  | 'coding-agent'
-  | 'agent-launch';
-
-const NAV_ITEMS: { id: SectionId; label: string }[] = [
-  { id: 'general', label: 'GENERAL' },
-  { id: 'agents', label: 'AGENTS' },
-  { id: 'skills', label: 'SKILLS' },
-  { id: 'hooks', label: 'HOOKS' },
-  { id: 'repositories', label: 'REPOSITORIES' },
-  { id: 'editor', label: 'EDITOR' },
-  { id: 'coding-agent', label: 'CODING AGENT' },
-  { id: 'agent-launch', label: 'AGENT LAUNCH' },
-];
-
-// Extra items that navigate away (not in-page scroll)
-const NAV_EXTRA_ITEMS: { id: string; label: string; to: string }[] = [
-  { id: 'integrations', label: 'INTEGRATIONS', to: '/integrations' },
-];
-
 function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [notifications, setNotifications] = useState(
     () => localStorage.getItem('octomux-notifications') !== 'false',
@@ -1216,9 +1093,9 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
     () => localStorage.getItem('octomux-sidebar-collapsed') === 'true',
   );
   return (
-    <SectionCard id="general" title="GENERAL" scrollRef={scrollRef}>
+    <SectionCard id="general" title="General" scrollRef={scrollRef}>
       <SettingRow label="Notifications" description="Show toast notifications for task events">
-        <ToggleSwitch
+        <Switch
           checked={notifications}
           onChange={(v) => {
             setNotifications(v);
@@ -1227,7 +1104,7 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
         />
       </SettingRow>
       <SettingRow label="Sidebar collapsed by default" lastRow>
-        <ToggleSwitch
+        <Switch
           checked={sidebarCollapsed}
           onChange={(v) => {
             setSidebarCollapsed(v);
@@ -1240,18 +1117,17 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
 }
 
 export default function SettingsPage() {
-  const navigate = useNavigate();
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
-  const [activeSection, setActiveSection] = useState<SectionId>('general');
+  const [activeSection, setActiveSection] = useState<SettingsScrollSection>('general');
 
   const setRef = useCallback(
-    (id: SectionId) => (el: HTMLElement | null) => {
+    (id: SettingsScrollSection) => (el: HTMLElement | null) => {
       sectionRefs.current[id] = el;
     },
     [],
   );
 
-  const scrollTo = useCallback((id: SectionId) => {
+  const scrollTo = useCallback((id: SettingsScrollSection) => {
     setActiveSection(id);
     const el = sectionRefs.current[id];
     if (el && typeof el.scrollIntoView === 'function') {
@@ -1260,80 +1136,20 @@ export default function SettingsPage() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col">
-      <GlassPanel level={1}>
-        <div className="flex items-center justify-between px-6 py-4">
-          <div>
-            <h1 className="font-display text-[30px] font-semibold leading-none text-white">
-              Settings
-            </h1>
-            <p className="mt-1 font-mono text-[11px] text-[#8a8a8a]">
-              // workspace preferences · synced to ~/.octomux/config.json
-            </p>
-          </div>
-        </div>
-      </GlassPanel>
-
-      <div className="flex min-h-0 flex-1">
-        <GlassPanel
-          level={1}
-          className="flex shrink-0 flex-col gap-1 border-r border-glass-edge py-4"
-          style={{ width: 220 }}
-        >
-          <nav aria-label="Settings sections" className="flex flex-col">
-            {NAV_ITEMS.map((item) => {
-              const isActive = item.id === activeSection;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-testid={`settings-nav-${item.id}`}
-                  data-active={isActive ? 'true' : undefined}
-                  onClick={() => scrollTo(item.id)}
-                  className={`focus-ring relative px-5 py-2 text-left text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                    isActive ? 'text-[#60a5fa]' : 'text-[#b5b5bd] hover:text-white'
-                  }`}
-                  style={
-                    isActive
-                      ? {
-                          backgroundColor: 'rgba(59,130,246,0.12)',
-                          boxShadow: 'inset 2px 0 0 0 #3B82F6',
-                        }
-                      : undefined
-                  }
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', margin: '8px 0' }} />
-            {NAV_EXTRA_ITEMS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                data-testid={`settings-nav-${item.id}`}
-                onClick={() => navigate(item.to)}
-                className="focus-ring relative px-5 py-2 text-left text-[11px] font-bold uppercase tracking-wider text-[#b5b5bd] transition-colors hover:text-white"
-              >
-                {item.label} ↗
-              </button>
-            ))}
-          </nav>
-        </GlassPanel>
-
-        <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
-          <div className="mx-auto max-w-3xl">
-            <GeneralSection scrollRef={setRef('general')} />
-            <AgentsSection scrollRef={setRef('agents')} />
-            <SkillsSection scrollRef={setRef('skills')} />
-            <HooksSection scrollRef={setRef('hooks')} />
-            <RepoConfigsSection scrollRef={setRef('repositories')} />
-            <EditorSection scrollRef={setRef('editor')} />
-            <CodingAgentSection scrollRef={setRef('coding-agent')} />
-            <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
-          </div>
-        </div>
-      </div>
-    </div>
+    <SettingsLayout
+      title="Settings"
+      description="Workspace preferences · synced to ~/.octomux/config.json"
+      activeScrollSection={activeSection}
+      onScrollTo={scrollTo}
+    >
+      <GeneralSection scrollRef={setRef('general')} />
+      <AgentsSection scrollRef={setRef('agents')} />
+      <SkillsSection scrollRef={setRef('skills')} />
+      <HooksSection scrollRef={setRef('hooks')} />
+      <RepoConfigsSection scrollRef={setRef('repositories')} />
+      <EditorSection scrollRef={setRef('editor')} />
+      <CodingAgentSection scrollRef={setRef('coding-agent')} />
+      <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
+    </SettingsLayout>
   );
 }

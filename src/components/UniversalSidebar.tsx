@@ -26,35 +26,22 @@ import {
   type SidebarGroup,
 } from '@/lib/sidebar-utils';
 import { api } from '@/lib/api';
+import {
+  sidebarIconColor,
+  sidebarNavLinkClass,
+  sidebarNavTileClass,
+  sidebarSecondaryLinkClass,
+} from '@/lib/sidebar-styles';
+import { cn } from '@/lib/utils';
 import type { RunMode, Agent } from '../../server/types';
 
 const STORAGE_KEY = 'octomux-sidebar-collapsed';
 const GROUP_COLLAPSE_PREFIX = 'octomux:sidebar:collapsed:';
 
-// ─── Glass material ────────────────────────────────────────────────────────
-// The sidebar uses a dark L1 glass panel (spec: rgba(14,15,20,0.9)) which is
-// distinct from the shared `--glass-l1` white tint (meant for surfaces sitting
-// on top of the page). We reuse the `glass-blur-l1` + `focus-ring` utilities
-// from the T1 design system (src/index.css) and only inline the dark tint +
-// specular highlight, which are sidebar-specific.
-
-const GLASS_L1_STYLE: CSSProperties = {
-  backgroundColor: 'rgba(14,15,20,0.9)',
-  borderRight: '1px solid rgba(255,255,255,0.08)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
-};
-
-const FOOTER_STRIP_STYLE: CSSProperties = {
-  backgroundColor: 'rgba(14,15,20,0.75)',
-  borderTop: '1px solid rgba(255,255,255,0.08)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
-};
-
 const FOCUS_RING = 'focus-ring';
 
 const CYAN_ACTIVE_FG = '#7DD3FC';
 const NAV_INACTIVE_FG = 'rgba(255,255,255,0.65)';
-// Mockup spec (PsSGN/uReOg): active row = 14% cyan fill + 2px left accent bar.
 const ACTIVE_FILL = 'rgba(59,130,246,0.14)';
 const ACTIVE_ACCENT = '#3B82F6';
 const SIDEBAR_EXPANDED_WIDTH = 240;
@@ -309,13 +296,13 @@ const NAV_ITEMS: ReadonlyArray<{
   to: string;
   Icon: (p: { color: string }) => ReactNode;
 }> = [
-  { key: 'home', label: 'HOME', to: '/', Icon: HomeIcon },
-  { key: 'tasks', label: 'TASKS', to: '/tasks', Icon: TasksIcon },
-  { key: 'settings', label: 'SETTINGS', to: '/settings', Icon: SettingsIcon },
+  { key: 'home', label: 'Home', to: '/', Icon: HomeIcon },
+  { key: 'tasks', label: 'Tasks', to: '/tasks', Icon: TasksIcon },
+  { key: 'settings', label: 'Settings', to: '/settings', Icon: SettingsIcon },
 ];
 
 const MORE_ITEMS = [
-  { key: 'workspaces', label: 'WORKSPACES', to: '/workspaces', Icon: WorkspacesIcon },
+  { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
 ] as const;
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────
@@ -624,10 +611,9 @@ export function UniversalSidebar() {
     <nav
       aria-label="Sidebar"
       data-testid="universal-sidebar"
-      className="glass-blur-l1 hidden md:flex flex-col overflow-y-auto overflow-x-hidden transition-[width] duration-150 ease-out"
+      className="glass-chrome glass-blur-l1 motion-sidebar hidden md:flex flex-col overflow-y-auto overflow-x-hidden border-r border-glass-edge"
       style={{
         width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH,
-        ...GLASS_L1_STYLE,
       }}
     >
       {/* Logo row */}
@@ -660,13 +646,10 @@ export function UniversalSidebar() {
                   'brightness(0) saturate(100%) invert(45%) sepia(98%) saturate(2000%) hue-rotate(210deg) brightness(100%) contrast(96%)',
               }}
             />
-            <span
-              className="font-sans font-semibold text-white"
-              style={{ fontSize: 16, letterSpacing: 1 }}
-            >
-              OCTOMUX
+            <span className="font-display text-base font-semibold tracking-tight text-foreground">
+              Octomux
             </span>
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>v2.0</span>
+            <span className="text-[11px] text-muted-soft">v2.0</span>
           </div>
           <button
             onClick={toggleCollapsed}
@@ -694,14 +677,10 @@ export function UniversalSidebar() {
       <div style={{ paddingBottom: 16 }}>
         {!collapsed && (
           <div
-            className="font-bold uppercase tracking-wider"
-            style={{
-              fontSize: 10,
-              color: 'rgba(255,255,255,0.4)',
-              padding: '0 20px 8px',
-            }}
+            className="text-[10px] font-medium tracking-wide text-muted-soft"
+            style={{ padding: '0 20px 8px' }}
           >
-            {'// NAVIGATION'}
+            Navigation
           </div>
         )}
         {NAV_ITEMS.map(({ key, label, to, Icon }) => {
@@ -788,30 +767,18 @@ function ExpandedNavRow({
   isActive: boolean;
 }) {
   const pretty = label.charAt(0) + label.slice(1).toLowerCase();
-  const iconColor = isActive ? '#3B82F6' : NAV_INACTIVE_FG;
 
   return (
-    <div style={{ padding: '2px 12px' }}>
+    <div className="px-3 py-0.5">
       <Link
         to={to}
         aria-label={pretty}
         aria-current={isActive ? 'page' : undefined}
         data-active={isActive || undefined}
         data-testid={`sidebar-nav-${label.toLowerCase()}`}
-        className={`flex items-center hover:bg-white/[0.04] ${FOCUS_RING}`}
-        style={{
-          padding: '8px 10px',
-          paddingLeft: isActive ? 8 : 10,
-          gap: 10,
-          borderRadius: 10,
-          backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-          borderLeft: `2px solid ${isActive ? ACTIVE_ACCENT : 'transparent'}`,
-          color: isActive ? ACTIVE_ACCENT : NAV_INACTIVE_FG,
-          fontWeight: isActive ? 600 : 500,
-          fontSize: 13,
-        }}
+        className={sidebarNavLinkClass(isActive)}
       >
-        <Icon color={iconColor} />
+        <Icon color={sidebarIconColor(isActive)} />
         <span className="truncate">{label}</span>
       </Link>
     </div>
@@ -833,7 +800,6 @@ function CollapsedNavTile({
   tooltip: string;
   ariaLabel: string;
 }) {
-  const iconColor = isActive ? '#3B82F6' : NAV_INACTIVE_FG;
   return (
     <div className="flex justify-center py-1">
       <Link
@@ -842,16 +808,9 @@ function CollapsedNavTile({
         aria-label={ariaLabel}
         aria-current={isActive ? 'page' : undefined}
         data-active={isActive || undefined}
-        className={`relative flex items-center justify-center ${FOCUS_RING}`}
-        style={{
-          width: RAIL_TILE_SIZE,
-          height: RAIL_TILE_SIZE,
-          borderRadius: 10,
-          backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-          border: `1px solid ${isActive ? 'rgba(59,130,246,0.4)' : 'transparent'}`,
-        }}
+        className={sidebarNavTileClass(isActive)}
       >
-        <Icon color={iconColor} />
+        <Icon color={sidebarIconColor(isActive)} />
       </Link>
     </div>
   );
@@ -906,8 +865,7 @@ function SidebarGroupView({
           <button
             type="button"
             onClick={onToggleGroup}
-            className={`flex items-center gap-1.5 font-bold uppercase tracking-wider hover:text-white rounded-[4px] ${FOCUS_RING}`}
-            style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}
+            className={`flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-muted-soft hover:text-white rounded-[4px] ${FOCUS_RING}`}
             aria-expanded={!groupCollapsed}
             aria-controls={`sidebar-group-${group.key}`}
           >
@@ -930,7 +888,7 @@ function SidebarGroupView({
                 strokeLinejoin="round"
               />
             </svg>
-            <span>{group.repo.toUpperCase()}</span>
+            <span>{group.repo}</span>
             <span
               aria-hidden="true"
               data-testid={`sidebar-group-count-${group.key}`}
@@ -1199,14 +1157,10 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
         onClick={toggle}
         aria-expanded={open}
         data-testid="sidebar-more-toggle"
-        className={`flex w-full items-center justify-between font-bold uppercase tracking-wider hover:text-white rounded-[4px] ${FOCUS_RING}`}
-        style={{
-          fontSize: 10,
-          color: 'rgba(255,255,255,0.4)',
-          padding: '0 20px 8px',
-        }}
+        className={`flex w-full items-center justify-between text-[10px] font-medium tracking-wide text-muted-soft hover:text-white rounded-[4px] ${FOCUS_RING}`}
+        style={{ padding: '0 20px 8px' }}
       >
-        <span>{'// MORE'}</span>
+        <span>More</span>
         <span
           style={{
             transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
@@ -1221,24 +1175,13 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
         MORE_ITEMS.map(({ key, to, Icon, label }) => {
           const isActive = activePath === to || activePath.startsWith(to + '/');
           return (
-            <div key={key} style={{ padding: '2px 12px' }}>
+            <div key={key} className="px-3 py-0.5">
               <Link
                 to={to}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex items-center hover:bg-white/[0.04] ${FOCUS_RING}`}
-                style={{
-                  padding: '8px 10px',
-                  paddingLeft: isActive ? 8 : 10,
-                  gap: 10,
-                  borderRadius: 10,
-                  backgroundColor: isActive ? ACTIVE_FILL : 'transparent',
-                  borderLeft: `2px solid ${isActive ? ACTIVE_ACCENT : 'transparent'}`,
-                  color: isActive ? ACTIVE_ACCENT : NAV_INACTIVE_FG,
-                  fontWeight: isActive ? 600 : 500,
-                  fontSize: 12,
-                }}
+                className={sidebarSecondaryLinkClass(isActive)}
               >
-                <Icon color={isActive ? '#3B82F6' : NAV_INACTIVE_FG} />
+                <Icon color={sidebarIconColor(isActive)} />
                 {label}
               </Link>
             </div>
@@ -1316,14 +1259,10 @@ function ChatsSection({ collapsed, activePath }: { collapsed: boolean; activePat
     <div style={{ paddingBottom: 12 }}>
       {!collapsed && chats.length > 0 && (
         <div
-          className="font-bold uppercase tracking-wider"
-          style={{
-            fontSize: 10,
-            color: 'rgba(255,255,255,0.4)',
-            padding: '0 20px 6px',
-          }}
+          className="text-[10px] font-medium tracking-wide text-muted-soft"
+          style={{ padding: '0 20px 6px' }}
         >
-          {'// CHATS'}
+          Chats
         </div>
       )}
       {chats.map((chat) => {
@@ -1597,21 +1536,16 @@ function SidebarFooter({ collapsed }: { collapsed: boolean }) {
       ref={rootRef}
       data-testid="sidebar-footer"
       data-connection={connection}
-      className="glass-blur-l1 relative shrink-0 mt-auto"
-      style={{
-        ...FOOTER_STRIP_STYLE,
-        padding: collapsed ? '10px 0' : '10px 12px',
-      }}
+      className={cn(
+        'glass-chrome-footer glass-blur-l1 relative mt-auto shrink-0',
+        collapsed ? 'px-0 py-2.5' : 'px-3 py-2.5',
+      )}
     >
       {menuOpen && (
         <div
           role="menu"
           data-testid="sidebar-footer-menu"
-          className="glass-blur-l1 absolute left-2 right-2 bottom-full mb-2 rounded-[8px] border py-1 text-xs outline-none z-50"
-          style={{
-            backgroundColor: 'rgba(20,21,28,0.95)',
-            borderColor: 'rgba(255,255,255,0.08)',
-          }}
+          className="glass-chrome-menu glass-blur-l2 absolute bottom-full left-2 right-2 z-50 mb-2 rounded-xl py-1 text-xs outline-none"
         >
           <button
             role="menuitem"

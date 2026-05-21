@@ -1,11 +1,11 @@
 import { memo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import type { Task, WorkflowStatus } from '../../server/types';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { BoardCard } from './BoardCard';
 import { EmptyColumnPlaceholder } from './EmptyColumnPlaceholder';
 import { DraggableBoardCard } from './DraggableBoardCard';
-
-// ─── Column metadata ──────────────────────────────────────────────────────
+import { cn } from '@/lib/utils';
 
 interface ColumnDef {
   id: WorkflowStatus;
@@ -16,13 +16,13 @@ interface ColumnDef {
 }
 
 export const COLUMN_DEFS: ColumnDef[] = [
-  { id: 'backlog', label: 'Backlog', accentClass: 'text-[#8a8a8a]', countClass: 'text-[#4a4a4a]' },
-  { id: 'planned', label: 'Planned', accentClass: 'text-[#8a8a8a]', countClass: 'text-[#4a4a4a]' },
+  { id: 'backlog', label: 'Backlog', accentClass: 'text-muted-soft', countClass: 'text-muted-soft' },
+  { id: 'planned', label: 'Planned', accentClass: 'text-muted-soft', countClass: 'text-muted-soft' },
   {
     id: 'in_progress',
     label: 'In progress',
-    accentClass: 'text-[#3B82F6]',
-    countClass: 'text-[#3B82F6]/60',
+    accentClass: 'text-primary',
+    countClass: 'text-primary/60',
   },
   {
     id: 'human_review',
@@ -33,20 +33,20 @@ export const COLUMN_DEFS: ColumnDef[] = [
   {
     id: 'pr',
     label: 'PR',
-    accentClass: 'text-green-400',
-    countClass: 'text-green-400/60',
+    accentClass: 'text-success',
+    countClass: 'text-success/60',
   },
   {
     id: 'done',
     label: 'Done',
-    accentClass: 'text-[#4a4a4a]',
-    countClass: 'text-[#3a3a3a]',
+    accentClass: 'text-muted-soft',
+    countClass: 'text-muted-soft/80',
   },
   {
     id: 'archived',
     label: 'Archived',
-    accentClass: 'text-[#5a5a5a]',
-    countClass: 'text-[#3a3a3a]',
+    accentClass: 'text-muted-soft/80',
+    countClass: 'text-muted-soft/60',
     muted: true,
   },
 ];
@@ -78,18 +78,16 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
   };
 
   return (
-    <div
+    <GlassPanel
+      level={1}
       data-testid={`board-column-${column.id}`}
-      className={`flex h-full w-[260px] flex-none flex-col${column.muted ? ' opacity-60' : ''}`}
+      className={cn(
+        'flex h-full w-[260px] flex-none flex-col rounded-2xl p-2',
+        column.muted && 'opacity-60',
+      )}
     >
-      {/* Column header */}
-      <div
-        className="mb-2 flex items-center justify-between px-1"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '8px' }}
-      >
-        <span className={`text-[11px] font-bold uppercase tracking-wider ${column.accentClass}`}>
-          {column.label}
-        </span>
+      <div className="mb-2 flex items-center justify-between border-b border-glass-edge px-1 pb-2">
+        <span className={cn('text-xs font-semibold', column.accentClass)}>{column.label}</span>
         <div className="flex items-center gap-2">
           {column.id === 'done' && onArchiveDone && (
             <button
@@ -97,23 +95,22 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
               data-testid="archive-all-done-btn"
               disabled={tasks.length === 0 || archiving}
               onClick={handleArchiveDone}
-              className="text-[10px] text-[#6a6a6a] transition-colors hover:text-[#8a8a8a] disabled:cursor-not-allowed disabled:opacity-40"
+              className="focus-ring rounded text-[10px] text-muted-soft transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
               Archive all ({tasks.length})
             </button>
           )}
-          <span className={`text-[11px] tabular-nums ${column.countClass}`}>{tasks.length}</span>
+          <span className={cn('text-xs tabular-nums', column.countClass)}>{tasks.length}</span>
         </div>
       </div>
 
-      {/* Droppable card list */}
       <div
         ref={setNodeRef}
         data-testid={`column-drop-${column.id}`}
-        className="flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto rounded-lg px-0.5 pb-2 transition-colors"
-        style={{
-          backgroundColor: isOver ? 'rgba(255,255,255,0.03)' : 'transparent',
-        }}
+        className={cn(
+          'board-column-drop flex min-h-[80px] flex-1 flex-col gap-2 overflow-y-auto px-0.5 pb-2',
+          isOver && 'bg-glass-l2/30',
+        )}
       >
         {tasks.length === 0 ? (
           <EmptyColumnPlaceholder isOver={isOver} />
@@ -123,10 +120,9 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
           ))
         )}
       </div>
-    </div>
+    </GlassPanel>
   );
 });
 
-// Re-export ColumnDef and BoardCard for external use
 export type { ColumnDef };
 export { BoardCard };

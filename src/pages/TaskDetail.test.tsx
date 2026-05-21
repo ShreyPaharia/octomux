@@ -142,7 +142,7 @@ describe('TaskDetail', () => {
   it('shows Done button for running task', async () => {
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('DONE')).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
   });
 
@@ -150,9 +150,9 @@ describe('TaskDetail', () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('DONE')).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('DONE'));
+    await user.click(screen.getByText('Done'));
     expect(await screen.findByTestId('close-confirm')).toBeInTheDocument();
     // Not called until confirmed
     expect(apiMock.moveTask).not.toHaveBeenCalled();
@@ -162,9 +162,9 @@ describe('TaskDetail', () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('DONE')).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('DONE'));
+    await user.click(screen.getByText('Done'));
     await user.click(await screen.findByTestId('close-confirm-accept'));
     await waitFor(() => {
       expect(apiMock.moveTask).toHaveBeenCalledWith('test-task-01', {
@@ -177,9 +177,9 @@ describe('TaskDetail', () => {
     const user = userEvent.setup();
     renderDetail();
     await waitFor(() => {
-      expect(screen.getByText('DONE')).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
-    await user.click(screen.getByText('DONE'));
+    await user.click(screen.getByText('Done'));
     await user.click(screen.getByText('Cancel'));
     await waitFor(() => {
       expect(screen.queryByTestId('close-confirm')).not.toBeInTheDocument();
@@ -674,7 +674,7 @@ describe('TaskDetail', () => {
         if (showsDiff) expect(diffBtn).toBeInTheDocument();
         else expect(diffBtn).not.toBeInTheDocument();
 
-        const repoLabel = screen.queryByText('REPO');
+        const repoLabel = screen.queryByText('Repo');
         if (showsBranchInfo) expect(repoLabel).toBeInTheDocument();
         else expect(repoLabel).not.toBeInTheDocument();
       },
@@ -695,7 +695,7 @@ describe('TaskDetail', () => {
       });
     });
 
-    it('existing mode uses "WORKTREE HEAD" label', async () => {
+    it('existing mode uses "Worktree head" label', async () => {
       apiMock.getTask.mockResolvedValue(
         makeTask({
           run_mode: 'existing',
@@ -706,7 +706,7 @@ describe('TaskDetail', () => {
       );
       renderDetail();
       await waitFor(() => {
-        expect(screen.getByText('WORKTREE HEAD')).toBeInTheDocument();
+        expect(screen.getByText('Worktree head')).toBeInTheDocument();
       });
     });
 

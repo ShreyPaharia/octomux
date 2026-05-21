@@ -73,10 +73,10 @@ describe('HomePage', () => {
     expect(screen.getByTestId('command-palette-input')).toBeInTheDocument();
   });
 
-  it('renders the // INBOX eyebrow above the welcome heading', () => {
+  it('renders the Inbox eyebrow above the welcome heading', () => {
     renderHome('/');
     const eyebrow = screen.getByTestId('home-eyebrow');
-    expect(eyebrow).toHaveTextContent(/\/\/ INBOX/);
+    expect(eyebrow).toHaveTextContent('Inbox');
     expect(eyebrow).toHaveTextContent(/inbox zero|sessions? want/i);
   });
 
