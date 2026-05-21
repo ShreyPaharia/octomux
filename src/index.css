@@ -247,12 +247,6 @@
   transition: background-color 150ms ease;
 }
 
-/** Diff review cockpit — Monaco pane surface (intentionally flat, not frosted). */
-@utility diff-pane {
-  background-color: var(--glass-l0);
-  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.5);
-}
-
 @utility diff-pane-header {
   background-color: var(--glass-chrome);
   border-bottom: 1px solid var(--glass-edge);
@@ -264,8 +258,6 @@
     width: 100%;
     min-width: 0;
     position: relative;
-    isolation: isolate;
-    contain: layout;
   }
 
   .diff-editor-host .monaco-diff-editor {

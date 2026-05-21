@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { api, type DiffFileEntry, type DiffRange } from '@/lib/api';
 import type { Agent } from '../../server/types';
 import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
-import { GlassPanel } from '@/components/ui/glass-panel';
 import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { DiffFileTree } from './DiffFileTree';
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
@@ -341,12 +340,10 @@ function ApiDiffViewer({
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 gap-3 p-3">
-      <GlassPanel
+    <div className="flex h-full min-h-0 w-full min-w-0">
+      <aside
         data-testid="diff-file-list"
-        level={1}
-        specular
-        className="flex w-[260px] shrink-0 flex-col overflow-hidden rounded-xl"
+        className="glass-chrome flex w-[260px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
       >
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
@@ -360,13 +357,13 @@ function ApiDiffViewer({
             reviewed={reviewed}
           />
         )}
-      </GlassPanel>
-      <GlassPanel
+      </aside>
+      <div
         data-testid="diff-pane"
-        className="diff-pane flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-glass-edge"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-glass-l0"
       >
         {reviewCounts.total > 0 ? (
-          <div className="diff-pane-header flex items-center justify-end gap-2 px-4 py-2.5">
+          <div className="diff-pane-header flex shrink-0 items-center justify-end gap-2 border-b border-glass-edge px-4 py-2">
             <span
               data-testid="review-progress"
               aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
@@ -392,7 +389,7 @@ function ApiDiffViewer({
             />
           )}
         </div>
-      </GlassPanel>
+      </div>
     </div>
   );
 }

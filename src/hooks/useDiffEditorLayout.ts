@@ -17,11 +17,8 @@ export function useDiffEditorLayout(
     const relayout = () => {
       const width = el.clientWidth;
       const height = el.clientHeight;
-      if (width > 0 && height > 0) {
-        editor.layout({ width, height });
-      } else {
-        editor.layout();
-      }
+      if (width <= 0) return;
+      editor.layout({ width, height: height > 0 ? height : undefined });
     };
 
     relayout();

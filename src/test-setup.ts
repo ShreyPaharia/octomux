@@ -66,10 +66,18 @@ if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () {};
 }
 
-// jsdom doesn't implement ResizeObserver — stub with a no-op so components
-// that resize-observe their host nodes don't crash.
+// jsdom doesn't implement ResizeObserver — fire one callback on observe so
+// components that gate on host width can proceed in tests.
 class TestResizeObserver {
-  observe(): void {}
+  private readonly cb: ResizeObserverCallback;
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb;
+  }
+  observe(target: Element): void {
+    queueMicrotask(() => {
+      this.cb([{ target } as ResizeObserverEntry], this);
+    });
+  }
   unobserve(): void {}
   disconnect(): void {}
 }

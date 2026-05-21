@@ -6,6 +6,7 @@ import type { DiffFileEntry, FileDiffResponse } from '@/lib/api';
 import type { Agent } from '../../server/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useDiffEditorHostSize } from '@/hooks/useDiffEditorHostSize';
 import { useDiffEditorLayout } from '@/hooks/useDiffEditorLayout';
 import { useInlineCommentZones } from '@/hooks/useInlineCommentZones';
 import { useTaskCommentsContext } from '@/hooks/useTaskComments';
@@ -90,16 +91,21 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
   const path = file.path;
   const placeholderHeight = estimateHeight(file);
   const editorHostRef = useRef<HTMLDivElement | null>(null);
-  const [height, setHeight] = useState<number>(placeholderHeight);
+  const [contentHeight, setContentHeight] = useState<number>(placeholderHeight);
   const [editorInstance, setEditorInstance] = useState<editor.IStandaloneDiffEditor | null>(null);
-
-  useDiffEditorLayout(editorInstance, editorHostRef);
 
   const canRenderDiffBody =
     !file.ignored && !file.tooLarge && !file.binary && !error && !diff?.isDirectory;
   const showEditor = canRenderDiffBody && diff !== null;
   const awaitingMount = canRenderDiffBody && !mounted;
   const showLoadingPlaceholder = canRenderDiffBody && mounted && (loading || !diff);
+
+  const hostReady = mounted && showEditor;
+  const hostSize = useDiffEditorHostSize(editorHostRef, hostReady);
+  const canMountMonaco = hostReady && hostSize.width > 0;
+  const editorHeight = Math.max(contentHeight, MIN_HEIGHT);
+
+  useDiffEditorLayout(canMountMonaco ? editorInstance : null, editorHostRef);
 
   const handleMount = useCallback<DiffOnMount>(
     (ed) => {
@@ -108,13 +114,12 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
 
       const recomputeHeight = () => {
         const host = editorHostRef.current;
-        if (host && host.clientWidth > 0) {
-          ed.layout({ width: host.clientWidth, height: host.clientHeight || placeholderHeight });
-        }
+        const w = host?.clientWidth ?? 0;
         const orig = ed.getOriginalEditor().getContentHeight();
         const mod = ed.getModifiedEditor().getContentHeight();
         const h = Math.max(orig, mod, MIN_HEIGHT);
-        setHeight(h);
+        if (w > 0) ed.layout({ width: w, height: h });
+        setContentHeight(h);
       };
 
       ed.getOriginalEditor().onDidContentSizeChange(recomputeHeight);
@@ -124,7 +129,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
         requestAnimationFrame(recomputeHeight);
       });
     },
-    [path, onEditorMount, placeholderHeight],
+    [path, onEditorMount],
   );
 
   const portals = enableComments ? (
@@ -144,9 +149,9 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
       data-active={active ? 'true' : undefined}
       data-reviewed={reviewed ? 'true' : 'false'}
       id={`file-${encodeURIComponent(path)}`}
-      className="overflow-hidden rounded-lg border border-glass-edge bg-glass-l0"
+      className="border-b border-glass-edge bg-glass-l0 last:border-b-0"
     >
-      <header className="diff-pane-header relative z-[1] flex items-center justify-between gap-3 px-4 py-2.5">
+      <header className="diff-pane-header flex items-center justify-between gap-3 px-4 py-2">
         <span className="flex min-w-0 items-center gap-2">
           {showReviewToggle ? (
             <input
@@ -185,7 +190,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
           ) : null}
         </span>
       </header>
-      <div className="min-w-0">
+      <div className="min-w-0 w-full">
         {error ? (
           <div className="flex h-32 items-center justify-center text-sm text-destructive">
             {error}
@@ -209,47 +214,54 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
             {loading ? `Loading ${path}…` : null}
           </div>
         ) : showEditor && diff ? (
-          <Suspense
-            fallback={
-              <div
-                className="flex items-center justify-center text-xs text-muted-foreground"
-                style={{ height: placeholderHeight }}
+          <div
+            ref={editorHostRef}
+            className="diff-editor-host w-full min-w-0"
+            style={{ height: editorHeight }}
+          >
+            {canMountMonaco ? (
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                    Loading editor…
+                  </div>
+                }
               >
+                <MonacoDiff
+                  key={`${path}:${expanded ? 'e' : 'c'}:${hostSize.width}`}
+                  width={hostSize.width}
+                  height={editorHeight}
+                  className="diff-editor-host-inner"
+                  original={diff.oldContent}
+                  modified={diff.newContent}
+                  language={extToLanguage(path)}
+                  theme="vs-dark"
+                  onMount={handleMount}
+                  options={{
+                    readOnly: true,
+                    renderSideBySide: true,
+                    useInlineViewWhenSpaceIsLimited: false,
+                    automaticLayout: false,
+                    minimap: { enabled: false },
+                    hideUnchangedRegions: { enabled: !expanded },
+                    scrollBeyondLastLine: false,
+                    scrollBeyondLastColumn: 0,
+                    fixedOverflowWidgets: true,
+                    scrollbar: {
+                      alwaysConsumeMouseWheel: false,
+                      vertical: 'auto',
+                      horizontal: 'auto',
+                    },
+                  }}
+                />
+                {portals}
+              </Suspense>
+            ) : (
+              <div className="flex h-full min-h-[200px] items-center justify-center text-xs text-muted-foreground">
                 Loading editor…
               </div>
-            }
-          >
-            <div ref={editorHostRef} className="diff-editor-host w-full min-w-0" style={{ height }}>
-              <MonacoDiff
-                key={`${path}:${expanded ? 'e' : 'c'}`}
-                width="100%"
-                height="100%"
-                className="diff-editor-host-inner"
-                original={diff.oldContent}
-                modified={diff.newContent}
-                language={extToLanguage(path)}
-                theme="vs-dark"
-                onMount={handleMount}
-                options={{
-                  readOnly: true,
-                  renderSideBySide: true,
-                  useInlineViewWhenSpaceIsLimited: false,
-                  automaticLayout: true,
-                  minimap: { enabled: false },
-                  hideUnchangedRegions: { enabled: !expanded },
-                  scrollBeyondLastLine: false,
-                  scrollBeyondLastColumn: 0,
-                  fixedOverflowWidgets: true,
-                  scrollbar: {
-                    alwaysConsumeMouseWheel: false,
-                    vertical: 'auto',
-                    horizontal: 'auto',
-                  },
-                }}
-              />
-            </div>
-            {portals}
-          </Suspense>
+            )}
+          </div>
         ) : null}
       </div>
     </section>

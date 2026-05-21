@@ -24,7 +24,8 @@ import { DiffFileRow } from './DiffFileRow';
 
 const HASH_PREFIX = '#file=';
 const PROGRAMMATIC_SCROLL_MS = 700;
-const PREFETCH_ROOT_MARGIN = '200% 0px';
+/** Prefetch file bodies slightly before scroll; keep modest so Monaco mounts with real width. */
+const PREFETCH_ROOT_MARGIN = '40% 0px';
 
 export interface DiffFileListHandle {
   scrollToFile: (path: string) => void;
@@ -478,7 +479,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
   return (
     <div
       ref={scrollContainerRef}
-      className="flex h-full min-w-0 flex-col gap-2 overflow-x-hidden overflow-y-auto p-2"
+      className="flex h-full min-w-0 flex-col overflow-x-hidden overflow-y-auto"
     >
       {orderedFiles.map((file) => {
         const path = file.path;
