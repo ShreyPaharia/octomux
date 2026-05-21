@@ -341,7 +341,7 @@ function ApiDiffViewer({
   }
 
   return (
-    <div className="flex h-full min-h-0 gap-3 p-3">
+    <div className="flex h-full min-h-0 w-full min-w-0 gap-3 p-3">
       <GlassPanel
         data-testid="diff-file-list"
         level={1}

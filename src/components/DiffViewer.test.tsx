@@ -282,6 +282,7 @@ describe('DiffViewer', () => {
         screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}',
       );
       expect(opts.hideUnchangedRegions.enabled).toBe(false);
+      expect(opts.useInlineViewWhenSpaceIsLimited).toBe(false);
     });
   });
 

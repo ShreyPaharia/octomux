@@ -17,6 +17,12 @@ declare global {
 
 if (typeof self !== 'undefined' && !self.MonacoEnvironment) {
   self.MonacoEnvironment = {
-    getWorker: () => new EditorWorker(),
+    getWorker(_workerId: string, label: string) {
+      // Diff computation uses the same editor worker bundle in our Vite setup.
+      if (label === 'diffEditor' || label === 'editor') {
+        return new EditorWorker();
+      }
+      return new EditorWorker();
+    },
   };
 }

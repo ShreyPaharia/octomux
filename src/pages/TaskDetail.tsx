@@ -741,8 +741,8 @@ export default function TaskDetail() {
                 }
               />
             ) : null}
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 min-w-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 <DiffViewer
                   taskId={task.id}
                   isRunning={task.runtime_state === 'running'}

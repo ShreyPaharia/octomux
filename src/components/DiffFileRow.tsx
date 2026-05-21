@@ -1,11 +1,12 @@
 import '@/lib/monaco-env';
-import { Suspense, forwardRef, lazy, useCallback, useMemo, useState } from 'react';
+import { Suspense, forwardRef, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type { DiffFileEntry, FileDiffResponse } from '@/lib/api';
 import type { Agent } from '../../server/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useDiffEditorLayout } from '@/hooks/useDiffEditorLayout';
 import { useInlineCommentZones } from '@/hooks/useInlineCommentZones';
 import { useTaskCommentsContext } from '@/hooks/useTaskComments';
 
@@ -88,8 +89,11 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
 ) {
   const path = file.path;
   const placeholderHeight = estimateHeight(file);
+  const editorHostRef = useRef<HTMLDivElement | null>(null);
   const [height, setHeight] = useState<number>(placeholderHeight);
   const [editorInstance, setEditorInstance] = useState<editor.IStandaloneDiffEditor | null>(null);
+
+  useDiffEditorLayout(editorInstance, editorHostRef);
 
   const canRenderDiffBody =
     !file.ignored && !file.tooLarge && !file.binary && !error && !diff?.isDirectory;
@@ -100,18 +104,27 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
   const handleMount = useCallback<DiffOnMount>(
     (ed) => {
       onEditorMount?.(path, ed);
-      const recompute = () => {
+      setEditorInstance(ed);
+
+      const recomputeHeight = () => {
+        const host = editorHostRef.current;
+        if (host && host.clientWidth > 0) {
+          ed.layout({ width: host.clientWidth, height: host.clientHeight || placeholderHeight });
+        }
         const orig = ed.getOriginalEditor().getContentHeight();
         const mod = ed.getModifiedEditor().getContentHeight();
         const h = Math.max(orig, mod, MIN_HEIGHT);
         setHeight(h);
       };
-      ed.getOriginalEditor().onDidContentSizeChange(recompute);
-      ed.getModifiedEditor().onDidContentSizeChange(recompute);
-      recompute();
-      setEditorInstance(ed);
+
+      ed.getOriginalEditor().onDidContentSizeChange(recomputeHeight);
+      ed.getModifiedEditor().onDidContentSizeChange(recomputeHeight);
+      requestAnimationFrame(() => {
+        recomputeHeight();
+        requestAnimationFrame(recomputeHeight);
+      });
     },
-    [path, onEditorMount],
+    [path, onEditorMount, placeholderHeight],
   );
 
   const portals = enableComments ? (
@@ -206,10 +219,12 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
               </div>
             }
           >
-            <div className="min-w-0 w-full overflow-hidden" style={{ height }}>
+            <div ref={editorHostRef} className="diff-editor-host w-full min-w-0" style={{ height }}>
               <MonacoDiff
                 key={`${path}:${expanded ? 'e' : 'c'}`}
+                width="100%"
                 height="100%"
+                className="diff-editor-host-inner"
                 original={diff.oldContent}
                 modified={diff.newContent}
                 language={extToLanguage(path)}
@@ -218,6 +233,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
                 options={{
                   readOnly: true,
                   renderSideBySide: true,
+                  useInlineViewWhenSpaceIsLimited: false,
                   automaticLayout: true,
                   minimap: { enabled: false },
                   hideUnchangedRegions: { enabled: !expanded },

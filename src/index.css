@@ -258,6 +258,29 @@
   border-bottom: 1px solid var(--glass-edge);
 }
 
+/* Monaco side-by-side diff — keep each pane clipped to its half */
+@layer components {
+  .diff-editor-host {
+    width: 100%;
+    min-width: 0;
+    position: relative;
+    isolation: isolate;
+    contain: layout;
+  }
+
+  .diff-editor-host .monaco-diff-editor {
+    width: 100% !important;
+  }
+
+  .diff-editor-host .monaco-diff-editor.side-by-side .editor {
+    box-sizing: border-box;
+  }
+
+  .diff-editor-host .monaco-diff-editor .overflow-guard {
+    overflow: hidden !important;
+  }
+}
+
 @utility glass-blur-l1 {
   backdrop-filter: blur(40px);
   -webkit-backdrop-filter: blur(40px);
