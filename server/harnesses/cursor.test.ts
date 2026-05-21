@@ -104,6 +104,32 @@ describe('cursorHarness', () => {
   });
 
   // -------------------------------------------------------------------------
+  // tmuxSessionOptions (scroll-wheel → copy-mode workaround)
+  // -------------------------------------------------------------------------
+
+  describe('tmuxSessionOptions', () => {
+    it('enables mouse and binds WheelUpPane to copy-mode -e for the given session', () => {
+      const session = 'octomux-agent-abc';
+      const opts = cursorHarness.tmuxSessionOptions!(session);
+      expect(opts).toEqual([
+        ['set-option', '-t', session, 'mouse', 'on'],
+        ['set-option', '-t', session, '@octomux-scroll-copy', 'on'],
+        [
+          'bind-key',
+          '-T',
+          'root',
+          'WheelUpPane',
+          'if-shell',
+          '-F',
+          '#{@octomux-scroll-copy}',
+          "if-shell -F -t = '#{pane_in_mode}' 'send-keys -M' 'copy-mode -e'",
+          'send-keys -M',
+        ],
+      ]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // resolveFlags
   // -------------------------------------------------------------------------
 

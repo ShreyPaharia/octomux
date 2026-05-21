@@ -3,7 +3,6 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { buildSgrWheelSequence } from '@/lib/terminal-wheel';
 import { CloudOffIcon } from './icons';
 
 interface TerminalViewProps {
@@ -177,20 +176,6 @@ export function TerminalView({
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(data);
       }
-    });
-
-    // On the alternate screen (Cursor CLI, Claude Code, etc.), xterm.js's
-    // default wheel handling emits Up/Down arrow keystrokes. TUIs then treat
-    // those as prompt-history navigation instead of scrollback. Forward a
-    // real SGR mouse-wheel event to the PTY instead so tmux (mouse on) can
-    // route it through WheelUpPane/WheelDownPane bindings into copy-mode.
-    term.attachCustomWheelEventHandler((ev) => {
-      if (term.buffer.active.type !== 'alternate') return true;
-      ev.preventDefault();
-      const ws = wsRef.current;
-      const seq = buildSgrWheelSequence(ev.deltaY);
-      if (seq && ws?.readyState === WebSocket.OPEN) ws.send(seq);
-      return false;
     });
 
     // Defer initial fit to next frame so the browser has completed flex layout.

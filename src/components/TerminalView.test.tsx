@@ -11,10 +11,8 @@ class MockTerminal {
   rows = 24;
   disposed = false;
   writes: string[] = [];
-  buffer = { active: { type: 'normal' as 'normal' | 'alternate' } };
   loadAddon = vi.fn();
   open = vi.fn();
-  attachCustomWheelEventHandler = vi.fn();
   write = (data: string) => {
     this.writes.push(data);
   };
@@ -234,38 +232,6 @@ describe('TerminalView', () => {
     act(() => ws._close(1005));
 
     expect(queryByTestId('terminal-disconnected-overlay')).not.toBeNull();
-  });
-
-  it('forwards alt-screen wheel events as SGR mouse sequences to the PTY', async () => {
-    const TerminalView = await importTerminalView();
-    render(<TerminalView taskId="task-A" windowIndex={0} />);
-    const term = terminalInstances[0];
-    const ws = MockWebSocket.instances[0];
-    act(() => ws._open());
-
-    const handler = term.attachCustomWheelEventHandler.mock.calls[0]?.[0] as
-      | ((ev: { deltaY: number; preventDefault: () => void }) => boolean)
-      | undefined;
-    expect(handler).toBeDefined();
-
-    // Normal buffer: handler must defer to xterm (no SGR sent to PTY).
-    term.buffer.active.type = 'normal';
-    const evNormal = { deltaY: -120, preventDefault: vi.fn() };
-    expect(handler!(evNormal)).toBe(true);
-    expect(evNormal.preventDefault).not.toHaveBeenCalled();
-    expect(ws.sent.some((d) => typeof d === 'string' && d.startsWith('\x1b[<'))).toBe(false);
-
-    // Alt screen + wheel up: send SGR button 64 (wheel up).
-    term.buffer.active.type = 'alternate';
-    const evUp = { deltaY: -120, preventDefault: vi.fn() };
-    expect(handler!(evUp)).toBe(false);
-    expect(evUp.preventDefault).toHaveBeenCalled();
-    expect(ws.sent).toContain('\x1b[<64;1;1M');
-
-    // Alt screen + wheel down: send SGR button 65 (wheel down).
-    const evDown = { deltaY: 120, preventDefault: vi.fn() };
-    handler!(evDown);
-    expect(ws.sent).toContain('\x1b[<65;1;1M');
   });
 
   it('does not reconnect a replaced WebSocket after it closes', async () => {
