@@ -125,7 +125,7 @@ describe('CommentsSidePanel', () => {
       filesInDiff: new Set(),
       onJumpTo,
     });
-    expect(screen.getByText('not in diff')).toBeInTheDocument();
+    expect(screen.getByText('Not in diff')).toBeInTheDocument();
     const btn = within(screen.getByTestId('side-panel-comment-c1')).getByRole('button');
     expect(btn).toBeDisabled();
     fireEvent.click(btn);

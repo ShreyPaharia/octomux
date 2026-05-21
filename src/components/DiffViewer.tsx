@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { api, type DiffFileEntry, type DiffRange } from '@/lib/api';
 import type { Agent } from '../../server/types';
 import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
+import { GlassPanel } from '@/components/ui/glass-panel';
+import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { DiffFileTree } from './DiffFileTree';
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
 
@@ -340,9 +342,11 @@ function ApiDiffViewer({
 
   return (
     <div className="flex h-full min-h-0 gap-3 p-3">
-      <aside
+      <GlassPanel
         data-testid="diff-file-list"
-        className="bg-glass-l1 glass-blur-l1 flex w-[260px] shrink-0 flex-col overflow-hidden border border-glass-edge"
+        level={1}
+        specular
+        className="flex w-[260px] shrink-0 flex-col overflow-hidden rounded-xl"
       >
         {summaryLoading && files.length === 0 ? (
           <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
@@ -356,24 +360,17 @@ function ApiDiffViewer({
             reviewed={reviewed}
           />
         )}
-      </aside>
-      <main
+      </GlassPanel>
+      <GlassPanel
         data-testid="diff-pane"
-        className="flex min-w-0 flex-1 flex-col overflow-hidden border border-glass-edge"
-        style={{
-          background: '#0B0C0F',
-          boxShadow: '0 8px 24px -6px rgba(0,0,0,0.5)',
-        }}
+        className="diff-pane flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-glass-edge"
       >
         {reviewCounts.total > 0 ? (
-          <div
-            className="flex items-center justify-end gap-2 px-4 py-[10px]"
-            style={{ background: '#101217', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
-          >
+          <div className="diff-pane-header flex items-center justify-end gap-2 px-4 py-2.5">
             <span
               data-testid="review-progress"
               aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
-              className="bg-glass-l1 glass-blur-l1 inline-flex items-center gap-1 border border-[#22D3EE] px-1.5 py-0.5 font-mono text-[11px] tracking-wider text-[#22D3EE]"
+              className={DIFF_REVIEW_BADGE}
             >
               {reviewCounts.done} / {reviewCounts.total} reviewed
             </span>
@@ -395,7 +392,7 @@ function ApiDiffViewer({
             />
           )}
         </div>
-      </main>
+      </GlassPanel>
     </div>
   );
 }

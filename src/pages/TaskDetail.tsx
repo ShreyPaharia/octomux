@@ -732,9 +732,7 @@ export default function TaskDetail() {
                     data-testid="comments-toggle"
                     data-active={showCommentsPanel ? 'true' : undefined}
                     className={
-                      showCommentsPanel
-                        ? 'border-[#22D3EE] bg-[#22D3EE1F] text-[#22D3EE]'
-                        : 'border-[#2f2f2f] text-[#8a8a8a]'
+                      showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined
                     }
                     onClick={() => setShowCommentsPanel((v) => !v)}
                   >

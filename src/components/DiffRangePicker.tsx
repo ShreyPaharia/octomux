@@ -163,7 +163,7 @@ export function DiffRangePicker({
   return (
     <Popover open={isOpen} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="text-muted-foreground hover:text-foreground border border-glass-edge bg-glass-l1 px-2 py-0.5 text-[11px]"
+        className="rounded-md border border-glass-edge bg-glass-l1 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-glass-l2/50 hover:text-foreground"
         data-testid="diff-range-picker-trigger"
       >
         {children ?? 'Change base…'}
@@ -171,9 +171,7 @@ export function DiffRangePicker({
       <PopoverContent className="w-[360px]" align="start">
         <div className="flex flex-col gap-3">
           <section className="flex flex-col gap-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              Base branch
-            </div>
+            <div className="text-[11px] font-medium text-muted-soft">Base branch</div>
             <Input
               placeholder="Search branches"
               value={branchQuery}
@@ -223,9 +221,7 @@ export function DiffRangePicker({
           </section>
 
           <section className="flex flex-col gap-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              Range
-            </div>
+            <div className="text-[11px] font-medium text-muted-soft">Range</div>
             <div className="grid grid-cols-2 gap-1 text-[11px]">
               {(
                 [

@@ -28,7 +28,7 @@ export function ReviewBaseRefBanner({
   rightSlot,
 }: ReviewBaseRefBannerProps) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2 text-xs border-b border-glass-border">
+    <div className="diff-pane-header flex items-center gap-3 px-4 py-2.5 text-xs">
       <span className="text-muted-foreground">
         Diffing against <span className="font-mono text-foreground">{baseRef}</span>
       </span>

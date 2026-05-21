@@ -130,14 +130,12 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
       data-active={active ? 'true' : undefined}
       data-reviewed={reviewed ? 'true' : 'false'}
       id={`file-${encodeURIComponent(path)}`}
-      className="border border-glass-edge bg-[#0B0C0F]"
+      className="overflow-hidden rounded-lg border border-glass-edge bg-glass-l0"
     >
       <header
         className={cn(
-          'sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-[10px]',
-          'border-b border-[rgba(255,255,255,0.06)]',
+          'diff-pane-header sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-2.5',
         )}
-        style={{ background: '#101217' }}
       >
         <span className="flex min-w-0 items-center gap-2">
           {showReviewToggle ? (
@@ -152,7 +150,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
           ) : null}
           <span
             className={cn(
-              'truncate font-mono text-[11px] text-[#B5B5BD]',
+              'truncate font-mono text-[11px] text-muted-foreground',
               reviewed && 'text-muted-foreground line-through',
             )}
           >

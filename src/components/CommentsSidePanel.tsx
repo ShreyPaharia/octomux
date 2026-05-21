@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { DIFF_FILTER_ACTIVE } from '@/lib/design-tokens';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { timeAgo } from '@/lib/time';
 import { useTaskCommentsContext } from '@/hooks/useTaskComments';
 import type { InlineCommentWithOutdated } from '@/lib/api';
@@ -72,10 +74,10 @@ export function CommentsSidePanel({
       onClick={() => setFilter(id)}
       data-active={filter === id ? 'true' : undefined}
       className={cn(
-        'border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider',
+        'rounded-md border px-2 py-0.5 text-[11px] font-medium',
         filter === id
-          ? 'border-[#22D3EE] bg-[#22D3EE1F] text-[#22D3EE]'
-          : 'border-glass-edge text-muted-foreground hover:text-foreground',
+          ? DIFF_FILTER_ACTIVE
+          : 'border-glass-edge text-muted-foreground hover:bg-glass-l2/50 hover:text-foreground',
       )}
     >
       {label}
@@ -83,8 +85,9 @@ export function CommentsSidePanel({
   );
 
   return (
-    <aside
+    <GlassPanel
       data-testid="comments-side-panel"
+      chrome
       className={cn('flex w-80 flex-col border-l border-glass-edge', className)}
     >
       <header className="flex items-center justify-between gap-2 border-b border-glass-edge px-3 py-2">
@@ -108,18 +111,16 @@ export function CommentsSidePanel({
             const inDiff = filesInDiff.has(filePath);
             return (
               <li key={filePath}>
-                <header
-                  className={cn(
-                    'sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-glass-edge bg-[#101217] px-3 py-1.5',
-                  )}
-                >
-                  <span className="truncate font-mono text-[11px] text-[#B5B5BD]">{filePath}</span>
+                <header className="diff-pane-header sticky top-0 z-10 flex items-center justify-between gap-2 px-3 py-1.5">
+                  <span className="truncate font-mono text-[11px] text-muted-foreground">
+                    {filePath}
+                  </span>
                   {!inDiff ? (
                     <span
                       title="File no longer in diff"
-                      className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
+                      className="text-[10px] font-medium text-muted-soft"
                     >
-                      not in diff
+                      Not in diff
                     </span>
                   ) : null}
                 </header>
@@ -141,7 +142,7 @@ export function CommentsSidePanel({
                           onClick={handleClick}
                           className={cn(
                             'flex w-full flex-col items-start gap-1 px-3 py-2 text-left text-xs',
-                            inDiff ? 'hover:bg-[#141414]' : 'cursor-not-allowed opacity-60',
+                            inDiff ? 'hover:bg-glass-l2/40' : 'cursor-not-allowed opacity-60',
                           )}
                         >
                           <span className="flex items-center gap-2 text-[11px]">
@@ -149,8 +150,8 @@ export function CommentsSidePanel({
                               className={cn(
                                 'inline-flex h-4 w-4 items-center justify-center rounded-full font-mono text-[9px] font-bold',
                                 c.agent_id
-                                  ? 'bg-[#22C55E1F] text-[#86EFAC]'
-                                  : 'bg-[#3B82F61F] text-[#93C5FD]',
+                                  ? 'bg-success/15 text-success'
+                                  : 'bg-primary/15 text-primary',
                               )}
                               aria-hidden
                             >
@@ -172,12 +173,12 @@ export function CommentsSidePanel({
                           </span>
                           <span className="flex items-center gap-1">
                             {c.resolved_at ? (
-                              <span className="border border-[#22C55E66] bg-[#22C55E1F] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[#86EFAC]">
+                              <span className="rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-[9px] font-medium text-success">
                                 Resolved
                               </span>
                             ) : null}
                             {rangeIsBase && c.outdated ? (
-                              <span className="border border-[#F59E0B66] bg-[#F59E0B1F] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[#FCD34D]">
+                              <span className="rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] font-medium text-warning">
                                 Outdated
                               </span>
                             ) : null}
@@ -197,7 +198,7 @@ export function CommentsSidePanel({
           Showing first {ROW_CAP} — refine filters to see more
         </footer>
       ) : null}
-    </aside>
+    </GlassPanel>
   );
 }
 

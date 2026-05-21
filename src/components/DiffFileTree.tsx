@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DiffFileEntry } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { DIFF_TREE_ACTIVE, DIFF_TREE_ROW } from '@/lib/design-tokens';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 
@@ -123,10 +124,8 @@ function TreeRow({
         data-reviewed={isReviewed ? 'true' : 'false'}
         data-active={active ? 'true' : undefined}
         className={cn(
-          'flex w-full items-center gap-2 px-2 py-1 text-left text-xs',
-          active
-            ? 'border border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6]'
-            : 'border border-transparent hover:bg-[#FFFFFF0A]',
+          DIFF_TREE_ROW,
+          active && DIFF_TREE_ACTIVE,
           'data-[reviewed=true]:opacity-50 data-[reviewed=true]:line-through',
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -199,7 +198,7 @@ function TreeRow({
             data-testid={`diff-group-${node.fullPath}`}
             aria-expanded={groupOpen}
             onClick={() => onToggleGroup?.(node.fullPath)}
-            className="flex w-full items-center gap-1.5 px-2 py-1 text-left font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-[#FFFFFF0A]"
+            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] font-medium text-muted-foreground hover:bg-glass-l2/60"
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
           >
             <span aria-hidden className="inline-block w-3 font-mono">
@@ -215,7 +214,7 @@ function TreeRow({
         ) : (
           <div
             data-testid={`diff-group-${node.fullPath}`}
-            className="px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
+            className="px-2 py-0.5 text-[11px] font-medium text-muted-soft"
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
           >
             {node.name}
@@ -342,12 +341,12 @@ export function DiffFileTree({
         />
       ) : null}
       {ignored.length > 0 ? (
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="border-t border-glass-edge">
           <button
             type="button"
             onClick={toggleIgnored}
             aria-expanded={ignoredOpen}
-            className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:bg-[#FFFFFF0A]"
+            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground hover:bg-glass-l2/60"
           >
             <span aria-hidden className="inline-block w-3 font-mono">
               {ignoredOpen ? '▾' : '▸'}
