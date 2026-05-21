@@ -18,15 +18,11 @@ export function TaskDetailMeta({ task }: { task: Task }) {
       data-testid="task-detail-meta"
       className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-glass-edge bg-glass-l1/50 px-6 py-2.5 text-xs glass-blur-l1"
     >
-      {task.repo_path && (
-        <MetaItem label="Repo" value={repoName(task.repo_path)} />
-      )}
+      {task.repo_path && <MetaItem label="Repo" value={repoName(task.repo_path)} />}
       {task.branch && (
         <MetaItem
           label={MODE_BRANCH_LABEL[runMode]}
-          value={
-            runMode === 'none' ? `${task.branch} (working tree)` : task.branch
-          }
+          value={runMode === 'none' ? `${task.branch} (working tree)` : task.branch}
           valueClassName="font-mono text-primary"
         />
       )}
@@ -67,9 +63,7 @@ function MetaItem({
         {label}
       </span>
       <span
-        className={
-          valueClassName ?? (mono ? 'font-mono text-muted-foreground' : 'text-foreground')
-        }
+        className={valueClassName ?? (mono ? 'font-mono text-muted-foreground' : 'text-foreground')}
       >
         {value}
       </span>

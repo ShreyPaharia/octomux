@@ -105,8 +105,7 @@
 }
 
 @theme inline {
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', monospace;
   --font-display: 'Space Grotesk', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);

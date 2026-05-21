@@ -39,7 +39,9 @@ export const GlassPanel = forwardRef<HTMLDivElement, GlassPanelProps>(function G
       data-glass-chrome={chrome ? 'true' : undefined}
       data-glass-specular={specular ? 'true' : undefined}
       className={cn(
-        chrome ? 'glass-chrome glass-blur-l1 border border-glass-edge' : [tintByLevel[level], edgeByLevel[level]],
+        chrome
+          ? 'glass-chrome glass-blur-l1 border border-glass-edge'
+          : [tintByLevel[level], edgeByLevel[level]],
         className,
       )}
       style={mergedStyle}

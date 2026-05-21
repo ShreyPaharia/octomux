@@ -155,7 +155,12 @@ function Section({
   if (tasks.length === 0) return null;
   return (
     <section data-testid={testId} className="motion-fade-in flex flex-col gap-3">
-      <InboxSectionHeader accentClass={accentClass} icon={icon} title={title} count={tasks.length} />
+      <InboxSectionHeader
+        accentClass={accentClass}
+        icon={icon}
+        title={title}
+        count={tasks.length}
+      />
       <div className="flex flex-col gap-3">
         {tasks.map((t) => (
           <InboxCard key={t.id} task={t} kind={kind} />

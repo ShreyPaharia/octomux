@@ -8,10 +8,7 @@ import { repoName } from '@/lib/utils';
 import { AddChip } from '@/components/layout/add-chip';
 import { SectionCard } from '@/components/layout/section-card';
 import { SettingRow } from '@/components/layout/setting-row';
-import {
-  SettingsLayout,
-  type SettingsScrollSection,
-} from '@/components/layout/settings-layout';
+import { SettingsLayout, type SettingsScrollSection } from '@/components/layout/settings-layout';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Switch } from '@/components/ui/switch';
 import { ROW_DIVIDER } from '@/lib/design-tokens';

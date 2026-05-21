@@ -618,11 +618,7 @@ function RepoChip({ value, onChange, onClear }: RepoChipProps) {
     );
   }
   return (
-    <div
-      data-testid="repo-chip"
-      title={value}
-      className={composerChipPrimaryClass()}
-    >
+    <div data-testid="repo-chip" title={value} className={composerChipPrimaryClass()}>
       <button
         type="button"
         onClick={onClear}
@@ -647,10 +643,7 @@ interface BranchChipProps {
 
 function BranchChip({ repoPath, value, onChange }: BranchChipProps) {
   return (
-    <div
-      className={composerChipNeutralClass}
-      data-testid="branch-chip"
-    >
+    <div className={composerChipNeutralClass} data-testid="branch-chip">
       <span className="text-[11px] text-muted-foreground" aria-hidden>
         ⎇
       </span>
@@ -798,11 +791,7 @@ function AgentChip({ value, onChange }: AgentChipProps) {
     );
   }
   return (
-    <div
-      data-testid="agent-chip"
-      title={value}
-      className={composerChipWarningClass()}
-    >
+    <div data-testid="agent-chip" title={value} className={composerChipWarningClass()}>
       <button
         type="button"
         onClick={() => onChange(null)}
@@ -827,11 +816,7 @@ interface HarnessChipProps {
 /** Compact chip showing the selected coding agent (harness). */
 function HarnessChip({ value, onChange }: HarnessChipProps) {
   return (
-    <div
-      className={composerChipNeutralClass}
-      data-testid="harness-chip"
-      title="Coding agent"
-    >
+    <div className={composerChipNeutralClass} data-testid="harness-chip" title="Coding agent">
       <span aria-hidden className="text-[11px] text-muted-foreground">
         ⚙
       </span>
@@ -899,11 +884,7 @@ function ChipRemovable({
   onRemove: () => void;
 } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      {...rest}
-      title={title}
-      className={composerChipNeutralClass}
-    >
+    <div {...rest} title={title} className={composerChipNeutralClass}>
       <button
         type="button"
         onClick={onRemove}

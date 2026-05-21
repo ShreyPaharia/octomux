@@ -51,11 +51,7 @@ export function SettingsLayout({
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader
-        variant="glass"
-        title={title}
-        description={description}
-      />
+      <PageHeader variant="glass" title={title} description={description} />
 
       <div className="flex min-h-0 flex-1">
         <GlassPanel
@@ -82,10 +78,7 @@ export function SettingsLayout({
                 </button>
               );
             })}
-            <div
-              className="mx-4 my-2 border-t border-glass-edge"
-              role="separator"
-            />
+            <div className="mx-4 my-2 border-t border-glass-edge" role="separator" />
             {SETTINGS_ROUTE_NAV.map((item) => {
               const isActive = item.to === pathname;
               return (
