@@ -1233,7 +1233,11 @@ export async function resumeTask(task: Task): Promise<void> {
           });
         } else {
           const newId = harness.newSessionId();
-          const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags, workspacePath: cwd });
+          const continueCmd = harness.buildContinueCommand({
+            sessionId: newId,
+            flags,
+            workspacePath: cwd,
+          });
           if (continueCmd !== null) {
             baseCmd = continueCmd;
           } else {
@@ -1405,7 +1409,11 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     });
   } else {
     const newId = harness.newSessionId();
-    const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags, workspacePath: cwd });
+    const continueCmd = harness.buildContinueCommand({
+      sessionId: newId,
+      flags,
+      workspacePath: cwd,
+    });
     if (continueCmd !== null) {
       baseCmd = continueCmd;
     } else {
