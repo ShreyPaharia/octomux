@@ -215,21 +215,39 @@
 
 @utility composer-shell {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    0 24px 60px -12px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 28px 56px -14px rgba(0, 0, 0, 0.55),
+    0 10px 20px -10px rgba(0, 0, 0, 0.35);
 }
 
 @utility composer-toolbar {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background-color: rgba(255, 255, 255, 0.04);
-  padding: 8px 10px;
+  padding: 2px 2px 0;
+}
+
+@utility composer-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.14) 20%,
+    rgba(255, 255, 255, 0.14) 80%,
+    transparent 100%
+  );
 }
 
 @utility composer-prompt-well {
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background-color: #0b0c0f;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.09) 0%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 10px 28px -12px rgba(0, 0, 0, 0.22);
 }
 
 @utility inbox-card-hot {
