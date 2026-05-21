@@ -7,6 +7,8 @@ export type GlassLevel = 1 | 2 | 3;
 export interface GlassPanelProps extends HTMLAttributes<HTMLDivElement> {
   level?: GlassLevel;
   specular?: boolean;
+  /** Dark app-chrome material (sidebar-style), not content tint. */
+  chrome?: boolean;
 }
 
 const tintByLevel: Record<GlassLevel, string> = {
@@ -24,7 +26,7 @@ const edgeByLevel: Record<GlassLevel, string> = {
 const SPECULAR_SHADOW = 'inset 0 1px 0 0 rgba(255, 255, 255, 0.22)';
 
 export const GlassPanel = forwardRef<HTMLDivElement, GlassPanelProps>(function GlassPanel(
-  { level = 1, specular = false, className, style, children, ...rest },
+  { level = 1, specular = false, chrome = false, className, style, children, ...rest },
   ref,
 ) {
   const mergedStyle: CSSProperties | undefined = specular
@@ -33,9 +35,13 @@ export const GlassPanel = forwardRef<HTMLDivElement, GlassPanelProps>(function G
   return (
     <div
       ref={ref}
-      data-glass-level={level}
+      data-glass-level={chrome ? undefined : level}
+      data-glass-chrome={chrome ? 'true' : undefined}
       data-glass-specular={specular ? 'true' : undefined}
-      className={cn(tintByLevel[level], edgeByLevel[level], className)}
+      className={cn(
+        chrome ? 'glass-chrome glass-blur-l1 border border-glass-edge' : [tintByLevel[level], edgeByLevel[level]],
+        className,
+      )}
       style={mergedStyle}
       {...rest}
     >

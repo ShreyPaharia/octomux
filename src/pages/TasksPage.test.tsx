@@ -53,19 +53,19 @@ describe('TasksPage (board layout)', () => {
   it('renders new task button', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getAllByText('NEW TASK').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('New task').length).toBeGreaterThan(0);
     });
   });
 
   // ─── Header ────────────────────────────────────────────────────────────────
 
-  it('renders Command center heading with // TASKS eyebrow', async () => {
+  it('renders Command center heading with Tasks eyebrow', async () => {
     renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('Command center')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('page-eyebrow')).toHaveTextContent('// TASKS');
-    expect(screen.getByRole('heading', { level: 1 })).toHaveClass('text-[32px]');
+    expect(screen.getByTestId('page-eyebrow')).toHaveTextContent('Tasks');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveClass('text-[28px]');
   });
 
   // ─── Board columns ────────────────────────────────────────────────────────

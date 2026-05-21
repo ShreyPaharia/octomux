@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PageHeader } from '@/components/layout/page-header';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
 import type { RunMode, WorktreeSummary } from '../../server/types';
 
@@ -79,38 +81,36 @@ export default function WorkspacesPage() {
 
   if (error) {
     return (
-      <div className="h-full overflow-auto">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-destructive">
-          Failed to load workspaces: {error}
-        </div>
+      <div className="h-full overflow-auto px-6 py-6">
+        <p className="text-sm text-destructive">Failed to load workspaces: {error}</p>
       </div>
     );
   }
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-6xl px-4 py-6">
-        <div className="mb-6 flex flex-col gap-1.5">
-          <h1
-            className="font-display text-[36px] font-bold leading-none tracking-tight"
-            style={{ letterSpacing: '-1px' }}
-          >
-            WORKSPACES
-          </h1>
-          <span className="text-sm text-[#8a8a8a]">
-            // git worktrees + scratch dirs used by tasks
-          </span>
-        </div>
+    <div className="flex h-full flex-col overflow-auto">
+      <PageHeader
+        variant="glass"
+        eyebrow="Workspaces"
+        title="Workspaces"
+        description="Git worktrees and scratch directories used by tasks"
+        className="shrink-0"
+      />
 
-        <div className="mb-4 flex flex-wrap items-center gap-3" data-testid="workspace-filters">
-          <label className="text-xs text-[#8a8a8a]">
+      <div className="mx-auto w-full max-w-6xl flex-1 px-6 py-6">
+        <GlassPanel
+          level={1}
+          specular
+          className="mb-4 flex flex-wrap items-center gap-4 rounded-2xl px-4 py-3"
+          data-testid="workspace-filters"
+        >
+          <label className="text-xs text-muted-soft">
             Repo
             <select
               aria-label="Filter by repo"
               value={repoFilter}
               onChange={(e) => setRepoFilter(e.target.value)}
-              className="ml-2 bg-[#141414] px-2 py-1 text-xs text-foreground outline-none"
-              style={{ border: '1px solid #2f2f2f' }}
+              className="focus-ring ml-2 rounded-lg border border-input bg-secondary px-2 py-1 text-xs text-foreground"
             >
               <option value="all">All</option>
               {repoOptions.map((r) => (
@@ -120,14 +120,13 @@ export default function WorkspacesPage() {
               ))}
             </select>
           </label>
-          <label className="text-xs text-[#8a8a8a]">
+          <label className="text-xs text-muted-soft">
             Mode
             <select
               aria-label="Filter by mode"
               value={modeFilter}
               onChange={(e) => setModeFilter(e.target.value)}
-              className="ml-2 bg-[#141414] px-2 py-1 text-xs text-foreground outline-none"
-              style={{ border: '1px solid #2f2f2f' }}
+              className="focus-ring ml-2 rounded-lg border border-input bg-secondary px-2 py-1 text-xs text-foreground"
             >
               <option value="all">All</option>
               {(['new', 'existing', 'none', 'scratch'] as RunMode[]).map((m) => (
@@ -137,28 +136,28 @@ export default function WorkspacesPage() {
               ))}
             </select>
           </label>
-        </div>
+        </GlassPanel>
 
         {worktrees === null ? (
-          <div className="text-sm text-[#8a8a8a]">Loading…</div>
+          <p className="text-sm text-muted-soft">Loading…</p>
         ) : filtered.length === 0 ? (
-          <div className="rounded-md border border-border bg-card p-8 text-center text-sm text-[#8a8a8a]">
+          <GlassPanel level={2} className="rounded-2xl p-8 text-center text-sm text-muted-soft">
             {worktrees.length === 0
               ? "No workspaces yet. They're created automatically when you start a task."
               : 'No workspaces match these filters.'}
-          </div>
+          </GlassPanel>
         ) : (
-          <div className="overflow-hidden rounded-md border border-border">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#0f0f0f] text-[#8a8a8a] uppercase tracking-wider">
+          <GlassPanel level={2} className="overflow-hidden rounded-2xl">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-glass-edge bg-glass-l1 text-xs font-medium text-muted-soft">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Repo</th>
-                  <th className="px-3 py-2 font-medium">Branch</th>
-                  <th className="px-3 py-2 font-medium">Mode</th>
-                  <th className="px-3 py-2 font-medium">Path</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Tasks</th>
-                  <th className="px-3 py-2 font-medium">Last used</th>
+                  <th className="px-4 py-2.5">Repo</th>
+                  <th className="px-4 py-2.5">Branch</th>
+                  <th className="px-4 py-2.5">Mode</th>
+                  <th className="px-4 py-2.5">Path</th>
+                  <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5">Tasks</th>
+                  <th className="px-4 py-2.5">Last used</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,38 +166,41 @@ export default function WorkspacesPage() {
                     key={w.id}
                     data-testid={`workspace-row-${w.id}`}
                     onClick={() => navigate(`/workspaces/${w.id}`)}
-                    className="cursor-pointer border-t border-border hover:bg-[#141414]"
+                    className="cursor-pointer border-t border-glass-edge transition-colors hover:bg-glass-l1"
                   >
-                    <td className="px-3 py-2 text-foreground">{shortRepoName(w.repo_path)}</td>
-                    <td className="px-3 py-2 font-mono text-[#a0a0a0]">{w.branch ?? '—'}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className="inline-flex items-center px-1.5 py-0.5"
-                        style={{
-                          fontSize: 10,
-                          background: '#1a1a1a',
-                          border: '1px solid #2f2f2f',
-                          color: '#a0a0a0',
-                        }}
-                      >
+                    <td className="px-4 py-2.5 text-foreground">{shortRepoName(w.repo_path)}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                      {w.branch ?? '—'}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex rounded-md border border-input bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
                         {MODE_LABEL[w.mode]}
                       </span>
                     </td>
-                    <td className="px-3 py-2 font-mono text-[#8a8a8a]" title={w.path}>
+                    <td
+                      className="max-w-[200px] truncate px-4 py-2.5 font-mono text-xs text-muted-soft"
+                      title={w.path}
+                    >
                       {truncate(w.path)}
                     </td>
-                    <td className="px-3 py-2">
-                      <span className={w.status === 'in_use' ? 'text-[#22C55E]' : 'text-[#8a8a8a]'}>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={
+                          w.status === 'in_use' ? 'text-success' : 'text-muted-soft'
+                        }
+                      >
                         {w.status}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-[#a0a0a0]">{w.task_count}</td>
-                    <td className="px-3 py-2 text-[#8a8a8a]">{relativeTime(w.last_used_at)}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{w.task_count}</td>
+                    <td className="px-4 py-2.5 text-muted-soft">
+                      {relativeTime(w.last_used_at)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </GlassPanel>
         )}
       </div>
     </div>

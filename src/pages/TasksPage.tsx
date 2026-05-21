@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import { TaskBoard } from '@/components/TaskBoard';
 import { EmptyState } from '@/components/EmptyState';
+import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -15,15 +16,9 @@ import type { Task } from '../../server/types';
 
 function NewTaskButton({ onClick }: { onClick: () => void }) {
   return (
-    <Button
-      onClick={onClick}
-      className="bg-[#3B82F6] text-white hover:bg-[#3B82F6]/90"
-      style={{
-        boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, 0.35), 0 0 24px 0 rgba(59, 130, 246, 0.35)',
-      }}
-    >
+    <Button onClick={onClick} className="btn-primary-glow">
       <PlusIcon data-icon="inline-start" />
-      NEW TASK
+      New task
     </Button>
   );
 }
@@ -57,7 +52,7 @@ function RepoFilterDropdown({
         render={
           <button
             type="button"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-[#8a8a8a] transition-colors hover:text-foreground"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-soft transition-colors hover:text-foreground"
           >
             {activeRepo ? (
               <Badge variant="outline" className="text-xs font-normal">
@@ -66,7 +61,7 @@ function RepoFilterDropdown({
             ) : (
               <span>all repos</span>
             )}
-            <ChevronDownIcon size={12} className="text-[#8a8a8a]" />
+            <ChevronDownIcon size={12} className="text-muted-soft" />
           </button>
         }
       />
@@ -117,7 +112,7 @@ function BoardFilterBar({
       level={1}
       specular
       data-testid="board-filter-bar"
-      className="my-3 flex items-center justify-between gap-2 rounded-[14px] px-2 py-1.5"
+      className="my-3 flex items-center justify-between gap-2 rounded-2xl px-2 py-1.5"
     >
       <div className="flex items-center gap-2">
         {/* Needs attention toggle */}
@@ -127,8 +122,8 @@ function BoardFilterBar({
           data-active={needsAttention ? 'true' : undefined}
           onClick={() => onNeedsAttentionChange(!needsAttention)}
           className={cn(
-            'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium tracking-wider uppercase transition-colors',
-            needsAttention ? 'text-amber-400' : 'text-[#8a8a8a] hover:text-foreground',
+            'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+            needsAttention ? 'text-amber-400' : 'text-muted-soft hover:text-foreground',
           )}
           style={
             needsAttention
@@ -149,8 +144,7 @@ function BoardFilterBar({
           placeholder="Search tasks…"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="h-7 rounded-md border border-[#2f2f2f] bg-transparent px-2.5 text-[11px] text-foreground placeholder:text-[#4a4a4a] focus:border-[#3B82F6] focus:outline-none"
-          style={{ width: '160px' }}
+          className="focus-ring h-7 w-40 rounded-lg border border-input bg-transparent px-2.5 text-xs text-foreground placeholder:text-muted-soft"
           data-testid="board-search"
         />
       </div>
@@ -263,25 +257,13 @@ export default function TasksPage() {
           </div>
         ) : (
           <>
-            {/* Header */}
-            <div className="flex items-end justify-between">
-              <div className="flex flex-col gap-2">
-                <span
-                  data-testid="page-eyebrow"
-                  className="font-mono text-[11px] font-bold text-[#B5B5BD]"
-                  style={{ letterSpacing: '1.5px' }}
-                >
-                  // TASKS
-                </span>
-                <h1
-                  className="font-display text-[32px] font-bold leading-[1.1] tracking-tight"
-                  style={{ letterSpacing: '-0.5px' }}
-                >
-                  Command center
-                </h1>
-              </div>
-              <NewTaskButton onClick={openCreate} />
-            </div>
+            <PageHeader
+              eyebrow="Tasks"
+              eyebrowTestId="page-eyebrow"
+              title="Command center"
+              actions={<NewTaskButton onClick={openCreate} />}
+              className="mb-1"
+            />
 
             <BoardFilterBar
               repos={repos}

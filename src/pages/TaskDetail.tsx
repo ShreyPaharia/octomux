@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { StatusBadge } from '@/components/StatusBadge';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
 import { DiffViewer } from '@/components/DiffViewer';
@@ -23,8 +22,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 import { useTask } from '@/lib/hooks';
 import { api, diffRangeToParam, type DiffRange, type DiffSummaryResponse } from '@/lib/api';
-import { repoName } from '@/lib/utils';
-import { PullRequestIcon, TerminalRectIcon } from '@/components/icons';
+import { TaskDetailHeader } from '@/components/layout/task-detail-header';
+import { TaskDetailMeta } from '@/components/layout/task-detail-meta';
+import { TerminalRectIcon } from '@/components/icons';
 import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
 import { TaskHooksPanel } from '@/components/TaskHooksPanel';
@@ -32,20 +32,6 @@ import { JiraLinkHelper } from '@/components/integrations/JiraLinkHelper';
 import type { RunMode } from '../../server/types';
 
 export const SHIP_EVENT = 'octomux:open-pr-sheet';
-
-const MODE_LABEL: Record<RunMode, string> = {
-  new: 'N',
-  existing: 'E',
-  none: 'Ø',
-  scratch: 'S',
-};
-
-const MODE_TOOLTIP: Record<RunMode, string> = {
-  new: 'new worktree',
-  existing: 'attached existing',
-  none: 'in-place (no worktree)',
-  scratch: 'scratch',
-};
 
 type TaskMode = 'agents' | 'editor' | 'diff' | 'info';
 
@@ -580,130 +566,24 @@ export default function TaskDetail() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* L1 glass header — 18px vertical / 24px horizontal padding, 17px title */}
-      <div
-        data-testid="task-detail-header"
-        className="bg-glass-l1 glass-blur-l1 flex items-center justify-between gap-3 border-b border-glass-edge px-6 py-[18px]"
-      >
-        <div className="flex min-w-0 items-center gap-2.5">
-          <h1
-            title={task.title}
-            aria-label={task.title}
-            className="truncate text-[17px] font-semibold leading-none tracking-tight"
-          >
-            {task.title}
-          </h1>
-          <span
-            data-testid="mode-badge"
-            title={MODE_TOOLTIP[runMode]}
-            aria-label={`run mode: ${MODE_TOOLTIP[runMode]}`}
-            className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-[#2f2f2f] bg-[#1a1a1a] px-1.5 font-mono text-[10px] font-bold text-[#8a8a8a]"
-          >
-            {MODE_LABEL[runMode]}
-          </span>
-          <StatusBadge status={task.derived_status || task.runtime_state} />
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          {canResume && (
-            <Button variant="default" size="sm" disabled={resuming} onClick={handleResume}>
-              {resuming ? '...' : 'Resume'}
-            </Button>
-          )}
-
-          {canShowDiff && (
-            <Button
-              size="sm"
-              data-testid="ship-button"
-              onClick={handleShip}
-              className="gap-1.5 border border-[#22C55EAA] bg-[#22C55E1F] text-[#DCFCE7] shadow-[0_0_0_1px_rgba(34,197,94,0.4),0_0_18px_-4px_rgba(34,197,94,0.7)] hover:bg-[#22C55E33] hover:text-white"
-            >
-              <PullRequestIcon size={14} aria-hidden />
-              <span className="font-semibold tracking-wider uppercase">Ship</span>
-            </Button>
-          )}
-
-          {isRunning && !!task.tmux_session && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-[#2f2f2f] text-[#8a8a8a]"
-              onClick={handleToggleEditor}
-            >
-              &lt;&gt; EDITOR
-            </Button>
-          )}
-          {canShowDiff && (
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="diff-toggle"
-              data-active={mode === 'diff' ? 'true' : undefined}
-              className={
-                mode === 'diff'
-                  ? 'border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6] hover:bg-[#3B82F633] hover:text-[#3B82F6]'
-                  : 'border-[#2f2f2f] text-[#8a8a8a]'
-              }
-              onClick={() => setMode(mode === 'diff' ? 'agents' : 'diff')}
-            >
-              DIFF
-            </Button>
-          )}
-          {!isDraft && (
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="info-toggle"
-              data-active={mode === 'info' ? 'true' : undefined}
-              className={
-                mode === 'info'
-                  ? 'border-[#3B82F666] bg-[#3B82F61F] text-[#3B82F6] hover:bg-[#3B82F633] hover:text-[#3B82F6]'
-                  : 'border-[#2f2f2f] text-[#8a8a8a]'
-              }
-              onClick={() => setMode(mode === 'info' ? 'agents' : 'info')}
-            >
-              INFO
-            </Button>
-          )}
-          {isDraft && (
-            <Button variant="default" size="sm" onClick={handleStart}>
-              Start
-            </Button>
-          )}
-          {isRunning &&
-            (closeConfirm ? (
-              <div
-                role="alertdialog"
-                aria-label="Confirm mark task done"
-                data-testid="close-confirm"
-                className="bg-glass-l2 glass-blur-l2 flex items-center gap-2 border border-[#22C55EAA] px-2 py-1 text-[11px] text-[#DCFCE7]"
-              >
-                <span className="font-semibold tracking-wider uppercase">Mark done?</span>
-                <button
-                  className="px-1.5 py-0.5 text-[#b5b5bd] hover:text-white"
-                  onClick={() => setCloseConfirm(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  data-testid="close-confirm-accept"
-                  className="border border-[#22C55EAA] bg-[#22C55E1F] px-1.5 py-0.5 font-bold uppercase text-[#DCFCE7] hover:bg-[#22C55E33]"
-                  onClick={handleClose}
-                >
-                  Confirm
-                </button>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-[#22C55EAA] bg-[#22C55E1F] text-[#DCFCE7] hover:bg-[#22C55E33] hover:text-white"
-                onClick={() => setCloseConfirm(true)}
-              >
-                DONE
-              </Button>
-            ))}
-        </div>
-      </div>
+      <TaskDetailHeader
+        task={task}
+        mode={mode}
+        canResume={canResume}
+        resuming={resuming}
+        canShowDiff={canShowDiff}
+        isRunning={isRunning}
+        isDraft={isDraft}
+        closeConfirm={closeConfirm}
+        onResume={handleResume}
+        onShip={handleShip}
+        onToggleEditor={handleToggleEditor}
+        onModeChange={setMode}
+        onStart={handleStart}
+        onCloseConfirm={() => setCloseConfirm(true)}
+        onCloseAccept={handleClose}
+        onCloseDismiss={() => setCloseConfirm(false)}
+      />
 
       {/* Error display — only when status !== 'error' (dedicated error view shows error) */}
       {task.error && task.runtime_state !== 'error' && (
@@ -712,64 +592,7 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Thin metadata bar — L1 lighter (5% white + 30px blur), 10/24 padding, 10% bottom stroke */}
-      {!isScratch && (
-        <div
-          data-testid="task-detail-meta"
-          className="flex items-center gap-5 px-6 py-[10px]"
-          style={{
-            background: 'rgba(255,255,255,0.05)',
-            backdropFilter: 'blur(30px)',
-            WebkitBackdropFilter: 'blur(30px)',
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
-          }}
-        >
-          {task.repo_path && (
-            <>
-              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-                REPO
-              </span>
-              <span className="text-[11px] text-[#8a8a8a]">{repoName(task.repo_path)}</span>
-            </>
-          )}
-          {task.branch && (
-            <>
-              {task.repo_path && <span className="text-[11px] text-[#2f2f2f]">|</span>}
-              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-                {runMode === 'existing' ? 'WORKTREE HEAD' : 'BRANCH'}
-              </span>
-              <span className="text-[11px] font-medium text-[#3B82F6]">
-                {runMode === 'none' ? `${task.branch} (working tree)` : task.branch}
-              </span>
-            </>
-          )}
-          {task.base_branch && (
-            <>
-              <span className="text-[11px] text-[#2f2f2f]">|</span>
-              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-                BASE
-              </span>
-              <span className="text-[11px] text-[#8a8a8a]">{task.base_branch}</span>
-            </>
-          )}
-          {task.pr_url && (
-            <>
-              <span className="text-[11px] text-[#2f2f2f]">|</span>
-              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
-                PR
-              </span>
-              <a
-                href={task.pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] font-medium text-[#3B82F6] hover:underline"
-              >
-                #{task.pr_number}
-              </a>
-            </>
-          )}
-        </div>
-      )}
+      {!isScratch && <TaskDetailMeta task={task} />}
 
       {/* Dedicated lifecycle state: setting_up */}
       {task.runtime_state === 'setting_up' && !hasTerminal && mode === 'agents' && (
