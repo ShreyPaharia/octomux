@@ -72,6 +72,14 @@ export interface Harness {
    * harness can capture and/or send keys.
    */
   postLaunch?(target: string): Promise<void>;
+  /**
+   * Optional list of extra tmux commands (as execFile argv suffixes — each
+   * entry is the args following the literal `tmux`) to run right after the
+   * session's `new-session` call. Used by harnesses whose TUIs interact
+   * poorly with the default tmux mouse-event forwarding (e.g. Cursor CLI
+   * treats wheel events as up-arrow / prompt-history navigation).
+   */
+  tmuxSessionOptions?(sessionName: string): string[][];
   resolveFlags(settings: OctomuxSettings): string;
   validateSettings(blob: unknown): Record<string, unknown>;
   validateAgentName(name: string): string;
