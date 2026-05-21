@@ -44,12 +44,38 @@ function isTmuxTargetMissing(err: unknown): boolean {
   return /can't find (?:session|window|pane):/i.test(stderr);
 }
 
-/** Get the active window index of a tmux session. */
-async function applyHarnessTmuxOptions(harnessId: string, session: string): Promise<void> {
-  const opts = getHarness(harnessId).tmuxSessionOptions?.(session) ?? [];
-  for (const args of opts) {
-    await execFile('tmux', args);
-  }
+/**
+ * Apply tmux session options that octomux relies on for terminal UX:
+ *
+ *  - `mouse on` so tmux interprets the SGR wheel events that the web
+ *    TerminalView forwards (TUIs like Cursor CLI otherwise treat wheel as
+ *    Up/Down arrow keys → prompt-history navigation).
+ *  - Override `WheelUpPane` to enter `copy-mode -e` whenever a wheel-up
+ *    arrives on a non-mouse-tracking pane. `-e` makes tmux auto-exit copy
+ *    mode when the user scrolls back to the bottom, so the entry/exit is
+ *    transparent.
+ *
+ * The binding is server-global (tmux has no per-session bind-key), but it
+ * preserves default behavior for any non-octomux sessions sharing this
+ * tmux server: `send-keys -M` forwards to apps that requested mouse mode,
+ * and otherwise the inner if-shell falls into `copy-mode -e` — which is
+ * what stock tmux does too.
+ */
+async function applyTmuxSessionOptions(session: string): Promise<void> {
+  await execFile('tmux', ['set-option', '-t', session, 'mouse', 'on']);
+  await execFile('tmux', [
+    'bind-key',
+    '-T',
+    'root',
+    'WheelUpPane',
+    'if-shell',
+    '-F',
+    '-t',
+    '=',
+    '#{?pane_in_mode,1,#{mouse_any_flag}}',
+    'send-keys -M',
+    'copy-mode -e',
+  ]);
 }
 
 async function getActiveWindowIndex(session: string): Promise<number> {
@@ -636,7 +662,7 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'tmux_session';
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', setup.worktreePath]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
-    await applyHarnessTmuxOptions(task.harness_id, session);
+    await applyTmuxSessionOptions(session);
     // Session exists now — persist the column. See race-avoidance comment above.
     db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
       session,
@@ -1194,7 +1220,7 @@ export async function resumeTask(task: Task): Promise<void> {
     const cwd = task.worktree!;
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
-    await applyHarnessTmuxOptions(task.harness_id, session);
+    await applyTmuxSessionOptions(session);
 
     const agents = db
       .prepare(
@@ -1395,7 +1421,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   if (isStandalone) {
     await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
-    await applyHarnessTmuxOptions(agent.harness_id, newSession);
+    await applyTmuxSessionOptions(newSession);
     newWindowIndex = 0;
   } else {
     await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd]);
