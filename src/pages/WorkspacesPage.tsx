@@ -184,18 +184,12 @@ export default function WorkspacesPage() {
                       {truncate(w.path)}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span
-                        className={
-                          w.status === 'in_use' ? 'text-success' : 'text-muted-soft'
-                        }
-                      >
+                      <span className={w.status === 'in_use' ? 'text-success' : 'text-muted-soft'}>
                         {w.status}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground">{w.task_count}</td>
-                    <td className="px-4 py-2.5 text-muted-soft">
-                      {relativeTime(w.last_used_at)}
-                    </td>
+                    <td className="px-4 py-2.5 text-muted-soft">{relativeTime(w.last_used_at)}</td>
                   </tr>
                 ))}
               </tbody>

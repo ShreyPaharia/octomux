@@ -12,6 +12,21 @@ import { childLogger } from '../logger.js';
 const execFile = promisify(execFileCb);
 const logger = childLogger('harness:cursor');
 
+/** Default cursor-agent model when harnesses.cursor.model and flags omit --model. */
+export const CURSOR_DEFAULT_MODEL = 'composer-2.5';
+
+const CURSOR_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+export function validateCursorModel(model: string): string {
+  const trimmed = model.trim();
+  if (!CURSOR_MODEL_RE.test(trimmed)) {
+    throw new Error(
+      `Invalid harnesses.cursor.model: ${JSON.stringify(model)}. Use an id from cursor-agent --list-models`,
+    );
+  }
+  return trimmed;
+}
+
 const OCTOMUX_CURSOR_RULE_PREFIX = 'octomux-agent-';
 
 /**
@@ -269,6 +284,7 @@ export const cursorHarness: Harness = {
     const sub = (settings.harnesses?.['cursor'] ?? {}) as {
       flags?: string;
       force?: boolean;
+      model?: string;
     };
 
     const parts: string[] = [];
@@ -277,6 +293,14 @@ export const cursorHarness: Harness = {
     }
     if (sub.flags) {
       parts.push(validateFlagString(sub.flags, 'harnesses.cursor.flags'));
+    }
+    const joined = parts.join(' ');
+    if (!/\B--model\b/.test(joined)) {
+      const modelId =
+        typeof sub.model === 'string' && sub.model.trim()
+          ? validateCursorModel(sub.model)
+          : CURSOR_DEFAULT_MODEL;
+      parts.push(`--model ${modelId}`);
     }
     return parts.length > 0 ? ` ${parts.join(' ')}` : '';
   },
@@ -287,7 +311,7 @@ export const cursorHarness: Harness = {
     }
     const obj = blob as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    const allowed = new Set(['flags', 'force']);
+    const allowed = new Set(['flags', 'force', 'model']);
     for (const key of Object.keys(obj)) {
       if (!allowed.has(key)) {
         throw new Error(`Invalid cursor settings: unknown key "${key}"`);
@@ -301,6 +325,13 @@ export const cursorHarness: Harness = {
         throw new Error('Invalid cursor.force: expected boolean');
       }
       out.force = obj.force;
+    }
+    if (obj.model !== undefined) {
+      if (typeof obj.model !== 'string') {
+        throw new Error('Invalid cursor.model: expected string');
+      }
+      const trimmed = obj.model.trim();
+      if (trimmed) out.model = validateCursorModel(trimmed);
     }
     return out;
   },

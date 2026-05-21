@@ -25,10 +25,7 @@ export function InboxSectionHeader({
         <span className="text-xs font-medium tabular-nums text-muted-soft">{count}</span>
       )}
       {meta && <span className="text-xs text-muted-soft">{meta}</span>}
-      <span
-        className={`ml-1 h-px flex-1 ${lineClass ?? 'bg-glass-edge'}`}
-        aria-hidden
-      />
+      <span className={`ml-1 h-px flex-1 ${lineClass ?? 'bg-glass-edge'}`} aria-hidden />
     </div>
   );
 }

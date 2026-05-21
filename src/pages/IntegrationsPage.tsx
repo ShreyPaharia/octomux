@@ -192,10 +192,7 @@ export default function IntegrationsPage() {
 
   if (loading) {
     return (
-      <SettingsLayout
-        title="Integrations"
-        description="Connect Octomux to external systems"
-      >
+      <SettingsLayout title="Integrations" description="Connect Octomux to external systems">
         <p className="text-sm text-muted-soft">Loading integrations…</p>
       </SettingsLayout>
     );

@@ -16,8 +16,18 @@ interface ColumnDef {
 }
 
 export const COLUMN_DEFS: ColumnDef[] = [
-  { id: 'backlog', label: 'Backlog', accentClass: 'text-muted-soft', countClass: 'text-muted-soft' },
-  { id: 'planned', label: 'Planned', accentClass: 'text-muted-soft', countClass: 'text-muted-soft' },
+  {
+    id: 'backlog',
+    label: 'Backlog',
+    accentClass: 'text-muted-soft',
+    countClass: 'text-muted-soft',
+  },
+  {
+    id: 'planned',
+    label: 'Planned',
+    accentClass: 'text-muted-soft',
+    countClass: 'text-muted-soft',
+  },
   {
     id: 'in_progress',
     label: 'In progress',

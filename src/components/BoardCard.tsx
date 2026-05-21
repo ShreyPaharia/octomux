@@ -54,9 +54,7 @@ export const BoardCard = memo(function BoardCard({ task, isDragging }: BoardCard
       <div className="px-3 py-2.5">
         {/* Error banner */}
         {task.runtime_state === 'error' && task.error && (
-          <div
-            className="mb-2 rounded-md bg-destructive/10 px-2 py-1 text-xs"
-          >
+          <div className="mb-2 rounded-md bg-destructive/10 px-2 py-1 text-xs">
             <span className="font-bold text-red-500">Error:</span>{' '}
             <span className="truncate text-red-400">{task.error}</span>
           </div>
