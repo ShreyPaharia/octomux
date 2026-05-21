@@ -234,30 +234,6 @@ export const cursorHarness: Harness = {
     }
   },
 
-  tmuxSessionOptions(sessionName: string): string[][] {
-    // Cursor CLI's TUI captures wheel events and feeds them to its prompt
-    // history (so scrolling cycles old prompts instead of scrolling chat).
-    // Work around it by turning mouse on and rebinding WheelUpPane to enter
-    // tmux copy-mode -e (which auto-exits on scroll-back-to-bottom). The
-    // binding is gated on a session-local user flag so it stays a no-op in
-    // any non-octomux tmux sessions on the same server.
-    return [
-      ['set-option', '-t', sessionName, 'mouse', 'on'],
-      ['set-option', '-t', sessionName, '@octomux-scroll-copy', 'on'],
-      [
-        'bind-key',
-        '-T',
-        'root',
-        'WheelUpPane',
-        'if-shell',
-        '-F',
-        '#{@octomux-scroll-copy}',
-        "if-shell -F -t = '#{pane_in_mode}' 'send-keys -M' 'copy-mode -e'",
-        'send-keys -M',
-      ],
-    ];
-  },
-
   async postLaunch(target: string): Promise<void> {
     if (process.env.NODE_ENV === 'test') return;
     const start = Date.now();

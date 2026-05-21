@@ -45,13 +45,6 @@ function isTmuxTargetMissing(err: unknown): boolean {
 }
 
 /** Get the active window index of a tmux session. */
-async function applyHarnessTmuxOptions(harnessId: string, session: string): Promise<void> {
-  const opts = getHarness(harnessId).tmuxSessionOptions?.(session) ?? [];
-  for (const args of opts) {
-    await execFile('tmux', args);
-  }
-}
-
 async function getActiveWindowIndex(session: string): Promise<number> {
   const { stdout } = await execFile('tmux', [
     'display-message',
@@ -636,7 +629,6 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'tmux_session';
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', setup.worktreePath]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
-    await applyHarnessTmuxOptions(task.harness_id, session);
     // Session exists now — persist the column. See race-avoidance comment above.
     db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
       session,
@@ -1194,7 +1186,6 @@ export async function resumeTask(task: Task): Promise<void> {
     const cwd = task.worktree!;
     await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
-    await applyHarnessTmuxOptions(task.harness_id, session);
 
     const agents = db
       .prepare(
@@ -1242,11 +1233,7 @@ export async function resumeTask(task: Task): Promise<void> {
           });
         } else {
           const newId = harness.newSessionId();
-          const continueCmd = harness.buildContinueCommand({
-            sessionId: newId,
-            flags,
-            workspacePath: cwd,
-          });
+          const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags, workspacePath: cwd });
           if (continueCmd !== null) {
             baseCmd = continueCmd;
           } else {
@@ -1395,7 +1382,6 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   if (isStandalone) {
     await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd]);
     await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
-    await applyHarnessTmuxOptions(agent.harness_id, newSession);
     newWindowIndex = 0;
   } else {
     await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd]);
@@ -1419,11 +1405,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     });
   } else {
     const newId = harness.newSessionId();
-    const continueCmd = harness.buildContinueCommand({
-      sessionId: newId,
-      flags,
-      workspacePath: cwd,
-    });
+    const continueCmd = harness.buildContinueCommand({ sessionId: newId, flags, workspacePath: cwd });
     if (continueCmd !== null) {
       baseCmd = continueCmd;
     } else {
