@@ -312,8 +312,7 @@ export function Composer({ onSubmitted }: Props = {}) {
   return (
     <GlassPanel
       level={3}
-      specular
-      className="composer-shell flex flex-col gap-3 rounded-2xl px-4 py-3"
+      className="composer-shell flex flex-col gap-2 overflow-hidden rounded-2xl px-4 py-3.5"
       data-testid="composer"
     >
       <IntentHeader
@@ -394,7 +393,7 @@ export function Composer({ onSubmitted }: Props = {}) {
 
         {showScratchHint && (
           <span
-            className="ml-auto inline-flex select-none items-center gap-1 rounded-full border border-white/[0.12] bg-white/[0.03] px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+            className="ml-auto inline-flex select-none items-center gap-1 rounded-full border border-glass-edge bg-glass-l1/60 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
             data-testid="scratch-hint"
             title="No repo selected — submission creates a scratch chat."
           >
@@ -404,12 +403,13 @@ export function Composer({ onSubmitted }: Props = {}) {
         )}
       </div>
 
-      {/* Prompt + submit — opaque block (terminal rule). */}
-      <form onSubmit={handleSubmit} className="composer-prompt-well flex flex-col gap-3 p-3">
+      <div className="composer-divider" aria-hidden />
+
+      <form onSubmit={handleSubmit} className="composer-prompt-well flex flex-col gap-3 p-3.5">
         <textarea
           ref={textareaRef}
           data-testid="composer-prompt"
-          className="focus-ring min-h-[72px] resize-y rounded-lg bg-transparent px-1 py-1 text-sm font-mono text-foreground outline-none"
+          className="focus-ring min-h-[72px] resize-y rounded-lg bg-transparent px-0.5 py-1 text-sm font-mono text-foreground outline-none placeholder:text-muted-soft"
           placeholder={promptPlaceholder(state)}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -850,7 +850,7 @@ function DraftToggle({
       className={`focus-ring rounded-full border px-3 py-1 text-[11px] font-mono transition-colors disabled:opacity-40 ${
         checked
           ? 'border-primary/40 bg-primary/10 text-primary'
-          : 'border-white/[0.15] bg-white/[0.03] text-muted-foreground hover:text-foreground'
+          : 'border-glass-edge bg-glass-l1/50 text-muted-foreground hover:text-foreground'
       }`}
     >
       📝 draft
