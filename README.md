@@ -24,14 +24,14 @@ One SQLite-backed state machine survives reboots: `octomux start` recovers tasks
 
 ## Screenshots
 
-| | |
-| --- | --- |
-| **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png) |
-| **Command center** — kanban from backlog → done | ![Command center](assets/screenshots/command-center.png) |
-| **Harness picker** — Claude Code or Cursor per task | ![Harness picker](assets/screenshots/composer-harness.png) |
-| **Settings** — default harness, Cursor model & `--force` | ![Settings](assets/screenshots/settings-harnesses.png) |
-| **Task cockpit** — agent tabs, live Claude session, Ship, Done | ![Task detail](assets/screenshots/task-detail.png) |
-| **Diff review** — file tree, reviewed state, inline comments | ![Diff](assets/screenshots/diff-review.png) |
+|                                                                               |                                                            |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png)             |
+| **Command center** — kanban from backlog → done                               | ![Command center](assets/screenshots/command-center.png)   |
+| **Harness picker** — Claude Code or Cursor per task                           | ![Harness picker](assets/screenshots/composer-harness.png) |
+| **Settings** — default harness, Cursor model & `--force`                      | ![Settings](assets/screenshots/settings-harnesses.png)     |
+| **Task cockpit** — agent tabs, live Claude session, Ship, Done                | ![Task detail](assets/screenshots/task-detail.png)         |
+| **Diff review** — file tree, reviewed state, inline comments                  | ![Diff](assets/screenshots/diff-review.png)                |
 
 ## Features
 
@@ -69,27 +69,27 @@ Step-by-step setup, Jira, and orchestrator skills: [ONBOARDING.md](./ONBOARDING.
 INTAKE → EXECUTE → SUPERVISE → REVIEW → MERGE → RESUME
 ```
 
-| Phase | What happens |
-| ----- | ------------ |
-| **Intake** | Composer, CLI, orchestrator skills, or Jira/GitHub drafts |
-| **Execute** | Worktree + branch + tmux; harness launches `claude` or `cursor-agent` |
-| **Supervise** | Inbox for permissions; command center for fleet status |
-| **Review** | Diff tab, lazygit terminal, mark reviewed, **Done** |
-| **Merge** | PR poller links branches; tasks close when PRs merge |
-| **Resume** | DB + worktrees survive reboot — `octomux start` picks up |
+| Phase         | What happens                                                          |
+| ------------- | --------------------------------------------------------------------- |
+| **Intake**    | Composer, CLI, orchestrator skills, or Jira/GitHub drafts             |
+| **Execute**   | Worktree + branch + tmux; harness launches `claude` or `cursor-agent` |
+| **Supervise** | Inbox for permissions; command center for fleet status                |
+| **Review**    | Diff tab, lazygit terminal, mark reviewed, **Done**                   |
+| **Merge**     | PR poller links branches; tasks close when PRs merge                  |
+| **Resume**    | DB + worktrees survive reboot — `octomux start` picks up              |
 
 ## CLI
 
-| Command | Description |
-| ------- | ----------- |
-| `octomux start` | Dashboard at `:7777` |
-| `octomux init` | Defaults wizard (Jira, base branch, harness prefs) |
-| `octomux create-task` | New task (`--harness cursor` optional) |
-| `octomux list-tasks` / `get-task` | Inspect tasks |
-| `octomux close-task` / `delete-task` | Stop or fully remove |
-| `octomux resume-task` | Resume a closed task |
-| `octomux add-agent` | Another agent window |
-| `octomux send-message` | Message a running agent |
+| Command                              | Description                                        |
+| ------------------------------------ | -------------------------------------------------- |
+| `octomux start`                      | Dashboard at `:7777`                               |
+| `octomux init`                       | Defaults wizard (Jira, base branch, harness prefs) |
+| `octomux create-task`                | New task (`--harness cursor` optional)             |
+| `octomux list-tasks` / `get-task`    | Inspect tasks                                      |
+| `octomux close-task` / `delete-task` | Stop or fully remove                               |
+| `octomux resume-task`                | Resume a closed task                               |
+| `octomux add-agent`                  | Another agent window                               |
+| `octomux send-message`               | Message a running agent                            |
 
 ## Architecture
 
@@ -131,12 +131,12 @@ flowchart LR
 
 ## Configuration
 
-| Variable / flag | Purpose |
-| --------------- | ------- |
-| `OCTOMUX_PORT` / `--port` | Dashboard port (default `7777`) |
-| `OCTOMUX_URL` | CLI → API base URL |
-| `OCTOMUX_DB_PATH` | Override task DB path |
-| `OCTOMUX_GITHUB_LOGIN` | Reviewer-request polling account |
+| Variable / flag           | Purpose                          |
+| ------------------------- | -------------------------------- |
+| `OCTOMUX_PORT` / `--port` | Dashboard port (default `7777`)  |
+| `OCTOMUX_URL`             | CLI → API base URL               |
+| `OCTOMUX_DB_PATH`         | Override task DB path            |
+| `OCTOMUX_GITHUB_LOGIN`    | Reviewer-request polling account |
 
 ## Links
 

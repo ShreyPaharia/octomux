@@ -7,7 +7,9 @@ const docsDbPath = process.env.OCTOMUX_DB_PATH
 /** README capture — always boot an isolated server (never reuse a dev `octomux start`). */
 const docsScreenshots = !!process.env.OCTOMUX_SCREENSHOTS;
 const reuseServer = !process.env.CI && !docsScreenshots;
-const backendPort = docsScreenshots ? '7788' : process.env.OCTOMUX_PORT || process.env.PORT || '7777';
+const backendPort = docsScreenshots
+  ? '7788'
+  : process.env.OCTOMUX_PORT || process.env.PORT || '7777';
 const vitePort = docsScreenshots ? '5174' : '5173';
 const backendEnv = {
   NODE_ENV: 'test',

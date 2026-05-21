@@ -232,7 +232,10 @@ test.describe.serial('Docs screenshots', () => {
     });
     await page.goto(`/tasks/${DEMO_DETAIL_ID}`);
     await page.waitForSelector('[data-testid="task-detail-header"]');
-    await page.getByTestId('task-error-view').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await page
+      .getByTestId('task-error-view')
+      .waitFor({ state: 'hidden', timeout: 5000 })
+      .catch(() => {});
     await page.getByRole('button', { name: 'Agent 1' }).click();
     await page.locator('.xterm').waitFor({ state: 'visible', timeout: 10_000 });
     // Allow xterm websocket to stream the static Claude welcome pane.
@@ -244,7 +247,10 @@ test.describe.serial('Docs screenshots', () => {
     mockDiffApi(page, DEMO_DETAIL_ID);
     await page.goto(`/tasks/${DEMO_DETAIL_ID}`);
     await page.waitForSelector('[data-testid="task-detail-header"]');
-    await page.getByTestId('task-error-view').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await page
+      .getByTestId('task-error-view')
+      .waitFor({ state: 'hidden', timeout: 5000 })
+      .catch(() => {});
     await page.getByTestId('task-detail-header').getByRole('button', { name: 'Diff' }).click();
     await page.waitForSelector('[data-testid="diff-file-row-src/auth/invite.ts"]');
     await page.getByTestId('diff-file-row-src/auth/invite.ts').click();

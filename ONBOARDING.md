@@ -31,11 +31,11 @@ octomux init --jira-url https://your-co.atlassian.net \
 
 Open **Settings** after first launch:
 
-| Setting | What it does |
-| ------- | ------------ |
-| **Default harness** | Composer and new tasks default to Claude Code or Cursor |
-| **Claude Code** | CLI flags, dangerously-skip-permissions |
-| **Cursor** | Default model (`cursor-agent --list-models`), `--force`, extra flags |
+| Setting             | What it does                                                         |
+| ------------------- | -------------------------------------------------------------------- |
+| **Default harness** | Composer and new tasks default to Claude Code or Cursor              |
+| **Claude Code**     | CLI flags, dangerously-skip-permissions                              |
+| **Cursor**          | Default model (`cursor-agent --list-models`), `--force`, extra flags |
 
 In the **composer** (home dock), use the **Coding agent** control to override the default for a single task.
 
@@ -97,29 +97,29 @@ Draft first if you want to edit title, prompt, and branch before agents start �
 
 ## 7. Where things live
 
-| Path | Purpose |
-| ---- | ------- |
-| `~/.octomux/settings.json` | Defaults (editor, Jira, harness flags, default harness) |
-| `~/.octomux/data/tasks.db` | Task state (production) |
-| `./data/tasks.db` | Task state (development) |
-| `~/.octomux/logs/` | Server + hook logs |
-| `~/.octomux/hooks/<event>.d/` | Lifecycle hooks |
-| `~/.octomux/agents/` | Custom agent definitions (Claude + Cursor) |
-| `~/.claude/skills/` | Skills installed for Claude Code |
-| `<repo>/.worktrees/<task-id>` | Per-task git worktree |
-| `<worktree>/.octomux-hooks/` | Cursor hook bridge (Cursor tasks) |
-| `<worktree>/.cursor/rules/` | Cursor rules synced from agent definitions |
+| Path                          | Purpose                                                 |
+| ----------------------------- | ------------------------------------------------------- |
+| `~/.octomux/settings.json`    | Defaults (editor, Jira, harness flags, default harness) |
+| `~/.octomux/data/tasks.db`    | Task state (production)                                 |
+| `./data/tasks.db`             | Task state (development)                                |
+| `~/.octomux/logs/`            | Server + hook logs                                      |
+| `~/.octomux/hooks/<event>.d/` | Lifecycle hooks                                         |
+| `~/.octomux/agents/`          | Custom agent definitions (Claude + Cursor)              |
+| `~/.claude/skills/`           | Skills installed for Claude Code                        |
+| `<repo>/.worktrees/<task-id>` | Per-task git worktree                                   |
+| `<worktree>/.octomux-hooks/`  | Cursor hook bridge (Cursor tasks)                       |
+| `<worktree>/.cursor/rules/`   | Cursor rules synced from agent definitions              |
 
 ## Troubleshooting
 
-| Issue | Fix |
-| ----- | --- |
-| Missing binary on start | `brew install <name>` or install Claude / Cursor CLI |
-| `cursor-agent` not found | Install [Cursor CLI](https://cursor.com/docs/cli); verify with `cursor-agent --version` |
-| Wrong harness on new tasks | Settings → default harness, or pass `--harness cursor` |
-| `gh` not authenticated | `gh auth login` |
-| Jira MCP not authenticated | Auth inside your agent IDE (separate from `JIRA_TOKEN`) |
-| No default branch | Pass `--base-branch main` when creating tasks |
-| Leftover worktree | `octomux delete-task <id>` (full cleanup) vs `close-task` (keeps branch for resume) |
+| Issue                      | Fix                                                                                     |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| Missing binary on start    | `brew install <name>` or install Claude / Cursor CLI                                    |
+| `cursor-agent` not found   | Install [Cursor CLI](https://cursor.com/docs/cli); verify with `cursor-agent --version` |
+| Wrong harness on new tasks | Settings → default harness, or pass `--harness cursor`                                  |
+| `gh` not authenticated     | `gh auth login`                                                                         |
+| Jira MCP not authenticated | Auth inside your agent IDE (separate from `JIRA_TOKEN`)                                 |
+| No default branch          | Pass `--base-branch main` when creating tasks                                           |
+| Leftover worktree          | `octomux delete-task <id>` (full cleanup) vs `close-task` (keeps branch for resume)     |
 
 More detail: [README](./README.md).

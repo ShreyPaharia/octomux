@@ -8,8 +8,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath =
-  process.env.OCTOMUX_DB_PATH ??
-  path.join(__dirname, '..', 'data', 'docs-demo', 'tasks.db');
+  process.env.OCTOMUX_DB_PATH ?? path.join(__dirname, '..', 'data', 'docs-demo', 'tasks.db');
 
 const DEMO_DETAIL_WORKTREE = path.join(
   __dirname,
@@ -57,13 +56,16 @@ primeDemoClaudeTmux();
 
 // Promote demo-detail for agent + diff screenshots (alive tmux → no recovery error).
 const db2 = new Database(dbPath);
-db2.prepare(
-  `UPDATE tasks
+db2
+  .prepare(
+    `UPDATE tasks
    SET runtime_state = 'running', error = NULL, tmux_session = ?, updated_at = datetime('now')
    WHERE id = 'demo-detail'`,
-).run(DEMO_TMUX);
-db2.prepare(
-  `INSERT OR REPLACE INTO integrations (id, kind, name, config_json, enabled, created_at, updated_at)
+  )
+  .run(DEMO_TMUX);
+db2
+  .prepare(
+    `INSERT OR REPLACE INTO integrations (id, kind, name, config_json, enabled, created_at, updated_at)
    VALUES (
      'demo-jira',
      'jira',
@@ -73,13 +75,14 @@ db2.prepare(
      datetime('now'),
      datetime('now')
    )`,
-).run(
-  JSON.stringify({
-    baseUrl: 'https://acme.atlassian.net',
-    email: 'ops@acme.io',
-    apiToken: 'demo-token-not-real',
-  }),
-);
+  )
+  .run(
+    JSON.stringify({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'ops@acme.io',
+      apiToken: 'demo-token-not-real',
+    }),
+  );
 
 db2.close();
 

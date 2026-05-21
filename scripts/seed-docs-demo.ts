@@ -31,7 +31,10 @@ if (!fs.existsSync(gitDir)) {
   fs.mkdirSync(gitDir, { recursive: true });
   fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
   fs.mkdirSync(path.join(gitDir, 'refs', 'heads'), { recursive: true });
-  fs.writeFileSync(path.join(gitDir, 'refs', 'heads', 'main'), 'a1b2c3d4e5f6789012345678901234567890abcd\n');
+  fs.writeFileSync(
+    path.join(gitDir, 'refs', 'heads', 'main'),
+    'a1b2c3d4e5f6789012345678901234567890abcd\n',
+  );
 }
 
 const db = new Database(dbPath);
