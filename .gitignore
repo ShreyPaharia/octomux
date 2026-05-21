@@ -17,6 +17,8 @@ blob-report/
 !.claude/agents/
 # Repo-local neovim runtime data
 .local/
+# optional local husky hook (not tracked)
+.husky/prepare-commit-msg
 .config/nvim/.luarc.json
 docs/superpowers
 designs/
