@@ -1,12 +1,4 @@
-import {
-  useState,
-  useMemo,
-  useEffect,
-  useCallback,
-  useRef,
-  type ReactNode,
-  type CSSProperties,
-} from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
 import {
