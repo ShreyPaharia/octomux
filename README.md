@@ -4,7 +4,7 @@
 
 # octomux
 
-> **Coding got faster. Managing 5 agents didn't.**
+> **Coding got faster. Managing agents didn't.**
 
 A local web app for running your **Claude Code** and **Cursor** agents in parallel — and reviewing what they shipped. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. Runs entirely on your laptop.
 
