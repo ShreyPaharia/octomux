@@ -59,8 +59,16 @@ export function AgentTabs({
   onMoveAgent,
   onDetachAgent,
 }: AgentTabsProps) {
+  const tabClass = (active: boolean) =>
+    cn(
+      'flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm transition-colors',
+      active
+        ? 'border border-primary/40 bg-primary/15 font-semibold text-primary'
+        : 'border border-transparent font-medium text-muted-foreground hover:bg-glass-l1 hover:text-foreground',
+    );
+
   return (
-    <div className="flex items-center gap-1 border-b border-glass-edge px-1 pb-1">
+    <div className="diff-pane-header flex items-center gap-1 px-2 pb-1 pt-1">
       {agents
         .filter((agent) => agent.status !== 'stopped')
         .map((agent) => {
@@ -72,12 +80,7 @@ export function AgentTabs({
                 data-testid={`agent-tab-${agent.id}`}
                 data-active={active ? 'true' : undefined}
                 data-display-status={displayStatus}
-                className={cn(
-                  'flex items-center gap-1.5 px-3.5 py-2 text-sm transition-colors',
-                  active
-                    ? 'border border-[#22D3EE] bg-[#0B0C0F] text-[#3B82F6] font-bold'
-                    : 'border border-transparent text-[#8a8a8a] font-medium hover:text-foreground',
-                )}
+                className={tabClass(active)}
                 onClick={() => onSelect(agent.window_index)}
               >
                 <StatusGlyph status={displayStatus} size={10} />
@@ -115,22 +118,19 @@ export function AgentTabs({
         })}
       {canAddAgent && <AddAgentButton onAdd={onAddAgent} />}
       {(userTerminals.length > 0 || onAddTerminal) && (
-        <div data-testid="tab-separator" className="mx-1 h-6 w-px bg-[#2f2f2f]" />
+        <div data-testid="tab-separator" className="mx-1 h-6 w-px bg-glass-edge" />
       )}
       {userTerminals.map((terminal) => (
         <div key={terminal.id} className="group flex items-center">
           <button
-            className={cn(
-              'flex items-center gap-1.5 px-3.5 py-2 text-sm transition-colors',
-              terminal.window_index === activeIndex
-                ? 'border border-[#22D3EE] bg-[#0B0C0F] text-[#3B82F6] font-bold'
-                : 'border border-transparent text-[#8a8a8a] font-medium hover:text-foreground',
-            )}
+            className={tabClass(terminal.window_index === activeIndex)}
             onClick={() => onSelect(terminal.window_index)}
           >
             <span
               className={`inline-block h-2 w-2 ${
-                terminal.status === 'working' ? 'animate-pulse bg-[#22C55E]' : 'bg-[#6a6a6a]'
+                terminal.status === 'working'
+                  ? 'animate-pulse bg-[#22C55E]'
+                  : 'bg-muted-foreground'
               }`}
             />
             {terminal.label}
@@ -208,12 +208,12 @@ function AgentTabMenu({
         <div
           role="menu"
           data-testid={`agent-tab-menu-items-${agent.id}`}
-          className="absolute right-0 top-full z-50 mt-1 min-w-44 bg-[#141414] border border-border py-1 text-xs outline-none"
+          className="glass-chrome-menu glass-blur-l2 absolute right-0 top-full z-50 mt-1 min-w-44 rounded-lg border border-glass-edge py-1 text-xs outline-none"
         >
           {onMove && (
             <button
               role="menuitem"
-              className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+              className="block w-full px-3 py-1.5 text-left text-foreground hover:bg-white/5"
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
@@ -226,7 +226,7 @@ function AgentTabMenu({
           {onDetach && (
             <button
               role="menuitem"
-              className="block w-full px-3 py-1.5 text-left text-[#d0d0d0] hover:bg-[#1a1a1a]"
+              className="block w-full px-3 py-1.5 text-left text-foreground hover:bg-white/5"
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
@@ -236,10 +236,10 @@ function AgentTabMenu({
               Detach to chat
             </button>
           )}
-          <div className="my-1 h-px bg-[#2f2f2f]" />
+          <div className="my-1 h-px bg-glass-edge" />
           <button
             role="menuitem"
-            className="block w-full px-3 py-1.5 text-left text-[#EF4444] hover:bg-[#1a1a1a]"
+            className="block w-full px-3 py-1.5 text-left text-destructive hover:bg-white/5"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);

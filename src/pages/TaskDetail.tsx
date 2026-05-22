@@ -24,6 +24,7 @@ import { useTask } from '@/lib/hooks';
 import { api, diffRangeToParam, type DiffRange, type DiffSummaryResponse } from '@/lib/api';
 import { TaskDetailHeader } from '@/components/layout/task-detail-header';
 import { TaskDetailMeta } from '@/components/layout/task-detail-meta';
+import { TaskInfoPanel } from '@/components/layout/task-info-panel';
 import { TerminalRectIcon } from '@/components/icons';
 import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
@@ -659,12 +660,16 @@ export default function TaskDetail() {
           <DraftEditForm task={task} onSaved={refresh} onStart={handleStart} />
           <div data-testid="task-detail-panels" className="border-t border-glass-edge px-6 py-4">
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              <TaskActivityPanel taskId={task.id} />
-              <div>
+              <TaskInfoPanel>
+                <TaskActivityPanel taskId={task.id} />
+              </TaskInfoPanel>
+              <TaskInfoPanel>
                 <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
                 <JiraLinkHelper taskId={task.id} />
-              </div>
-              <TaskHooksPanel taskId={task.id} />
+              </TaskInfoPanel>
+              <TaskInfoPanel>
+                <TaskHooksPanel taskId={task.id} />
+              </TaskInfoPanel>
             </div>
           </div>
         </div>
@@ -792,12 +797,16 @@ export default function TaskDetail() {
       {mode === 'info' && !isDraft && (
         <div data-testid="task-detail-panels" className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <TaskActivityPanel taskId={task.id} />
-            <div>
+            <TaskInfoPanel>
+              <TaskActivityPanel taskId={task.id} />
+            </TaskInfoPanel>
+            <TaskInfoPanel>
               <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
               <JiraLinkHelper taskId={task.id} />
-            </div>
-            <TaskHooksPanel taskId={task.id} />
+            </TaskInfoPanel>
+            <TaskInfoPanel>
+              <TaskHooksPanel taskId={task.id} />
+            </TaskInfoPanel>
           </div>
         </div>
       )}

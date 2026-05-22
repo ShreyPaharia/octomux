@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { PageHeader } from '@/components/layout/page-header';
-import { SETTINGS_NAV_ACTIVE_STYLE } from '@/lib/design-tokens';
 import { cn } from '@/lib/utils';
 
 export type SettingsScrollSection =
@@ -55,10 +54,10 @@ export function SettingsLayout({
 
       <div className="flex min-h-0 flex-1">
         <GlassPanel
-          level={1}
-          className="flex w-[220px] shrink-0 flex-col gap-1 rounded-none border-y-0 border-l-0 py-4"
+          chrome
+          className="flex w-[220px] shrink-0 flex-col gap-0.5 rounded-none border-y-0 border-l-0 py-4"
         >
-          <nav aria-label="Settings sections" className="flex flex-col">
+          <nav aria-label="Settings sections" className="flex flex-col gap-0.5 px-2">
             {SETTINGS_SCROLL_NAV.map((item) => {
               const isActive = !onIntegrations && item.id === activeScrollSection;
               return (
@@ -68,17 +67,13 @@ export function SettingsLayout({
                   data-testid={`settings-nav-${item.id}`}
                   data-active={isActive ? 'true' : undefined}
                   onClick={() => onScrollTo?.(item.id)}
-                  className={cn(
-                    'focus-ring relative px-5 py-2 text-left text-sm font-medium transition-colors',
-                    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  style={isActive ? SETTINGS_NAV_ACTIVE_STYLE : undefined}
+                  className={settingsNavItemClass(isActive)}
                 >
                   {item.label}
                 </button>
               );
             })}
-            <div className="mx-4 my-2 border-t border-glass-edge" role="separator" />
+            <div className="mx-2 my-2 border-t border-glass-edge" role="separator" />
             {SETTINGS_ROUTE_NAV.map((item) => {
               const isActive = item.to === pathname;
               return (
@@ -87,11 +82,7 @@ export function SettingsLayout({
                   to={item.to}
                   data-testid={`settings-nav-${item.id}`}
                   data-active={isActive ? 'true' : undefined}
-                  className={cn(
-                    'focus-ring relative px-5 py-2 text-sm font-medium transition-colors',
-                    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  style={isActive ? SETTINGS_NAV_ACTIVE_STYLE : undefined}
+                  className={settingsNavItemClass(isActive)}
                 >
                   {item.label}
                 </Link>
@@ -105,5 +96,14 @@ export function SettingsLayout({
         </div>
       </div>
     </div>
+  );
+}
+
+function settingsNavItemClass(active: boolean): string {
+  return cn(
+    'focus-ring rounded-[10px] px-3 py-2 text-left text-sm font-medium transition-all duration-150',
+    active
+      ? 'border-l-2 border-primary bg-primary/15 text-primary'
+      : 'border-l-2 border-transparent text-muted-foreground hover:bg-white/5 hover:text-foreground',
   );
 }

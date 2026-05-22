@@ -16,7 +16,7 @@ export function TaskDetailMeta({ task }: { task: Task }) {
   return (
     <div
       data-testid="task-detail-meta"
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-glass-edge bg-glass-l1/50 px-6 py-2.5 text-xs glass-blur-l1"
+      className="diff-pane-header flex flex-wrap items-center gap-x-4 gap-y-1 px-6 py-2.5 text-xs"
     >
       {task.repo_path && <MetaItem label="Repo" value={repoName(task.repo_path)} />}
       {task.branch && (

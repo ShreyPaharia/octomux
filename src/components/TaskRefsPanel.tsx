@@ -70,26 +70,28 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">Linked Refs</h2>
+      <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        Linked Refs
+      </h2>
 
       {/* Existing refs list */}
       {refs.length === 0 ? (
-        <p className="text-[11px] text-[#4a4a4a]">No integrations linked.</p>
+        <p className="text-[11px] text-muted-soft">No integrations linked.</p>
       ) : (
         <div className="flex flex-col gap-1">
           {refs.map((r) => (
             <div
               key={r.integration}
-              className="flex items-center gap-2 rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2"
+              className="flex items-center gap-2 rounded-lg border border-glass-edge bg-glass-l1 px-3 py-2"
             >
-              <span className="text-[11px] font-medium text-[#8a8a8a]">{r.integration}</span>
-              <span className="text-[10px] text-[#4a4a4a]">:</span>
+              <span className="text-[11px] font-medium text-muted-foreground">{r.integration}</span>
+              <span className="text-[10px] text-muted-soft">:</span>
               {r.url ? (
                 <a
                   href={r.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] text-[#3B82F6] hover:underline"
+                  className="text-[11px] text-primary hover:underline"
                 >
                   {r.ref}
                 </a>
@@ -98,7 +100,7 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
               )}
               <button
                 type="button"
-                className="ml-auto text-[10px] text-[#4a4a4a] hover:text-destructive"
+                className="ml-auto text-[10px] text-muted-soft hover:text-destructive"
                 onClick={() => handleRemove(r.integration)}
                 aria-label={`Remove ${r.integration} ref`}
                 data-testid={`remove-ref-${r.integration}`}
@@ -111,8 +113,8 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
       )}
 
       {/* Add ref form */}
-      <div className="flex flex-col gap-2 rounded-lg border border-[#2f2f2f] p-3">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-[#4a4a4a]">Add ref</p>
+      <div className="flex flex-col gap-2 rounded-xl border border-glass-edge bg-glass-l1/50 p-3">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-soft">Add ref</p>
         <div className="flex gap-2">
           <Input
             placeholder="jira"

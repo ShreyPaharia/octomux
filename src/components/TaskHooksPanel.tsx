@@ -49,11 +49,13 @@ export function TaskHooksPanel({ taskId }: TaskHooksPanelProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">Hook Runs</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          Hook Runs
+        </h2>
         <button
           type="button"
           onClick={load}
-          className="ml-auto text-[10px] text-[#4a4a4a] hover:text-[#8a8a8a]"
+          className="ml-auto text-[10px] text-muted-soft hover:text-muted-foreground"
           aria-label="Refresh hook executions"
           data-testid="hooks-refresh-button"
         >
@@ -61,9 +63,9 @@ export function TaskHooksPanel({ taskId }: TaskHooksPanelProps) {
         </button>
       </div>
       {loading ? (
-        <div className="text-[11px] text-[#4a4a4a]">Loading…</div>
+        <div className="text-[11px] text-muted-soft">Loading…</div>
       ) : executions.length === 0 ? (
-        <div className="text-[11px] text-[#4a4a4a]">No hook runs recorded.</div>
+        <div className="text-[11px] text-muted-soft">No hook runs recorded.</div>
       ) : (
         <div className="flex flex-col gap-1">
           {executions.map((ex, i) => {
@@ -126,7 +128,7 @@ function HookExecutionRow({
 }) {
   return (
     <div
-      className="rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2"
+      className="rounded-lg border border-glass-edge bg-glass-l1 px-3 py-2"
       data-testid="hook-execution-row"
     >
       <button
@@ -135,23 +137,23 @@ function HookExecutionRow({
         onClick={onToggle}
         aria-expanded={expanded}
       >
-        <span className="shrink-0 text-[10px] text-[#4a4a4a]">{expanded ? '▾' : '▸'}</span>
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[#8a8a8a]">
+        <span className="shrink-0 text-[10px] text-muted-soft">{expanded ? '▾' : '▸'}</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
           {execution.event}
         </span>
-        <span className="shrink-0 text-[10px] text-[#4a4a4a]">{execution.script}</span>
+        <span className="shrink-0 text-[10px] text-muted-soft">{execution.script}</span>
         {execution.duration_ms !== null && (
-          <span className="shrink-0 text-[10px] tabular-nums text-[#4a4a4a]">
+          <span className="shrink-0 text-[10px] tabular-nums text-muted-soft">
             {execution.duration_ms}ms
           </span>
         )}
         <ExitBadge exitCode={execution.exit_code} />
-        <span className="shrink-0 text-[10px] tabular-nums text-[#4a4a4a]">
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-soft">
           {timeAgo(execution.started_at)}
         </span>
       </button>
       {expanded && execution.stdout_excerpt && (
-        <pre className="mt-2 overflow-x-auto rounded bg-[#0d0d0d] p-2 text-[10px] leading-relaxed text-[#8a8a8a] whitespace-pre-wrap">
+        <pre className="mt-2 overflow-x-auto rounded-lg border border-glass-edge bg-glass-l1 p-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {execution.stdout_excerpt}
         </pre>
       )}

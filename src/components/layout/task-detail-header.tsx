@@ -62,7 +62,7 @@ export function TaskDetailHeader({
 
   return (
     <GlassPanel
-      level={1}
+      chrome
       data-testid="task-detail-header"
       className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 px-6 py-4"
     >

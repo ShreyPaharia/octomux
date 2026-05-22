@@ -47,11 +47,13 @@ export function TaskActivityPanel({ taskId }: TaskActivityPanelProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-[11px] font-bold uppercase tracking-wider text-[#8a8a8a]">Activity</h2>
+      <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        Activity
+      </h2>
       {loading ? (
-        <div className="text-[11px] text-[#4a4a4a]">Loading…</div>
+        <div className="text-[11px] text-muted-soft">Loading…</div>
       ) : updates.length === 0 ? (
-        <div className="text-[11px] text-[#4a4a4a]">No activity yet.</div>
+        <div className="text-[11px] text-muted-soft">No activity yet.</div>
       ) : (
         <div className="flex flex-col gap-2">
           {updates.map((u) => (
@@ -69,22 +71,24 @@ function ActivityRow({ update }: { update: TaskUpdate }) {
   const author = update.agent_id ? `agent: ${update.agent_id}` : 'human';
 
   return (
-    <div className="flex items-start gap-2 rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2">
+    <div className="flex items-start gap-2 rounded-lg border border-glass-edge bg-glass-l1 px-3 py-2">
       <span className="mt-0.5 shrink-0 text-[12px]">{icon}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-medium text-[#8a8a8a]">{label}</span>
+          <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
           {update.kind === 'transition' && update.from_status && update.to_status && (
-            <span className="text-[11px] text-[#6a6a6a]">
+            <span className="text-[11px] text-muted-soft">
               {update.from_status} → {update.to_status}
             </span>
           )}
-          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-[#4a4a4a]">
+          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-soft">
             {timeAgo(update.created_at)}
           </span>
         </div>
-        {update.body && <p className="mt-0.5 text-[11px] text-[#8a8a8a]">{update.body}</p>}
-        <p className="mt-0.5 text-[10px] text-[#4a4a4a]">{author}</p>
+        {update.body && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{update.body}</p>
+        )}
+        <p className="mt-0.5 text-[10px] text-muted-soft">{author}</p>
       </div>
     </div>
   );

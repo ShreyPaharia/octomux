@@ -62,8 +62,8 @@ describe('SettingsPage', () => {
     renderWithRouter(<SettingsPage />);
     const general = await screen.findByTestId('settings-nav-general');
     expect(general).toHaveAttribute('data-active', 'true');
-    // Active style is the cyan tint
-    expect(general.getAttribute('style') ?? '').toContain('59, 130, 246');
+    expect(general.className).toContain('text-primary');
+    expect(general.className).toContain('border-primary');
   });
 
   it('clicking a nav item scrolls the matching section into view and marks it active', async () => {
@@ -80,7 +80,8 @@ describe('SettingsPage', () => {
 
     expect(scrollSpy).toHaveBeenCalled();
     expect(skillsNav).toHaveAttribute('data-active', 'true');
-    expect(skillsNav.getAttribute('style') ?? '').toContain('59, 130, 246');
+    expect(skillsNav.className).toContain('text-primary');
+    expect(skillsNav.className).toContain('border-primary');
 
     // The previously-active general item is no longer active.
     const generalNav = screen.getByTestId('settings-nav-general');
