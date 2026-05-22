@@ -4,7 +4,9 @@
 
 # octomux
 
-**Mission control for Claude Code and Cursor agents** — spin up isolated worktrees, run real agent sessions in tmux, and supervise everything from one dashboard until you’re ready to ship. Terminals, an inbox when agents need you, kanban for the fleet, and in-app diff review before merge.
+> **Coding got faster. Managing 5 agents didn't.**
+
+A local web app for running your **Claude Code** and **Cursor** agents in parallel — and reviewing what they shipped. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. Runs entirely on your laptop.
 
 ```bash
 npm install -g octomux && octomux init && cd your-repo && octomux start
@@ -12,15 +14,16 @@ npm install -g octomux && octomux init && cd your-repo && octomux start
 
 Open [http://localhost:7777](http://localhost:7777) — describe a task in the composer, pick **Claude Code** or **Cursor**, and watch agents work in place.
 
-## Why octomux?
+## What you stop doing
 
-Running agents in separate terminal tabs doesn’t scale. octomux gives you a repeatable loop from dispatch to merge:
+Running agents in separate terminal tabs doesn't scale. octomux compresses the loop from dispatch to merge:
 
-- **Isolated** — Each task gets its own git worktree, branch, and tmux session. Parallel agents don’t stomp the same tree.
-- **Supervised** — Permission prompts land in a **Sessions inbox**; reply once and the agent resumes. No polling twenty panes for “allow this tool?”
-- **Reviewable** — Diff tab, per-file reviewed state, inline comments, and **Ship** / **Done** when the branch is ready — without leaving the dashboard.
+- **Triage** — every "allow this tool?" prompt lands in one inbox, not ten tmux panes
+- **Status** — kanban shows what every agent is doing at a glance: draft, running, ready, shipped
+- **Review** — diff lives in-app; mark files reviewed, queue inline comments, hit **Ship**
+- **Ticket flow** — pull from Jira or GitHub; PRs auto-link; tasks auto-close on merge
 
-One SQLite-backed state machine survives reboots: `octomux start` recovers tasks, worktrees, and sessions.
+Code never leaves your machine. No telemetry, no cloud sync. Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
 
 ## Screenshots
 
@@ -35,15 +38,17 @@ One SQLite-backed state machine survives reboots: `octomux start` recovers tasks
 
 ## Features
 
-- **Dual harnesses** — Run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**
-- **Git worktree isolation** — Automatic worktree + `agents/<task-id>` branch per task; safe parallel work on one repo
-- **Live terminals** — xterm.js streams each agent’s tmux pane; attach the same session from the CLI if you prefer
-- **Sessions inbox** — Human-in-the-loop for permission prompts; tab title shows `(N) octomux` when something needs you
-- **Command center** — Kanban columns, drag status, archive, workflow from draft → ship
-- **In-app diff review** — Compare to `main`, mark files reviewed, queue comments, open lazygit in-editor
-- **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake
-- **CLI + dashboard** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows
-- **Recovery** — WAL SQLite + preserved worktrees across restarts
+- **Sessions inbox** — every permission prompt and question lands in one place; reply once, agents keep going. Tab title shows `(N) octomux` when something needs you.
+- **Command center** — kanban for backlog → done; drag status, archive, workflow from draft → ship.
+- **In-app diff review** — compare to `main`, mark files reviewed, queue inline comments, open lazygit in-editor.
+- **Dual harnesses** — run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**.
+- **Worktrees keep agents off each other** — each task gets its own git worktree and `agents/<task-id>` branch; five agents can edit `auth.ts` at the same time without conflicts on your main tree.
+- **Live terminals** — xterm.js streams each agent's tmux pane; attach the same session from the CLI if you prefer.
+- **Agents that dispatch agents** — `/create-task`, `/list-tasks`, `/send-agent-message` skills work inside any Claude Code window; recursive dispatch from inside an agent.
+- **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake.
+- **CLI ↔ dashboard parity** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows.
+- **Reboot-proof** — WAL SQLite + preserved worktrees across restarts.
+- **Local-only** — no telemetry, no cloud sync, no analytics. Your `.env` stays on the host.
 
 ## Quick start
 
@@ -66,30 +71,31 @@ Step-by-step setup, Jira, and orchestrator skills: [ONBOARDING.md](./ONBOARDING.
 ## How it works
 
 ```
-INTAKE → EXECUTE → SUPERVISE → REVIEW → MERGE → RESUME
+DISPATCH → BRANCH → CODE → INBOX → REVIEW → MERGE
 ```
 
-| Phase         | What happens                                                          |
-| ------------- | --------------------------------------------------------------------- |
-| **Intake**    | Composer, CLI, orchestrator skills, or Jira/GitHub drafts             |
-| **Execute**   | Worktree + branch + tmux; harness launches `claude` or `cursor-agent` |
-| **Supervise** | Inbox for permissions; command center for fleet status                |
-| **Review**    | Diff tab, lazygit terminal, mark reviewed, **Done**                   |
-| **Merge**     | PR poller links branches; tasks close when PRs merge                  |
-| **Resume**    | DB + worktrees survive reboot — `octomux start` picks up              |
+| Phase        | What happens                                                                |
+| ------------ | --------------------------------------------------------------------------- |
+| **Dispatch** | Composer, CLI, orchestrator skills, or Jira/GitHub drafts                   |
+| **Branch**   | Automatic git worktree + `agents/<task-id>` branch                          |
+| **Code**     | tmux session per task; harness launches `claude` or `cursor-agent`          |
+| **Inbox**    | Every permission prompt or question collects in one place                   |
+| **Review**   | Diff tab, lazygit terminal, mark files reviewed, **Ship** / **Done**        |
+| **Merge**    | PR poller links branches; tasks close when their PRs merge                  |
+| _Recovery_   | DB + worktrees survive reboot — `octomux start` picks up where you left off |
 
 ## CLI
 
-| Command                              | Description                                        |
-| ------------------------------------ | -------------------------------------------------- |
-| `octomux start`                      | Dashboard at `:7777`                               |
-| `octomux init`                       | Defaults wizard (Jira, base branch, harness prefs) |
-| `octomux create-task`                | New task (`--harness cursor` optional)             |
-| `octomux list-tasks` / `get-task`    | Inspect tasks                                      |
-| `octomux close-task` / `delete-task` | Stop or fully remove                               |
-| `octomux resume-task`                | Resume a closed task                               |
-| `octomux add-agent`                  | Another agent window                               |
-| `octomux send-message`               | Message a running agent                            |
+| Command                              | Description                                              |
+| ------------------------------------ | -------------------------------------------------------- |
+| `octomux start`                      | Dashboard at `:7777`                                     |
+| `octomux init`                       | Defaults wizard (Jira, base branch, harness prefs)       |
+| `octomux create-task`                | New task (`--harness cursor` optional)                   |
+| `octomux list-tasks` / `get-task`    | Inspect tasks                                            |
+| `octomux close-task` / `delete-task` | Stop or fully remove                                     |
+| `octomux resume-task`                | Resume a closed task                                     |
+| `octomux add-agent`                  | Another agent window                                     |
+| `octomux send-message`               | Message a running agent — course-correct without restart |
 
 ## Architecture
 
@@ -138,8 +144,25 @@ flowchart LR
 | `OCTOMUX_DB_PATH`         | Override task DB path            |
 | `OCTOMUX_GITHUB_LOGIN`    | Reviewer-request polling account |
 
+## FAQ
+
+**What's the difference between octomux and just running tmux + Claude Code?**
+octomux adds the kanban, the inbox, and diff review on top. tmux is just plumbing underneath.
+
+**Does it work with Cursor?**
+Yes. Pick Claude Code or Cursor per task. Mix them on the same task with **Add agent**.
+
+**What happens if two agents touch the same file?**
+They can't — each task runs in its own git worktree on its own branch. Five agents can edit `auth.ts` at the same time without conflicts on your main tree.
+
+**What if my laptop reboots or crashes?**
+Run `octomux start`. Tasks, branches, terminals, and review state all come back.
+
+**How do I track what each agent is costing me?**
+Each agent's tmux session has its own session log; Claude Code and Cursor both emit token usage there. A first-class cost view in the dashboard is on the roadmap.
+
 ## Links
 
-- [GitHub](https://github.com/ShreyPaharia/octomux) · [npm](https://www.npmjs.com/package/octomux) · [octomux.com](https://octomux.com)
+- [GitHub](https://github.com/ShreyPaharia/octomux) · [npm](https://www.npmjs.com/package/octomux) · [octomux.dev](https://octomux.dev)
 
 Issues and PRs welcome.
