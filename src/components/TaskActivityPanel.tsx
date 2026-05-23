@@ -85,9 +85,7 @@ function ActivityRow({ update }: { update: TaskUpdate }) {
             {timeAgo(update.created_at)}
           </span>
         </div>
-        {update.body && (
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{update.body}</p>
-        )}
+        {update.body && <p className="mt-0.5 text-[11px] text-muted-foreground">{update.body}</p>}
         <p className="mt-0.5 text-[10px] text-muted-soft">{author}</p>
       </div>
     </div>

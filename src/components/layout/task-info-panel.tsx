@@ -14,10 +14,7 @@ export function TaskInfoPanel({
     <GlassPanel
       level={2}
       specular
-      className={cn(
-        'rounded-2xl p-4 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.55)]',
-        className,
-      )}
+      className={cn('rounded-2xl p-4 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.55)]', className)}
     >
       {children}
     </GlassPanel>

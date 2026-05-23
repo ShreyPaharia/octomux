@@ -128,9 +128,7 @@ export function AgentTabs({
           >
             <span
               className={`inline-block h-2 w-2 ${
-                terminal.status === 'working'
-                  ? 'animate-pulse bg-[#22C55E]'
-                  : 'bg-muted-foreground'
+                terminal.status === 'working' ? 'animate-pulse bg-[#22C55E]' : 'bg-muted-foreground'
               }`}
             />
             {terminal.label}
