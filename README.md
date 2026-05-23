@@ -6,7 +6,7 @@
 
 > **Coding got faster. Managing agents didn't.**
 
-A local web app for running your **Claude Code** and **Cursor** agents in parallel — and reviewing what they shipped. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. Runs entirely on your laptop.
+A local web app to **dispatch, watch, and review** parallel **Claude Code** and **Cursor** agents from one place. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. No cloud. MIT.
 
 ```bash
 npm install -g octomux && octomux init && cd your-repo && octomux start
@@ -14,16 +14,15 @@ npm install -g octomux && octomux init && cd your-repo && octomux start
 
 Open [http://localhost:7777](http://localhost:7777) — describe a task in the composer, pick **Claude Code** or **Cursor**, and watch agents work in place.
 
-## What you stop doing
+## From prompt to merged PR
 
-Running agents in separate terminal tabs doesn't scale. octomux compresses the loop from dispatch to merge:
+Three phases, one window:
 
-- **Triage** — every "allow this tool?" prompt lands in one inbox, not ten tmux panes
-- **Status** — kanban shows what every agent is doing at a glance: draft, running, ready, shipped
-- **Review** — diff lives in-app; mark files reviewed, queue inline comments, hit **Ship**
-- **Ticket flow** — pull from Jira or GitHub; PRs auto-link; tasks auto-close on merge
+- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira links, or GitHub issue URLs. Drop a second agent on the same branch with one click.
+- **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
+- **03 — Review & Ship.** Diff review in the same window. File tree, per-file reviewed state, inline comments. Hit **Ship** and the PR auto-links to the task — closes itself when the PR merges.
 
-Code never leaves your machine. No telemetry, no cloud sync. Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
+Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
 
 ## Screenshots
 
@@ -43,12 +42,32 @@ Code never leaves your machine. No telemetry, no cloud sync. Crash, reboot, clos
 - **In-app diff review** — compare to `main`, mark files reviewed, queue inline comments, open lazygit in-editor.
 - **Dual harnesses** — run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**.
 - **Worktrees keep agents off each other** — each task gets its own git worktree and `agents/<task-id>` branch; five agents can edit `auth.ts` at the same time without conflicts on your main tree.
-- **Live terminals** — xterm.js streams each agent's tmux pane; attach the same session from the CLI if you prefer.
+- **Live task view** — see every agent work in real time: files edited, diff growing, terminal output streaming via xterm.js. Attach the same session from the CLI if you prefer.
 - **Agents that dispatch agents** — `/create-task`, `/list-tasks`, `/send-agent-message` skills work inside any Claude Code window; recursive dispatch from inside an agent.
 - **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake.
 - **CLI ↔ dashboard parity** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows.
 - **Reboot-proof** — WAL SQLite + preserved worktrees across restarts.
 - **Local-only** — no telemetry, no cloud sync, no analytics. Your `.env` stays on the host.
+
+## Patterns
+
+Three workflows octomux makes one-click:
+
+### Verifier — two agents, two opinions
+
+Claude wrote it. Drop Cursor on the same branch for a second pass. Same-model self-review is just self-confirmation — a different model reads the diff without inheriting the first agent's assumptions. Catches missing nonce checks, off-by-one TTLs, and the kind of mistakes that pass type-checking but break in prod.
+
+> Finish a task with Claude → hit **Add agent** → pick Cursor → reviews land as inline comments → you arbitrate, Ship.
+
+### Sweep — five PRs by lunch
+
+Paste a Jira filter or GitHub issue list into the composer. Each ticket gets its own worktree, branch, and agent. Mix Claude and Cursor across the batch so the model best at each kind of task ends up on it. Come back from standup to a kanban of ready-to-review PRs.
+
+### Operator — one prompt becomes an epic
+
+Give an agent the orchestrator skills. It plans the work, breaks down the spec, and dispatches subtasks — each one gets its own worktree, mergeable independently. Inside a Claude Code window, the agent itself becomes the user of octomux. You supervise from the dashboard.
+
+> `/create-task`, `/list-tasks`, `/send-agent-message` skills inside any Claude Code window. Recursive dispatch.
 
 ## Quick start
 
