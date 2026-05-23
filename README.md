@@ -26,14 +26,13 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 
 ## Screenshots
 
-|                                                                               |                                                            |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png)             |
-| **Command center** — kanban from backlog → done                               | ![Command center](assets/screenshots/command-center.png)   |
-| **Harness picker** — Claude Code or Cursor per task                           | ![Harness picker](assets/screenshots/composer-harness.png) |
-| **Settings** — default harness, Cursor model & `--force`                      | ![Settings](assets/screenshots/settings-harnesses.png)     |
-| **Task cockpit** — agent tabs, live Claude session, Ship, Done                | ![Task detail](assets/screenshots/task-detail.png)         |
-| **Diff review** — file tree, reviewed state, inline comments                  | ![Diff](assets/screenshots/diff-review.png)                |
+|                                                                               |                                                          |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png)           |
+| **Command center** — kanban from backlog → done                               | ![Command center](assets/screenshots/command-center.png) |
+| **Settings** — default harness, Cursor model & `--force`                      | ![Settings](assets/screenshots/settings-harnesses.png)   |
+| **Task cockpit** — agent tabs, live Claude session, Ship, Done                | ![Task detail](assets/screenshots/task-detail.png)       |
+| **Diff review** — file tree, reviewed state, inline comments                  | ![Diff](assets/screenshots/diff-review.png)              |
 
 ## Features
 
