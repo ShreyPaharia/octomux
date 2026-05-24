@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { TerminalView } from '@/components/TerminalView';
 import { AgentTabs } from '@/components/AgentTabs';
+import { AgentGridCell } from '@/components/AgentGridCell';
+import { gridColumns } from '@/pages/GridMonitor';
 import { DiffViewer } from '@/components/DiffViewer';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
@@ -89,6 +91,7 @@ export default function TaskDetail() {
 
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<TaskMode>('agents');
+  const [gridView, setGridView] = useState(false);
   const [creatingEditor, setCreatingEditor] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const agentParam = searchParams.get('agent');
@@ -610,30 +613,47 @@ export default function TaskDetail() {
       {task.runtime_state === 'error' ||
       (task.runtime_state === 'setting_up' && !hasTerminal) ? null : hasTerminal ? (
         <div className={mode === 'agents' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-          <AgentTabs
-            agents={agents}
-            activeIndex={activeWindow}
-            onSelect={setActiveWindow}
-            onAddAgent={handleAddAgent}
-            onStopAgent={handleStopAgent}
-            canAddAgent={isRunning}
-            userTerminals={isRunning ? task.user_terminals || [] : []}
-            onAddTerminal={isRunning ? handleAddTerminal : undefined}
-            onCloseTerminal={isRunning ? handleCloseTerminal : undefined}
-            onMoveAgent={isRunning ? (id) => setMovingAgentId(id) : undefined}
-            onDetachAgent={
-              isRunning
-                ? async (id) => {
-                    try {
-                      await api.moveAgentToTask(id, null);
-                      navigate(`/chats/${id}`);
-                    } catch (err) {
-                      console.error('Failed to detach agent:', err);
-                    }
-                  }
-                : undefined
-            }
-          />
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <AgentTabs
+                agents={agents}
+                activeIndex={activeWindow}
+                onSelect={setActiveWindow}
+                onAddAgent={handleAddAgent}
+                onStopAgent={handleStopAgent}
+                canAddAgent={isRunning}
+                userTerminals={isRunning ? task.user_terminals || [] : []}
+                onAddTerminal={isRunning ? handleAddTerminal : undefined}
+                onCloseTerminal={isRunning ? handleCloseTerminal : undefined}
+                onMoveAgent={isRunning ? (id) => setMovingAgentId(id) : undefined}
+                onDetachAgent={
+                  isRunning
+                    ? async (id) => {
+                        try {
+                          await api.moveAgentToTask(id, null);
+                          navigate(`/chats/${id}`);
+                        } catch (err) {
+                          console.error('Failed to detach agent:', err);
+                        }
+                      }
+                    : undefined
+                }
+              />
+            </div>
+            {agents.filter((a) => a.status !== 'stopped').length > 1 && (
+              <Button
+                type="button"
+                size="xs"
+                variant={gridView ? 'default' : 'outline'}
+                data-testid="task-grid-toggle"
+                aria-pressed={gridView}
+                onClick={() => setGridView((v) => !v)}
+                className="mr-2"
+              >
+                {gridView ? 'Single' : 'Grid view'}
+              </Button>
+            )}
+          </div>
           {movingAgentId && (
             <MoveAgentDialog
               open={!!movingAgentId}
@@ -647,13 +667,39 @@ export default function TaskDetail() {
               }}
             />
           )}
-          <div className="min-h-0 flex-1 overflow-hidden p-1">
-            <TerminalView
-              taskId={task.id}
-              windowIndex={activeWindow!}
-              visible={mode === 'agents'}
-            />
-          </div>
+          {gridView ? (
+            <div data-testid="task-agent-grid" className="min-h-0 flex-1 overflow-auto p-2">
+              {(() => {
+                const running = agents.filter((a) => a.status !== 'stopped');
+                const cols = gridColumns(running.length);
+                return (
+                  <div
+                    className="grid gap-3"
+                    style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+                  >
+                    {running.map((a) => (
+                      <AgentGridCell
+                        key={a.id}
+                        taskId={task.id}
+                        windowIndex={a.window_index}
+                        taskTitle={task.title || '(untitled task)'}
+                        agentName={a.label}
+                        activity={a.hook_activity}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-hidden p-1">
+              <TerminalView
+                taskId={task.id}
+                windowIndex={activeWindow!}
+                visible={mode === 'agents'}
+              />
+            </div>
+          )}
         </div>
       ) : isDraft ? (
         <div className={mode === 'agents' ? 'min-h-0 flex-1 overflow-y-auto' : 'hidden'}>
