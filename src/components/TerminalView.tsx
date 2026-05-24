@@ -10,6 +10,9 @@ interface TerminalViewProps {
   windowIndex?: number;
   wsUrl?: string;
   visible?: boolean;
+  readOnly?: boolean;
+  fontSize?: number;
+  scrollback?: number;
 }
 
 const MAX_RECONNECT_DELAY = 10_000;
@@ -20,6 +23,9 @@ export function TerminalView({
   windowIndex,
   wsUrl: wsUrlProp,
   visible = true,
+  readOnly = false,
+  fontSize = 13,
+  scrollback = 5000,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -139,8 +145,9 @@ export function TerminalView({
     }
 
     const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 13,
+      cursorBlink: !readOnly,
+      disableStdin: readOnly,
+      fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
         background: '#09090b',
@@ -148,7 +155,7 @@ export function TerminalView({
         cursor: '#fafafa',
         selectionBackground: '#3f3f46',
       },
-      scrollback: 5000,
+      scrollback,
     });
 
     const fitAddon = new FitAddon();
@@ -171,12 +178,15 @@ export function TerminalView({
 
     // Register input handler once per terminal lifetime — always forwards to
     // the latest WebSocket via wsRef, so reconnects don't accumulate listeners.
-    term.onData((data) => {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
+    // Skipped in readOnly mode so panes can't receive keystrokes.
+    if (!readOnly) {
+      term.onData((data) => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
+    }
 
     // Defer initial fit to next frame so the browser has completed flex layout.
     // Without this, fit() can measure a not-yet-expanded container and set xterm
@@ -186,7 +196,7 @@ export function TerminalView({
     });
 
     connectWs(term);
-  }, [connectWs]);
+  }, [connectWs, readOnly, fontSize, scrollback]);
 
   const handleRetryNow = useCallback(() => {
     if (reconnectTimer.current) {

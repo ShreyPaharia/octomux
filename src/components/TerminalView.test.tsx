@@ -234,6 +234,29 @@ describe('TerminalView', () => {
     expect(queryByTestId('terminal-disconnected-overlay')).not.toBeNull();
   });
 
+  it('does not forward typed input to the WebSocket when readOnly is true', async () => {
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} readOnly />);
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+
+    // In readOnly mode, the onData handler is never registered, so even if a
+    // keystroke event were fired, no callback would run. Simulate that by
+    // calling the captured cb if it exists — it should be null.
+    expect(lastOnDataCb.current).toBeNull();
+
+    // Sanity: also verify no payload was sent on the ws beyond the resize.
+    const nonResize = ws.sent.filter((m) => {
+      try {
+        const parsed = JSON.parse(m as string);
+        return parsed?.type !== 'resize';
+      } catch {
+        return true;
+      }
+    });
+    expect(nonResize).toEqual([]);
+  });
+
   it('does not reconnect a replaced WebSocket after it closes', async () => {
     // This is the core bug guard: once we switch tabs, the old WS's onclose
     // must NOT trigger a reconnect via the stale closure.

@@ -13,6 +13,7 @@ import type { Task } from '../server/types';
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+const GridMonitor = lazy(() => import('./pages/GridMonitor'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SkillEditor = lazy(() => import('./pages/SkillEditor'));
 const AgentEditor = lazy(() => import('./pages/AgentEditor'));
@@ -113,6 +114,7 @@ export function AppShell() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route path="/monitor" element={<GridMonitor />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/skills/:name" element={<SkillEditor />} />
                 <Route path="/agents/:name" element={<AgentEditor />} />
