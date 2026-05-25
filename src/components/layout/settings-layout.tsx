@@ -26,7 +26,8 @@ export const SETTINGS_SCROLL_NAV: { id: SettingsScrollSection; label: string }[]
   { id: 'agent-launch', label: 'Agent launch' },
 ];
 
-export const SETTINGS_ROUTE_NAV: { id: 'integrations'; label: string; to: string }[] = [
+export const SETTINGS_ROUTE_NAV: { id: string; label: string; to: string }[] = [
+  { id: 'setup', label: 'Setup', to: '/setup' },
   { id: 'integrations', label: 'Integrations', to: '/integrations' },
 ];
 
@@ -46,7 +47,7 @@ export function SettingsLayout({
   children,
 }: SettingsLayoutProps) {
   const { pathname } = useLocation();
-  const onIntegrations = pathname === '/integrations';
+  const onRouteNav = SETTINGS_ROUTE_NAV.some((item) => item.to === pathname);
 
   return (
     <div className="flex h-full flex-col">
@@ -59,7 +60,7 @@ export function SettingsLayout({
         >
           <nav aria-label="Settings sections" className="flex flex-col gap-0.5 px-2">
             {SETTINGS_SCROLL_NAV.map((item) => {
-              const isActive = !onIntegrations && item.id === activeScrollSection;
+              const isActive = !onRouteNav && item.id === activeScrollSection;
               return (
                 <button
                   key={item.id}

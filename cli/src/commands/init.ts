@@ -169,6 +169,7 @@ export function registerInit(program: Command): void {
       console.log('  • Start the dashboard:');
       console.log('    ' + chalk.yellow('octomux start'));
       console.log('');
+      console.log(chalk.dim('Finish setup in the dashboard: Settings → Setup (or /setup).'));
       console.log(chalk.dim('See ONBOARDING.md for the full walkthrough.'));
       console.log('');
     });

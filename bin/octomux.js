@@ -53,11 +53,10 @@ async function runStart(startArgs) {
   // Fix node-pty spawn-helper permissions (may have been missed if postinstall didn't run)
   fixNodePtyPermissions();
 
-  // Preflight: ensure all required binaries are installed
-  const { ensureBinary, checkNeovimVersion, syncLazyVimPlugins } =
-    await import('../dist-server/startup.js');
+  // Preflight: warn about missing tools (install from dashboard Setup — no blocking exit)
+  const { warnBinary, checkNeovimVersion } = await import('../dist-server/startup.js');
 
-  const required = [
+  const preflight = [
     { cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' },
     { cmd: 'git', checkArgs: ['--version'], brewPkg: 'git' },
     {
@@ -66,18 +65,22 @@ async function runStart(startArgs) {
       name: 'Claude Code CLI',
       installUrl: 'https://docs.anthropic.com/en/docs/claude-code',
     },
+    {
+      cmd: 'cursor-agent',
+      checkArgs: ['--version'],
+      name: 'Cursor CLI',
+      installUrl: 'https://cursor.com/docs/cli',
+    },
     { cmd: 'nvim', checkArgs: ['--version'], brewPkg: 'neovim', name: 'neovim' },
     { cmd: 'lazygit', checkArgs: ['--version'], brewPkg: 'lazygit' },
   ];
 
-  for (const dep of required) {
-    ensureBinary(dep);
+  for (const dep of preflight) {
+    warnBinary(dep);
   }
 
-  // Neovim-specific: version check + LazyVim plugin sync
-  const repoRoot = path.resolve(__dirname, '..');
   checkNeovimVersion();
-  syncLazyVimPlugins(repoRoot);
+  console.log('Open Setup in the dashboard to install dependencies and configure defaults.\n');
 
   // Start server
   process.env.NODE_ENV = 'production';

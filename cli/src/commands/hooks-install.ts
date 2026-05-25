@@ -8,9 +8,6 @@ import { success, errorMessage } from '../format.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Resolve the templates directory relative to this file.
-// In dev: cli/src/commands/ → ../../templates  (monorepo root)
-// In dist: cli/dist/commands/ → ../../../templates (monorepo root)
 function resolveTemplateDir(): string {
   const candidates = [
     path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'hooks'),
@@ -21,13 +18,27 @@ function resolveTemplateDir(): string {
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
-  // Fallback — may throw later with a clear error.
   return candidates[0];
 }
 
 interface TemplateManifest {
   event: string;
   files: string[];
+}
+
+function listAvailableTemplates(templatesBase: string): string[] {
+  try {
+    if (!fs.existsSync(templatesBase)) return [];
+    return fs.readdirSync(templatesBase).filter((f) => {
+      try {
+        return fs.statSync(path.join(templatesBase, f)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return [];
+  }
 }
 
 export function registerHooksInstall(program: Command): void {
@@ -82,7 +93,6 @@ export function registerHooksInstall(program: Command): void {
 
         fs.copyFileSync(src, dest);
 
-        // Make scripts executable (files without .json extension)
         if (!fileName.endsWith('.json')) {
           fs.chmodSync(dest, 0o755);
         }
@@ -98,7 +108,6 @@ export function registerHooksInstall(program: Command): void {
         console.log('  ' + chalk.cyan(f));
       }
 
-      // Print next steps for jira-status template.
       if (template === 'jira-status') {
         console.log('');
         console.log(chalk.bold('Next steps:'));
@@ -129,19 +138,4 @@ export function registerHooksInstall(program: Command): void {
 
       console.log('');
     });
-}
-
-function listAvailableTemplates(templatesBase: string): string[] {
-  try {
-    if (!fs.existsSync(templatesBase)) return [];
-    return fs.readdirSync(templatesBase).filter((f) => {
-      try {
-        return fs.statSync(path.join(templatesBase, f)).isDirectory();
-      } catch {
-        return false;
-      }
-    });
-  } catch {
-    return [];
-  }
 }

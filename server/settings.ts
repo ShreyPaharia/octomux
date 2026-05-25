@@ -12,6 +12,11 @@ export interface OctomuxSettings {
   defaultHarnessId: string;
   harnesses: Record<string, Record<string, unknown>>;
 
+  defaultJiraBaseUrl?: string;
+  defaultJiraProjectKey?: string;
+  defaultBaseBranch?: string;
+  onboardingCompletedAt?: string;
+
   /** @deprecated promoted into harnesses['claude-code'] on next save */
   claudeFlags?: string;
   /** @deprecated */
@@ -88,6 +93,14 @@ export async function getSettings(): Promise<OctomuxSettings> {
     editor: (parsed.editor as EditorChoice) ?? DEFAULT_SETTINGS.editor,
     defaultHarnessId: (parsed.defaultHarnessId as string) ?? DEFAULT_SETTINGS.defaultHarnessId,
     harnesses: mergedHarnesses,
+    defaultJiraBaseUrl:
+      typeof parsed.defaultJiraBaseUrl === 'string' ? parsed.defaultJiraBaseUrl : undefined,
+    defaultJiraProjectKey:
+      typeof parsed.defaultJiraProjectKey === 'string' ? parsed.defaultJiraProjectKey : undefined,
+    defaultBaseBranch:
+      typeof parsed.defaultBaseBranch === 'string' ? parsed.defaultBaseBranch : undefined,
+    onboardingCompletedAt:
+      typeof parsed.onboardingCompletedAt === 'string' ? parsed.onboardingCompletedAt : undefined,
   };
 }
 
@@ -128,6 +141,18 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     editor: patch.editor ?? current.editor,
     defaultHarnessId: patch.defaultHarnessId ?? current.defaultHarnessId,
     harnesses: mergedHarnesses,
+    defaultJiraBaseUrl:
+      patch.defaultJiraBaseUrl !== undefined ? patch.defaultJiraBaseUrl : current.defaultJiraBaseUrl,
+    defaultJiraProjectKey:
+      patch.defaultJiraProjectKey !== undefined
+        ? patch.defaultJiraProjectKey
+        : current.defaultJiraProjectKey,
+    defaultBaseBranch:
+      patch.defaultBaseBranch !== undefined ? patch.defaultBaseBranch : current.defaultBaseBranch,
+    onboardingCompletedAt:
+      patch.onboardingCompletedAt !== undefined
+        ? patch.onboardingCompletedAt
+        : current.onboardingCompletedAt,
   };
 
   const filePath = settingsPath();

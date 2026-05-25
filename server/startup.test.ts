@@ -17,7 +17,14 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(),
 }));
 
+vi.mock('./binary-check.js', () => ({
+  probeBinary: vi.fn(),
+  brewInstall: vi.fn(),
+  hasBrew: vi.fn(() => false),
+}));
+
 const { execFileSync } = await import('child_process');
+const { probeBinary, brewInstall } = await import('./binary-check.js');
 const fs = await import('fs');
 const { ensureBinary, checkNeovimVersion, syncLazyVimPlugins } = await import('./startup.js');
 const { setLogger, getLogger } = await import('./logger.js');
@@ -64,80 +71,40 @@ afterEach(() => {
 
 describe('ensureBinary', () => {
   it('does nothing when binary is already installed', () => {
-    mockExecFileSync.mockReturnValue(Buffer.from(''));
+    vi.mocked(probeBinary).mockReturnValue({ ok: true });
 
     ensureBinary({ cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' });
 
-    expect(mockExecFileSync).toHaveBeenCalledWith('tmux', ['-V'], { stdio: 'ignore' });
     expect(mockExit).not.toHaveBeenCalled();
   });
 
   it.each([
-    { cmd: 'tmux', brewPkg: 'tmux', label: 'tmux' },
-    { cmd: 'nvim', brewPkg: 'neovim', name: 'neovim', label: 'neovim' },
-    { cmd: 'lazygit', brewPkg: 'lazygit', label: 'lazygit' },
-  ])('auto-installs $label via brew on macOS when missing', ({ cmd, brewPkg, name }) => {
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    { cmd: 'tmux', brewPkg: 'tmux', checkArgs: ['-V'], label: 'tmux' },
+    { cmd: 'nvim', brewPkg: 'neovim', checkArgs: ['--version'], name: 'neovim', label: 'neovim' },
+    { cmd: 'lazygit', brewPkg: 'lazygit', checkArgs: ['--version'], label: 'lazygit' },
+  ])('auto-installs $label via brew when missing', ({ cmd, brewPkg, checkArgs, name }) => {
+    vi.mocked(probeBinary).mockReturnValueOnce({ ok: false }).mockReturnValueOnce({ ok: true });
+    vi.mocked(brewInstall).mockReturnValue(true);
 
-    // First call (check binary) fails, second (check brew) succeeds, third (brew install) succeeds
-    mockExecFileSync
-      .mockImplementationOnce(() => {
-        throw new Error('not found');
-      })
-      .mockReturnValueOnce(Buffer.from('Homebrew 4.0'))
-      .mockReturnValueOnce(Buffer.from(''));
+    ensureBinary({ cmd, checkArgs, brewPkg, name });
 
-    ensureBinary({ cmd, checkArgs: ['--version'], brewPkg, name });
-
-    expect(mockExecFileSync).toHaveBeenCalledWith('brew', ['install', brewPkg], {
-      stdio: 'inherit',
-    });
+    expect(brewInstall).toHaveBeenCalledWith(brewPkg, { cmd, checkArgs });
     expect(mockExit).not.toHaveBeenCalled();
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
   });
 
-  it('exits with error when binary missing and no brew available on macOS', () => {
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-
-    // Binary check fails, brew check fails
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('not found');
-    });
+  it('exits with error when binary missing and brew install fails', () => {
+    vi.mocked(probeBinary).mockReturnValue({ ok: false });
+    vi.mocked(brewInstall).mockReturnValue(false);
 
     expect(() => ensureBinary({ cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' })).toThrow(
       'process.exit',
     );
     expect(mockExit).toHaveBeenCalledWith(1);
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  });
-
-  it('exits with error on non-macOS when binary missing', () => {
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'linux' });
-
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('not found');
-    });
-
-    expect(() => ensureBinary({ cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' })).toThrow(
-      'process.exit',
-    );
-    expect(mockExit).toHaveBeenCalledWith(1);
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
   });
 
   it('uses installUrl when provided instead of brew formula URL', () => {
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'linux' });
-
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error('not found');
-    });
+    vi.mocked(probeBinary).mockReturnValue({ ok: false });
+    vi.mocked(brewInstall).mockReturnValue(false);
 
     expect(() =>
       ensureBinary({
@@ -149,29 +116,6 @@ describe('ensureBinary', () => {
     ).toThrow('process.exit');
 
     expect(logs.text()).toContain('https://docs.anthropic.com/en/docs/claude-code');
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  });
-
-  it('exits when brew install fails', () => {
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-
-    mockExecFileSync
-      .mockImplementationOnce(() => {
-        throw new Error('not found');
-      }) // binary check
-      .mockReturnValueOnce(Buffer.from('Homebrew 4.0')) // brew check
-      .mockImplementationOnce(() => {
-        throw new Error('install failed');
-      }); // brew install
-
-    expect(() => ensureBinary({ cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' })).toThrow(
-      'process.exit',
-    );
-    expect(mockExit).toHaveBeenCalledWith(1);
-
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
   });
 });
 
@@ -192,10 +136,11 @@ describe('checkNeovimVersion', () => {
   it.each([
     { version: 'NVIM v0.9.5', desc: '0.9.5' },
     { version: 'NVIM v0.8.0', desc: '0.8.0' },
-  ])('exits for version $desc (too old)', ({ version }) => {
+  ])('warns for version $desc (too old) without exiting', ({ version }) => {
     mockExecFileSync.mockReturnValue(version);
-    expect(() => checkNeovimVersion()).toThrow('process.exit');
-    expect(mockExit).toHaveBeenCalledWith(1);
+    checkNeovimVersion();
+    expect(mockExit).not.toHaveBeenCalled();
+    expect(logs.text()).toContain('Neovim version too old');
   });
 
   it('exits when version cannot be determined', () => {
