@@ -9,21 +9,17 @@ import type { BinaryDep } from './startup.js';
 import { getSettings, type OctomuxSettings } from './settings.js';
 import { listIntegrations } from './integrations/store.js';
 import { ensureGithubLogin } from './github-login.js';
-import { isHookTemplateInstalled, listHookTemplates, installHookTemplate } from './hooks-install.js';
+import {
+  isHookTemplateInstalled,
+  listHookTemplates,
+  installHookTemplate,
+} from './hooks-install.js';
 import { syncLazyVimPlugins } from './startup.js';
-import { childLogger } from './logger.js';
-
-const logger = childLogger('setup');
 const execFile = promisify(execFileCb);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export type SetupItemStatus =
-  | 'ok'
-  | 'missing'
-  | 'outdated'
-  | 'unconfigured'
-  | 'optional_missing';
+export type SetupItemStatus = 'ok' | 'missing' | 'outdated' | 'unconfigured' | 'optional_missing';
 
 export type SetupItemCategory = 'required' | 'recommended' | 'optional';
 
@@ -75,8 +71,21 @@ const BINARY_DEPS: Array<BinaryDep & { id: string; category: SetupItemCategory }
     installUrl: 'https://cursor.com/docs/cli',
     category: 'optional',
   },
-  { id: 'nvim', cmd: 'nvim', checkArgs: ['--version'], brewPkg: 'neovim', name: 'Neovim', category: 'recommended' },
-  { id: 'lazygit', cmd: 'lazygit', checkArgs: ['--version'], brewPkg: 'lazygit', category: 'recommended' },
+  {
+    id: 'nvim',
+    cmd: 'nvim',
+    checkArgs: ['--version'],
+    brewPkg: 'neovim',
+    name: 'Neovim',
+    category: 'recommended',
+  },
+  {
+    id: 'lazygit',
+    cmd: 'lazygit',
+    checkArgs: ['--version'],
+    brewPkg: 'lazygit',
+    category: 'recommended',
+  },
 ];
 
 function packageRoot(): string {
@@ -117,8 +126,8 @@ function lazygitConfigTarget(): string {
 function jiraEnvConfigured(): boolean {
   return Boolean(
     process.env.JIRA_BASE_URL?.trim() &&
-      process.env.JIRA_EMAIL?.trim() &&
-      process.env.JIRA_TOKEN?.trim(),
+    process.env.JIRA_EMAIL?.trim() &&
+    process.env.JIRA_TOKEN?.trim(),
   );
 }
 
@@ -132,7 +141,11 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
 
   for (const dep of BINARY_DEPS) {
     const probe = probeBinary(dep);
-    let status: SetupItemStatus = probe.ok ? 'ok' : dep.category === 'optional' ? 'optional_missing' : 'missing';
+    let status: SetupItemStatus = probe.ok
+      ? 'ok'
+      : dep.category === 'optional'
+        ? 'optional_missing'
+        : 'missing';
     let detail: string | undefined;
 
     if (dep.id === 'nvim' && probe.ok) {
@@ -185,7 +198,11 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
     id: 'lazygit-config',
     label: 'Lazygit config',
     category: 'optional',
-    status: fs.existsSync(lgTarget) ? 'ok' : fs.existsSync(lgSource) ? 'missing' : 'optional_missing',
+    status: fs.existsSync(lgTarget)
+      ? 'ok'
+      : fs.existsSync(lgSource)
+        ? 'missing'
+        : 'optional_missing',
     install: fs.existsSync(lgSource)
       ? { kind: 'copy', id: 'lazygit-config', label: 'Install lazygit config' }
       : undefined,
@@ -198,7 +215,10 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
     category: 'optional',
     status: jiraHookInstalled ? 'ok' : 'missing',
     install: { kind: 'template', id: 'jira-status-hook', label: 'Install jira-status hook' },
-    detail: jiraHookInstalled && !jiraEnvConfigured() ? 'Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN' : undefined,
+    detail:
+      jiraHookInstalled && !jiraEnvConfigured()
+        ? 'Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN'
+        : undefined,
   });
 
   items.push({
@@ -329,7 +349,10 @@ export async function runSetupInstall(id: string): Promise<{ ok: boolean; messag
         count++;
       }
     }
-    return { ok: true, message: count ? `Installed ${count} skill(s)` : 'All skills already present' };
+    return {
+      ok: true,
+      message: count ? `Installed ${count} skill(s)` : 'All skills already present',
+    };
   }
 
   if (id === 'lazygit-config') {
