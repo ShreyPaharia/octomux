@@ -17,8 +17,8 @@ const logger = childLogger('poller');
 const execFile = promisify(execFileCb);
 
 const STATUS_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
-const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 30000;
-const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 30000;
+const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
+const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
@@ -142,16 +142,51 @@ export async function pollPRs(): Promise<void> {
     )
     .all() as Task[];
 
-  const results = await Promise.allSettled(
-    tasks.map(async (task) => {
-      const pr = await detectPR(task);
-      return { task, pr };
-    }),
-  );
+  if (tasks.length === 0) return;
 
-  for (const result of results) {
-    if (result.status !== 'fulfilled') continue;
-    const { task, pr } = result.value;
+  // Resolve each task's repo to owner/repo so we can fetch all open-PR-by-branch
+  // lookups in a single aliased GraphQL query instead of one `gh pr list` per task.
+  const eligible: Array<{ task: Task; owner: string; name: string; branch: string }> = [];
+  for (const task of tasks) {
+    if (!task.repo_path || !task.branch) continue;
+    const nwo = await repoNameWithOwner(task.repo_path);
+    if (!nwo) continue;
+    const [owner, name] = nwo.split('/');
+    if (!owner || !name) continue;
+    eligible.push({ task, owner, name, branch: task.branch });
+  }
+  if (eligible.length === 0) return;
+
+  const aliasFragments = eligible
+    .map(
+      ({ owner, name, branch }, i) =>
+        `pr${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { pullRequests(headRefName: ${JSON.stringify(branch)}, first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { number url } } }`,
+    )
+    .join('\n  ');
+  const query = `query { ${aliasFragments} }`;
+
+  let parsed: {
+    data?: Record<
+      string,
+      { pullRequests: { nodes: Array<{ number: number; url: string }> } } | null
+    >;
+  } = {};
+  try {
+    const { stdout } = await execFile('gh', ['api', 'graphql', '-f', `query=${query}`]);
+    parsed = JSON.parse(stdout.trim() || '{}');
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (/rate limit/i.test(msg)) {
+      logger.warn('gh rate limit hit on PR detection — backing off until next cycle');
+    } else {
+      logger.debug({ err: msg }, 'gh api graphql for PR detection failed');
+    }
+    return;
+  }
+
+  for (const [i, { task }] of eligible.entries()) {
+    const node = parsed.data?.[`pr${i}`]?.pullRequests?.nodes?.[0];
+    const pr = node ? { url: node.url, number: node.number } : null;
     if (pr) {
       // Flip workflow_status to 'pr' if currently in_progress or human_review
       const prevWorkflow = task.workflow_status;
@@ -191,23 +226,47 @@ export async function checkMergedPRs(): Promise<void> {
     .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
     .all() as Task[];
 
-  const results = await Promise.allSettled(
-    tasks.map(async (task) => {
-      const { stdout } = await execFile(
-        'gh',
-        ['pr', 'view', String(task.pr_number), '--json', 'state'],
-        {
-          cwd: task.repo_path,
-        },
-      );
-      const { state } = JSON.parse(stdout.trim());
-      return { task, state };
-    }),
-  );
+  if (tasks.length === 0) return;
 
-  for (const result of results) {
-    if (result.status !== 'fulfilled') continue;
-    const { task, state } = result.value;
+  // Resolve each task's repo to owner/repo so we can fetch all PR states in
+  // a single aliased GraphQL query instead of one `gh pr view` per task.
+  const eligible: Array<{ task: Task; owner: string; name: string }> = [];
+  for (const task of tasks) {
+    if (!task.repo_path || !task.pr_number) continue;
+    const nwo = await repoNameWithOwner(task.repo_path);
+    if (!nwo) continue;
+    const [owner, name] = nwo.split('/');
+    if (!owner || !name) continue;
+    eligible.push({ task, owner, name });
+  }
+  if (eligible.length === 0) return;
+
+  const aliasFragments = eligible
+    .map(
+      ({ owner, name, task }, i) =>
+        `pr${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { pullRequest(number: ${task.pr_number}) { state } }`,
+    )
+    .join('\n  ');
+  const query = `query { ${aliasFragments} }`;
+
+  let parsed: {
+    data?: Record<string, { pullRequest: { state: string } | null } | null>;
+  } = {};
+  try {
+    const { stdout } = await execFile('gh', ['api', 'graphql', '-f', `query=${query}`]);
+    parsed = JSON.parse(stdout.trim() || '{}');
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (/rate limit/i.test(msg)) {
+      logger.warn('gh rate limit hit on merged-PR check — backing off until next cycle');
+    } else {
+      logger.debug({ err: msg }, 'gh api graphql for merged PR check failed');
+    }
+    return;
+  }
+
+  for (const [i, { task }] of eligible.entries()) {
+    const state = parsed.data?.[`pr${i}`]?.pullRequest?.state;
     if (state === 'MERGED') {
       try {
         const prevWorkflow = task.workflow_status;
@@ -273,37 +332,122 @@ function listTrackedRepos(): string[] {
   return rows.map((r) => r.repo_path);
 }
 
-/** Query `gh` for PRs in a repo where the owner is still a requested reviewer. */
-async function fetchReviewRequestedPRs(repoPath: string): Promise<OpenReviewPR[]> {
+/** Parse a git remote URL into `owner/repo` (nameWithOwner) form. Returns null if non-GitHub. */
+function parseNameWithOwner(remoteUrl: string): string | null {
+  // Matches https://github.com/o/r(.git), git@github.com:o/r(.git), ssh://git@github.com/o/r(.git)
+  const m = remoteUrl.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?\s*$/i);
+  if (!m) return null;
+  return `${m[1]}/${m[2]}`;
+}
+
+/**
+ * Cache of repoPath → nameWithOwner. Remotes rarely change at runtime.
+ * Only successful resolutions are cached so a transient failure (or a repo
+ * that gains a GitHub remote later) is retried on the next tick.
+ */
+const repoNwoCache = new Map<string, string>();
+
+async function repoNameWithOwner(repoPath: string): Promise<string | null> {
+  const cached = repoNwoCache.get(repoPath);
+  if (cached) return cached;
   try {
-    const { stdout } = await execFile(
-      'gh',
-      [
-        'pr',
-        'list',
-        '--search',
-        'review-requested:@me',
-        '--state',
-        'open',
-        '--json',
-        'number,title,author,headRefOid,headRefName,baseRefName,url,reviewRequests',
-      ],
-      { cwd: repoPath },
-    );
-    const prs = JSON.parse(stdout.trim() || '[]') as OpenReviewPR[];
-    return Array.isArray(prs) ? prs : [];
+    const { stdout } = await execFile('git', ['-C', repoPath, 'remote', 'get-url', 'origin']);
+    const nwo = parseNameWithOwner(stdout.trim());
+    if (nwo) repoNwoCache.set(repoPath, nwo);
+    return nwo;
+  } catch {
+    return null;
+  }
+}
+
+/** Raw shape returned by GitHub's GraphQL search for the review-requested query. */
+interface RawSearchNode {
+  number: number;
+  title: string;
+  url: string;
+  author: { login: string } | null;
+  headRefOid: string;
+  headRefName: string;
+  baseRefName: string;
+  repository: { nameWithOwner: string };
+  reviewRequests: {
+    nodes: Array<{
+      requestedReviewer: { __typename?: string; login?: string } | null;
+    }>;
+  };
+}
+
+const REVIEW_REQUESTED_GRAPHQL_QUERY = `query {
+  search(query: "is:pr is:open review-requested:@me archived:false", type: ISSUE, first: 100) {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        url
+        author { login }
+        headRefOid
+        headRefName
+        baseRefName
+        repository { nameWithOwner }
+        reviewRequests(first: 20) {
+          nodes {
+            requestedReviewer {
+              __typename
+              ... on User { login }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+/**
+ * One global GraphQL search for all PRs where the authenticated user is still a
+ * requested reviewer, grouped by repository's `owner/repo`. Replaces a per-repo
+ * `gh pr list --search` loop (N calls × 10 search points) with a single call.
+ */
+async function fetchAllReviewRequestedPRs(): Promise<Map<string, OpenReviewPR[]>> {
+  const byRepo = new Map<string, OpenReviewPR[]>();
+  try {
+    const { stdout } = await execFile('gh', [
+      'api',
+      'graphql',
+      '-f',
+      `query=${REVIEW_REQUESTED_GRAPHQL_QUERY}`,
+    ]);
+    const parsed = JSON.parse(stdout.trim() || '{}') as {
+      data?: { search?: { nodes?: RawSearchNode[] } };
+    };
+    const nodes = parsed.data?.search?.nodes ?? [];
+    for (const node of nodes) {
+      if (!node || !node.repository?.nameWithOwner) continue;
+      const pr: OpenReviewPR = {
+        number: node.number,
+        title: node.title,
+        url: node.url,
+        author: node.author,
+        headRefOid: node.headRefOid,
+        headRefName: node.headRefName,
+        baseRefName: node.baseRefName,
+        reviewRequests: (node.reviewRequests?.nodes ?? [])
+          .map((rr) => ({ login: rr.requestedReviewer?.login }))
+          .filter((rr): rr is { login: string } => typeof rr.login === 'string'),
+      };
+      const key = node.repository.nameWithOwner.toLowerCase();
+      const list = byRepo.get(key);
+      if (list) list.push(pr);
+      else byRepo.set(key, [pr]);
+    }
   } catch (err) {
     const msg = (err as Error).message || '';
     if (/rate limit/i.test(msg)) {
-      logger.warn({ repo_path: repoPath }, 'gh rate limit hit — backing off until next cycle');
+      logger.warn('gh rate limit hit on graphql search — backing off until next cycle');
     } else {
-      logger.debug(
-        { repo_path: repoPath, err: msg },
-        'gh pr list failed for tracked repo (no GitHub remote?)',
-      );
+      logger.debug({ err: msg }, 'gh api graphql search failed');
     }
-    return [];
   }
+  return byRepo;
 }
 
 /** Does any reviewRequests entity match the owner login? */
@@ -506,8 +650,19 @@ export async function pollReviewerRequests(): Promise<void> {
   const repos = listTrackedRepos();
   if (repos.length === 0) return;
 
+  // Resolve each tracked repoPath to its GitHub owner/repo so we can match PRs
+  // from a single global GraphQL search back to local worktree roots.
+  const tracked: Array<{ repoPath: string; nwo: string }> = [];
   for (const repoPath of repos) {
-    const prs = await fetchReviewRequestedPRs(repoPath);
+    const nwo = await repoNameWithOwner(repoPath);
+    if (nwo) tracked.push({ repoPath, nwo: nwo.toLowerCase() });
+  }
+  if (tracked.length === 0) return;
+
+  const prsByNwo = await fetchAllReviewRequestedPRs();
+
+  for (const { repoPath, nwo } of tracked) {
+    const prs = prsByNwo.get(nwo) ?? [];
     const activePrNumbers = new Set<number>();
 
     for (const pr of prs) {

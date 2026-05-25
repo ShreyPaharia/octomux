@@ -341,17 +341,26 @@ describe('pollPRs', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
     vi.mocked(execFile).mockImplementation((...mockArgs: any[]) => {
-      const cb = findCallback(...mockArgs);
-      if (cb) {
-        const args = mockArgs[1] as string[];
-        if (args && args[0] === 'pr') {
-          cb(null, {
-            stdout: JSON.stringify([{ url: 'https://github.com/org/repo/pull/99', number: 99 }]),
-            stderr: '',
-          });
-        } else {
-          cb(null, { stdout: '', stderr: '' });
-        }
+      const cb = findCallback(...mockArgs)!;
+      const cmd = mockArgs[0] as string;
+      const args = mockArgs[1] as string[];
+      if (cmd === 'git' && args?.includes('remote') && args?.includes('get-url')) {
+        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
+      } else if (cmd === 'gh' && args?.[0] === 'api' && args?.[1] === 'graphql') {
+        cb(null, {
+          stdout: JSON.stringify({
+            data: {
+              pr0: {
+                pullRequests: {
+                  nodes: [{ number: 99, url: 'https://github.com/org/repo/pull/99' }],
+                },
+              },
+            },
+          }),
+          stderr: '',
+        });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
       }
       return undefined as any;
     });
@@ -407,25 +416,38 @@ describe('pollPRs', () => {
 // ─── checkMergedPRs ─────────────────────────────────────────────────────────
 
 describe('checkMergedPRs', () => {
+  /**
+   * Mock both `git remote get-url origin` (so the test repo resolves to org/repo)
+   * and the single `gh api graphql` PR-state query. `prStates` maps alias index
+   * to PR state (e.g. { pr0: 'MERGED' }).
+   */
+  function mockPrStates(prStates: Record<string, string>) {
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args)!;
+      const cmd = args[0] as string;
+      const cmdArgs = args[1] as string[];
+      if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
+        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
+      } else if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
+        const data: Record<string, { pullRequest: { state: string } }> = {};
+        for (const [alias, state] of Object.entries(prStates)) {
+          data[alias] = { pullRequest: { state } };
+        }
+        cb(null, { stdout: JSON.stringify({ data }), stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+  }
+
   it('closes task when PR is merged', async () => {
     insertTask(db, {
       ...DEFAULTS.runningTask,
       pr_number: 42,
       pr_url: 'https://github.com/org/repo/pull/42',
     });
-
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) {
-        const cmdArgs = args[1] as string[];
-        if (cmdArgs && cmdArgs[0] === 'pr' && cmdArgs[1] === 'view') {
-          cb(null, { stdout: JSON.stringify({ state: 'MERGED' }), stderr: '' });
-        } else {
-          cb(null, { stdout: '', stderr: '' });
-        }
-      }
-      return undefined as any;
-    });
+    mockPrStates({ pr0: 'MERGED' });
 
     await checkMergedPRs();
 
@@ -438,19 +460,7 @@ describe('checkMergedPRs', () => {
       pr_number: 42,
       pr_url: 'https://github.com/org/repo/pull/42',
     });
-
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) {
-        const cmdArgs = args[1] as string[];
-        if (cmdArgs && cmdArgs[0] === 'pr' && cmdArgs[1] === 'view') {
-          cb(null, { stdout: JSON.stringify({ state: 'OPEN' }), stderr: '' });
-        } else {
-          cb(null, { stdout: '', stderr: '' });
-        }
-      }
-      return undefined as any;
-    });
+    mockPrStates({ pr0: 'OPEN' });
 
     await checkMergedPRs();
 
@@ -483,27 +493,27 @@ describe('checkMergedPRs', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
-  it('runs gh pr view with correct args in repo directory', async () => {
+  it('issues one gh api graphql call with aliased PR queries for all running tasks', async () => {
     insertTask(db, {
       ...DEFAULTS.runningTask,
       pr_number: 42,
       pr_url: 'https://github.com/org/repo/pull/42',
     });
-
-    vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const cb = findCallback(...args);
-      if (cb) cb(null, { stdout: JSON.stringify({ state: 'OPEN' }), stderr: '' });
-      return undefined as any;
-    });
+    mockPrStates({ pr0: 'OPEN' });
 
     await checkMergedPRs();
 
-    expect(execFile).toHaveBeenCalledWith(
-      'gh',
-      ['pr', 'view', '42', '--json', 'state'],
-      expect.objectContaining({ cwd: DEFAULTS.runningTask.repo_path }),
-      expect.any(Function),
-    );
+    const ghCalls = vi.mocked(execFile).mock.calls.filter((c: any[]) => c[0] === 'gh');
+    expect(ghCalls).toHaveLength(1);
+    const callArgs = ghCalls[0][1] as string[];
+    expect(callArgs[0]).toBe('api');
+    expect(callArgs[1]).toBe('graphql');
+    const queryField = callArgs.find((a) => a.startsWith('query='));
+    expect(queryField).toBeDefined();
+    expect(queryField).toContain('pr0:');
+    expect(queryField).toContain('owner: "org"');
+    expect(queryField).toContain('name: "repo"');
+    expect(queryField).toContain('pullRequest(number: 42)');
   });
 
   const nonRunningStates = ['idle', 'error', 'setting_up'] as const;
@@ -625,13 +635,37 @@ describe('pollReviewerRequests', () => {
     ...overrides,
   });
 
-  /** Install an execFile mock that returns the given PR list for gh pr list calls. */
+  /**
+   * Install an execFile mock that returns the given PR list for the global
+   * `gh api graphql` search call. Test PRs are URL-derived to belong to `org/repo`,
+   * which the git-remote mock resolves to the test REPO.
+   */
   function mockPrList(prs: Array<Record<string, unknown>>) {
+    const searchNodes = prs.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      author: pr.author,
+      headRefOid: pr.headRefOid,
+      headRefName: pr.headRefName,
+      baseRefName: pr.baseRefName,
+      repository: { nameWithOwner: 'org/repo' },
+      reviewRequests: {
+        nodes: ((pr.reviewRequests as Array<{ login?: string }> | undefined) ?? []).map((rr) => ({
+          requestedReviewer: { __typename: 'User', login: rr.login },
+        })),
+      },
+    }));
+    const graphqlBody = JSON.stringify({ data: { search: { nodes: searchNodes } } });
+
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
       const cb = findCallback(...args)!;
+      const cmd = args[0] as string;
       const cmdArgs = args[1] as string[];
-      if (cmdArgs?.[0] === 'pr' && cmdArgs?.[1] === 'list') {
-        cb(null, { stdout: JSON.stringify(prs), stderr: '' });
+      if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
+        cb(null, { stdout: graphqlBody, stderr: '' });
+      } else if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
+        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
       } else {
         cb(null, { stdout: '', stderr: '' });
       }
@@ -650,12 +684,9 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    // Should not have shelled out
-    const prListCall = vi.mocked(execFile).mock.calls.find((c: any[]) => {
-      const args = c[1] as string[];
-      return args?.[0] === 'pr' && args?.[1] === 'list';
-    });
-    expect(prListCall).toBeUndefined();
+    // Should not have shelled out to gh at all
+    const ghCall = vi.mocked(execFile).mock.calls.find((c: any[]) => c[0] === 'gh');
+    expect(ghCall).toBeUndefined();
   });
 
   it('creates a draft auto-review task when owner is a reviewer', async () => {
@@ -935,24 +966,23 @@ describe('pollReviewerRequests', () => {
     expect(autos).toHaveLength(0);
   });
 
-  it('uses --search review-requested:@me with --state open and cwd=repo', async () => {
+  it('uses a single global gh api graphql search for review-requested PRs', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     mockPrList([]);
 
     await pollReviewerRequests();
 
-    const prListCall = vi.mocked(execFile).mock.calls.find((c: any[]) => {
-      const args = c[1] as string[];
-      return args?.[0] === 'pr' && args?.[1] === 'list';
-    });
-    expect(prListCall).toBeDefined();
-    const callArgs = prListCall![1] as string[];
-    expect(callArgs).toContain('--search');
-    expect(callArgs).toContain('review-requested:@me');
-    expect(callArgs).toContain('--state');
-    expect(callArgs).toContain('open');
-    const opts = prListCall![2] as { cwd: string };
-    expect(opts.cwd).toBe(REPO);
+    // Exactly one gh call, and it's the graphql search (not per-repo `pr list`).
+    const ghCalls = vi.mocked(execFile).mock.calls.filter((c: any[]) => c[0] === 'gh');
+    expect(ghCalls).toHaveLength(1);
+    const callArgs = ghCalls[0][1] as string[];
+    expect(callArgs[0]).toBe('api');
+    expect(callArgs[1]).toBe('graphql');
+    // The query payload is passed via `-f query=...`
+    const queryField = callArgs.find((a) => a.startsWith('query='));
+    expect(queryField).toBeDefined();
+    expect(queryField).toContain('review-requested:@me');
+    expect(queryField).toContain('is:open');
   });
 });
 
