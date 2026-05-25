@@ -12,11 +12,13 @@ npm install -g octomux
 
 **Cursor harness (optional):** install the [Cursor CLI](https://cursor.com/docs/cli) so `cursor-agent` is on your PATH. You can run Claude-only, Cursor-only, or both and switch per task.
 
-`octomux start` runs a preflight for missing binaries. If native modules fail to build, run `xcode-select --install` and retry.
+`octomux start` logs warnings for missing binaries but does not block — use **Setup** in the dashboard to install dependencies. If native modules fail to build, run `xcode-select --install` and retry.
 
-## 2. Defaults (`octomux init`)
+## 2. Defaults (dashboard Setup or `octomux init`)
 
 Writes `~/.octomux/settings.json` (Jira base URL, project key, default base branch). All fields are optional.
+
+**Recommended:** open the dashboard → **Settings → Setup** (`/setup`) to see what is installed, run Homebrew installs, and save defaults in one place.
 
 ```bash
 octomux init

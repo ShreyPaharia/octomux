@@ -1557,6 +1557,62 @@ export function setupRoutes(app: Express): void {
     res.status(204).send();
   });
 
+  // ─── Setup / onboarding ─────────────────────────────────────────────────────
+
+  app.get('/api/setup/status', async (_req: Request, res: Response) => {
+    try {
+      const { getSetupStatus } = await import('./setup-status.js');
+      res.json(await getSetupStatus());
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/setup/install', async (req: Request, res: Response) => {
+    const { id } = req.body as { id?: string };
+    if (!id || typeof id !== 'string') {
+      res.status(400).json({ error: 'body must contain { id: string }' });
+      return;
+    }
+    try {
+      const { runSetupInstall } = await import('./setup-status.js');
+      const result = await runSetupInstall(id);
+      res.json(result);
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message.startsWith('Install not allowed')) {
+        res.status(400).json({ error: message });
+      } else {
+        res.status(500).json({ error: message });
+      }
+    }
+  });
+
+  app.post('/api/setup/apply-recommended-defaults', async (_req: Request, res: Response) => {
+    try {
+      const { applyRecommendedDefaults } = await import('./setup-status.js');
+      const settings = await applyRecommendedDefaults();
+      res.json(augmentDashboardSettings(settings));
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/hooks/install', async (req: Request, res: Response) => {
+    const { template } = req.body as { template?: string };
+    if (!template || typeof template !== 'string') {
+      res.status(400).json({ error: 'body must contain { template: string }' });
+      return;
+    }
+    try {
+      const { installHookTemplate } = await import('./hooks-install.js');
+      const files = installHookTemplate(template);
+      res.json({ ok: true, files });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   app.get('/api/settings', async (_req: Request, res: Response) => {
     try {
       const settings = await getSettings();

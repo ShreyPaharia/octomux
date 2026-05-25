@@ -9,6 +9,7 @@ import { UniversalSidebar } from './components/UniversalSidebar';
 import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SHIP_EVENT } from './pages/TaskDetail';
+import { SetupBanner } from './components/SetupBanner';
 import type { Task } from '../server/types';
 
 const TasksPage = lazy(() => import('./pages/TasksPage'));
@@ -21,6 +22,7 @@ const ChatPage = lazy(() => import('./pages/ChatPage'));
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'));
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
+const SetupPage = lazy(() => import('./pages/SetupPage'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -90,6 +92,7 @@ export function AppShell() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       <OfflineBanner />
+      <SetupBanner />
       <div className="flex min-h-0 flex-1">
         <Toaster
           theme="dark"
@@ -122,6 +125,7 @@ export function AppShell() {
                 <Route path="/workspaces" element={<WorkspacesPage />} />
                 <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
+                <Route path="/setup" element={<SetupPage />} />
               </Routes>
             </Suspense>
           </div>

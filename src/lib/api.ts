@@ -107,9 +107,39 @@ export interface OctomuxSettings {
   claudeFlags: string;
   defaultHarnessId?: string;
   harnesses?: Record<string, Record<string, unknown>>;
+  defaultJiraBaseUrl?: string;
+  defaultJiraProjectKey?: string;
+  defaultBaseBranch?: string;
+  onboardingCompletedAt?: string;
   envOverrides?: {
     claudeFlags: string | null;
   };
+}
+
+export type SetupItemStatus =
+  | 'ok'
+  | 'missing'
+  | 'outdated'
+  | 'unconfigured'
+  | 'optional_missing';
+
+export interface SetupItem {
+  id: string;
+  label: string;
+  category: 'required' | 'recommended' | 'optional';
+  status: SetupItemStatus;
+  version?: string;
+  detail?: string;
+  install?: { kind: string; id: string; label: string };
+  configureUrl?: string;
+  docsUrl?: string;
+}
+
+export interface SetupStatusResponse {
+  items: SetupItem[];
+  summary: { ready: boolean; blockerCount: number; attentionCount: number };
+  platform: string;
+  hasBrew: boolean;
 }
 
 export interface HarnessSummary {
@@ -422,6 +452,20 @@ export const api = {
   getSettings: () => request<OctomuxSettings>('/settings'),
   updateSettings: (data: Partial<OctomuxSettings>) =>
     request<OctomuxSettings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+
+  getSetupStatus: () => request<SetupStatusResponse>('/setup/status'),
+  setupInstall: (id: string) =>
+    request<{ ok: boolean; message: string }>('/setup/install', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    }),
+  applyRecommendedDefaults: () =>
+    request<OctomuxSettings>('/setup/apply-recommended-defaults', { method: 'POST' }),
+  installHookTemplate: (template: string) =>
+    request<{ ok: boolean; files: string[] }>('/hooks/install', {
+      method: 'POST',
+      body: JSON.stringify({ template }),
+    }),
 
   // Harnesses (coding agent runtimes — Claude Code, Cursor, ...)
   listHarnesses: () => request<HarnessSummary[]>('/harnesses'),

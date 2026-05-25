@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
+import { brewInstall, probeBinary } from './binary-check.js';
 
 const logger = childLogger('startup');
 
@@ -19,38 +20,26 @@ export interface BinaryDep {
 
 export function ensureBinary({ cmd, checkArgs, name, brewPkg, installUrl }: BinaryDep): void {
   const label = name || cmd;
-  try {
-    execFileSync(cmd, checkArgs, { stdio: 'ignore' });
-    return;
-  } catch {
-    // not installed — try to auto-install
+  if (probeBinary({ cmd, checkArgs }).ok) return;
+
+  if (brewPkg && process.platform === 'darwin' && brewInstall(brewPkg, { cmd, checkArgs })) {
+    if (probeBinary({ cmd, checkArgs }).ok) return;
   }
 
-  // If there's a brew package and we're on macOS, try auto-install
-  if (brewPkg && process.platform === 'darwin') {
-    let hasBrew = true;
-    try {
-      execFileSync('brew', ['--version'], { stdio: 'ignore' });
-    } catch {
-      hasBrew = false;
-    }
-
-    if (hasBrew) {
-      logger.info({ label, brew_pkg: brewPkg }, `Installing ${label} via Homebrew`);
-      try {
-        execFileSync('brew', ['install', brewPkg], { stdio: 'inherit' });
-        return;
-      } catch (err) {
-        logger.error({ label, brew_pkg: brewPkg, err }, `Failed to install ${label} via Homebrew`);
-        process.exit(1);
-      }
-    }
-  }
-
-  // Can't auto-install — show manual instructions
   const url = installUrl || `https://formulae.brew.sh/formula/${brewPkg || cmd}`;
   logger.error({ label, install_url: url }, `${label} not found — install it manually`);
   process.exit(1);
+}
+
+/** Log a warning when a binary is missing; never exits. */
+export function warnBinary({ cmd, checkArgs, name, installUrl, brewPkg }: BinaryDep): void {
+  const label = name || cmd;
+  if (probeBinary({ cmd, checkArgs }).ok) return;
+  const url = installUrl || (brewPkg ? `https://formulae.brew.sh/formula/${brewPkg}` : undefined);
+  logger.warn(
+    { label, install_url: url },
+    `${label} not found — install from the Setup page or run: octomux start after fixing`,
+  );
 }
 
 // ─── Neovim version check ────────────────────────────────────────────────────
@@ -73,11 +62,10 @@ export function checkNeovimVersion(): void {
   }
 
   if (nvimVersion.major === 0 && nvimVersion.minor < 10) {
-    logger.error(
+    logger.warn(
       { found: nvimVersion.raw, required: '>=0.10.0' },
-      'Neovim version too old — upgrade with: brew upgrade neovim',
+      'Neovim version too old — upgrade with: brew upgrade neovim (or use VS Code/Cursor editor in Setup)',
     );
-    process.exit(1);
   }
 }
 
