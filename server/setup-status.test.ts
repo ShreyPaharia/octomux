@@ -54,7 +54,8 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
-const { getSetupStatus, runSetupInstall, applyRecommendedDefaults } = await import('./setup-status.js');
+const { getSetupStatus, runSetupInstall, applyRecommendedDefaults } =
+  await import('./setup-status.js');
 const { probeBinary } = await import('./binary-check.js');
 
 describe('getSetupStatus', () => {

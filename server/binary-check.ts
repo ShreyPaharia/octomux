@@ -7,9 +7,15 @@ export interface BinaryProbeResult {
 }
 
 /** Run a binary check without exiting the process. */
-export function probeBinary({ cmd, checkArgs }: Pick<BinaryDep, 'cmd' | 'checkArgs'>): BinaryProbeResult {
+export function probeBinary({
+  cmd,
+  checkArgs,
+}: Pick<BinaryDep, 'cmd' | 'checkArgs'>): BinaryProbeResult {
   try {
-    const out = execFileSync(cmd, checkArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const out = execFileSync(cmd, checkArgs, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     const firstLine = out.split('\n')[0]?.trim();
     return { ok: true, version: firstLine || undefined };
   } catch {

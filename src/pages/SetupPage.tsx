@@ -58,7 +58,10 @@ function SetupItemRow({
   const busy = installing === item.id;
 
   return (
-    <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between" style={ROW_DIVIDER}>
+    <div
+      className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:justify-between"
+      style={ROW_DIVIDER}
+    >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-white">{item.label}</span>
@@ -164,7 +167,9 @@ function DefaultsForm({
         />
       </div>
       <div>
-        <label className="mb-1 block text-xs text-[#b5b5bd]">Default Jira project key (optional)</label>
+        <label className="mb-1 block text-xs text-[#b5b5bd]">
+          Default Jira project key (optional)
+        </label>
         <input
           type="text"
           value={jiraProject}
@@ -174,7 +179,13 @@ function DefaultsForm({
         />
       </div>
       <div className="flex justify-end">
-        <Button type="button" size="sm" disabled={saving} onClick={save} data-testid="setup-save-defaults">
+        <Button
+          type="button"
+          size="sm"
+          disabled={saving}
+          onClick={save}
+          data-testid="setup-save-defaults"
+        >
           {saving ? 'Saving…' : 'Save defaults'}
         </Button>
       </div>
@@ -184,7 +195,9 @@ function DefaultsForm({
 
 export default function SetupPage() {
   const [status, setStatus] = useState<SetupStatusResponse | null>(null);
-  const [settings, setSettings] = useState<Awaited<ReturnType<typeof api.getSettings>> | null>(null);
+  const [settings, setSettings] = useState<Awaited<ReturnType<typeof api.getSettings>> | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
@@ -337,12 +350,7 @@ export default function SetupPage() {
                 >
                   <span />
                 </SettingRow>
-                {settings && (
-                  <DefaultsForm
-                    initial={settings}
-                    onSaved={load}
-                  />
-                )}
+                {settings && <DefaultsForm initial={settings} onSaved={load} />}
               </SectionCard>
 
               <p className="text-center text-xs text-[#8a8a8a]">

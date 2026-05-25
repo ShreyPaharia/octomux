@@ -116,12 +116,7 @@ export interface OctomuxSettings {
   };
 }
 
-export type SetupItemStatus =
-  | 'ok'
-  | 'missing'
-  | 'outdated'
-  | 'unconfigured'
-  | 'optional_missing';
+export type SetupItemStatus = 'ok' | 'missing' | 'outdated' | 'unconfigured' | 'optional_missing';
 
 export interface SetupItem {
   id: string;

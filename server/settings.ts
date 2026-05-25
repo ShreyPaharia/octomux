@@ -142,7 +142,9 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     defaultHarnessId: patch.defaultHarnessId ?? current.defaultHarnessId,
     harnesses: mergedHarnesses,
     defaultJiraBaseUrl:
-      patch.defaultJiraBaseUrl !== undefined ? patch.defaultJiraBaseUrl : current.defaultJiraBaseUrl,
+      patch.defaultJiraBaseUrl !== undefined
+        ? patch.defaultJiraBaseUrl
+        : current.defaultJiraBaseUrl,
     defaultJiraProjectKey:
       patch.defaultJiraProjectKey !== undefined
         ? patch.defaultJiraProjectKey
