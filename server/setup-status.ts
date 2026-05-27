@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { probeBinary, brewInstall, hasBrew } from './binary-check.js';
 import type { BinaryDep } from './startup.js';
-import { getSettings, type OctomuxSettings } from './settings.js';
+import { getSettings, type OctomuxSettings, type EditorChoice } from './settings.js';
 import { listIntegrations } from './integrations/store.js';
 import { ensureGithubLogin } from './github-login.js';
 import {
@@ -71,22 +71,28 @@ const BINARY_DEPS: Array<BinaryDep & { id: string; category: SetupItemCategory }
     installUrl: 'https://cursor.com/docs/cli',
     category: 'optional',
   },
-  {
-    id: 'nvim',
+];
+
+const EDITOR_DEPS: Record<EditorChoice, BinaryDep & { displayName: string }> = {
+  nvim: {
     cmd: 'nvim',
     checkArgs: ['--version'],
     brewPkg: 'neovim',
-    name: 'Neovim',
-    category: 'recommended',
+    displayName: 'Neovim',
   },
-  {
-    id: 'lazygit',
-    cmd: 'lazygit',
+  cursor: {
+    cmd: 'cursor',
     checkArgs: ['--version'],
-    brewPkg: 'lazygit',
-    category: 'recommended',
+    displayName: 'Cursor IDE',
+    installUrl: 'https://cursor.com/',
   },
-];
+  vscode: {
+    cmd: 'code',
+    checkArgs: ['--version'],
+    displayName: 'VS Code',
+    installUrl: 'https://code.visualstudio.com/',
+  },
+};
 
 function packageRoot(): string {
   return path.resolve(__dirname, '..');
@@ -117,12 +123,6 @@ function missingBundledSkills(): string[] {
   return missing;
 }
 
-function lazygitConfigTarget(): string {
-  return process.platform === 'darwin'
-    ? path.join(os.homedir(), 'Library', 'Application Support', 'lazygit', 'config.yml')
-    : path.join(os.homedir(), '.config', 'lazygit', 'config.yml');
-}
-
 function jiraEnvConfigured(): boolean {
   return Boolean(
     process.env.JIRA_BASE_URL?.trim() &&
@@ -135,38 +135,63 @@ function defaultsConfigured(settings: OctomuxSettings): boolean {
   return Boolean(settings.defaultBaseBranch?.trim());
 }
 
+function buildEditorItem(choice: EditorChoice): SetupItem {
+  const dep = EDITOR_DEPS[choice];
+  const probe = probeBinary(dep);
+  let status: SetupItemStatus = probe.ok ? 'ok' : 'missing';
+  let detail: string | undefined;
+
+  if (choice === 'nvim' && probe.ok) {
+    try {
+      const verOut = execFileSync('nvim', ['--version'], { encoding: 'utf8' });
+      const match = verOut.match(/(\d+)\.(\d+)\.(\d+)/);
+      if (match) {
+        const major = parseInt(match[1], 10);
+        const minor = parseInt(match[2], 10);
+        if (major === 0 && minor < 10) {
+          status = 'outdated';
+          detail = `Found ${match[0]} — need >= 0.10`;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const install =
+    status !== 'ok' && dep.brewPkg && hasBrew() && process.platform === 'darwin'
+      ? { kind: 'brew' as const, id: 'editor', label: `Install ${dep.displayName} (Homebrew)` }
+      : undefined;
+
+  return {
+    id: 'editor',
+    label: `Editor: ${dep.displayName}`,
+    category: 'recommended',
+    status,
+    version: probe.version,
+    detail:
+      detail ??
+      (status === 'missing' ? `Configured editor "${choice}" not found on PATH` : undefined),
+    install,
+    docsUrl: dep.installUrl,
+    configureUrl: '/settings',
+  };
+}
+
 export async function getSetupStatus(): Promise<SetupStatusResponse> {
   const settings = await getSettings();
   const items: SetupItem[] = [];
 
   for (const dep of BINARY_DEPS) {
     const probe = probeBinary(dep);
-    let status: SetupItemStatus = probe.ok
+    const status: SetupItemStatus = probe.ok
       ? 'ok'
       : dep.category === 'optional'
         ? 'optional_missing'
         : 'missing';
-    let detail: string | undefined;
-
-    if (dep.id === 'nvim' && probe.ok) {
-      try {
-        const verOut = execFileSync('nvim', ['--version'], { encoding: 'utf8' });
-        const match = verOut.match(/(\d+)\.(\d+)\.(\d+)/);
-        if (match) {
-          const major = parseInt(match[1], 10);
-          const minor = parseInt(match[2], 10);
-          if (major === 0 && minor < 10) {
-            status = 'outdated';
-            detail = `Found ${match[0]} — need >= 0.10`;
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
 
     const install =
-      dep.brewPkg && hasBrew() && process.platform === 'darwin'
+      status !== 'ok' && dep.brewPkg && hasBrew() && process.platform === 'darwin'
         ? { kind: 'brew' as const, id: dep.id, label: `Install ${dep.name || dep.cmd} (Homebrew)` }
         : undefined;
 
@@ -176,11 +201,12 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
       category: dep.category,
       status,
       version: probe.version,
-      detail,
       install,
       docsUrl: dep.installUrl,
     });
   }
+
+  items.push(buildEditorItem(settings.editor));
 
   const missingSkills = missingBundledSkills();
   items.push({
@@ -189,22 +215,8 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
     category: 'recommended',
     status: missingSkills.length === 0 ? 'ok' : 'missing',
     detail: missingSkills.length ? `Missing: ${missingSkills.join(', ')}` : undefined,
-    install: { kind: 'copy', id: 'skills', label: 'Install bundled skills' },
-  });
-
-  const lgTarget = lazygitConfigTarget();
-  const lgSource = path.join(packageRoot(), '.config', 'lazygit', 'config.yml');
-  items.push({
-    id: 'lazygit-config',
-    label: 'Lazygit config',
-    category: 'optional',
-    status: fs.existsSync(lgTarget)
-      ? 'ok'
-      : fs.existsSync(lgSource)
-        ? 'missing'
-        : 'optional_missing',
-    install: fs.existsSync(lgSource)
-      ? { kind: 'copy', id: 'lazygit-config', label: 'Install lazygit config' }
+    install: missingSkills.length
+      ? { kind: 'copy', id: 'skills', label: 'Install bundled skills' }
       : undefined,
   });
 
@@ -213,8 +225,10 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
     id: 'jira-status-hook',
     label: 'jira-status hook',
     category: 'optional',
-    status: jiraHookInstalled ? 'ok' : 'missing',
-    install: { kind: 'template', id: 'jira-status-hook', label: 'Install jira-status hook' },
+    status: jiraHookInstalled ? 'ok' : 'optional_missing',
+    install: jiraHookInstalled
+      ? undefined
+      : { kind: 'template', id: 'jira-status-hook', label: 'Install jira-status hook' },
     detail:
       jiraHookInstalled && !jiraEnvConfigured()
         ? 'Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN'
@@ -285,7 +299,6 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
     detail: settings.defaultBaseBranch
       ? `Base branch: ${settings.defaultBaseBranch}`
       : 'Set default base branch (and optional Jira defaults)',
-    configureUrl: '/setup',
   });
 
   const blockerCount = items.filter(
@@ -314,11 +327,9 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
 const INSTALL_ALLOWLIST = new Set([
   'tmux',
   'git',
-  'nvim',
-  'lazygit',
+  'editor',
   'gh',
   'skills',
-  'lazygit-config',
   'jira-status-hook',
   'lazyvim-sync',
 ]);
@@ -355,20 +366,6 @@ export async function runSetupInstall(id: string): Promise<{ ok: boolean; messag
     };
   }
 
-  if (id === 'lazygit-config') {
-    const source = path.join(packageRoot(), '.config', 'lazygit', 'config.yml');
-    if (!fs.existsSync(source)) {
-      return { ok: false, message: 'Bundled lazygit config not found' };
-    }
-    const dest = lazygitConfigTarget();
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    if (fs.existsSync(dest)) {
-      return { ok: true, message: 'Lazygit config already present' };
-    }
-    fs.copyFileSync(source, dest);
-    return { ok: true, message: `Installed lazygit config to ${dest}` };
-  }
-
   if (id === 'jira-status-hook') {
     const files = installHookTemplate('jira-status');
     return { ok: true, message: `Installed hook (${files.length} file(s))` };
@@ -384,6 +381,27 @@ export async function runSetupInstall(id: string): Promise<{ ok: boolean; messag
     return ok
       ? { ok: true, message: 'Installed GitHub CLI' }
       : { ok: false, message: 'Could not install gh via Homebrew' };
+  }
+
+  if (id === 'editor') {
+    const settings = await getSettings();
+    const editorDep = EDITOR_DEPS[settings.editor];
+    if (!editorDep.brewPkg) {
+      return {
+        ok: false,
+        message: `Install ${editorDep.displayName} manually${editorDep.installUrl ? `: ${editorDep.installUrl}` : ''}.`,
+      };
+    }
+    const ok = brewInstall(editorDep.brewPkg, {
+      cmd: editorDep.cmd,
+      checkArgs: editorDep.checkArgs,
+    });
+    return ok
+      ? { ok: true, message: `Installed ${editorDep.displayName}` }
+      : {
+          ok: false,
+          message: `Could not install ${editorDep.displayName}${editorDep.installUrl ? `: ${editorDep.installUrl}` : ''}.`,
+        };
   }
 
   const dep = BINARY_DEPS.find((d) => d.id === id);

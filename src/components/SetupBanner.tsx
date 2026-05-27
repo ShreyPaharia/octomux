@@ -36,7 +36,7 @@ export function SetupBanner() {
   const message =
     summary.blockers > 0
       ? `${summary.blockers} required setup item${summary.blockers === 1 ? '' : 's'} need attention`
-      : `${summary.attention} optional setup item${summary.attention === 1 ? '' : 's'} can be configured`;
+      : `${summary.attention} setup item${summary.attention === 1 ? '' : 's'} can be configured`;
 
   return (
     <div
