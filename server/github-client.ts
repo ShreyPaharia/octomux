@@ -28,10 +28,19 @@ export interface PostPullRequestReviewResult {
 /**
  * Posts a pull request review to GitHub using `gh api`.
  * Sends the JSON payload on stdin via `--input -`.
+ *
+ * Test-only stub: when NODE_ENV === 'test' AND the OCTOMUX_GH_STUB_RESPONSE env
+ * var is set, returns the parsed JSON from that env var without invoking `gh`.
  */
 export async function postPullRequestReview(
   input: PostPullRequestReviewInput,
 ): Promise<PostPullRequestReviewResult> {
+  // ─── Test-only stub hatch ─────────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'test' && process.env.OCTOMUX_GH_STUB_RESPONSE) {
+    logger.info({ event: input.event, comment_count: input.comments.length }, 'gh stub fired');
+    return JSON.parse(process.env.OCTOMUX_GH_STUB_RESPONSE) as PostPullRequestReviewResult;
+  }
+
   const { owner, repo, pull_number, ...payload } = input;
   const endpoint = `/repos/${owner}/${repo}/pulls/${pull_number}/reviews`;
   const body = JSON.stringify(payload);
