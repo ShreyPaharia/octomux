@@ -116,10 +116,7 @@ export function WalkthroughHeader({
   if (!hasContent) return null;
 
   return (
-    <section
-      data-testid="walkthrough-header"
-      className="border-b border-glass-edge bg-glass-l1"
-    >
+    <section data-testid="walkthrough-header" className="border-b border-glass-edge bg-glass-l1">
       <header className="flex items-center justify-between gap-2 px-4 py-2">
         <button
           type="button"
@@ -140,9 +137,7 @@ export function WalkthroughHeader({
             {g.effort !== undefined && <ScalarPill>Effort {g.effort}/5</ScalarPill>}
             {g.relevant_tests && <ScalarPill>Tests: {g.relevant_tests}</ScalarPill>}
             {g.security_concerns && (
-              <ScalarPill className="text-yellow-400">
-                Security: {g.security_concerns}
-              </ScalarPill>
+              <ScalarPill className="text-yellow-400">Security: {g.security_concerns}</ScalarPill>
             )}
           </div>
         )}
