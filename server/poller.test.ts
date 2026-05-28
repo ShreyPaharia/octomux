@@ -712,9 +712,8 @@ describe('pollReviewerRequests', () => {
     expect((created!.branch as string).startsWith('review/')).toBe(true);
     expect(created!.branch).toContain('pr-42');
     expect(created!.title).toContain('#42');
-    expect((created!.initial_prompt as string).startsWith('/review-pr https://github.com')).toBe(
-      true,
-    );
+    expect((created!.initial_prompt as string).startsWith('/review-orchestrator')).toBe(true);
+    expect(created!.initial_prompt).toContain('https://github.com');
     expect(broadcast).toHaveBeenCalledWith({
       type: 'task:created',
       payload: { taskId: created!.id },

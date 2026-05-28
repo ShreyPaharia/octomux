@@ -470,13 +470,14 @@ function repoShortName(repoPath: string): string {
 function buildReviewPrompt(pr: OpenReviewPR, requestedAt: string): string {
   const author = pr.author?.login ?? 'unknown';
   return [
-    `/review-pr ${pr.url}`,
+    `/review-orchestrator`,
     '',
     `PR: ${pr.title} (#${pr.number}) by @${author}`,
+    `URL: ${pr.url}`,
     `Head: ${pr.headRefOid}`,
     `Review requested: ${requestedAt}`,
     '',
-    'Use the review-pr skill to post inline comments on GitHub. Keep feedback grounded in the diff.',
+    'Use the review-orchestrator skill to produce a structured walkthrough and inline draft comments via the `octomux review` CLI. Do NOT post to GitHub directly.',
   ].join('\n');
 }
 
