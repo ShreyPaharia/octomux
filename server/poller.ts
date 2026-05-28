@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
-import { closeTask } from './task-runner.js';
+import { closeTask, startTask } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
@@ -676,6 +676,19 @@ export async function pollReviewerRequests(): Promise<void> {
           'auto-created review task for reviewer request',
         );
         broadcast({ type: 'task:created', payload: { taskId: result.taskId! } });
+        const fresh = getDb()
+          .prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`)
+          .get(result.taskId) as Task | undefined;
+        if (fresh) {
+          try {
+            await startTask(fresh);
+          } catch (err) {
+            logger.error(
+              { task_id: result.taskId, err: (err as Error).message },
+              'failed to auto-start review task',
+            );
+          }
+        }
       } else if (result.action === 'updated') {
         logger.info(
           {

@@ -30,6 +30,7 @@ vi.mock('child_process', () => ({
 
 vi.mock('./task-runner.js', () => ({
   closeTask: vi.fn(),
+  startTask: vi.fn(async () => undefined),
 }));
 
 vi.mock('./hook-settings.js', () => ({
@@ -57,7 +58,7 @@ const {
   stopPolling,
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
-const { closeTask } = await import('./task-runner.js');
+const { closeTask, startTask } = await import('./task-runner.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
@@ -718,6 +719,21 @@ describe('pollReviewerRequests', () => {
       type: 'task:created',
       payload: { taskId: created!.id },
     });
+  });
+
+  it('auto-starts the task after creating it', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    mockPrList([makePR()]);
+
+    await pollReviewerRequests();
+
+    const created = db
+      .prepare(`SELECT id FROM tasks WHERE source = 'auto_review'`)
+      .get() as { id: string };
+    expect(created).toBeDefined();
+    expect(startTask).toHaveBeenCalledTimes(1);
+    const calledWith = vi.mocked(startTask).mock.calls[0][0];
+    expect((calledWith as { id: string }).id).toBe(created.id);
   });
 
   it('skips when owner is not in reviewRequests (e.g. already reviewed)', async () => {
