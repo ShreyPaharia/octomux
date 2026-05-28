@@ -555,6 +555,22 @@ describe('review orchestrator migration', () => {
   });
 });
 
+describe('deleted_at migration', () => {
+  it('creates deleted_at column on fresh DB', () => {
+    const db = createTestDb();
+    const cols = db.pragma('table_info(tasks)') as Array<{ name: string }>;
+    expect(cols.find((c) => c.name === 'deleted_at')).toBeDefined();
+  });
+
+  it('creates partial index for deleted_at', () => {
+    const db = createTestDb();
+    const idx = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_deleted_at'`)
+      .get();
+    expect(idx).toBeTruthy();
+  });
+});
+
 describe('claude_session_id rename', () => {
   it('renames the column on an existing DB with old column', () => {
     // Simulate a pre-rename DB by manually creating the old schema.

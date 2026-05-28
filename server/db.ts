@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     current_summary              TEXT,
     current_summary_updated_at   TEXT,
     harness_id                   TEXT NOT NULL DEFAULT 'claude-code',
+    deleted_at                   TEXT,
     created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at                   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -513,6 +514,13 @@ export function initDb(instance: Database.Database): void {
   );
   addColumn('tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
   addColumn('tasks', 'current_summary_updated_at', 'current_summary_updated_at TEXT', taskColsV2);
+  addColumn('tasks', 'deleted_at', 'deleted_at TEXT', taskColsV2);
+
+  // Partial index for the purge poller's hot path.
+  instance.exec(
+    `CREATE INDEX IF NOT EXISTS idx_tasks_deleted_at
+         ON tasks(deleted_at) WHERE deleted_at IS NOT NULL`,
+  );
 
   // Backfill workflow_status from initial_prompt + pr_url for old rows that
   // still have the default 'backlog' and no context to derive from.
