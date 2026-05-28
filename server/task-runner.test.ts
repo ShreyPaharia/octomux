@@ -2200,3 +2200,24 @@ describe('hopAgent', () => {
     expect(killSession).toBeDefined();
   });
 });
+
+// ─── softDeleteTask ──────────────────────────────────────────────────────────
+
+describe('softDeleteTask', () => {
+  it('kills tmux, sets deleted_at, sets runtime_state idle, stops running agents', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db, { hook_activity: 'active' });
+
+    const { softDeleteTask } = await import('./task-runner.js');
+    const task = { ...DEFAULTS.runningTask } as unknown as Task;
+
+    await softDeleteTask(task);
+
+    const row = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(DEFAULTS.runningTask.id) as any;
+    expect(row.deleted_at).not.toBeNull();
+    expect(row.runtime_state).toBe('idle');
+
+    const agents = getAgents(db, DEFAULTS.runningTask.id);
+    expect(agents[0].status).toBe('stopped');
+  });
+});

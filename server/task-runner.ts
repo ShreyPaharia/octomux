@@ -895,6 +895,48 @@ export async function closeTask(task: Task): Promise<void> {
   logger.info({ task_id: task.id, operation: 'closeTask' }, 'closeTask: complete');
 }
 
+/**
+ * Soft-delete a task: kill tmux + flag for the purge poller. Keeps worktree,
+ * branch, and all DB rows so the user can restore from the trash column
+ * within the grace window. The purge poller calls `deleteTask` on rows past
+ * grace.
+ */
+export async function softDeleteTask(task: Task): Promise<void> {
+  const db = getDb();
+  logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: start');
+
+  if (task.tmux_session) {
+    await cleanupLinkedSessions(task.tmux_session);
+    try {
+      await execFile('tmux', ['kill-session', '-t', task.tmux_session]);
+    } catch (err) {
+      if (!isTmuxTargetMissing(err)) {
+        logger.warn(
+          { task_id: task.id, tmux_session: task.tmux_session, err },
+          'softDeleteTask: tmux kill-session failed',
+        );
+      }
+    }
+  }
+
+  db.prepare(
+    `UPDATE tasks SET deleted_at = datetime('now'),
+                      runtime_state = 'idle',
+                      updated_at = datetime('now')
+       WHERE id = ?`,
+  ).run(task.id);
+
+  db.prepare(
+    `UPDATE agents
+        SET status = 'stopped',
+            hook_activity = 'idle',
+            hook_activity_updated_at = datetime('now')
+      WHERE task_id = ? AND status = 'running'`,
+  ).run(task.id);
+
+  logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: complete');
+}
+
 export async function deleteTask(task: Task): Promise<void> {
   const db = getDb();
   logger.info(
