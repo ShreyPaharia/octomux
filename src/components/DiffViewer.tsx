@@ -49,6 +49,9 @@ interface Props {
   /** Notifier fired whenever the list of files in the diff changes. The host
    *  uses this to mark "no longer in diff" comments in the side panel. */
   onFilesChange?: (paths: string[]) => void;
+  /** Hide the built-in left file tree. Hosts (e.g. the review cockpit) use
+   *  this when they render their own grouped tree alongside the diff. */
+  hideFileTree?: boolean;
 }
 
 export function DiffViewer(props: Props) {
@@ -68,6 +71,7 @@ export function DiffViewer(props: Props) {
     enableComments,
     agents,
     onFilesChange,
+    hideFileTree,
   } = props;
 
   // Standalone / composer mode — renders the new-content lines as clickable
@@ -99,6 +103,7 @@ export function DiffViewer(props: Props) {
       enableComments={enableComments}
       agents={agents}
       onFilesChange={onFilesChange}
+      hideFileTree={hideFileTree}
     />
   );
 }
@@ -194,6 +199,7 @@ function ApiDiffViewer({
   enableComments = false,
   agents = [],
   onFilesChange,
+  hideFileTree = false,
 }: {
   taskId: string;
   isRunning: boolean;
@@ -205,6 +211,7 @@ function ApiDiffViewer({
   enableComments?: boolean;
   agents?: Agent[];
   onFilesChange?: (paths: string[]) => void;
+  hideFileTree?: boolean;
 }) {
   const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
@@ -341,23 +348,25 @@ function ApiDiffViewer({
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0">
-      <aside
-        data-testid="diff-file-list"
-        className="glass-chrome flex w-[260px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
-      >
-        {summaryLoading && files.length === 0 ? (
-          <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
-        ) : (
-          <DiffFileTree
-            files={files}
-            selected={activeFile}
-            onSelect={handleSelect}
-            taskId={taskId}
-            ignoredTruncated={ignoredTruncated}
-            reviewed={reviewed}
-          />
-        )}
-      </aside>
+      {!hideFileTree && (
+        <aside
+          data-testid="diff-file-list"
+          className="glass-chrome flex w-[260px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
+        >
+          {summaryLoading && files.length === 0 ? (
+            <div className="p-4 text-xs text-muted-foreground">Loading diff...</div>
+          ) : (
+            <DiffFileTree
+              files={files}
+              selected={activeFile}
+              onSelect={handleSelect}
+              taskId={taskId}
+              ignoredTruncated={ignoredTruncated}
+              reviewed={reviewed}
+            />
+          )}
+        </aside>
+      )}
       <div
         data-testid="diff-pane"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-glass-l0"
