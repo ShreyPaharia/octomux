@@ -806,6 +806,43 @@ export async function pollTerminalActivity(): Promise<void> {
   }
 }
 
+// ─── Watchdog for stuck review_runs ──────────────────────────────────────────
+
+const REVIEW_RUN_TIMEOUT_MIN = 15;
+
+/**
+ * Fail review_runs that have been 'running' for longer than the timeout window
+ * without producing a walkthrough or any inline comments. Idempotent.
+ */
+export async function sweepStuckReviewRuns(): Promise<void> {
+  const db = getDb();
+  const stuck = db
+    .prepare(
+      `SELECT rr.id, rr.task_id FROM review_runs rr
+        WHERE rr.status = 'running'
+          AND rr.started_at < datetime('now', ?)
+          AND rr.walkthrough IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM inline_comments ic
+             WHERE ic.review_run_id = rr.id
+               AND ic.created_at > rr.started_at
+          )`,
+    )
+    .all(`-${REVIEW_RUN_TIMEOUT_MIN} minutes`) as Array<{ id: string; task_id: string }>;
+
+  for (const row of stuck) {
+    db.prepare(
+      `UPDATE review_runs
+          SET status = 'failed',
+              error = 'timeout: no progress for ${REVIEW_RUN_TIMEOUT_MIN} minutes',
+              completed_at = datetime('now')
+        WHERE id = ?`,
+    ).run(row.id);
+    logger.warn({ task_id: row.task_id, review_run_id: row.id }, 'review_run timed out');
+    broadcast({ type: 'review:run-failed', payload: { taskId: row.task_id, reviewRunId: row.id } });
+  }
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 /** Fire both PR-related GitHub polls together to avoid doubling `gh` usage. */
@@ -819,6 +856,11 @@ async function pollPRsAndReviewers(): Promise<void> {
     await pollReviewerRequests();
   } catch (err) {
     logger.error({ err, operation: 'pollReviewerRequests' }, 'pollReviewerRequests failed');
+  }
+  try {
+    await sweepStuckReviewRuns();
+  } catch (err) {
+    logger.error({ err, operation: 'sweepStuckReviewRuns' }, 'sweepStuckReviewRuns failed');
   }
 }
 

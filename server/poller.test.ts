@@ -1136,6 +1136,47 @@ describe('pollReviewerRequests', () => {
   });
 });
 
+// ─── sweepStuckReviewRuns ────────────────────────────────────────────────────
+
+describe('sweepStuckReviewRuns', () => {
+  it('marks a review_run failed after 15min with no walkthrough and no comments', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t1', 'x', '', 'running', 'backlog', 'auto_review')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, status, started_at)
+       VALUES ('r1', 't1', 'sha', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status, error FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+      error: string | null;
+    };
+    expect(row.status).toBe('failed');
+    expect(row.error).toMatch(/timeout/);
+  });
+
+  it('leaves a fresh review_run alone', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t1', 'x', '', 'running', 'backlog', 'auto_review')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, status, started_at)
+       VALUES ('r1', 't1', 'sha', 'running', datetime('now', '-2 minutes'))`,
+    ).run();
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+    };
+    expect(row.status).toBe('running');
+  });
+});
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 describe('startPolling / stopPolling', () => {
