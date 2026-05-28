@@ -30,7 +30,12 @@ vi.mock('child_process', () => ({
 
 vi.mock('./task-runner.js', () => ({
   closeTask: vi.fn(),
+  deleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
+}));
+
+vi.mock('./settings.js', () => ({
+  getSettings: vi.fn(async () => ({ deleteGraceHours: 6 })),
 }));
 
 vi.mock('./hook-settings.js', () => ({
@@ -54,14 +59,16 @@ const {
   pollPRs,
   checkMergedPRs,
   pollReviewerRequests,
+  pollSoftDeletes,
   startPolling,
   stopPolling,
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
-const { closeTask, startTask } = await import('./task-runner.js');
+const { closeTask, deleteTask, startTask } = await import('./task-runner.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
+const { getSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -1173,6 +1180,77 @@ describe('sweepStuckReviewRuns', () => {
       status: string;
     };
     expect(row.status).toBe('running');
+  });
+});
+
+// ─── pollSoftDeletes ─────────────────────────────────────────────────────────
+
+describe('pollSoftDeletes', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ deleteGraceHours: 6 } as any);
+    vi.mocked(deleteTask).mockResolvedValue(undefined);
+  });
+
+  it('purges tasks past grace window, leaves recent ones alone', async () => {
+    insertTask(db, { ...DEFAULTS.task, id: 'old-task', title: 'Old' });
+    db.prepare(
+      `UPDATE tasks SET deleted_at = datetime('now', '-8 hours') WHERE id = 'old-task'`,
+    ).run();
+
+    insertTask(db, { ...DEFAULTS.task, id: 'new-task', title: 'New' });
+    db.prepare(
+      `UPDATE tasks SET deleted_at = datetime('now', '-30 minutes') WHERE id = 'new-task'`,
+    ).run();
+
+    await pollSoftDeletes();
+
+    const oldRow = db.prepare(`SELECT id FROM tasks WHERE id = 'old-task'`).get();
+    const newRow = db.prepare(`SELECT id FROM tasks WHERE id = 'new-task'`).get();
+    expect(oldRow).toBeUndefined();
+    expect(newRow).toBeDefined();
+  });
+
+  it('calls deleteTask for each purged task', async () => {
+    insertTask(db, { ...DEFAULTS.task, id: 'del-task', title: 'Del' });
+    db.prepare(
+      `UPDATE tasks SET deleted_at = datetime('now', '-8 hours') WHERE id = 'del-task'`,
+    ).run();
+
+    await pollSoftDeletes();
+
+    expect(deleteTask).toHaveBeenCalledOnce();
+    expect(vi.mocked(deleteTask).mock.calls[0][0]).toMatchObject({ id: 'del-task' });
+  });
+
+  it('does not propagate errors when deleteTask throws — row stays for next tick', async () => {
+    vi.mocked(deleteTask).mockRejectedValueOnce(new Error('tmux failed'));
+    insertTask(db, { ...DEFAULTS.task, id: 'err-task', title: 'Err' });
+    db.prepare(
+      `UPDATE tasks SET deleted_at = datetime('now', '-8 hours') WHERE id = 'err-task'`,
+    ).run();
+
+    await expect(pollSoftDeletes()).resolves.toBeUndefined();
+
+    const row = db.prepare(`SELECT id FROM tasks WHERE id = 'err-task'`).get();
+    expect(row).toBeDefined();
+
+    // Row is still found on next call
+    vi.mocked(deleteTask).mockRejectedValueOnce(new Error('tmux failed again'));
+    await expect(pollSoftDeletes()).resolves.toBeUndefined();
+    const rowAgain = db.prepare(`SELECT id FROM tasks WHERE id = 'err-task'`).get();
+    expect(rowAgain).toBeDefined();
+  });
+
+  it('respects custom deleteGraceHours = 0, purging tasks deleted just now', async () => {
+    vi.mocked(getSettings).mockResolvedValue({ deleteGraceHours: 0 } as any);
+
+    insertTask(db, { ...DEFAULTS.task, id: 'now-task', title: 'Now' });
+    db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 'now-task'`).run();
+
+    await pollSoftDeletes();
+
+    const row = db.prepare(`SELECT id FROM tasks WHERE id = 'now-task'`).get();
+    expect(row).toBeUndefined();
   });
 });
 

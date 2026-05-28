@@ -3,7 +3,8 @@ import { promisify } from 'util';
 import path from 'path';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
-import { closeTask, startTask } from './task-runner.js';
+import { getSettings } from './settings.js';
+import { closeTask, deleteTask, startTask } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
@@ -20,10 +21,12 @@ const execFile = promisify(execFileCb);
 const STATUS_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
+const DELETE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60 * 60 * 1000; // 1h
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
 let mergedPrTimer: ReturnType<typeof setInterval> | null = null;
+let deleteTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
@@ -865,6 +868,41 @@ async function pollPRsAndReviewers(): Promise<void> {
   }
 }
 
+// ─── Soft-Delete Purge ───────────────────────────────────────────────────────
+
+export async function pollSoftDeletes(): Promise<void> {
+  let hours: number;
+  try {
+    const settings = await getSettings();
+    hours = Math.max(0, settings.deleteGraceHours ?? 6);
+  } catch (err) {
+    logger.warn({ err, operation: 'pollSoftDeletes' }, 'could not read settings; using default 6h');
+    hours = 6;
+  }
+
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.deleted_at IS NOT NULL
+                            AND t.deleted_at <= datetime('now', ?)`,
+    )
+    .all(`-${hours} hours`) as Task[];
+
+  for (const task of rows) {
+    try {
+      await deleteTask(task);
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+      broadcast({ type: 'task:deleted', payload: { taskId: task.id } });
+      logger.info({ task_id: task.id, operation: 'pollSoftDeletes' }, 'purged soft-deleted task');
+    } catch (err) {
+      logger.error(
+        { err, task_id: task.id, operation: 'pollSoftDeletes' },
+        'purge failed; will retry next tick',
+      );
+    }
+  }
+}
+
 export function startPolling(): void {
   // Install hooks in any running worktrees that might be missing them
   ensureHooksInstalled();
@@ -877,6 +915,9 @@ export function startPolling(): void {
   }
   if (MERGED_PR_INTERVAL > 0) {
     mergedPrTimer = setInterval(pollMergedPRs, MERGED_PR_INTERVAL);
+  }
+  if (DELETE_INTERVAL > 0) {
+    deleteTimer = setInterval(pollSoftDeletes, DELETE_INTERVAL);
   }
 }
 
@@ -892,5 +933,9 @@ export function stopPolling(): void {
   if (mergedPrTimer) {
     clearInterval(mergedPrTimer);
     mergedPrTimer = null;
+  }
+  if (deleteTimer) {
+    clearInterval(deleteTimer);
+    deleteTimer = null;
   }
 }
