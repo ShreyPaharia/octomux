@@ -169,10 +169,7 @@ export function ReviewFileTree({ files, walkthrough, comments, selectedPath, onS
   }
 
   return (
-    <nav
-      data-testid="review-file-tree"
-      className="flex h-full min-h-0 flex-col overflow-y-auto"
-    >
+    <nav data-testid="review-file-tree" className="flex h-full min-h-0 flex-col overflow-y-auto">
       {groups.map((group) => {
         const open = !collapsed.has(group.name);
         return (

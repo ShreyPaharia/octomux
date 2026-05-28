@@ -747,6 +747,90 @@ describe('startTask', () => {
       expect(updated.base_sha).toBe(MERGE_BASE_SHA);
     });
 
+    it('fetches PR head and resets worktree to pr_head_sha when pr_number is set', async () => {
+      insertTask(db, {
+        source: 'auto_review',
+        base_branch: 'main',
+        pr_number: 42,
+        pr_head_sha: PR_HEAD,
+      });
+      await startTask({ ...reviewTask, pr_number: 42 } as Task);
+
+      const fetchCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['fetch', 'origin', 'pull/42/head'],
+      });
+      expect(fetchCall).toBeDefined();
+
+      const resetCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['reset', '--hard', PR_HEAD],
+      });
+      expect(resetCall).toBeDefined();
+    });
+
+    it('resets worktree to pr_head_sha but skips fetch when pr_number is null (manual review)', async () => {
+      insertTask(db, {
+        source: 'auto_review',
+        base_branch: 'main',
+        pr_number: null,
+        pr_head_sha: PR_HEAD,
+      });
+      await startTask({ ...reviewTask, pr_number: null } as Task);
+
+      const fetchCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['fetch'],
+      });
+      expect(fetchCall).toBeUndefined();
+
+      const resetCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['reset', '--hard', PR_HEAD],
+      });
+      expect(resetCall).toBeDefined();
+    });
+
+    it('continues setup when git fetch fails', async () => {
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        if (args.includes('display-message')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('list-windows')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('new-window')) {
+          nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else if (args.includes('fetch')) {
+          cb(new Error('network unreachable'), null);
+        } else if (args.includes('merge-base')) {
+          cb(null, { stdout: `${MERGE_BASE_SHA}\n`, stderr: '' });
+        } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+          cb(null, { stdout: 'main\n', stderr: '' });
+        } else if (args.includes('rev-parse')) {
+          cb(null, { stdout: `${REV_PARSE_SHA}\n`, stderr: '' });
+        } else {
+          cb(null, { stdout: 'true', stderr: '' });
+        }
+      }) as never);
+
+      insertTask(db, {
+        source: 'auto_review',
+        base_branch: 'main',
+        pr_number: 42,
+        pr_head_sha: PR_HEAD,
+      });
+      await startTask({ ...reviewTask, pr_number: 42 } as Task);
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.runtime_state).toBe('running');
+    });
+
     it('falls back to rev-parse when git merge-base fails', async () => {
       vi.mocked(execFile).mockImplementation(((
         _cmd: string,
@@ -808,6 +892,23 @@ describe('startTask', () => {
         argsInclude: ['rev-parse', 'main^{commit}'],
       });
       expect(revParseCall).toBeDefined();
+    });
+
+    it('does not fetch PR head or reset --hard for non-review tasks', async () => {
+      insertTask(db, { base_branch: 'main' });
+      await startTask({ ...DEFAULTS.task, base_branch: 'main' } as Task);
+
+      const fetchCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['fetch'],
+      });
+      expect(fetchCall).toBeUndefined();
+
+      const resetCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['reset', '--hard'],
+      });
+      expect(resetCall).toBeUndefined();
     });
   });
 });
