@@ -10,8 +10,29 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
 ## Steps
 
 1. **Understand the goal:**
-   - Ask the user what they want built/fixed, or infer from context (e.g. a Jira ticket URL, a bug description, a feature request)
-   - If given a Jira ticket URL or key (e.g. `PROJ-843`), fetch the ticket details. Jira keys match `[A-Z][A-Z0-9]+-\d+`. If `~/.octomux/settings.json` has `defaultJiraBaseUrl` / `defaultJiraProjectKey`, treat those as the user's defaults when inferring a URL or assuming a project key.
+   - Ask the user what they want built/fixed, or infer from context (e.g. a Linear/Jira ticket URL, a bug description, a feature request)
+   - If given a ticket URL or key (e.g. `BAC-843`, `PROJ-843`), fetch the ticket details. Ticket keys match `[A-Z][A-Z0-9]+-\d+`. Decide tracker (Linear vs Jira) using the rules below.
+
+   **How to decide which tracker the key belongs to:**
+
+   - Full URL with `linear.app/` → Linear.
+   - Full URL with `*.atlassian.net/` → Jira.
+   - Bare key (e.g. `BAC-123`):
+     - Call `mcp__plugin_linear_linear__list_teams()` and check whether the key prefix matches a Linear team's key → Linear.
+     - Otherwise treat as Jira.
+   - If ambiguous (both could match), prefer `defaultTracker` from `~/.octomux/settings.json`.
+
+   **Fetching Linear issue details:**
+   1. Extract the issue key (e.g. `BAC-843`).
+   2. Use Linear MCP tools:
+      - `mcp__plugin_linear_linear__get_issue({ query: '<issue-key>' })` to fetch title, description, state, labels, priority, team, project.
+   3. Map fields to the prompt template:
+      - `title` → task title + What section
+      - `description` → Context section (extract acceptance criteria if present)
+      - `labels[].name` / `priority` → urgency hints in Why section
+      - `team.key` + `team.id` + `project.id` + `id` (issue UUID) → ref metadata (Step 6a below)
+      - `state` → ignored (octomux owns workflow state)
+   4. Branch naming uses the same convention: `feat/BAC-123-add-position-sync`.
 
    **Fetching Jira ticket details:**
    1. Extract the ticket key from the URL (e.g., `PROJ-843` from `https://your-company.atlassian.net/browse/PROJ-843`)
@@ -23,6 +44,8 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
       - `description` -> Context section (extract acceptance criteria if embedded)
       - `priority` / `labels` -> inform urgency in Why section
    4. If the description contains acceptance criteria (bullet lists, checkboxes), extract them verbatim for the Acceptance Criteria section
+
+   If `~/.octomux/settings.json` has `defaultJiraBaseUrl` / `defaultJiraProjectKey` / `defaultLinearTeamKey`, treat those as the user's defaults when inferring a URL or assuming a project/team key.
 
 2. **Resolve the repo:**
    - Query recent repos via CLI:
@@ -102,6 +125,25 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
      --branch '<branch_name>' \
      --base-branch '<detected_branch>' \
      --initial-prompt '<crafted_prompt>'
+   ```
+
+6a. **Link the source ticket (if applicable):**
+
+   If the source was a Linear issue, immediately link it with the cached metadata so the status-sync handler doesn't need to refetch the team on every column change:
+
+   ```bash
+   octomux task-ref-add <task-id> linear BAC-843 \
+     --url 'https://linear.app/ostium-labs/issue/BAC-843' \
+     --metadata '{"team_key":"BAC","team_id":"<uuid>","issue_id":"<uuid>","project_id":null}'
+   ```
+
+   `team_id`, `issue_id`, and `project_id` come from the `get_issue` response. The handler falls back to a runtime lookup if metadata is missing, but caching is faster and rate-limit-friendly.
+
+   If the source was a Jira issue, link it without metadata:
+
+   ```bash
+   octomux task-ref-add <task-id> jira PROJ-843 \
+     --url 'https://your-company.atlassian.net/browse/PROJ-843'
    ```
 
 7. **Report:**
