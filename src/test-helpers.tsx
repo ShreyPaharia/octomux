@@ -244,6 +244,12 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     updateHookEnabled: vi
       .fn()
       .mockResolvedValue({ scope: 'builtin', key: 'summarize-progress', enabled: true }),
+    listReviewsInbox: vi.fn().mockResolvedValue([]),
+    getReviewDetail: vi.fn().mockResolvedValue(null),
+    patchComment: vi.fn().mockResolvedValue({ id: 'c1', status: 'accepted' }),
+    patchWalkthrough: vi.fn().mockResolvedValue({ walkthrough: '{}' }),
+    publishReview: vi.fn().mockResolvedValue({ publishedReviewId: 'pr1', commentCount: 0 }),
+    requestReReview: vi.fn().mockResolvedValue({ ok: true }),
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
       dangerouslySkipPermissions: false,
