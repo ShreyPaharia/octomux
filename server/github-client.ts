@@ -76,10 +76,7 @@ export async function postPullRequestReview(
 
   const result = JSON.parse(stdout) as { id: number; html_url: string };
 
-  logger.info(
-    { owner, repo, pull_number, review_id: result.id },
-    'pull request review posted',
-  );
+  logger.info({ owner, repo, pull_number, review_id: result.id }, 'pull request review posted');
 
   return { id: result.id, html_url: result.html_url };
 }

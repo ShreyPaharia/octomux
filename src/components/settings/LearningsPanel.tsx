@@ -107,8 +107,7 @@ export function LearningsPanel({ repoPath }: LearningsPanelProps) {
               </span>
               {learning.last_used_at && (
                 <span>
-                  last:{' '}
-                  <span className="text-[#b5b5bd]">{formatDate(learning.last_used_at)}</span>
+                  last: <span className="text-[#b5b5bd]">{formatDate(learning.last_used_at)}</span>
                 </span>
               )}
               <span>

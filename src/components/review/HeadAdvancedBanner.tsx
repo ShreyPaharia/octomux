@@ -16,7 +16,10 @@ export function HeadAdvancedBanner({ taskId, currentSha, onRefresh }: HeadAdvanc
 
   useEffect(() => {
     return subscribe((event) => {
-      const e = event as { type: string; payload: { taskId?: string; newHeadSha?: string; reviewRunId?: string } };
+      const e = event as {
+        type: string;
+        payload: { taskId?: string; newHeadSha?: string; reviewRunId?: string };
+      };
       if (!e.payload.taskId || e.payload.taskId !== taskId) return;
       if (e.type === 'review:head-advanced' && e.payload.newHeadSha) {
         setNewSha(e.payload.newHeadSha);
@@ -52,8 +55,7 @@ export function HeadAdvancedBanner({ taskId, currentSha, onRefresh }: HeadAdvanc
   return (
     <div className="flex items-center gap-3 bg-yellow-900/30 border-b border-yellow-600 px-6 py-2 text-sm text-yellow-300">
       <span>
-        PR head advanced to{' '}
-        <code className="font-mono text-xs">{newSha.slice(0, 8)}</code>
+        PR head advanced to <code className="font-mono text-xs">{newSha.slice(0, 8)}</code>
       </span>
       <Button
         variant="outline"

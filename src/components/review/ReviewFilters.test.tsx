@@ -27,9 +27,7 @@ describe('ReviewFilters', () => {
     const onChange = vi.fn();
     render(<ReviewFilters filters={defaultFilters} onChange={onChange} />);
     await user.click(screen.getByText('issue'));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ severity: ['issue'] }),
-    );
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ severity: ['issue'] }));
   });
 
   it('toggles showResolved when clicking show/hide resolved', async () => {
@@ -37,19 +35,14 @@ describe('ReviewFilters', () => {
     const onChange = vi.fn();
     render(<ReviewFilters filters={defaultFilters} onChange={onChange} />);
     await user.click(screen.getByText('show resolved'));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ showResolved: true }),
-    );
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ showResolved: true }));
   });
 
   it('shows Clear button when filters are active and calls onChange to reset', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(
-      <ReviewFilters
-        filters={{ ...defaultFilters, severity: ['issue'] }}
-        onChange={onChange}
-      />,
+      <ReviewFilters filters={{ ...defaultFilters, severity: ['issue'] }} onChange={onChange} />,
     );
     expect(screen.getByText('Clear')).toBeTruthy();
     await user.click(screen.getByText('Clear'));

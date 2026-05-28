@@ -178,9 +178,7 @@ describe('POST /api/tasks/:id/review-runs', () => {
 
   it('nudges agent when task is already running', async () => {
     const db = getDb();
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'running' WHERE id = 'task-rev1'`,
-    ).run();
+    db.prepare(`UPDATE tasks SET runtime_state = 'running' WHERE id = 'task-rev1'`).run();
     db.prepare(
       `INSERT INTO agents (id, task_id, window_index, label, status, hook_token)
        VALUES ('ag1', 'task-rev1', 0, 'Agent', 'running', '')`,
@@ -250,9 +248,7 @@ describe('DELETE /api/learnings/:id', () => {
   it('deletes a learning and returns 204', async () => {
     const res = await request(app).delete('/api/learnings/l1');
     expect(res.status).toBe(204);
-    const remaining = getDb()
-      .prepare(`SELECT * FROM review_learnings WHERE id = 'l1'`)
-      .all();
+    const remaining = getDb().prepare(`SELECT * FROM review_learnings WHERE id = 'l1'`).all();
     expect(remaining).toHaveLength(0);
   });
 

@@ -305,7 +305,12 @@ export interface HookExecution {
 
 // ─── Review orchestrator types ───────────────────────────────────────────────
 
-export type ReviewInboxStatus = 'reviewing' | 'drafts-ready' | 'head-advanced' | 'published' | 'failed';
+export type ReviewInboxStatus =
+  | 'reviewing'
+  | 'drafts-ready'
+  | 'head-advanced'
+  | 'published'
+  | 'failed';
 
 export type PublishedReviewVerdict = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 
@@ -658,20 +663,12 @@ export const api = {
   // ─── Reviews (review orchestrator) ───────────────────────────────────────────
   listReviewsInbox: () => request<ReviewInboxRow[]>('/reviews'),
   getReviewDetail: (taskId: string) => request<ReviewDetail>(`/reviews/${taskId}`),
-  patchComment: (
-    taskId: string,
-    commentId: string,
-    patch: ReviewCommentPatch,
-  ) =>
+  patchComment: (taskId: string, commentId: string, patch: ReviewCommentPatch) =>
     request<InlineCommentDTO>(`/tasks/${taskId}/comments/${commentId}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  patchWalkthrough: (
-    taskId: string,
-    runId: string,
-    partial: Record<string, unknown>,
-  ) =>
+  patchWalkthrough: (taskId: string, runId: string, partial: Record<string, unknown>) =>
     request<{ walkthrough: string }>(`/tasks/${taskId}/review-runs/${runId}/walkthrough`, {
       method: 'PATCH',
       body: JSON.stringify(partial),

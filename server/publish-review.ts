@@ -18,9 +18,7 @@ export interface PublishReviewResult {
   comment_count: number;
 }
 
-function parsePrUrl(
-  prUrl: string,
-): { owner: string; repo: string; pull_number: number } | null {
+function parsePrUrl(prUrl: string): { owner: string; repo: string; pull_number: number } | null {
   // https://github.com/<owner>/<repo>/pull/<number>
   const m = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
   if (!m) return null;
@@ -41,9 +39,7 @@ export async function publishReview(
 ): Promise<PublishReviewResult> {
   const db = getDb();
 
-  const task = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`)
-    .get(taskId) as Task | undefined;
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
 
   if (!task) throw new Error(`Task not found: ${taskId}`);
 
@@ -124,9 +120,9 @@ export async function publishReview(
     // Flip stale comments
     if (staleIds.length > 0) {
       const placeholders = staleIds.map(() => '?').join(', ');
-      db.prepare(
-        `UPDATE inline_comments SET status = 'stale' WHERE id IN (${placeholders})`,
-      ).run(...staleIds);
+      db.prepare(`UPDATE inline_comments SET status = 'stale' WHERE id IN (${placeholders})`).run(
+        ...staleIds,
+      );
     }
 
     // Flip accepted → published and set published_review_id

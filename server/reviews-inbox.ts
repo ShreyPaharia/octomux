@@ -50,11 +50,7 @@ function deriveStatus(
   if (latestRun?.status === 'failed') return 'failed';
 
   // Head has advanced past the last reviewed SHA
-  if (
-    latestRun &&
-    task.pr_head_sha &&
-    latestRun.pr_head_sha !== task.pr_head_sha
-  ) {
+  if (latestRun && task.pr_head_sha && latestRun.pr_head_sha !== task.pr_head_sha) {
     return 'head-advanced';
   }
 

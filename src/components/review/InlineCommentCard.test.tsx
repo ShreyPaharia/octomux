@@ -146,7 +146,10 @@ describe('InlineCommentCard', () => {
   it('auto-resolved comment shows resolved chip and is dimmed', () => {
     const { container } = render(
       <InlineCommentCard
-        comment={makeDraftComment({ auto_resolved_at: '2026-05-28', auto_resolved_reason: 'fixed upstream' })}
+        comment={makeDraftComment({
+          auto_resolved_at: '2026-05-28',
+          auto_resolved_reason: 'fixed upstream',
+        })}
         taskId="t1"
         onUpdated={() => {}}
       />,

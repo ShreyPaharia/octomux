@@ -30,7 +30,11 @@ function SeverityBadge({ severity }: { severity: InlineCommentDTO['severity'] })
   );
 }
 
-export function InlineCommentCard({ comment: initialComment, taskId, onUpdated }: InlineCommentCardProps) {
+export function InlineCommentCard({
+  comment: initialComment,
+  taskId,
+  onUpdated,
+}: InlineCommentCardProps) {
   const [comment, setComment] = useState(initialComment);
   const [editing, setEditing] = useState(false);
   const [editBody, setEditBody] = useState(comment.body);
@@ -89,16 +93,16 @@ export function InlineCommentCard({ comment: initialComment, taskId, onUpdated }
       >
         {/* Header row */}
         <div className="flex items-center gap-2 flex-wrap">
-          <code className="text-xs text-blue-300">{comment.file_path}:{comment.line}</code>
+          <code className="text-xs text-blue-300">
+            {comment.file_path}:{comment.line}
+          </code>
           <SeverityBadge severity={comment.severity} />
           {comment.bucket && (
             <Badge variant={comment.bucket === 'actionable' ? 'default' : 'secondary'}>
               {comment.bucket}
             </Badge>
           )}
-          {comment.kind === 'suggestion' && (
-            <Badge variant="outline">🔧 patch</Badge>
-          )}
+          {comment.kind === 'suggestion' && <Badge variant="outline">🔧 patch</Badge>}
           {isReFlag && (
             <a
               href={`#comment-${comment.re_flag_of}`}
@@ -107,9 +111,7 @@ export function InlineCommentCard({ comment: initialComment, taskId, onUpdated }
               ↻ re-flag of #{comment.re_flag_of?.slice(0, 6)}
             </a>
           )}
-          {isStale && (
-            <Badge variant="destructive">stale — line moved</Badge>
-          )}
+          {isStale && <Badge variant="destructive">stale — line moved</Badge>}
           {isAutoResolved && (
             <span
               title={comment.auto_resolved_reason ?? undefined}

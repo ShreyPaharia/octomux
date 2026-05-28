@@ -180,9 +180,7 @@ export default function TasksPage() {
   const [search, setSearch] = useState('');
 
   const repos = useMemo(() => {
-    const paths = new Set(
-      tasks.filter((t) => t.source !== 'auto_review').map((t) => t.repo_path),
-    );
+    const paths = new Set(tasks.filter((t) => t.source !== 'auto_review').map((t) => t.repo_path));
     return [...paths].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   }, [tasks]);
 

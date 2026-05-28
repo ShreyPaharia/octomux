@@ -51,9 +51,17 @@ interface WalkthroughTreeProps {
   onRefresh?: () => void;
 }
 
-function ScalarPill({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function ScalarPill({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border border-glass-edge bg-glass-l1 px-2 py-0.5 text-xs text-muted-foreground ${className}`}>
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border border-glass-edge bg-glass-l1 px-2 py-0.5 text-xs text-muted-foreground ${className}`}
+    >
       {children}
     </span>
   );
@@ -80,10 +88,7 @@ export function WalkthroughTree({ walkthrough, runId, taskId, onRefresh }: Walkt
   }
 
   function startEdit(kind: 'summary' | 'key_review_points') {
-    const value =
-      kind === 'summary'
-        ? (g.summary ?? '')
-        : (g.key_review_points ?? []).join('\n');
+    const value = kind === 'summary' ? (g.summary ?? '') : (g.key_review_points ?? []).join('\n');
     setEditingSection({ kind, value });
   }
 
@@ -169,9 +174,7 @@ export function WalkthroughTree({ walkthrough, runId, taskId, onRefresh }: Walkt
             <div className="mt-2 space-y-2">
               <Textarea
                 value={editingSection.value}
-                onChange={(e) =>
-                  setEditingSection({ ...editingSection, value: e.target.value })
-                }
+                onChange={(e) => setEditingSection({ ...editingSection, value: e.target.value })}
                 rows={3}
               />
               <div className="flex gap-2">
@@ -209,9 +212,7 @@ export function WalkthroughTree({ walkthrough, runId, taskId, onRefresh }: Walkt
             <div className="space-y-2">
               <Textarea
                 value={editingSection.value}
-                onChange={(e) =>
-                  setEditingSection({ ...editingSection, value: e.target.value })
-                }
+                onChange={(e) => setEditingSection({ ...editingSection, value: e.target.value })}
                 placeholder="One point per line"
                 rows={4}
               />

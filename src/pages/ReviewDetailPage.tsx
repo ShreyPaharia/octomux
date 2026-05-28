@@ -37,10 +37,7 @@ export default function ReviewDetailPage() {
     return subscribe((event) => {
       const e = event as { type: string; payload: { taskId?: string } };
       if (!('taskId' in e.payload) || e.payload.taskId !== id) return;
-      if (
-        e.type === 'review:drafts-ready' ||
-        e.type === 'review:published'
-      ) {
+      if (e.type === 'review:drafts-ready' || e.type === 'review:published') {
         refresh();
       }
     });
@@ -49,8 +46,9 @@ export default function ReviewDetailPage() {
   if (error) return <div className="p-6 text-red-500">{error}</div>;
   if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
 
-  const walkthrough =
-    detail.latest_run?.walkthrough ? JSON.parse(detail.latest_run.walkthrough) : null;
+  const walkthrough = detail.latest_run?.walkthrough
+    ? JSON.parse(detail.latest_run.walkthrough)
+    : null;
 
   const visibleComments = detail.comments.filter((c) => {
     if (!filters.showResolved && (c.auto_resolved_at || c.status === 'published')) return false;
@@ -67,8 +65,7 @@ export default function ReviewDetailPage() {
   const staleCount = detail.comments.filter((c) => c.status === 'stale').length;
 
   const isRunning =
-    detail.latest_run?.status === 'running' ||
-    detail.all_runs.some((r) => r.status === 'running');
+    detail.latest_run?.status === 'running' || detail.all_runs.some((r) => r.status === 'running');
 
   return (
     <div className="flex flex-col min-h-0 h-full">
@@ -128,9 +125,7 @@ export default function ReviewDetailPage() {
         )}
 
         {/* Filters */}
-        {detail.comments.length > 0 && (
-          <ReviewFilters filters={filters} onChange={setFilters} />
-        )}
+        {detail.comments.length > 0 && <ReviewFilters filters={filters} onChange={setFilters} />}
 
         {/* Comment cards */}
         {visibleComments.length > 0 ? (

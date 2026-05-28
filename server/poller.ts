@@ -717,9 +717,9 @@ export async function pollReviewerRequests(): Promise<void> {
           'auto-created review task for reviewer request',
         );
         broadcast({ type: 'task:created', payload: { taskId: result.taskId! } });
-        const fresh = getDb()
-          .prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`)
-          .get(result.taskId) as Task | undefined;
+        const fresh = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(result.taskId) as
+          | Task
+          | undefined;
         if (fresh) {
           try {
             await startTask(fresh);

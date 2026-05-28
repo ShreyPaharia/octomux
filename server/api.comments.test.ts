@@ -302,7 +302,9 @@ describe('inline comments API', () => {
 
     it('updates status to accepted', async () => {
       const id = await seed();
-      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'accepted' });
+      const r = await request(app)
+        .patch(`/api/tasks/t1/comments/${id}`)
+        .send({ status: 'accepted' });
       expect(r.status).toBe(200);
       expect(r.body.status).toBe('accepted');
     });
@@ -333,7 +335,9 @@ describe('inline comments API', () => {
       // Manually mark it published via DB
       const { getDb } = await import('./db.js');
       getDb().prepare(`UPDATE inline_comments SET status = 'published' WHERE id = ?`).run(id);
-      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'accepted' });
+      const r = await request(app)
+        .patch(`/api/tasks/t1/comments/${id}`)
+        .send({ status: 'accepted' });
       expect(r.status).toBe(409);
     });
 
@@ -356,7 +360,9 @@ describe('inline comments API', () => {
 
     it('rejects invalid status value', async () => {
       const id = await seed();
-      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'invalid' });
+      const r = await request(app)
+        .patch(`/api/tasks/t1/comments/${id}`)
+        .send({ status: 'invalid' });
       expect(r.status).toBe(400);
     });
   });

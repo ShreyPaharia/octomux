@@ -92,9 +92,7 @@ export function ReviewFilters({ filters, onChange }: ReviewFiltersProps) {
         <Button
           size="xs"
           variant="ghost"
-          onClick={() =>
-            onChange({ severity: [], bucket: [], kind: [], showResolved: false })
-          }
+          onClick={() => onChange({ severity: [], bucket: [], kind: [], showResolved: false })}
         >
           Clear
         </Button>

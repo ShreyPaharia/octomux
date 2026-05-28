@@ -35,16 +35,12 @@ describe('HeadAdvancedBanner', () => {
   });
 
   it('does not render when no head-advanced event received', () => {
-    render(
-      <HeadAdvancedBanner taskId="t1" currentSha="sha-old" onRefresh={() => {}} />,
-    );
+    render(<HeadAdvancedBanner taskId="t1" currentSha="sha-old" onRefresh={() => {}} />);
     expect(screen.queryByText(/PR head advanced/)).toBeNull();
   });
 
   it('shows banner when review:head-advanced fires for this task', async () => {
-    render(
-      <HeadAdvancedBanner taskId="t1" currentSha="sha-old" onRefresh={() => {}} />,
-    );
+    render(<HeadAdvancedBanner taskId="t1" currentSha="sha-old" onRefresh={() => {}} />);
     subscribeCb?.({
       type: 'review:head-advanced',
       payload: { taskId: 't1', newHeadSha: 'newsha123' },
@@ -54,9 +50,7 @@ describe('HeadAdvancedBanner', () => {
   });
 
   it('does not show banner for a different task', async () => {
-    render(
-      <HeadAdvancedBanner taskId="t1" currentSha="sha-old" onRefresh={() => {}} />,
-    );
+    render(<HeadAdvancedBanner taskId="t1" currentSha="sha-old" onRefresh={() => {}} />);
     subscribeCb?.({
       type: 'review:head-advanced',
       payload: { taskId: 't2', newHeadSha: 'newsha123' },

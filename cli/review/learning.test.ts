@@ -33,9 +33,10 @@ describe('octomux review learning touch', () => {
     const id = JSON.parse(stdoutBuf).id as string;
     stdoutBuf = '';
     await runLearning(['touch', '--id', id]);
-    const row = getDb()
-      .prepare(`SELECT * FROM review_learnings WHERE id = ?`)
-      .get(id) as Record<string, unknown>;
+    const row = getDb().prepare(`SELECT * FROM review_learnings WHERE id = ?`).get(id) as Record<
+      string,
+      unknown
+    >;
     expect(row.usage_count).toBe(1);
     expect(row.last_used_at).not.toBeNull();
   });

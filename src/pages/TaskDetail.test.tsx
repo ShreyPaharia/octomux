@@ -97,9 +97,7 @@ describe('TaskDetail', () => {
   // ─── auto_review redirect ─────────────────────────────────────────────────
 
   it('redirects to /reviews/:id when task source is auto_review', async () => {
-    apiMock.getTask.mockResolvedValue(
-      makeTask({ id: 'test-task-01', source: 'auto_review' }),
-    );
+    apiMock.getTask.mockResolvedValue(makeTask({ id: 'test-task-01', source: 'auto_review' }));
     renderDetail();
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/reviews/test-task-01', { replace: true });

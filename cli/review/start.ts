@@ -120,4 +120,3 @@ function safeParse(json: string): unknown {
     return null;
   }
 }
-

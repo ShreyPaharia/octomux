@@ -726,9 +726,9 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const created = db
-      .prepare(`SELECT id FROM tasks WHERE source = 'auto_review'`)
-      .get() as { id: string };
+    const created = db.prepare(`SELECT id FROM tasks WHERE source = 'auto_review'`).get() as {
+      id: string;
+    };
     expect(created).toBeDefined();
     expect(startTask).toHaveBeenCalledTimes(1);
     const calledWith = vi.mocked(startTask).mock.calls[0][0];

@@ -78,9 +78,10 @@ describe('octomux review draft-comment (kind=comment)', () => {
     expect(out.id).toMatch(/^[a-zA-Z0-9_-]{12}$/);
     expect(out.status).toBe('draft');
 
-    const row = getDb()
-      .prepare(`SELECT * FROM inline_comments WHERE id = ?`)
-      .get(out.id) as Record<string, unknown>;
+    const row = getDb().prepare(`SELECT * FROM inline_comments WHERE id = ?`).get(out.id) as Record<
+      string,
+      unknown
+    >;
     expect(row.kind).toBe('comment');
     expect(row.severity).toBe('issue');
     expect(row.bucket).toBe('actionable');
@@ -115,9 +116,10 @@ describe('octomux review draft-comment (kind=comment)', () => {
     ]);
     const out = JSON.parse(stdoutBuf);
     expect(out.id).toBeTruthy();
-    const row = getDb()
-      .prepare('SELECT * FROM inline_comments WHERE id = ?')
-      .get(out.id) as Record<string, unknown>;
+    const row = getDb().prepare('SELECT * FROM inline_comments WHERE id = ?').get(out.id) as Record<
+      string,
+      unknown
+    >;
     expect(row.kind).toBe('suggestion');
     expect(row.existing_code).toBe('line3');
     expect(row.suggested_code).toBe('line3-improved');

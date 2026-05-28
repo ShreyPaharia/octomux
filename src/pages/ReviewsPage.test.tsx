@@ -19,18 +19,20 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
 );
 vi.mock('react-router-dom', routerMockFactory);
 
-function makeRow(overrides: Partial<{
-  task_id: string;
-  pr_number: number;
-  pr_title: string;
-  repo_path: string;
-  status: string;
-  draft_count: number;
-  accepted_count: number;
-  rejected_count: number;
-  stale_count: number;
-  author_login: string | null;
-}> = {}) {
+function makeRow(
+  overrides: Partial<{
+    task_id: string;
+    pr_number: number;
+    pr_title: string;
+    repo_path: string;
+    status: string;
+    draft_count: number;
+    accepted_count: number;
+    rejected_count: number;
+    stale_count: number;
+    author_login: string | null;
+  }> = {},
+) {
   return {
     task_id: 't1',
     pr_number: 1,
@@ -62,8 +64,19 @@ describe('ReviewsPage', () => {
 
   it('renders one row per inbox entry grouped by repo', async () => {
     apiMock.listReviewsInbox.mockResolvedValue([
-      makeRow({ task_id: 't1', pr_title: 'Add foo', status: 'drafts-ready', repo_path: '/repos/foo' }),
-      makeRow({ task_id: 't2', pr_number: 2, pr_title: 'Fix bar', status: 'reviewing', repo_path: '/repos/foo' }),
+      makeRow({
+        task_id: 't1',
+        pr_title: 'Add foo',
+        status: 'drafts-ready',
+        repo_path: '/repos/foo',
+      }),
+      makeRow({
+        task_id: 't2',
+        pr_number: 2,
+        pr_title: 'Fix bar',
+        status: 'reviewing',
+        repo_path: '/repos/foo',
+      }),
     ]);
     renderWithRouter(<ReviewsPage />);
     expect(await screen.findByText('Add foo')).toBeTruthy();
@@ -94,9 +107,7 @@ describe('ReviewsPage', () => {
   });
 
   it('shows stale count when > 0', async () => {
-    apiMock.listReviewsInbox.mockResolvedValue([
-      makeRow({ stale_count: 3 }),
-    ]);
+    apiMock.listReviewsInbox.mockResolvedValue([makeRow({ stale_count: 3 })]);
     renderWithRouter(<ReviewsPage />);
     expect(await screen.findByText(/3 stale/)).toBeTruthy();
   });

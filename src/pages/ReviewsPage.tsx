@@ -82,14 +82,12 @@ export default function ReviewsPage() {
                     {STATUS_PILL[r.status].label}
                   </Badge>
                   {r.author_login && (
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      @{r.author_login}
-                    </span>
+                    <span className="text-xs text-muted-foreground ml-auto">@{r.author_login}</span>
                   )}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {r.accepted_count} accepted · {r.draft_count} drafts · {r.rejected_count}{' '}
-                  rejected{r.stale_count > 0 && ` · ${r.stale_count} stale`}
+                  {r.accepted_count} accepted · {r.draft_count} drafts · {r.rejected_count} rejected
+                  {r.stale_count > 0 && ` · ${r.stale_count} stale`}
                 </div>
               </Card>
             ))}

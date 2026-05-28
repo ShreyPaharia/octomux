@@ -68,12 +68,7 @@ export function PublishBar({
 
       <div className="ml-auto flex items-center gap-2">
         {/* Re-run button */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleReRun}
-          disabled={isRunning || reRunning}
-        >
+        <Button variant="outline" size="sm" onClick={handleReRun} disabled={isRunning || reRunning}>
           {reRunning ? 'Starting…' : isRunning ? 'Running…' : 'Re-run review'}
         </Button>
 
@@ -92,11 +87,7 @@ export function PublishBar({
         </select>
 
         {/* Publish button */}
-        <Button
-          size="sm"
-          onClick={handlePublish}
-          disabled={acceptedCount === 0 || publishing}
-        >
+        <Button size="sm" onClick={handlePublish} disabled={acceptedCount === 0 || publishing}>
           {publishing ? 'Publishing…' : 'Publish review'}
         </Button>
       </div>

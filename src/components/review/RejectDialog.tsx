@@ -1,11 +1,5 @@
 import { useState } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '../ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 
@@ -48,11 +42,7 @@ export function RejectDialog({ open, onOpenChange, onReject }: RejectDialogProps
           />
         </div>
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => handleReject(false)}
-            disabled={rejecting}
-          >
+          <Button variant="outline" onClick={() => handleReject(false)} disabled={rejecting}>
             Reject only
           </Button>
           <Button

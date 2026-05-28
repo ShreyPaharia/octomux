@@ -161,7 +161,10 @@ export interface UpdateCommentFields {
   suggested_code?: string | null;
 }
 
-export function updateCommentFields(id: string, fields: UpdateCommentFields): InlineCommentRow | null {
+export function updateCommentFields(
+  id: string,
+  fields: UpdateCommentFields,
+): InlineCommentRow | null {
   const sets: string[] = [];
   const vals: unknown[] = [];
 
