@@ -171,3 +171,79 @@ describe('inline_comments DAO', () => {
     });
   });
 });
+
+describe('inline-comments — orchestrator fields', () => {
+  beforeEach(() => {
+    const db = createTestDb();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t1', 'x', '', 'idle', 'backlog', 'auto_review')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha) VALUES ('r1', 't1', 'sha1')`,
+    ).run();
+  });
+
+  it('inserts a kind=comment draft with bucket+severity+review_run_id', () => {
+    const row = addComment({
+      task_id: 't1',
+      file_path: 'a.ts',
+      line: 10,
+      side: 'new',
+      original_commit_sha: 'sha1',
+      body: 'consider memoizing',
+      kind: 'comment',
+      severity: 'suggestion',
+      bucket: 'actionable',
+      review_run_id: 'r1',
+    });
+    expect(row.kind).toBe('comment');
+    expect(row.bucket).toBe('actionable');
+    expect(row.severity).toBe('suggestion');
+    expect(row.review_run_id).toBe('r1');
+    expect(row.status).toBe('draft');
+  });
+
+  it('inserts a kind=suggestion draft with existing_code + suggested_code', () => {
+    const row = addComment({
+      task_id: 't1',
+      file_path: 'a.ts',
+      line: 12,
+      side: 'new',
+      original_commit_sha: 'sha1',
+      body: 'use Object.fromEntries',
+      kind: 'suggestion',
+      severity: 'nit',
+      bucket: 'actionable',
+      review_run_id: 'r1',
+      existing_code: 'return data.reduce(...)',
+      suggested_code: 'return Object.fromEntries(data);',
+    });
+    expect(row.kind).toBe('suggestion');
+    expect(row.existing_code).toBe('return data.reduce(...)');
+    expect(row.suggested_code).toBe('return Object.fromEntries(data);');
+  });
+
+  it('inserts a re_flag_of pointer when set', () => {
+    const original = addComment({
+      task_id: 't1',
+      file_path: 'a.ts',
+      line: 1,
+      side: 'new',
+      original_commit_sha: 'sha0',
+      body: 'first',
+      review_run_id: 'r1',
+    });
+    const reflag = addComment({
+      task_id: 't1',
+      file_path: 'a.ts',
+      line: 1,
+      side: 'new',
+      original_commit_sha: 'sha1',
+      body: 'still applies',
+      review_run_id: 'r1',
+      re_flag_of: original.id,
+    });
+    expect(reflag.re_flag_of).toBe(original.id);
+  });
+});
