@@ -8,6 +8,14 @@ export type ServerEvent =
   | {
       type: 'review:drafts-ready' | 'review:run-failed';
       payload: { taskId: string; reviewRunId: string };
+    }
+  | {
+      type: 'review:published';
+      payload: { taskId: string; github_review_url: string | null };
+    }
+  | {
+      type: 'review:head-advanced';
+      payload: { taskId: string; newHeadSha: string };
     };
 
 const clients = new Set<WebSocket>();
