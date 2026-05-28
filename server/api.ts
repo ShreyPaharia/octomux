@@ -13,6 +13,7 @@ import { promisify } from 'util';
 import {
   startTask,
   closeTask,
+  softDeleteTask,
   deleteTask,
   resumeTask,
   addAgent,
@@ -396,14 +397,17 @@ export function setupRoutes(app: Express): void {
   app.get('/api/tasks', (req: Request, res: Response) => {
     const db = getDb();
     const repoPath = req.query.repo_path as string | undefined;
+    const trash = req.query.trash === 'true';
+    const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
+    const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
 
     let tasks: Task[];
     if (repoPath) {
       tasks = db
-        .prepare(`${SELECT_TASK_SQL} WHERE w.repo_path = ? ORDER BY t.created_at DESC`)
+        .prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} AND w.repo_path = ? ${orderBy}`)
         .all(repoPath) as Task[];
     } else {
-      tasks = db.prepare(`${SELECT_TASK_SQL} ORDER BY t.created_at DESC`).all() as Task[];
+      tasks = db.prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} ${orderBy}`).all() as Task[];
     }
 
     if (tasks.length === 0) {
@@ -918,18 +922,47 @@ export function setupRoutes(app: Express): void {
       });
   });
 
-  // Delete task
+  // Delete task (soft by default; ?purge=true hard-deletes a previously soft-deleted task)
   app.delete('/api/tasks/:id', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
     const db = getDb();
 
-    const taskId = task.id;
-    await deleteTask(task);
-    // ON DELETE CASCADE removes agents, permission_prompts, user_terminals
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
-    broadcast({ type: 'task:deleted', payload: { taskId } });
+    if (req.query.purge === 'true') {
+      if (task.deleted_at == null) {
+        res.status(409).json({ error: 'task must be soft-deleted before purge' });
+        return;
+      }
+      const taskId = task.id;
+      await deleteTask(task);
+      // ON DELETE CASCADE removes agents, permission_prompts, user_terminals
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+      broadcast({ type: 'task:deleted', payload: { taskId } });
+    } else {
+      await softDeleteTask(task);
+      broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    }
+
     res.status(204).send();
+  });
+
+  // Restore a soft-deleted task
+  app.post('/api/tasks/:id/restore', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+    const db = getDb();
+
+    if (task.deleted_at == null) {
+      res.status(409).json({ error: 'task is not in trash' });
+      return;
+    }
+
+    db.prepare(`UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`).run(
+      task.id,
+    );
+    const refreshed = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id);
+    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+    res.json(refreshed);
   });
 
   // Add agent to task

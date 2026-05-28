@@ -44,6 +44,7 @@ export const TASK_DEFAULTS: Task = {
   run_mode: 'new',
   base_sha: null,
   last_viewed_at: null,
+  deleted_at: null,
   source: null,
   worktree_id: null,
   harness_id: 'claude-code',

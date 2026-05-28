@@ -38,6 +38,13 @@ vi.mock('./task-runner.js', async () => {
       ).run(task.id);
       db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
     }),
+    softDeleteTask: vi.fn(async (task: any) => {
+      const db = getDb();
+      db.prepare(
+        `UPDATE tasks SET deleted_at = datetime('now'), runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+      db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
+    }),
     deleteTask: vi.fn(),
     resumeTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -788,26 +795,36 @@ describe('PATCH /api/tasks/:id', () => {
 // ─── DELETE /api/tasks/:id ───────────────────────────────────────────────────
 
 describe('DELETE /api/tasks/:id', () => {
-  it('deletes task and returns 204', async () => {
+  it('soft-deletes task by default and returns 204 (row still exists)', async () => {
     insertTask(db);
     const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
     expect(res.status).toBe(204);
+    // Row still exists — soft delete, not hard delete
+    const row = db
+      .prepare('SELECT deleted_at FROM tasks WHERE id = ?')
+      .get(DEFAULTS.task.id) as any;
+    expect(row).toBeDefined();
+    expect(row.deleted_at).not.toBeNull();
+  });
+
+  it('?purge=true hard-deletes a soft-deleted task and calls deleteTask', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = ?`).run(DEFAULTS.task.id);
+    await request(app).delete(`/api/tasks/${DEFAULTS.task.id}?purge=true`);
+    expect(deleteTask).toHaveBeenCalledOnce();
     expect(getTask(db, DEFAULTS.task.id)).toBeUndefined();
   });
 
-  it('calls deleteTask before deleting', async () => {
-    insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
-    expect(deleteTask).toHaveBeenCalledOnce();
-  });
-
-  it('cascades delete to agents', async () => {
+  it('soft-delete sets stopped on agents (does not cascade-delete them)', async () => {
     insertTask(db);
     insertAgent(db);
     await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
-    expect(db.prepare('SELECT * FROM agents WHERE task_id = ?').all(DEFAULTS.task.id)).toHaveLength(
-      0,
-    );
+    // Agents still exist but are stopped
+    const agents = db
+      .prepare('SELECT * FROM agents WHERE task_id = ?')
+      .all(DEFAULTS.task.id) as any[];
+    expect(agents).toHaveLength(1);
+    expect(agents[0].status).toBe('stopped');
   });
 });
 

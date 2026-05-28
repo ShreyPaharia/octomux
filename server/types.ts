@@ -78,6 +78,7 @@ export interface Task {
   run_mode: RunMode;
   base_sha: string | null;
   last_viewed_at: string | null;
+  deleted_at: string | null;
   source: TaskSource;
   /** Phase 2a: link into the extracted `worktrees` table. Null = scratch/none during transition. */
   worktree_id: string | null;
