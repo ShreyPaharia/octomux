@@ -24,6 +24,7 @@ describe('SetupPage', () => {
       dangerouslySkipPermissions: false,
       claudeFlags: '',
       defaultBaseBranch: '',
+      deleteGraceHours: 6,
     });
     apiMock.getSetupStatus.mockResolvedValue({
       items: [
@@ -62,5 +63,25 @@ describe('SetupPage', () => {
     await waitFor(() => screen.getByTestId('setup-install-tmux'));
     await user.click(screen.getByTestId('setup-install-tmux'));
     await waitFor(() => expect(apiMock.setupInstall).toHaveBeenCalledWith('tmux'));
+  });
+
+  it('renders deleteGraceHours input with initial value and saves updated value', async () => {
+    apiMock.updateSettings.mockResolvedValue({});
+    const user = userEvent.setup();
+    renderWithRouter(<SetupPage />);
+
+    const input = await screen.findByTestId('setup-delete-grace-hours');
+    expect(input).toHaveValue(6);
+
+    await user.clear(input);
+    await user.type(input, '12');
+
+    await user.click(screen.getByTestId('setup-save-defaults'));
+
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ deleteGraceHours: 12 }),
+      ),
+    );
   });
 });

@@ -118,12 +118,14 @@ function DefaultsForm({
     defaultBaseBranch?: string;
     defaultJiraBaseUrl?: string;
     defaultJiraProjectKey?: string;
+    deleteGraceHours?: number;
   };
   onSaved: () => void;
 }) {
   const [baseBranch, setBaseBranch] = useState(initial.defaultBaseBranch ?? '');
   const [jiraUrl, setJiraUrl] = useState(initial.defaultJiraBaseUrl ?? '');
   const [jiraProject, setJiraProject] = useState(initial.defaultJiraProjectKey ?? '');
+  const [deleteGraceHours, setDeleteGraceHours] = useState<number>(initial.deleteGraceHours ?? 6);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -133,6 +135,7 @@ function DefaultsForm({
         defaultBaseBranch: baseBranch.trim() || undefined,
         defaultJiraBaseUrl: jiraUrl.trim() || undefined,
         defaultJiraProjectKey: jiraProject.trim().toUpperCase() || undefined,
+        deleteGraceHours,
       });
       showToast('success', 'DEFAULTS', 'Task defaults saved');
       onSaved();
@@ -177,6 +180,23 @@ function DefaultsForm({
           placeholder="PROJ"
           className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
         />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-[#b5b5bd]">
+          Hours before deleted tasks are permanently removed
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={deleteGraceHours}
+            onChange={(e) => setDeleteGraceHours(Math.max(0, Number(e.target.value) || 0))}
+            className="w-32 border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
+            data-testid="setup-delete-grace-hours"
+          />
+          <span className="text-xs text-[#8a8a8a]">default 6</span>
+        </div>
       </div>
       <div className="flex justify-end">
         <Button
