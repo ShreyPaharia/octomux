@@ -130,7 +130,12 @@ describe('ReviewDetailPage', () => {
   it('renders WalkthroughHeader with summary and pills', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
-        latest_run: { id: 'r1', pr_head_sha: 'sha1', walkthrough: WALKTHROUGH_JSON, status: 'done' },
+        latest_run: {
+          id: 'r1',
+          pr_head_sha: 'sha1',
+          walkthrough: WALKTHROUGH_JSON,
+          status: 'done',
+        },
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
@@ -142,7 +147,12 @@ describe('ReviewDetailPage', () => {
   it('renders one ReviewFileTree section per walkthrough group', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
-        latest_run: { id: 'r1', pr_head_sha: 'sha1', walkthrough: WALKTHROUGH_JSON, status: 'done' },
+        latest_run: {
+          id: 'r1',
+          pr_head_sha: 'sha1',
+          walkthrough: WALKTHROUGH_JSON,
+          status: 'done',
+        },
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
@@ -152,7 +162,12 @@ describe('ReviewDetailPage', () => {
   it('renders "Other" group for diff files not in the walkthrough', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
-        latest_run: { id: 'r1', pr_head_sha: 'sha1', walkthrough: WALKTHROUGH_JSON, status: 'done' },
+        latest_run: {
+          id: 'r1',
+          pr_head_sha: 'sha1',
+          walkthrough: WALKTHROUGH_JSON,
+          status: 'done',
+        },
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
@@ -163,7 +178,12 @@ describe('ReviewDetailPage', () => {
   it('clicking a file invokes the DiffViewer scroll handle', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
-        latest_run: { id: 'r1', pr_head_sha: 'sha1', walkthrough: WALKTHROUGH_JSON, status: 'done' },
+        latest_run: {
+          id: 'r1',
+          pr_head_sha: 'sha1',
+          walkthrough: WALKTHROUGH_JSON,
+          status: 'done',
+        },
         comments: [comment()],
       }),
     );
