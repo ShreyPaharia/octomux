@@ -118,7 +118,6 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
     { workflow_status: 'planned' as const },
     { workflow_status: 'pr' as const },
     { workflow_status: 'done' as const },
-    { workflow_status: 'archived' as const },
   ])('skips transition when task is in $workflow_status', async ({ workflow_status }) => {
     db.prepare('UPDATE tasks SET workflow_status = ? WHERE id = ?').run(workflow_status, 't1');
 

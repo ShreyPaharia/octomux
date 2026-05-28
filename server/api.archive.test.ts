@@ -64,7 +64,7 @@ vi.mock('./title-gen.js', () => ({
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('POST /api/tasks/archive-done', () => {
+describe('POST /api/tasks/delete-done', () => {
   let db: Database.Database;
   let app: ReturnType<typeof createApp>;
 
@@ -74,44 +74,54 @@ describe('POST /api/tasks/archive-done', () => {
     vi.clearAllMocks();
   });
 
-  it('returns { archived: 0 } when no done tasks exist', async () => {
+  it('returns { deleted: 0 } when no done tasks exist', async () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress' });
-    const res = await request(app).post('/api/tasks/archive-done').expect(200);
-    expect(res.body).toEqual({ archived: 0 });
+    const res = await request(app).post('/api/tasks/delete-done').expect(200);
+    expect(res.body).toEqual({ deleted: 0 });
   });
 
-  it('archives all done tasks and writes task_updates rows', async () => {
+  it('soft-deletes all done tasks (sets deleted_at, keeps workflow_status = done)', async () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
     insertTask(db, { id: 't2', workflow_status: 'done', runtime_state: 'idle' });
     insertTask(db, { id: 't3', workflow_status: 'in_progress', runtime_state: 'running' });
 
-    const res = await request(app).post('/api/tasks/archive-done').expect(200);
-    expect(res.body).toEqual({ archived: 2 });
+    const res = await request(app).post('/api/tasks/delete-done').expect(200);
+    expect(res.body).toEqual({ deleted: 2 });
 
     const t1 = getTask(db, 't1');
     const t2 = getTask(db, 't2');
     const t3 = getTask(db, 't3');
-    expect(t1?.workflow_status).toBe('archived');
-    expect(t2?.workflow_status).toBe('archived');
+    expect(t1?.workflow_status).toBe('done'); // status stays done
+    expect(t2?.workflow_status).toBe('done');
     expect(t3?.workflow_status).toBe('in_progress'); // untouched
 
-    const updates = db
-      .prepare(`SELECT * FROM task_updates WHERE task_id IN ('t1','t2') ORDER BY created_at ASC`)
-      .all() as any[];
-    expect(updates).toHaveLength(2);
-    expect(updates[0].from_status).toBe('done');
-    expect(updates[0].to_status).toBe('archived');
-    expect(updates[0].body).toBe('auto: bulk archive');
+    // Verify deleted_at via raw query since Task type / SELECT_TASK_SQL doesn't include it
+    const row1 = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get('t1') as any;
+    const row2 = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get('t2') as any;
+    const row3 = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get('t3') as any;
+    expect(row1.deleted_at).not.toBeNull(); // soft-deleted
+    expect(row2.deleted_at).not.toBeNull(); // soft-deleted
+    expect(row3.deleted_at).toBeNull(); // not deleted
   });
 
-  it('calls closeTask for done tasks that are running before archiving', async () => {
+  it('does not re-delete tasks already soft-deleted', async () => {
+    insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
+    // First call soft-deletes t1
+    const first = await request(app).post('/api/tasks/delete-done').expect(200);
+    expect(first.body).toEqual({ deleted: 1 });
+    // Second call should find 0 eligible tasks (deleted_at IS NOT NULL now)
+    const second = await request(app).post('/api/tasks/delete-done').expect(200);
+    expect(second.body).toEqual({ deleted: 0 });
+  });
+
+  it('calls closeTask for done tasks that are running before soft-deleting', async () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
 
     const { closeTask } = await import('./task-runner.js');
 
-    const res = await request(app).post('/api/tasks/archive-done').expect(200);
-    expect(res.body).toEqual({ archived: 1 });
+    const res = await request(app).post('/api/tasks/delete-done').expect(200);
+    expect(res.body).toEqual({ deleted: 1 });
     expect(closeTask).toHaveBeenCalledTimes(1);
     expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
   });
@@ -121,43 +131,7 @@ describe('POST /api/tasks/archive-done', () => {
 
     const { closeTask } = await import('./task-runner.js');
 
-    await request(app).post('/api/tasks/archive-done').expect(200);
-    expect(closeTask).not.toHaveBeenCalled();
-  });
-});
-
-describe('POST /api/tasks/:id/move to archived (B2)', () => {
-  let db: Database.Database;
-  let app: ReturnType<typeof createApp>;
-
-  beforeEach(() => {
-    db = createTestDb();
-    app = createApp();
-    vi.clearAllMocks();
-  });
-
-  it('calls closeTask before archiving a running task', async () => {
-    insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'running' });
-    insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
-
-    const { closeTask } = await import('./task-runner.js');
-
-    const res = await request(app)
-      .post('/api/tasks/t1/move')
-      .send({ workflow_status: 'archived' })
-      .expect(200);
-
-    expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
-    expect(res.body.workflow_status).toBe('archived');
-  });
-
-  it('does not call closeTask when archiving an idle task', async () => {
-    insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
-
-    const { closeTask } = await import('./task-runner.js');
-
-    await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'archived' }).expect(200);
-
+    await request(app).post('/api/tasks/delete-done').expect(200);
     expect(closeTask).not.toHaveBeenCalled();
   });
 });

@@ -2191,35 +2191,30 @@ export function setupRoutes(app: Express): void {
 
   // ─── Task Workflow Endpoints ──────────────────────────────────────────────────
 
-  // B3: Bulk-archive all done tasks
-  app.post('/api/tasks/archive-done', async (req: Request, res: Response) => {
+  // B3: Bulk-delete all done tasks (soft-delete)
+  app.post('/api/tasks/delete-done', async (req: Request, res: Response) => {
     const db = getDb();
     const doneTasks = db
-      .prepare(`${SELECT_TASK_SQL} WHERE t.workflow_status = 'done'`)
+      .prepare(`${SELECT_TASK_SQL} WHERE t.workflow_status = 'done' AND t.deleted_at IS NULL`)
       .all() as Task[];
 
-    let archivedCount = 0;
+    let deletedCount = 0;
     for (const task of doneTasks) {
-      // Close running tasks before archiving
+      // Close running tasks before soft-deleting
       if (task.runtime_state === 'running' || task.runtime_state === 'setting_up') {
         await closeTask(task);
       }
 
-      const updateId = nanoid(12);
       db.prepare(
-        `UPDATE tasks SET workflow_status = 'archived', updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE tasks SET deleted_at = datetime('now'), runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
 
-      db.prepare(
-        `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', 'done', 'archived', ?)`,
-      ).run(updateId, task.id, 'auto: bulk archive');
-
       broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-      archivedCount++;
+      deletedCount++;
     }
 
-    apiLogger.info({ operation: 'archive_done', archived: archivedCount }, 'bulk archive done');
-    res.json({ archived: archivedCount });
+    apiLogger.info({ operation: 'delete_done', deleted: deletedCount }, 'bulk delete done');
+    res.json({ deleted: deletedCount });
   });
 
   // Move task to a new workflow_status
@@ -2241,10 +2236,10 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    // Auto-close runtime when moving to a terminal column (done or archived) if
+    // Auto-close runtime when moving to the terminal column (done) if
     // the task is still actively running. Keeps the worktree/branch (close, not delete).
     if (
-      (body.workflow_status === 'done' || body.workflow_status === 'archived') &&
+      body.workflow_status === 'done' &&
       (task.runtime_state === 'running' || task.runtime_state === 'setting_up')
     ) {
       await closeTask(task);

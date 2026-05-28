@@ -76,7 +76,6 @@ describe('POST /api/hooks/user-prompt-submit → in_progress transition', () => 
     { workflow_status: 'in_progress' as const },
     { workflow_status: 'pr' as const },
     { workflow_status: 'done' as const },
-    { workflow_status: 'archived' as const },
   ])('skips transition when task is in $workflow_status', async ({ workflow_status }) => {
     db.prepare('UPDATE tasks SET workflow_status = ? WHERE id = ?').run(workflow_status, 't1');
 
