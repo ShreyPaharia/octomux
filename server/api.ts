@@ -44,6 +44,7 @@ import {
 import { computeOutdated, splitLines } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { SELECT_TASK_SQL } from './task-select.js';
+import { sendMessageToAgent } from './tmux-input.js';
 
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import {
@@ -1034,13 +1035,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    await execFile('tmux', [
-      'send-keys',
-      '-t',
-      `${task.tmux_session}:${agent.window_index}`,
-      message,
-      'Enter',
-    ]);
+    await sendMessageToAgent(task.tmux_session!, agent.window_index, message);
 
     res.json({ success: true });
   });

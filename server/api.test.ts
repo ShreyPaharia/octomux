@@ -1728,17 +1728,31 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
 
-    const calls = vi.mocked(execFileMock).mock.calls;
-    const tmuxCall = calls.find(
-      (c: any[]) => c[0] === 'tmux' && (c[1] as string[]).includes('send-keys'),
+    const sendKeysCalls = vi
+      .mocked(execFileMock)
+      .mock.calls.filter(
+        (c: unknown[]) =>
+          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
+      );
+
+    expect(sendKeysCalls).toHaveLength(2);
+
+    const firstArgs = sendKeysCalls[0][1] as string[];
+    expect(firstArgs).toContain('-t');
+    expect(firstArgs).toContain(
+      `${DEFAULTS.runningTask.tmux_session}:${DEFAULTS.agent.window_index}`,
     );
-    expect(tmuxCall).toBeDefined();
-    const args = tmuxCall![1] as string[];
-    expect(args).toContain('send-keys');
-    expect(args).toContain('-t');
-    expect(args).toContain(`${DEFAULTS.runningTask.tmux_session}:${DEFAULTS.agent.window_index}`);
-    expect(args).toContain('hello agent');
-    expect(args).toContain('Enter');
+    expect(firstArgs).toContain('-l');
+    expect(firstArgs).toContain('hello agent');
+    expect(firstArgs).not.toContain('Enter');
+
+    const secondArgs = sendKeysCalls[1][1] as string[];
+    expect(secondArgs).toContain('-t');
+    expect(secondArgs).toContain(
+      `${DEFAULTS.runningTask.tmux_session}:${DEFAULTS.agent.window_index}`,
+    );
+    expect(secondArgs).toContain('Enter');
+    expect(secondArgs).not.toContain('-l');
   });
 
   it('returns 404 when agent not found on existing task', async () => {
