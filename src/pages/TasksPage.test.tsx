@@ -187,6 +187,20 @@ describe('TasksPage (board layout)', () => {
     expect(screen.getByText('Fix login bug')).toBeInTheDocument();
   });
 
+  // ─── auto_review filtering ────────────────────────────────────────────────
+
+  it('hides tasks with source=auto_review from the board', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', title: 'Normal Task', source: null }),
+      makeTask({ id: 't2', title: 'PR Review Task', source: 'auto_review' }),
+    ]);
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByText('Normal Task')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('PR Review Task')).not.toBeInTheDocument();
+  });
+
   // ─── Board card navigation ────────────────────────────────────────────────
 
   it('navigates to task detail when card is clicked', async () => {

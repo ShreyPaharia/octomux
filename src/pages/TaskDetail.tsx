@@ -196,6 +196,13 @@ export default function TaskDetail() {
     });
   }, [taskId]);
 
+  // auto_review tasks live on /reviews/:id — redirect any stale /tasks/:id link.
+  useEffect(() => {
+    if (task?.source === 'auto_review') {
+      navigate(`/reviews/${task.id}`, { replace: true });
+    }
+  }, [task, navigate]);
+
   // Auto-switch back to agents when task enters non-running state.
   // Diff mode is allowed to persist so users can keep reviewing a closed task's diff.
   useEffect(() => {

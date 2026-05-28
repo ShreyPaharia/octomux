@@ -30,7 +30,7 @@ vi.mock('@/lib/api', async () => {
   return { ...actual, api: apiProxy };
 });
 
-const { routerMockFactory } = await vi.hoisted(async () =>
+const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
@@ -93,6 +93,18 @@ describe('TaskDetail', () => {
       path: '/tasks/:id',
     });
   }
+
+  // ─── auto_review redirect ─────────────────────────────────────────────────
+
+  it('redirects to /reviews/:id when task source is auto_review', async () => {
+    apiMock.getTask.mockResolvedValue(
+      makeTask({ id: 'test-task-01', source: 'auto_review' }),
+    );
+    renderDetail();
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/reviews/test-task-01', { replace: true });
+    });
+  });
 
   // ─── Loading state ────────────────────────────────────────────────────────
 

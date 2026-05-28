@@ -180,7 +180,9 @@ export default function TasksPage() {
   const [search, setSearch] = useState('');
 
   const repos = useMemo(() => {
-    const paths = new Set(tasks.map((t) => t.repo_path));
+    const paths = new Set(
+      tasks.filter((t) => t.source !== 'auto_review').map((t) => t.repo_path),
+    );
     return [...paths].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   }, [tasks]);
 
@@ -189,9 +191,11 @@ export default function TasksPage() {
     setActiveRepo(repo);
   }, []);
 
-  // Apply board-level filters (repo + needs attention + search)
+  // Apply board-level filters (repo + needs attention + search).
+  // auto_review tasks belong to the /reviews surface, not the regular board.
   const filteredTasks = useMemo<Task[]>(() => {
     return tasks.filter((t) => {
+      if (t.source === 'auto_review') return false;
       if (activeRepo && t.repo_path !== activeRepo) return false;
       if (needsAttention) {
         const isAttention = t.workflow_status === 'human_review' || t.runtime_state === 'error';
