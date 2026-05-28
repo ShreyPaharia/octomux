@@ -868,6 +868,126 @@ describe('pollReviewerRequests', () => {
     });
   });
 
+  it('git-fetches and checks out the new head before nudging the agent', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      worktree: '/wt',
+      runtime_state: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
+
+    await pollReviewerRequests();
+
+    const gitCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter((c: unknown[]) => c[0] === 'git' && Array.isArray(c[1]));
+    const fetchIdx = gitCalls.findIndex(
+      (c) => Array.isArray(c[1]) && (c[1] as string[]).includes('fetch'),
+    );
+    const checkoutIdx = gitCalls.findIndex(
+      (c) =>
+        Array.isArray(c[1]) &&
+        (c[1] as string[]).includes('checkout') &&
+        (c[1] as string[]).includes('sha-new'),
+    );
+    expect(fetchIdx).toBeGreaterThanOrEqual(0);
+    expect(checkoutIdx).toBeGreaterThan(fetchIdx);
+
+    // Both git calls precede the first tmux send-keys (allCalls order).
+    const allCalls = vi.mocked(execFile).mock.calls;
+    const sendKeysAt = allCalls.findIndex(
+      (c: unknown[]) =>
+        c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
+    );
+    const checkoutAt = allCalls.findIndex(
+      (c: unknown[]) =>
+        c[0] === 'git' &&
+        Array.isArray(c[1]) &&
+        (c[1] as string[]).includes('checkout') &&
+        (c[1] as string[]).includes('sha-new'),
+    );
+    expect(sendKeysAt).toBeGreaterThan(checkoutAt);
+  });
+
+  it('falls back to full re-review when prev head is unreachable from new head', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      worktree: '/wt',
+      runtime_state: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+
+    // PR list mock + override merge-base --is-ancestor to fail.
+    const searchNodes = [
+      {
+        number: 42,
+        title: 'Add thing',
+        url: 'https://github.com/org/repo/pull/42',
+        author: { login: 'teammate' },
+        headRefOid: 'sha-new',
+        headRefName: 'feat/thing',
+        baseRefName: 'main',
+        repository: { nameWithOwner: 'org/repo' },
+        reviewRequests: {
+          nodes: [{ requestedReviewer: { __typename: 'User', login: OWNER } }],
+        },
+      },
+    ];
+    const graphqlBody = JSON.stringify({ data: { search: { nodes: searchNodes } } });
+
+    vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+      const cb = findCallback(...args)!;
+      const cmd = args[0] as string;
+      const cmdArgs = args[1] as string[];
+      if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
+        cb(null, { stdout: graphqlBody, stderr: '' });
+      } else if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
+        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
+      } else if (cmd === 'git' && cmdArgs?.includes('merge-base')) {
+        cb(new Error('not an ancestor'));
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as ReturnType<typeof execFile>;
+    });
+
+    await pollReviewerRequests();
+
+    const sendKeysCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: unknown[]) =>
+          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
+      );
+    const literal = sendKeysCalls[0][1] as string[];
+    const message = literal.find((a) => a.startsWith('Re-review'));
+    expect(message).toBeDefined();
+    expect(message).toMatch(/previous_head_unreachable=true/);
+  });
+
   it('does not re-nudge a running review when head SHA is unchanged', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     insertTask(db, {

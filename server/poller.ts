@@ -484,10 +484,11 @@ function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): 
   return `${prompt}\n\nUpdated: head advanced to ${newSha} at ${timestamp}`;
 }
 
-function buildReReviewNudge(pr: OpenReviewPR): string {
+function buildReReviewNudge(pr: OpenReviewPR, previousHeadReachable = true): string {
   return (
     `Re-review requested for PR #${pr.number}. ` +
     `Head advanced to ${pr.headRefOid}. ` +
+    `previous_head_unreachable=${!previousHeadReachable}. ` +
     `Please pull the latest and re-run the /review-pr flow on ${pr.url}.`
   );
 }
@@ -511,11 +512,12 @@ async function nudgeAgentForReReview(
   taskId: string,
   tmuxSession: string,
   pr: OpenReviewPR,
+  previousHeadReachable = true,
 ): Promise<boolean> {
   const agent = firstActiveAgent(taskId);
   if (!agent) return false;
   try {
-    const message = buildReReviewNudge(pr);
+    const message = buildReReviewNudge(pr, previousHeadReachable);
     await sendMessageToAgent(tmuxSession, agent.window_index, message);
     return true;
   } catch (err) {
@@ -541,7 +543,8 @@ async function upsertReviewTask(
       `SELECT t.id AS id, t.runtime_state AS runtime_state,
               t.source AS source,
               t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
-              t.tmux_session AS tmux_session
+              t.tmux_session AS tmux_session,
+              w.path AS worktree_path
          FROM tasks t
          INNER JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.pr_number = ?
@@ -556,6 +559,7 @@ async function upsertReviewTask(
         pr_head_sha: string | null;
         initial_prompt: string | null;
         tmux_session: string | null;
+        worktree_path: string | null;
       }
     | undefined;
 
@@ -581,7 +585,43 @@ async function upsertReviewTask(
     // creating a duplicate. Record the new SHA so we don't re-nudge on every tick.
     if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
-      const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
+
+      // Fetch + checkout the new head into the worktree so the agent sees it
+      // before we nudge. Also probe whether the previous head is reachable; if
+      // not the author force-pushed and we tell the agent to do a full re-review.
+      let previousHeadReachable = true;
+      if (existing.worktree_path) {
+        try {
+          await execFile('git', ['-C', existing.worktree_path, 'fetch', 'origin', '--quiet']);
+          await execFile('git', ['-C', existing.worktree_path, 'checkout', pr.headRefOid]);
+        } catch (err) {
+          logger.warn(
+            { task_id: existing.id, err: (err as Error).message },
+            'failed to fetch/checkout new head; nudging anyway and letting agent retry',
+          );
+        }
+        if (existing.pr_head_sha) {
+          try {
+            await execFile('git', [
+              '-C',
+              existing.worktree_path,
+              'merge-base',
+              '--is-ancestor',
+              existing.pr_head_sha,
+              pr.headRefOid,
+            ]);
+          } catch {
+            previousHeadReachable = false;
+          }
+        }
+      }
+
+      const delivered = await nudgeAgentForReReview(
+        existing.id,
+        existing.tmux_session,
+        pr,
+        previousHeadReachable,
+      );
       if (!delivered) return { action: 'skipped' };
       db.prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`).run(
         pr.headRefOid,
