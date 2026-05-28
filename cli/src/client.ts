@@ -137,7 +137,13 @@ export interface OctomuxClient {
   postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
   addTaskRef(
     taskId: string,
-    data: { integration: string; external_id: string; url?: string; title?: string },
+    data: {
+      integration: string;
+      external_id: string;
+      url?: string;
+      title?: string;
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<TaskExternalRef>;
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
