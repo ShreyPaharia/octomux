@@ -299,6 +299,66 @@ describe('inline comments API', () => {
       const r = await request(app).patch(`/api/tasks/t2/comments/${id}`).send({ resolved: true });
       expect(r.status).toBe(404);
     });
+
+    it('updates status to accepted', async () => {
+      const id = await seed();
+      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'accepted' });
+      expect(r.status).toBe(200);
+      expect(r.body.status).toBe('accepted');
+    });
+
+    it('updates status to rejected and captures learning when rejection_why provided', async () => {
+      const id = await seed();
+      const r = await request(app)
+        .patch(`/api/tasks/t1/comments/${id}`)
+        .send({ status: 'rejected', rejection_why: 'false positive' });
+      expect(r.status).toBe(200);
+      expect(r.body.status).toBe('rejected');
+      const { listLearningsForRepo } = await import('./review-learnings.js');
+      const learnings = listLearningsForRepo('/tmp/test-repo');
+      expect(learnings).toHaveLength(1);
+      expect(learnings[0].why).toBe('false positive');
+    });
+
+    it('does not capture learning when rejection_why is absent', async () => {
+      const id = await seed();
+      await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'rejected' });
+      const { listLearningsForRepo } = await import('./review-learnings.js');
+      const learnings = listLearningsForRepo('/tmp/test-repo');
+      expect(learnings).toHaveLength(0);
+    });
+
+    it('returns 409 when trying to update a published comment', async () => {
+      const id = await seed();
+      // Manually mark it published via DB
+      const { getDb } = await import('./db.js');
+      getDb().prepare(`UPDATE inline_comments SET status = 'published' WHERE id = ?`).run(id);
+      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'accepted' });
+      expect(r.status).toBe(409);
+    });
+
+    it('updates bucket, kind, severity, existing_code, suggested_code', async () => {
+      const id = await seed();
+      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({
+        bucket: 'actionable',
+        kind: 'suggestion',
+        severity: 'issue',
+        existing_code: 'old code',
+        suggested_code: 'new code',
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.bucket).toBe('actionable');
+      expect(r.body.kind).toBe('suggestion');
+      expect(r.body.severity).toBe('issue');
+      expect(r.body.existing_code).toBe('old code');
+      expect(r.body.suggested_code).toBe('new code');
+    });
+
+    it('rejects invalid status value', async () => {
+      const id = await seed();
+      const r = await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'invalid' });
+      expect(r.status).toBe(400);
+    });
   });
 
   describe('DELETE /api/tasks/:id/comments/:cid', () => {

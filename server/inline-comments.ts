@@ -152,6 +152,58 @@ export function updateCommentBody(id: string, body: string): InlineCommentRow | 
   return row;
 }
 
+export interface UpdateCommentFields {
+  status?: import('./types.js').CommentStatus;
+  bucket?: import('./types.js').CommentBucket | null;
+  kind?: import('./types.js').CommentKind;
+  severity?: import('./types.js').CommentSeverity | null;
+  existing_code?: string | null;
+  suggested_code?: string | null;
+}
+
+export function updateCommentFields(id: string, fields: UpdateCommentFields): InlineCommentRow | null {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+
+  if (fields.status !== undefined) {
+    sets.push('status = ?');
+    vals.push(fields.status);
+  }
+  if (fields.bucket !== undefined) {
+    sets.push('bucket = ?');
+    vals.push(fields.bucket);
+  }
+  if (fields.kind !== undefined) {
+    sets.push('kind = ?');
+    vals.push(fields.kind);
+  }
+  if (fields.severity !== undefined) {
+    sets.push('severity = ?');
+    vals.push(fields.severity);
+  }
+  if (fields.existing_code !== undefined) {
+    sets.push('existing_code = ?');
+    vals.push(fields.existing_code);
+  }
+  if (fields.suggested_code !== undefined) {
+    sets.push('suggested_code = ?');
+    vals.push(fields.suggested_code);
+  }
+
+  if (sets.length === 0) return getComment(id);
+
+  vals.push(id);
+  const result = getDb()
+    .prepare(`UPDATE inline_comments SET ${sets.join(', ')} WHERE id = ?`)
+    .run(...vals);
+  if (result.changes === 0) return null;
+  const row = getComment(id);
+  if (row) {
+    logger.info({ task_id: row.task_id, comment_id: id, fields }, 'inline comment fields updated');
+  }
+  return row;
+}
+
 export function deleteComment(id: string): boolean {
   const row = getComment(id);
   const result = getDb().prepare(`DELETE FROM inline_comments WHERE id = ?`).run(id);
