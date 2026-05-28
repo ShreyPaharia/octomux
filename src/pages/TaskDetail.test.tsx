@@ -325,6 +325,67 @@ describe('TaskDetail', () => {
     expect(screen.queryByTestId('ship-button')).not.toBeInTheDocument();
   });
 
+  // ─── Review button ────────────────────────────────────────────────────────
+
+  it('renders a Review button labelled "Review" for a running task without an existing review', async () => {
+    renderDetail();
+    const button = await screen.findByTestId('review-button');
+    expect(button).toHaveTextContent('Review');
+    expect(button).not.toBeDisabled();
+  });
+
+  it('clicking Review triggers POST and navigates to the new review', async () => {
+    const user = userEvent.setup();
+    apiMock.triggerManualReview.mockResolvedValue({ id: 'rev-new', action: 'created' });
+    renderDetail();
+    const button = await screen.findByTestId('review-button');
+    await user.click(button);
+    await waitFor(() => {
+      expect(apiMock.triggerManualReview).toHaveBeenCalledWith('test-task-01');
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('/reviews/rev-new');
+  });
+
+  it('flips label to "Open review" and navigates without POSTing when an existing review exists', async () => {
+    const user = userEvent.setup();
+    apiMock.getTask.mockResolvedValue(
+      makeTask({
+        ...runningTask,
+        existing_review_id: 'rev-existing',
+      }),
+    );
+    renderDetail();
+    const button = await screen.findByTestId('review-button');
+    expect(button).toHaveTextContent('Open review');
+    await user.click(button);
+    expect(apiMock.triggerManualReview).not.toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith('/reviews/rev-existing');
+  });
+
+  it('disables the Review button when source task is a draft (no branch yet)', async () => {
+    apiMock.getTask.mockResolvedValue(
+      makeTask({
+        runtime_state: 'idle',
+        branch: null,
+        worktree: null,
+        agents: [],
+      }),
+    );
+    renderDetail();
+    const button = await screen.findByTestId('review-button');
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'Start the task first');
+  });
+
+  it('hides the Review button for an error-state task', async () => {
+    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'error', error: 'boom' }));
+    renderDetail();
+    await waitFor(() => {
+      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('review-button')).not.toBeInTheDocument();
+  });
+
   // ─── PR link ──────────────────────────────────────────────────────────────
 
   it('shows PR link when available', async () => {

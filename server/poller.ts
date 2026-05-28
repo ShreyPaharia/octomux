@@ -1,6 +1,5 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
-import path from 'path';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { getSettings } from './settings.js';
@@ -12,6 +11,7 @@ import { readGithubLogin } from './github-login.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 import { fireHook } from './hook-dispatcher.js';
 import { sendMessageToAgent } from './tmux-input.js';
+import { buildPrReviewPrompt, insertReviewTask, repoShortName } from './review-tasks.js';
 import type { Task, UserTerminal } from './types.js';
 
 const logger = childLogger('poller');
@@ -462,27 +462,15 @@ function isOwnerStillRequested(pr: OpenReviewPR, ownerLogin: string): boolean {
   );
 }
 
-function repoShortName(repoPath: string): string {
-  return (
-    path
-      .basename(repoPath)
-      .replace(/[^a-zA-Z0-9-]+/g, '-')
-      .toLowerCase() || 'repo'
-  );
-}
-
 function buildReviewPrompt(pr: OpenReviewPR, requestedAt: string): string {
-  const author = pr.author?.login ?? 'unknown';
-  return [
-    `/review-orchestrator`,
-    '',
-    `PR: ${pr.title} (#${pr.number}) by @${author}`,
-    `URL: ${pr.url}`,
-    `Head: ${pr.headRefOid}`,
-    `Review requested: ${requestedAt}`,
-    '',
-    'Use the review-orchestrator skill to produce a structured walkthrough and inline draft comments via the `octomux review` CLI. Do NOT post to GitHub directly.',
-  ].join('\n');
+  return buildPrReviewPrompt({
+    title: pr.title,
+    number: pr.number,
+    url: pr.url,
+    author: pr.author?.login,
+    headRefOid: pr.headRefOid,
+    requestedAt,
+  });
 }
 
 function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): string {
@@ -639,26 +627,23 @@ async function upsertReviewTask(
     return { action: 'skipped' };
   }
 
-  const id = nanoid(12);
   const short = repoShortName(repoPath);
   const branch = `review/${short}-pr-${pr.number}`;
   const title = `Review: ${pr.title} (#${pr.number})`;
   const description = `Auto-created review task for PR #${pr.number} in ${short}`;
   const prompt = buildReviewPrompt(pr, new Date().toISOString());
 
-  // Materialise a worktree row for the review-branch base before linking the task.
-  const worktreeId = nanoid(12);
-  db.prepare(
-    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
-     VALUES (?, '', ?, ?, ?, 'new', 'available')`,
-  ).run(worktreeId, repoPath, branch, pr.baseRefName);
-
-  db.prepare(
-    `INSERT INTO tasks
-       (id, title, description, runtime_state, workflow_status, pr_url, pr_number, pr_head_sha,
-        initial_prompt, source, worktree_id)
-     VALUES (?, ?, ?, 'idle', 'backlog', ?, ?, ?, ?, 'auto_review', ?)`,
-  ).run(id, title, description, pr.url, pr.number, pr.headRefOid, prompt, worktreeId);
+  const id = insertReviewTask({
+    repoPath,
+    branch,
+    baseBranch: pr.baseRefName,
+    title,
+    description,
+    initialPrompt: prompt,
+    prUrl: pr.url,
+    prNumber: pr.number,
+    prHeadSha: pr.headRefOid,
+  });
   return { action: 'created', taskId: id };
 }
 
