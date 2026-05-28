@@ -23,6 +23,7 @@ import { DIFF_KEYBINDS, useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 import { useTask } from '@/lib/hooks';
+import { useTerminalCacheSize } from '@/lib/terminal-cache-settings';
 import { api, diffRangeToParam, type DiffRange, type DiffSummaryResponse } from '@/lib/api';
 import { TaskDetailHeader } from '@/components/layout/task-detail-header';
 import { TaskDetailMeta } from '@/components/layout/task-detail-meta';
@@ -88,6 +89,10 @@ export default function TaskDetail() {
   const taskId = id ?? '';
   const { task, loading, error, refresh } = useTask(taskId);
   const [activeWindow, setActiveWindow] = useState<number | null>(null);
+  const terminalCacheSize = useTerminalCacheSize();
+  // LRU of mounted agent terminals by window_index. Most-recently-active first.
+  // Lets the user flip between recent tabs without xterm/WS teardown.
+  const [terminalLRU, setTerminalLRU] = useState<number[]>([]);
 
   const [resuming, setResuming] = useState(false);
   const [mode, setMode] = useState<TaskMode>('agents');
@@ -161,9 +166,29 @@ export default function TaskDetail() {
       setActiveWindow(saved?.activeWindow ?? null);
       setMode(saved?.mode ?? 'agents');
       setLocalUserWindowIndex(null);
+      // Window indexes are task-scoped; drop the prior task's cached terminals.
+      setTerminalLRU([]);
       prevTaskIdRef.current = taskId;
     }
   }, [taskId]);
+
+  // Promote active window to front of LRU; evict beyond cache size.
+  useEffect(() => {
+    if (activeWindow === null) return;
+    setTerminalLRU((prev) => {
+      const without = prev.filter((k) => k !== activeWindow);
+      const next = [activeWindow, ...without].slice(0, terminalCacheSize);
+      if (next.length === prev.length && next.every((k, i) => k === prev[i])) return prev;
+      return next;
+    });
+  }, [activeWindow, terminalCacheSize]);
+
+  // When the user shrinks the cache size, trim the LRU immediately.
+  useEffect(() => {
+    setTerminalLRU((prev) =>
+      prev.length <= terminalCacheSize ? prev : prev.slice(0, terminalCacheSize),
+    );
+  }, [terminalCacheSize]);
 
   // Keep the map in sync as user interacts
   useEffect(() => {
@@ -321,6 +346,22 @@ export default function TaskDetail() {
     },
     [taskId, refetchDiff],
   );
+
+  // Set of window indexes currently present on this task (agents + user terminals).
+  // Used to evict LRU entries whose underlying agent/terminal is gone.
+  const validWindowIndexes = useMemo(() => {
+    const s = new Set<number>();
+    for (const a of task?.agents || []) s.add(a.window_index);
+    for (const t of task?.user_terminals || []) s.add(t.window_index);
+    return s;
+  }, [task?.agents, task?.user_terminals]);
+
+  useEffect(() => {
+    setTerminalLRU((prev) => {
+      const filtered = prev.filter((k) => validWindowIndexes.has(k));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [validWindowIndexes]);
 
   const activeAgentId = useMemo(() => {
     const ags = task?.agents ?? [];
@@ -699,12 +740,33 @@ export default function TaskDetail() {
               })()}
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-hidden p-1">
-              <TerminalView
-                taskId={task.id}
-                windowIndex={activeWindow!}
-                visible={mode === 'agents'}
-              />
+            <div className="relative min-h-0 flex-1 overflow-hidden p-1">
+              {terminalLRU.map((wi) => {
+                const isActive = wi === activeWindow;
+                return (
+                  <div
+                    key={wi}
+                    data-window-index={wi}
+                    data-terminal-active={isActive ? 'true' : 'false'}
+                    aria-hidden={!isActive}
+                    // `inert` blocks focus + input on the cached-but-hidden
+                    // terminals so xterm's textarea can't capture keystrokes
+                    // intended for the active tab.
+                    inert={!isActive}
+                    className={
+                      isActive
+                        ? 'absolute inset-0'
+                        : 'pointer-events-none absolute inset-0 opacity-0'
+                    }
+                  >
+                    <TerminalView
+                      taskId={task.id}
+                      windowIndex={wi}
+                      visible={isActive && mode === 'agents'}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

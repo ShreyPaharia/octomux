@@ -3,6 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
+import {
+  TERMINAL_CACHE_DEFAULT,
+  TERMINAL_CACHE_MAX,
+  TERMINAL_CACHE_MIN,
+  getTerminalCacheSize,
+  setTerminalCacheSize,
+} from '@/lib/terminal-cache-settings';
 import { ReviewsSection } from '@/components/settings/LearningsPanel';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
@@ -1114,6 +1121,51 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
   );
 }
 
+function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
+  const [cacheSize, setCacheSize] = useState<number>(() => getTerminalCacheSize());
+  const [buffer, setBuffer] = useState<string>(() => String(getTerminalCacheSize()));
+
+  const handleCommit = useCallback(() => {
+    const parsed = Number.parseInt(buffer, 10);
+    if (!Number.isFinite(parsed)) {
+      setBuffer(String(cacheSize));
+      return;
+    }
+    const next = setTerminalCacheSize(parsed);
+    setCacheSize(next);
+    setBuffer(String(next));
+    showToast('success', 'ADVANCED', `Terminal cache size set to ${next}`);
+  }, [buffer, cacheSize]);
+
+  return (
+    <SectionCard id="advanced" title="Advanced" scrollRef={scrollRef}>
+      <SettingRow
+        label="Terminal cache size"
+        description={`Number of agent terminals kept mounted (LRU). Switching to a cached tab avoids xterm + WebSocket rebuild. Min ${TERMINAL_CACHE_MIN}, max ${TERMINAL_CACHE_MAX}, default ${TERMINAL_CACHE_DEFAULT}.`}
+        lastRow
+      >
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={TERMINAL_CACHE_MIN}
+            max={TERMINAL_CACHE_MAX}
+            value={buffer}
+            onChange={(e) => setBuffer(e.target.value)}
+            onBlur={handleCommit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur();
+              }
+            }}
+            data-testid="terminal-cache-size-input"
+            className="focus-ring w-20 border border-glass-edge bg-[#0B0C0F] px-2 py-1 text-right font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
+          />
+        </div>
+      </SettingRow>
+    </SectionCard>
+  );
+}
+
 export default function SettingsPage() {
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const [activeSection, setActiveSection] = useState<SettingsScrollSection>('general');
@@ -1149,6 +1201,7 @@ export default function SettingsPage() {
       <EditorSection scrollRef={setRef('editor')} />
       <CodingAgentSection scrollRef={setRef('coding-agent')} />
       <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
+      <AdvancedSection scrollRef={setRef('advanced')} />
     </SettingsLayout>
   );
 }

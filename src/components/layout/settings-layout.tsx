@@ -14,7 +14,8 @@ export type SettingsScrollSection =
   | 'reviews'
   | 'editor'
   | 'coding-agent'
-  | 'agent-launch';
+  | 'agent-launch'
+  | 'advanced';
 
 export const SETTINGS_SCROLL_NAV: { id: SettingsScrollSection; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -26,6 +27,7 @@ export const SETTINGS_SCROLL_NAV: { id: SettingsScrollSection; label: string }[]
   { id: 'editor', label: 'Editor' },
   { id: 'coding-agent', label: 'Coding agent' },
   { id: 'agent-launch', label: 'Agent launch' },
+  { id: 'advanced', label: 'Advanced' },
 ];
 
 export const SETTINGS_ROUTE_NAV: { id: string; label: string; to: string }[] = [
