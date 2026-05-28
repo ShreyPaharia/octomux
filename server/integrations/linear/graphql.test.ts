@@ -50,7 +50,9 @@ describe('linearGraphql', () => {
       ok: true,
       status: 200,
       json: vi.fn().mockResolvedValue({
-        errors: [{ message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } }],
+        errors: [
+          { message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } },
+        ],
       }),
     });
 

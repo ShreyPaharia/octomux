@@ -8,10 +8,7 @@ import { api } from '@/lib/api';
 import type { IntegrationProvider, IntegrationRow } from '@/lib/api';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
-import {
-  LinearConfigForm,
-  toLinearConfig,
-} from '@/components/integrations/LinearConfigForm';
+import { LinearConfigForm, toLinearConfig } from '@/components/integrations/LinearConfigForm';
 import type { LinearConfig } from '@/components/integrations/LinearConfigForm';
 
 function providerIcon(kind: string): string {

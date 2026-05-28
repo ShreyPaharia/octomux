@@ -105,9 +105,7 @@ describe('TaskRefsPanel', () => {
   });
 
   it('falls back to plain rendering when metadata is null', () => {
-    const refs = [
-      makeRef({ integration: 'jira', ref: 'PROJ-1', url: null, metadata: null }),
-    ];
+    const refs = [makeRef({ integration: 'jira', ref: 'PROJ-1', url: null, metadata: null })];
     renderWithRouter(<TaskRefsPanel taskId="task-1" initialRefs={refs} />);
     expect(screen.getByText('PROJ-1')).toBeInTheDocument();
   });

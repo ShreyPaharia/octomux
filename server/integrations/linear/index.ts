@@ -6,7 +6,14 @@ import { linearGraphql, LinearApiError } from './graphql.js';
 
 const logger = childLogger('integrations:linear');
 
-const OCTOMUX_COLUMNS = ['backlog', 'planned', 'in_progress', 'human_review', 'pr', 'done'] as const;
+const OCTOMUX_COLUMNS = [
+  'backlog',
+  'planned',
+  'in_progress',
+  'human_review',
+  'pr',
+  'done',
+] as const;
 type OctomuxColumn = (typeof OCTOMUX_COLUMNS)[number];
 
 export interface LinearConfig {

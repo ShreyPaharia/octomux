@@ -52,10 +52,7 @@ describe('POST /api/integrations/linear/prefill', () => {
 
   it('returns 400 when api_key missing', async () => {
     const app = createApp();
-    const res = await request(app)
-      .post('/api/integrations/linear/prefill')
-      .send({})
-      .expect(400);
+    const res = await request(app).post('/api/integrations/linear/prefill').send({}).expect(400);
     expect(res.body.error).toMatch(/api_key/);
   });
 
@@ -64,7 +61,9 @@ describe('POST /api/integrations/linear/prefill', () => {
       ok: true,
       status: 200,
       json: vi.fn().mockResolvedValue({
-        errors: [{ message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } }],
+        errors: [
+          { message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } },
+        ],
       }),
     });
     const app = createApp();

@@ -124,9 +124,7 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     patch.defaultTracker !== 'jira' &&
     patch.defaultTracker !== 'linear'
   ) {
-    throw new Error(
-      `Invalid defaultTracker: ${patch.defaultTracker}. Must be 'jira' or 'linear'.`,
-    );
+    throw new Error(`Invalid defaultTracker: ${patch.defaultTracker}. Must be 'jira' or 'linear'.`);
   }
 
   const current = await getSettings();

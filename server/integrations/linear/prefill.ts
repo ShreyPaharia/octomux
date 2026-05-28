@@ -92,8 +92,7 @@ export async function prefillFromLinear(apiKey: string): Promise<PrefillResult> 
     status_map_by_team[t.key] = map as PrefillResult['status_map_by_team'][string];
   }
 
-  const default_team_suggestion =
-    teams.find((t) => t.key === 'BAC')?.key ?? teams[0]?.key ?? null;
+  const default_team_suggestion = teams.find((t) => t.key === 'BAC')?.key ?? teams[0]?.key ?? null;
 
   return { teams, status_map_by_team, default_team_suggestion };
 }

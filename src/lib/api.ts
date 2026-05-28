@@ -655,8 +655,18 @@ export const api = {
     }),
 
   async prefillLinear(apiKey: string): Promise<{
-    teams: Array<{ id: string; key: string; name: string; states: Array<{ id: string; name: string; type: string }> }>;
-    status_map_by_team: Record<string, Partial<Record<'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done', string>>>;
+    teams: Array<{
+      id: string;
+      key: string;
+      name: string;
+      states: Array<{ id: string; name: string; type: string }>;
+    }>;
+    status_map_by_team: Record<
+      string,
+      Partial<
+        Record<'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done', string>
+      >
+    >;
     default_team_suggestion: string | null;
   }> {
     const res = await fetch('/api/integrations/linear/prefill', {

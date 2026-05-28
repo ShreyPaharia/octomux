@@ -274,9 +274,9 @@ describe('OctomuxSettings tracker fields', () => {
   });
 
   it('rejects an invalid defaultTracker value', async () => {
-    await expect(
-      updateSettings({ defaultTracker: 'asana' as any }),
-    ).rejects.toThrow(/defaultTracker/);
+    await expect(updateSettings({ defaultTracker: 'asana' as any })).rejects.toThrow(
+      /defaultTracker/,
+    );
   });
 });
 

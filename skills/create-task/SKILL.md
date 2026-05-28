@@ -14,7 +14,6 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    - If given a ticket URL or key (e.g. `BAC-843`, `PROJ-843`), fetch the ticket details. Ticket keys match `[A-Z][A-Z0-9]+-\d+`. Decide tracker (Linear vs Jira) using the rules below.
 
    **How to decide which tracker the key belongs to:**
-
    - Full URL with `linear.app/` → Linear.
    - Full URL with `*.atlassian.net/` → Jira.
    - Bare key (e.g. `BAC-123`):
@@ -129,22 +128,22 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
 
 6a. **Link the source ticket (if applicable):**
 
-   If the source was a Linear issue, immediately link it with the cached metadata so the status-sync handler doesn't need to refetch the team on every column change:
+If the source was a Linear issue, immediately link it with the cached metadata so the status-sync handler doesn't need to refetch the team on every column change:
 
-   ```bash
-   octomux task-ref-add <task-id> linear BAC-843 \
-     --url 'https://linear.app/ostium-labs/issue/BAC-843' \
-     --metadata '{"team_key":"BAC","team_id":"<uuid>","issue_id":"<uuid>","project_id":null}'
-   ```
+```bash
+octomux task-ref-add <task-id> linear BAC-843 \
+  --url 'https://linear.app/ostium-labs/issue/BAC-843' \
+  --metadata '{"team_key":"BAC","team_id":"<uuid>","issue_id":"<uuid>","project_id":null}'
+```
 
-   `team_id`, `issue_id`, and `project_id` come from the `get_issue` response. The handler falls back to a runtime lookup if metadata is missing, but caching is faster and rate-limit-friendly.
+`team_id`, `issue_id`, and `project_id` come from the `get_issue` response. The handler falls back to a runtime lookup if metadata is missing, but caching is faster and rate-limit-friendly.
 
-   If the source was a Jira issue, link it without metadata:
+If the source was a Jira issue, link it without metadata:
 
-   ```bash
-   octomux task-ref-add <task-id> jira PROJ-843 \
-     --url 'https://your-company.atlassian.net/browse/PROJ-843'
-   ```
+```bash
+octomux task-ref-add <task-id> jira PROJ-843 \
+  --url 'https://your-company.atlassian.net/browse/PROJ-843'
+```
 
 7. **Report:**
    - Print the task ID returned by the CLI

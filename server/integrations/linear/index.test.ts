@@ -38,9 +38,21 @@ describe('linearProvider.validate', () => {
   it.each([
     ['missing api_key', { ...VALID_CONFIG, api_key: '' }, 'api_key'],
     ['null config', null, 'object'],
-    ['status_map_by_team not an object', { ...VALID_CONFIG, status_map_by_team: 'bad' }, 'status_map_by_team'],
-    ['invalid status_map column key', { ...VALID_CONFIG, status_map_by_team: { BAC: { bogus: 'uuid' } } }, 'column'],
-    ['invalid UUID in map', { ...VALID_CONFIG, status_map_by_team: { BAC: { done: 'not-a-uuid' } } }, 'uuid'],
+    [
+      'status_map_by_team not an object',
+      { ...VALID_CONFIG, status_map_by_team: 'bad' },
+      'status_map_by_team',
+    ],
+    [
+      'invalid status_map column key',
+      { ...VALID_CONFIG, status_map_by_team: { BAC: { bogus: 'uuid' } } },
+      'column',
+    ],
+    [
+      'invalid UUID in map',
+      { ...VALID_CONFIG, status_map_by_team: { BAC: { done: 'not-a-uuid' } } },
+      'uuid',
+    ],
   ] as const)('rejects %s', (_label, config, expectedWord) => {
     const result = linearProvider.validate(config);
     expect(result.ok).toBe(false);
@@ -75,7 +87,9 @@ describe('linearProvider.test', () => {
       ok: true,
       status: 200,
       json: vi.fn().mockResolvedValue({
-        errors: [{ message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } }],
+        errors: [
+          { message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } },
+        ],
       }),
     });
     const result = await linearProvider.test!(VALID_CONFIG);
@@ -148,7 +162,9 @@ describe('linearProvider.handler', () => {
 
   it('skips when no linear ref on task', async () => {
     await linearProvider.handler(
-      makeEnvelope({ task: { id: 't', external_refs: [{ integration: 'jira', ref: 'P-1' }] } as any }),
+      makeEnvelope({
+        task: { id: 't', external_refs: [{ integration: 'jira', ref: 'P-1' }] } as any,
+      }),
       VALID_CONFIG,
     );
     expect(mockFetch).not.toHaveBeenCalled();

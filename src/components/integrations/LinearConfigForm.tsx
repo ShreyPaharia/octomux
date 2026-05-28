@@ -175,9 +175,7 @@ export function LinearConfigForm({
                       <span className="w-32 text-xs text-[#b5b5bd]">{wf.label}</span>
                       <select
                         value={teamMap[wf.key] ?? ''}
-                        onChange={(e) =>
-                          setMapping(team.key, wf.key, e.target.value || undefined)
-                        }
+                        onChange={(e) => setMapping(team.key, wf.key, e.target.value || undefined)}
                         className="flex-1 border border-glass-edge bg-[#0B0C0F] px-2 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
                       >
                         <option value="">— unmapped —</option>

@@ -205,10 +205,7 @@ function DefaultsForm({
       {showJira && (
         <>
           <div>
-            <label
-              htmlFor="setup-default-jira-url"
-              className="mb-1 block text-xs text-[#b5b5bd]"
-            >
+            <label htmlFor="setup-default-jira-url" className="mb-1 block text-xs text-[#b5b5bd]">
               Jira base URL (optional)
             </label>
             <input
