@@ -684,6 +684,10 @@ export const api = {
     ),
   requestReReview: (taskId: string) =>
     request<{ ok: boolean }>(`/tasks/${taskId}/review-runs`, { method: 'POST' }),
+  triggerManualReview: (taskId: string) =>
+    request<{ id: string; action: 'created' | 'existing' }>(`/tasks/${taskId}/review`, {
+      method: 'POST',
+    }),
 
   // ─── Review learnings ─────────────────────────────────────────────────────
   listLearnings: (repoPath: string) =>

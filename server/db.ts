@@ -801,4 +801,20 @@ export function initDb(instance: Database.Database): void {
     'auto_resolved_reason TEXT',
     inlineCommentCols,
   );
+
+  // ── Manual review trigger: link review tasks back to their source task ──
+  // Nullable so poller-created reviews (which review a PR, not a source task)
+  // can leave it NULL. ON DELETE SET NULL so removing a source task doesn't
+  // cascade-delete its review.
+  const taskColsForReviewLink = columnsOf('tasks');
+  addColumn(
+    'tasks',
+    'review_of_task_id',
+    'review_of_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL',
+    taskColsForReviewLink,
+  );
+  instance.exec(
+    `CREATE INDEX IF NOT EXISTS idx_tasks_review_of_task_id
+       ON tasks(review_of_task_id) WHERE review_of_task_id IS NOT NULL`,
+  );
 }

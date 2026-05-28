@@ -449,6 +449,26 @@ export default function TaskDetail() {
     window.dispatchEvent(new CustomEvent(SHIP_EVENT, { detail: { taskId } }));
   }, [taskId]);
 
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const existingReviewId = task?.existing_review_id ?? null;
+  const handleReview = useCallback(async () => {
+    if (!taskId) return;
+    if (existingReviewId) {
+      navigate(`/reviews/${existingReviewId}`);
+      return;
+    }
+    setReviewBusy(true);
+    try {
+      const result = await api.triggerManualReview(taskId);
+      navigate(`/reviews/${result.id}`);
+    } catch (err) {
+      console.error('Failed to trigger review:', err);
+      toast.error((err as Error).message);
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [taskId, existingReviewId, navigate]);
+
   const handleAddAgent = useCallback(
     async (prompt?: string) => {
       if (!taskId) return;
@@ -627,6 +647,9 @@ export default function TaskDetail() {
         isRunning={isRunning}
         isDraft={isDraft}
         closeConfirm={closeConfirm}
+        reviewDisabled={!task.branch || !task.worktree}
+        existingReviewId={existingReviewId}
+        reviewBusy={reviewBusy}
         onResume={handleResume}
         onShip={handleShip}
         onToggleEditor={handleToggleEditor}
@@ -635,6 +658,7 @@ export default function TaskDetail() {
         onCloseConfirm={() => setCloseConfirm(true)}
         onCloseAccept={handleClose}
         onCloseDismiss={() => setCloseConfirm(false)}
+        onReview={handleReview}
       />
 
       {/* Error display — only when status !== 'error' (dedicated error view shows error) */}

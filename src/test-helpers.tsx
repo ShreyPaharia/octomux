@@ -252,6 +252,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     patchWalkthrough: vi.fn().mockResolvedValue({ walkthrough: '{}' }),
     publishReview: vi.fn().mockResolvedValue({ publishedReviewId: 'pr1', commentCount: 0 }),
     requestReReview: vi.fn().mockResolvedValue({ ok: true }),
+    triggerManualReview: vi.fn().mockResolvedValue({ id: 'rev1', action: 'created' as const }),
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
       dangerouslySkipPermissions: false,
