@@ -4,7 +4,6 @@ import type { HookEnvelope } from '../../hook-types.js';
 import { registerProvider } from '../registry.js';
 import { linearGraphql, LinearApiError } from './graphql.js';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const logger = childLogger('integrations:linear');
 
 const OCTOMUX_COLUMNS = ['backlog', 'planned', 'in_progress', 'human_review', 'pr', 'done'] as const;
@@ -86,9 +85,135 @@ async function testConnection(config: unknown): Promise<{ ok: boolean; message: 
   }
 }
 
-// Handler implemented in Task 5 — placeholder for now so the provider object compiles.
-async function handler(_envelope: HookEnvelope, _config: unknown): Promise<void> {
-  // implemented in Task 5
+const ISSUE_LOOKUP_QUERY = `
+  query Issue($id: String!) {
+    issue(id: $id) {
+      id
+      team { id key }
+    }
+  }
+`;
+
+const ISSUE_UPDATE_MUTATION = `
+  mutation IssueUpdate($id: String!, $stateId: String!) {
+    issueUpdate(id: $id, input: { stateId: $stateId }) { success }
+  }
+`;
+
+const COMMENT_CREATE_MUTATION = `
+  mutation CommentCreate($id: String!, $body: String!) {
+    commentCreate(input: { issueId: $id, body: $body }) { success }
+  }
+`;
+
+async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
+  const cfg = config as LinearConfig;
+  const task = envelope.task;
+
+  const refs = (task.external_refs ?? []) as Array<{
+    integration: string;
+    ref: string;
+    metadata?: Record<string, unknown> | null;
+  }>;
+  const linearRef = refs.find(
+    (r) => r.integration === 'linear' || r.integration.startsWith('linear:'),
+  );
+  if (!linearRef) {
+    logger.debug({ task_id: task.id }, 'linear handler: no linear ref, skipping');
+    return;
+  }
+
+  const data = envelope.data as Record<string, unknown> | undefined;
+  const toStatus = (data?.to_status ?? data?.to ?? '') as string;
+  if (!toStatus) {
+    logger.debug({ task_id: task.id }, 'linear handler: no to_status, skipping');
+    return;
+  }
+
+  // Resolve team_key from metadata or by parsing the ref string.
+  const metadata = (linearRef.metadata ?? {}) as Record<string, unknown>;
+  let teamKey = typeof metadata.team_key === 'string' ? metadata.team_key : '';
+  let issueId = typeof metadata.issue_id === 'string' ? metadata.issue_id : '';
+
+  if (!teamKey) {
+    const m = linearRef.ref.match(/^([A-Z][A-Z0-9]+)-\d+$/);
+    if (m) teamKey = m[1];
+  }
+
+  if (!teamKey) {
+    logger.debug(
+      { task_id: task.id, ref: linearRef.ref },
+      'linear handler: cannot derive team_key, skipping',
+    );
+    return;
+  }
+
+  const teamMap = cfg.status_map_by_team[teamKey];
+  const stateId = teamMap?.[toStatus as OctomuxColumn];
+  if (!stateId) {
+    logger.debug(
+      { task_id: task.id, team_key: teamKey, to_status: toStatus },
+      'linear handler: no mapping for status, skipping',
+    );
+    return;
+  }
+
+  // Resolve issue UUID if we don't have it cached.
+  if (!issueId) {
+    try {
+      const resp = await linearGraphql<{
+        issue: { id: string; team: { key: string } } | null;
+      }>(cfg.api_key, ISSUE_LOOKUP_QUERY, { id: linearRef.ref });
+      if (!resp.issue) {
+        logger.warn({ task_id: task.id, ref: linearRef.ref }, 'linear handler: issue not found');
+        return;
+      }
+      issueId = resp.issue.id;
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, ref: linearRef.ref, err: (err as Error).message },
+        'linear handler: issue lookup failed',
+      );
+      return;
+    }
+  }
+
+  // State change.
+  try {
+    await linearGraphql(cfg.api_key, ISSUE_UPDATE_MUTATION, { id: issueId, stateId });
+    logger.info(
+      {
+        task_id: task.id,
+        issue_id: issueId,
+        team_key: teamKey,
+        to_status: toStatus,
+        state_id: stateId,
+      },
+      'linear handler: state updated',
+    );
+  } catch (err) {
+    logger.warn(
+      { task_id: task.id, issue_id: issueId, err: (err as Error).message },
+      'linear handler: issueUpdate failed',
+    );
+    return;
+  }
+
+  // Comment-back, unless we're resetting to backlog.
+  if (toStatus === 'backlog') return;
+
+  const prUrl = typeof (data?.pr_url ?? '') === 'string' ? (data?.pr_url as string) : '';
+  const body = `octomux task moved to **${toStatus}**${prUrl ? ` — PR: ${prUrl}` : ''}.`;
+
+  try {
+    await linearGraphql(cfg.api_key, COMMENT_CREATE_MUTATION, { id: issueId, body });
+  } catch (err) {
+    // Comment failure shouldn't block the integration; log and move on.
+    logger.warn(
+      { task_id: task.id, issue_id: issueId, err: (err as Error).message },
+      'linear handler: commentCreate failed',
+    );
+  }
 }
 
 export const linearProvider: IntegrationProvider = {

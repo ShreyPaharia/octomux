@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { HookEnvelope } from '../../hook-types.js';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -80,5 +81,115 @@ describe('linearProvider.test', () => {
     const result = await linearProvider.test!(VALID_CONFIG);
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/authentication/i);
+  });
+});
+
+function makeEnvelope(overrides: Partial<HookEnvelope> = {}): HookEnvelope {
+  return {
+    event: 'workflow_status_changed',
+    task: {
+      id: 'task-abc',
+      external_refs: [
+        {
+          integration: 'linear',
+          ref: 'BAC-1',
+          url: null,
+          metadata: { team_key: 'BAC', issue_id: 'lin-uuid-1' },
+        },
+      ],
+    } as any,
+    data: { from: 'in_progress', to: 'done' },
+    ...overrides,
+  };
+}
+
+describe('linearProvider.handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('issueUpdate + commentCreate when ref + map hit + non-backlog target', async () => {
+    // Two sequential graphql calls expected: issueUpdate, then commentCreate.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ data: { issueUpdate: { success: true } } }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ data: { commentCreate: { success: true } } }),
+    });
+
+    await linearProvider.handler(makeEnvelope(), VALID_CONFIG);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(firstBody.query).toContain('issueUpdate');
+    expect(firstBody.variables).toMatchObject({
+      id: 'lin-uuid-1',
+      stateId: '55555555-5555-5555-5555-555555555555',
+    });
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    expect(secondBody.query).toContain('commentCreate');
+    expect(secondBody.variables.body).toContain('done');
+  });
+
+  it('suppresses comment when target is backlog', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ data: { issueUpdate: { success: true } } }),
+    });
+    await linearProvider.handler(
+      makeEnvelope({ data: { from: 'planned', to: 'backlog' } }),
+      VALID_CONFIG,
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1); // only issueUpdate, no commentCreate
+  });
+
+  it('skips when no linear ref on task', async () => {
+    await linearProvider.handler(
+      makeEnvelope({ task: { id: 't', external_refs: [{ integration: 'jira', ref: 'P-1' }] } as any }),
+      VALID_CONFIG,
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('skips when team has no mapping for to_status', async () => {
+    await linearProvider.handler(
+      makeEnvelope({ data: { from: 'backlog', to: 'unknown_status' } as any }),
+      VALID_CONFIG,
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('parses team_key from ref string when metadata missing', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        data: { issue: { id: 'lin-uuid-2', team: { key: 'BAC' } } },
+      }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ data: { issueUpdate: { success: true } } }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ data: { commentCreate: { success: true } } }),
+    });
+
+    await linearProvider.handler(
+      makeEnvelope({
+        task: {
+          id: 't',
+          external_refs: [{ integration: 'linear', ref: 'BAC-9', metadata: null }],
+        } as any,
+      }),
+      VALID_CONFIG,
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(3); // issue lookup + issueUpdate + commentCreate
   });
 });
