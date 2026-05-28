@@ -2615,6 +2615,24 @@ export function setupRoutes(app: Express): void {
     res.status(204).send();
   });
 
+  // POST /api/integrations/linear/prefill — fetch teams/states and build a prefilled config map
+  app.post('/api/integrations/linear/prefill', async (req: Request, res: Response) => {
+    const body = req.body as { api_key?: string };
+    const apiKey = body.api_key?.trim();
+    if (!apiKey) {
+      res.status(400).json({ error: 'api_key is required' });
+      return;
+    }
+    try {
+      const { prefillFromLinear } = await import('./integrations/linear/prefill.js');
+      const result = await prefillFromLinear(apiKey);
+      res.json(result);
+    } catch (err) {
+      const message = (err as Error).message;
+      res.status(502).json({ error: message });
+    }
+  });
+
   // POST /api/integrations/:id/test — test the connection using stored (unmasked) config
   app.post('/api/integrations/:id/test', async (req: Request, res: Response) => {
     const id = (req.params as Record<string, string>).id;
