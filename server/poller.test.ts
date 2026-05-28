@@ -820,18 +820,28 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
-      const args = c[1] as string[];
-      return args?.[0] === 'send-keys';
-    });
-    expect(sendKeys).toBeDefined();
-    const args = sendKeys![1] as string[];
-    expect(args).toContain('-t');
-    expect(args).toContain('octomux-agent-running-review:0');
-    const message = args.find((a) => a.includes('Re-review requested'));
+    const sendKeysCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: unknown[]) =>
+          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
+      );
+
+    expect(sendKeysCalls).toHaveLength(2);
+
+    const literalArgs = sendKeysCalls[0][1] as string[];
+    expect(literalArgs).toContain('-t');
+    expect(literalArgs).toContain('octomux-agent-running-review:0');
+    expect(literalArgs).toContain('-l');
+    const message = literalArgs.find((a) => a.includes('Re-review requested'));
     expect(message).toBeDefined();
     expect(message).toContain('sha-new');
     expect(message).toContain('#42');
+
+    const enterArgs = sendKeysCalls[1][1] as string[];
+    expect(enterArgs).toContain('-t');
+    expect(enterArgs).toContain('octomux-agent-running-review:0');
+    expect(enterArgs).toContain('Enter');
 
     // SHA recorded so we don't re-nudge on the next tick
     const task = getTask(db, 'running-review')!;
@@ -863,11 +873,13 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
-      const args = c[1] as string[];
-      return args?.[0] === 'send-keys';
-    });
-    expect(sendKeys).toBeUndefined();
+    const sendKeysCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: unknown[]) =>
+          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
+      );
+    expect(sendKeysCalls).toHaveLength(0);
   });
 
   it('does not nudge owner-created running tasks', async () => {
@@ -891,11 +903,13 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const sendKeys = vi.mocked(execFile).mock.calls.find((c: any[]) => {
-      const args = c[1] as string[];
-      return args?.[0] === 'send-keys';
-    });
-    expect(sendKeys).toBeUndefined();
+    const sendKeysCalls = vi
+      .mocked(execFile)
+      .mock.calls.filter(
+        (c: unknown[]) =>
+          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
+      );
+    expect(sendKeysCalls).toHaveLength(0);
     // SHA untouched
     expect(getTask(db, 'manual-running')!.pr_head_sha).toBe('sha-old');
   });

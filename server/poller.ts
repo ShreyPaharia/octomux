@@ -10,6 +10,7 @@ import { childLogger } from './logger.js';
 import { readGithubLogin } from './github-login.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 import { fireHook } from './hook-dispatcher.js';
+import { sendMessageToAgent } from './tmux-input.js';
 import type { Task, UserTerminal } from './types.js';
 
 const logger = childLogger('poller');
@@ -514,9 +515,8 @@ async function nudgeAgentForReReview(
   const agent = firstActiveAgent(taskId);
   if (!agent) return false;
   try {
-    const target = `${tmuxSession}:${agent.window_index}`;
     const message = buildReReviewNudge(pr);
-    await execFile('tmux', ['send-keys', '-t', target, message, 'Enter']);
+    await sendMessageToAgent(tmuxSession, agent.window_index, message);
     return true;
   } catch (err) {
     logger.warn(
