@@ -1,23 +1,25 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { api, type ReviewDetail } from '../lib/api';
 import { subscribe } from '../lib/event-source';
-import { WalkthroughTree } from '../components/review/WalkthroughTree';
-import { InlineCommentCard } from '../components/review/InlineCommentCard';
-import { ReviewFilters, type CommentFilters } from '../components/review/ReviewFilters';
+import { WalkthroughHeader, type Walkthrough } from '../components/review/WalkthroughHeader';
+import { ReviewFileTree } from '../components/review/ReviewFileTree';
 import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
+import { DiffViewer } from '../components/DiffViewer';
+import { CommentsSidePanel } from '../components/CommentsSidePanel';
+import { Button } from '../components/ui/button';
+import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
+import type { DiffFileListHandle } from '../components/DiffFileList';
 
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<CommentFilters>({
-    severity: [],
-    bucket: [],
-    kind: [],
-    showResolved: false,
-  });
+  const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [showCommentsPanel, setShowCommentsPanel] = useState(false);
+  const diffListRef = useRef<DiffFileListHandle | null>(null);
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -31,7 +33,6 @@ export default function ReviewDetailPage() {
     refresh();
   }, [refresh]);
 
-  // Subscribe to review events
   useEffect(() => {
     if (!id) return;
     return subscribe((event) => {
@@ -43,22 +44,33 @@ export default function ReviewDetailPage() {
     });
   }, [id, refresh]);
 
+  const taskComments = useTaskComments(id);
+
+  const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
+
+  const handleSelectFile = useCallback((path: string) => {
+    setSelectedPath(path);
+    diffListRef.current?.scrollToFile(path);
+  }, []);
+
+  const handleJumpToComment = useCallback(
+    (filePath: string, line: number, side: 'old' | 'new', commentId: string) => {
+      setSelectedPath(filePath);
+      diffListRef.current?.revealLineInFile(filePath, line, side);
+      taskComments.setFocusedId(commentId);
+      window.setTimeout(() => {
+        if (taskComments.focusedId === commentId) taskComments.setFocusedId(null);
+      }, 1600);
+    },
+    [taskComments],
+  );
+
   if (error) return <div className="p-6 text-red-500">{error}</div>;
   if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
 
-  const walkthrough = detail.latest_run?.walkthrough
+  const walkthrough: Walkthrough | null = detail.latest_run?.walkthrough
     ? JSON.parse(detail.latest_run.walkthrough)
     : null;
-
-  const visibleComments = detail.comments.filter((c) => {
-    if (!filters.showResolved && (c.auto_resolved_at || c.status === 'published')) return false;
-    if (filters.severity.length > 0 && (!c.severity || !filters.severity.includes(c.severity)))
-      return false;
-    if (filters.bucket.length > 0 && (!c.bucket || !filters.bucket.includes(c.bucket)))
-      return false;
-    if (filters.kind.length > 0 && !filters.kind.includes(c.kind)) return false;
-    return true;
-  });
 
   const draftCount = detail.comments.filter((c) => c.status === 'draft').length;
   const acceptedCount = detail.comments.filter((c) => c.status === 'accepted').length;
@@ -68,81 +80,96 @@ export default function ReviewDetailPage() {
     detail.latest_run?.status === 'running' || detail.all_runs.some((r) => r.status === 'running');
 
   return (
-    <div className="flex flex-col min-h-0 h-full">
-      {/* Head-advanced banner */}
-      <HeadAdvancedBanner taskId={id!} currentSha={detail.task.pr_head_sha} onRefresh={refresh} />
+    <TaskCommentsContext.Provider value={taskComments}>
+      <div className="flex h-full min-h-0 flex-col">
+        <HeadAdvancedBanner taskId={id!} currentSha={detail.task.pr_head_sha} onRefresh={refresh} />
 
-      {/* Publish bar */}
-      <PublishBar
-        taskId={id!}
-        acceptedCount={acceptedCount}
-        draftCount={draftCount}
-        staleCount={staleCount}
-        isRunning={isRunning}
-        onPublished={refresh}
-        onReRun={refresh}
-      />
+        <PublishBar
+          taskId={id!}
+          acceptedCount={acceptedCount}
+          draftCount={draftCount}
+          staleCount={staleCount}
+          isRunning={isRunning}
+          onPublished={refresh}
+          onReRun={refresh}
+        />
 
-      <div className="flex-1 overflow-auto p-6 space-y-6">
-        {/* Header */}
-        <header className="flex items-baseline gap-2">
-          <h1 className="text-lg font-semibold">{detail.task.title}</h1>
-          <span className="text-xs text-muted-foreground">#{detail.task.pr_number}</span>
-          {detail.task.pr_url && (
-            <a
-              href={detail.task.pr_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-blue-400 hover:underline ml-1"
-            >
-              View on GitHub
-            </a>
-          )}
+        <header className="flex items-baseline justify-between gap-2 border-b border-glass-edge px-4 py-2">
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-lg font-semibold">{detail.task.title}</h1>
+            <span className="text-xs text-muted-foreground">#{detail.task.pr_number}</span>
+            {detail.task.pr_url && (
+              <a
+                href={detail.task.pr_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-400 hover:underline"
+              >
+                View on GitHub
+              </a>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="xs"
+            data-testid="comments-toggle"
+            data-active={showCommentsPanel ? 'true' : undefined}
+            className={
+              showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined
+            }
+            onClick={() => setShowCommentsPanel((v) => !v)}
+          >
+            Comments ({taskComments.byId.size})
+          </Button>
         </header>
 
-        {/* Walkthrough */}
         {walkthrough && (
-          <WalkthroughTree
+          <WalkthroughHeader
             walkthrough={walkthrough}
-            onEditSection={(section) => {
-              if (!detail.latest_run) return;
-              const runId = detail.latest_run.id;
-              const partial: Record<string, unknown> = {};
-              if (section.kind === 'global') {
-                partial['global'] = { [section.key]: section.value };
-              } else if (section.kind === 'group') {
-                // handled inside WalkthroughTree
-              }
-              api
-                .patchWalkthrough(id!, runId, partial)
-                .then(() => refresh())
-                .catch(() => {});
-            }}
             runId={detail.latest_run?.id ?? null}
             taskId={id!}
             onRefresh={refresh}
           />
         )}
 
-        {/* Filters */}
-        {detail.comments.length > 0 && <ReviewFilters filters={filters} onChange={setFilters} />}
+        <div className="flex min-h-0 flex-1">
+          <aside
+            data-testid="review-file-tree-pane"
+            className="glass-chrome flex w-[300px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
+          >
+            <ReviewFileTree
+              files={filesInDiff}
+              walkthrough={walkthrough}
+              comments={detail.comments}
+              selectedPath={selectedPath}
+              onSelect={handleSelectFile}
+            />
+          </aside>
 
-        {/* Comment cards */}
-        {visibleComments.length > 0 ? (
-          <div className="space-y-3">
-            {visibleComments.map((comment) => (
-              <InlineCommentCard
-                key={comment.id}
-                comment={comment}
-                taskId={id!}
-                onUpdated={refresh}
-              />
-            ))}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <DiffViewer
+              taskId={id!}
+              isRunning={isRunning}
+              range={{ kind: 'base' }}
+              listRef={diffListRef}
+              enableComments
+              onFilesChange={setFilesInDiff}
+              onSelectionChange={setSelectedPath}
+              hideFileTree
+            />
           </div>
-        ) : detail.comments.length > 0 ? (
-          <p className="text-sm text-muted-foreground">No comments match your filters.</p>
-        ) : null}
+
+          {showCommentsPanel && (
+            <CommentsSidePanel
+              agents={[]}
+              filesInDiff={filesInDiffSet}
+              rangeIsBase={true}
+              onJumpTo={handleJumpToComment}
+              onClose={() => setShowCommentsPanel(false)}
+            />
+          )}
+        </div>
       </div>
-    </div>
+    </TaskCommentsContext.Provider>
   );
 }
