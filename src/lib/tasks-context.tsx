@@ -12,10 +12,10 @@ const TasksContext = createContext<TasksState | null>(null);
  * state-update cascades.
  */
 export function TasksProvider({ children }: { children: ReactNode }) {
-  const { tasks, loading, error, refresh } = useTasks();
+  const { tasks, loading, error, refresh, addOptimistic } = useTasks();
   const value = useMemo<TasksState>(
-    () => ({ tasks, loading, error, refresh }),
-    [tasks, loading, error, refresh],
+    () => ({ tasks, loading, error, refresh, addOptimistic }),
+    [tasks, loading, error, refresh, addOptimistic],
   );
   return <TasksContext.Provider value={value}>{children}</TasksContext.Provider>;
 }

@@ -37,12 +37,24 @@ export function useTasks() {
     }
   }, []);
 
+  // Optimistically inject a newly created task into local state so the
+  // sidebar/board reflect it before the next listTasks() round-trip lands.
+  // The subsequent refresh from the WS event will reconcile with server state.
+  const addOptimistic = useCallback((task: Task) => {
+    setTasks((prev) => {
+      if (prev.some((t) => t.id === task.id)) return prev;
+      const next = [task, ...prev];
+      lastJsonRef.current = JSON.stringify(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     refresh();
     return subscribe(() => refresh());
   }, [refresh]);
 
-  return { tasks, loading, error, refresh };
+  return { tasks, loading, error, refresh, addOptimistic };
 }
 
 export function useTask(id: string) {

@@ -63,7 +63,7 @@ interface Props {
 export function Composer({ onSubmitted }: Props = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { tasks, refresh } = useTasksContext();
+  const { tasks, refresh, addOptimistic } = useTasksContext();
 
   const [state, dispatch] = useReducer(reduce, searchParams, (params: URLSearchParams) =>
     hydrateFromUrl(params),
@@ -240,7 +240,7 @@ export function Composer({ onSubmitted }: Props = {}) {
           const created = await api.createTask(payload);
           localStorage.removeItem(DRAFT_KEY);
           setPrompt('');
-          refresh();
+          addOptimistic(created);
           onSubmitted?.(created);
           navigate(`/tasks/${created.id}`);
         }
@@ -255,7 +255,7 @@ export function Composer({ onSubmitted }: Props = {}) {
         setSubmitting(false);
       }
     },
-    [canSubmit, prompt, state, navigate, onSubmitted, refresh, harnessId],
+    [canSubmit, prompt, state, navigate, onSubmitted, refresh, addOptimistic, harnessId],
   );
 
   const onTextareaKeyDown = useCallback(
@@ -370,7 +370,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             if (preflightBlock.result.warnings.length > 0) return;
             const created = await api.createTask(preflightBlock.payload);
             setPreflightBlock(null);
-            refresh();
+            addOptimistic(created);
             onSubmitted?.(created);
             navigate(`/tasks/${created.id}`);
           }}
@@ -392,7 +392,7 @@ export function Composer({ onSubmitted }: Props = {}) {
               );
               const created = await api.createTask(preflightBlock.payload);
               setPreflightBlock(null);
-              refresh();
+              addOptimistic(created);
               onSubmitted?.(created);
               navigate(`/tasks/${created.id}`);
             }}
@@ -410,7 +410,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             onConfirm={async () => {
               const created = await api.createTask(preflightBlock.payload);
               setPreflightBlock(null);
-              refresh();
+              addOptimistic(created);
               onSubmitted?.(created);
               navigate(`/tasks/${created.id}`);
             }}

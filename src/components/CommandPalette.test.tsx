@@ -20,6 +20,7 @@ vi.mock('@/lib/hooks', () => ({
     loading: false,
     error: null,
     refresh: mockRefresh,
+    addOptimistic: vi.fn(),
   }),
 }));
 

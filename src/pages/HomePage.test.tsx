@@ -19,6 +19,7 @@ vi.mock('@/lib/hooks', () => ({
     loading: false,
     error: null,
     refresh: vi.fn(),
+    addOptimistic: vi.fn(),
   }),
   useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
   useHarnesses: () => ({
