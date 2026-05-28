@@ -104,3 +104,27 @@ export async function computeOutdated(
 }
 
 export { splitLines };
+
+export interface AnchorCheck {
+  worktree: string;
+  oldSha: string;
+  newSha: string;
+  file: string;
+  line: number;
+  side: 'old' | 'new';
+}
+
+/**
+ * Returns true when the line at `line` in `file` differs between `oldSha` and `newSha`,
+ * or when the file is missing at either ref / the line index is out of range.
+ */
+export async function isAnchorOutdated(input: AnchorCheck): Promise<boolean> {
+  const oldContent = await gitShow(input.worktree, input.oldSha, input.file);
+  const newContent = await gitShow(input.worktree, input.newSha, input.file);
+  if (oldContent === null || newContent === null) return true;
+  const oldLines = splitLines(oldContent);
+  const newLines = splitLines(newContent);
+  const idx = input.line - 1;
+  if (idx < 0 || idx >= newLines.length || idx >= oldLines.length) return true;
+  return oldLines[idx] !== newLines[idx];
+}
