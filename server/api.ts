@@ -385,6 +385,7 @@ export function setupRoutes(app: Express): void {
            FROM tasks t
            INNER JOIN worktrees w ON t.worktree_id = w.id
           WHERE w.repo_path IS NOT NULL
+            AND t.deleted_at IS NULL
           GROUP BY w.repo_path
           ORDER BY last_used DESC
           LIMIT 10`,
@@ -2085,13 +2086,13 @@ export function setupRoutes(app: Express): void {
                     ORDER BY COALESCE(w.last_used_at, w.created_at) DESC, w.id DESC
                   ) AS rn
              FROM worktrees w
-            WHERE EXISTS (SELECT 1 FROM tasks t WHERE t.worktree_id = w.id)
+            WHERE EXISTS (SELECT 1 FROM tasks t WHERE t.worktree_id = w.id AND t.deleted_at IS NULL)
          ),
          agg AS (
            SELECT group_key,
                   COUNT(*) FILTER (WHERE 1=1) AS row_count,
                   SUM(
-                    (SELECT COUNT(*) FROM tasks t WHERE t.worktree_id = grouped.id)
+                    (SELECT COUNT(*) FROM tasks t WHERE t.worktree_id = grouped.id AND t.deleted_at IS NULL)
                   ) AS task_count,
                   MAX(CASE WHEN status = 'in_use' THEN 1 ELSE 0 END) AS any_in_use,
                   MAX(recency) AS recency
@@ -2115,6 +2116,7 @@ export function setupRoutes(app: Express): void {
                      || COALESCE(w2.branch,'')   || '|' || COALESCE(w2.path,'')
                       = g.group_key
                     AND t.runtime_state IN ('idle','setting_up','running')
+                    AND t.deleted_at IS NULL
                   ORDER BY CASE t.runtime_state
                              WHEN 'running'    THEN 0
                              WHEN 'setting_up' THEN 1
@@ -2140,7 +2142,9 @@ export function setupRoutes(app: Express): void {
       return;
     }
     const tasks = db
-      .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? ORDER BY t.updated_at DESC`)
+      .prepare(
+        `${SELECT_TASK_SQL} WHERE t.worktree_id = ? AND t.deleted_at IS NULL ORDER BY t.updated_at DESC`,
+      )
       .all(worktree.id) as Task[];
     const active = tasks.find((t) => {
       return (['setting_up', 'running'] as const).includes(t.runtime_state as 'running');

@@ -61,7 +61,9 @@ function deriveStatus(
 export function listReviewsInbox(): ReviewInboxRow[] {
   const db = getDb();
   const tasks = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.source = 'auto_review' ORDER BY t.updated_at DESC`)
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.source = 'auto_review' AND t.deleted_at IS NULL ORDER BY t.updated_at DESC`,
+    )
     .all() as Task[];
 
   return tasks.map((task) => {

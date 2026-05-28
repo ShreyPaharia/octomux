@@ -281,7 +281,8 @@ export async function gcScratchDirs(): Promise<void> {
         .prepare(
           `SELECT t.id AS id FROM tasks t
              LEFT JOIN worktrees w ON t.worktree_id = w.id
-            WHERE w.mode = 'scratch' AND t.runtime_state IN ('idle','setting_up','running')`,
+            WHERE w.mode = 'scratch' AND t.runtime_state IN ('idle','setting_up','running')
+              AND t.deleted_at IS NULL`,
         )
         .all() as Array<{ id: string }>
     ).map((r) => r.id),

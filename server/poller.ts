@@ -329,6 +329,7 @@ function listTrackedRepos(): string[] {
          FROM tasks t
          INNER JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path IS NOT NULL
+          AND t.deleted_at IS NULL
         GROUP BY w.repo_path
         ORDER BY MAX(t.created_at) DESC`,
     )
@@ -553,6 +554,7 @@ async function upsertReviewTask(
          INNER JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.pr_number = ?
           AND t.runtime_state != 'error'
+          AND t.deleted_at IS NULL
         ORDER BY t.created_at DESC LIMIT 1`,
     )
     .get(repoPath, pr.number) as
@@ -667,7 +669,8 @@ function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<numb
     .prepare(
       `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
          LEFT JOIN worktrees w ON t.worktree_id = w.id
-        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'`,
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
+          AND t.deleted_at IS NULL`,
     )
     .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
 
