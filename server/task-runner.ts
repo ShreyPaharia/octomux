@@ -15,6 +15,7 @@ import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
+import { computeMergeBase } from './git-commits.js';
 
 const logger = childLogger('task-runner');
 
@@ -352,7 +353,20 @@ async function setupNew(task: Task): Promise<SetupResult> {
   await execFile('git', worktreeArgs);
 
   const baseRef = task.base_branch || 'HEAD';
-  const baseSha = await revParseHead(task.repo_path, baseRef);
+  let baseSha: string;
+  if (task.source === 'auto_review' && task.pr_head_sha && task.base_branch) {
+    try {
+      baseSha = await computeMergeBase(task.repo_path, task.base_branch, task.pr_head_sha);
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, operation: 'createTask', err },
+        'createTask: git merge-base failed, falling back to rev-parse',
+      );
+      baseSha = await revParseHead(task.repo_path, baseRef);
+    }
+  } else {
+    baseSha = await revParseHead(task.repo_path, baseRef);
+  }
 
   // Copy .claude/settings.local.json if it exists
   const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
