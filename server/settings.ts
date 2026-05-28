@@ -7,13 +7,17 @@ const logger = childLogger('settings');
 
 export type EditorChoice = 'nvim' | 'vscode' | 'cursor';
 
+export type DefaultTracker = 'jira' | 'linear';
+
 export interface OctomuxSettings {
   editor: EditorChoice;
   defaultHarnessId: string;
   harnesses: Record<string, Record<string, unknown>>;
 
+  defaultTracker?: DefaultTracker;
   defaultJiraBaseUrl?: string;
   defaultJiraProjectKey?: string;
+  defaultLinearTeamKey?: string;
   defaultBaseBranch?: string;
   onboardingCompletedAt?: string;
 
@@ -93,10 +97,16 @@ export async function getSettings(): Promise<OctomuxSettings> {
     editor: (parsed.editor as EditorChoice) ?? DEFAULT_SETTINGS.editor,
     defaultHarnessId: (parsed.defaultHarnessId as string) ?? DEFAULT_SETTINGS.defaultHarnessId,
     harnesses: mergedHarnesses,
+    defaultTracker:
+      parsed.defaultTracker === 'jira' || parsed.defaultTracker === 'linear'
+        ? parsed.defaultTracker
+        : undefined,
     defaultJiraBaseUrl:
       typeof parsed.defaultJiraBaseUrl === 'string' ? parsed.defaultJiraBaseUrl : undefined,
     defaultJiraProjectKey:
       typeof parsed.defaultJiraProjectKey === 'string' ? parsed.defaultJiraProjectKey : undefined,
+    defaultLinearTeamKey:
+      typeof parsed.defaultLinearTeamKey === 'string' ? parsed.defaultLinearTeamKey : undefined,
     defaultBaseBranch:
       typeof parsed.defaultBaseBranch === 'string' ? parsed.defaultBaseBranch : undefined,
     onboardingCompletedAt:
@@ -107,6 +117,16 @@ export async function getSettings(): Promise<OctomuxSettings> {
 export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<OctomuxSettings> {
   if (patch.editor && !VALID_EDITORS.includes(patch.editor)) {
     throw new Error(`Invalid editor: ${patch.editor}. Must be one of: ${VALID_EDITORS.join(', ')}`);
+  }
+
+  if (
+    patch.defaultTracker !== undefined &&
+    patch.defaultTracker !== 'jira' &&
+    patch.defaultTracker !== 'linear'
+  ) {
+    throw new Error(
+      `Invalid defaultTracker: ${patch.defaultTracker}. Must be 'jira' or 'linear'.`,
+    );
   }
 
   const current = await getSettings();
@@ -141,6 +161,8 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     editor: patch.editor ?? current.editor,
     defaultHarnessId: patch.defaultHarnessId ?? current.defaultHarnessId,
     harnesses: mergedHarnesses,
+    defaultTracker:
+      patch.defaultTracker !== undefined ? patch.defaultTracker : current.defaultTracker,
     defaultJiraBaseUrl:
       patch.defaultJiraBaseUrl !== undefined
         ? patch.defaultJiraBaseUrl
@@ -149,6 +171,10 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
       patch.defaultJiraProjectKey !== undefined
         ? patch.defaultJiraProjectKey
         : current.defaultJiraProjectKey,
+    defaultLinearTeamKey:
+      patch.defaultLinearTeamKey !== undefined
+        ? patch.defaultLinearTeamKey
+        : current.defaultLinearTeamKey,
     defaultBaseBranch:
       patch.defaultBaseBranch !== undefined ? patch.defaultBaseBranch : current.defaultBaseBranch,
     onboardingCompletedAt:
