@@ -90,6 +90,28 @@ describe('TaskRefsPanel', () => {
     expect(screen.getByTestId('add-ref-button')).not.toBeDisabled();
   });
 
+  it('renders Linear chip with team badge when metadata.team_key is present', () => {
+    const refs = [
+      makeRef({
+        integration: 'linear',
+        ref: 'BAC-1',
+        url: 'https://linear.app/x/issue/BAC-1',
+        metadata: { team_key: 'BAC' },
+      }),
+    ];
+    renderWithRouter(<TaskRefsPanel taskId="task-1" initialRefs={refs} />);
+    expect(screen.getByText('BAC-1')).toBeInTheDocument();
+    expect(screen.getByText('BAC')).toBeInTheDocument();
+  });
+
+  it('falls back to plain rendering when metadata is null', () => {
+    const refs = [
+      makeRef({ integration: 'jira', ref: 'PROJ-1', url: null, metadata: null }),
+    ];
+    renderWithRouter(<TaskRefsPanel taskId="task-1" initialRefs={refs} />);
+    expect(screen.getByText('PROJ-1')).toBeInTheDocument();
+  });
+
   it('calls addTaskRef and clears form on add', async () => {
     const user = userEvent.setup();
     apiMock.addTaskRef.mockResolvedValue(
