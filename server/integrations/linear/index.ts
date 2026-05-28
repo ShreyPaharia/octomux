@@ -149,7 +149,9 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   }
 
   const teamMap = cfg.status_map_by_team[teamKey];
-  const stateId = teamMap?.[toStatus as OctomuxColumn];
+  const stateId = OCTOMUX_COLUMNS.includes(toStatus as OctomuxColumn)
+    ? teamMap?.[toStatus as OctomuxColumn]
+    : undefined;
   if (!stateId) {
     logger.debug(
       { task_id: task.id, team_key: teamKey, to_status: toStatus },
@@ -202,7 +204,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   // Comment-back, unless we're resetting to backlog.
   if (toStatus === 'backlog') return;
 
-  const prUrl = typeof (data?.pr_url ?? '') === 'string' ? (data?.pr_url as string) : '';
+  const prUrl = typeof data?.pr_url === 'string' ? data.pr_url : '';
   const body = `octomux task moved to **${toStatus}**${prUrl ? ` — PR: ${prUrl}` : ''}.`;
 
   try {

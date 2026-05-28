@@ -191,5 +191,13 @@ describe('linearProvider.handler', () => {
       VALID_CONFIG,
     );
     expect(mockFetch).toHaveBeenCalledTimes(3); // issue lookup + issueUpdate + commentCreate
+    // Confirms the regex-derived team_key 'BAC' resolved through VALID_CONFIG's BAC map.
+    const lookupBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(lookupBody.variables).toEqual({ id: 'BAC-9' });
+    const updateBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    expect(updateBody.variables).toMatchObject({
+      id: 'lin-uuid-2',
+      stateId: '55555555-5555-5555-5555-555555555555',
+    });
   });
 });
