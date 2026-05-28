@@ -16,9 +16,10 @@ function makeRef(overrides: Partial<TaskExternalRef> = {}): TaskExternalRef {
     integration: 'jira',
     ref: 'PROJ-1',
     url: null,
+    metadata: null,
     created_at: '2026-01-01 00:00:00',
     ...overrides,
-  };
+  } as TaskExternalRef;
 }
 
 describe('TaskRefsPanel', () => {

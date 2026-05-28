@@ -73,6 +73,7 @@ export function inferRefs(
       integration: rule.integration,
       ref,
       url: url ?? null,
+      metadata: null,
       created_at: new Date().toISOString(),
     });
   }

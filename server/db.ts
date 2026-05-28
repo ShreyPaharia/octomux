@@ -330,6 +330,9 @@ export function initDb(instance: Database.Database): void {
   addColumn('agents', 'harness_id', `harness_id TEXT NOT NULL DEFAULT 'claude-code'`, agentCols);
   addColumn('agents', 'hook_token', `hook_token TEXT NOT NULL DEFAULT ''`, agentCols);
 
+  const taskRefCols = columnsOf('task_external_refs');
+  addColumn('task_external_refs', 'metadata', 'metadata TEXT', taskRefCols);
+
   // Ensure the index exists (created here rather than SCHEMA to avoid ordering
   // issues when the old column is still named claude_session_id at SCHEMA time).
   instance.exec(

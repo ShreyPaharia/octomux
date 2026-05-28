@@ -155,6 +155,7 @@ export interface TaskExternalRef {
   integration: string;
   ref: string;
   url: string | null;
+  metadata: Record<string, unknown> | null; // NEW
   created_at: string;
 }
 
