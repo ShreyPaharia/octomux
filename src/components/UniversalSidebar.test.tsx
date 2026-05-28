@@ -37,19 +37,21 @@ beforeEach(() => {
 });
 
 describe('UniversalSidebar nav', () => {
-  it('renders Home, Tasks, Settings nav items', async () => {
+  it('renders Home, Tasks, Reviews, Settings nav items', async () => {
     renderSidebar('/');
     await waitFor(() => expect(screen.getByText('Home')).toBeInTheDocument());
     expect(screen.getByText('Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Reviews')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
     expect(screen.queryByText('ORCHESTRATOR')).not.toBeInTheDocument();
   });
 
-  it('points Tasks to /tasks and Home to /', async () => {
+  it('points Tasks to /tasks, Reviews to /reviews and Home to /', async () => {
     renderSidebar('/');
     await waitFor(() => expect(screen.getByText('Home')).toBeInTheDocument());
     expect(screen.getByText('Home').closest('a')).toHaveAttribute('href', '/');
     expect(screen.getByText('Tasks').closest('a')).toHaveAttribute('href', '/tasks');
+    expect(screen.getByText('Reviews').closest('a')).toHaveAttribute('href', '/reviews');
   });
 
   it('nav links carry an aria-label matching the nav label', async () => {
@@ -57,7 +59,14 @@ describe('UniversalSidebar nav', () => {
     await waitFor(() => expect(screen.getByText('Home')).toBeInTheDocument());
     expect(screen.getByLabelText('Home')).toBeInTheDocument();
     expect(screen.getByLabelText('Tasks')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reviews')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
+  });
+
+  it('marks Reviews as active on /reviews and /reviews/:id', async () => {
+    renderSidebar('/reviews');
+    const row = await screen.findByTestId('sidebar-nav-reviews');
+    expect(row).toHaveAttribute('data-active', 'true');
   });
 
   it('active nav row carries primary tint + left accent bar classes', async () => {

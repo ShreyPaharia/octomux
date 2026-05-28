@@ -23,6 +23,8 @@ const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'));
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
+const ReviewsPage = lazy(() => import('./pages/ReviewsPage'));
+const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -117,6 +119,8 @@ export function AppShell() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route path="/reviews" element={<ReviewsPage />} />
+                <Route path="/reviews/:id" element={<ReviewDetailPage />} />
                 <Route path="/monitor" element={<GridMonitor />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/skills/:name" element={<SkillEditor />} />
