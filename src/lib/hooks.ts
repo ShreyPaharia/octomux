@@ -12,7 +12,15 @@ export function useTasks() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await api.listTasks();
+      // Fetch active tasks and trash tasks in parallel so the board can
+      // populate the trash column with soft-deleted tasks.
+      const [active, trashed] = await Promise.all([
+        api.listTasks(),
+        api.listTasks({ trash: true }),
+      ]);
+      // Deduplicate by id (active wins) in case mock returns overlapping data in tests
+      const seen = new Set(active.map((t) => t.id));
+      const data = [...active, ...trashed.filter((t) => !seen.has(t.id))];
       // Only trigger a re-render when the task list actually changed.
       // Without this, every WebSocket event creates a new array reference
       // and causes the entire Dashboard + TaskList tree to re-render.

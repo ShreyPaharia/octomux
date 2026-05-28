@@ -37,6 +37,8 @@ const hookCases = [
     successValue: [{ id: 't1', title: 'Test' }],
     resultKey: 'tasks' as const,
     emptyValue: [],
+    // useTasks calls listTasks twice per refresh (active + trash)
+    callsPerRefresh: 2,
   },
   {
     name: 'useTask',
@@ -45,73 +47,77 @@ const hookCases = [
     successValue: { id: 't1', title: 'Test' },
     resultKey: 'task' as const,
     emptyValue: null,
+    callsPerRefresh: 1,
   },
 ];
 
-describe.each(hookCases)('$name', ({ renderFn, mockFn, successValue, resultKey, emptyValue }) => {
-  it('starts in loading state', async () => {
-    mockFn().mockReturnValue(new Promise(() => {}));
-    const { result } = renderFn();
-    expect(result.current.loading).toBe(true);
-    expect((result.current as any)[resultKey]).toEqual(emptyValue);
-    expect(result.current.error).toBeNull();
-  });
-
-  it('returns data after fetch', async () => {
-    mockFn().mockResolvedValue(successValue);
-
-    const { result } = renderFn();
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    expect((result.current as any)[resultKey]).toEqual(successValue);
-    expect(result.current.error).toBeNull();
-  });
-
-  it('sets error on fetch failure', async () => {
-    mockFn().mockRejectedValue(new Error('Network error'));
-
-    const { result } = renderFn();
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    expect(result.current.error).toBe('Network error');
-    expect((result.current as any)[resultKey]).toEqual(emptyValue);
-  });
-
-  it('re-fetches when event-source fires', async () => {
-    mockFn().mockResolvedValue(successValue);
-
-    const { result } = renderFn();
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    expect(mockFn()).toHaveBeenCalledTimes(1);
-
-    // Simulate a server event
-    await act(async () => {
-      eventCallback?.({ type: 'task:updated', payload: { taskId: 't1' } });
+describe.each(hookCases)(
+  '$name',
+  ({ renderFn, mockFn, successValue, resultKey, emptyValue, callsPerRefresh }) => {
+    it('starts in loading state', async () => {
+      mockFn().mockReturnValue(new Promise(() => {}));
+      const { result } = renderFn();
+      expect(result.current.loading).toBe(true);
+      expect((result.current as any)[resultKey]).toEqual(emptyValue);
+      expect(result.current.error).toBeNull();
     });
 
-    expect(mockFn()).toHaveBeenCalledTimes(2);
-  });
+    it('returns data after fetch', async () => {
+      mockFn().mockResolvedValue(successValue);
 
-  it('unsubscribes on unmount', async () => {
-    mockFn().mockResolvedValue(successValue);
+      const { result } = renderFn();
 
-    const { unmount } = renderFn();
-
-    await waitFor(() => {
-      expect(mockFn()).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect((result.current as any)[resultKey]).toEqual(successValue);
+      expect(result.current.error).toBeNull();
     });
 
-    unmount();
-    expect(unsubscribe).toHaveBeenCalled();
-  });
-});
+    it('sets error on fetch failure', async () => {
+      mockFn().mockRejectedValue(new Error('Network error'));
+
+      const { result } = renderFn();
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(result.current.error).toBe('Network error');
+      expect((result.current as any)[resultKey]).toEqual(emptyValue);
+    });
+
+    it('re-fetches when event-source fires', async () => {
+      mockFn().mockResolvedValue(successValue);
+
+      const { result } = renderFn();
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(mockFn()).toHaveBeenCalledTimes(callsPerRefresh);
+
+      // Simulate a server event
+      await act(async () => {
+        eventCallback?.({ type: 'task:updated', payload: { taskId: 't1' } });
+      });
+
+      expect(mockFn()).toHaveBeenCalledTimes(callsPerRefresh * 2);
+    });
+
+    it('unsubscribes on unmount', async () => {
+      mockFn().mockResolvedValue(successValue);
+
+      const { unmount } = renderFn();
+
+      await waitFor(() => {
+        expect(mockFn()).toHaveBeenCalledTimes(callsPerRefresh);
+      });
+
+      unmount();
+      expect(unsubscribe).toHaveBeenCalled();
+    });
+  },
+);
 
 // ─── useTasks-specific ──────────────────────────────────────────────────────
 

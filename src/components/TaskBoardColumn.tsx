@@ -7,8 +7,10 @@ import { EmptyColumnPlaceholder } from './EmptyColumnPlaceholder';
 import { DraggableBoardCard } from './DraggableBoardCard';
 import { cn } from '@/lib/utils';
 
+export type BoardColumnId = WorkflowStatus | 'trash';
+
 interface ColumnDef {
-  id: WorkflowStatus;
+  id: BoardColumnId;
   label: string;
   accentClass: string;
   countClass: string;
@@ -53,8 +55,8 @@ export const COLUMN_DEFS: ColumnDef[] = [
     countClass: 'text-muted-soft/80',
   },
   {
-    id: 'archived',
-    label: 'Archived',
+    id: 'trash',
+    label: 'Trash',
     accentClass: 'text-muted-soft/80',
     countClass: 'text-muted-soft/60',
     muted: true,
@@ -65,25 +67,27 @@ interface TaskBoardColumnProps {
   column: ColumnDef;
   tasks: Task[];
   activeTaskId: string | null;
-  onArchiveDone?: () => void;
+  onDeleteDone?: () => void;
+  graceHours?: number;
 }
 
 export const TaskBoardColumn = memo(function TaskBoardColumn({
   column,
   tasks,
   activeTaskId,
-  onArchiveDone,
+  onDeleteDone,
+  graceHours = 6,
 }: TaskBoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
-  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  const handleArchiveDone = async () => {
-    if (!onArchiveDone || tasks.length === 0) return;
-    setArchiving(true);
+  const handleDeleteDone = async () => {
+    if (!onDeleteDone || tasks.length === 0) return;
+    setDeleting(true);
     try {
-      onArchiveDone();
+      onDeleteDone();
     } finally {
-      setArchiving(false);
+      setDeleting(false);
     }
   };
 
@@ -99,15 +103,15 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
       <div className="mb-2 flex items-center justify-between border-b border-glass-edge px-1 pb-2">
         <span className={cn('text-xs font-semibold', column.accentClass)}>{column.label}</span>
         <div className="flex items-center gap-2">
-          {column.id === 'done' && onArchiveDone && (
+          {column.id === 'done' && onDeleteDone && (
             <button
               type="button"
-              data-testid="archive-all-done-btn"
-              disabled={tasks.length === 0 || archiving}
-              onClick={handleArchiveDone}
+              data-testid="delete-all-done-btn"
+              disabled={tasks.length === 0 || deleting}
+              onClick={handleDeleteDone}
               className="focus-ring rounded text-[10px] text-muted-soft transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Archive all ({tasks.length})
+              Delete all ({tasks.length})
             </button>
           )}
           <span className={cn('text-xs tabular-nums', column.countClass)}>{tasks.length}</span>
@@ -126,7 +130,12 @@ export const TaskBoardColumn = memo(function TaskBoardColumn({
           <EmptyColumnPlaceholder isOver={isOver} />
         ) : (
           tasks.map((task) => (
-            <DraggableBoardCard key={task.id} task={task} isDragging={activeTaskId === task.id} />
+            <DraggableBoardCard
+              key={task.id}
+              task={task}
+              isDragging={activeTaskId === task.id}
+              graceHours={graceHours}
+            />
           ))
         )}
       </div>

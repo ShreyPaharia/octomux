@@ -10,7 +10,7 @@ import {
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import type { Task, WorkflowStatus } from '../../server/types';
-import { TaskBoardColumn, COLUMN_DEFS } from './TaskBoardColumn';
+import { TaskBoardColumn, COLUMN_DEFS, type BoardColumnId } from './TaskBoardColumn';
 import { MoveWithNoteDialog } from './MoveWithNoteDialog';
 import { api } from '@/lib/api';
 import { showToast } from './CustomToast';
@@ -18,9 +18,9 @@ import { showToast } from './CustomToast';
 // Columns that require a note when dragging into them
 const NOTE_REQUIRED_COLUMNS = new Set<WorkflowStatus>(['planned', 'human_review']);
 
-const SHOW_ARCHIVED_KEY = 'octomux-board-show-archived';
+const SHOW_TRASH_KEY = 'octomux-board-show-trash';
 
-// Default visible columns (archived excluded by default)
+// Default visible columns (trash excluded by default)
 const DEFAULT_VISIBLE_COLUMNS = new Set<WorkflowStatus>([
   'backlog',
   'planned',
@@ -39,28 +39,29 @@ interface PendingMove {
 interface TaskBoardProps {
   tasks: Task[];
   onTasksChange?: (tasks: Task[]) => void;
+  graceHours?: number;
 }
 
-export function TaskBoard({ tasks, onTasksChange }: TaskBoardProps) {
+export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardProps) {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   // Optimistic override: maps task id → workflow_status override
   const [optimisticMoves, setOptimisticMoves] = useState<Map<string, WorkflowStatus>>(new Map());
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
 
-  // Show/hide archived column — default off, persisted to localStorage
-  const [showArchived, setShowArchived] = useState<boolean>(() => {
+  // Show/hide trash column — default off, persisted to localStorage
+  const [showTrash, setShowTrash] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(SHOW_ARCHIVED_KEY) === 'true';
+      return localStorage.getItem(SHOW_TRASH_KEY) === 'true';
     } catch {
       return false;
     }
   });
 
-  const toggleShowArchived = useCallback(() => {
-    setShowArchived((prev) => {
+  const toggleShowTrash = useCallback(() => {
+    setShowTrash((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem(SHOW_ARCHIVED_KEY, String(next));
+        localStorage.setItem(SHOW_TRASH_KEY, String(next));
       } catch {
         // ignore
       }
@@ -84,40 +85,42 @@ export function TaskBoard({ tasks, onTasksChange }: TaskBoardProps) {
     });
   }, [tasks, optimisticMoves]);
 
-  // Group tasks by column
-  const columnTasks = useMemo<Record<WorkflowStatus, Task[]>>(() => {
-    const map: Record<WorkflowStatus, Task[]> = {
+  // Group tasks by column — trashed tasks go to 'trash' regardless of workflow_status
+  const columnTasks = useMemo<Record<BoardColumnId, Task[]>>(() => {
+    const map: Record<BoardColumnId, Task[]> = {
       backlog: [],
       planned: [],
       in_progress: [],
       human_review: [],
       pr: [],
       done: [],
-      archived: [],
+      trash: [],
     };
     for (const t of tasksWithOverrides) {
-      if (t.workflow_status in map) {
+      if (t.deleted_at) {
+        map.trash.push(t);
+      } else if (t.workflow_status in map) {
         map[t.workflow_status].push(t);
       } else {
-        map['backlog'].push(t);
+        map.backlog.push(t);
       }
     }
     return map;
   }, [tasksWithOverrides]);
 
-  // Archive all done tasks
-  const handleArchiveDone = useCallback(async () => {
+  // Soft-delete all done tasks (moves them to trash)
+  const handleDeleteDone = useCallback(async () => {
     try {
-      const result = await api.archiveDone();
-      if (result.archived > 0) {
+      const result = await api.deleteDone();
+      if (result.deleted > 0) {
         showToast(
           'success',
-          `Archived ${result.archived} task${result.archived === 1 ? '' : 's'}`,
+          `Deleted ${result.deleted} task${result.deleted === 1 ? '' : 's'}`,
           '',
         );
       }
     } catch (err: unknown) {
-      showToast('error', 'Archive failed', (err as Error).message);
+      showToast('error', 'Delete failed', (err as Error).message);
     }
   }, []);
 
@@ -210,22 +213,23 @@ export function TaskBoard({ tasks, onTasksChange }: TaskBoardProps) {
   // Determine which columns to render
   const visibleColumns = useMemo(() => {
     return COLUMN_DEFS.filter(
-      (col) => DEFAULT_VISIBLE_COLUMNS.has(col.id) || (showArchived && col.id === 'archived'),
+      (col) =>
+        DEFAULT_VISIBLE_COLUMNS.has(col.id as WorkflowStatus) || (showTrash && col.id === 'trash'),
     );
-  }, [showArchived]);
+  }, [showTrash]);
 
   return (
     <>
       <div className="mb-2 flex items-center justify-end px-1">
         <button
           type="button"
-          data-testid="show-archived-toggle"
-          onClick={toggleShowArchived}
-          className={`text-[11px] transition-colors ${showArchived ? 'text-foreground' : 'text-[#6a6a6a] hover:text-[#8a8a8a]'}`}
+          data-testid="show-trash-toggle"
+          onClick={toggleShowTrash}
+          className={`text-[11px] transition-colors ${showTrash ? 'text-foreground' : 'text-[#6a6a6a] hover:text-[#8a8a8a]'}`}
         >
-          {showArchived ? 'Hide archived' : 'Show archived'}
-          {!showArchived && columnTasks['archived'].length > 0 && (
-            <span className="ml-1 text-[#4a4a4a]">({columnTasks['archived'].length})</span>
+          {showTrash ? 'Hide trash' : 'Show trash'}
+          {!showTrash && columnTasks['trash'].length > 0 && (
+            <span className="ml-1 text-[#4a4a4a]">({columnTasks['trash'].length})</span>
           )}
         </button>
       </div>
@@ -237,7 +241,8 @@ export function TaskBoard({ tasks, onTasksChange }: TaskBoardProps) {
               column={col}
               tasks={columnTasks[col.id]}
               activeTaskId={activeTaskId}
-              onArchiveDone={col.id === 'done' ? handleArchiveDone : undefined}
+              onDeleteDone={col.id === 'done' ? handleDeleteDone : undefined}
+              graceHours={graceHours}
             />
           ))}
         </div>

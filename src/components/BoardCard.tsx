@@ -5,6 +5,8 @@ import { GlassPanel } from '@/components/ui/glass-panel';
 import type { Task, WorkflowStatus } from '../../server/types';
 import { timeAgo } from '@/lib/time';
 import { cn, repoName } from '@/lib/utils';
+import { api } from '@/lib/api';
+import { TrashCountdown } from './TrashCountdown';
 
 // ─── Runtime indicator glyphs ─────────────────────────────────────────────
 
@@ -26,17 +28,40 @@ interface BoardCardProps {
   task: Task;
   isDragging?: boolean;
   workflowStatus?: WorkflowStatus;
+  graceHours?: number;
 }
 
-export const BoardCard = memo(function BoardCard({ task, isDragging }: BoardCardProps) {
+export const BoardCard = memo(function BoardCard({
+  task,
+  isDragging,
+  graceHours = 6,
+}: BoardCardProps) {
   const navigate = useNavigate();
   const isStale =
     task.runtime_state === 'running' &&
     (!task.current_summary_updated_at ||
       Date.now() - new Date(task.current_summary_updated_at + 'Z').getTime() > 3_600_000);
 
+  const isTrashed = task.deleted_at !== null;
+
   const handleClick = () => {
+    if (isTrashed) return; // don't navigate to trashed tasks
     navigate(`/tasks/${task.id}`);
+  };
+
+  const handleRestore = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    api.restoreTask(task.id).catch(() => {
+      // WS refresh will re-render; swallow error silently
+    });
+  };
+
+  const handlePurge = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(`Permanently delete "${task.title}"? This cannot be undone.`)) return;
+    api.deleteTask(task.id, { purge: true }).catch(() => {
+      // swallow
+    });
   };
 
   return (
@@ -47,7 +72,8 @@ export const BoardCard = memo(function BoardCard({ task, isDragging }: BoardCard
       data-testid="board-card"
       data-task-id={task.id}
       className={cn(
-        'group cursor-pointer rounded-xl transition-all duration-150 hover:bg-glass-l3/50',
+        'group rounded-xl transition-all duration-150',
+        isTrashed ? 'cursor-default' : 'cursor-pointer hover:bg-glass-l3/50',
         isDragging && 'opacity-60 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.7)]',
       )}
     >
@@ -126,6 +152,33 @@ export const BoardCard = memo(function BoardCard({ task, isDragging }: BoardCard
             {timeAgo(task.updated_at)}
           </span>
         </div>
+
+        {/* Trash footer: countdown + restore/delete-now actions */}
+        {isTrashed && (
+          <div className="mt-2 border-t border-glass-edge pt-2">
+            <div className="flex items-center justify-between gap-2">
+              <TrashCountdown deletedAt={task.deleted_at!} graceHours={graceHours} />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="trash-restore-btn"
+                  onClick={handleRestore}
+                  className="focus-ring rounded text-[10px] text-primary transition-colors hover:text-primary/80"
+                >
+                  Restore
+                </button>
+                <button
+                  type="button"
+                  data-testid="trash-delete-now-btn"
+                  onClick={handlePurge}
+                  className="focus-ring rounded text-[10px] text-destructive transition-colors hover:text-destructive/80"
+                >
+                  Delete now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </GlassPanel>
   );

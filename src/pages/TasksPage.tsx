@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import { TaskBoard } from '@/components/TaskBoard';
@@ -13,6 +13,7 @@ import { repoName } from '@/lib/utils';
 import { ChevronDownIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { Task } from '../../server/types';
+import { api } from '@/lib/api';
 
 function NewTaskButton({ onClick }: { onClick: () => void }) {
   return (
@@ -172,6 +173,19 @@ export default function TasksPage() {
   const navigate = useNavigate();
   const openCreate = useCallback(() => navigate('/'), [navigate]);
 
+  // Fetch grace hours for the trash countdown
+  const [graceHours, setGraceHours] = useState(6);
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => {
+        if (s.deleteGraceHours != null) setGraceHours(s.deleteGraceHours);
+      })
+      .catch(() => {
+        // use default
+      });
+  }, []);
+
   // Board filters
   const [activeRepo, setActiveRepo] = useState(
     () => localStorage.getItem('octomux-repo-filter') ?? '',
@@ -191,9 +205,12 @@ export default function TasksPage() {
 
   // Apply board-level filters (repo + needs attention + search).
   // auto_review tasks belong to the /reviews surface, not the regular board.
+  // Trashed tasks (deleted_at !== null) always pass through so the trash column can show them.
   const filteredTasks = useMemo<Task[]>(() => {
     return tasks.filter((t) => {
       if (t.source === 'auto_review') return false;
+      // Trashed tasks bypass all other filters — they show in the trash column as-is
+      if (t.deleted_at) return true;
       if (activeRepo && t.repo_path !== activeRepo) return false;
       if (needsAttention) {
         const isAttention = t.workflow_status === 'human_review' || t.runtime_state === 'error';
@@ -283,7 +300,11 @@ export default function TasksPage() {
       {/* Board — takes remaining height, scrolls horizontally */}
       {!loading && !error && (
         <div className="min-h-0 flex-1 overflow-hidden px-4">
-          <TaskBoard tasks={filteredTasks} onTasksChange={handleTasksChange} />
+          <TaskBoard
+            tasks={filteredTasks}
+            onTasksChange={handleTasksChange}
+            graceHours={graceHours}
+          />
         </div>
       )}
     </div>

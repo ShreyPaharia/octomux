@@ -259,6 +259,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       defaultHarnessId: 'claude-code',
       harnesses: {},
       envOverrides: { claudeFlags: null },
+      deleteGraceHours: 6,
     }),
     updateSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
@@ -267,6 +268,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       defaultHarnessId: 'claude-code',
       harnesses: {},
       envOverrides: { claudeFlags: null },
+      deleteGraceHours: 6,
     }),
     listHarnesses: vi.fn().mockResolvedValue([
       { id: 'claude-code', displayName: 'Claude Code', sessionIdMode: 'orchestrator-assigned' },
