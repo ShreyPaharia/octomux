@@ -134,7 +134,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     createTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     updateTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     startTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    deleteTask: vi.fn().mockResolvedValue(undefined),
+    deleteTask: vi.fn().mockResolvedValue(undefined), // accepts optional opts: { purge?: boolean }
     getTaskDiffSummary: vi.fn().mockResolvedValue({ files: [] }),
     createPr: vi.fn().mockResolvedValue({ ok: true }),
     getTaskDiffFile: vi.fn().mockResolvedValue({
@@ -217,7 +217,8 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     }),
     deleteComment: vi.fn().mockResolvedValue(undefined),
     listIntegrations: vi.fn().mockResolvedValue([]),
-    archiveDone: vi.fn().mockResolvedValue({ archived: 0 }),
+    deleteDone: vi.fn().mockResolvedValue({ deleted: 0 }),
+    restoreTask: vi.fn().mockResolvedValue(undefined),
     moveTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     postTaskSummary: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     postTaskNote: vi.fn().mockResolvedValue({

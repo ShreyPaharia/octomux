@@ -112,6 +112,7 @@ export interface OctomuxSettings {
   defaultJiraProjectKey?: string;
   defaultBaseBranch?: string;
   onboardingCompletedAt?: string;
+  deleteGraceHours?: number;
   envOverrides?: {
     claudeFlags: string | null;
   };
@@ -437,14 +438,16 @@ export const api = {
     request<string[]>(`/branches?repo_path=${encodeURIComponent(repoPath)}`),
   getDefaultBranch: (repoPath: string) =>
     request<{ branch: string }>(`/default-branch?repo_path=${encodeURIComponent(repoPath)}`),
-  listTasks: () => request<Task[]>('/tasks'),
+  listTasks: (opts?: { trash?: boolean }) =>
+    request<Task[]>(opts?.trash ? '/tasks?trash=true' : '/tasks'),
   getTask: (id: string) => request<Task>(`/tasks/${id}`),
   createTask: (data: CreateTaskRequest) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (id: string, data: UpdateTaskRequest) =>
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   startTask: (id: string) => request<Task>(`/tasks/${id}/start`, { method: 'POST' }),
-  deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  deleteTask: (id: string, opts?: { purge?: boolean }) =>
+    request<void>(opts?.purge ? `/tasks/${id}?purge=true` : `/tasks/${id}`, { method: 'DELETE' }),
   getTaskDiffSummary: (id: string, range?: DiffRange) => {
     const param = diffRangeToParam(range);
     const qs = param ? `?range=${encodeURIComponent(param)}` : '';
@@ -518,7 +521,8 @@ export const api = {
     request<void>(`/tasks/${taskId}/terminals/${terminalId}`, { method: 'DELETE' }),
 
   // Workflow endpoints
-  archiveDone: () => request<{ archived: number }>('/tasks/archive-done', { method: 'POST' }),
+  deleteDone: () => request<{ deleted: number }>('/tasks/delete-done', { method: 'POST' }),
+  restoreTask: (id: string) => request<Task>(`/tasks/${id}/restore`, { method: 'POST' }),
   moveTask: (id: string, data: MoveTaskRequest) =>
     request<Task>(`/tasks/${id}/move`, { method: 'POST', body: JSON.stringify(data) }),
   postTaskSummary: (id: string, data: SummaryRequest) =>
