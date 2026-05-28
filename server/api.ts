@@ -3004,4 +3004,112 @@ export function setupRoutes(app: Express): void {
       res.status(500).json({ error: (err as Error).message });
     }
   });
+
+  // ─── Test-only seed endpoint ─────────────────────────────────────────────────
+  // Gated strictly on NODE_ENV=test. Never exposed in production.
+  if (process.env.NODE_ENV === 'test') {
+    /**
+     * POST /api/__test__/seed-review
+     * Seeds a review task, a review run, and inline comments directly in the DB.
+     *
+     * The worktrees row uses:
+     *  - `path`      = process.cwd()      — so `git show <sha>:<file>` resolves
+     *  - `repo_path` = '/tmp/e2e-norepo'  — so deleteTask's `git worktree remove`
+     *                                        fails gracefully on a non-existent repo
+     *
+     * This ensures staleness checks work with real SHAs/files while preventing
+     * deleteTask from accidentally removing the server's working directory.
+     */
+    app.post('/api/__test__/seed-review', (req: Request, res: Response) => {
+      const db = getDb();
+      try {
+        const body = req.body as {
+          task: {
+            id: string;
+            title: string;
+            pr_url: string;
+            pr_number: number;
+            pr_head_sha: string;
+          };
+          review_run: {
+            id: string;
+            walkthrough: string;
+          };
+          comments: Array<{
+            id: string;
+            file_path: string;
+            line: number;
+            side: 'old' | 'new';
+            body: string;
+            kind: 'comment' | 'suggestion';
+            severity?: string;
+            bucket?: string;
+            existing_code?: string | null;
+            suggested_code?: string | null;
+          }>;
+        };
+
+        db.transaction(() => {
+          const wtId = `wt-${body.task.id}`;
+          // `path` = server's cwd so git-show works; `repo_path` = non-existent so
+          // deleteTask's git-worktree-remove fails gracefully without deleting cwd.
+          db.prepare(
+            `INSERT OR IGNORE INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+             VALUES (?, ?, '/tmp/e2e-norepo', 'review/e2e', 'main', 'new', 'available')`,
+          ).run(wtId, process.cwd());
+
+          db.prepare(
+            `INSERT OR IGNORE INTO tasks
+               (id, title, description, runtime_state, workflow_status, source, worktree_id,
+                pr_url, pr_number, pr_head_sha)
+             VALUES (?, ?, '', 'idle', 'backlog', 'auto_review', ?, ?, ?, ?)`,
+          ).run(
+            body.task.id,
+            body.task.title,
+            wtId,
+            body.task.pr_url,
+            body.task.pr_number,
+            body.task.pr_head_sha,
+          );
+
+          db.prepare(
+            `INSERT OR IGNORE INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, completed_at)
+             VALUES (?, ?, ?, ?, 'completed', datetime('now'))`,
+          ).run(
+            body.review_run.id,
+            body.task.id,
+            body.task.pr_head_sha,
+            body.review_run.walkthrough,
+          );
+
+          for (const c of body.comments) {
+            db.prepare(
+              `INSERT OR IGNORE INTO inline_comments
+                 (id, task_id, review_run_id, file_path, line, side, original_commit_sha,
+                  body, status, kind, severity, bucket, existing_code, suggested_code)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
+            ).run(
+              c.id,
+              body.task.id,
+              body.review_run.id,
+              c.file_path,
+              c.line,
+              c.side,
+              body.task.pr_head_sha,
+              c.body,
+              c.kind,
+              c.severity ?? null,
+              c.bucket ?? null,
+              c.existing_code ?? null,
+              c.suggested_code ?? null,
+            );
+          }
+        })();
+
+        res.json({ task_id: body.task.id });
+      } catch (err) {
+        res.status(500).json({ error: (err as Error).message });
+      }
+    });
+  }
 }

@@ -11,10 +11,20 @@ const backendPort = docsScreenshots
   ? '7788'
   : process.env.OCTOMUX_PORT || process.env.PORT || '7777';
 const vitePort = docsScreenshots ? '5174' : '5173';
+const GH_STUB = JSON.stringify({
+  id: 99999,
+  html_url: 'https://example.invalid/r/99999',
+  comments: [
+    { id: 1, path: 'server/github-client.ts', line: 1 },
+    { id: 2, path: 'server/publish-review.ts', line: 1 },
+  ],
+});
+
 const backendEnv = {
   NODE_ENV: 'test',
   PORT: backendPort,
   OCTOMUX_PORT: backendPort,
+  OCTOMUX_GH_STUB_RESPONSE: GH_STUB,
   ...(docsDbPath ? { OCTOMUX_DB_PATH: docsDbPath } : {}),
 };
 

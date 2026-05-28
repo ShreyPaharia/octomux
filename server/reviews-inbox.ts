@@ -35,6 +35,7 @@ export interface ReviewInboxRow {
 export interface ReviewDetail {
   task: Task;
   latest_run: ReviewRun | null;
+  all_runs: ReviewRun[];
   comments: InlineCommentRow[];
   published_history: PublishedReview[];
 }
@@ -133,6 +134,7 @@ export function getReviewDetail(taskId: string): ReviewDetail | null {
   return {
     task,
     latest_run: latestRun,
+    all_runs: runs,
     comments,
     published_history: publishedHistory,
   };
