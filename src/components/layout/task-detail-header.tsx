@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { StatusBadge } from '@/components/StatusBadge';
-import { PullRequestIcon } from '@/components/icons';
+import { ClipboardCheckIcon, PullRequestIcon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
@@ -30,6 +30,12 @@ export interface TaskDetailHeaderProps {
   isRunning: boolean;
   isDraft: boolean;
   closeConfirm: boolean;
+  /** Disable the Review trigger (e.g. source task is still a draft). */
+  reviewDisabled: boolean;
+  /** Existing review task id for this source — flips Review → Open review. */
+  existingReviewId: string | null;
+  /** Manual-review trigger in-flight. */
+  reviewBusy: boolean;
   onResume: () => void;
   onShip: () => void;
   onToggleEditor: () => void;
@@ -38,6 +44,7 @@ export interface TaskDetailHeaderProps {
   onCloseConfirm: () => void;
   onCloseAccept: () => void;
   onCloseDismiss: () => void;
+  onReview: () => void;
 }
 
 export function TaskDetailHeader({
@@ -49,6 +56,9 @@ export function TaskDetailHeader({
   isRunning,
   isDraft,
   closeConfirm,
+  reviewDisabled,
+  existingReviewId,
+  reviewBusy,
   onResume,
   onShip,
   onToggleEditor,
@@ -57,6 +67,7 @@ export function TaskDetailHeader({
   onCloseConfirm,
   onCloseAccept,
   onCloseDismiss,
+  onReview,
 }: TaskDetailHeaderProps) {
   const runMode: RunMode = task.run_mode ?? 'new';
 
@@ -107,6 +118,22 @@ export function TaskDetailHeader({
           >
             <PullRequestIcon size={14} aria-hidden />
             Ship
+          </Button>
+        )}
+
+        {task.runtime_state !== 'error' && task.source !== 'auto_review' && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="review-button"
+            disabled={reviewDisabled || reviewBusy}
+            title={reviewDisabled ? 'Start the task first' : undefined}
+            className="gap-1.5"
+            onClick={onReview}
+          >
+            <ClipboardCheckIcon size={14} aria-hidden />
+            {existingReviewId ? 'Open review' : 'Review'}
           </Button>
         )}
 

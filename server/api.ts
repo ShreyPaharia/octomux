@@ -52,6 +52,13 @@ import { listPublishedReviews } from './published-reviews.js';
 import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
 import { updateCommentFields } from './inline-comments.js';
 
+import {
+  buildManualReviewPrompt,
+  buildPrReviewPrompt,
+  insertReviewTask,
+  repoShortName,
+} from './review-tasks.js';
+
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import {
   listIntegrations,
@@ -149,6 +156,35 @@ function sendDomainError(res: Response, err: unknown): void {
 /** Message sent to a running agent to trigger a manual re-review. */
 function manualReRunNudge(): string {
   return 'Re-review requested manually. Please re-run the /review-pr flow on the current PR.';
+}
+
+/**
+ * Return the id of a live auto_review task pointing at this source — either
+ * keyed on `pr_number` (poller-created) or on `review_of_task_id` (manual).
+ * Used by both GET /api/tasks/:id and the manual-trigger endpoint.
+ */
+function lookupExistingReviewId(task: { id: string; pr_number: number | null }): string | null {
+  const db = getDb();
+  if (task.pr_number != null) {
+    const byPr = db
+      .prepare(
+        `SELECT id FROM tasks
+          WHERE pr_number = ? AND source = 'auto_review'
+            AND runtime_state != 'error' AND deleted_at IS NULL
+          ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(task.pr_number) as { id: string } | undefined;
+    if (byPr) return byPr.id;
+  }
+  const byLink = db
+    .prepare(
+      `SELECT id FROM tasks
+        WHERE review_of_task_id = ? AND source = 'auto_review'
+          AND runtime_state != 'error' AND deleted_at IS NULL
+        ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(task.id) as { id: string } | undefined;
+  return byLink?.id ?? null;
 }
 
 /** Recursively merge `incoming` into `base` (objects merged, primitives overwritten). */
@@ -547,6 +583,7 @@ export function setupRoutes(app: Express): void {
       derived_status: derivedStatus({ runtime_state: task.runtime_state, agents }),
       user_terminals: userTerminals,
       worktree_row: worktreeRow,
+      existing_review_id: lookupExistingReviewId(task),
     });
   });
 
@@ -3012,6 +3049,119 @@ export function setupRoutes(app: Express): void {
         res.status(500).json({ error: msg });
       }
     }
+  });
+
+  // POST /api/tasks/:taskId/review — manually trigger a review for this task.
+  // Creates an auto_review task pointing back at the source via review_of_task_id,
+  // or returns the existing review when one is already present.
+  app.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => {
+    const taskId = (req.params as Record<string, string>).taskId;
+    const task = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as
+      | Task
+      | undefined;
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    if (!task.branch || !task.worktree) {
+      res.status(400).json({ error: 'Start the task first' });
+      return;
+    }
+
+    const db = getDb();
+
+    const existingId = lookupExistingReviewId(task);
+    if (existingId) {
+      res.status(200).json({ id: existingId, action: 'existing' });
+      return;
+    }
+
+    // PR-less source: capture the current HEAD of the source worktree so the
+    // review agent has a concrete sha to diff base..head against.
+    let prHeadSha = task.pr_head_sha;
+    if (!prHeadSha) {
+      const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+      try {
+        const { stdout } = await execFile('git', ['-C', cwd!, 'rev-parse', 'HEAD']);
+        prHeadSha = stdout.trim();
+      } catch (err) {
+        res.status(500).json({ error: `failed to resolve HEAD: ${(err as Error).message}` });
+        return;
+      }
+    }
+
+    const short = repoShortName(task.repo_path || '');
+    const requestedAt = new Date().toISOString();
+
+    let branch: string;
+    let title: string;
+    let description: string;
+    let prompt: string;
+    if (task.pr_url && task.pr_number != null) {
+      branch = `review/${short}-pr-${task.pr_number}`;
+      title = `Review: ${task.title} (#${task.pr_number})`;
+      description = `Manual review for PR #${task.pr_number} in ${short}`;
+      prompt = buildPrReviewPrompt({
+        title: task.title,
+        number: task.pr_number,
+        url: task.pr_url,
+        author: null,
+        headRefOid: prHeadSha,
+        requestedAt,
+      });
+    } else {
+      branch = `review/${short}-task-${task.id}`;
+      title = `Review: ${task.title}`;
+      description = `Manual pre-PR review for task ${task.id}`;
+      prompt = buildManualReviewPrompt({
+        sourceId: task.id,
+        sourceTitle: task.title,
+        repoShort: short,
+        branch: task.branch,
+        baseBranch: task.base_branch,
+        baseSha: task.base_sha ?? '',
+        prHeadSha,
+        requestedAt,
+      });
+    }
+
+    const newId = insertReviewTask({
+      repoPath: task.repo_path,
+      branch,
+      baseBranch: task.base_branch ?? '',
+      baseSha: task.base_sha ?? null,
+      title,
+      description,
+      initialPrompt: prompt,
+      prUrl: task.pr_url ?? null,
+      prNumber: task.pr_number ?? null,
+      prHeadSha,
+      reviewOfTaskId: task.id,
+    });
+
+    broadcast({ type: 'task:created', payload: { taskId: newId } });
+
+    const fresh = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(newId) as Task | undefined;
+    if (fresh) {
+      // Fire-and-forget: the response shouldn't block on worktree setup.
+      startTask(fresh)
+        .then(() => broadcast({ type: 'task:updated', payload: { taskId: newId } }))
+        .catch((err) => {
+          apiLogger.error(
+            { task_id: newId, err: (err as Error).message },
+            'failed to auto-start manual review task',
+          );
+          broadcast({ type: 'task:updated', payload: { taskId: newId } });
+        });
+    }
+
+    apiLogger.info(
+      { task_id: newId, source_task_id: task.id, pr_number: task.pr_number ?? null },
+      'manual review task created',
+    );
+
+    res.status(201).json({ id: newId, action: 'created' });
   });
 
   // ─── Review learnings ────────────────────────────────────────────────────────

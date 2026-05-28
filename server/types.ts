@@ -97,6 +97,8 @@ export interface Task {
   derived_status?: DerivedTaskStatus | null;
   external_refs?: TaskExternalRef[];
   recent_updates?: TaskUpdate[];
+  /** Live review task pointing at this source (or this PR). Set by GET /api/tasks/:id. */
+  existing_review_id?: string | null;
 }
 
 export interface Agent {
