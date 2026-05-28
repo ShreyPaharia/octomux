@@ -45,6 +45,11 @@ import { computeOutdated, splitLines } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 import { sendMessageToAgent } from './tmux-input.js';
+import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
+import { getReviewRun, getCurrentRun, setWalkthrough } from './review-runs.js';
+import { listPublishedReviews } from './published-reviews.js';
+import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
+import { updateCommentFields } from './inline-comments.js';
 
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import {
@@ -138,6 +143,37 @@ function sendDomainError(res: Response, err: unknown): void {
   } else {
     res.status(500).json({ error: msg });
   }
+}
+
+/** Message sent to a running agent to trigger a manual re-review. */
+function manualReRunNudge(): string {
+  return 'Re-review requested manually. Please re-run the /review-pr flow on the current PR.';
+}
+
+/** Recursively merge `incoming` into `base` (objects merged, primitives overwritten). */
+function deepMerge(
+  base: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, val] of Object.entries(incoming)) {
+    if (
+      val !== null &&
+      typeof val === 'object' &&
+      !Array.isArray(val) &&
+      typeof result[key] === 'object' &&
+      result[key] !== null &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMerge(
+        result[key] as Record<string, unknown>,
+        val as Record<string, unknown>,
+      );
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
 }
 
 /** Reload a task with its related agents and user_terminals. */
@@ -1507,11 +1543,36 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    const body = req.body as { resolved?: unknown; body?: unknown };
+    // Refuse updates on already-published comments
+    if (existing.status === 'published') {
+      res.status(409).json({ error: 'Cannot update a published comment' });
+      return;
+    }
+
+    const body = req.body as {
+      resolved?: unknown;
+      body?: unknown;
+      status?: unknown;
+      bucket?: unknown;
+      kind?: unknown;
+      severity?: unknown;
+      existing_code?: unknown;
+      suggested_code?: unknown;
+      rejection_why?: unknown;
+    };
     const hasResolved = body.resolved !== undefined;
     const hasBody = body.body !== undefined;
+    const hasStatus = body.status !== undefined;
+    const hasExtended =
+      body.bucket !== undefined ||
+      body.kind !== undefined ||
+      body.severity !== undefined ||
+      body.existing_code !== undefined ||
+      body.suggested_code !== undefined;
 
-    if (!hasResolved && !hasBody) {
+    const VALID_STATUSES = ['draft', 'accepted', 'rejected', 'stale'];
+
+    if (!hasResolved && !hasBody && !hasStatus && !hasExtended) {
       res.status(400).json({ error: 'no fields to update' });
       return;
     }
@@ -1523,8 +1584,13 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'body must be a non-empty string' });
       return;
     }
+    if (hasStatus && !VALID_STATUSES.includes(body.status as string)) {
+      res.status(400).json({ error: `status must be one of ${VALID_STATUSES.join(', ')}` });
+      return;
+    }
 
     let row = existing;
+
     if (hasBody) {
       const updated = updateCommentBody(cid, body.body as string);
       if (updated) row = updated;
@@ -1532,6 +1598,37 @@ export function setupRoutes(app: Express): void {
     if (hasResolved) {
       const updated = (body.resolved as boolean) ? resolveComment(cid) : unresolveComment(cid);
       if (updated) row = updated;
+    }
+    if (hasStatus || hasExtended) {
+      const fields: import('./inline-comments.js').UpdateCommentFields = {};
+      if (hasStatus) fields.status = body.status as import('./types.js').CommentStatus;
+      if (body.bucket !== undefined)
+        fields.bucket = body.bucket as import('./types.js').CommentBucket | null;
+      if (body.kind !== undefined) fields.kind = body.kind as import('./types.js').CommentKind;
+      if (body.severity !== undefined)
+        fields.severity = body.severity as import('./types.js').CommentSeverity | null;
+      if (body.existing_code !== undefined)
+        fields.existing_code = body.existing_code as string | null;
+      if (body.suggested_code !== undefined)
+        fields.suggested_code = body.suggested_code as string | null;
+      const updated = updateCommentFields(cid, fields);
+      if (updated) row = updated;
+    }
+
+    // Capture rejection learning if status='rejected' and rejection_why provided
+    if (
+      body.status === 'rejected' &&
+      typeof body.rejection_why === 'string' &&
+      body.rejection_why.trim()
+    ) {
+      const repoPath = task.repo_path ?? '';
+      if (repoPath) {
+        addLearning({
+          repo_path: repoPath,
+          why: body.rejection_why.trim(),
+          created_from_comment_id: cid,
+        });
+      }
     }
 
     res.json(row);
@@ -2755,6 +2852,156 @@ export function setupRoutes(app: Express): void {
     } catch (err) {
       apiLogger.warn({ scope, key, err }, 'failed to update hook_settings');
       res.status(500).json({ error: 'failed to update hook setting' });
+    }
+  });
+
+  // ─── Reviews inbox ───────────────────────────────────────────────────────────
+
+  // GET /api/reviews — list all auto_review tasks with aggregated counts
+  app.get('/api/reviews', (_req: Request, res: Response) => {
+    try {
+      res.json(listReviewsInbox());
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/reviews/:id — full detail for a single review task
+  app.get('/api/reviews/:id', (req: Request, res: Response) => {
+    try {
+      const detail = getReviewDetail((req.params as Record<string, string>).id);
+      if (!detail) {
+        res.status(404).json({ error: 'Review not found' });
+        return;
+      }
+      res.json(detail);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─── Review runs ─────────────────────────────────────────────────────────────
+
+  // PATCH /api/tasks/:id/review-runs/:rid/walkthrough — deep-merge walkthrough
+  app.patch('/api/tasks/:id/review-runs/:rid/walkthrough', (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+
+    const params = req.params as Record<string, string>;
+    const rid = params.rid;
+
+    const run = getReviewRun(rid);
+    if (!run || run.task_id !== task.id) {
+      res.status(404).json({ error: 'Review run not found' });
+      return;
+    }
+
+    // Refuse if a published_reviews row exists for this run's pr_head_sha
+    const published = listPublishedReviews(task.id);
+    const alreadyPublished = published.some((p) => p.head_sha === run.pr_head_sha);
+    if (alreadyPublished) {
+      res.status(409).json({ error: 'Review already published for this head SHA' });
+      return;
+    }
+
+    // Deep-merge incoming body into existing walkthrough JSON
+    const existing = run.walkthrough ? JSON.parse(run.walkthrough) : {};
+    const incoming = req.body as Record<string, unknown>;
+    const merged = deepMerge(existing, incoming);
+    setWalkthrough(rid, JSON.stringify(merged));
+
+    const updated = getReviewRun(rid);
+    res.json(updated);
+  });
+
+  // POST /api/tasks/:id/review-runs — trigger a manual re-review
+  app.post('/api/tasks/:id/review-runs', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+
+    // 409 if a run with status='running' already exists for this task
+    const currentRun = getCurrentRun(task.id);
+    if (currentRun?.status === 'running') {
+      res.status(409).json({ error: 'A review run is already in progress' });
+      return;
+    }
+
+    try {
+      if (task.runtime_state !== 'running') {
+        await startTask(task);
+      } else {
+        // Find first non-stopped agent and nudge it
+        const db = getDb();
+        const agent = db
+          .prepare(
+            `SELECT id, window_index FROM agents
+             WHERE task_id = ? AND status != 'stopped'
+             ORDER BY window_index ASC LIMIT 1`,
+          )
+          .get(task.id) as { id: string; window_index: number } | undefined;
+
+        if (agent && task.tmux_session) {
+          const nudge = manualReRunNudge();
+          await sendMessageToAgent(task.tmux_session, agent.window_index, nudge);
+        }
+      }
+      res.status(202).json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // POST /api/tasks/:id/publish-review — publish accepted draft comments to GitHub
+  app.post('/api/tasks/:id/publish-review', async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req, res);
+    if (!task) return;
+
+    const body = req.body as { verdict?: unknown; review_body?: unknown };
+    const verdict = body.verdict ?? 'COMMENT';
+
+    if (!['COMMENT', 'APPROVE', 'REQUEST_CHANGES'].includes(verdict as string)) {
+      res.status(400).json({ error: 'verdict must be one of COMMENT, APPROVE, REQUEST_CHANGES' });
+      return;
+    }
+
+    try {
+      const { publishReview } = await import('./publish-review.js');
+      const result = await publishReview(
+        task.id,
+        verdict as import('./types.js').PublishedReviewVerdict,
+        typeof body.review_body === 'string' ? body.review_body : '',
+      );
+      res.json(result);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg.includes('No accepted comments')) {
+        res.status(400).json({ error: msg });
+      } else {
+        res.status(500).json({ error: msg });
+      }
+    }
+  });
+
+  // ─── Review learnings ────────────────────────────────────────────────────────
+
+  // GET /api/repos/:repoPath/learnings — list learnings for a repo
+  app.get('/api/repos/:repoPath/learnings', (req: Request, res: Response) => {
+    const repoPath = decodeURIComponent((req.params as Record<string, string>).repoPath);
+    try {
+      res.json(listLearningsForRepo(repoPath));
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // DELETE /api/learnings/:id — delete a single learning
+  app.delete('/api/learnings/:id', (req: Request, res: Response) => {
+    const id = (req.params as Record<string, string>).id;
+    try {
+      deleteLearning(id);
+      res.status(204).send();
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
     }
   });
 }
