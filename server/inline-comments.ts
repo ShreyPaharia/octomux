@@ -1,6 +1,13 @@
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { childLogger } from './logger.js';
+import type {
+  CommentBucket,
+  CommentKind,
+  CommentSeverity,
+  CommentStatus,
+  LastCheckStatus,
+} from './types.js';
 
 const logger = childLogger('inline-comments');
 
@@ -15,6 +22,20 @@ export interface InlineCommentRow {
   body: string;
   created_at: string;
   resolved_at: string | null;
+  status: CommentStatus;
+  review_run_id: string | null;
+  severity: CommentSeverity | null;
+  bucket: CommentBucket | null;
+  kind: CommentKind;
+  existing_code: string | null;
+  suggested_code: string | null;
+  published_review_id: string | null;
+  github_comment_id: number | null;
+  re_flag_of: string | null;
+  last_check_run_id: string | null;
+  last_check_status: LastCheckStatus | null;
+  auto_resolved_at: string | null;
+  auto_resolved_reason: string | null;
 }
 
 export interface AddCommentInput {
@@ -25,6 +46,14 @@ export interface AddCommentInput {
   side: 'old' | 'new';
   original_commit_sha: string;
   body: string;
+  // ── Optional review-orchestrator fields. DB column defaults apply when omitted.
+  kind?: CommentKind;
+  severity?: CommentSeverity | null;
+  bucket?: CommentBucket | null;
+  review_run_id?: string | null;
+  existing_code?: string | null;
+  suggested_code?: string | null;
+  re_flag_of?: string | null;
 }
 
 export function addComment(input: AddCommentInput): InlineCommentRow {
@@ -32,8 +61,9 @@ export function addComment(input: AddCommentInput): InlineCommentRow {
   getDb()
     .prepare(
       `INSERT INTO inline_comments
-         (id, task_id, agent_id, file_path, line, side, original_commit_sha, body)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, task_id, agent_id, file_path, line, side, original_commit_sha, body,
+          kind, severity, bucket, review_run_id, existing_code, suggested_code, re_flag_of)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -44,6 +74,13 @@ export function addComment(input: AddCommentInput): InlineCommentRow {
       input.side,
       input.original_commit_sha,
       input.body,
+      input.kind ?? 'comment',
+      input.severity ?? null,
+      input.bucket ?? null,
+      input.review_run_id ?? null,
+      input.existing_code ?? null,
+      input.suggested_code ?? null,
+      input.re_flag_of ?? null,
     );
   const row = getComment(id);
   if (!row) {
