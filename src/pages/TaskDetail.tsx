@@ -163,11 +163,16 @@ export default function TaskDetail() {
       });
       // Restore incoming task state (or reset to defaults)
       const saved = perTaskUiState.get(taskId);
-      setActiveWindow(saved?.activeWindow ?? null);
+      const nextActive = saved?.activeWindow ?? null;
+      setActiveWindow(nextActive);
       setMode(saved?.mode ?? 'agents');
       setLocalUserWindowIndex(null);
-      // Window indexes are task-scoped; drop the prior task's cached terminals.
-      setTerminalLRU([]);
+      // Window indexes are task-scoped; seed the LRU directly from the restored
+      // active window instead of clearing it and waiting for the promote effect
+      // to refill — that effect won't fire if `nextActive` equals the outgoing
+      // task's activeWindow, leaving the LRU empty and the terminal pane blank
+      // on cache-hit task switches (e.g. B→A where both had activeWindow=0).
+      setTerminalLRU(nextActive !== null ? [nextActive] : []);
       prevTaskIdRef.current = taskId;
     }
   }, [taskId]);
