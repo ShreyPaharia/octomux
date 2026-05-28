@@ -8,9 +8,15 @@ import { api } from '@/lib/api';
 import type { IntegrationProvider, IntegrationRow } from '@/lib/api';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
+import {
+  LinearConfigForm,
+  toLinearConfig,
+} from '@/components/integrations/LinearConfigForm';
+import type { LinearConfig } from '@/components/integrations/LinearConfigForm';
 
 function providerIcon(kind: string): string {
   if (kind === 'jira') return 'J';
+  if (kind === 'linear') return 'L';
   return kind.charAt(0).toUpperCase();
 }
 
@@ -125,7 +131,11 @@ export default function IntegrationsPage() {
   const [integrations, setIntegrations] = useState<IntegrationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<
-    { kind: 'create-jira' } | { kind: 'edit-jira'; integration: IntegrationRow } | null
+    | { kind: 'create-jira' }
+    | { kind: 'edit-jira'; integration: IntegrationRow }
+    | { kind: 'create-linear' }
+    | { kind: 'edit-linear'; integration: IntegrationRow }
+    | null
   >(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>(
@@ -156,6 +166,21 @@ export default function IntegrationsPage() {
   }
 
   async function handleEditJira(id: string, config: JiraConfig, name: string) {
+    await api.updateIntegration(id, {
+      name,
+      config: config as unknown as Record<string, unknown>,
+    });
+    setModal(null);
+    void refresh();
+  }
+
+  async function handleCreateLinear(config: LinearConfig, name: string) {
+    await api.createIntegration('linear', name, config as unknown as Record<string, unknown>);
+    setModal(null);
+    void refresh();
+  }
+
+  async function handleEditLinear(id: string, config: LinearConfig, name: string) {
     await api.updateIntegration(id, {
       name,
       config: config as unknown as Record<string, unknown>,
@@ -223,11 +248,15 @@ export default function IntegrationsPage() {
                     <p className="text-xs text-muted-soft">Events: {p.events.join(', ')}</p>
                   </div>
                 </div>
-                {p.kind === 'jira' && (
-                  <Button size="sm" onClick={() => setModal({ kind: 'create-jira' })}>
-                    Add Jira
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    if (p.kind === 'jira') setModal({ kind: 'create-jira' });
+                    else if (p.kind === 'linear') setModal({ kind: 'create-linear' });
+                  }}
+                >
+                  Add {p.displayName}
+                </Button>
               </div>
             ))
           )}
@@ -245,6 +274,7 @@ export default function IntegrationsPage() {
                 integration={i}
                 onEdit={() => {
                   if (i.kind === 'jira') setModal({ kind: 'edit-jira', integration: i });
+                  else if (i.kind === 'linear') setModal({ kind: 'edit-linear', integration: i });
                 }}
                 onDelete={() => setDeleteConfirmId(i.id)}
                 onToggle={(enabled) => void handleToggle(i.id, enabled)}
@@ -273,6 +303,28 @@ export default function IntegrationsPage() {
             initial={toJiraConfig(modal.integration)}
             nameInitial={modal.integration.name}
             onSubmit={(config, name) => handleEditJira(modal.integration.id, config, name)}
+            onCancel={() => setModal(null)}
+            submitLabel="Save changes"
+          />
+        </Modal>
+      )}
+
+      {modal?.kind === 'create-linear' && (
+        <Modal title="Add Linear integration" onClose={() => setModal(null)}>
+          <LinearConfigForm
+            onSubmit={handleCreateLinear}
+            onCancel={() => setModal(null)}
+            submitLabel="Create"
+          />
+        </Modal>
+      )}
+
+      {modal?.kind === 'edit-linear' && (
+        <Modal title="Edit Linear integration" onClose={() => setModal(null)}>
+          <LinearConfigForm
+            initial={toLinearConfig(modal.integration)}
+            nameInitial={modal.integration.name}
+            onSubmit={(config, name) => handleEditLinear(modal.integration.id, config, name)}
             onCancel={() => setModal(null)}
             submitLabel="Save changes"
           />
