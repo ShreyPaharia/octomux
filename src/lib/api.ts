@@ -115,6 +115,8 @@ export interface OctomuxSettings {
   envOverrides?: {
     claudeFlags: string | null;
   };
+  defaultTracker?: 'jira' | 'linear';
+  defaultLinearTeamKey?: string;
 }
 
 export type SetupItemStatus = 'ok' | 'missing' | 'outdated' | 'unconfigured' | 'optional_missing';
@@ -651,6 +653,23 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/integrations/${encodeURIComponent(id)}/test`, {
       method: 'POST',
     }),
+
+  async prefillLinear(apiKey: string): Promise<{
+    teams: Array<{ id: string; key: string; name: string; states: Array<{ id: string; name: string; type: string }> }>;
+    status_map_by_team: Record<string, Partial<Record<'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done', string>>>;
+    default_team_suggestion: string | null;
+  }> {
+    const res = await fetch('/api/integrations/linear/prefill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error ?? `prefill failed: ${res.status}`);
+    }
+    return res.json();
+  },
 
   // ─── Hooks registry (C4) ─────────────────────────────────────────────────────
   getHooksRegistry: () => request<{ hooks: HookRegistryEntry[] }>('/hooks/registry'),
