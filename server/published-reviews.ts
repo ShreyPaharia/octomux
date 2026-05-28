@@ -47,7 +47,7 @@ export function listPublishedReviews(taskId: string): PublishedReview[] {
     .prepare(
       `SELECT * FROM published_reviews
          WHERE task_id = ?
-         ORDER BY published_at DESC, id DESC`,
+         ORDER BY published_at DESC, rowid DESC`,
     )
     .all(taskId) as PublishedReview[];
 }
@@ -57,7 +57,7 @@ export function getLatestPublishedReview(taskId: string): PublishedReview | null
     (getDb()
       .prepare(
         `SELECT * FROM published_reviews
-         WHERE task_id = ? ORDER BY published_at DESC, id DESC LIMIT 1`,
+         WHERE task_id = ? ORDER BY published_at DESC, rowid DESC LIMIT 1`,
       )
       .get(taskId) as PublishedReview | undefined) ?? null
   );
