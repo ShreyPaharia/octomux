@@ -4,7 +4,11 @@ import type { Duplex } from 'stream';
 
 export type ServerEvent =
   | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
-  | { type: 'chat:updated' | 'chat:deleted'; payload: { chatId: string } };
+  | { type: 'chat:updated' | 'chat:deleted'; payload: { chatId: string } }
+  | {
+      type: 'review:drafts-ready' | 'review:run-failed';
+      payload: { taskId: string; reviewRunId: string };
+    };
 
 const clients = new Set<WebSocket>();
 let wss: WebSocketServer;
