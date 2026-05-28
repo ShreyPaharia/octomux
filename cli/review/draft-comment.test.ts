@@ -89,6 +89,104 @@ describe('octomux review draft-comment (kind=comment)', () => {
     expect(row.original_commit_sha).toBe('sha-head');
   });
 
+  it('inserts a suggestion when existing_code matches the file verbatim', async () => {
+    seed();
+    await runDraftComment([
+      '--task',
+      't1',
+      '--file',
+      'server/db.ts',
+      '--line',
+      '3',
+      '--side',
+      'new',
+      '--severity',
+      'nit',
+      '--bucket',
+      'actionable',
+      '--kind',
+      'suggestion',
+      '--existing-code',
+      'line3',
+      '--suggested-code',
+      'line3-improved',
+      '--body',
+      'cleaner.',
+    ]);
+    const out = JSON.parse(stdoutBuf);
+    expect(out.id).toBeTruthy();
+    const row = getDb()
+      .prepare('SELECT * FROM inline_comments WHERE id = ?')
+      .get(out.id) as Record<string, unknown>;
+    expect(row.kind).toBe('suggestion');
+    expect(row.existing_code).toBe('line3');
+    expect(row.suggested_code).toBe('line3-improved');
+  });
+
+  it('rejects suggestion when existing_code does not match the file at the line range', async () => {
+    seed();
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as typeof process.exit);
+    await expect(
+      runDraftComment([
+        '--task',
+        't1',
+        '--file',
+        'server/db.ts',
+        '--line',
+        '3',
+        '--side',
+        'new',
+        '--severity',
+        'nit',
+        '--bucket',
+        'actionable',
+        '--kind',
+        'suggestion',
+        '--existing-code',
+        'wrong content',
+        '--suggested-code',
+        'whatever',
+        '--body',
+        'x',
+      ]),
+    ).rejects.toThrow(/exit 2/);
+    expect(stderrBuf).toMatch(/existing_code mismatch/);
+    expect(stderrBuf).toMatch(/-line3/);
+    exitSpy.mockRestore();
+  });
+
+  it('validates multi-line suggestion against the start-line..line range', async () => {
+    seed();
+    await runDraftComment([
+      '--task',
+      't1',
+      '--file',
+      'server/db.ts',
+      '--start-line',
+      '2',
+      '--line',
+      '4',
+      '--side',
+      'new',
+      '--severity',
+      'nit',
+      '--bucket',
+      'actionable',
+      '--kind',
+      'suggestion',
+      '--existing-code',
+      'line2\nline3\nline4',
+      '--suggested-code',
+      'replacement',
+      '--body',
+      'x',
+    ]);
+    const out = JSON.parse(stdoutBuf);
+    expect(out.id).toBeTruthy();
+  });
+
   it('rejects an out-of-range line', async () => {
     seed();
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {

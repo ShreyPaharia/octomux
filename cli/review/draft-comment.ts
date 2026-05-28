@@ -89,8 +89,47 @@ export async function runDraftComment(argv: string[]): Promise<void> {
   }
 
   if (kind === 'suggestion') {
-    process.stderr.write('kind=suggestion path not yet implemented (added in Task C5)\n');
-    process.exit(2);
+    const existing = values['existing-code'];
+    const suggested = values['suggested-code'];
+    if (typeof existing !== 'string' || typeof suggested !== 'string') {
+      process.stderr.write(
+        `--existing-code and --suggested-code are required when --kind=suggestion\n`,
+      );
+      process.exit(2);
+    }
+    const startLine = values['start-line'] ? Number(values['start-line']) : line;
+    if (!Number.isInteger(startLine) || startLine < 1 || startLine > line) {
+      process.stderr.write(`--start-line must be a positive integer <= --line\n`);
+      process.exit(2);
+    }
+    const expectedSlice = fileLines.slice(startLine - 1, line).join('\n');
+    if (expectedSlice !== existing) {
+      process.stderr.write(
+        `existing_code mismatch at ${values.file}:${startLine}-${line}\n` +
+          diffLikeHint(expectedSlice, existing) +
+          '\n',
+      );
+      process.exit(2);
+    }
+    const suggestionRow = addComment({
+      task_id: taskId,
+      file_path: values.file as string,
+      line,
+      side: values.side as 'new' | 'old',
+      original_commit_sha: task.pr_head_sha,
+      body: values.body as string,
+      kind: 'suggestion',
+      severity: values.severity as CommentSeverity,
+      bucket: values.bucket as CommentBucket,
+      review_run_id: run.id,
+      existing_code: existing,
+      suggested_code: suggested,
+      re_flag_of: (values['reflag-of'] as string) ?? null,
+    });
+    process.stdout.write(
+      JSON.stringify({ id: suggestionRow.id, status: suggestionRow.status }) + '\n',
+    );
+    return;
   }
 
   const row = addComment({
@@ -108,4 +147,20 @@ export async function runDraftComment(argv: string[]): Promise<void> {
   });
 
   process.stdout.write(JSON.stringify({ id: row.id, status: row.status }) + '\n');
+}
+
+function diffLikeHint(expected: string, actual: string): string {
+  const e = expected.split('\n');
+  const a = actual.split('\n');
+  const out: string[] = [];
+  const max = Math.max(e.length, a.length);
+  for (let i = 0; i < max; i++) {
+    if (e[i] === a[i]) {
+      out.push(`  ${e[i] ?? ''}`);
+    } else {
+      if (e[i] !== undefined) out.push(`-${e[i]}`);
+      if (a[i] !== undefined) out.push(`+${a[i]}`);
+    }
+  }
+  return out.join('\n');
 }
