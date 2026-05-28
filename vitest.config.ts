@@ -44,6 +44,14 @@ export default defineConfig({
       },
       {
         test: {
+          name: 'cli-review',
+          globals: true,
+          environment: 'node',
+          include: ['cli/review/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
           name: 'bin',
           globals: true,
           environment: 'node',

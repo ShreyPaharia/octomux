@@ -19,6 +19,8 @@ const command = args[0];
 
 if (command === 'start') {
   await runStart(args.slice(1));
+} else if (command === 'review') {
+  await runReview(args.slice(1));
 } else {
   // Delegate to CLI (commander-based) for all other commands
   await import('../cli/dist/index.js');
@@ -104,6 +106,29 @@ async function runStart(startArgs) {
       execCb(`open ${url}`);
     }
   }
+}
+
+// ─── review subcommand ───────────────────────────────────────────────────────
+
+async function runReview(reviewArgs) {
+  // Prefer the compiled dist build when present; fall back to running the
+  // TypeScript source directly via tsx in dev. tsx is a project devDependency.
+  const distEntry = path.join(__dirname, '..', 'dist-server', 'cli-review.js');
+  if (existsSync(distEntry)) {
+    const { runReview: handler } = await import(distEntry);
+    await handler(reviewArgs);
+    return;
+  }
+
+  // Dev path: import the .ts source directly. Node 22+ resolves .ts files
+  // with the appropriate loader (tsx for dev, the harness's transpiler for tests).
+  // Spawn tsx as a subprocess so we don't need a loader registered in this process.
+  const tsxBin = path.join(__dirname, '..', 'node_modules', '.bin', 'tsx');
+  const entry = path.join(__dirname, '..', 'cli', 'review', 'index.ts');
+  const result = execFileSync(tsxBin, [entry, ...reviewArgs], {
+    stdio: 'inherit',
+  });
+  return result;
 }
 
 // ─── cli dependency installer ────────────────────────────────────────────────

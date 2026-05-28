@@ -18,5 +18,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "server"]
+  "include": ["src", "server", "cli/review"]
 }
