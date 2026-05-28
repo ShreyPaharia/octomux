@@ -500,6 +500,61 @@ describe('permission_prompts.session_id nullability', () => {
   });
 });
 
+describe('review orchestrator migration', () => {
+  it('creates review_runs, published_reviews, review_learnings tables', () => {
+    const db = createTestDb();
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+      name: string;
+    }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('review_runs');
+    expect(names).toContain('published_reviews');
+    expect(names).toContain('review_learnings');
+  });
+
+  it('adds 14 new columns to inline_comments', () => {
+    const db = createTestDb();
+    const cols = db.prepare('PRAGMA table_info(inline_comments)').all() as { name: string }[];
+    const colNames = cols.map((c) => c.name);
+    for (const name of [
+      'status',
+      'review_run_id',
+      'severity',
+      'bucket',
+      'kind',
+      'existing_code',
+      'suggested_code',
+      'published_review_id',
+      'github_comment_id',
+      're_flag_of',
+      'last_check_run_id',
+      'last_check_status',
+      'auto_resolved_at',
+      'auto_resolved_reason',
+    ]) {
+      expect(colNames).toContain(name);
+    }
+  });
+
+  it('defaults inline_comments.status to draft and kind to comment for new rows', () => {
+    const db = createTestDb();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('t-rev', 'x', '', 'idle', 'backlog');
+    db.prepare(
+      `INSERT INTO inline_comments (id, task_id, file_path, line, side, original_commit_sha, body)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run('c1', 't-rev', 'a.ts', 1, 'new', 'sha', 'body');
+    const row = db.prepare('SELECT status, kind FROM inline_comments WHERE id = ?').get('c1') as {
+      status: string;
+      kind: string;
+    };
+    expect(row.status).toBe('draft');
+    expect(row.kind).toBe('comment');
+  });
+});
+
 describe('claude_session_id rename', () => {
   it('renames the column on an existing DB with old column', () => {
     // Simulate a pre-rename DB by manually creating the old schema.

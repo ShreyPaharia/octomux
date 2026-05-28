@@ -686,4 +686,87 @@ export function initDb(instance: Database.Database): void {
     `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
      WHERE hook_activity = 'waiting' AND status = 'running'`,
   );
+
+  // ── Review orchestrator (2026-05-28) ─────────────────────────────────────
+
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS review_runs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      pr_head_sha TEXT NOT NULL,
+      walkthrough TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      started_at TIMESTAMP NOT NULL DEFAULT (datetime('now')),
+      completed_at TIMESTAMP,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_runs_task ON review_runs(task_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_review_runs_task_sha_status
+      ON review_runs(task_id, pr_head_sha)
+      WHERE status IN ('running', 'completed');
+
+    CREATE TABLE IF NOT EXISTS published_reviews (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      github_review_id INTEGER NOT NULL,
+      github_review_url TEXT,
+      head_sha TEXT NOT NULL,
+      verdict TEXT NOT NULL DEFAULT 'COMMENT',
+      comment_count INTEGER NOT NULL,
+      published_at TIMESTAMP NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_published_reviews_task ON published_reviews(task_id);
+
+    CREATE TABLE IF NOT EXISTS review_learnings (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      why TEXT NOT NULL,
+      created_from_comment_id TEXT REFERENCES inline_comments(id) ON DELETE SET NULL,
+      usage_count INTEGER NOT NULL DEFAULT 0,
+      last_used_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_learnings_repo ON review_learnings(repo_path);
+  `);
+
+  const inlineCommentCols = columnsOf('inline_comments');
+  addColumn('inline_comments', 'status', `status TEXT NOT NULL DEFAULT 'draft'`, inlineCommentCols);
+  addColumn(
+    'inline_comments',
+    'review_run_id',
+    'review_run_id TEXT REFERENCES review_runs(id)',
+    inlineCommentCols,
+  );
+  addColumn('inline_comments', 'severity', 'severity TEXT', inlineCommentCols);
+  addColumn('inline_comments', 'bucket', 'bucket TEXT', inlineCommentCols);
+  addColumn('inline_comments', 'kind', `kind TEXT NOT NULL DEFAULT 'comment'`, inlineCommentCols);
+  addColumn('inline_comments', 'existing_code', 'existing_code TEXT', inlineCommentCols);
+  addColumn('inline_comments', 'suggested_code', 'suggested_code TEXT', inlineCommentCols);
+  addColumn(
+    'inline_comments',
+    'published_review_id',
+    'published_review_id TEXT REFERENCES published_reviews(id)',
+    inlineCommentCols,
+  );
+  addColumn('inline_comments', 'github_comment_id', 'github_comment_id INTEGER', inlineCommentCols);
+  addColumn(
+    'inline_comments',
+    're_flag_of',
+    're_flag_of TEXT REFERENCES inline_comments(id)',
+    inlineCommentCols,
+  );
+  addColumn(
+    'inline_comments',
+    'last_check_run_id',
+    'last_check_run_id TEXT REFERENCES review_runs(id)',
+    inlineCommentCols,
+  );
+  addColumn('inline_comments', 'last_check_status', 'last_check_status TEXT', inlineCommentCols);
+  addColumn('inline_comments', 'auto_resolved_at', 'auto_resolved_at TIMESTAMP', inlineCommentCols);
+  addColumn(
+    'inline_comments',
+    'auto_resolved_reason',
+    'auto_resolved_reason TEXT',
+    inlineCommentCols,
+  );
 }
