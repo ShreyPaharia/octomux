@@ -482,6 +482,36 @@ export async function getFileDiff(opts: {
   return { oldContent, newContent, status, tooLarge, binary, isDirectory };
 }
 
+/**
+ * `git diff --name-only base..head` — returns the unique list of files changed
+ * between two SHAs in PR-head terms.
+ */
+export async function listChangedFiles(opts: {
+  worktree: string;
+  base: string;
+  head: string;
+}): Promise<string[]> {
+  const stdout = await git(opts.worktree, [
+    'diff',
+    '--name-only',
+    '--no-renames',
+    `${opts.base}..${opts.head}`,
+  ]);
+  return stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** `git show <sha>:<relPath>` — returns the file contents at a SHA, throws if missing. */
+export async function showFileAtSha(opts: {
+  worktree: string;
+  sha: string;
+  relPath: string;
+}): Promise<string> {
+  return git(opts.worktree, ['show', `${opts.sha}:${opts.relPath}`]);
+}
+
 export function safeResolvePath(worktree: string, relPath: string): string {
   if (!relPath || relPath.trim() === '') throw new Error('Invalid path');
   if (path.isAbsolute(relPath)) throw new Error('Invalid path');
