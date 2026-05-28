@@ -352,6 +352,38 @@ async function setupNew(task: Task): Promise<SetupResult> {
   if (task.base_branch) worktreeArgs.push(task.base_branch);
   await execFile('git', worktreeArgs);
 
+  // For review tasks, move HEAD to pr_head_sha so the diff UI and merge-base
+  // see the PR's actual commit. Auto-review tasks need a fetch first (the SHA
+  // may not be a local object yet); manual-review tasks reuse the source
+  // task's local HEAD and skip the fetch. Failures here are logged but never
+  // abort setup — the agent can recover even with an empty diff.
+  if (task.source === 'auto_review' && task.pr_head_sha) {
+    if (task.pr_number) {
+      try {
+        await execFile('git', [
+          '-C',
+          task.repo_path,
+          'fetch',
+          'origin',
+          `pull/${task.pr_number}/head`,
+        ]);
+      } catch (err) {
+        logger.warn(
+          { task_id: task.id, operation: 'createTask', err },
+          'createTask: failed to fetch PR head; review may show no files',
+        );
+      }
+    }
+    try {
+      await execFile('git', ['-C', worktreePath, 'reset', '--hard', task.pr_head_sha]);
+    } catch (err) {
+      logger.warn(
+        { task_id: task.id, operation: 'createTask', err },
+        'createTask: failed to reset worktree to pr_head_sha; leaving at base-branch tip',
+      );
+    }
+  }
+
   const baseRef = task.base_branch || 'HEAD';
   let baseSha: string;
   if (task.source === 'auto_review' && task.pr_head_sha && task.base_branch) {
