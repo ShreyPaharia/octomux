@@ -15,9 +15,10 @@ import type {
   SummaryRequest,
   NoteRequest,
   AddRefRequest,
+  ReviewLearning,
 } from '../../server/types';
 
-export type { WorkflowStatus, RuntimeState, TaskExternalRef, TaskUpdate };
+export type { WorkflowStatus, RuntimeState, TaskExternalRef, TaskUpdate, ReviewLearning };
 
 export interface WorktreeDetail {
   worktree: Worktree;
@@ -682,4 +683,10 @@ export const api = {
     ),
   requestReReview: (taskId: string) =>
     request<{ ok: boolean }>(`/tasks/${taskId}/review-runs`, { method: 'POST' }),
+
+  // ─── Review learnings ─────────────────────────────────────────────────────
+  listLearnings: (repoPath: string) =>
+    request<ReviewLearning[]>(`/repos/${encodeURIComponent(repoPath)}/learnings`),
+  deleteLearning: (id: string) =>
+    request<void>(`/learnings/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

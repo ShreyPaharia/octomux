@@ -11,6 +11,7 @@ export type SettingsScrollSection =
   | 'skills'
   | 'hooks'
   | 'repositories'
+  | 'reviews'
   | 'editor'
   | 'coding-agent'
   | 'agent-launch';
@@ -21,6 +22,7 @@ export const SETTINGS_SCROLL_NAV: { id: SettingsScrollSection; label: string }[]
   { id: 'skills', label: 'Skills' },
   { id: 'hooks', label: 'Hooks' },
   { id: 'repositories', label: 'Repositories' },
+  { id: 'reviews', label: 'Reviews' },
   { id: 'editor', label: 'Editor' },
   { id: 'coding-agent', label: 'Coding agent' },
   { id: 'agent-launch', label: 'Agent launch' },

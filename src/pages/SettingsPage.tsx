@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
 import { api } from '@/lib/api';
 import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
+import { ReviewsSection } from '@/components/settings/LearningsPanel';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { AddChip } from '@/components/layout/add-chip';
@@ -1144,6 +1145,7 @@ export default function SettingsPage() {
       <SkillsSection scrollRef={setRef('skills')} />
       <HooksSection scrollRef={setRef('hooks')} />
       <RepoConfigsSection scrollRef={setRef('repositories')} />
+      <ReviewsSection scrollRef={setRef('reviews')} />
       <EditorSection scrollRef={setRef('editor')} />
       <CodingAgentSection scrollRef={setRef('coding-agent')} />
       <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />

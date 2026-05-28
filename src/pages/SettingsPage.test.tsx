@@ -20,6 +20,8 @@ const { apiProxy } = await vi.hoisted(async () => {
       claudeFlags: '',
       envOverrides: { claudeFlags: null },
     }),
+    listLearnings: vi.fn().mockResolvedValue([]),
+    deleteLearning: vi.fn().mockResolvedValue(undefined),
   });
 });
 vi.mock('@/lib/api', () => ({ api: apiProxy }));
@@ -33,6 +35,10 @@ vi.mock('../lib/hooks', async (importOriginal) => {
     useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
   };
 });
+
+vi.mock('@/lib/tasks-context', () => ({
+  useTasksContextOptional: () => null,
+}));
 
 describe('SettingsPage', () => {
   beforeEach(() => {
@@ -86,5 +92,14 @@ describe('SettingsPage', () => {
     // The previously-active general item is no longer active.
     const generalNav = screen.getByTestId('settings-nav-general');
     expect(generalNav).not.toHaveAttribute('data-active');
+  });
+
+  it('renders the Reviews nav item and Reviews section', async () => {
+    renderWithRouter(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-nav-reviews')).toBeInTheDocument();
+    });
+    // The section element should be present in the DOM
+    expect(document.getElementById('section-reviews')).toBeInTheDocument();
   });
 });

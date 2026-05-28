@@ -97,6 +97,10 @@ vi.mock('../lib/hooks', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/tasks-context', () => ({
+  useTasksContextOptional: () => null,
+}));
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('C5: HooksSection', () => {
