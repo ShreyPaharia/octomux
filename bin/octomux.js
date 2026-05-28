@@ -120,15 +120,26 @@ async function runReview(reviewArgs) {
     return;
   }
 
-  // Dev path: import the .ts source directly. Node 22+ resolves .ts files
-  // with the appropriate loader (tsx for dev, the harness's transpiler for tests).
-  // Spawn tsx as a subprocess so we don't need a loader registered in this process.
-  const tsxBin = path.join(__dirname, '..', 'node_modules', '.bin', 'tsx');
+  // Dev path: locate tsx (local node_modules first, then walk up for git worktrees
+  // sharing a parent install, then fall back to `npx tsx` which respects PATH).
   const entry = path.join(__dirname, '..', 'cli', 'review', 'index.ts');
-  const result = execFileSync(tsxBin, [entry, ...reviewArgs], {
-    stdio: 'inherit',
-  });
-  return result;
+  const candidates = [path.join(__dirname, '..', 'node_modules', '.bin', 'tsx')];
+  let dir = path.resolve(__dirname, '..', '..');
+  for (let i = 0; i < 5; i++) {
+    candidates.push(path.join(dir, 'node_modules', '.bin', 'tsx'));
+    dir = path.dirname(dir);
+  }
+  const tsxBin = candidates.find((p) => existsSync(p));
+  try {
+    if (tsxBin) {
+      execFileSync(tsxBin, [entry, ...reviewArgs], { stdio: 'inherit' });
+    } else {
+      execFileSync('npx', ['--yes', 'tsx', entry, ...reviewArgs], { stdio: 'inherit' });
+    }
+  } catch (err) {
+    // Propagate the child's exit code without dumping a stack trace.
+    process.exit(typeof err.status === 'number' ? err.status : 1);
+  }
 }
 
 // ─── cli dependency installer ────────────────────────────────────────────────
