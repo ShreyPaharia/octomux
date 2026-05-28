@@ -571,6 +571,25 @@ describe('deleted_at migration', () => {
   });
 });
 
+describe('archived → trash migration', () => {
+  it('moves archived tasks to done with deleted_at set', async () => {
+    const db = createTestDb();
+    // Insert a row with the legacy archived status by writing directly
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, workflow_status, runtime_state)
+       VALUES ('legacy-1', 't', 'd', 'archived', 'idle')`,
+    ).run();
+
+    // Re-run initDb (idempotent) to trigger the backfill
+    const { initDb } = await import('./db.js');
+    initDb(db);
+
+    const row = db.prepare(`SELECT * FROM tasks WHERE id = 'legacy-1'`).get() as any;
+    expect(row.workflow_status).toBe('done');
+    expect(row.deleted_at).not.toBeNull();
+  });
+});
+
 describe('claude_session_id rename', () => {
   it('renames the column on an existing DB with old column', () => {
     // Simulate a pre-rename DB by manually creating the old schema.

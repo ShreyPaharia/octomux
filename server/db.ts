@@ -522,6 +522,30 @@ export function initDb(instance: Database.Database): void {
          ON tasks(deleted_at) WHERE deleted_at IS NOT NULL`,
   );
 
+  // Migrate legacy 'archived' workflow_status rows into the new trash flow.
+  // Idempotent: only updates rows that still have workflow_status='archived'.
+  // Uses datetime('now') (not updated_at) so users get a full grace window
+  // post-upgrade to restore anything they actually wanted to keep.
+  const archivedCount = (
+    instance
+      .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE workflow_status = 'archived'`)
+      .get() as { n: number }
+  ).n;
+  if (archivedCount > 0) {
+    instance
+      .prepare(
+        `UPDATE tasks SET workflow_status = 'done',
+                         deleted_at      = datetime('now'),
+                         updated_at      = datetime('now')
+         WHERE workflow_status = 'archived'`,
+      )
+      .run();
+    logger.warn(
+      { migrated: archivedCount },
+      'migrated legacy archived tasks to trash; will purge after deleteGraceHours',
+    );
+  }
+
   // Backfill workflow_status from initial_prompt + pr_url for old rows that
   // still have the default 'backlog' and no context to derive from.
   // The status-based backfill was removed in Wave 4 (status column dropped).
