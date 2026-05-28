@@ -20,6 +20,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout;
 }
 
+export async function computeMergeBase(
+  repoPath: string,
+  ref1: string,
+  ref2: string,
+): Promise<string> {
+  const { stdout } = await execFile('git', ['-C', repoPath, 'merge-base', ref1, ref2], {
+    env: gitEnv(),
+  });
+  return stdout.trim();
+}
+
 /**
  * List commits in `cwd` between `from` and `to`. Both default behaviour: caller
  * supplies a base..HEAD style window via `from`/`to`. Returns up to `limit`

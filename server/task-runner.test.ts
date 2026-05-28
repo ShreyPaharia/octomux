@@ -79,6 +79,8 @@ vi.mock('child_process', () => ({
         cb(null, { stdout: '', stderr: '' });
       } else if (args.includes('status') && args.some((a) => a.startsWith('--porcelain'))) {
         cb(null, { stdout: '', stderr: '' });
+      } else if (args.includes('merge-base')) {
+        cb(null, { stdout: '1111111111111111111111111111111111111111\n', stderr: '' });
       } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
         cb(null, { stdout: 'main\n', stderr: '' });
       } else if (args.includes('rev-parse')) {
@@ -672,6 +674,141 @@ describe('startTask', () => {
     // and stamp 'Setup interrupted' on top — keep it NULL until the session
     // is actually created.
     expect(updated.tmux_session).toBeNull();
+  });
+
+  // ─── auto_review base_sha = merge-base of base_branch and pr_head_sha ──────
+  describe('source=auto_review', () => {
+    const PR_HEAD = 'feedbeef0000000000000000000000000000beef';
+    const MERGE_BASE_SHA = '1111111111111111111111111111111111111111';
+    const REV_PARSE_SHA = 'abcdef0000000000000000000000000000000000';
+
+    const reviewTask = {
+      ...DEFAULTS.task,
+      source: 'auto_review' as const,
+      base_branch: 'main',
+      pr_head_sha: PR_HEAD,
+    } as Task;
+
+    // Earlier tests (e.g. resumeTask's "sets error status on failure") replace
+    // the default mock with mockImplementation, which persists across tests
+    // since vi.clearAllMocks only clears call history. Restore a known-good
+    // impl here so merge-base routing is deterministic.
+    beforeEach(() => {
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        if (args.includes('display-message')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('list-windows')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('new-window')) {
+          nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else if (args.includes('merge-base')) {
+          cb(null, { stdout: `${MERGE_BASE_SHA}\n`, stderr: '' });
+        } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+          cb(null, { stdout: 'main\n', stderr: '' });
+        } else if (args.includes('rev-parse')) {
+          cb(null, { stdout: `${REV_PARSE_SHA}\n`, stderr: '' });
+        } else {
+          cb(null, { stdout: 'true', stderr: '' });
+        }
+      }) as never);
+    });
+
+    it('invokes git merge-base with base_branch and pr_head_sha', async () => {
+      insertTask(db, {
+        source: 'auto_review',
+        base_branch: 'main',
+        pr_head_sha: PR_HEAD,
+      });
+      await startTask(reviewTask);
+
+      const mergeBaseCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['merge-base', 'main', PR_HEAD],
+      });
+      expect(mergeBaseCall).toBeDefined();
+    });
+
+    it('persists merge-base SHA as base_sha', async () => {
+      insertTask(db, {
+        source: 'auto_review',
+        base_branch: 'main',
+        pr_head_sha: PR_HEAD,
+      });
+      await startTask(reviewTask);
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.base_sha).toBe(MERGE_BASE_SHA);
+    });
+
+    it('falls back to rev-parse when git merge-base fails', async () => {
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        if (args.includes('display-message')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('list-windows')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('new-window')) {
+          nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else if (args.includes('merge-base')) {
+          cb(new Error('Not a valid object name'), null);
+        } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
+          cb(null, { stdout: 'main\n', stderr: '' });
+        } else if (args.includes('rev-parse')) {
+          cb(null, { stdout: `${REV_PARSE_SHA}\n`, stderr: '' });
+        } else {
+          cb(null, { stdout: 'true', stderr: '' });
+        }
+      }) as never);
+
+      insertTask(db, {
+        source: 'auto_review',
+        base_branch: 'main',
+        pr_head_sha: PR_HEAD,
+      });
+      await startTask(reviewTask);
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.runtime_state).toBe('running');
+      expect(updated.base_sha).toBe(REV_PARSE_SHA);
+    });
+  });
+
+  // ─── non-review sources keep rev-parse path ────────────────────────────────
+  describe('source=null (default)', () => {
+    it('does not invoke git merge-base for base_sha', async () => {
+      insertTask(db, { base_branch: 'main' });
+      await startTask({ ...DEFAULTS.task, base_branch: 'main' } as Task);
+
+      const mergeBaseCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['merge-base'],
+      });
+      expect(mergeBaseCall).toBeUndefined();
+    });
+
+    it('uses rev-parse for base_sha', async () => {
+      insertTask(db, { base_branch: 'main' });
+      await startTask({ ...DEFAULTS.task, base_branch: 'main' } as Task);
+
+      const revParseCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['rev-parse', 'main^{commit}'],
+      });
+      expect(revParseCall).toBeDefined();
+    });
   });
 });
 
