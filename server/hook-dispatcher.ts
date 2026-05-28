@@ -262,6 +262,25 @@ async function runScript(
  * Providers run first (in instance creation order), then shell scripts.
  * All errors are isolated per provider; never throws.
  */
+/**
+ * Load external refs for a task from the DB, parsing the JSON metadata column.
+ * Returns an empty array if the DB is unavailable or the task has no refs.
+ */
+function loadTaskExternalRefs(taskId: string): import('./types.js').TaskExternalRef[] {
+  try {
+    const db = getDb();
+    const rows = db
+      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? ORDER BY created_at ASC')
+      .all(taskId) as Array<import('./types.js').TaskExternalRef & { metadata: string | null }>;
+    return rows.map((r) => ({
+      ...r,
+      metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, unknown>) : null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 async function fireIntegrationProviders(
   event: HookEventName,
   envelope: HookEnvelope,
@@ -285,6 +304,19 @@ async function fireIntegrationProviders(
     return;
   }
 
+  // Ensure external_refs (with parsed metadata) are available for provider handlers.
+  // Callers typically spread the task row which lacks this relation, so we hydrate it here.
+  const enrichedEnvelope: HookEnvelope =
+    envelope.task?.id && !envelope.task.external_refs
+      ? {
+          ...envelope,
+          task: {
+            ...envelope.task,
+            external_refs: loadTaskExternalRefs(envelope.task.id),
+          },
+        }
+      : envelope;
+
   const timeoutMs = parseInt(process.env.OCTOMUX_HOOK_TIMEOUT_MS ?? '30000', 10);
 
   for (const integration of integrations) {
@@ -303,7 +335,7 @@ async function fireIntegrationProviders(
 
     try {
       await Promise.race([
-        provider.handler(envelope, resolvedConfig),
+        provider.handler(enrichedEnvelope, resolvedConfig),
         new Promise<void>((_, reject) =>
           setTimeout(() => reject(new Error('provider handler timed out')), timeoutMs),
         ),

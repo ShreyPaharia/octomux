@@ -2368,7 +2368,7 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
     const db = getDb();
-    const body = req.body as AddRefRequest;
+    const body = req.body as AddRefRequest & { metadata?: unknown };
 
     if (!body.integration?.trim()) {
       res.status(400).json({ error: 'integration is required' });
@@ -2378,11 +2378,27 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'ref is required' });
       return;
     }
+    if (
+      body.metadata !== undefined &&
+      body.metadata !== null &&
+      (typeof body.metadata !== 'object' || Array.isArray(body.metadata))
+    ) {
+      res.status(400).json({ error: 'metadata must be a JSON object' });
+      return;
+    }
+
+    const metadataJson =
+      body.metadata !== null &&
+      body.metadata !== undefined &&
+      typeof body.metadata === 'object' &&
+      !Array.isArray(body.metadata)
+        ? JSON.stringify(body.metadata)
+        : null;
 
     db.prepare(
-      `INSERT OR REPLACE INTO task_external_refs (task_id, integration, ref, url, created_at)
-       VALUES (?, ?, ?, ?, datetime('now'))`,
-    ).run(task.id, body.integration, body.ref, body.url ?? null);
+      `INSERT OR REPLACE INTO task_external_refs (task_id, integration, ref, url, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+    ).run(task.id, body.integration, body.ref, body.url ?? null, metadataJson);
 
     fireHook('ref_added', {
       event: 'ref_added',
@@ -2390,10 +2406,13 @@ export function setupRoutes(app: Express): void {
       data: { integration: body.integration, ref: body.ref, url: body.url },
     });
 
-    const row = db
+    const raw = db
       .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
-      .get(task.id, body.integration) as TaskExternalRef;
-    res.status(201).json(row);
+      .get(task.id, body.integration) as { metadata: string | null } & Record<string, unknown>;
+    res.status(201).json({
+      ...raw,
+      metadata: raw.metadata ? (JSON.parse(raw.metadata) as Record<string, unknown>) : null,
+    });
   });
 
   // Delete an external ref
@@ -2446,8 +2465,13 @@ export function setupRoutes(app: Express): void {
     const db = getDb();
     const refs = db
       .prepare('SELECT * FROM task_external_refs WHERE task_id = ? ORDER BY created_at ASC')
-      .all(task.id) as TaskExternalRef[];
-    res.json(refs);
+      .all(task.id) as Array<{ metadata: string | null } & Record<string, unknown>>;
+    res.json(
+      refs.map((r) => ({
+        ...r,
+        metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, unknown>) : null,
+      })),
+    );
   });
 
   // ─── Hook executions for a task ──────────────────────────────────────────────

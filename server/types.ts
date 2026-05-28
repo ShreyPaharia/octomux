@@ -231,6 +231,7 @@ export interface AddRefRequest {
   integration: string;
   ref: string;
   url?: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 /** Request body for PATCH /api/tasks/:id/base — change a task's diff base. */
