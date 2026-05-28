@@ -17,6 +17,9 @@ export interface OctomuxSettings {
   defaultBaseBranch?: string;
   onboardingCompletedAt?: string;
 
+  /** Hours a soft-deleted task waits before permanent purge. Default 6 when absent. */
+  deleteGraceHours?: number;
+
   /** @deprecated promoted into harnesses['claude-code'] on next save */
   claudeFlags?: string;
   /** @deprecated */
@@ -101,12 +104,22 @@ export async function getSettings(): Promise<OctomuxSettings> {
       typeof parsed.defaultBaseBranch === 'string' ? parsed.defaultBaseBranch : undefined,
     onboardingCompletedAt:
       typeof parsed.onboardingCompletedAt === 'string' ? parsed.onboardingCompletedAt : undefined,
+    deleteGraceHours:
+      typeof parsed.deleteGraceHours === 'number' ? parsed.deleteGraceHours : undefined,
   };
 }
 
 export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<OctomuxSettings> {
   if (patch.editor && !VALID_EDITORS.includes(patch.editor)) {
     throw new Error(`Invalid editor: ${patch.editor}. Must be one of: ${VALID_EDITORS.join(', ')}`);
+  }
+
+  if (patch.deleteGraceHours !== undefined) {
+    if (!Number.isFinite(patch.deleteGraceHours) || patch.deleteGraceHours < 0) {
+      throw new Error(
+        `Invalid deleteGraceHours: ${patch.deleteGraceHours}. Must be a number >= 0.`,
+      );
+    }
   }
 
   const current = await getSettings();
@@ -155,6 +168,8 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
       patch.onboardingCompletedAt !== undefined
         ? patch.onboardingCompletedAt
         : current.onboardingCompletedAt,
+    deleteGraceHours:
+      patch.deleteGraceHours !== undefined ? patch.deleteGraceHours : current.deleteGraceHours,
   };
 
   const filePath = settingsPath();

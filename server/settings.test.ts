@@ -244,6 +244,69 @@ describe('settings', () => {
   });
 });
 
+describe('deleteGraceHours', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFs.mkdir.mockResolvedValue(undefined);
+    mockFs.writeFile.mockResolvedValue(undefined);
+  });
+
+  describe('getSettings', () => {
+    it('returns undefined for deleteGraceHours when field is absent from disk', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify({ editor: 'nvim', harnesses: {} }));
+      const settings = await getSettings();
+      expect(settings.deleteGraceHours).toBeUndefined();
+    });
+
+    it('returns the stored value when deleteGraceHours is present on disk', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ editor: 'nvim', harnesses: {}, deleteGraceHours: 24 }),
+      );
+      const settings = await getSettings();
+      expect(settings.deleteGraceHours).toBe(24);
+    });
+  });
+
+  describe('updateSettings', () => {
+    beforeEach(() => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+    });
+
+    it('persists deleteGraceHours: 24 and getSettings returns 24', async () => {
+      const result = await updateSettings({ deleteGraceHours: 24 });
+      expect(result.deleteGraceHours).toBe(24);
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      const written = JSON.parse(writtenJson);
+      expect(written.deleteGraceHours).toBe(24);
+    });
+
+    it('accepts deleteGraceHours: 0 (purge on next poller tick)', async () => {
+      const result = await updateSettings({ deleteGraceHours: 0 });
+      expect(result.deleteGraceHours).toBe(0);
+    });
+
+    it('leaves deleteGraceHours untouched when not in patch', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ ...DEFAULT_SETTINGS, deleteGraceHours: 12 }),
+      );
+      const result = await updateSettings({ editor: 'vscode' });
+      expect(result.deleteGraceHours).toBe(12);
+    });
+
+    it('rejects negative deleteGraceHours', async () => {
+      await expect(updateSettings({ deleteGraceHours: -1 })).rejects.toThrow(
+        /Invalid deleteGraceHours/,
+      );
+    });
+
+    it('rejects NaN deleteGraceHours', async () => {
+      await expect(updateSettings({ deleteGraceHours: NaN })).rejects.toThrow(
+        /Invalid deleteGraceHours/,
+      );
+    });
+  });
+});
+
 describe('resolveClaudeFlags', () => {
   afterEach(() => {
     delete process.env.OCTOMUX_CLAUDE_FLAGS;
