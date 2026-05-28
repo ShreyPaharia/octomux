@@ -38,7 +38,7 @@ export function getCurrentRun(taskId: string): ReviewRun | null {
       .prepare(
         `SELECT * FROM review_runs
            WHERE task_id = ? AND status != 'failed'
-           ORDER BY started_at DESC, id DESC LIMIT 1`,
+           ORDER BY started_at DESC, rowid DESC LIMIT 1`,
       )
       .get(taskId) as ReviewRun | undefined) ?? null
   );

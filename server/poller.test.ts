@@ -971,7 +971,7 @@ describe('pollReviewerRequests', () => {
       } else {
         cb(null, { stdout: '', stderr: '' });
       }
-      return undefined as ReturnType<typeof execFile>;
+      return undefined as unknown as ReturnType<typeof execFile>;
     });
 
     await pollReviewerRequests();

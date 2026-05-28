@@ -15,16 +15,11 @@ vi.mock('../../server/diff.js', async (importOriginal) => {
 });
 
 let tmpDir: string;
-let stdoutBuf = '';
 let stderrBuf = '';
 
 beforeEach(() => {
-  stdoutBuf = '';
   stderrBuf = '';
-  vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
-    stdoutBuf += String(chunk);
-    return true;
-  }) as typeof process.stdout.write);
+  vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as typeof process.stdout.write);
   vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
     stderrBuf += String(chunk);
     return true;
