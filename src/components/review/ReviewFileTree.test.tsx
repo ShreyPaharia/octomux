@@ -44,6 +44,11 @@ const WT: Walkthrough = {
   ],
 };
 
+const defaultProps = {
+  reviewedFiles: new Set<string>(),
+  onToggleReviewed: () => {},
+};
+
 describe('ReviewFileTree', () => {
   it('renders one section per walkthrough group, filtering walkthrough-only files', () => {
     render(
@@ -53,6 +58,7 @@ describe('ReviewFileTree', () => {
         comments={[]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
 
@@ -72,6 +78,7 @@ describe('ReviewFileTree', () => {
         comments={[]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
 
@@ -94,6 +101,7 @@ describe('ReviewFileTree', () => {
         ]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
     const pill = screen.getByTestId('comment-count-src/a.ts');
@@ -109,6 +117,7 @@ describe('ReviewFileTree', () => {
         comments={[comment({ id: 'c1', severity: 'nit' })]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
     const pill = screen.getByTestId('comment-count-src/a.ts');
@@ -123,6 +132,7 @@ describe('ReviewFileTree', () => {
         comments={[]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
     expect(screen.queryByTestId('comment-count-src/a.ts')).toBeNull();
@@ -140,6 +150,7 @@ describe('ReviewFileTree', () => {
         ]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
     const open = screen.getByTestId('comment-count-src/a.ts');
@@ -160,6 +171,7 @@ describe('ReviewFileTree', () => {
         ]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
     expect(screen.queryByTestId('comment-count-src/a.ts')).toBeNull();
@@ -174,6 +186,7 @@ describe('ReviewFileTree', () => {
         comments={[]}
         selectedPath={null}
         onSelect={onSelect}
+        {...defaultProps}
       />,
     );
     fireEvent.click(screen.getByTestId('review-file-row-src/a.ts'));
@@ -188,9 +201,55 @@ describe('ReviewFileTree', () => {
         comments={[]}
         selectedPath={null}
         onSelect={() => {}}
+        {...defaultProps}
       />,
     );
     const other = screen.getByTestId('review-file-group-Other');
     expect(within(other).getByTestId('review-file-row-scripts/x.sh')).toBeTruthy();
+  });
+});
+
+describe('ReviewFileTree group row', () => {
+  const walkthrough: Walkthrough = {
+    groups: [
+      {
+        name: 'Admin Pair Configs — FX-correct hedge size USD',
+        summary: 'A long summary that should stay on one line',
+        files: [{ path: 'a.go' }, { path: 'b.go' }],
+      },
+    ],
+  };
+
+  it('renders the group name in a single truncating element', () => {
+    render(
+      <ReviewFileTree
+        files={['a.go', 'b.go']}
+        walkthrough={walkthrough}
+        comments={[]}
+        selectedPath={null}
+        reviewedFiles={new Set()}
+        onToggleReviewed={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    const nameEl = screen.getByText(/Admin Pair Configs/);
+    expect(nameEl.className).toMatch(/truncate/);
+  });
+
+  it('fires onToggleReviewed when the checkbox changes', () => {
+    const onToggleReviewed = vi.fn();
+    render(
+      <ReviewFileTree
+        files={['a.go']}
+        walkthrough={null}
+        comments={[]}
+        selectedPath={null}
+        reviewedFiles={new Set()}
+        onToggleReviewed={onToggleReviewed}
+        onSelect={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('review-toggle-a.go'));
+    expect(onToggleReviewed).toHaveBeenCalledWith('a.go', false);
   });
 });

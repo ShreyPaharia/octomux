@@ -1,24 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Badge } from '../ui/badge';
 import { ChevronDownIcon } from '../icons';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { InlineCommentDTO } from '@/lib/api';
 import type { Walkthrough, WalkthroughFile } from './WalkthroughHeader';
-
-export const OTHER_GROUP_NAME = 'Other';
+import { buildGroups } from '@/lib/review-file-groups';
 
 interface Props {
   files: string[];
   walkthrough: Walkthrough | null;
   comments: InlineCommentDTO[];
   selectedPath: string | null;
+  reviewedFiles: Set<string>;
+  onToggleReviewed: (path: string, currentlyReviewed: boolean) => void;
   onSelect: (path: string) => void;
-}
-
-interface RenderGroup {
-  name: string;
-  summary?: string;
-  files: WalkthroughFile[];
 }
 
 interface FileCounts {
@@ -42,50 +38,25 @@ function countsByFile(comments: InlineCommentDTO[]): Map<string, FileCounts> {
   return m;
 }
 
-function buildGroups(files: string[], walkthrough: Walkthrough | null): RenderGroup[] {
-  const diffSet = new Set(files);
-  const claimed = new Set<string>();
-  const groups: RenderGroup[] = [];
-
-  for (const g of walkthrough?.groups ?? []) {
-    const present = (g.files ?? []).filter((f) => diffSet.has(f.path));
-    if (present.length === 0) continue;
-    for (const f of present) claimed.add(f.path);
-    groups.push({ name: g.name, summary: g.summary, files: present });
-  }
-
-  const orphans = files.filter((p) => !claimed.has(p));
-  if (orphans.length > 0) {
-    groups.push({
-      name: OTHER_GROUP_NAME,
-      files: orphans.map((path) => ({ path })),
-    });
-  }
-
-  return groups;
-}
-
 function shortPath(path: string): string {
   const idx = path.lastIndexOf('/');
   return idx === -1 ? path : path.slice(idx + 1);
-}
-
-function dirPath(path: string): string {
-  const idx = path.lastIndexOf('/');
-  return idx === -1 ? '' : path.slice(0, idx);
 }
 
 interface FileRowProps {
   file: WalkthroughFile;
   selected: boolean;
   counts: FileCounts | undefined;
+  reviewedFiles: Set<string>;
+  onToggleReviewed: (path: string, currentlyReviewed: boolean) => void;
   onSelect: (path: string) => void;
 }
 
-function FileRow({ file, selected, counts, onSelect }: FileRowProps) {
+function FileRow({ file, selected, counts, reviewedFiles, onToggleReviewed, onSelect }: FileRowProps) {
   const open = counts?.open ?? 0;
   const stale = counts?.stale ?? 0;
   const serious = !!counts?.hasSerious;
+  const isReviewed = reviewedFiles.has(file.path);
 
   return (
     <li>
@@ -93,28 +64,52 @@ function FileRow({ file, selected, counts, onSelect }: FileRowProps) {
         type="button"
         data-testid={`review-file-row-${file.path}`}
         data-selected={selected ? 'true' : undefined}
+        data-reviewed={isReviewed ? 'true' : 'false'}
+        role="treeitem"
+        aria-selected={selected}
+        tabIndex={selected ? 0 : -1}
         onClick={() => onSelect(file.path)}
         className={cn(
-          'flex w-full items-start gap-2 px-3 py-1.5 text-left text-xs hover:bg-glass-l2/40',
+          'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-glass-l2/40',
           selected && 'bg-glass-l2/60',
+          'data-[reviewed=true]:opacity-60',
         )}
       >
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex items-center gap-2">
-            <code className="truncate font-mono text-foreground">{shortPath(file.path)}</code>
-            {file.label && (
-              <Badge variant="outline" className="px-1 text-[10px]">
-                {file.label}
-              </Badge>
-            )}
-          </span>
-          {dirPath(file.path) && (
-            <span className="truncate font-mono text-[10px] text-muted-foreground">
-              {dirPath(file.path)}
-            </span>
+        <input
+          type="checkbox"
+          checked={isReviewed}
+          data-testid={`review-toggle-${file.path}`}
+          aria-label={isReviewed ? `Unmark ${file.path} reviewed` : `Mark ${file.path} reviewed`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            e.stopPropagation();
+            onToggleReviewed(file.path, isReviewed);
+          }}
+          className="h-3.5 w-3.5 shrink-0 cursor-pointer"
+        />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <code
+            className="min-w-0 flex-1 truncate font-mono text-foreground"
+            title={file.path}
+          >
+            {shortPath(file.path)}
+          </code>
+          {file.label && (
+            <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
+              {file.label}
+            </Badge>
           )}
           {file.summary && (
-            <span className="line-clamp-2 text-[11px] text-muted-foreground">{file.summary}</span>
+            <Popover>
+              <PopoverTrigger render={<span />} nativeButton={false}
+                aria-label={`Summary for ${file.path}`}
+                className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
+                onClick={(e) => e.stopPropagation()}
+              >
+                info
+              </PopoverTrigger>
+              <PopoverContent className="w-72 text-xs">{file.summary}</PopoverContent>
+            </Popover>
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -146,7 +141,15 @@ function FileRow({ file, selected, counts, onSelect }: FileRowProps) {
   );
 }
 
-export function ReviewFileTree({ files, walkthrough, comments, selectedPath, onSelect }: Props) {
+export function ReviewFileTree({
+  files,
+  walkthrough,
+  comments,
+  selectedPath,
+  reviewedFiles,
+  onToggleReviewed,
+  onSelect,
+}: Props) {
   const groups = useMemo(() => buildGroups(files, walkthrough), [files, walkthrough]);
   const counts = useMemo(() => countsByFile(comments), [comments]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -160,6 +163,23 @@ export function ReviewFileTree({ files, walkthrough, comments, selectedPath, onS
     });
   }
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLElement>) => {
+      if (!['ArrowDown', 'ArrowUp', 'j', 'k'].includes(e.key)) return;
+      const orderedPaths = groups.flatMap((g) => g.files.map((f) => f.path));
+      if (orderedPaths.length === 0) return;
+      const idx = selectedPath ? orderedPaths.indexOf(selectedPath) : -1;
+      const delta = e.key === 'ArrowDown' || e.key === 'j' ? 1 : -1;
+      const nextIdx = idx === -1 ? 0 : (idx + delta + orderedPaths.length) % orderedPaths.length;
+      const next = orderedPaths[nextIdx];
+      if (next) {
+        e.preventDefault();
+        onSelect(next);
+      }
+    },
+    [groups, selectedPath, onSelect],
+  );
+
   if (groups.length === 0) {
     return (
       <div className="p-4 text-xs text-muted-foreground" data-testid="review-file-tree-empty">
@@ -169,34 +189,50 @@ export function ReviewFileTree({ files, walkthrough, comments, selectedPath, onS
   }
 
   return (
-    <nav data-testid="review-file-tree" className="flex h-full min-h-0 flex-col overflow-y-auto">
+    <nav
+      data-testid="review-file-tree"
+      role="tree"
+      tabIndex={0}
+      className="flex h-full min-h-0 flex-col overflow-y-auto"
+      onKeyDown={handleKeyDown}
+    >
       {groups.map((group) => {
         const open = !collapsed.has(group.name);
         return (
           <section
             key={group.name}
+            role="group"
             data-testid={`review-file-group-${group.name}`}
             className="border-b border-glass-edge/60"
           >
             <button
               type="button"
               onClick={() => toggle(group.name)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold hover:bg-glass-l2/40"
+              className="flex w-full items-center gap-2 overflow-hidden px-3 py-2 text-left text-xs font-semibold hover:bg-glass-l2/40"
               aria-expanded={open}
+              role="treeitem"
+              title={group.name}
             >
               <ChevronDownIcon
-                className={open ? 'transition-transform' : '-rotate-90 transition-transform'}
+                aria-hidden
+                className={cn(
+                  'shrink-0',
+                  open ? 'transition-transform' : '-rotate-90 transition-transform',
+                )}
               />
-              <span>{group.name}</span>
-              <span className="text-[10px] font-normal text-muted-foreground">
+              <span className="min-w-0 flex-1 truncate">{group.name}</span>
+              <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
                 {group.files.length}
               </span>
-              {group.summary && (
-                <span className="ml-1 truncate text-[11px] font-normal text-muted-foreground">
-                  — {group.summary}
-                </span>
-              )}
             </button>
+            {open && group.summary && (
+              <div
+                className="line-clamp-1 px-3 pb-1 text-[11px] text-muted-foreground"
+                title={group.summary}
+              >
+                {group.summary}
+              </div>
+            )}
             {open && (
               <ul>
                 {group.files.map((f) => (
@@ -205,6 +241,8 @@ export function ReviewFileTree({ files, walkthrough, comments, selectedPath, onS
                     file={f}
                     selected={selectedPath === f.path}
                     counts={counts.get(f.path)}
+                    reviewedFiles={reviewedFiles}
+                    onToggleReviewed={onToggleReviewed}
                     onSelect={onSelect}
                   />
                 ))}

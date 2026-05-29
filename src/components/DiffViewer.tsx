@@ -52,6 +52,13 @@ interface Props {
   /** Hide the built-in left file tree. Hosts (e.g. the review cockpit) use
    *  this when they render their own grouped tree alongside the diff. */
   hideFileTree?: boolean;
+  /** When provided, sort the rendered file list to match this path order.
+   *  Paths not in the list are appended after the ordered set, preserving
+   *  their API order. */
+  fileOrder?: string[];
+  /** When provided, render sticky group-name dividers above each group's files
+   *  in the diff stream. */
+  groups?: import('@/lib/review-file-groups').RenderGroup[];
 }
 
 export function DiffViewer(props: Props) {
@@ -72,6 +79,8 @@ export function DiffViewer(props: Props) {
     agents,
     onFilesChange,
     hideFileTree,
+    fileOrder,
+    groups,
   } = props;
 
   // Standalone / composer mode — renders the new-content lines as clickable
@@ -104,6 +113,8 @@ export function DiffViewer(props: Props) {
       agents={agents}
       onFilesChange={onFilesChange}
       hideFileTree={hideFileTree}
+      fileOrder={fileOrder}
+      groups={groups}
     />
   );
 }
@@ -200,6 +211,8 @@ function ApiDiffViewer({
   agents = [],
   onFilesChange,
   hideFileTree = false,
+  fileOrder,
+  groups,
 }: {
   taskId: string;
   isRunning: boolean;
@@ -212,6 +225,8 @@ function ApiDiffViewer({
   agents?: Agent[];
   onFilesChange?: (paths: string[]) => void;
   hideFileTree?: boolean;
+  fileOrder?: string[];
+  groups?: import('@/lib/review-file-groups').RenderGroup[];
 }) {
   const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
@@ -226,10 +241,19 @@ function ApiDiffViewer({
   const internalListRef = useRef<DiffFileListHandle | null>(null);
   const listRef = externalListRef ?? internalListRef;
 
+  const orderedFiles = useMemo(() => {
+    if (!fileOrder || fileOrder.length === 0) return files;
+    const indexOf = new Map(fileOrder.map((p, i) => [p, i]));
+    const known = files.filter((f) => indexOf.has(f.path));
+    const unknown = files.filter((f) => !indexOf.has(f.path));
+    known.sort((a, b) => indexOf.get(a.path)! - indexOf.get(b.path)!);
+    return [...known, ...unknown];
+  }, [files, fileOrder]);
+
   // Notify host when the file set changes.
   useEffect(() => {
-    onFilesChange?.(files.map((f) => f.path));
-  }, [files, onFilesChange]);
+    onFilesChange?.(orderedFiles.map((f) => f.path));
+  }, [orderedFiles, onFilesChange]);
 
   // Hydrate reviewed set from the API in review-cockpit mode, otherwise localStorage.
   useEffect(() => {
@@ -371,7 +395,7 @@ function ApiDiffViewer({
         data-testid="diff-pane"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-glass-l0"
       >
-        {reviewCounts.total > 0 ? (
+        {!hideFileTree && reviewCounts.total > 0 ? (
           <div className="diff-pane-header flex shrink-0 items-center justify-end gap-2 border-b border-glass-edge px-4 py-2">
             <span
               data-testid="review-progress"
@@ -383,11 +407,11 @@ function ApiDiffViewer({
           </div>
         ) : null}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          {files.length === 0 ? null : (
+          {orderedFiles.length === 0 ? null : (
             <DiffFileList
               ref={listRef}
               taskId={taskId}
-              files={files}
+              files={orderedFiles}
               reviewed={reviewed}
               onToggleReviewed={toggleReviewed}
               onActiveChange={setActiveFile}
@@ -395,6 +419,7 @@ function ApiDiffViewer({
               agents={agents}
               rangeIsBase={isBaseRange}
               enableComments={enableComments}
+              groups={groups}
             />
           )}
         </div>

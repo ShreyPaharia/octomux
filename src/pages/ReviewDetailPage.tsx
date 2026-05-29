@@ -1,16 +1,29 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { api, type ReviewDetail } from '../lib/api';
+import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
 import { subscribe } from '../lib/event-source';
 import { WalkthroughHeader, type Walkthrough } from '../components/review/WalkthroughHeader';
+import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
 import { ReviewFileTree } from '../components/review/ReviewFileTree';
 import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
 import { DiffViewer } from '../components/DiffViewer';
 import { CommentsSidePanel } from '../components/CommentsSidePanel';
-import { Button } from '../components/ui/button';
 import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
+
+const COMMENTS_PANEL_KEY = 'octomux:review:comments-panel-open';
+
+function defaultCommentsPanelOpen(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = localStorage.getItem(COMMENTS_PANEL_KEY);
+    if (stored !== null) return stored === 'true';
+  } catch {
+    // localStorage unavailable
+  }
+  return window.innerWidth >= 1440;
+}
 
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -18,8 +31,16 @@ export default function ReviewDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [showCommentsPanel, setShowCommentsPanel] = useState(false);
+  const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
   const diffListRef = useRef<DiffFileListHandle | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMMENTS_PANEL_KEY, String(showCommentsPanel));
+    } catch {
+      // ignore
+    }
+  }, [showCommentsPanel]);
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -46,7 +67,61 @@ export default function ReviewDetailPage() {
 
   const taskComments = useTaskComments(id);
 
+  const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set());
+
+  const handleToggleReviewed = useCallback(
+    async (path: string, currentlyReviewed: boolean) => {
+      setReviewedFiles((prev) => {
+        const next = new Set(prev);
+        if (currentlyReviewed) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      try {
+        if (currentlyReviewed) await api.unmarkReviewed(id!, path);
+        else await api.markReviewed(id!, path);
+      } catch {
+        setReviewedFiles((prev) => {
+          const next = new Set(prev);
+          if (currentlyReviewed) next.add(path);
+          else next.delete(path);
+          return next;
+        });
+      }
+    },
+    [id],
+  );
+
+  const reviewedHydratedRef = useRef(false);
+  const handleSummaryLoaded = useCallback((s: DiffSummaryResponse) => {
+    if (reviewedHydratedRef.current) return;
+    reviewedHydratedRef.current = true;
+    const set = new Set<string>();
+    for (const f of s.files) if (f.reviewed) set.add(f.path);
+    setReviewedFiles(set);
+  }, []);
+
   const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
+
+  const walkthrough = useMemo<Walkthrough | null>(() => {
+    const raw = detail?.latest_run?.walkthrough;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as Walkthrough;
+    } catch {
+      return null;
+    }
+  }, [detail]);
+
+  const orderedGroups = useMemo(
+    () => buildGroups(filesInDiff, walkthrough),
+    [filesInDiff, walkthrough],
+  );
+
+  const orderedFileOrder = useMemo(
+    () => orderedPathsFromGroups(orderedGroups),
+    [orderedGroups],
+  );
 
   const handleSelectFile = useCallback((path: string) => {
     setSelectedPath(path);
@@ -68,10 +143,6 @@ export default function ReviewDetailPage() {
   if (error) return <div className="p-6 text-red-500">{error}</div>;
   if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
 
-  const walkthrough: Walkthrough | null = detail.latest_run?.walkthrough
-    ? JSON.parse(detail.latest_run.walkthrough)
-    : null;
-
   const draftCount = detail.comments.filter((c) => c.status === 'draft').length;
   const acceptedCount = detail.comments.filter((c) => c.status === 'accepted').length;
   const staleCount = detail.comments.filter((c) => c.status === 'stale').length;
@@ -86,51 +157,23 @@ export default function ReviewDetailPage() {
 
         <PublishBar
           taskId={id!}
+          prTitle={detail.task.title}
+          prNumber={detail.task.pr_number}
+          prUrl={detail.task.pr_url ?? undefined}
           acceptedCount={acceptedCount}
           draftCount={draftCount}
           staleCount={staleCount}
+          reviewedDone={reviewedFiles.size}
+          reviewedTotal={filesInDiff.length}
+          totalCommentsCount={taskComments.byId.size}
+          showCommentsPanel={showCommentsPanel}
+          onToggleCommentsPanel={() => setShowCommentsPanel((v) => !v)}
           isRunning={isRunning}
           onPublished={refresh}
           onReRun={refresh}
         />
 
-        <header className="flex items-baseline justify-between gap-2 border-b border-glass-edge px-4 py-2">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-lg font-semibold">{detail.task.title}</h1>
-            <span className="text-xs text-muted-foreground">#{detail.task.pr_number}</span>
-            {detail.task.pr_url && (
-              <a
-                href={detail.task.pr_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-400 hover:underline"
-              >
-                View on GitHub
-              </a>
-            )}
-          </div>
-          <Button
-            variant="outline"
-            size="xs"
-            data-testid="comments-toggle"
-            data-active={showCommentsPanel ? 'true' : undefined}
-            className={
-              showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined
-            }
-            onClick={() => setShowCommentsPanel((v) => !v)}
-          >
-            Comments ({taskComments.byId.size})
-          </Button>
-        </header>
-
-        {walkthrough && (
-          <WalkthroughHeader
-            walkthrough={walkthrough}
-            runId={detail.latest_run?.id ?? null}
-            taskId={id!}
-            onRefresh={refresh}
-          />
-        )}
+        {walkthrough && <WalkthroughHeader walkthrough={walkthrough} taskId={id!} />}
 
         <div className="flex min-h-0 flex-1">
           <aside
@@ -142,6 +185,8 @@ export default function ReviewDetailPage() {
               walkthrough={walkthrough}
               comments={detail.comments}
               selectedPath={selectedPath}
+              reviewedFiles={reviewedFiles}
+              onToggleReviewed={handleToggleReviewed}
               onSelect={handleSelectFile}
             />
           </aside>
@@ -155,7 +200,11 @@ export default function ReviewDetailPage() {
               enableComments
               onFilesChange={setFilesInDiff}
               onSelectionChange={setSelectedPath}
+              onSummaryLoaded={handleSummaryLoaded}
+              onToggleReviewed={handleToggleReviewed}
               hideFileTree
+              fileOrder={orderedFileOrder}
+              groups={orderedGroups}
             />
           </div>
 

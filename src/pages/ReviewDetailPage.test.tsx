@@ -140,7 +140,10 @@ describe('ReviewDetailPage', () => {
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
     expect(await screen.findByTestId('walkthrough-header')).toBeTruthy();
-    expect(screen.getByText('adds the thing')).toBeTruthy();
+    // header starts collapsed — summary preview visible in the toggle button
+    expect(screen.getByText(/adds the thing/i)).toBeTruthy();
+    // expand to see pills
+    fireEvent.click(screen.getByRole('button', { name: /walkthrough/i }));
     expect(screen.getByText('Enhancement')).toBeTruthy();
   });
 
