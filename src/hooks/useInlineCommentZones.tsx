@@ -164,39 +164,50 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
 
     for (const [k, e] of newEntries) existing.set(k, e);
 
-    // Observe new DOM nodes for resize → update zone height.
-    // Monaco's layoutZone only re-positions, not re-measures: it doesn't
-    // re-read heightInPx from the zone object after addZone. To actually
-    // grow the zone we have to remove + re-add it with the new height.
+    // Observe the React-portaled child for size changes, then resize the Monaco
+    // zone to match. We cannot observe node.domNode itself because Monaco sets
+    // an explicit inline `height` on it (matching heightInPx), so its box never
+    // grows naturally with content. Observing the inner child gives the real
+    // rendered size. Wait via rAF until React mounts the portal child.
     for (const node of newDomNodes) {
       let lastHeight = 0;
-      const obs = new ResizeObserver(() => {
-        const cur = zonesRef.current.get(node.key);
-        if (!cur) return;
-        const h = node.domNode.offsetHeight;
-        if (h === 0 || h === lastHeight) return;
-        lastHeight = h;
-        const ed = node.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
-        ed.changeViewZones((accessor) => {
-          accessor.removeZone(cur.zoneId);
-          const nextZone: MonacoEditor.IViewZone = {
-            afterLineNumber: cur.line,
-            heightInPx: h,
-            domNode: cur.domNode,
-            suppressMouseDown: true,
-          };
-          const newId = accessor.addZone(nextZone);
-          zonesRef.current.set(node.key, {
-            zoneId: newId,
-            zone: nextZone,
-            domNode: cur.domNode,
-            side: cur.side,
-            line: cur.line,
+      let obs: ResizeObserver | null = null;
+      const startObserving = () => {
+        const child = node.domNode.firstElementChild as HTMLElement | null;
+        if (!child) {
+          requestAnimationFrame(startObserving);
+          return;
+        }
+        obs = new ResizeObserver(() => {
+          const cur = zonesRef.current.get(node.key);
+          if (!cur) return;
+          const h = child.offsetHeight;
+          if (h === 0 || h === lastHeight) return;
+          lastHeight = h;
+          const ed =
+            node.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
+          ed.changeViewZones((accessor) => {
+            accessor.removeZone(cur.zoneId);
+            const nextZone: MonacoEditor.IViewZone = {
+              afterLineNumber: cur.line,
+              heightInPx: h,
+              domNode: cur.domNode,
+              suppressMouseDown: true,
+            };
+            const newId = accessor.addZone(nextZone);
+            zonesRef.current.set(node.key, {
+              zoneId: newId,
+              zone: nextZone,
+              domNode: cur.domNode,
+              side: cur.side,
+              line: cur.line,
+            });
           });
         });
-      });
-      obs.observe(node.domNode);
-      observersRef.current.set(node.key, obs);
+        obs.observe(child);
+        observersRef.current.set(node.key, obs);
+      };
+      startObserving();
     }
 
     setZoneTick((t) => t + 1);
@@ -245,29 +256,38 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
     });
     composerZoneRef.current = { key: composerKey!, zoneId, zone: composerZone, domNode };
 
-    // Observe height changes — Monaco's layoutZone doesn't re-measure;
-    // remove + re-add to actually grow the zone.
+    // Observe the React-portaled child (Monaco sets explicit height on the
+    // wrapper, so we measure the inner content instead). Wait for portal mount.
     let lastHeight = 0;
-    const obs = new ResizeObserver(() => {
-      const cur = composerZoneRef.current;
-      if (!cur) return;
-      const h = domNode.offsetHeight;
-      if (h === 0 || h === lastHeight) return;
-      lastHeight = h;
-      ed.changeViewZones((accessor) => {
-        accessor.removeZone(cur.zoneId);
-        const nextZone: MonacoEditor.IViewZone = {
-          afterLineNumber: openComposer.line,
-          heightInPx: h,
-          domNode,
-          suppressMouseDown: true,
-        };
-        const newId = accessor.addZone(nextZone);
-        composerZoneRef.current = { key: cur.key, zoneId: newId, zone: nextZone, domNode };
+    let obs: ResizeObserver | null = null;
+    const startObserving = () => {
+      const child = domNode.firstElementChild as HTMLElement | null;
+      if (!child) {
+        requestAnimationFrame(startObserving);
+        return;
+      }
+      obs = new ResizeObserver(() => {
+        const cur = composerZoneRef.current;
+        if (!cur) return;
+        const h = child.offsetHeight;
+        if (h === 0 || h === lastHeight) return;
+        lastHeight = h;
+        ed.changeViewZones((accessor) => {
+          accessor.removeZone(cur.zoneId);
+          const nextZone: MonacoEditor.IViewZone = {
+            afterLineNumber: openComposer.line,
+            heightInPx: h,
+            domNode,
+            suppressMouseDown: true,
+          };
+          const newId = accessor.addZone(nextZone);
+          composerZoneRef.current = { key: cur.key, zoneId: newId, zone: nextZone, domNode };
+        });
       });
-    });
-    obs.observe(domNode);
-    observersRef.current.set(composerKey!, obs);
+      obs.observe(child);
+      observersRef.current.set(composerKey!, obs);
+    };
+    startObserving();
 
     setZoneTick((t) => t + 1);
     return () => {
