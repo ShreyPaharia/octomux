@@ -92,7 +92,10 @@ export default function ReviewDetailPage() {
     [id],
   );
 
+  const reviewedHydratedRef = useRef(false);
   const handleSummaryLoaded = useCallback((s: DiffSummaryResponse) => {
+    if (reviewedHydratedRef.current) return;
+    reviewedHydratedRef.current = true;
     const set = new Set<string>();
     for (const f of s.files) if (f.reviewed) set.add(f.path);
     setReviewedFiles(set);
@@ -100,19 +103,19 @@ export default function ReviewDetailPage() {
 
   const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
 
-  const walkthroughForOrder = useMemo<import('../components/review/WalkthroughHeader').Walkthrough | null>(() => {
+  const walkthrough = useMemo<Walkthrough | null>(() => {
     const raw = detail?.latest_run?.walkthrough;
     if (!raw) return null;
     try {
-      return JSON.parse(raw);
+      return JSON.parse(raw) as Walkthrough;
     } catch {
       return null;
     }
   }, [detail]);
 
   const orderedGroups = useMemo(
-    () => buildGroups(filesInDiff, walkthroughForOrder),
-    [filesInDiff, walkthroughForOrder],
+    () => buildGroups(filesInDiff, walkthrough),
+    [filesInDiff, walkthrough],
   );
 
   const orderedFileOrder = useMemo(
@@ -139,10 +142,6 @@ export default function ReviewDetailPage() {
 
   if (error) return <div className="p-6 text-red-500">{error}</div>;
   if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
-
-  const walkthrough: Walkthrough | null = detail.latest_run?.walkthrough
-    ? JSON.parse(detail.latest_run.walkthrough)
-    : null;
 
   const draftCount = detail.comments.filter((c) => c.status === 'draft').length;
   const acceptedCount = detail.comments.filter((c) => c.status === 'accepted').length;
@@ -202,6 +201,7 @@ export default function ReviewDetailPage() {
               onFilesChange={setFilesInDiff}
               onSelectionChange={setSelectedPath}
               onSummaryLoaded={handleSummaryLoaded}
+              onToggleReviewed={handleToggleReviewed}
               hideFileTree
               fileOrder={orderedFileOrder}
               groups={orderedGroups}

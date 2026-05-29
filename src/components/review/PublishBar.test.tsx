@@ -86,13 +86,13 @@ describe('PublishBar', () => {
         {...defaultProps({ reviewedDone: 2, reviewedTotal: 5 })}
       />,
     );
-    expect(screen.getByTestId('review-progress')).toBeTruthy();
+    expect(screen.getByTestId('pr-review-progress')).toBeTruthy();
     expect(screen.getByText('2/5 reviewed')).toBeTruthy();
   });
 
   it('does not show reviewed progress when reviewedTotal is 0', () => {
     render(<PublishBar {...defaultProps({ reviewedDone: 0, reviewedTotal: 0 })} />);
-    expect(screen.queryByTestId('review-progress')).toBeNull();
+    expect(screen.queryByTestId('pr-review-progress')).toBeNull();
   });
 
   it('renders Comments toggle button with count', () => {

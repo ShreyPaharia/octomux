@@ -103,7 +103,7 @@ export function PublishBar({
       {/* Reviewed progress */}
       {reviewedTotal > 0 && (
         <span
-          data-testid="review-progress"
+          data-testid="pr-review-progress"
           className="shrink-0 text-xs text-muted-foreground"
           aria-label={`${reviewedDone} of ${reviewedTotal} files reviewed`}
         >
