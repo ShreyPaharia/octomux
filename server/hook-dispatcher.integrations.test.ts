@@ -83,7 +83,15 @@ describe('fireHook — integration providers', () => {
     await fireHook('workflow_status_changed', ENVELOPE);
 
     expect(provider.handler).toHaveBeenCalledOnce();
-    expect(provider.handler).toHaveBeenCalledWith(ENVELOPE, integration.config);
+    // The dispatcher enriches the envelope with external_refs (empty when DB is unavailable).
+    expect(provider.handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: ENVELOPE.event,
+        data: ENVELOPE.data,
+        task: expect.objectContaining({ id: 'task-abc', external_refs: expect.any(Array) }),
+      }),
+      integration.config,
+    );
   });
 
   it('skips disabled integrations', async () => {

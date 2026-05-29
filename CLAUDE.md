@@ -115,6 +115,14 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - poller tests: use `findCallback(...args)` to find callback in promisified execFile mocks
 - logger path resolution is lazy — tests that stub `os`/`fs` must not expect the log
   dir to exist at module-load time (pino is silent in NODE_ENV=test anyway)
+- `task_external_refs.metadata` is a nullable JSON text column — always parse with
+  `JSON.parse(row.metadata ?? 'null')` server-side, never expose the raw string. The
+  hook dispatcher's `loadTaskExternalRefs(taskId)` helper already does this for
+  provider envelopes; route handlers must parse on read too.
+- Linear API uses the bare API key in the `Authorization` header (no `Bearer` prefix)
+  — see `server/integrations/linear/graphql.ts`.
+- Linear errors come back as HTTP 200 with an `errors[]` array. `linearGraphql`
+  throws `LinearApiError` for those; callers must catch.
 
 ## Dispatching parallel Claude Code sub-agents in this repo
 

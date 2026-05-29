@@ -1,5 +1,6 @@
 // Side-effect imports register all known providers.
 import './jira/index.js';
+import './linear/index.js';
 
 export { registerProvider, getProvider, listProviders } from './registry.js';
 export {

@@ -307,6 +307,42 @@ describe('deleteGraceHours', () => {
   });
 });
 
+describe('OctomuxSettings tracker fields', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+    mockFs.mkdir.mockResolvedValue(undefined);
+    mockFs.writeFile.mockResolvedValue(undefined);
+  });
+
+  it('round-trips defaultTracker and defaultLinearTeamKey', async () => {
+    await updateSettings({ defaultTracker: 'linear', defaultLinearTeamKey: 'BAC' });
+    const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+    mockFs.readFile.mockResolvedValue(writtenJson);
+    const s = await getSettings();
+    expect(s.defaultTracker).toBe('linear');
+    expect(s.defaultLinearTeamKey).toBe('BAC');
+  });
+
+  it('preserves Jira defaults when only Linear fields are updated', async () => {
+    await updateSettings({ defaultJiraBaseUrl: 'https://acme.atlassian.net' });
+    const writtenJson1 = mockFs.writeFile.mock.calls[0][1] as string;
+    mockFs.readFile.mockResolvedValue(writtenJson1);
+    await updateSettings({ defaultTracker: 'linear' });
+    const writtenJson2 = mockFs.writeFile.mock.calls[1][1] as string;
+    mockFs.readFile.mockResolvedValue(writtenJson2);
+    const s = await getSettings();
+    expect(s.defaultJiraBaseUrl).toBe('https://acme.atlassian.net');
+    expect(s.defaultTracker).toBe('linear');
+  });
+
+  it('rejects an invalid defaultTracker value', async () => {
+    await expect(updateSettings({ defaultTracker: 'asana' as any })).rejects.toThrow(
+      /defaultTracker/,
+    );
+  });
+});
+
 describe('resolveClaudeFlags', () => {
   afterEach(() => {
     delete process.env.OCTOMUX_CLAUDE_FLAGS;

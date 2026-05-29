@@ -150,6 +150,7 @@ export interface TaskExternalRef {
   integration: string;
   ref: string;
   url: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -225,6 +226,7 @@ export interface AddRefRequest {
   integration: string;
   ref: string;
   url?: string;
+  metadata?: Record<string, unknown> | null;
 }
 
 /** Request body for PATCH /api/tasks/:id/base — change a task's diff base. */

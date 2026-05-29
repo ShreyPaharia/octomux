@@ -84,7 +84,11 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
               key={r.integration}
               className="flex items-center gap-2 rounded-lg border border-glass-edge bg-glass-l1 px-3 py-2"
             >
-              <span className="text-[11px] font-medium text-muted-foreground">{r.integration}</span>
+              <span
+                className={`text-[11px] font-medium ${r.integration === 'linear' ? 'text-[#a78bfa]' : 'text-muted-foreground'}`}
+              >
+                {r.integration}
+              </span>
               <span className="text-[10px] text-muted-soft">:</span>
               {r.url ? (
                 <a
@@ -97,6 +101,11 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
                 </a>
               ) : (
                 <span className="text-[11px] text-foreground">{r.ref}</span>
+              )}
+              {typeof r.metadata?.team_key === 'string' && (
+                <span className="rounded bg-glass-l2 px-1.5 py-0.5 text-[10px] font-medium text-[#b5b5bd]">
+                  {r.metadata.team_key}
+                </span>
               )}
               <button
                 type="button"

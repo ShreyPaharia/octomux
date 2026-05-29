@@ -76,15 +76,23 @@ octomux task-note abc123 "Decided to defer DB migration to a follow-up task (see
 
 ## Linking external references
 
-Link a Jira ticket, GitHub issue, or any external item to a task:
+Link a Linear issue, Jira ticket, GitHub issue, or any external item to a task:
 
 ```bash
-octomux task-ref-add <task-id> <integration> <external-id> [--url <url>] [--title <title>]
+octomux task-ref-add <task-id> <integration> <external-id> [--url <url>] [--title <title>] [--metadata <json>]
 ```
+
+The `--metadata` flag accepts a JSON object with integration-specific fields. For Linear, cache `team_key`/`team_id`/`issue_id`/`project_id` so the status-sync handler doesn't need extra API calls on every column change.
 
 **Examples:**
 
 ```bash
+# Link a Linear issue (Backend team example)
+octomux task-ref-add abc123 linear BAC-843 \
+  --url "https://linear.app/ostium-labs/issue/BAC-843" \
+  --title "Add position sync to backend" \
+  --metadata '{"team_key":"BAC","team_id":"a3b9a29e-9847-4f5e-9eae-6dc0eb63da92","issue_id":"<issue-uuid>"}'
+
 # Link a Jira ticket (substitute your project key + Jira host)
 octomux task-ref-add abc123 jira PROJ-843 \
   --url "https://your-company.atlassian.net/browse/PROJ-843" \

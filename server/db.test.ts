@@ -590,6 +590,33 @@ describe('archived → trash migration', () => {
   });
 });
 
+describe('task_external_refs metadata column', () => {
+  it('round-trips JSON metadata', () => {
+    const db = createTestDb();
+    db.prepare(`INSERT INTO tasks (id, title, description) VALUES ('t1', 'T', 'D')`).run();
+    db.prepare(
+      `INSERT INTO task_external_refs (task_id, integration, ref, url, metadata)
+       VALUES ('t1', 'linear', 'BAC-1', 'https://linear.app/x/issue/BAC-1', ?)`,
+    ).run(JSON.stringify({ team_key: 'BAC', team_id: 'uuid-1' }));
+    const row = db
+      .prepare(`SELECT metadata FROM task_external_refs WHERE task_id = 't1'`)
+      .get() as { metadata: string };
+    expect(JSON.parse(row.metadata)).toEqual({ team_key: 'BAC', team_id: 'uuid-1' });
+  });
+
+  it('accepts NULL metadata (legacy rows)', () => {
+    const db = createTestDb();
+    db.prepare(`INSERT INTO tasks (id, title, description) VALUES ('t2', 'T', 'D')`).run();
+    db.prepare(
+      `INSERT INTO task_external_refs (task_id, integration, ref) VALUES ('t2', 'jira', 'PROJ-1')`,
+    ).run();
+    const row = db
+      .prepare(`SELECT metadata FROM task_external_refs WHERE task_id = 't2'`)
+      .get() as { metadata: string | null };
+    expect(row.metadata).toBeNull();
+  });
+});
+
 describe('claude_session_id rename', () => {
   it('renames the column on an existing DB with old column', () => {
     // Simulate a pre-rename DB by manually creating the old schema.
