@@ -189,7 +189,9 @@ describe('ReviewFileTree', () => {
         {...defaultProps}
       />,
     );
-    fireEvent.click(screen.getByTestId('review-file-row-src/a.ts'));
+    // The row is a <li>; selection is handled by the inner button wrapping the filename.
+    const row = screen.getByTestId('review-file-row-src/a.ts');
+    fireEvent.click(row.querySelector('button')!);
     expect(onSelect).toHaveBeenCalledWith('src/a.ts');
   });
 
@@ -251,5 +253,21 @@ describe('ReviewFileTree group row', () => {
     );
     fireEvent.click(screen.getByTestId('review-toggle-a.go'));
     expect(onToggleReviewed).toHaveBeenCalledWith('a.go', false);
+  });
+
+  it('does not trap focus on the tree nav', () => {
+    render(
+      <ReviewFileTree
+        files={['a.go']}
+        walkthrough={null}
+        comments={[]}
+        selectedPath={null}
+        reviewedFiles={new Set()}
+        onToggleReviewed={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    const nav = screen.getByTestId('review-file-tree');
+    expect(nav.hasAttribute('tabIndex')).toBe(false);
   });
 });
