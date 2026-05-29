@@ -406,4 +406,10 @@
 
 .octomux-comment-zone {
   padding: 4px 0;
+  background: var(--bg-elevated, #14151c);
+  border-top: 1px solid var(--glass-edge);
+  border-bottom: 1px solid var(--glass-edge);
+}
+.octomux-comment-composer-zone {
+  background: var(--bg-elevated, #14151c);
 }

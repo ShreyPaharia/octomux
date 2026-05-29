@@ -41,6 +41,7 @@ export interface UseInlineCommentZonesParams {
 
 interface ZoneEntry {
   zoneId: string;
+  zone: MonacoEditor.IViewZone;
   domNode: HTMLDivElement;
   side: 'old' | 'new';
   line: number;
@@ -76,9 +77,12 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
   } = params;
 
   const zonesRef = useRef<Map<string, ZoneEntry>>(new Map());
-  const composerZoneRef = useRef<{ key: string; zoneId: string; domNode: HTMLDivElement } | null>(
-    null,
-  );
+  const composerZoneRef = useRef<{
+    key: string;
+    zoneId: string;
+    zone: MonacoEditor.IViewZone;
+    domNode: HTMLDivElement;
+  } | null>(null);
   const observersRef = useRef<Map<string, ResizeObserver>>(new Map());
   // Bump on every successful zone mutation so the parent re-runs portal creation
   // with the latest domNode set.
@@ -137,14 +141,16 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
         }
         for (const node of newDomNodes) {
           if (node.side !== side) continue;
-          const zoneId = accessor.addZone({
+          const zone: MonacoEditor.IViewZone = {
             afterLineNumber: node.line,
-            heightInPx: 1,
+            heightInPx: node.domNode.offsetHeight || 1,
             domNode: node.domNode,
             suppressMouseDown: true,
-          });
+          };
+          const zoneId = accessor.addZone(zone);
           newEntries.set(node.key, {
             zoneId,
+            zone,
             domNode: node.domNode,
             side: node.side,
             line: node.line,
@@ -165,6 +171,7 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
         if (!cur) return;
         const ed = node.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
         ed.changeViewZones((accessor) => {
+          cur.zone.heightInPx = node.domNode.offsetHeight;
           accessor.layoutZone(cur.zoneId);
         });
       });
@@ -207,21 +214,25 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
     const ed =
       openComposer.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
     let zoneId = '';
+    const composerZone: MonacoEditor.IViewZone = {
+      afterLineNumber: openComposer.line,
+      heightInPx: domNode.offsetHeight || 1,
+      domNode,
+      suppressMouseDown: true,
+    };
     ed.changeViewZones((accessor) => {
-      zoneId = accessor.addZone({
-        afterLineNumber: openComposer.line,
-        heightInPx: 1,
-        domNode,
-        suppressMouseDown: true,
-      });
+      zoneId = accessor.addZone(composerZone);
     });
-    composerZoneRef.current = { key: composerKey!, zoneId, domNode };
+    composerZoneRef.current = { key: composerKey!, zoneId, zone: composerZone, domNode };
 
     // Observe height changes
     const obs = new ResizeObserver(() => {
       const cur = composerZoneRef.current;
       if (!cur) return;
-      ed.changeViewZones((accessor) => accessor.layoutZone(cur.zoneId));
+      ed.changeViewZones((accessor) => {
+        cur.zone.heightInPx = domNode.offsetHeight;
+        accessor.layoutZone(cur.zoneId);
+      });
     });
     obs.observe(domNode);
     observersRef.current.set(composerKey!, obs);
