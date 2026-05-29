@@ -127,7 +127,7 @@ describe('ReviewDetailPage', () => {
     expect(await screen.findByText(/not found/i)).toBeTruthy();
   });
 
-  it('renders WalkthroughHeader with summary and pills', async () => {
+  it('renders WalkthroughHeader as a one-line peek strip', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
         latest_run: {
@@ -139,12 +139,13 @@ describe('ReviewDetailPage', () => {
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    expect(await screen.findByTestId('walkthrough-header')).toBeTruthy();
-    // header starts collapsed — summary preview visible in the toggle button
-    expect(screen.getByText(/adds the thing/i)).toBeTruthy();
-    // expand to see pills
-    fireEvent.click(screen.getByRole('button', { name: /walkthrough/i }));
-    expect(screen.getByText('Enhancement')).toBeTruthy();
+    const strip = await screen.findByTestId('walkthrough-header');
+    expect(strip).toBeTruthy();
+    // summary first-sentence visible inline
+    expect(strip.textContent).toMatch(/adds the thing/i);
+    // meta pills rendered inline (risk + key points count)
+    expect(strip.textContent).toMatch(/risk: low/);
+    expect(strip.textContent).toMatch(/1 key point/);
   });
 
   it('renders one ReviewFileTree section per walkthrough group', async () => {

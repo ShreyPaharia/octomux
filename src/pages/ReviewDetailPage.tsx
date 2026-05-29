@@ -173,7 +173,7 @@ export default function ReviewDetailPage() {
           onReRun={refresh}
         />
 
-        {walkthrough && <WalkthroughHeader walkthrough={walkthrough} taskId={id!} />}
+        {walkthrough && <WalkthroughHeader walkthrough={walkthrough} />}
 
         <div className="flex min-h-0 flex-1">
           <aside
