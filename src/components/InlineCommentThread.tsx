@@ -95,7 +95,7 @@ export function InlineCommentThread({
       data-testid="inline-comment-thread"
       data-focused={focusedHere ? 'true' : undefined}
       className={cn(
-        'bg-glass-l1 glass-blur-l1 border border-glass-edge p-3',
+        'border border-glass-edge bg-card p-3 shadow-[0_8px_20px_-12px_rgba(0,0,0,0.6)]',
         focusedHere && 'octomux-comment-flash',
         className,
       )}

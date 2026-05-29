@@ -246,7 +246,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
                     hideUnchangedRegions: { enabled: !expanded },
                     scrollBeyondLastLine: false,
                     scrollBeyondLastColumn: 0,
-                    fixedOverflowWidgets: true,
+                    fixedOverflowWidgets: false,
                     scrollbar: {
                       alwaysConsumeMouseWheel: false,
                       vertical: 'auto',

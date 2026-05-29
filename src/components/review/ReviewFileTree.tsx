@@ -59,84 +59,84 @@ function FileRow({ file, selected, counts, reviewedFiles, onToggleReviewed, onSe
   const isReviewed = reviewedFiles.has(file.path);
 
   return (
-    <li>
+    <li
+      data-testid={`review-file-row-${file.path}`}
+      data-selected={selected ? 'true' : undefined}
+      data-reviewed={isReviewed ? 'true' : 'false'}
+      className={cn(
+        'flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-glass-l2/40',
+        selected && 'bg-glass-l2/60',
+        'data-[reviewed=true]:opacity-60',
+      )}
+      role="treeitem"
+      aria-selected={selected}
+    >
+      <input
+        type="checkbox"
+        checked={isReviewed}
+        data-testid={`review-toggle-${file.path}`}
+        aria-label={isReviewed ? `Unmark ${file.path} reviewed` : `Mark ${file.path} reviewed`}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          e.stopPropagation();
+          onToggleReviewed(file.path, isReviewed);
+        }}
+        className="h-3.5 w-3.5 shrink-0 cursor-pointer"
+      />
       <button
         type="button"
-        data-testid={`review-file-row-${file.path}`}
-        data-selected={selected ? 'true' : undefined}
-        data-reviewed={isReviewed ? 'true' : 'false'}
-        role="treeitem"
-        aria-selected={selected}
-        tabIndex={selected ? 0 : -1}
         onClick={() => onSelect(file.path)}
-        className={cn(
-          'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-glass-l2/40',
-          selected && 'bg-glass-l2/60',
-          'data-[reviewed=true]:opacity-60',
-        )}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        tabIndex={selected ? 0 : -1}
       >
-        <input
-          type="checkbox"
-          checked={isReviewed}
-          data-testid={`review-toggle-${file.path}`}
-          aria-label={isReviewed ? `Unmark ${file.path} reviewed` : `Mark ${file.path} reviewed`}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            e.stopPropagation();
-            onToggleReviewed(file.path, isReviewed);
-          }}
-          className="h-3.5 w-3.5 shrink-0 cursor-pointer"
-        />
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <code
-            className="min-w-0 flex-1 truncate font-mono text-foreground"
-            title={file.path}
-          >
-            {shortPath(file.path)}
-          </code>
-          {file.label && (
-            <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
-              {file.label}
-            </Badge>
-          )}
-          {file.summary && (
-            <Popover>
-              <PopoverTrigger render={<span />} nativeButton={false}
-                aria-label={`Summary for ${file.path}`}
-                className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
-                onClick={(e) => e.stopPropagation()}
-              >
-                info
-              </PopoverTrigger>
-              <PopoverContent className="w-72 text-xs">{file.summary}</PopoverContent>
-            </Popover>
-          )}
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {open > 0 && (
-            <span
-              data-testid={`comment-count-${file.path}`}
-              data-tone={serious ? 'serious' : 'muted'}
-              className={cn(
-                'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                serious
-                  ? 'bg-destructive/20 text-destructive'
-                  : 'bg-glass-l2 text-muted-foreground',
-              )}
-            >
-              {open}
-            </span>
-          )}
-          {stale > 0 && (
-            <span
-              data-testid={`stale-count-${file.path}`}
-              className="inline-flex items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
-            >
-              stale: {stale}
-            </span>
-          )}
-        </div>
+        <code
+          className="min-w-0 flex-1 truncate font-mono text-foreground"
+          title={file.path}
+        >
+          {shortPath(file.path)}
+        </code>
+        {file.label && (
+          <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
+            {file.label}
+          </Badge>
+        )}
       </button>
+      {file.summary && (
+        <Popover>
+          <PopoverTrigger render={<span />} nativeButton={false}
+            aria-label={`Summary for ${file.path}`}
+            className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={(e) => e.stopPropagation()}
+          >
+            info
+          </PopoverTrigger>
+          <PopoverContent className="w-72 text-xs">{file.summary}</PopoverContent>
+        </Popover>
+      )}
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        {open > 0 && (
+          <span
+            data-testid={`comment-count-${file.path}`}
+            data-tone={serious ? 'serious' : 'muted'}
+            className={cn(
+              'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+              serious
+                ? 'bg-destructive/20 text-destructive'
+                : 'bg-glass-l2 text-muted-foreground',
+            )}
+          >
+            {open}
+          </span>
+        )}
+        {stale > 0 && (
+          <span
+            data-testid={`stale-count-${file.path}`}
+            className="inline-flex items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+          >
+            stale: {stale}
+          </span>
+        )}
+      </div>
     </li>
   );
 }
@@ -192,7 +192,6 @@ export function ReviewFileTree({
     <nav
       data-testid="review-file-tree"
       role="tree"
-      tabIndex={0}
       className="flex h-full min-h-0 flex-col overflow-y-auto"
       onKeyDown={handleKeyDown}
     >
