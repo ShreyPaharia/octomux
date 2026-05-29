@@ -67,6 +67,41 @@ export default function ReviewDetailPage() {
 
   const taskComments = useTaskComments(id);
 
+  // WORKAROUND for nav lockup on review detail. Monaco's many editors + their
+  // ResizeObservers and disposal chains starve React Router's re-render after
+  // history.pushState, so <Link> clicks update the URL but the route never
+  // commits. Until we move to createBrowserRouter or virtualise the editors,
+  // intercept primary-button clicks on internal <a href> while this page is
+  // mounted and force a full reload to the target. Cmd/Ctrl/Shift/Alt click
+  // still falls through to the browser's "open in new tab" behaviour.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        e.button !== 0 ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        e.altKey ||
+        e.defaultPrevented
+      ) {
+        return;
+      }
+      const link = (e.target as HTMLElement | null)?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!link) return;
+      const href = link.getAttribute('href') ?? '';
+      if (!href.startsWith('/') || href.startsWith('//')) return;
+      if (link.target && link.target !== '_self') return;
+      const same =
+        href === window.location.pathname + window.location.search + window.location.hash;
+      if (same) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.location.assign(href);
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, []);
+
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set());
 
   const handleToggleReviewed = useCallback(
