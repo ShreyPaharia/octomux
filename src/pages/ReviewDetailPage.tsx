@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
 import { subscribe } from '../lib/event-source';
 import { WalkthroughHeader, type Walkthrough } from '../components/review/WalkthroughHeader';
+import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
 import { ReviewFileTree } from '../components/review/ReviewFileTree';
 import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
@@ -78,6 +79,21 @@ export default function ReviewDetailPage() {
   }, []);
 
   const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
+
+  const walkthroughForOrder = useMemo<import('../components/review/WalkthroughHeader').Walkthrough | null>(() => {
+    const raw = detail?.latest_run?.walkthrough;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }, [detail]);
+
+  const orderedFileOrder = useMemo(
+    () => orderedPathsFromGroups(buildGroups(filesInDiff, walkthroughForOrder)),
+    [filesInDiff, walkthroughForOrder],
+  );
 
   const handleSelectFile = useCallback((path: string) => {
     setSelectedPath(path);
@@ -183,6 +199,7 @@ export default function ReviewDetailPage() {
               onSelectionChange={setSelectedPath}
               onSummaryLoaded={handleSummaryLoaded}
               hideFileTree
+              fileOrder={orderedFileOrder}
             />
           </div>
 
