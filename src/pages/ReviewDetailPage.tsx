@@ -9,7 +9,6 @@ import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
 import { DiffViewer } from '../components/DiffViewer';
 import { CommentsSidePanel } from '../components/CommentsSidePanel';
-import { Button } from '../components/ui/button';
 import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
 
@@ -138,42 +137,21 @@ export default function ReviewDetailPage() {
 
         <PublishBar
           taskId={id!}
+          prTitle={detail.task.title}
+          prNumber={detail.task.pr_number}
+          prUrl={detail.task.pr_url ?? undefined}
           acceptedCount={acceptedCount}
           draftCount={draftCount}
           staleCount={staleCount}
+          reviewedDone={reviewedFiles.size}
+          reviewedTotal={filesInDiff.length}
+          totalCommentsCount={taskComments.byId.size}
+          showCommentsPanel={showCommentsPanel}
+          onToggleCommentsPanel={() => setShowCommentsPanel((v) => !v)}
           isRunning={isRunning}
           onPublished={refresh}
           onReRun={refresh}
         />
-
-        <header className="flex items-baseline justify-between gap-2 border-b border-glass-edge px-4 py-2">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-lg font-semibold">{detail.task.title}</h1>
-            <span className="text-xs text-muted-foreground">#{detail.task.pr_number}</span>
-            {detail.task.pr_url && (
-              <a
-                href={detail.task.pr_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-400 hover:underline"
-              >
-                View on GitHub
-              </a>
-            )}
-          </div>
-          <Button
-            variant="outline"
-            size="xs"
-            data-testid="comments-toggle"
-            data-active={showCommentsPanel ? 'true' : undefined}
-            className={
-              showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined
-            }
-            onClick={() => setShowCommentsPanel((v) => !v)}
-          >
-            Comments ({taskComments.byId.size})
-          </Button>
-        </header>
 
         {walkthrough && <WalkthroughHeader walkthrough={walkthrough} taskId={id!} />}
 

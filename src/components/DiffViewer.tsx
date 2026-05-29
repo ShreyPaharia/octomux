@@ -395,7 +395,7 @@ function ApiDiffViewer({
         data-testid="diff-pane"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-glass-l0"
       >
-        {reviewCounts.total > 0 ? (
+        {!hideFileTree && reviewCounts.total > 0 ? (
           <div className="diff-pane-header flex shrink-0 items-center justify-end gap-2 border-b border-glass-edge px-4 py-2">
             <span
               data-testid="review-progress"
