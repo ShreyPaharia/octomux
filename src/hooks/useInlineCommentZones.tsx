@@ -165,14 +165,34 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
     for (const [k, e] of newEntries) existing.set(k, e);
 
     // Observe new DOM nodes for resize → update zone height.
+    // Monaco's layoutZone only re-positions, not re-measures: it doesn't
+    // re-read heightInPx from the zone object after addZone. To actually
+    // grow the zone we have to remove + re-add it with the new height.
     for (const node of newDomNodes) {
+      let lastHeight = 0;
       const obs = new ResizeObserver(() => {
         const cur = zonesRef.current.get(node.key);
         if (!cur) return;
+        const h = node.domNode.offsetHeight;
+        if (h === 0 || h === lastHeight) return;
+        lastHeight = h;
         const ed = node.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
         ed.changeViewZones((accessor) => {
-          cur.zone.heightInPx = node.domNode.offsetHeight;
-          accessor.layoutZone(cur.zoneId);
+          accessor.removeZone(cur.zoneId);
+          const nextZone: MonacoEditor.IViewZone = {
+            afterLineNumber: cur.line,
+            heightInPx: h,
+            domNode: cur.domNode,
+            suppressMouseDown: true,
+          };
+          const newId = accessor.addZone(nextZone);
+          zonesRef.current.set(node.key, {
+            zoneId: newId,
+            zone: nextZone,
+            domNode: cur.domNode,
+            side: cur.side,
+            line: cur.line,
+          });
         });
       });
       obs.observe(node.domNode);
@@ -225,13 +245,25 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
     });
     composerZoneRef.current = { key: composerKey!, zoneId, zone: composerZone, domNode };
 
-    // Observe height changes
+    // Observe height changes — Monaco's layoutZone doesn't re-measure;
+    // remove + re-add to actually grow the zone.
+    let lastHeight = 0;
     const obs = new ResizeObserver(() => {
       const cur = composerZoneRef.current;
       if (!cur) return;
+      const h = domNode.offsetHeight;
+      if (h === 0 || h === lastHeight) return;
+      lastHeight = h;
       ed.changeViewZones((accessor) => {
-        cur.zone.heightInPx = domNode.offsetHeight;
-        accessor.layoutZone(cur.zoneId);
+        accessor.removeZone(cur.zoneId);
+        const nextZone: MonacoEditor.IViewZone = {
+          afterLineNumber: openComposer.line,
+          heightInPx: h,
+          domNode,
+          suppressMouseDown: true,
+        };
+        const newId = accessor.addZone(nextZone);
+        composerZoneRef.current = { key: cur.key, zoneId: newId, zone: nextZone, domNode };
       });
     });
     obs.observe(domNode);
