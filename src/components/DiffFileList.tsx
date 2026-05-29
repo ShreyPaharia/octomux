@@ -474,12 +474,12 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
   // ─── Group header map: first file path in each group → group info ────────
   // Used to inject sticky dividers inline in the flat file list.
   const groupHeaderMap = useMemo(() => {
-    const m = new Map<string, { name: string; count: number }>();
+    const m = new Map<string, { name: string; count: number; summary?: string }>();
     if (!groups) return m;
     for (const g of groups) {
       const firstPresent = g.files.find((gf) => filesByPath.has(gf.path));
       if (firstPresent) {
-        m.set(firstPresent.path, { name: g.name, count: g.files.length });
+        m.set(firstPresent.path, { name: g.name, count: g.files.length, summary: g.summary });
       }
     }
     return m;
@@ -506,12 +506,19 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
         return (
           <div key={path}>
             {groupHeader && (
-              <div
-                data-testid={`diff-group-section-${groupHeader.name}`}
-                className="sticky top-0 z-10 border-b border-glass-edge bg-glass-l1/95 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur"
-              >
-                {groupHeader.name}
-                <span className="ml-1 font-normal opacity-60">({groupHeader.count})</span>
+              <div data-testid={`diff-group-section-${groupHeader.name}`}>
+                <div className="sticky top-0 z-10 border-b border-glass-edge bg-glass-l1/95 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">
+                  {groupHeader.name}
+                  <span className="ml-1 font-normal opacity-60">({groupHeader.count})</span>
+                </div>
+                {groupHeader.summary && (
+                  <div
+                    data-testid={`diff-group-summary-${groupHeader.name}`}
+                    className="border-b border-glass-edge bg-glass-l1/40 px-4 py-2 text-xs text-foreground"
+                  >
+                    {groupHeader.summary}
+                  </div>
+                )}
               </div>
             )}
             <DiffFileRow

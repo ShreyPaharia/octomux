@@ -275,6 +275,28 @@ describe('DiffFileList', () => {
     expect(window.location.hash).toBe('#file=b.ts');
   });
 
+  it('renders group summary card above group files when summary is present', async () => {
+    installControllableIO();
+    render(
+      <DiffFileList
+        taskId="t1"
+        files={FILES}
+        reviewed={new Set()}
+        onToggleReviewed={() => {}}
+        groups={[
+          { name: 'Alpha', summary: 'Core logic changes', files: [{ path: 'a.ts' }, { path: 'b.ts' }] },
+          { name: 'Other', files: [{ path: 'c.ts' }] },
+        ]}
+      />,
+    );
+    const header = await screen.findByTestId('diff-group-section-Alpha');
+    expect(header).toBeTruthy();
+    const summaryCard = screen.getByTestId('diff-group-summary-Alpha');
+    expect(summaryCard.textContent).toBe('Core logic changes');
+    // 'Other' group has no summary — card should not render
+    expect(screen.queryByTestId('diff-group-summary-Other')).toBeNull();
+  });
+
   it('skips fetching ignored, tooLarge, or binary files', async () => {
     const io = installControllableIO();
     render(
