@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
@@ -85,6 +85,7 @@ export default function App() {
 export function AppShell() {
   const { tasks, refresh: refreshTasks } = useTasksContext();
   const [prSheetTask, setPrSheetTask] = useState<Task | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -121,7 +122,7 @@ export function AppShell() {
                 </div>
               }
             >
-              <Routes>
+              <Routes location={location} key={location.pathname}>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
