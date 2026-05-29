@@ -4,6 +4,9 @@ import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import HomePage from './pages/HomePage';
+import TasksPage from './pages/TasksPage';
+import ReviewsPage from './pages/ReviewsPage';
+import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
 import { PrSheet } from './components/PrSheet';
@@ -12,10 +15,14 @@ import { SHIP_EVENT } from './pages/TaskDetail';
 import { SetupBanner } from './components/SetupBanner';
 import type { Task } from '../server/types';
 
-const TasksPage = lazy(() => import('./pages/TasksPage'));
+// Top-level nav targets are eager — lazy() + React 19 concurrent Suspense
+// can deadlock when navigating away from a heavy page (ReviewDetailPage
+// with many Monaco editors): the lazy import never starts because the
+// scheduler keeps yielding back to in-flight Monaco effects, leaving the
+// URL updated but the route never swapping. Eager imports of the targets
+// users click most often avoid the Suspense boundary entirely.
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const GridMonitor = lazy(() => import('./pages/GridMonitor'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SkillEditor = lazy(() => import('./pages/SkillEditor'));
 const AgentEditor = lazy(() => import('./pages/AgentEditor'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
@@ -23,7 +30,6 @@ const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'));
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
-const ReviewsPage = lazy(() => import('./pages/ReviewsPage'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 
 /** Runs at app root so notifications fire on every page. */
