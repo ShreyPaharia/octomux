@@ -127,10 +127,10 @@ export function WalkthroughHeader({ walkthrough, taskId }: WalkthroughHeaderProp
         </button>
         {!collapsed && (g.type || g.risk || g.effort !== undefined || g.relevant_tests) && (
           <div className="flex flex-wrap gap-2">
-            {g.type && <ScalarPill>{g.type}</ScalarPill>}
+            {g.type && <ScalarPill tone="neutral">{g.type}</ScalarPill>}
             {g.risk && <ScalarPill tone={riskTone(g.risk)}>Risk: {g.risk}</ScalarPill>}
-            {g.effort !== undefined && <ScalarPill>Effort {g.effort}/5</ScalarPill>}
-            {g.relevant_tests && <ScalarPill>Tests: {g.relevant_tests}</ScalarPill>}
+            {g.effort !== undefined && <ScalarPill tone="neutral">Effort {g.effort}/5</ScalarPill>}
+            {g.relevant_tests && <ScalarPill tone="neutral">Tests: {g.relevant_tests}</ScalarPill>}
             {g.security_concerns && (
               <ScalarPill tone="danger">Security: {g.security_concerns}</ScalarPill>
             )}
