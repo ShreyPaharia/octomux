@@ -12,14 +12,35 @@ import { CommentsSidePanel } from '../components/CommentsSidePanel';
 import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
 
+const COMMENTS_PANEL_KEY = 'octomux:review:comments-panel-open';
+
+function defaultCommentsPanelOpen(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = localStorage.getItem(COMMENTS_PANEL_KEY);
+    if (stored !== null) return stored === 'true';
+  } catch {
+    // localStorage unavailable
+  }
+  return window.innerWidth >= 1440;
+}
+
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [showCommentsPanel, setShowCommentsPanel] = useState(false);
+  const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
   const diffListRef = useRef<DiffFileListHandle | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMMENTS_PANEL_KEY, String(showCommentsPanel));
+    } catch {
+      // ignore
+    }
+  }, [showCommentsPanel]);
 
   const refresh = useCallback(() => {
     if (!id) return;
