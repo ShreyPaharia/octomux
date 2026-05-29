@@ -193,7 +193,10 @@ describe('ReviewDetailPage', () => {
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
     const row = await screen.findByTestId('review-file-row-server/db.ts');
-    fireEvent.click(row);
+    // Row is now a <li>; the inner selection <button> wraps the filename.
+    const selectButton = row.querySelector('button');
+    if (!selectButton) throw new Error('expected selection button inside file row');
+    fireEvent.click(selectButton);
     await waitFor(() => expect(scrollToFileSpy).toHaveBeenCalledWith('server/db.ts'));
   });
 
