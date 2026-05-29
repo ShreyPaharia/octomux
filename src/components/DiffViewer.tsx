@@ -250,9 +250,22 @@ function ApiDiffViewer({
     return [...known, ...unknown];
   }, [files, fileOrder]);
 
-  // Notify host when the file set changes.
+  // Notify host when the file set changes — but only when the *content* of the
+  // path list actually changes. `orderedFiles` is a fresh array on every render
+  // (it sorts by the `fileOrder` prop), and hosts commonly derive `fileOrder`
+  // from the very paths we emit here (e.g. ReviewDetailPage groups them). Firing
+  // unconditionally turns that into an infinite render loop: emit → host setState
+  // → new `fileOrder` ref → new `orderedFiles` ref → emit again. Guarding on
+  // content keeps the URL/location update from being starved by that loop.
+  const lastEmittedPathsRef = useRef<string[] | null>(null);
   useEffect(() => {
-    onFilesChange?.(orderedFiles.map((f) => f.path));
+    const paths = orderedFiles.map((f) => f.path);
+    const prev = lastEmittedPathsRef.current;
+    if (prev && prev.length === paths.length && prev.every((p, i) => p === paths[i])) {
+      return;
+    }
+    lastEmittedPathsRef.current = paths;
+    onFilesChange?.(paths);
   }, [orderedFiles, onFilesChange]);
 
   // Hydrate reviewed set from the API in review-cockpit mode, otherwise localStorage.

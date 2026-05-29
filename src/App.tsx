@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
-import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
@@ -15,12 +15,8 @@ import { SHIP_EVENT } from './pages/TaskDetail';
 import { SetupBanner } from './components/SetupBanner';
 import type { Task } from '../server/types';
 
-// Top-level nav targets are eager — lazy() + React 19 concurrent Suspense
-// can deadlock when navigating away from a heavy page (ReviewDetailPage
-// with many Monaco editors): the lazy import never starts because the
-// scheduler keeps yielding back to in-flight Monaco effects, leaving the
-// URL updated but the route never swapping. Eager imports of the targets
-// users click most often avoid the Suspense boundary entirely.
+// The four most-clicked nav targets stay eager so navigating to them never
+// shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const GridMonitor = lazy(() => import('./pages/GridMonitor'));
 const SkillEditor = lazy(() => import('./pages/SkillEditor'));
@@ -85,7 +81,6 @@ export default function App() {
 export function AppShell() {
   const { tasks, refresh: refreshTasks } = useTasksContext();
   const [prSheetTask, setPrSheetTask] = useState<Task | null>(null);
-  const location = useLocation();
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -122,7 +117,7 @@ export function AppShell() {
                 </div>
               }
             >
-              <Routes location={location} key={location.pathname}>
+              <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
                 <Route path="/tasks/:id" element={<TaskDetail />} />
@@ -151,3 +146,4 @@ export function AppShell() {
     </div>
   );
 }
+
