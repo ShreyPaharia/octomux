@@ -1,8 +1,5 @@
-import { useState } from 'react';
-import { Button } from '../ui/button';
-import { Textarea } from '../ui/textarea';
+import { useState, useEffect } from 'react';
 import { ChevronDownIcon } from '../icons';
-import { api } from '../../lib/api';
 
 interface TicketCompliance {
   ticket: string;
@@ -39,69 +36,61 @@ export interface Walkthrough {
 
 interface WalkthroughHeaderProps {
   walkthrough: Walkthrough;
-  runId?: string | null;
-  taskId?: string;
-  onRefresh?: () => void;
+  taskId: string;
+}
+
+const COLLAPSE_KEY = (taskId: string) => `octomux:walkthrough-collapsed:${taskId}`;
+
+function riskTone(risk?: string): 'neutral' | 'warn' | 'danger' {
+  if (risk === 'high' || risk === 'critical') return 'danger';
+  if (risk === 'medium' || risk === 'med') return 'warn';
+  return 'neutral';
 }
 
 function ScalarPill({
   children,
-  className = '',
+  tone = 'neutral',
 }: {
   children: React.ReactNode;
-  className?: string;
+  tone?: 'neutral' | 'warn' | 'danger';
 }) {
+  const toneClasses = {
+    neutral: 'border-glass-edge bg-glass-l1 text-muted-foreground',
+    warn: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+    danger: 'border-red-400/40 bg-red-400/10 text-red-300',
+  }[tone];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border border-glass-edge bg-glass-l1 px-2 py-0.5 text-xs text-muted-foreground ${className}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${toneClasses}`}
     >
       {children}
     </span>
   );
 }
 
-export function WalkthroughHeader({
-  walkthrough,
-  runId,
-  taskId,
-  onRefresh,
-}: WalkthroughHeaderProps) {
+export function WalkthroughHeader({ walkthrough, taskId }: WalkthroughHeaderProps) {
   const g = walkthrough.global ?? {};
-  const [collapsed, setCollapsed] = useState(false);
-  const [editingSection, setEditingSection] = useState<{
-    kind: 'summary' | 'key_review_points';
-    value: string;
-  } | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
-  function startEdit(kind: 'summary' | 'key_review_points') {
-    const value = kind === 'summary' ? (g.summary ?? '') : (g.key_review_points ?? []).join('\n');
-    setEditingSection({ kind, value });
-  }
-
-  async function saveEdit() {
-    if (!editingSection || !runId || !taskId) return;
-    setSaving(true);
+  useEffect(() => {
     try {
-      const partial: Record<string, unknown> = {};
-      if (editingSection.kind === 'summary') {
-        partial['global'] = { summary: editingSection.value };
-      } else {
-        partial['global'] = {
-          key_review_points: editingSection.value
-            .split('\n')
-            .map((s) => s.trim())
-            .filter(Boolean),
-        };
-      }
-      await api.patchWalkthrough(taskId, runId, partial);
-      onRefresh?.();
+      const v = localStorage.getItem(COLLAPSE_KEY(taskId));
+      if (v !== null) setCollapsed(v === 'true');
     } catch {
-      // ignore
-    } finally {
-      setSaving(false);
-      setEditingSection(null);
+      // localStorage unavailable
     }
+  }, [taskId]);
+
+  function toggle() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(COLLAPSE_KEY(taskId), String(next));
+      } catch {
+        // localStorage unavailable
+      }
+      return next;
+    });
   }
 
   const hasContent =
@@ -120,31 +109,37 @@ export function WalkthroughHeader({
       <header className="flex items-center justify-between gap-2 px-4 py-2">
         <button
           type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+          onClick={toggle}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
           aria-expanded={!collapsed}
           aria-controls="walkthrough-header-body"
         >
           <ChevronDownIcon
+            aria-hidden
             className={collapsed ? '-rotate-90 transition-transform' : 'transition-transform'}
           />
-          Walkthrough
+          <span className="shrink-0">Walkthrough</span>
+          {collapsed && g.summary && (
+            <span className="ml-2 min-w-0 truncate text-xs font-normal text-muted-foreground/80">
+              — {g.summary.split(/[.!?](\s|$)/)[0]}
+            </span>
+          )}
         </button>
         {!collapsed && (g.type || g.risk || g.effort !== undefined || g.relevant_tests) && (
           <div className="flex flex-wrap gap-2">
-            {g.type && <ScalarPill>{g.type}</ScalarPill>}
-            {g.risk && <ScalarPill>Risk: {g.risk}</ScalarPill>}
-            {g.effort !== undefined && <ScalarPill>Effort {g.effort}/5</ScalarPill>}
-            {g.relevant_tests && <ScalarPill>Tests: {g.relevant_tests}</ScalarPill>}
+            {g.type && <ScalarPill tone="neutral">{g.type}</ScalarPill>}
+            {g.risk && <ScalarPill tone={riskTone(g.risk)}>Risk: {g.risk}</ScalarPill>}
+            {g.effort !== undefined && <ScalarPill tone="neutral">Effort {g.effort}/5</ScalarPill>}
+            {g.relevant_tests && <ScalarPill tone="neutral">Tests: {g.relevant_tests}</ScalarPill>}
             {g.security_concerns && (
-              <ScalarPill className="text-yellow-400">Security: {g.security_concerns}</ScalarPill>
+              <ScalarPill tone="danger">Security: {g.security_concerns}</ScalarPill>
             )}
           </div>
         )}
       </header>
 
       {!collapsed && (
-        <div id="walkthrough-header-body" className="space-y-3 px-4 pb-3">
+        <div id="walkthrough-header-body" className="max-h-60 space-y-3 overflow-y-auto px-4 pb-3">
           {g.ticket_compliance && g.ticket_compliance.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {g.ticket_compliance.map((tc) => (
@@ -168,87 +163,23 @@ export function WalkthroughHeader({
 
           {g.summary && (
             <div>
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm text-foreground">{g.summary}</p>
-                {runId && (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => startEdit('summary')}
-                    className="shrink-0 text-xs"
-                  >
-                    Edit
-                  </Button>
-                )}
-              </div>
-              {editingSection?.kind === 'summary' && (
-                <div className="mt-2 space-y-2">
-                  <Textarea
-                    value={editingSection.value}
-                    onChange={(e) =>
-                      setEditingSection({ ...editingSection, value: e.target.value })
-                    }
-                    rows={3}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="xs" onClick={saveEdit} disabled={saving}>
-                      {saving ? 'Saving…' : 'Save'}
-                    </Button>
-                    <Button variant="ghost" size="xs" onClick={() => setEditingSection(null)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <p className="text-sm text-foreground">{g.summary}</p>
             </div>
           )}
 
           {g.key_review_points && g.key_review_points.length > 0 && (
             <div>
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Key points
-                </p>
-                {runId && (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => startEdit('key_review_points')}
-                    className="text-xs"
-                  >
-                    Edit
-                  </Button>
-                )}
-              </div>
-              {editingSection?.kind === 'key_review_points' ? (
-                <div className="space-y-2">
-                  <Textarea
-                    value={editingSection.value}
-                    onChange={(e) =>
-                      setEditingSection({ ...editingSection, value: e.target.value })
-                    }
-                    placeholder="One point per line"
-                    rows={4}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="xs" onClick={saveEdit} disabled={saving}>
-                      {saving ? 'Saving…' : 'Save'}
-                    </Button>
-                    <Button variant="ghost" size="xs" onClick={() => setEditingSection(null)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <ul className="space-y-1">
-                  {g.key_review_points.map((pt, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="mt-1 shrink-0 text-muted-foreground">·</span>
-                      <span>{pt}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Key points
+              </p>
+              <ul className="space-y-1">
+                {g.key_review_points.map((pt, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    <span className="mt-1 shrink-0 text-muted-foreground">·</span>
+                    <span>{pt}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

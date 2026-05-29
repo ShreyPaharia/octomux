@@ -154,14 +154,7 @@ export default function ReviewDetailPage() {
           </Button>
         </header>
 
-        {walkthrough && (
-          <WalkthroughHeader
-            walkthrough={walkthrough}
-            runId={detail.latest_run?.id ?? null}
-            taskId={id!}
-            onRefresh={refresh}
-          />
-        )}
+        {walkthrough && <WalkthroughHeader walkthrough={walkthrough} taskId={id!} />}
 
         <div className="flex min-h-0 flex-1">
           <aside
