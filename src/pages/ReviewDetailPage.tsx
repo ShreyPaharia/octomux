@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { api, type ReviewDetail } from '../lib/api';
+import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
 import { subscribe } from '../lib/event-source';
 import { WalkthroughHeader, type Walkthrough } from '../components/review/WalkthroughHeader';
 import { ReviewFileTree } from '../components/review/ReviewFileTree';
@@ -45,6 +45,37 @@ export default function ReviewDetailPage() {
   }, [id, refresh]);
 
   const taskComments = useTaskComments(id);
+
+  const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set());
+
+  const handleToggleReviewed = useCallback(
+    async (path: string, currentlyReviewed: boolean) => {
+      setReviewedFiles((prev) => {
+        const next = new Set(prev);
+        if (currentlyReviewed) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      try {
+        if (currentlyReviewed) await api.unmarkReviewed(id!, path);
+        else await api.markReviewed(id!, path);
+      } catch {
+        setReviewedFiles((prev) => {
+          const next = new Set(prev);
+          if (currentlyReviewed) next.add(path);
+          else next.delete(path);
+          return next;
+        });
+      }
+    },
+    [id],
+  );
+
+  const handleSummaryLoaded = useCallback((s: DiffSummaryResponse) => {
+    const set = new Set<string>();
+    for (const f of s.files) if (f.reviewed) set.add(f.path);
+    setReviewedFiles(set);
+  }, []);
 
   const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
 
@@ -142,6 +173,8 @@ export default function ReviewDetailPage() {
               walkthrough={walkthrough}
               comments={detail.comments}
               selectedPath={selectedPath}
+              reviewedFiles={reviewedFiles}
+              onToggleReviewed={handleToggleReviewed}
               onSelect={handleSelectFile}
             />
           </aside>
@@ -155,6 +188,7 @@ export default function ReviewDetailPage() {
               enableComments
               onFilesChange={setFilesInDiff}
               onSelectionChange={setSelectedPath}
+              onSummaryLoaded={handleSummaryLoaded}
               hideFileTree
             />
           </div>
