@@ -118,9 +118,7 @@ export function PublishBar({
           size="sm"
           data-testid="comments-toggle"
           data-active={showCommentsPanel ? 'true' : undefined}
-          className={
-            showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined
-          }
+          className={showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined}
           onClick={onToggleCommentsPanel}
         >
           Comments ({totalCommentsCount})

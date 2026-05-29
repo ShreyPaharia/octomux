@@ -79,9 +79,7 @@ export function WalkthroughHeader({ walkthrough }: WalkthroughHeaderProps) {
             · {firstSentence(g.summary)}
           </span>
         )}
-        {meta.length > 0 && (
-          <Pip>{meta.join(' · ')}</Pip>
-        )}
+        {meta.length > 0 && <Pip>{meta.join(' · ')}</Pip>}
       </div>
     </section>
   );

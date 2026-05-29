@@ -52,7 +52,14 @@ interface FileRowProps {
   onSelect: (path: string) => void;
 }
 
-function FileRow({ file, selected, counts, reviewedFiles, onToggleReviewed, onSelect }: FileRowProps) {
+function FileRow({
+  file,
+  selected,
+  counts,
+  reviewedFiles,
+  onToggleReviewed,
+  onSelect,
+}: FileRowProps) {
   const open = counts?.open ?? 0;
   const stale = counts?.stale ?? 0;
   const serious = !!counts?.hasSerious;
@@ -89,10 +96,7 @@ function FileRow({ file, selected, counts, reviewedFiles, onToggleReviewed, onSe
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
         tabIndex={selected ? 0 : -1}
       >
-        <code
-          className="min-w-0 flex-1 truncate font-mono text-foreground"
-          title={file.path}
-        >
+        <code className="min-w-0 flex-1 truncate font-mono text-foreground" title={file.path}>
           {shortPath(file.path)}
         </code>
         {file.label && (
@@ -103,7 +107,9 @@ function FileRow({ file, selected, counts, reviewedFiles, onToggleReviewed, onSe
       </button>
       {file.summary && (
         <Popover>
-          <PopoverTrigger render={<span />} nativeButton={false}
+          <PopoverTrigger
+            render={<span />}
+            nativeButton={false}
             aria-label={`Summary for ${file.path}`}
             className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
             onClick={(e) => e.stopPropagation()}
@@ -120,9 +126,7 @@ function FileRow({ file, selected, counts, reviewedFiles, onToggleReviewed, onSe
             data-tone={serious ? 'serious' : 'muted'}
             className={cn(
               'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-              serious
-                ? 'bg-destructive/20 text-destructive'
-                : 'bg-glass-l2 text-muted-foreground',
+              serious ? 'bg-destructive/20 text-destructive' : 'bg-glass-l2 text-muted-foreground',
             )}
           >
             {open}

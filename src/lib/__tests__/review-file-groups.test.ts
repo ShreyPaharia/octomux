@@ -3,14 +3,9 @@ import { buildGroups, orderedPathsFromGroups, OTHER_GROUP_NAME } from '../review
 
 describe('buildGroups', () => {
   it('orders files by walkthrough.groups then orphans', () => {
-    const groups = buildGroups(
-      ['a.ts', 'b.ts', 'c.ts'],
-      {
-        groups: [
-          { name: 'Group A', files: [{ path: 'b.ts' }, { path: 'a.ts' }] },
-        ],
-      },
-    );
+    const groups = buildGroups(['a.ts', 'b.ts', 'c.ts'], {
+      groups: [{ name: 'Group A', files: [{ path: 'b.ts' }, { path: 'a.ts' }] }],
+    });
     expect(groups.map((g) => g.name)).toEqual(['Group A', OTHER_GROUP_NAME]);
     expect(orderedPathsFromGroups(groups)).toEqual(['b.ts', 'a.ts', 'c.ts']);
   });

@@ -153,10 +153,7 @@ export default function ReviewDetailPage() {
     [filesInDiff, walkthrough],
   );
 
-  const orderedFileOrder = useMemo(
-    () => orderedPathsFromGroups(orderedGroups),
-    [orderedGroups],
-  );
+  const orderedFileOrder = useMemo(() => orderedPathsFromGroups(orderedGroups), [orderedGroups]);
 
   const handleSelectFile = useCallback((path: string) => {
     setSelectedPath(path);
