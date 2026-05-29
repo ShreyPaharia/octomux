@@ -5,7 +5,7 @@ import { ChevronDownIcon } from '../icons';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { InlineCommentDTO } from '@/lib/api';
 import type { Walkthrough, WalkthroughFile } from './WalkthroughHeader';
-import { buildGroups, OTHER_GROUP_NAME, type RenderGroup } from '@/lib/review-file-groups';
+import { buildGroups } from '@/lib/review-file-groups';
 
 interface Props {
   files: string[];

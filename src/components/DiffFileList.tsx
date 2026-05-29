@@ -21,6 +21,7 @@ import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
 import { useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { DiffFileRow } from './DiffFileRow';
+import type { RenderGroup } from '@/lib/review-file-groups';
 
 const HASH_PREFIX = '#file=';
 const PROGRAMMATIC_SCROLL_MS = 700;
@@ -44,6 +45,8 @@ interface Props {
   agents?: Agent[];
   rangeIsBase?: boolean;
   enableComments?: boolean;
+  /** When provided, render sticky group-name dividers above each group's files. */
+  groups?: RenderGroup[];
 }
 
 function readHashPath(): string | null {
@@ -68,6 +71,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     agents = [],
     rangeIsBase = true,
     enableComments = false,
+    groups,
   },
   ref,
 ) {
@@ -467,6 +471,20 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     onPrevHunk: () => navigateHunk(-1),
   });
 
+  // ─── Group header map: first file path in each group → group info ────────
+  // Used to inject sticky dividers inline in the flat file list.
+  const groupHeaderMap = useMemo(() => {
+    const m = new Map<string, { name: string; count: number }>();
+    if (!groups) return m;
+    for (const g of groups) {
+      const firstPresent = g.files.find((gf) => filesByPath.has(gf.path));
+      if (firstPresent) {
+        m.set(firstPresent.path, { name: g.name, count: g.files.length });
+      }
+    }
+    return m;
+  }, [groups, filesByPath]);
+
   // ─── Render ─────────────────────────────────────────────────────────────
   if (orderedFiles.length === 0) {
     return (
@@ -484,26 +502,37 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
       {orderedFiles.map((file) => {
         const path = file.path;
         const exp = isExpanded(path);
+        const groupHeader = groupHeaderMap.size > 0 ? groupHeaderMap.get(path) : undefined;
         return (
-          <DiffFileRow
-            key={path}
-            ref={(el) => registerRow(path, el)}
-            file={file}
-            diff={loaded.get(path) ?? null}
-            loading={loading.has(path)}
-            error={errors.get(path) ?? null}
-            mounted={visible.has(path)}
-            expanded={exp}
-            reviewed={reviewed.has(path)}
-            active={activeFile === path}
-            showReviewToggle={!file.ignored}
-            onToggleReviewed={() => onToggleReviewed(path)}
-            onToggleExpanded={() => toggleExpanded(path)}
-            onEditorMount={handleEditorMount}
-            agents={agents}
-            rangeIsBase={rangeIsBase}
-            enableComments={enableComments}
-          />
+          <div key={path}>
+            {groupHeader && (
+              <div
+                data-testid={`diff-group-section-${groupHeader.name}`}
+                className="sticky top-0 z-10 border-b border-glass-edge bg-glass-l1/95 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur"
+              >
+                {groupHeader.name}
+                <span className="ml-1 font-normal opacity-60">({groupHeader.count})</span>
+              </div>
+            )}
+            <DiffFileRow
+              ref={(el) => registerRow(path, el)}
+              file={file}
+              diff={loaded.get(path) ?? null}
+              loading={loading.has(path)}
+              error={errors.get(path) ?? null}
+              mounted={visible.has(path)}
+              expanded={exp}
+              reviewed={reviewed.has(path)}
+              active={activeFile === path}
+              showReviewToggle={!file.ignored}
+              onToggleReviewed={() => onToggleReviewed(path)}
+              onToggleExpanded={() => toggleExpanded(path)}
+              onEditorMount={handleEditorMount}
+              agents={agents}
+              rangeIsBase={rangeIsBase}
+              enableComments={enableComments}
+            />
+          </div>
         );
       })}
     </div>

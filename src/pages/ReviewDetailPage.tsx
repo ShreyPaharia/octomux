@@ -90,9 +90,14 @@ export default function ReviewDetailPage() {
     }
   }, [detail]);
 
-  const orderedFileOrder = useMemo(
-    () => orderedPathsFromGroups(buildGroups(filesInDiff, walkthroughForOrder)),
+  const orderedGroups = useMemo(
+    () => buildGroups(filesInDiff, walkthroughForOrder),
     [filesInDiff, walkthroughForOrder],
+  );
+
+  const orderedFileOrder = useMemo(
+    () => orderedPathsFromGroups(orderedGroups),
+    [orderedGroups],
   );
 
   const handleSelectFile = useCallback((path: string) => {
@@ -200,6 +205,7 @@ export default function ReviewDetailPage() {
               onSummaryLoaded={handleSummaryLoaded}
               hideFileTree
               fileOrder={orderedFileOrder}
+              groups={orderedGroups}
             />
           </div>
 

@@ -56,6 +56,9 @@ interface Props {
    *  Paths not in the list are appended after the ordered set, preserving
    *  their API order. */
   fileOrder?: string[];
+  /** When provided, render sticky group-name dividers above each group's files
+   *  in the diff stream. */
+  groups?: import('@/lib/review-file-groups').RenderGroup[];
 }
 
 export function DiffViewer(props: Props) {
@@ -77,6 +80,7 @@ export function DiffViewer(props: Props) {
     onFilesChange,
     hideFileTree,
     fileOrder,
+    groups,
   } = props;
 
   // Standalone / composer mode — renders the new-content lines as clickable
@@ -110,6 +114,7 @@ export function DiffViewer(props: Props) {
       onFilesChange={onFilesChange}
       hideFileTree={hideFileTree}
       fileOrder={fileOrder}
+      groups={groups}
     />
   );
 }
@@ -207,6 +212,7 @@ function ApiDiffViewer({
   onFilesChange,
   hideFileTree = false,
   fileOrder,
+  groups,
 }: {
   taskId: string;
   isRunning: boolean;
@@ -220,6 +226,7 @@ function ApiDiffViewer({
   onFilesChange?: (paths: string[]) => void;
   hideFileTree?: boolean;
   fileOrder?: string[];
+  groups?: import('@/lib/review-file-groups').RenderGroup[];
 }) {
   const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
@@ -412,6 +419,7 @@ function ApiDiffViewer({
               agents={agents}
               rangeIsBase={isBaseRange}
               enableComments={enableComments}
+              groups={groups}
             />
           )}
         </div>
