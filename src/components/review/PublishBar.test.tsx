@@ -55,11 +55,7 @@ describe('PublishBar', () => {
   });
 
   it('shows GitHub link when prUrl is provided', () => {
-    render(
-      <PublishBar
-        {...defaultProps({ prUrl: 'https://github.com/o/r/pull/42' })}
-      />,
-    );
+    render(<PublishBar {...defaultProps({ prUrl: 'https://github.com/o/r/pull/42' })} />);
     const link = screen.getByText('GitHub');
     expect(link.closest('a')?.href).toBe('https://github.com/o/r/pull/42');
   });
@@ -70,22 +66,14 @@ describe('PublishBar', () => {
   });
 
   it('shows accepted, draft, and stale counts', () => {
-    render(
-      <PublishBar
-        {...defaultProps({ acceptedCount: 3, draftCount: 5, staleCount: 1 })}
-      />,
-    );
+    render(<PublishBar {...defaultProps({ acceptedCount: 3, draftCount: 5, staleCount: 1 })} />);
     expect(screen.getByText(/3 accepted/)).toBeTruthy();
     expect(screen.getByText(/5 drafts/)).toBeTruthy();
     expect(screen.getByText(/1 stale/)).toBeTruthy();
   });
 
   it('shows reviewed progress when reviewedTotal > 0', () => {
-    render(
-      <PublishBar
-        {...defaultProps({ reviewedDone: 2, reviewedTotal: 5 })}
-      />,
-    );
+    render(<PublishBar {...defaultProps({ reviewedDone: 2, reviewedTotal: 5 })} />);
     expect(screen.getByTestId('pr-review-progress')).toBeTruthy();
     expect(screen.getByText('2/5 reviewed')).toBeTruthy();
   });

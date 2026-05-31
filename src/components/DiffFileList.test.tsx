@@ -284,7 +284,11 @@ describe('DiffFileList', () => {
         reviewed={new Set()}
         onToggleReviewed={() => {}}
         groups={[
-          { name: 'Alpha', summary: 'Core logic changes', files: [{ path: 'a.ts' }, { path: 'b.ts' }] },
+          {
+            name: 'Alpha',
+            summary: 'Core logic changes',
+            files: [{ path: 'a.ts' }, { path: 'b.ts' }],
+          },
           { name: 'Other', files: [{ path: 'c.ts' }] },
         ]}
       />,

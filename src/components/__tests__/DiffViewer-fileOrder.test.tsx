@@ -43,11 +43,7 @@ describe('DiffViewer fileOrder prop', () => {
   it('sorts the file list by the provided fileOrder', async () => {
     const onFilesChange = vi.fn();
     render(
-      <DiffViewer
-        taskId="t1"
-        fileOrder={['c.ts', 'a.ts', 'b.ts']}
-        onFilesChange={onFilesChange}
-      />,
+      <DiffViewer taskId="t1" fileOrder={['c.ts', 'a.ts', 'b.ts']} onFilesChange={onFilesChange} />,
     );
     await waitFor(() => {
       expect(onFilesChange).toHaveBeenCalledWith(['c.ts', 'a.ts', 'b.ts']);

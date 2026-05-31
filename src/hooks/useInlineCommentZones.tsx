@@ -184,8 +184,7 @@ export function useInlineCommentZones(params: UseInlineCommentZonesParams): Reac
           const h = child.offsetHeight;
           if (h === 0 || h === lastHeight) return;
           lastHeight = h;
-          const ed =
-            node.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
+          const ed = node.side === 'new' ? editor.getModifiedEditor() : editor.getOriginalEditor();
           ed.changeViewZones((accessor) => {
             accessor.removeZone(cur.zoneId);
             const nextZone: MonacoEditor.IViewZone = {
