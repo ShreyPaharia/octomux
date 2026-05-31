@@ -22,6 +22,8 @@ vi.mock('./setup-status.js', () => ({
 
 vi.mock('./hooks-install.js', () => ({
   installHookTemplate: vi.fn(() => ['/tmp/jira-status']),
+  listHookTemplates: vi.fn(() => ['jira-status']),
+  isHookTemplateInstalled: vi.fn(() => false),
 }));
 
 vi.mock('./task-runner.js', () => ({
@@ -101,5 +103,24 @@ describe('POST /api/hooks/install', () => {
       .expect(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.files).toHaveLength(1);
+  });
+});
+
+describe('GET /api/hooks/templates', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('lists available hook templates with installed state', async () => {
+    const res = await request(app).get('/api/hooks/templates').expect(200);
+    expect(res.body).toEqual([{ id: 'jira-status', installed: false }]);
   });
 });

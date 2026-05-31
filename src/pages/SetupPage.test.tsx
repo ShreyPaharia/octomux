@@ -85,56 +85,38 @@ describe('SetupPage', () => {
     );
   });
 
-  describe('DefaultsForm — tracker selector', () => {
-    it('renders Linear team-key input and hides Jira URL when defaultTracker is linear', async () => {
+  describe('DefaultsForm — tracker fields moved to Integrations', () => {
+    it('does not render tracker / Jira / Linear default fields', async () => {
       apiMock.getSettings.mockResolvedValue({
         editor: 'nvim',
         dangerouslySkipPermissions: false,
         claudeFlags: '',
-        defaultBaseBranch: '',
-        defaultTracker: 'linear',
+        defaultBaseBranch: 'main',
+        defaultTracker: 'jira',
+        defaultJiraBaseUrl: 'https://myco.atlassian.net',
         defaultLinearTeamKey: 'BAC',
       });
       renderWithRouter(<SetupPage />);
-      await waitFor(() => screen.getByLabelText(/default linear team key/i));
-      expect(screen.getByLabelText(/default linear team key/i)).toHaveValue('BAC');
+      // Base branch + grace hours remain; tracker-specific fields are gone.
+      await screen.findByTestId('setup-default-branch');
+      expect(screen.getByTestId('setup-delete-grace-hours')).toBeInTheDocument();
+      expect(screen.queryByLabelText(/default tracker/i)).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/jira base url/i)).not.toBeInTheDocument();
-    });
-
-    it('renders Jira URL input and hides Linear team-key when defaultTracker is jira', async () => {
-      apiMock.getSettings.mockResolvedValue({
-        editor: 'nvim',
-        dangerouslySkipPermissions: false,
-        claudeFlags: '',
-        defaultBaseBranch: '',
-        defaultTracker: 'jira',
-        defaultJiraBaseUrl: 'https://myco.atlassian.net',
-      });
-      renderWithRouter(<SetupPage />);
-      await waitFor(() => screen.getByLabelText(/jira base url/i));
-      expect(screen.getByLabelText(/jira base url/i)).toHaveValue('https://myco.atlassian.net');
       expect(screen.queryByLabelText(/default linear team key/i)).not.toBeInTheDocument();
     });
 
-    it('switching tracker dropdown swaps conditional sections', async () => {
-      apiMock.getSettings.mockResolvedValue({
-        editor: 'nvim',
-        dangerouslySkipPermissions: false,
-        claudeFlags: '',
-        defaultBaseBranch: '',
-        defaultTracker: 'linear',
-        defaultLinearTeamKey: '',
-      });
+    it('saves only base branch and grace hours', async () => {
+      apiMock.updateSettings.mockResolvedValue({});
       const user = userEvent.setup();
       renderWithRouter(<SetupPage />);
-      await waitFor(() => screen.getByLabelText(/default tracker/i));
-      // Initially linear — Linear input visible, Jira URL not
-      expect(screen.getByLabelText(/default linear team key/i)).toBeInTheDocument();
-      expect(screen.queryByLabelText(/jira base url/i)).not.toBeInTheDocument();
-      // Switch to Jira
-      await user.selectOptions(screen.getByLabelText(/default tracker/i), 'jira');
-      expect(screen.getByLabelText(/jira base url/i)).toBeInTheDocument();
-      expect(screen.queryByLabelText(/default linear team key/i)).not.toBeInTheDocument();
+      await screen.findByTestId('setup-save-defaults');
+      await user.click(screen.getByTestId('setup-save-defaults'));
+      await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalledTimes(1));
+      const payload = apiMock.updateSettings.mock.calls[0][0];
+      expect(payload).not.toHaveProperty('defaultTracker');
+      expect(payload).not.toHaveProperty('defaultJiraBaseUrl');
+      expect(payload).not.toHaveProperty('defaultLinearTeamKey');
+      expect(payload).toHaveProperty('deleteGraceHours');
     });
   });
 });

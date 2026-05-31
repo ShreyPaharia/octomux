@@ -20,6 +20,9 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
      - Call `mcp__plugin_linear_linear__list_teams()` and check whether the key prefix matches a Linear team's key → Linear.
      - Otherwise treat as Jira.
    - If ambiguous (both could match), prefer `defaultTracker` from `~/.octomux/settings.json`.
+   - The configured trackers and their defaults are the source of truth — run
+     `octomux list-integrations --json` to see enabled Jira/Linear integrations with
+     their `base_url`, `default_project`, and `default_team_key` (secrets are masked).
 
    **Fetching Linear issue details:**
    1. Extract the issue key (e.g. `BAC-843`).
@@ -44,7 +47,11 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
       - `priority` / `labels` -> inform urgency in Why section
    4. If the description contains acceptance criteria (bullet lists, checkboxes), extract them verbatim for the Acceptance Criteria section
 
-   If `~/.octomux/settings.json` has `defaultJiraBaseUrl` / `defaultJiraProjectKey` / `defaultLinearTeamKey`, treat those as the user's defaults when inferring a URL or assuming a project/team key.
+   For the default base URL / project key / team key when inferring a URL or assuming a
+   project/team, read the enabled integration's config via `octomux list-integrations --json`
+   (`base_url` / `default_project` for Jira, `default_team_key` for Linear). Fall back to the
+   legacy `defaultJiraBaseUrl` / `defaultJiraProjectKey` / `defaultLinearTeamKey` keys in
+   `~/.octomux/settings.json` only when no matching integration is configured.
 
 2. **Resolve the repo:**
    - Query recent repos via CLI:

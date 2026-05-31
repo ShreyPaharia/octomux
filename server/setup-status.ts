@@ -7,13 +7,7 @@ import { fileURLToPath } from 'url';
 import { probeBinary, brewInstall, hasBrew } from './binary-check.js';
 import type { BinaryDep } from './startup.js';
 import { getSettings, type OctomuxSettings, type EditorChoice } from './settings.js';
-import { listIntegrations } from './integrations/store.js';
 import { ensureGithubLogin } from './github-login.js';
-import {
-  isHookTemplateInstalled,
-  listHookTemplates,
-  installHookTemplate,
-} from './hooks-install.js';
 import { syncLazyVimPlugins } from './startup.js';
 const execFile = promisify(execFileCb);
 
@@ -24,7 +18,7 @@ export type SetupItemStatus = 'ok' | 'missing' | 'outdated' | 'unconfigured' | '
 export type SetupItemCategory = 'required' | 'recommended' | 'optional';
 
 export interface SetupInstallAction {
-  kind: 'brew' | 'copy' | 'template' | 'sync';
+  kind: 'brew' | 'copy' | 'template' | 'sync' | 'shell';
   id: string;
   label: string;
 }
@@ -52,7 +46,20 @@ export interface SetupStatusResponse {
   hasBrew: boolean;
 }
 
-const BINARY_DEPS: Array<BinaryDep & { id: string; category: SetupItemCategory }> = [
+/**
+ * `shellInstall` is a fixed POSIX command line used to install a dependency that
+ * has no Homebrew package (e.g. the coding-agent CLIs). It is run verbatim via
+ * `bash -lc` from `runSetupInstall` and is NEVER built from user input — the only
+ * source is this static table. Omit it (or run on Windows) to fall back to the docs
+ * link.
+ */
+type SetupBinaryDep = BinaryDep & {
+  id: string;
+  category: SetupItemCategory;
+  shellInstall?: string;
+};
+
+const BINARY_DEPS: SetupBinaryDep[] = [
   { id: 'tmux', cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux', category: 'required' },
   { id: 'git', cmd: 'git', checkArgs: ['--version'], brewPkg: 'git', category: 'required' },
   {
@@ -60,7 +67,8 @@ const BINARY_DEPS: Array<BinaryDep & { id: string; category: SetupItemCategory }
     cmd: 'claude',
     checkArgs: ['--version'],
     name: 'Claude Code CLI',
-    installUrl: 'https://docs.anthropic.com/en/docs/claude-code',
+    installUrl: 'https://code.claude.com/docs/en/setup',
+    shellInstall: 'curl -fsSL https://claude.ai/install.sh | bash',
     category: 'recommended',
   },
   {
@@ -69,6 +77,7 @@ const BINARY_DEPS: Array<BinaryDep & { id: string; category: SetupItemCategory }
     checkArgs: ['--version'],
     name: 'Cursor CLI',
     installUrl: 'https://cursor.com/docs/cli',
+    shellInstall: 'curl https://cursor.com/install -fsS | bash',
     category: 'optional',
   },
 ];
@@ -123,12 +132,20 @@ function missingBundledSkills(): string[] {
   return missing;
 }
 
-function jiraEnvConfigured(): boolean {
-  return Boolean(
-    process.env.JIRA_BASE_URL?.trim() &&
-    process.env.JIRA_EMAIL?.trim() &&
-    process.env.JIRA_TOKEN?.trim(),
-  );
+/**
+ * Pick an install action for a missing binary dep: prefer Homebrew on macOS, then a
+ * fixed shell installer on any POSIX platform. Returns undefined when neither applies
+ * (the UI then shows only the docs link).
+ */
+function binaryInstallAction(dep: SetupBinaryDep): SetupInstallAction | undefined {
+  const name = dep.name || dep.cmd;
+  if (dep.brewPkg && hasBrew() && process.platform === 'darwin') {
+    return { kind: 'brew', id: dep.id, label: `Install ${name} (Homebrew)` };
+  }
+  if (dep.shellInstall && process.platform !== 'win32') {
+    return { kind: 'shell', id: dep.id, label: `Install ${name}` };
+  }
+  return undefined;
 }
 
 function defaultsConfigured(settings: OctomuxSettings): boolean {
@@ -190,10 +207,7 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
         ? 'optional_missing'
         : 'missing';
 
-    const install =
-      status !== 'ok' && dep.brewPkg && hasBrew() && process.platform === 'darwin'
-        ? { kind: 'brew' as const, id: dep.id, label: `Install ${dep.name || dep.cmd} (Homebrew)` }
-        : undefined;
+    const install = status !== 'ok' ? binaryInstallAction(dep) : undefined;
 
     items.push({
       id: dep.id,
@@ -218,38 +232,6 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
     install: missingSkills.length
       ? { kind: 'copy', id: 'skills', label: 'Install bundled skills' }
       : undefined,
-  });
-
-  const jiraHookInstalled = isHookTemplateInstalled('jira-status');
-  items.push({
-    id: 'jira-status-hook',
-    label: 'jira-status hook',
-    category: 'optional',
-    status: jiraHookInstalled ? 'ok' : 'optional_missing',
-    install: jiraHookInstalled
-      ? undefined
-      : { kind: 'template', id: 'jira-status-hook', label: 'Install jira-status hook' },
-    detail:
-      jiraHookInstalled && !jiraEnvConfigured()
-        ? 'Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN'
-        : undefined,
-  });
-
-  items.push({
-    id: 'jira-env',
-    label: 'Jira hook credentials (env)',
-    category: 'optional',
-    status: jiraEnvConfigured() ? 'ok' : 'unconfigured',
-    detail: 'Required only for the jira-status hook',
-  });
-
-  const jiraIntegrations = listIntegrations().filter((i) => i.kind === 'jira' && i.enabled);
-  items.push({
-    id: 'jira-integration',
-    label: 'Jira integration (API)',
-    category: 'optional',
-    status: jiraIntegrations.length > 0 ? 'ok' : 'unconfigured',
-    configureUrl: '/integrations',
   });
 
   const ghProbe = probeBinary({ cmd: 'gh', checkArgs: ['--version'] });
@@ -327,10 +309,11 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
 const INSTALL_ALLOWLIST = new Set([
   'tmux',
   'git',
+  'claude',
+  'cursor-agent',
   'editor',
   'gh',
   'skills',
-  'jira-status-hook',
   'lazyvim-sync',
 ]);
 
@@ -366,9 +349,26 @@ export async function runSetupInstall(id: string): Promise<{ ok: boolean; messag
     };
   }
 
-  if (id === 'jira-status-hook') {
-    const files = installHookTemplate('jira-status');
-    return { ok: true, message: `Installed hook (${files.length} file(s))` };
+  const shellDep = BINARY_DEPS.find((d) => d.id === id && d.shellInstall);
+  if (shellDep?.shellInstall) {
+    if (process.platform === 'win32') {
+      return {
+        ok: false,
+        message: `Install ${shellDep.name || shellDep.cmd} manually${shellDep.installUrl ? `: ${shellDep.installUrl}` : ''}.`,
+      };
+    }
+    try {
+      execFileSync('bash', ['-lc', shellDep.shellInstall], { stdio: 'inherit' });
+    } catch {
+      // fall through to the re-probe below; a failed installer still gets a clear message
+    }
+    const ok = probeBinary({ cmd: shellDep.cmd, checkArgs: shellDep.checkArgs }).ok;
+    return ok
+      ? { ok: true, message: `Installed ${shellDep.name || shellDep.cmd}` }
+      : {
+          ok: false,
+          message: `Could not install ${shellDep.name || shellDep.cmd}. Install manually${shellDep.installUrl ? `: ${shellDep.installUrl}` : ''}.`,
+        };
   }
 
   if (id === 'lazyvim-sync') {
@@ -453,11 +453,4 @@ async function detectDefaultBaseBranch(): Promise<string> {
     // fall through
   }
   return 'main';
-}
-
-export function listSetupHookTemplates(): Array<{ id: string; installed: boolean }> {
-  return listHookTemplates().map((id) => ({
-    id,
-    installed: isHookTemplateInstalled(id),
-  }));
 }
