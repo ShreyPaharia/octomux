@@ -116,35 +116,20 @@ function DefaultsForm({
 }: {
   initial: {
     defaultBaseBranch?: string;
-    defaultJiraBaseUrl?: string;
-    defaultJiraProjectKey?: string;
     deleteGraceHours?: number;
-    defaultTracker?: 'jira' | 'linear';
-    defaultLinearTeamKey?: string;
   };
   onSaved: () => void;
 }) {
-  const [tracker, setTracker] = useState<'jira' | 'linear' | ''>(initial.defaultTracker ?? '');
   const [baseBranch, setBaseBranch] = useState(initial.defaultBaseBranch ?? '');
-  const [jiraUrl, setJiraUrl] = useState(initial.defaultJiraBaseUrl ?? '');
-  const [jiraProject, setJiraProject] = useState(initial.defaultJiraProjectKey ?? '');
   const [deleteGraceHours, setDeleteGraceHours] = useState<number>(initial.deleteGraceHours ?? 6);
-  const [linearTeamKey, setLinearTeamKey] = useState(initial.defaultLinearTeamKey ?? '');
   const [saving, setSaving] = useState(false);
-
-  const showJira = tracker === 'jira' || (tracker === '' && !!initial.defaultJiraBaseUrl);
-  const showLinear = tracker === 'linear';
 
   const save = async () => {
     setSaving(true);
     try {
       await api.updateSettings({
-        defaultTracker: tracker || undefined,
         defaultBaseBranch: baseBranch.trim() || undefined,
-        defaultJiraBaseUrl: jiraUrl.trim() || undefined,
-        defaultJiraProjectKey: jiraProject.trim().toUpperCase() || undefined,
         deleteGraceHours,
-        defaultLinearTeamKey: linearTeamKey.trim().toUpperCase() || undefined,
       });
       showToast('success', 'DEFAULTS', 'Task defaults saved');
       onSaved();
@@ -157,22 +142,6 @@ function DefaultsForm({
 
   return (
     <div className="space-y-3 pt-2">
-      <div>
-        <label htmlFor="setup-default-tracker" className="mb-1 block text-xs text-[#b5b5bd]">
-          Default tracker
-        </label>
-        <select
-          id="setup-default-tracker"
-          value={tracker}
-          onChange={(e) => setTracker(e.target.value as 'jira' | 'linear' | '')}
-          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 text-sm text-white outline-none focus:border-[#3B82F6]"
-          data-testid="setup-default-tracker"
-        >
-          <option value="">— none —</option>
-          <option value="linear">Linear</option>
-          <option value="jira">Jira</option>
-        </select>
-      </div>
       <div>
         <label htmlFor="setup-default-branch" className="mb-1 block text-xs text-[#b5b5bd]">
           Default base branch
@@ -187,57 +156,6 @@ function DefaultsForm({
           data-testid="setup-default-branch"
         />
       </div>
-      {showLinear && (
-        <div>
-          <label
-            htmlFor="setup-default-linear-team-key"
-            className="mb-1 block text-xs text-[#b5b5bd]"
-          >
-            Default Linear team key
-          </label>
-          <input
-            id="setup-default-linear-team-key"
-            type="text"
-            value={linearTeamKey}
-            onChange={(e) => setLinearTeamKey(e.target.value)}
-            placeholder="ENG"
-            className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-          />
-        </div>
-      )}
-      {showJira && (
-        <>
-          <div>
-            <label htmlFor="setup-default-jira-url" className="mb-1 block text-xs text-[#b5b5bd]">
-              Jira base URL (optional)
-            </label>
-            <input
-              id="setup-default-jira-url"
-              type="text"
-              value={jiraUrl}
-              onChange={(e) => setJiraUrl(e.target.value)}
-              placeholder="https://your-co.atlassian.net"
-              className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="setup-default-jira-project"
-              className="mb-1 block text-xs text-[#b5b5bd]"
-            >
-              Default Jira project key (optional)
-            </label>
-            <input
-              id="setup-default-jira-project"
-              type="text"
-              value={jiraProject}
-              onChange={(e) => setJiraProject(e.target.value)}
-              placeholder="PROJ"
-              className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-            />
-          </div>
-        </>
-      )}
       <div>
         <label className="mb-1 block text-xs text-[#b5b5bd]">
           Hours before deleted tasks are permanently removed
@@ -422,7 +340,7 @@ export default function SetupPage() {
               <SectionCard id="setup-defaults" title="Task defaults">
                 <SettingRow
                   label="Defaults for new tasks"
-                  description="Base branch and Jira shortcuts used by the composer and CLI"
+                  description="Base branch and trash retention for new tasks"
                   lastRow
                 >
                   <span />

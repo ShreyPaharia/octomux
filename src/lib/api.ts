@@ -129,9 +129,18 @@ export interface SetupItem {
   status: SetupItemStatus;
   version?: string;
   detail?: string;
-  install?: { kind: string; id: string; label: string };
+  install?: {
+    kind: 'brew' | 'copy' | 'template' | 'sync' | 'shell' | string;
+    id: string;
+    label: string;
+  };
   configureUrl?: string;
   docsUrl?: string;
+}
+
+export interface HookTemplate {
+  id: string;
+  installed: boolean;
 }
 
 export interface SetupStatusResponse {
@@ -553,6 +562,7 @@ export const api = {
     }),
   applyRecommendedDefaults: () =>
     request<OctomuxSettings>('/setup/apply-recommended-defaults', { method: 'POST' }),
+  listHookTemplates: () => request<HookTemplate[]>('/hooks/templates'),
   installHookTemplate: (template: string) =>
     request<{ ok: boolean; files: string[] }>('/hooks/install', {
       method: 'POST',

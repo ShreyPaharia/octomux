@@ -3,9 +3,11 @@ import { Button } from '@/components/ui/button';
 import { SectionCard } from '@/components/layout/section-card';
 import { SettingsLayout } from '@/components/layout/settings-layout';
 import { Switch } from '@/components/ui/switch';
+import { InfoTooltip } from '@/components/ui/tooltip';
+import { showToast } from '@/components/CustomToast';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
 import { api } from '@/lib/api';
-import type { IntegrationProvider, IntegrationRow } from '@/lib/api';
+import type { IntegrationProvider, IntegrationRow, HookTemplate } from '@/lib/api';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
 import { LinearConfigForm, toLinearConfig } from '@/components/integrations/LinearConfigForm';
@@ -15,6 +17,22 @@ function providerIcon(kind: string): string {
   if (kind === 'jira') return 'J';
   if (kind === 'linear') return 'L';
   return kind.charAt(0).toUpperCase();
+}
+
+/** Display metadata for installable workflow-hook templates. */
+const HOOK_TEMPLATE_META: Record<string, { label: string; tooltip: string }> = {
+  'jira-status': {
+    label: 'jira-status hook',
+    tooltip:
+      'Runs when a task’s workflow column changes and transitions the linked Jira ' +
+      'issue via the status→transition-ID map in ~/.octomux/hooks. Needs JIRA_BASE_URL, ' +
+      'JIRA_EMAIL and JIRA_TOKEN. This is an alternative to the Jira API integration’s ' +
+      'automatic transitions — use one or the other to avoid double-firing.',
+  },
+};
+
+function hookTemplateLabel(id: string): string {
+  return HOOK_TEMPLATE_META[id]?.label ?? id;
 }
 
 interface IntegrationCardProps {
@@ -139,18 +157,55 @@ export default function IntegrationsPage() {
     {},
   );
   const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [hookTemplates, setHookTemplates] = useState<HookTemplate[]>([]);
+  const [installingHook, setInstallingHook] = useState<string | null>(null);
+  const [tracker, setTracker] = useState<'jira' | 'linear' | ''>('');
+  const [savingTracker, setSavingTracker] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [p, i] = await Promise.all([api.listProviders(), api.listIntegrations()]);
+      const [p, i, hooks, settings] = await Promise.all([
+        api.listProviders(),
+        api.listIntegrations(),
+        api.listHookTemplates().catch(() => [] as HookTemplate[]),
+        api.getSettings().catch(() => null),
+      ]);
       setProviders(p);
       setIntegrations(i);
+      setHookTemplates(hooks);
+      if (settings) setTracker(settings.defaultTracker ?? '');
     } catch {
       // silently ignore
     } finally {
       setLoading(false);
     }
   }, []);
+
+  async function handleInstallHook(id: string) {
+    setInstallingHook(id);
+    try {
+      await api.installHookTemplate(id);
+      showToast('success', 'HOOKS', `Installed ${hookTemplateLabel(id)}`);
+      void refresh();
+    } catch (err) {
+      showToast('error', 'HOOKS', err instanceof Error ? err.message : 'Install failed');
+    } finally {
+      setInstallingHook(null);
+    }
+  }
+
+  async function handleTrackerChange(next: 'jira' | 'linear' | '') {
+    setTracker(next);
+    setSavingTracker(true);
+    try {
+      await api.updateSettings({ defaultTracker: next || undefined });
+      showToast('success', 'INTEGRATIONS', 'Primary tracker saved');
+    } catch (err) {
+      showToast('error', 'INTEGRATIONS', err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSavingTracker(false);
+    }
+  }
 
   useEffect(() => {
     void refresh();
@@ -279,6 +334,71 @@ export default function IntegrationsPage() {
                 testResult={testResults[i.id] ?? null}
                 testing={testing[i.id] ?? false}
               />
+            ))
+          )}
+        </SectionCard>
+
+        <SectionCard id="primary-tracker" title="Primary tracker">
+          <div
+            className="flex items-center justify-between py-3"
+            style={ROW_DIVIDER}
+            data-testid="primary-tracker-row"
+          >
+            <div>
+              <p className="text-sm font-medium text-foreground">Default tracker for new tasks</p>
+              <p className="text-xs text-muted-soft">
+                Used by the create-task flow when more than one tracker is configured.
+              </p>
+            </div>
+            <select
+              value={tracker}
+              disabled={savingTracker}
+              onChange={(e) => void handleTrackerChange(e.target.value as 'jira' | 'linear' | '')}
+              className="border border-glass-edge bg-[#0B0C0F] px-3 py-2 text-sm text-white outline-none focus:border-[#3B82F6]"
+              data-testid="primary-tracker-select"
+              aria-label="Primary tracker"
+            >
+              <option value="">— none —</option>
+              <option value="linear">Linear</option>
+              <option value="jira">Jira</option>
+            </select>
+          </div>
+        </SectionCard>
+
+        <SectionCard id="workflow-hooks" title="Workflow hooks">
+          {hookTemplates.length === 0 ? (
+            <p className="py-2 text-xs text-muted-soft">No hook templates available.</p>
+          ) : (
+            hookTemplates.map((h) => (
+              <div
+                key={h.id}
+                className="flex items-center justify-between py-3"
+                style={ROW_DIVIDER}
+                data-testid={`hook-template-${h.id}`}
+              >
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">{hookTemplateLabel(h.id)}</p>
+                  {HOOK_TEMPLATE_META[h.id]?.tooltip && (
+                    <InfoTooltip
+                      content={HOOK_TEMPLATE_META[h.id].tooltip}
+                      label={`About ${hookTemplateLabel(h.id)}`}
+                    />
+                  )}
+                </div>
+                {h.installed ? (
+                  <span className="text-xs font-medium text-[#22C55E]">Installed</span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={installingHook === h.id}
+                    onClick={() => void handleInstallHook(h.id)}
+                    data-testid={`hook-install-${h.id}`}
+                  >
+                    {installingHook === h.id ? 'Installing…' : 'Install'}
+                  </Button>
+                )}
+              </div>
             ))
           )}
         </SectionCard>

@@ -20,18 +20,8 @@ vi.mock('./settings.js', () => ({
   })),
 }));
 
-vi.mock('./integrations/store.js', () => ({
-  listIntegrations: vi.fn(() => []),
-}));
-
 vi.mock('./github-login.js', () => ({
   ensureGithubLogin: vi.fn(async () => null),
-}));
-
-vi.mock('./hooks-install.js', () => ({
-  isHookTemplateInstalled: vi.fn(() => false),
-  listHookTemplates: vi.fn(() => ['jira-status']),
-  installHookTemplate: vi.fn(() => ['/tmp/hook']),
 }));
 
 vi.mock('child_process', () => ({
@@ -81,6 +71,24 @@ describe('getSetupStatus', () => {
     const tmux = status.items.find((i) => i.id === 'tmux');
     expect(tmux?.status).toBe('missing');
   });
+
+  it('does not surface Jira integration rows (those live under Integrations)', async () => {
+    const status = await getSetupStatus();
+    const ids = status.items.map((i) => i.id);
+    expect(ids).not.toContain('jira-status-hook');
+    expect(ids).not.toContain('jira-env');
+    expect(ids).not.toContain('jira-integration');
+  });
+
+  it('offers a shell install for cursor-agent when missing (no brew)', async () => {
+    vi.mocked(probeBinary).mockImplementation(({ cmd }) =>
+      cmd === 'cursor-agent' ? { ok: false } : { ok: true, version: '1.0' },
+    );
+    const status = await getSetupStatus();
+    const cursor = status.items.find((i) => i.id === 'cursor-agent');
+    expect(cursor?.status).toBe('optional_missing');
+    expect(cursor?.install).toEqual(expect.objectContaining({ kind: 'shell', id: 'cursor-agent' }));
+  });
 });
 
 describe('runSetupInstall', () => {
@@ -91,6 +99,25 @@ describe('runSetupInstall', () => {
   it('installs skills when allowed', async () => {
     const result = await runSetupInstall('skills');
     expect(result.ok).toBe(true);
+  });
+
+  it('runs the fixed shell installer for cursor-agent and re-probes', async () => {
+    const { execFileSync } = await import('child_process');
+    vi.mocked(probeBinary).mockReturnValue({ ok: true, version: '1.0' });
+    const result = await runSetupInstall('cursor-agent');
+    expect(result.ok).toBe(true);
+    expect(execFileSync).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', 'curl https://cursor.com/install -fsS | bash'],
+      expect.anything(),
+    );
+  });
+
+  it('reports failure when the shell installer leaves the binary off PATH', async () => {
+    vi.mocked(probeBinary).mockReturnValue({ ok: false });
+    const result = await runSetupInstall('claude');
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/install/i);
   });
 });
 

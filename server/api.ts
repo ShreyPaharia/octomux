@@ -1761,6 +1761,19 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  app.get('/api/hooks/templates', async (_req: Request, res: Response) => {
+    try {
+      const { listHookTemplates, isHookTemplateInstalled } = await import('./hooks-install.js');
+      const templates = listHookTemplates().map((id) => ({
+        id,
+        installed: isHookTemplateInstalled(id),
+      }));
+      res.json(templates);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   app.post('/api/hooks/install', async (req: Request, res: Response) => {
     const { template } = req.body as { template?: string };
     if (!template || typeof template !== 'string') {

@@ -85,7 +85,19 @@ export interface PostCommentInput {
   anchor_commit_sha?: string;
 }
 
+export interface IntegrationRow {
+  id: string;
+  kind: string;
+  name: string;
+  /** Secret fields (api_token / api_key) are masked by the server. */
+  config: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface OctomuxClient {
+  listIntegrations(): Promise<IntegrationRow[]>;
   createTask(data: {
     title: string;
     description: string;
@@ -186,6 +198,9 @@ export function createClient(serverUrl: string): OctomuxClient {
   const baseUrl = serverUrl.replace(/\/$/, '') + '/api';
 
   return {
+    listIntegrations() {
+      return request<IntegrationRow[]>(baseUrl, '/integrations');
+    },
     createTask(data) {
       return request<Task>(baseUrl, '/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
