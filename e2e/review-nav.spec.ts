@@ -81,10 +81,7 @@ test.describe('Review detail → SPA navigation (nav-lockup regression)', () => 
     await expect(page.getByTestId('review-file-tree')).toHaveCount(0);
 
     // NavLink active state updates (pre-fix: aria-current stayed null).
-    await expect(page.locator('a[href="/tasks"]').first()).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    await expect(page.locator('a[href="/tasks"]').first()).toHaveAttribute('aria-current', 'page');
 
     // SPA navigation — no full page reload (pre-fix workaround did location.assign).
     const noReload = await page.evaluate(
