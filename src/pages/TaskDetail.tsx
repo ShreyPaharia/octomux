@@ -7,6 +7,7 @@ import { AgentTabs } from '@/components/AgentTabs';
 import { AgentGridCell } from '@/components/AgentGridCell';
 import { gridColumns } from '@/pages/GridMonitor';
 import { DiffViewer } from '@/components/DiffViewer';
+import { clearDiffTreeExpandedState } from '@/components/DiffFileTree';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
@@ -533,6 +534,7 @@ export default function TaskDetail() {
     if (!taskId) return;
     try {
       await api.deleteTask(taskId);
+      clearDiffTreeExpandedState(taskId);
       navigate('/tasks');
     } catch (err) {
       console.error('Failed to delete task:', err);

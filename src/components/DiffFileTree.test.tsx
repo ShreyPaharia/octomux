@@ -2,10 +2,54 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DiffFileEntry } from '@/lib/api';
-import { DiffFileTree, ignoredGroupKey } from './DiffFileTree';
+import {
+  DiffFileTree,
+  ignoredGroupKey,
+  diffTreeExpandedKey,
+  loadExpandedState,
+  saveExpandedState,
+  clearDiffTreeExpandedState,
+} from './DiffFileTree';
 
 beforeEach(() => {
   localStorage.clear();
+});
+
+describe('diff tree expand-state persistence helpers', () => {
+  it('namespaces the storage key per task', () => {
+    expect(diffTreeExpandedKey('t1')).toBe('octomux:diff-tree-expanded:t1');
+  });
+
+  it('loadExpandedState returns an empty object when nothing is stored', () => {
+    expect(loadExpandedState('t1')).toEqual({});
+  });
+
+  it('loadExpandedState parses a stored boolean map', () => {
+    localStorage.setItem(diffTreeExpandedKey('t1'), JSON.stringify({ src: false, 'src/lib': true }));
+    expect(loadExpandedState('t1')).toEqual({ src: false, 'src/lib': true });
+  });
+
+  it('loadExpandedState ignores non-boolean entries and malformed JSON', () => {
+    localStorage.setItem(diffTreeExpandedKey('t1'), JSON.stringify({ src: 'nope', lib: true }));
+    expect(loadExpandedState('t1')).toEqual({ lib: true });
+
+    localStorage.setItem(diffTreeExpandedKey('t2'), 'not json');
+    expect(loadExpandedState('t2')).toEqual({});
+  });
+
+  it('saveExpandedState round-trips through loadExpandedState', () => {
+    saveExpandedState('t1', { src: false });
+    expect(localStorage.getItem(diffTreeExpandedKey('t1'))).toBe(JSON.stringify({ src: false }));
+    expect(loadExpandedState('t1')).toEqual({ src: false });
+  });
+
+  it('clearDiffTreeExpandedState removes the per-task keys', () => {
+    saveExpandedState('t1', { src: false });
+    localStorage.setItem(ignoredGroupKey('t1'), 'true');
+    clearDiffTreeExpandedState('t1');
+    expect(localStorage.getItem(diffTreeExpandedKey('t1'))).toBeNull();
+    expect(localStorage.getItem(ignoredGroupKey('t1'))).toBeNull();
+  });
 });
 
 describe('DiffFileTree', () => {
@@ -84,6 +128,41 @@ describe('DiffFileTree', () => {
       />,
     );
     expect(screen.getByText(/more hidden/i)).toBeInTheDocument();
+  });
+
+  it('keeps folders expanded by default when no state is persisted', () => {
+    const files: DiffFileEntry[] = [
+      { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
+      { path: 'src/b.ts', status: 'M', additions: 1, deletions: 0 },
+    ];
+    render(<DiffFileTree files={files} selected={null} onSelect={vi.fn()} taskId="t1" />);
+    expect(screen.getByTestId('diff-group-src')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('a.ts')).toBeInTheDocument();
+  });
+
+  it('restores a collapsed folder from localStorage on mount', () => {
+    localStorage.setItem(diffTreeExpandedKey('t1'), JSON.stringify({ src: false }));
+    const files: DiffFileEntry[] = [
+      { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
+      { path: 'src/b.ts', status: 'M', additions: 1, deletions: 0 },
+    ];
+    render(<DiffFileTree files={files} selected={null} onSelect={vi.fn()} taskId="t1" />);
+    expect(screen.getByTestId('diff-group-src')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('a.ts')).not.toBeInTheDocument();
+  });
+
+  it('persists folder collapse to the per-task key on toggle', async () => {
+    const user = userEvent.setup();
+    const files: DiffFileEntry[] = [
+      { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
+      { path: 'src/b.ts', status: 'M', additions: 1, deletions: 0 },
+    ];
+    render(<DiffFileTree files={files} selected={null} onSelect={vi.fn()} taskId="t1" />);
+
+    await user.click(screen.getByTestId('diff-group-src'));
+
+    expect(screen.queryByText('a.ts')).not.toBeInTheDocument();
+    expect(loadExpandedState('t1')).toEqual({ src: false });
   });
 
   it('calls onSelect when an ignored file is clicked after expanding', async () => {

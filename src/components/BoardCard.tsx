@@ -8,6 +8,7 @@ import { formatDuration } from '@/lib/format-duration';
 import { cn, repoName } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { TrashCountdown } from './TrashCountdown';
+import { clearDiffTreeExpandedState } from './DiffFileTree';
 
 // ─── Runtime indicator glyphs ─────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ export const BoardCard = memo(function BoardCard({
     api.deleteTask(task.id, { purge: true }).catch(() => {
       // swallow
     });
+    clearDiffTreeExpandedState(task.id);
   };
 
   return (

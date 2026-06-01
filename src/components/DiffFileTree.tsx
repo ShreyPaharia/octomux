@@ -20,8 +20,48 @@ export function ignoredGroupKey(taskId: string): string {
   return `octomux:diff-ignored-open:${taskId}`;
 }
 
-export function topGroupKey(taskId: string, group: string): string {
-  return `octomux:diff-group-open:${taskId}:${group}`;
+export function diffTreeExpandedKey(taskId: string): string {
+  return `octomux:diff-tree-expanded:${taskId}`;
+}
+
+/**
+ * Read the persisted folder open-state overrides for a task. Returns a map of
+ * folder path → open/closed; absent folders fall back to the default behaviour.
+ * Returns `{}` when nothing is stored, the value is malformed, or localStorage
+ * is unavailable (SSR, privacy mode, etc.).
+ */
+export function loadExpandedState(taskId: string): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(diffTreeExpandedKey(taskId));
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'boolean') out[key] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveExpandedState(taskId: string, state: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(diffTreeExpandedKey(taskId), JSON.stringify(state));
+  } catch {
+    // ignore — persistence is best-effort
+  }
+}
+
+/** Best-effort cleanup of a task's persisted diff-tree state (e.g. on delete). */
+export function clearDiffTreeExpandedState(taskId: string): void {
+  try {
+    localStorage.removeItem(diffTreeExpandedKey(taskId));
+    localStorage.removeItem(ignoredGroupKey(taskId));
+  } catch {
+    // ignore — stale keys are harmless
+  }
 }
 
 interface Node {
@@ -271,36 +311,14 @@ export function DiffFileTree({
     setOpenGroups((prev) => {
       const current = prev[path] ?? true;
       const next = { ...prev, [path]: !current };
-      if (taskId) {
-        try {
-          localStorage.setItem(topGroupKey(taskId, path), String(!current));
-        } catch {
-          // ignore
-        }
-      }
+      if (taskId) saveExpandedState(taskId, next);
       return next;
     });
   };
 
   useEffect(() => {
-    if (!taskId) return;
-    const next: Record<string, boolean> = {};
-    const walk = (node: Node) => {
-      if (node.name) {
-        try {
-          const stored = localStorage.getItem(topGroupKey(taskId, node.fullPath));
-          if (stored !== null) next[node.fullPath] = stored === 'true';
-        } catch {
-          // ignore
-        }
-      }
-      if (node.children) {
-        for (const c of node.children.values()) walk(c);
-      }
-    };
-    walk(changedTree);
-    setOpenGroups(next);
-  }, [taskId, changedTree]);
+    setOpenGroups(taskId ? loadExpandedState(taskId) : {});
+  }, [taskId]);
 
   const toggleIgnored = () => {
     setIgnoredOpen((prev) => {

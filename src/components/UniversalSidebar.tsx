@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
+import { clearDiffTreeExpandedState } from '@/components/DiffFileTree';
 import {
   Dialog,
   DialogContent,
@@ -610,6 +611,7 @@ export function UniversalSidebar() {
     async (id: string) => {
       try {
         await api.deleteTask(id);
+        clearDiffTreeExpandedState(id);
         refresh();
       } catch (err) {
         console.error('Failed to delete task:', err);
