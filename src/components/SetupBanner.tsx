@@ -16,8 +16,10 @@ export function SetupBanner() {
           setShow(false);
           return;
         }
-        const needsAttention = setup.summary.blockerCount > 0 || setup.summary.attentionCount > 0;
-        setShow(needsAttention);
+        // Only nag about genuinely missing required dependencies (blockers). Optional /
+        // recommended / hidden items (e.g. the defaults row) should not trigger the banner,
+        // so an all-green Setup page never shows a count.
+        setShow(setup.summary.blockerCount > 0);
         setSummary({
           blockers: setup.summary.blockerCount,
           attention: setup.summary.attentionCount,
@@ -33,10 +35,9 @@ export function SetupBanner() {
 
   if (!show || !summary) return null;
 
-  const message =
-    summary.blockers > 0
-      ? `${summary.blockers} required setup item${summary.blockers === 1 ? '' : 's'} need attention`
-      : `${summary.attention} setup item${summary.attention === 1 ? '' : 's'} can be configured`;
+  const message = `${summary.blockers} required setup item${
+    summary.blockers === 1 ? '' : 's'
+  } need attention`;
 
   return (
     <div
