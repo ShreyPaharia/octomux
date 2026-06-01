@@ -314,6 +314,16 @@ function ApiDiffViewer({
     return { done, total };
   }, [files, reviewed]);
 
+  // Every reviewable file marked done — collapse the header to a compact bar.
+  const allReviewed = reviewCounts.total > 0 && reviewCounts.done === reviewCounts.total;
+
+  // Unmark every reviewed file so the full review header returns.
+  const reopenReview = useCallback(() => {
+    for (const f of files) {
+      if (!f.ignored && reviewed.has(f.path)) toggleReviewed(f.path);
+    }
+  }, [files, reviewed, toggleReviewed]);
+
   useEffect(() => {
     onSelectionChange?.(activeFile);
   }, [activeFile, onSelectionChange]);
@@ -425,14 +435,36 @@ function ApiDiffViewer({
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-glass-l0"
       >
         {!hideFileTree && reviewCounts.total > 0 ? (
-          <div className="diff-pane-header flex shrink-0 items-center justify-end gap-2 border-b border-glass-edge px-4 py-2">
-            <span
-              data-testid="review-progress"
-              aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
-              className={DIFF_REVIEW_BADGE}
-            >
-              {reviewCounts.done} / {reviewCounts.total} reviewed
-            </span>
+          <div
+            data-testid="diff-pane-header"
+            data-collapsed={allReviewed ? 'true' : 'false'}
+            className={`diff-pane-header flex shrink-0 items-center gap-2 overflow-hidden border-b border-glass-edge px-4 transition-all duration-200 ease-out ${
+              allReviewed ? 'justify-between py-1' : 'justify-end py-2'
+            }`}
+          >
+            {allReviewed ? (
+              <>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {reviewCounts.total} {reviewCounts.total === 1 ? 'file' : 'files'} reviewed
+                </span>
+                <button
+                  type="button"
+                  data-testid="reopen-review"
+                  onClick={reopenReview}
+                  className="rounded-md border border-glass-edge px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-glass-l2/60 hover:text-foreground"
+                >
+                  Reopen review
+                </button>
+              </>
+            ) : (
+              <span
+                data-testid="review-progress"
+                aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
+                className={DIFF_REVIEW_BADGE}
+              >
+                {reviewCounts.done} / {reviewCounts.total} reviewed
+              </span>
+            )}
           </div>
         ) : null}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">

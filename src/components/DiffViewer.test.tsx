@@ -335,6 +335,48 @@ describe('DiffViewer', () => {
     expect(localStorage.getItem(reviewedKey('t1', 'src/a.ts'))).toBeNull();
   });
 
+  it('collapses the diff header when every file is marked done and reopens on demand', async () => {
+    const user = userEvent.setup();
+    apiMock.getTaskDiffSummary.mockResolvedValue({
+      files: [
+        { path: 'src/a.ts', status: 'M', additions: 1, deletions: 0 },
+        { path: 'src/b.ts', status: 'A', additions: 1, deletions: 0 },
+      ],
+    });
+    apiMock.getTaskDiffFile.mockImplementation((_id: string, p: string) =>
+      Promise.resolve({
+        oldContent: `${p}-old`,
+        newContent: `${p}-new`,
+        status: 'M',
+        tooLarge: false,
+        binary: false,
+        isDirectory: false,
+      }),
+    );
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+
+    // Full header shows the progress badge while files remain unreviewed.
+    await screen.findByTestId('review-progress');
+    expect(screen.getByTestId('diff-pane-header')).toHaveAttribute('data-collapsed', 'false');
+
+    // Mark both files done — header collapses to the compact "Reopen review" bar.
+    await user.click(within(rowFor('src/a.ts')).getByTestId('review-toggle-src/a.ts'));
+    await user.click(within(rowFor('src/b.ts')).getByTestId('review-toggle-src/b.ts'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('diff-pane-header')).toHaveAttribute('data-collapsed', 'true'),
+    );
+    expect(screen.queryByTestId('review-progress')).not.toBeInTheDocument();
+    expect(screen.getByText(/2 files reviewed/i)).toBeInTheDocument();
+
+    // Reopening unmarks every file and restores the full header.
+    await user.click(screen.getByTestId('reopen-review'));
+    await waitFor(() =>
+      expect(screen.getByTestId('diff-pane-header')).toHaveAttribute('data-collapsed', 'false'),
+    );
+    expect(screen.getByTestId('review-progress').textContent).toMatch(/0\s*\/\s*2\s*reviewed/);
+  });
+
   it('renders a review checkbox per row in the stacked file list', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({
       files: [
