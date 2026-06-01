@@ -8,19 +8,32 @@ import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
-import { PlusIcon } from '@/components/icons';
+import { PlusIcon, LayoutGridIcon } from '@/components/icons';
 import { repoName } from '@/lib/utils';
 import { ChevronDownIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { Task } from '../../server/types';
 import { api } from '@/lib/api';
+import { BulkCreateDialog } from '@/components/BulkCreateDialog';
 
-function NewTaskButton({ onClick }: { onClick: () => void }) {
+function TaskCreateActions({
+  onNewTask,
+  onBulkCreate,
+}: {
+  onNewTask: () => void;
+  onBulkCreate: () => void;
+}) {
   return (
-    <Button onClick={onClick} className="btn-primary-glow">
-      <PlusIcon data-icon="inline-start" />
-      New task
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button variant="outline" onClick={onBulkCreate} data-testid="bulk-create-button">
+        <LayoutGridIcon data-icon="inline-start" />
+        Bulk create
+      </Button>
+      <Button onClick={onNewTask} className="btn-primary-glow">
+        <PlusIcon data-icon="inline-start" />
+        New task
+      </Button>
+    </div>
   );
 }
 
@@ -172,6 +185,7 @@ export default function TasksPage() {
   const { tasks, loading, error, refresh } = useTasksContext();
   const navigate = useNavigate();
   const openCreate = useCallback(() => navigate('/'), [navigate]);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   // Fetch grace hours for the trash countdown
   const [graceHours, setGraceHours] = useState(6);
@@ -280,7 +294,9 @@ export default function TasksPage() {
               eyebrow="Tasks"
               eyebrowTestId="page-eyebrow"
               title="Command center"
-              actions={<NewTaskButton onClick={openCreate} />}
+              actions={
+                <TaskCreateActions onNewTask={openCreate} onBulkCreate={() => setBulkOpen(true)} />
+              }
               className="mb-1"
             />
 
@@ -307,6 +323,8 @@ export default function TasksPage() {
           />
         </div>
       )}
+
+      <BulkCreateDialog open={bulkOpen} onOpenChange={setBulkOpen} />
     </div>
   );
 }
