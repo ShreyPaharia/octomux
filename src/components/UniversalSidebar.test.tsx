@@ -79,6 +79,32 @@ describe('UniversalSidebar nav', () => {
   });
 });
 
+describe('UniversalSidebar Monitor link', () => {
+  it('shows a Monitor link above Workspaces under More, routing to /monitor', async () => {
+    const user = userEvent.setup();
+    renderSidebar('/');
+    await waitFor(() => expect(screen.getByTestId('sidebar-more-toggle')).toBeInTheDocument());
+    await user.click(screen.getByTestId('sidebar-more-toggle'));
+
+    const monitor = await screen.findByTestId('sidebar-more-monitor');
+    const workspaces = screen.getByTestId('sidebar-more-workspaces');
+    expect(monitor).toHaveAttribute('href', '/monitor');
+
+    // Monitor must render before Workspaces in document order.
+    expect(monitor.compareDocumentPosition(workspaces)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('marks Monitor active on /monitor', async () => {
+    const user = userEvent.setup();
+    renderSidebar('/monitor');
+    await user.click(await screen.findByTestId('sidebar-more-toggle'));
+    const monitor = await screen.findByTestId('sidebar-more-monitor');
+    expect(monitor).toHaveAttribute('data-active', 'true');
+    expect(monitor.className).toMatch(/border-primary/);
+    expect(monitor.className).toMatch(/text-primary/);
+  });
+});
+
 describe('UniversalSidebar grouping', () => {
   it('groups sessions by repo basename', async () => {
     apiMock.listTasks.mockResolvedValue([

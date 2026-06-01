@@ -258,6 +258,27 @@ function ReviewsIcon({ color }: { color: string }) {
   );
 }
 
+function MonitorIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
+  );
+}
+
 function WorkspacesIcon({ color }: { color: string }) {
   return (
     <svg
@@ -317,6 +338,7 @@ const NAV_ITEMS: ReadonlyArray<{
 ];
 
 const MORE_ITEMS = [
+  { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
 ] as const;
 
@@ -1196,6 +1218,8 @@ function MoreSection({ collapsed, activePath }: { collapsed: boolean; activePath
               <Link
                 to={to}
                 aria-current={isActive ? 'page' : undefined}
+                data-active={isActive || undefined}
+                data-testid={`sidebar-more-${key}`}
                 className={sidebarSecondaryLinkClass(isActive)}
               >
                 <Icon color={sidebarIconColor(isActive)} />
