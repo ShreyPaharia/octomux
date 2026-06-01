@@ -75,7 +75,7 @@ describe('AgentTabs', () => {
 
   it('shows add button when canAddAgent is true', () => {
     renderWithRouter(<AgentTabs {...defaultProps} agents={[makeAgent()]} />);
-    expect(screen.getByTitle('Add agent without prompt')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add agent without prompt' })).toBeInTheDocument();
   });
 
   it('hides add button when canAddAgent is false', () => {
@@ -87,14 +87,16 @@ describe('AgentTabs', () => {
         onAddTerminal={undefined}
       />,
     );
-    expect(screen.queryByTitle('Add agent without prompt')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Add agent without prompt' }),
+    ).not.toBeInTheDocument();
   });
 
   it('calls onAddAgent without prompt on quick add', async () => {
     const user = userEvent.setup();
     renderWithRouter(<AgentTabs {...defaultProps} agents={[makeAgent()]} />);
 
-    await user.click(screen.getByTitle('Add agent without prompt'));
+    await user.click(screen.getByRole('button', { name: 'Add agent without prompt' }));
     expect(onAddAgent).toHaveBeenCalledWith();
   });
 
@@ -149,14 +151,14 @@ describe('AgentTabs', () => {
       renderWithRouter(
         <AgentTabs {...defaultProps} agents={[makeAgent()]} userTerminals={terminals} />,
       );
-      await user.click(screen.getByTitle('Close terminal'));
+      await user.click(screen.getByRole('button', { name: 'Close terminal Terminal 1' }));
       expect(onCloseTerminal).toHaveBeenCalledWith('term-1');
     });
 
     it('calls onAddTerminal when clicking terminal + button', async () => {
       const user = userEvent.setup();
       renderWithRouter(<AgentTabs {...defaultProps} agents={[makeAgent()]} userTerminals={[]} />);
-      await user.click(screen.getByTitle('Add terminal'));
+      await user.click(screen.getByRole('button', { name: 'Add terminal' }));
       expect(onAddTerminal).toHaveBeenCalled();
     });
 
