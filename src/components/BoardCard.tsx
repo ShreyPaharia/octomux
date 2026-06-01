@@ -1,9 +1,10 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import type { Task, WorkflowStatus } from '../../server/types';
 import { timeAgo } from '@/lib/time';
+import { formatDuration } from '@/lib/format-duration';
 import { cn, repoName } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { TrashCountdown } from './TrashCountdown';
@@ -22,6 +23,45 @@ function RuntimeDot({ state }: { state: Task['runtime_state'] }) {
     default:
       return <span className="text-[#4a4a4a]">○</span>;
   }
+}
+
+// ─── Live duration label ──────────────────────────────────────────────────
+
+/**
+ * Shows time since the task started. Ticks every second while the task is
+ * active (running / setting_up); shows the final, static duration for
+ * terminal states (idle = closed, error).
+ */
+function TaskDuration({ task }: { task: Task }) {
+  const isActive = task.runtime_state === 'running' || task.runtime_state === 'setting_up';
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isActive) return;
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, [isActive]);
+
+  const start = new Date(task.created_at + 'Z').getTime();
+  if (Number.isNaN(start)) return null;
+
+  const end = isActive ? now : new Date(task.updated_at + 'Z').getTime();
+  const label = formatDuration(end - start);
+
+  const prefix =
+    task.runtime_state === 'running'
+      ? 'Running'
+      : task.runtime_state === 'setting_up'
+        ? 'Setting up'
+        : task.runtime_state === 'error'
+          ? 'Failed after'
+          : 'Closed after';
+
+  return (
+    <span data-testid="task-duration" className="text-[10px] tabular-nums text-muted-soft">
+      {prefix} {label}
+    </span>
+  );
 }
 
 interface BoardCardProps {
@@ -147,6 +187,7 @@ export const BoardCard = memo(function BoardCard({
                 {task.agents.length} agent{task.agents.length !== 1 ? 's' : ''}
               </span>
             )}
+            <TaskDuration task={task} />
           </div>
           <span className="text-[10px] tabular-nums text-muted-soft">
             {timeAgo(task.updated_at)}
