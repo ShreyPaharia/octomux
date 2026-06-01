@@ -70,6 +70,16 @@ afterEach(() => {
 // ─── ensureBinary ────────────────────────────────────────────────────────────
 
 describe('ensureBinary', () => {
+  // The brew auto-install path only runs on macOS (process.platform === 'darwin').
+  // Pin the platform so these tests are deterministic on Linux CI runners too.
+  const realPlatform = process.platform;
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+  });
+
   it('does nothing when binary is already installed', () => {
     vi.mocked(probeBinary).mockReturnValue({ ok: true });
 
@@ -99,6 +109,19 @@ describe('ensureBinary', () => {
     expect(() => ensureBinary({ cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' })).toThrow(
       'process.exit',
     );
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it('skips brew and exits on non-darwin platforms', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    vi.mocked(probeBinary).mockReturnValue({ ok: false });
+    vi.mocked(brewInstall).mockReturnValue(true);
+
+    expect(() => ensureBinary({ cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' })).toThrow(
+      'process.exit',
+    );
+    // brew auto-install must not be attempted off macOS, even if it would succeed.
+    expect(brewInstall).not.toHaveBeenCalled();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
