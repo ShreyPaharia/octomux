@@ -71,6 +71,9 @@ describe('TasksPage (board layout)', () => {
   // ─── Board columns ────────────────────────────────────────────────────────
 
   it('renders all 6 board columns', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', title: 'Seed Task', workflow_status: 'backlog' }),
+    ]);
     renderDashboard();
     await waitFor(() => {
       expect(screen.getByTestId('board-column-backlog')).toBeInTheDocument();
@@ -82,12 +85,50 @@ describe('TasksPage (board layout)', () => {
     expect(screen.getByTestId('board-column-done')).toBeInTheDocument();
   });
 
-  it('shows empty placeholder in each column when no tasks', async () => {
+  it('shows empty placeholder in columns without tasks', async () => {
+    apiMock.listTasks.mockResolvedValue([
+      makeTask({ id: 't1', title: 'Seed Task', workflow_status: 'backlog' }),
+    ]);
     renderDashboard();
     await waitFor(() => {
       const empties = screen.getAllByText('Empty');
-      expect(empties.length).toBeGreaterThanOrEqual(6);
+      expect(empties.length).toBeGreaterThanOrEqual(5);
     });
+  });
+
+  // ─── Empty state ──────────────────────────────────────────────────────────
+
+  it('renders the empty state when there are zero tasks', async () => {
+    apiMock.listTasks.mockResolvedValue([]);
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByText('No tasks yet')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText('Dispatch an agent to start working on a feature, bug, or refactor.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create your first task/ })).toBeInTheDocument();
+  });
+
+  it('CTA opens the same create-task flow as the New task button', async () => {
+    apiMock.listTasks.mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Create your first task/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Create your first task/ }));
+    expect(mockNavigate).toHaveBeenCalledWith('/');
+  });
+
+  it('hides the empty state as soon as one task exists', async () => {
+    apiMock.listTasks.mockResolvedValue([makeTask({ id: 't1', title: 'First Task' })]);
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByText('First Task')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument();
   });
 
   // ─── Task cards rendering ──────────────────────────────────────────────────

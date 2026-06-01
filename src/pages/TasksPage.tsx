@@ -316,11 +316,25 @@ export default function TasksPage() {
       {/* Board — takes remaining height, scrolls horizontally */}
       {!loading && !error && (
         <div className="min-h-0 flex-1 overflow-hidden px-4">
-          <TaskBoard
-            tasks={filteredTasks}
-            onTasksChange={handleTasksChange}
-            graceHours={graceHours}
-          />
+          {tasks.length === 0 ? (
+            <EmptyState
+              icon={<LayoutGridIcon size={48} />}
+              heading="No tasks yet"
+              subtext="Dispatch an agent to start working on a feature, bug, or refactor."
+              action={
+                <Button onClick={openCreate} className="btn-primary-glow">
+                  <PlusIcon data-icon="inline-start" />
+                  Create your first task
+                </Button>
+              }
+            />
+          ) : (
+            <TaskBoard
+              tasks={filteredTasks}
+              onTasksChange={handleTasksChange}
+              graceHours={graceHours}
+            />
+          )}
         </div>
       )}
 
