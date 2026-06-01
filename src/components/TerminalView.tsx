@@ -37,6 +37,9 @@ export function TerminalView({
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
+  // True while the WebSocket is opening (initial connect or a reconnect) and no
+  // data has arrived yet. Drives the lightweight "Connecting…" placeholder.
+  const [connecting, setConnecting] = useState(true);
 
   // Belt-and-suspenders: never show the overlay while the ws is actually OPEN,
   // even if some stale state flipped `disconnected` to true.
@@ -73,11 +76,15 @@ export function TerminalView({
     (term: Terminal) => {
       if (unmounted.current) return;
 
+      // Show the connecting placeholder for every connect attempt, including
+      // reconnects — cleared on open or as soon as the first chunk arrives.
+      setConnecting(true);
       const ws = new WebSocket(getWsUrl());
 
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
         setDisconnected(false);
+        setConnecting(false);
         if (countdownTimer.current) {
           clearInterval(countdownTimer.current);
           countdownTimer.current = null;
@@ -92,6 +99,8 @@ export function TerminalView({
       };
 
       ws.onmessage = (event) => {
+        // First chunk means the terminal has real content — drop the placeholder.
+        setConnecting(false);
         term.write(event.data);
       };
 
@@ -278,6 +287,21 @@ export function TerminalView({
         className="h-full w-full overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
         style={{ opacity: showOverlay ? 0.7 : 1 }}
       />
+      {connecting && (
+        <div
+          data-testid="terminal-connecting-placeholder"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        >
+          <span className="flex items-center gap-1 text-[12px] font-medium text-[#a1a1aa]">
+            Connecting to terminal
+            <span className="inline-flex gap-0.5">
+              <span className="size-1 animate-bounce rounded-full bg-[#a1a1aa] [animation-delay:-0.3s]" />
+              <span className="size-1 animate-bounce rounded-full bg-[#a1a1aa] [animation-delay:-0.15s]" />
+              <span className="size-1 animate-bounce rounded-full bg-[#a1a1aa]" />
+            </span>
+          </span>
+        </div>
+      )}
       {showOverlay && (
         <div
           data-testid="terminal-disconnected-overlay"

@@ -234,6 +234,52 @@ describe('TerminalView', () => {
     expect(queryByTestId('terminal-disconnected-overlay')).not.toBeNull();
   });
 
+  it('shows the connecting placeholder before the first message and hides it once the ws opens', async () => {
+    const TerminalView = await importTerminalView();
+    const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    // While the ws is still CONNECTING, the placeholder is shown.
+    expect(ws.readyState).toBe(MockWebSocket.CONNECTING);
+    expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
+
+    // Once the ws opens, the placeholder disappears.
+    act(() => ws._open());
+    expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
+  });
+
+  it('hides the connecting placeholder as soon as the first data chunk arrives', async () => {
+    const TerminalView = await importTerminalView();
+    const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
+
+    // First PTY chunk arrives (without an explicit onopen) — placeholder clears.
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
+    expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
+  });
+
+  it('shows the connecting placeholder again while reconnecting', async () => {
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+    expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
+
+    // Non-normal close triggers a reconnect; advancing past the backoff delay
+    // creates a fresh CONNECTING ws and the placeholder reappears.
+    act(() => ws._close(1005));
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
+  });
+
   it('does not forward typed input to the WebSocket when readOnly is true', async () => {
     const TerminalView = await importTerminalView();
     render(<TerminalView taskId="task-A" windowIndex={0} readOnly />);
