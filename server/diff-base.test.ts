@@ -5,7 +5,12 @@ vi.mock('child_process', () => ({
 }));
 
 import { execFile } from 'child_process';
-import { BaseUnavailableError, clearDiffBaseCache, resolveDiffBase } from './diff-base.js';
+import {
+  BaseBranchMissingError,
+  BaseUnavailableError,
+  clearDiffBaseCache,
+  resolveDiffBase,
+} from './diff-base.js';
 import type { Task } from './types.js';
 
 const baseTask: Task = {
@@ -211,6 +216,70 @@ describe('resolveDiffBase', () => {
       await vi.advanceTimersByTimeAsync(10000);
       const err = await promise;
       expect(err).toBeInstanceOf(BaseUnavailableError);
+    });
+  });
+
+  describe('local base branch fallback (ref absent on origin)', () => {
+    // git fetch error when the branch exists locally but was never pushed.
+    const MISSING_REF_ERR = "fatal: couldn't find remote ref featureX";
+
+    it('resolves the local branch tip when origin has no such ref', async () => {
+      const localSha = '1111111111111111111111111111111111111111';
+      mockedExec.mockImplementation(
+        (
+          _cmd: string,
+          args: readonly string[],
+          _opts: unknown,
+          cb: (err: Error | null, out: { stdout: string; stderr: string }) => void,
+        ) => {
+          const arr = args as string[];
+          if (arr.includes('fetch')) {
+            cb(new Error(MISSING_REF_ERR), { stdout: '', stderr: MISSING_REF_ERR });
+          } else if (arr.includes('rev-parse')) {
+            // Only the local lookup (refs/heads/...) should be reached.
+            if (arr.some((a) => a.startsWith('refs/heads/'))) {
+              cb(null, { stdout: `${localSha}\n`, stderr: '' });
+            } else {
+              cb(new Error('origin rev-parse should not run'), { stdout: '', stderr: '' });
+            }
+          }
+          return undefined;
+        },
+      );
+
+      const t = task({ base_branch: 'featureX' });
+      const res = await resolveDiffBase(t);
+      expect(res).toEqual({ sha: localSha, ref: 'featureX', is_stale: false });
+
+      // Deterministic failure — must NOT retry the fetch.
+      const fetchCalls = mockedExec.mock.calls.filter((c) => (c[1] as string[]).includes('fetch'));
+      expect(fetchCalls.length).toBe(1);
+    });
+
+    it('throws BaseBranchMissingError when the branch is absent on origin AND locally', async () => {
+      mockedExec.mockImplementation(
+        (
+          _cmd: string,
+          args: readonly string[],
+          _opts: unknown,
+          cb: (err: Error | null, out: { stdout: string; stderr: string }) => void,
+        ) => {
+          const arr = args as string[];
+          if (arr.includes('fetch')) {
+            cb(new Error(MISSING_REF_ERR), { stdout: '', stderr: MISSING_REF_ERR });
+          } else if (arr.includes('rev-parse')) {
+            // Local lookup also fails (branch gone everywhere).
+            cb(new Error('not a valid ref'), { stdout: '', stderr: '' });
+          }
+          return undefined;
+        },
+      );
+
+      const t = task({ base_branch: 'featureX' });
+      const err = (await resolveDiffBase(t).catch((e) => e)) as Error & { code?: string };
+      expect(err).toBeInstanceOf(BaseBranchMissingError);
+      expect(err.code).toBe('base_branch_missing');
+      expect(err.message).toMatch(/featureX/);
     });
   });
 

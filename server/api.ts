@@ -26,6 +26,7 @@ import {
 import * as diffMod from './diff.js';
 import { parseDiffRange } from './diff-range.js';
 import {
+  BaseBranchMissingError,
   BaseUnavailableError,
   clearDiffBaseCache,
   resolveDiffBase,
@@ -1180,6 +1181,10 @@ export function setupRoutes(app: Express): void {
       const summary = await diffMod.getDiffSummary({ task, range });
       res.json(summary);
     } catch (err) {
+      if (err instanceof BaseBranchMissingError) {
+        res.status(422).json({ error: 'base_branch_missing', message: err.message });
+        return;
+      }
       if (err instanceof BaseUnavailableError) {
         res.status(503).json({ error: 'base_unavailable', message: err.message });
         return;
@@ -1236,6 +1241,10 @@ export function setupRoutes(app: Express): void {
       });
       res.json(diff);
     } catch (err) {
+      if (err instanceof BaseBranchMissingError) {
+        res.status(422).json({ error: 'base_branch_missing', message: err.message });
+        return;
+      }
       if (err instanceof BaseUnavailableError) {
         res.status(503).json({ error: 'base_unavailable', message: err.message });
         return;

@@ -234,6 +234,7 @@ function ApiDiffViewer({
   const [error, setError] = useState<string | null>(null);
   const [baseShaUnavailable, setBaseShaUnavailable] = useState(false);
   const [baseUnavailable, setBaseUnavailable] = useState(false);
+  const [baseBranchMissing, setBaseBranchMissing] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -326,11 +327,18 @@ function ApiDiffViewer({
       setError(null);
       setBaseShaUnavailable(false);
       setBaseUnavailable(false);
+      setBaseBranchMissing(false);
     } catch (err) {
       const msg = (err as Error).message;
       if (msg.includes('base_sha not available')) {
         setFiles([]);
         setBaseShaUnavailable(true);
+        setError(null);
+      } else if (msg.includes('base_branch_missing')) {
+        // Definite: the base branch is gone on origin AND locally. Not a
+        // connectivity blip — polling won't recover it, so say so plainly.
+        setFiles([]);
+        setBaseBranchMissing(true);
         setError(null);
       } else if (msg.includes('base_unavailable')) {
         // Transient: couldn't reach origin AND no cached base SHA. Keep any
@@ -363,6 +371,14 @@ function ApiDiffViewer({
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Diff unavailable (base_sha not captured)
+      </div>
+    );
+  }
+
+  if (baseBranchMissing) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Base branch no longer exists on origin or locally &mdash; set a new diff base
       </div>
     );
   }

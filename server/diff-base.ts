@@ -30,6 +30,37 @@ export class BaseUnavailableError extends Error {
   }
 }
 
+/**
+ * Thrown by `resolveDiffBase` when a task's `base_branch` exists neither on
+ * origin nor as a local branch — it has been deleted everywhere. Distinct from
+ * `BaseUnavailableError` (origin unreachable, retrying may help): this is a
+ * definite missing-ref state, so the UI should say so plainly rather than
+ * implying a transient network problem.
+ */
+export class BaseBranchMissingError extends Error {
+  readonly code = 'base_branch_missing' as const;
+  constructor(msg: string) {
+    super(msg);
+    this.name = 'BaseBranchMissingError';
+  }
+}
+
+/**
+ * Internal sentinel: `git fetch origin <branch>` reported the ref doesn't exist
+ * on origin (vs. a network/connectivity failure). Deterministic, so we don't
+ * retry it — we fall back to the local branch instead.
+ */
+class RemoteRefMissingError extends Error {}
+
+// `git fetch origin <branch>` prints this to stderr when the ref is absent on
+// origin. Reachability is fine — the branch simply isn't there (e.g. a
+// local-only or never-pushed base branch).
+function isMissingRemoteRef(err: unknown): boolean {
+  const e = err as { message?: string; stderr?: string };
+  const text = `${e?.message ?? ''}\n${e?.stderr ?? ''}`;
+  return /couldn't find remote ref/i.test(text);
+}
+
 const CACHE_TTL_MS = 30_000;
 const ATTEMPT_TIMEOUT_MS = 5_000;
 // Internal promise-level timeout fires slightly before the execFile timeout
@@ -42,12 +73,19 @@ const RETRY_BACKOFF_MS = 200;
 interface CacheEntry {
   sha: string;
   ts: number;
+  /** Human-readable ref this SHA resolved to (`origin/<x>` live, `<x>` local). */
+  ref: string;
+}
+
+interface ResolvedLive {
+  sha: string;
+  ref: string;
 }
 
 // Keyed by `${cwd}\0${base_branch}` — `cwd` is each task's worktree (unique
 // per task) or its repo_path (shared across `none`-mode tasks).
 const cache = new Map<string, CacheEntry>();
-const pending = new Map<string, Promise<string>>();
+const pending = new Map<string, Promise<ResolvedLive>>();
 
 function cacheKey(cwd: string, baseBranch: string): string {
   return `${cwd}\0${baseBranch}`;
@@ -86,14 +124,23 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function fetchOnce(cwd: string, baseBranch: string): Promise<string> {
-  await withTimeout(
-    execFile('git', ['-C', cwd, 'fetch', 'origin', baseBranch], {
-      env: gitEnv(),
-      timeout: ATTEMPT_TIMEOUT_MS,
-    }),
-    ATTEMPT_INTERNAL_MS,
-    'git fetch',
-  );
+  try {
+    await withTimeout(
+      execFile('git', ['-C', cwd, 'fetch', 'origin', baseBranch], {
+        env: gitEnv(),
+        timeout: ATTEMPT_TIMEOUT_MS,
+      }),
+      ATTEMPT_INTERNAL_MS,
+      'git fetch',
+    );
+  } catch (err) {
+    // Ref absent on origin is deterministic — surface it distinctly so the
+    // caller can fall back to the local branch instead of retrying.
+    if (isMissingRemoteRef(err)) {
+      throw new RemoteRefMissingError(`origin has no ref ${baseBranch}`);
+    }
+    throw err;
+  }
   const { stdout } = await withTimeout(
     execFile('git', ['-C', cwd, 'rev-parse', `origin/${baseBranch}`], {
       env: gitEnv(),
@@ -113,6 +160,8 @@ async function fetchWithRetry(cwd: string, baseBranch: string): Promise<string> 
     try {
       return await fetchOnce(cwd, baseBranch);
     } catch (err) {
+      // Missing-on-origin is deterministic; retrying can't help.
+      if (err instanceof RemoteRefMissingError) throw err;
       lastErr = err as Error;
       if (attempt < RETRY_ATTEMPTS - 1) {
         await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
@@ -120,6 +169,47 @@ async function fetchWithRetry(cwd: string, baseBranch: string): Promise<string> 
     }
   }
   throw lastErr ?? new Error('fetch failed');
+}
+
+/**
+ * Resolve a base branch that exists locally but not on origin (e.g. preserved,
+ * recovered, or not-yet-pushed branches). Returns the local tip SHA, or null if
+ * there's no such local branch either.
+ */
+async function resolveLocalBranch(cwd: string, baseBranch: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile(
+      'git',
+      ['-C', cwd, 'rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`],
+      { env: gitEnv() },
+    );
+    const sha = stdout.trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the live base SHA + ref, preferring `origin/<base_branch>`. If origin
+ * has no such ref, fall back to the local branch. Throws `BaseBranchMissingError`
+ * when the branch is gone everywhere, or re-throws a network-class error (which
+ * the caller maps to stale-cache / `BaseUnavailableError`).
+ */
+async function resolveLive(cwd: string, baseBranch: string): Promise<ResolvedLive> {
+  try {
+    const sha = await fetchWithRetry(cwd, baseBranch);
+    return { sha, ref: `origin/${baseBranch}` };
+  } catch (err) {
+    if (err instanceof RemoteRefMissingError) {
+      const localSha = await resolveLocalBranch(cwd, baseBranch);
+      if (localSha) return { sha: localSha, ref: baseBranch };
+      throw new BaseBranchMissingError(
+        `base branch '${baseBranch}' not found on origin or locally`,
+      );
+    }
+    throw err;
+  }
 }
 
 /**
@@ -154,16 +244,16 @@ export async function resolveDiffBase(task: Task): Promise<ResolvedBase> {
 
   // Fresh cache hit.
   if (entry && now - entry.ts < CACHE_TTL_MS) {
-    return { sha: entry.sha, ref: `origin/${baseBranch}`, is_stale: false };
+    return { sha: entry.sha, ref: entry.ref, is_stale: false };
   }
 
-  // Coalesce concurrent fetches for the same (cwd, base_branch).
+  // Coalesce concurrent resolutions for the same (cwd, base_branch).
   let p = pending.get(key);
   if (!p) {
-    p = fetchWithRetry(cwd, baseBranch).then(
-      (sha) => {
-        cache.set(key, { sha, ts: Date.now() });
-        return sha;
+    p = resolveLive(cwd, baseBranch).then(
+      (resolved) => {
+        cache.set(key, { sha: resolved.sha, ts: Date.now(), ref: resolved.ref });
+        return resolved;
       },
       (err: Error) => {
         // Re-throw so awaiting callers see the failure; cache untouched.
@@ -178,9 +268,11 @@ export async function resolveDiffBase(task: Task): Promise<ResolvedBase> {
   }
 
   try {
-    const sha = await p;
-    return { sha, ref: `origin/${baseBranch}`, is_stale: false };
+    const resolved = await p;
+    return { sha: resolved.sha, ref: resolved.ref, is_stale: false };
   } catch (err) {
+    // Branch deleted everywhere — definite, not a connectivity blip.
+    if (err instanceof BaseBranchMissingError) throw err;
     if (entry) {
       logger.warn(
         {
@@ -191,7 +283,7 @@ export async function resolveDiffBase(task: Task): Promise<ResolvedBase> {
         },
         'live-base resolution failed, serving expired cache',
       );
-      return { sha: entry.sha, ref: `origin/${baseBranch}`, is_stale: true };
+      return { sha: entry.sha, ref: entry.ref, is_stale: true };
     }
     logger.warn(
       { task_id: task.id, base_branch: baseBranch, err: (err as Error).message },

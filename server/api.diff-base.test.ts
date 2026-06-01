@@ -143,4 +143,22 @@ describe('summary diff endpoint surfaces BaseUnavailableError', () => {
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('base_unavailable');
   });
+
+  it('returns 422 base_branch_missing when the base branch is gone on origin and locally', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      base_branch: 'featureX',
+      base_sha: 'snapshot1234567890snapshot1234567890snap',
+    });
+    (diffMod.getDiffSummary as any).mockRejectedValue(
+      new diffBaseMod.BaseBranchMissingError(
+        "base branch 'featureX' not found on origin or locally",
+      ),
+    );
+
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('base_branch_missing');
+  });
 });

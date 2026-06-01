@@ -73,6 +73,16 @@ describe('DiffViewer', () => {
     expect(screen.queryByText(/base_sha not available for this task/i)).not.toBeInTheDocument();
   });
 
+  it('shows an honest empty state (not the "reach origin" message) when the base branch is gone', async () => {
+    apiMock.getTaskDiffSummary.mockRejectedValue(new Error('base_branch_missing'));
+    render(<DiffViewer taskId="t1" isRunning={false} />);
+    await waitFor(() =>
+      expect(screen.getByText(/base branch no longer exists/i)).toBeInTheDocument(),
+    );
+    // Must NOT imply a transient connectivity problem.
+    expect(screen.queryByText(/reach origin/i)).not.toBeInTheDocument();
+  });
+
   it('shows empty state when no files changed', async () => {
     apiMock.getTaskDiffSummary.mockResolvedValue({ files: [] });
     render(<DiffViewer taskId="t1" isRunning={false} />);
