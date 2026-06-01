@@ -108,6 +108,7 @@ export function AgentTabs({
                     e.stopPropagation();
                     onStopAgent(agent.id);
                   }}
+                  aria-label={`Stop agent ${agent.label}`}
                   title="Stop agent"
                 >
                   <CloseIcon />
@@ -140,6 +141,7 @@ export function AgentTabs({
                 e.stopPropagation();
                 onCloseTerminal(terminal.id);
               }}
+              aria-label={`Close terminal ${terminal.label}`}
               title="Close terminal"
             >
               <CloseIcon />
@@ -151,6 +153,7 @@ export function AgentTabs({
         <button
           className="p-[10px] text-sm text-[#6a6a6a] hover:text-foreground"
           onClick={onAddTerminal}
+          aria-label="Add terminal"
           title="Add terminal"
         >
           +
@@ -194,6 +197,9 @@ function AgentTabMenu({
           e.stopPropagation();
           setOpen((v) => !v);
         }}
+        aria-label={`Actions for agent ${agent.label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
         title="Agent actions"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -272,6 +278,7 @@ function AddAgentButton({ onAdd }: { onAdd: (prompt?: string) => void }) {
         <button
           className="p-[10px] text-sm text-[#6a6a6a] hover:text-foreground"
           onClick={handleQuickAdd}
+          aria-label="Add agent without prompt"
           title="Add agent without prompt"
         >
           +
@@ -280,6 +287,7 @@ function AddAgentButton({ onAdd }: { onAdd: (prompt?: string) => void }) {
           render={
             <button
               className="rounded px-1 py-1 text-xs font-bold text-[#6a6a6a] hover:text-foreground"
+              aria-label="Add agent with prompt"
               title="Add agent with prompt"
             />
           }
