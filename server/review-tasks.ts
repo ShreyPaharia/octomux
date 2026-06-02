@@ -13,6 +13,8 @@ export function repoShortName(repoPath: string): string {
 }
 
 export interface PrReviewPromptInput {
+  /** Id of THIS review task — the id every `octomux review` command must target. */
+  reviewTaskId: string;
   title: string;
   number: number;
   url: string;
@@ -21,11 +23,26 @@ export interface PrReviewPromptInput {
   requestedAt: string;
 }
 
+/**
+ * Instruction line shared by both prompt shapes, pinning the exact id the
+ * orchestrator must pass to the review CLI. Without this the agent has to guess
+ * its own task id (or, worse, latches onto a source id printed elsewhere in the
+ * prompt) and writes the run/comments under the wrong task_id.
+ */
+function reviewTaskIdLines(reviewTaskId: string): string[] {
+  return [
+    `Review task id: ${reviewTaskId}`,
+    `Pass this exact id to every \`octomux review\` command, e.g. \`--task ${reviewTaskId}\`.`,
+  ];
+}
+
 /** Prompt used when the source has an open PR — same shape the poller emits. */
 export function buildPrReviewPrompt(input: PrReviewPromptInput): string {
   const author = input.author ?? 'unknown';
   return [
     `/review-orchestrator`,
+    '',
+    ...reviewTaskIdLines(input.reviewTaskId),
     '',
     `PR: ${input.title} (#${input.number}) by @${author}`,
     `URL: ${input.url}`,
@@ -37,6 +54,8 @@ export function buildPrReviewPrompt(input: PrReviewPromptInput): string {
 }
 
 export interface ManualReviewPromptInput {
+  /** Id of THIS review task — the id every `octomux review` command must target. */
+  reviewTaskId: string;
   sourceId: string;
   sourceTitle: string;
   repoShort: string;
@@ -52,7 +71,9 @@ export function buildManualReviewPrompt(input: ManualReviewPromptInput): string 
   return [
     `/review-orchestrator`,
     '',
-    `Task: ${input.sourceTitle} (id ${input.sourceId})`,
+    ...reviewTaskIdLines(input.reviewTaskId),
+    '',
+    `Source task (context only — do NOT pass to --task): ${input.sourceTitle} (id ${input.sourceId})`,
     `Repo: ${input.repoShort}`,
     `Branch: ${input.branch ?? ''}`,
     `Base: ${input.baseBranch ?? ''} @ ${input.baseSha}`,
@@ -64,6 +85,12 @@ export function buildManualReviewPrompt(input: ManualReviewPromptInput): string 
 }
 
 export interface InsertReviewTaskParams {
+  /**
+   * Pre-generated id for the review task. Callers that embed the id in the
+   * orchestrator prompt MUST pass it here so the prompt and the DB row agree.
+   * Falls back to a fresh nanoid when omitted.
+   */
+  id?: string;
   repoPath: string;
   branch: string;
   baseBranch: string;
@@ -85,7 +112,7 @@ export interface InsertReviewTaskParams {
  */
 export function insertReviewTask(params: InsertReviewTaskParams): string {
   const db = getDb();
-  const id = nanoid(12);
+  const id = params.id ?? nanoid(12);
   const worktreeId = nanoid(12);
 
   db.prepare(

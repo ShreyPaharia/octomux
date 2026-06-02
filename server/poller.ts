@@ -462,8 +462,9 @@ function isOwnerStillRequested(pr: OpenReviewPR, ownerLogin: string): boolean {
   );
 }
 
-function buildReviewPrompt(pr: OpenReviewPR, requestedAt: string): string {
+function buildReviewPrompt(pr: OpenReviewPR, requestedAt: string, reviewTaskId: string): string {
   return buildPrReviewPrompt({
+    reviewTaskId,
     title: pr.title,
     number: pr.number,
     url: pr.url,
@@ -564,7 +565,7 @@ async function upsertReviewTask(
 
     if (existing.runtime_state === 'idle') {
       const updatedPrompt = buildShaUpdateNote(
-        existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString()),
+        existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString(), existing.id),
         pr.headRefOid,
         new Date().toISOString(),
       );
@@ -631,9 +632,12 @@ async function upsertReviewTask(
   const branch = `review/${short}-pr-${pr.number}`;
   const title = `Review: ${pr.title} (#${pr.number})`;
   const description = `Auto-created review task for PR #${pr.number} in ${short}`;
-  const prompt = buildReviewPrompt(pr, new Date().toISOString());
+  // Mint the id first so it can be pinned into the orchestrator prompt.
+  const id = nanoid(12);
+  const prompt = buildReviewPrompt(pr, new Date().toISOString(), id);
 
-  const id = insertReviewTask({
+  insertReviewTask({
+    id,
     repoPath,
     branch,
     baseBranch: pr.baseRefName,

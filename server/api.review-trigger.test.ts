@@ -73,7 +73,11 @@ describe('POST /api/tasks/:taskId/review', () => {
     expect(review!.branch).toMatch(/^review\/.+-task-src1$/);
     expect(review!.base_branch).toBe('main');
     expect(String(review!.initial_prompt)).toContain('/review-orchestrator');
-    expect(String(review!.initial_prompt)).toContain('Task:');
+    // The prompt must pin the review task's OWN id for --task, not the source id.
+    expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
+    expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);
+    expect(String(review!.initial_prompt)).not.toContain('--task src1');
+    // Source id stays in the prompt as context.
     expect(String(review!.initial_prompt)).toContain('id src1');
     expect(startTask).toHaveBeenCalled();
   });
@@ -113,6 +117,8 @@ describe('POST /api/tasks/:taskId/review', () => {
     expect(review!.branch).toMatch(/^review\/.+-pr-42$/);
     expect(String(review!.initial_prompt)).toContain('PR:');
     expect(String(review!.initial_prompt)).toContain('#42');
+    expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
+    expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);
   });
 
   it('returns existing review when manual review already exists for the source', async () => {

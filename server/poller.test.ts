@@ -721,6 +721,9 @@ describe('pollReviewerRequests', () => {
     expect(created!.title).toContain('#42');
     expect((created!.initial_prompt as string).startsWith('/review-orchestrator')).toBe(true);
     expect(created!.initial_prompt).toContain('https://github.com');
+    // Prompt pins the new review task's own id for the review CLI.
+    expect(created!.initial_prompt).toContain(`Review task id: ${created!.id}`);
+    expect(created!.initial_prompt).toContain(`--task ${created!.id}`);
     expect(broadcast).toHaveBeenCalledWith({
       type: 'task:created',
       payload: { taskId: created!.id },

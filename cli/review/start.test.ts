@@ -91,4 +91,25 @@ describe('octomux review start', () => {
     expect(stderrBuf).toMatch(/--task is required/);
     exitSpy.mockRestore();
   });
+
+  it('exits 2 when --task points at a source task rather than the review task', async () => {
+    const db = createTestDb();
+    // A regular (non-review) task — source is null, like the task being reviewed.
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status)
+       VALUES ('wtDev', '/tmp/dev', '/repos/foo', 'feat/x', 'main', 'sha-base', 'new', 'available')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks
+         (id, title, description, runtime_state, workflow_status, source, worktree_id, pr_head_sha)
+       VALUES
+         ('dev1', 'Dev task', '', 'running', 'backlog', NULL, 'wtDev', 'sha-head')`,
+    ).run();
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as typeof process.exit);
+    await expect(runStart(['--task', 'dev1'])).rejects.toThrow(/exit 2/);
+    expect(stderrBuf).toMatch(/review task id/i);
+    exitSpy.mockRestore();
+  });
 });

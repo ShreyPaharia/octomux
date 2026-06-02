@@ -3157,6 +3157,9 @@ export function setupRoutes(app: Express): void {
 
     const short = repoShortName(task.repo_path || '');
     const requestedAt = new Date().toISOString();
+    // Generate the review task id up front so it can be embedded in the prompt;
+    // the orchestrator passes this exact id to every `octomux review` command.
+    const reviewTaskId = nanoid(12);
 
     let branch: string;
     let title: string;
@@ -3167,6 +3170,7 @@ export function setupRoutes(app: Express): void {
       title = `Review: ${task.title} (#${task.pr_number})`;
       description = `Manual review for PR #${task.pr_number} in ${short}`;
       prompt = buildPrReviewPrompt({
+        reviewTaskId,
         title: task.title,
         number: task.pr_number,
         url: task.pr_url,
@@ -3179,6 +3183,7 @@ export function setupRoutes(app: Express): void {
       title = `Review: ${task.title}`;
       description = `Manual pre-PR review for task ${task.id}`;
       prompt = buildManualReviewPrompt({
+        reviewTaskId,
         sourceId: task.id,
         sourceTitle: task.title,
         repoShort: short,
@@ -3191,6 +3196,7 @@ export function setupRoutes(app: Express): void {
     }
 
     const newId = insertReviewTask({
+      id: reviewTaskId,
       repoPath: task.repo_path,
       branch,
       baseBranch: task.base_branch ?? '',

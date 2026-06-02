@@ -39,6 +39,14 @@ export async function runStart(argv: string[]): Promise<void> {
     process.stderr.write(`task not found: ${taskId}\n`);
     process.exit(2);
   }
+  if (task.source !== 'auto_review') {
+    process.stderr.write(
+      `task ${taskId} is not a review task (source=${task.source ?? 'null'}). ` +
+        `--task must be the review task id from your prompt's "Review task id:" line, ` +
+        `not the source task being reviewed.\n`,
+    );
+    process.exit(2);
+  }
   if (!task.pr_head_sha) {
     process.stderr.write(`task ${taskId} has no pr_head_sha\n`);
     process.exit(2);
