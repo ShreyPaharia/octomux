@@ -25,7 +25,10 @@ describe('diff tree expand-state persistence helpers', () => {
   });
 
   it('loadExpandedState parses a stored boolean map', () => {
-    localStorage.setItem(diffTreeExpandedKey('t1'), JSON.stringify({ src: false, 'src/lib': true }));
+    localStorage.setItem(
+      diffTreeExpandedKey('t1'),
+      JSON.stringify({ src: false, 'src/lib': true }),
+    );
     expect(loadExpandedState('t1')).toEqual({ src: false, 'src/lib': true });
   });
 
