@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildGroups, orderedPathsFromGroups, OTHER_GROUP_NAME } from '../review-file-groups';
+import {
+  buildGroups,
+  lookupWalkthroughFile,
+  orderedPathsFromGroups,
+  OTHER_GROUP_NAME,
+} from '../review-file-groups';
 
 describe('buildGroups', () => {
   it('orders files by walkthrough.groups then orphans', () => {
@@ -19,5 +24,20 @@ describe('buildGroups', () => {
 
   it('returns empty when no files', () => {
     expect(buildGroups([], null)).toEqual([]);
+  });
+
+  it('lookupWalkthroughFile resolves group and file metadata', () => {
+    const groups = buildGroups(['a.ts'], {
+      groups: [
+        {
+          name: 'G',
+          summary: 'group note',
+          files: [{ path: 'a.ts', summary: 'file note' }],
+        },
+      ],
+    });
+    const ctx = lookupWalkthroughFile(groups, 'a.ts');
+    expect(ctx?.group.name).toBe('G');
+    expect(ctx?.file.summary).toBe('file note');
   });
 });

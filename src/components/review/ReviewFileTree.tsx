@@ -7,6 +7,7 @@ import { DIFF_TREE_ACTIVE, DIFF_TREE_ROW } from '@/lib/design-tokens';
 import type { Walkthrough, WalkthroughFile } from './walkthrough-types';
 import { buildGroups } from '@/lib/review-file-groups';
 import { ReviewProgressBar } from './ReviewProgressBar';
+import { ClampedExplainer } from './ClampedExplainer';
 
 interface Props {
   files: string[];
@@ -116,9 +117,12 @@ function FileRow({
           )}
         </span>
         {file.summary && (
-          <span className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">
-            {file.summary}
-          </span>
+          <ClampedExplainer
+            text={file.summary}
+            lines={2}
+            clampChars={120}
+            className="text-[10px] leading-snug text-muted-foreground"
+          />
         )}
       </button>
       {(open > 0 || stale > 0) && (
@@ -264,11 +268,13 @@ export function ReviewFileTree({
                 </span>
               </button>
               {open && group.summary && (
-                <div
-                  className="line-clamp-2 px-3 pb-1.5 text-[11px] leading-snug text-muted-foreground"
-                  title={group.summary}
-                >
-                  {group.summary}
+                <div className="px-3 pb-1.5">
+                  <ClampedExplainer
+                    text={group.summary}
+                    lines={2}
+                    clampChars={120}
+                    className="text-[11px] leading-snug text-muted-foreground"
+                  />
                 </div>
               )}
               {open && (
