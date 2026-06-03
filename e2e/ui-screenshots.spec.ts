@@ -7,7 +7,7 @@
  * Prerequisites: Both servers must be running (bun run dev)
  */
 import { test, expect } from '@playwright/test';
-import { createReviewFixture, deleteReviewTask } from './helpers-review';
+import { createReviewFixture } from './helpers-review';
 
 const API = 'http://localhost:7777/api';
 const SCREENSHOTS = 'ui-review/screenshots';
