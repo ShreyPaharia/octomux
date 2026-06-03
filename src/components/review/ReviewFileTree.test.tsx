@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { ReviewFileTree } from './ReviewFileTree';
-import type { Walkthrough } from './WalkthroughHeader';
+import type { Walkthrough } from './walkthrough-types';
 import type { InlineCommentDTO } from '@/lib/api';
 
 function comment(overrides: Partial<InlineCommentDTO> = {}): InlineCommentDTO {
@@ -221,6 +221,20 @@ describe('ReviewFileTree group row', () => {
       },
     ],
   };
+
+  it('shows file summary as subtitle on the row', () => {
+    render(
+      <ReviewFileTree
+        files={['server/db.ts']}
+        walkthrough={WT}
+        comments={[]}
+        selectedPath={null}
+        onSelect={() => {}}
+        {...defaultProps}
+      />,
+    );
+    expect(screen.getByText('migration')).toBeTruthy();
+  });
 
   it('renders the group name in a single truncating element', () => {
     render(

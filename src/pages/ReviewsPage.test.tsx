@@ -31,6 +31,7 @@ function makeRow(
     rejected_count: number;
     stale_count: number;
     author_login: string | null;
+    last_activity_at: string;
   }> = {},
 ) {
   return {
@@ -46,7 +47,7 @@ function makeRow(
     accepted_count: 1,
     rejected_count: 0,
     stale_count: 0,
-    last_activity_at: '2026-05-28',
+    last_activity_at: '2026-05-28T12:00:00.000Z',
     ...overrides,
   };
 }
@@ -62,7 +63,7 @@ describe('ReviewsPage', () => {
     expect(await screen.findByText(/no open review requests/i)).toBeTruthy();
   });
 
-  it('renders one row per inbox entry grouped by repo', async () => {
+  it('renders inbox rows with glass cards grouped by repo', async () => {
     apiMock.listReviewsInbox.mockResolvedValue([
       makeRow({
         task_id: 't1',
@@ -80,29 +81,30 @@ describe('ReviewsPage', () => {
     ]);
     renderWithRouter(<ReviewsPage />);
     expect(await screen.findByText('Add foo')).toBeTruthy();
-    expect(await screen.findByText('Fix bar')).toBeTruthy();
+    expect(screen.getByText('Fix bar')).toBeTruthy();
     expect(screen.getByText('drafts ready')).toBeTruthy();
     expect(screen.getByText('reviewing')).toBeTruthy();
+    expect(screen.getByTestId('review-inbox-row-t1')).toBeTruthy();
   });
 
-  it('groups rows under their repo_path header', async () => {
+  it('groups rows under repo name header', async () => {
     apiMock.listReviewsInbox.mockResolvedValue([
       makeRow({ task_id: 't1', pr_title: 'PR one', repo_path: '/repos/alpha' }),
       makeRow({ task_id: 't2', pr_number: 2, pr_title: 'PR two', repo_path: '/repos/beta' }),
     ]);
     renderWithRouter(<ReviewsPage />);
-    expect(await screen.findByText('/repos/alpha')).toBeTruthy();
-    expect(screen.getByText('/repos/beta')).toBeTruthy();
+    expect(await screen.findByTestId('review-inbox-repo-alpha')).toBeTruthy();
+    expect(screen.getByTestId('review-inbox-repo-beta')).toBeTruthy();
   });
 
-  it('clicking a row navigates to /reviews/:id', async () => {
+  it('Open review navigates to /reviews/:id', async () => {
     const user = userEvent.setup();
     apiMock.listReviewsInbox.mockResolvedValue([
       makeRow({ task_id: 'task-abc', pr_title: 'Clickable PR' }),
     ]);
     renderWithRouter(<ReviewsPage />);
     await screen.findByText('Clickable PR');
-    await user.click(screen.getByText('Clickable PR'));
+    await user.click(screen.getByRole('button', { name: 'Open review' }));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/reviews/task-abc'));
   });
 

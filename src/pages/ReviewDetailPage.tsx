@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
 import { subscribe } from '../lib/event-source';
-import { WalkthroughHeader, type Walkthrough } from '../components/review/WalkthroughHeader';
+import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
+import type { Walkthrough } from '../components/review/walkthrough-types';
 import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
 import { ReviewFileTree } from '../components/review/ReviewFileTree';
 import { PublishBar } from '../components/review/PublishBar';
@@ -170,7 +171,7 @@ export default function ReviewDetailPage() {
           onReRun={refresh}
         />
 
-        {walkthrough && <WalkthroughHeader walkthrough={walkthrough} />}
+        {walkthrough && <WalkthroughPanel walkthrough={walkthrough} />}
 
         <div className="flex min-h-0 flex-1">
           <aside

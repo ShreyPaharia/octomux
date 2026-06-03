@@ -78,7 +78,9 @@ Compose a single JSON file at `.octomux/review-walkthrough.json` with this exact
     "effort": 1,
     "relevant_tests": "yes | no | partial",
     "security_concerns": null,
-    "ticket_compliance": [],
+    "ticket_compliance": [
+      { "ticket": "IN-1234", "status": "met", "notes": "One sentence on how the PR satisfies the ticket." }
+    ],
     "summary": "...",
     "key_review_points": ["..."]
   },
@@ -105,6 +107,7 @@ Rules:
 - If you forget a file, octomux will auto-append it to an "Other changes" group at the end — but try not to miss any.
 - `key_review_points` should be at most 5 short bullets that tell the reviewer where to focus.
 - `ticket_compliance` should have one entry per linked ticket parsed from the PR body (look for IN-1234, github#456, etc.). If none, leave the array empty.
+- Each entry: `ticket` (id string), `status` one of `met` | `partial` | `not_met` | `n/a`, and `notes` (required when status is not `n/a` — one or two sentences the human reviewer will see in the dashboard).
 
 Then ingest:
 

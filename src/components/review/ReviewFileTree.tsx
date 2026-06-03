@@ -2,9 +2,9 @@ import { useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Badge } from '../ui/badge';
 import { ChevronDownIcon } from '../icons';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { InlineCommentDTO } from '@/lib/api';
-import type { Walkthrough, WalkthroughFile } from './WalkthroughHeader';
+import { DIFF_TREE_ACTIVE, DIFF_TREE_ROW } from '@/lib/design-tokens';
+import type { Walkthrough, WalkthroughFile } from './walkthrough-types';
 import { buildGroups } from '@/lib/review-file-groups';
 
 interface Props {
@@ -71,8 +71,7 @@ function FileRow({
       data-selected={selected ? 'true' : undefined}
       data-reviewed={isReviewed ? 'true' : 'false'}
       className={cn(
-        'flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-glass-l2/40',
-        selected && 'bg-glass-l2/60',
+        'flex gap-2 px-2 py-1.5 text-left text-xs',
         'data-[reviewed=true]:opacity-60',
       )}
       role="treeitem"
@@ -93,32 +92,28 @@ function FileRow({
       <button
         type="button"
         onClick={() => onSelect(file.path)}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className={cn(
+          DIFF_TREE_ROW,
+          'min-w-0 flex-1 flex-col items-stretch gap-0.5 py-1.5',
+          selected && DIFF_TREE_ACTIVE,
+        )}
         tabIndex={selected ? 0 : -1}
+        title={file.path}
       >
-        <code className="min-w-0 flex-1 truncate font-mono text-foreground" title={file.path}>
-          {shortPath(file.path)}
-        </code>
-        {file.label && (
-          <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
-            {file.label}
-          </Badge>
+        <span className="flex min-w-0 items-center gap-2">
+          <code className="min-w-0 flex-1 truncate font-mono text-foreground">{shortPath(file.path)}</code>
+          {file.label && (
+            <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
+              {file.label}
+            </Badge>
+          )}
+        </span>
+        {file.summary && (
+          <span className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">
+            {file.summary}
+          </span>
         )}
       </button>
-      {file.summary && (
-        <Popover>
-          <PopoverTrigger
-            render={<span />}
-            nativeButton={false}
-            aria-label={`Summary for ${file.path}`}
-            className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
-            onClick={(e) => e.stopPropagation()}
-          >
-            info
-          </PopoverTrigger>
-          <PopoverContent className="w-72 text-xs">{file.summary}</PopoverContent>
-        </Popover>
-      )}
       <div className="flex shrink-0 flex-col items-end gap-1">
         {open > 0 && (
           <span
@@ -230,7 +225,7 @@ export function ReviewFileTree({
             </button>
             {open && group.summary && (
               <div
-                className="line-clamp-1 px-3 pb-1 text-[11px] text-muted-foreground"
+                className="line-clamp-2 px-3 pb-1.5 text-[11px] leading-snug text-muted-foreground"
                 title={group.summary}
               >
                 {group.summary}

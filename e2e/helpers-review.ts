@@ -9,6 +9,8 @@ export interface ReviewFixtureOpts {
   runId?: string;
   prUrl?: string;
   prNumber?: number;
+  /** Override walkthrough JSON string (must include valid `global` scalars for CLI). */
+  walkthrough?: string;
   /** SHA that both pr_head_sha and original_commit_sha will be set to.
    *  Defaults to the git HEAD of the current worktree so that staleness
    *  checks resolve against real git objects. */
@@ -46,9 +48,21 @@ export async function createReviewFixture(
       }
     })();
 
-  const walkthrough = JSON.stringify({
-    global: { risk: 'low', summary: 'E2E test review' },
-  });
+  const walkthrough =
+    opts.walkthrough ??
+    JSON.stringify({
+      global: {
+        type: 'Other',
+        risk: 'low',
+        effort: 1,
+        relevant_tests: 'no',
+        security_concerns: null,
+        ticket_compliance: [],
+        summary: 'E2E test review',
+        key_review_points: [],
+      },
+      groups: [],
+    });
 
   const res = await page.request.post(`${API}/__test__/seed-review`, {
     data: {
