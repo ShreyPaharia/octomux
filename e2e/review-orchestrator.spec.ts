@@ -25,7 +25,10 @@ test.describe('Review orchestrator — happy path', () => {
     await expect(page.getByText(/E2E review PR #99/)).toBeVisible({ timeout: 10_000 });
 
     // 3. Open review → navigate to /reviews/:id
-    await page.getByTestId(`review-inbox-row-${taskId}`).getByRole('button', { name: 'Open review' }).click();
+    await page
+      .getByTestId(`review-inbox-row-${taskId}`)
+      .getByRole('button', { name: 'Open review' })
+      .click();
     await expect(page).toHaveURL(new RegExp(`/reviews/${taskId}`), { timeout: 10_000 });
   });
 

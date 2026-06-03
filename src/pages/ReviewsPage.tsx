@@ -95,7 +95,10 @@ export default function ReviewsPage() {
         <PageHeader title="Reviews" />
         <div className="mt-4 space-y-2">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-20 animate-pulse rounded-2xl border border-glass-edge bg-glass-l1" />
+            <div
+              key={i}
+              className="h-20 animate-pulse rounded-2xl border border-glass-edge bg-glass-l1"
+            />
           ))}
         </div>
       </div>

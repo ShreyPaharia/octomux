@@ -79,7 +79,11 @@ Compose a single JSON file at `.octomux/review-walkthrough.json` with this exact
     "relevant_tests": "yes | no | partial",
     "security_concerns": null,
     "ticket_compliance": [
-      { "ticket": "IN-1234", "status": "met", "notes": "One sentence on how the PR satisfies the ticket." }
+      {
+        "ticket": "IN-1234",
+        "status": "met",
+        "notes": "One sentence on how the PR satisfies the ticket."
+      }
     ],
     "summary": "...",
     "key_review_points": ["..."]
