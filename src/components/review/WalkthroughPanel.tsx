@@ -123,7 +123,9 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
             )}
           </div>
           {!expanded && g.summary && (
-            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{g.summary}</p>
+            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+              {g.summary}
+            </p>
           )}
         </div>
         <span className="shrink-0 pt-0.5 text-[10px] text-muted-foreground">
@@ -180,7 +182,9 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
                       </span>
                     </div>
                     {t.detail && (
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.detail}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {t.detail}
+                      </p>
                     )}
                   </li>
                 ))}

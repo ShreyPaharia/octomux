@@ -7,7 +7,12 @@ interface ReviewProgressBarProps {
   'data-testid'?: string;
 }
 
-export function ReviewProgressBar({ done, total, className, 'data-testid': testId }: ReviewProgressBarProps) {
+export function ReviewProgressBar({
+  done,
+  total,
+  className,
+  'data-testid': testId,
+}: ReviewProgressBarProps) {
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   return (
     <div

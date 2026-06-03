@@ -106,7 +106,9 @@ function FileRow({
         title={file.path}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <code className="min-w-0 flex-1 truncate font-mono text-foreground">{shortPath(file.path)}</code>
+          <code className="min-w-0 flex-1 truncate font-mono text-foreground">
+            {shortPath(file.path)}
+          </code>
           {file.label && (
             <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
               {file.label}
@@ -127,7 +129,9 @@ function FileRow({
               data-tone={serious ? 'serious' : 'muted'}
               className={cn(
                 'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                serious ? 'bg-destructive/20 text-destructive' : 'bg-glass-l2 text-muted-foreground',
+                serious
+                  ? 'bg-destructive/20 text-destructive'
+                  : 'bg-glass-l2 text-muted-foreground',
               )}
             >
               {open}
