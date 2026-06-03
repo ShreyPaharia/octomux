@@ -17,7 +17,7 @@ You are reviewing a pull request from inside an octomux worktree. Octomux owns t
 
 **Your task id:** every `octomux review` command below takes `--task <task_id>`. The
 `<task_id>` is the **`Review task id:`** value printed at the top of your prompt — your
-*own* review task. Do NOT use any other id you see in the prompt (e.g. a "Source task
+_own_ review task. Do NOT use any other id you see in the prompt (e.g. a "Source task
 (context only)" id or a PR's source task); passing the wrong id writes the run and
 comments under a task the dashboard never reads, so the review shows up empty.
 
