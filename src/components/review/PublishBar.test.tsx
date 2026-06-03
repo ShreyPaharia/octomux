@@ -75,7 +75,8 @@ describe('PublishBar', () => {
   it('shows reviewed progress when reviewedTotal > 0', () => {
     render(<PublishBar {...defaultProps({ reviewedDone: 2, reviewedTotal: 5 })} />);
     expect(screen.getByTestId('pr-review-progress')).toBeTruthy();
-    expect(screen.getByText('2/5 reviewed')).toBeTruthy();
+    expect(screen.getByText(/2\/5 files reviewed/)).toBeTruthy();
+    expect(screen.getByRole('progressbar')).toBeTruthy();
   });
 
   it('does not show reviewed progress when reviewedTotal is 0', () => {

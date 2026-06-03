@@ -40,7 +40,7 @@ describe('WalkthroughPanel', () => {
   it('collapses to preview and hides key points', async () => {
     const user = userEvent.setup();
     render(<WalkthroughPanel walkthrough={WT} />);
-    await user.click(screen.getByRole('button', { name: 'Collapse' }));
+    await user.click(screen.getByRole('button', { name: 'Collapse walkthrough' }));
     expect(screen.queryByTestId('walkthrough-key-points')).toBeNull();
     expect(screen.getByText(/2 focus areas/)).toBeTruthy();
     expect(screen.getByText(/This PR refactors X/)).toBeTruthy();
