@@ -1,4 +1,4 @@
-import type { Walkthrough, WalkthroughFile } from '@/components/review/WalkthroughHeader';
+import type { Walkthrough, WalkthroughFile } from '@/components/review/walkthrough-types';
 
 export const OTHER_GROUP_NAME = 'Other';
 

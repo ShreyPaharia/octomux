@@ -7,6 +7,7 @@
  * Prerequisites: Both servers must be running (bun run dev)
  */
 import { test, expect } from '@playwright/test';
+import { createReviewFixture, deleteReviewTask } from './helpers-review';
 
 const API = 'http://localhost:7777/api';
 const SCREENSHOTS = 'ui-review/screenshots';
@@ -346,5 +347,41 @@ test.describe.serial('UI Screenshots', () => {
     await page.waitForSelector('text=Create Task');
     await page.waitForTimeout(300);
     await shot(page, '19-responsive-create-dialog-mobile');
+  });
+
+  // ── Reviews inbox + detail (seeded fixture) ─────────────────────────
+
+  test('20 reviews inbox', async ({ page }) => {
+    const reviewId = await createReviewFixture(page);
+    testTaskIds.push(reviewId);
+
+    await page.setViewportSize(DESKTOP);
+    await page.goto('/reviews');
+    await page.waitForTimeout(800);
+    await shot(page, '20-reviews-inbox');
+  });
+
+  test('21 review detail walkthrough expanded', async ({ page }) => {
+    const walkthrough = JSON.stringify({
+      global: {
+        type: 'Enhancement',
+        risk: 'medium',
+        effort: 3,
+        relevant_tests: 'yes',
+        security_concerns: null,
+        ticket_compliance: [{ ticket: 'IN-1', status: 'met', notes: 'Ticket scope covered.' }],
+        summary: 'Screenshot fixture: expanded walkthrough with summary and focus bullets.',
+        key_review_points: ['Check auth path', 'Verify migration rollback'],
+      },
+      groups: [],
+    });
+    const reviewId = await createReviewFixture(page, { walkthrough });
+    testTaskIds.push(reviewId);
+
+    await page.setViewportSize(DESKTOP);
+    await page.goto(`/reviews/${reviewId}`);
+    await page.getByTestId('walkthrough-panel').waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(1200);
+    await shot(page, '21-review-detail-walkthrough');
   });
 });
