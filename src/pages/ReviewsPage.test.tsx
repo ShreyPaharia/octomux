@@ -93,8 +93,10 @@ describe('ReviewsPage', () => {
       makeRow({ task_id: 't2', pr_number: 2, pr_title: 'PR two', repo_path: '/repos/beta' }),
     ]);
     renderWithRouter(<ReviewsPage />);
-    expect(await screen.findByTestId('review-inbox-repo-alpha')).toBeTruthy();
-    expect(screen.getByTestId('review-inbox-repo-beta')).toBeTruthy();
+    expect(await screen.findByText('PR one')).toBeTruthy();
+    expect(screen.getByText('PR two')).toBeTruthy();
+    expect(screen.getByText('alpha')).toBeTruthy();
+    expect(screen.getByText('beta')).toBeTruthy();
   });
 
   it('Open review navigates to /reviews/:id', async () => {
@@ -103,8 +105,8 @@ describe('ReviewsPage', () => {
       makeRow({ task_id: 'task-abc', pr_title: 'Clickable PR' }),
     ]);
     renderWithRouter(<ReviewsPage />);
-    await screen.findByText('Clickable PR');
-    await user.click(screen.getByRole('button', { name: 'Open review' }));
+    const row = await screen.findByText('Clickable PR');
+    await user.click(row);
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/reviews/task-abc'));
   });
 

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
+import { riskBadgeClass } from '@/lib/review-display';
+import { ChevronDownIcon } from '../icons';
 import {
   normalizeTicketCompliance,
   ticketToneClass,
@@ -20,12 +21,6 @@ function readExpandedPreference(): boolean {
     // ignore
   }
   return true;
-}
-
-function previewLines(text: string, maxLines: number): string {
-  const lines = text.split(/\n/).filter(Boolean);
-  if (lines.length <= maxLines) return text;
-  return lines.slice(0, maxLines).join('\n');
 }
 
 interface WalkthroughPanelProps {
@@ -52,18 +47,20 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
   );
 
   const keyPoints = g.key_review_points?.filter(Boolean) ?? [];
-  const hasScalars = !!(g.type || g.risk || g.effort !== undefined || g.relevant_tests);
   const hasSecurity = g.security_concerns != null && g.security_concerns !== '';
   const hasContent =
     g.summary ||
-    hasScalars ||
+    g.type ||
+    g.risk ||
+    g.effort !== undefined ||
+    g.relevant_tests ||
     hasSecurity ||
     keyPoints.length > 0 ||
     tickets.length > 0;
 
   if (!hasContent) return null;
 
-  const summaryPreview = g.summary ? previewLines(g.summary, 2) : null;
+  const riskClass = riskBadgeClass(g.risk);
 
   return (
     <section
@@ -71,25 +68,30 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
       data-expanded={expanded ? 'true' : 'false'}
       className="border-b border-glass-edge bg-glass-l1"
     >
-      <div className="flex items-start gap-2 px-4 py-2">
-        <button
-          type="button"
-          onClick={toggle}
-          className="focus-ring mt-0.5 shrink-0 rounded px-1 text-xs font-semibold text-foreground hover:bg-glass-l2/60"
-          aria-expanded={expanded}
-        >
-          {expanded ? '▾' : '▸'} Walkthrough
-        </button>
-
+      <button
+        type="button"
+        onClick={toggle}
+        className="focus-ring flex w-full items-start gap-2 px-4 py-2.5 text-left hover:bg-glass-l2/30"
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Collapse walkthrough' : 'Expand walkthrough'}
+      >
+        <ChevronDownIcon
+          aria-hidden
+          className={cn(
+            'mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform',
+            !expanded && '-rotate-90',
+          )}
+        />
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-semibold text-foreground">Walkthrough</span>
             {g.type && (
               <Badge variant="outline" className="text-[10px]">
                 {g.type}
               </Badge>
             )}
             {g.risk && (
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" className={cn('text-[10px]', riskClass)}>
                 risk: {g.risk}
               </Badge>
             )}
@@ -99,46 +101,49 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
               </Badge>
             )}
             {g.relevant_tests && (
-              <Badge variant="outline" className="text-[10px]">
+              <Badge
+                variant="outline"
+                className={cn(
+                  'text-[10px]',
+                  g.relevant_tests === 'no' && 'border-amber-500/40 text-amber-400',
+                )}
+              >
                 tests: {g.relevant_tests}
               </Badge>
             )}
             {hasSecurity && (
               <Badge variant="destructive" className="text-[10px]">
-                security: {g.security_concerns}
+                security
               </Badge>
             )}
             {!expanded && keyPoints.length > 0 && (
               <span className="text-[10px] text-muted-foreground">
-                {keyPoints.length} focus {keyPoints.length === 1 ? 'area' : 'areas'}
+                · {keyPoints.length} focus {keyPoints.length === 1 ? 'area' : 'areas'}
               </span>
             )}
           </div>
-
-          {!expanded && summaryPreview && (
-            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-              {summaryPreview}
-            </p>
+          {!expanded && g.summary && (
+            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{g.summary}</p>
           )}
         </div>
-
-        <Button
-          variant="ghost"
-          size="xs"
-          className="shrink-0 text-xs text-muted-foreground"
-          onClick={toggle}
-        >
+        <span className="shrink-0 pt-0.5 text-[10px] text-muted-foreground">
           {expanded ? 'Collapse' : 'Expand'}
-        </Button>
-      </div>
+        </span>
+      </button>
 
       {expanded && (
         <div
           data-testid="walkthrough-panel-body"
-          className="space-y-3 border-t border-glass-edge/60 px-4 pb-3 pt-2"
+          className="max-h-[min(280px,40vh)] space-y-3 overflow-y-auto border-t border-glass-edge/60 px-4 pb-3 pt-2"
         >
           {g.summary && (
             <p className="max-w-4xl text-sm leading-relaxed text-foreground">{g.summary}</p>
+          )}
+
+          {hasSecurity && (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {g.security_concerns}
+            </p>
           )}
 
           {keyPoints.length > 0 && (
@@ -146,10 +151,11 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
               <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Where to focus
               </h3>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
+              <ul className="space-y-1.5 text-sm text-foreground">
                 {keyPoints.map((point) => (
-                  <li key={point} className="leading-snug">
-                    {point}
+                  <li key={point} className="flex gap-2 leading-snug">
+                    <span className="mt-1.5 size-1 shrink-0 rounded-full bg-primary" aria-hidden />
+                    <span>{point}</span>
                   </li>
                 ))}
               </ul>
@@ -187,7 +193,6 @@ export function WalkthroughPanel({ walkthrough }: WalkthroughPanelProps) {
   );
 }
 
-// Re-export types for consumers that imported from WalkthroughHeader
 export type {
   Walkthrough,
   WalkthroughFile,
