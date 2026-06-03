@@ -146,6 +146,25 @@ describe('ReviewDetailPage', () => {
     expect(screen.getByText('watch migration')).toBeTruthy();
   });
 
+  it('renders ReviewContextStrip with file notes when a file is selected', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(
+      makeDetail({
+        latest_run: {
+          id: 'r1',
+          pr_head_sha: 'sha1',
+          walkthrough: WALKTHROUGH_JSON,
+          status: 'done',
+        },
+      }),
+    );
+    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    await screen.findByTestId('review-file-tree');
+    const row = await screen.findByTestId('review-file-row-server/db.ts');
+    fireEvent.click(row.querySelector('button')!);
+    const fileCtx = await screen.findByTestId('review-context-file');
+    expect(fileCtx.textContent).toMatch(/migration/);
+  });
+
   it('renders one ReviewFileTree section per walkthrough group', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({

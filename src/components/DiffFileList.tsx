@@ -21,7 +21,8 @@ import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
 import { useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { DiffFileRow } from './DiffFileRow';
-import type { RenderGroup } from '@/lib/review-file-groups';
+import { fileSummariesFromGroups, type RenderGroup } from '@/lib/review-file-groups';
+import { ClampedExplainer } from '@/components/review/ClampedExplainer';
 
 const HASH_PREFIX = '#file=';
 const PROGRAMMATIC_SCROLL_MS = 700;
@@ -485,6 +486,11 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     return m;
   }, [groups, filesByPath]);
 
+  const fileSummaries = useMemo(
+    () => (groups ? fileSummariesFromGroups(groups) : new Map()),
+    [groups],
+  );
+
   // ─── Render ─────────────────────────────────────────────────────────────
   if (orderedFiles.length === 0) {
     return (
@@ -514,9 +520,14 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
                 {groupHeader.summary && (
                   <div
                     data-testid={`diff-group-summary-${groupHeader.name}`}
-                    className="border-b border-glass-edge bg-glass-l1/40 px-4 py-2 text-xs text-foreground"
+                    className="border-b border-glass-edge bg-glass-l1/40 px-4 py-2"
                   >
-                    {groupHeader.summary}
+                    <ClampedExplainer
+                      text={groupHeader.summary}
+                      lines={3}
+                      clampChars={200}
+                      className="text-xs leading-relaxed text-foreground"
+                    />
                   </div>
                 )}
               </div>
@@ -538,6 +549,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
               agents={agents}
               rangeIsBase={rangeIsBase}
               enableComments={enableComments}
+              explainer={fileSummaries.get(path)}
             />
           </div>
         );

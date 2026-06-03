@@ -6,6 +6,7 @@ import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
 import type { Walkthrough } from '../components/review/walkthrough-types';
 import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
 import { ReviewFileTree } from '../components/review/ReviewFileTree';
+import { ReviewContextStrip } from '../components/review/ReviewContextStrip';
 import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
 import { DiffViewer } from '../components/DiffViewer';
@@ -173,10 +174,12 @@ export default function ReviewDetailPage() {
 
         {walkthrough && <WalkthroughPanel walkthrough={walkthrough} />}
 
+        <ReviewContextStrip groups={orderedGroups} selectedPath={selectedPath} />
+
         <div className="flex min-h-0 flex-1">
           <aside
             data-testid="review-file-tree-pane"
-            className="glass-chrome flex w-[300px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
+            className="glass-chrome flex w-[320px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
           >
             <ReviewFileTree
               files={filesInDiff}
