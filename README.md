@@ -14,12 +14,14 @@ npm install -g octomux && octomux init && cd your-repo && octomux start
 
 Open [http://localhost:7777](http://localhost:7777) — describe a task in the composer, pick **Claude Code** or **Cursor**, and watch agents work in place.
 
+![octomux demo](assets/demo.gif)
+
 ## From prompt to merged PR
 
 Three phases, one window:
 
-- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira links, or GitHub issue URLs. Drop a second agent on the same branch with one click.
-- **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
+- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira links, or GitHub issue URLs. Drop a second agent on the same branch with one click — or paste a whole list and **bulk-create** a worktree, branch, and agent for each.
+- **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. The **Monitor** view tiles every running agent into one grid so you can scan the whole fleet at a glance. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
 - **03 — Review & Ship.** Diff review in the same window. File tree, per-file reviewed state, inline comments. Hit **Ship** and the PR auto-links to the task — closes itself when the PR merges.
 
 Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
@@ -37,7 +39,9 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 ## Features
 
 - **Sessions inbox** — every permission prompt and question lands in one place; reply once, agents keep going. Tab title shows `(N) octomux` when something needs you.
-- **Command center** — kanban for backlog → done; drag status, archive, workflow from draft → ship.
+- **Command center** — kanban for backlog → done; drag status, archive, workflow from draft → ship. Empty board? A first-run guide shows you where to start.
+- **Monitor grid** — every running agent tiled into one auto-sized grid; scan the whole fleet's activity (active / idle / waiting) without opening each task.
+- **Bulk dispatch** — paste a list of prompts or a GitHub issue list and spin up one task — worktree, branch, agent — per line in a single shot.
 - **In-app diff review** — compare to `main`, mark files reviewed, queue inline comments, open lazygit in-editor.
 - **Dual harnesses** — run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**.
 - **Worktrees keep agents off each other** — each task gets its own git worktree and `agents/<task-id>` branch; five agents can edit `auth.ts` at the same time without conflicts on your main tree.
@@ -148,10 +152,12 @@ flowchart LR
 
 ## Requirements
 
-- macOS (ARM64 or x64), Node.js 20+
+- macOS (ARM64 or x64), Node.js 20+ (24 LTS recommended)
 - `tmux`, `git`
 - At least one harness: **Claude Code** (`claude`) and/or **Cursor CLI** (`cursor-agent`)
 - Recommended: `lazygit`, `neovim`
+
+> First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira and other integrations are configured later from the in-app **Integrations** page.
 
 ## Configuration
 
