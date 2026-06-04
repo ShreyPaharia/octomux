@@ -338,6 +338,15 @@ describe('GET /api/tasks', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
+
+  it('excludes auto_review tasks from the list', async () => {
+    insertTask(db, { id: 'regular', source: null });
+    insertTask(db, { id: 'review', source: 'auto_review' });
+
+    const res = await request(app).get('/api/tasks');
+    expect(res.status).toBe(200);
+    expect(res.body.map((t: Task) => t.id)).toEqual(['regular']);
+  });
 });
 
 // ─── Inbox ──────────────────────────────────────────────────────────────────
@@ -357,6 +366,27 @@ describe('GET /api/tasks/inbox', () => {
   it('returns empty arrays when no tasks match', async () => {
     const res = await request(app).get('/api/tasks/inbox');
     expect(res.body).toEqual({ needs_you: [], activity: [] });
+  });
+
+  it('excludes auto_review tasks from inbox buckets', async () => {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    insertTask(db, {
+      id: 'review-err',
+      source: 'auto_review',
+      runtime_state: 'error',
+      last_viewed_at: null,
+      updated_at: now,
+    });
+    insertTask(db, {
+      id: 'regular-err',
+      source: null,
+      runtime_state: 'error',
+      last_viewed_at: null,
+      updated_at: now,
+    });
+
+    const res = await request(app).get('/api/tasks/inbox');
+    expect(res.body.needs_you.map((t: Task) => t.id)).toEqual(['regular-err']);
   });
 });
 

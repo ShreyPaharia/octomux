@@ -13,6 +13,9 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
@@ -114,5 +117,19 @@ describe('ReviewsPage', () => {
     apiMock.listReviewsInbox.mockResolvedValue([makeRow({ stale_count: 3 })]);
     renderWithRouter(<ReviewsPage />);
     expect(await screen.findByText(/3 stale/)).toBeTruthy();
+  });
+
+  it('deletes a review from the inbox after confirmation', async () => {
+    const user = userEvent.setup();
+    apiMock.deleteTask.mockResolvedValue(undefined);
+    apiMock.listReviewsInbox.mockResolvedValue([
+      makeRow({ task_id: 'del-me', pr_title: 'Remove me' }),
+    ]);
+    renderWithRouter(<ReviewsPage />);
+    await screen.findByText('Remove me');
+    await user.click(screen.getByTestId('review-delete-del-me'));
+    await user.click(screen.getByTestId('confirm-delete-review-confirm'));
+    await waitFor(() => expect(apiMock.deleteTask).toHaveBeenCalledWith('del-me'));
+    await waitFor(() => expect(screen.queryByText('Remove me')).toBeNull());
   });
 });

@@ -9,6 +9,7 @@ import { GlassPanel } from '@/components/ui/glass-panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { PlusIcon, LayoutGridIcon } from '@/components/icons';
+import { isRegularTask } from '@/lib/task-filters';
 import { repoName } from '@/lib/utils';
 import { ChevronDownIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
@@ -208,7 +209,7 @@ export default function TasksPage() {
   const [search, setSearch] = useState('');
 
   const repos = useMemo(() => {
-    const paths = new Set(tasks.filter((t) => t.source !== 'auto_review').map((t) => t.repo_path));
+    const paths = new Set(tasks.filter((t) => isRegularTask(t)).map((t) => t.repo_path));
     return [...paths].sort((a, b) => repoName(a).localeCompare(repoName(b)));
   }, [tasks]);
 
@@ -222,7 +223,7 @@ export default function TasksPage() {
   // Trashed tasks (deleted_at !== null) always pass through so the trash column can show them.
   const filteredTasks = useMemo<Task[]>(() => {
     return tasks.filter((t) => {
-      if (t.source === 'auto_review') return false;
+      if (!isRegularTask(t)) return false;
       // Trashed tasks bypass all other filters — they show in the trash column as-is
       if (t.deleted_at) return true;
       if (activeRepo && t.repo_path !== activeRepo) return false;

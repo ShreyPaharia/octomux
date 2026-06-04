@@ -5,6 +5,7 @@ import { api, type PublishedReviewVerdict } from '../../lib/api';
 import { displayReviewTitle } from '@/lib/review-display';
 import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { cn } from '@/lib/utils';
+import { ConfirmDeleteReviewDialog } from './ConfirmDeleteReviewDialog';
 import { ReviewProgressBar } from './ReviewProgressBar';
 
 interface PublishBarProps {
@@ -23,6 +24,7 @@ interface PublishBarProps {
   isRunning: boolean;
   onPublished: () => void;
   onReRun: () => void;
+  onDeleted?: () => void;
 }
 
 const VERDICT_OPTIONS: Array<{ value: PublishedReviewVerdict; label: string }> = [
@@ -47,10 +49,12 @@ export function PublishBar({
   isRunning,
   onPublished,
   onReRun,
+  onDeleted,
 }: PublishBarProps) {
   const [verdict, setVerdict] = useState<PublishedReviewVerdict>('COMMENT');
   const [publishing, setPublishing] = useState(false);
   const [reRunning, setReRunning] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const title = displayReviewTitle(prTitle);
 
@@ -78,6 +82,17 @@ export function PublishBar({
       toast.error(`Re-run failed: ${(e as Error).message}`);
     } finally {
       setReRunning(false);
+    }
+  }
+
+  async function handleDelete() {
+    try {
+      await api.deleteTask(taskId);
+      toast.success('Review deleted');
+      onDeleted?.();
+    } catch (e) {
+      toast.error(`Delete failed: ${(e as Error).message}`);
+      throw e;
     }
   }
 
@@ -158,8 +173,25 @@ export function PublishBar({
           <Button size="sm" onClick={handlePublish} disabled={acceptedCount === 0 || publishing}>
             {publishing ? 'Publishing…' : 'Publish review'}
           </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-destructive"
+            data-testid="review-delete-btn"
+            onClick={() => setDeleteOpen(true)}
+          >
+            Delete
+          </Button>
         </div>
       </div>
+
+      <ConfirmDeleteReviewDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        reviewLabel={title}
+        onConfirm={handleDelete}
+      />
 
       {reviewedTotal > 0 && (
         <div

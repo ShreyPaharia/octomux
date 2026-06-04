@@ -3,15 +3,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PublishBar } from './PublishBar';
 
-const { mockPublishReview, mockRequestReReview } = await vi.hoisted(async () => ({
+const { mockPublishReview, mockRequestReReview, mockDeleteTask } = await vi.hoisted(async () => ({
   mockPublishReview: vi.fn(),
   mockRequestReReview: vi.fn(),
+  mockDeleteTask: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({
   api: {
     publishReview: mockPublishReview,
     requestReReview: mockRequestReReview,
+    deleteTask: mockDeleteTask,
   },
 }));
 
@@ -135,6 +137,19 @@ describe('PublishBar', () => {
     await waitFor(() => {
       expect(mockRequestReReview).toHaveBeenCalledWith('t1');
       expect(onReRun).toHaveBeenCalled();
+    });
+  });
+
+  it('deletes review and calls onDeleted after confirmation', async () => {
+    const user = userEvent.setup();
+    mockDeleteTask.mockResolvedValue(undefined);
+    const onDeleted = vi.fn();
+    render(<PublishBar {...defaultProps({ onDeleted })} />);
+    await user.click(screen.getByTestId('review-delete-btn'));
+    await user.click(screen.getByTestId('confirm-delete-review-confirm'));
+    await waitFor(() => {
+      expect(mockDeleteTask).toHaveBeenCalledWith('t1');
+      expect(onDeleted).toHaveBeenCalled();
     });
   });
 });

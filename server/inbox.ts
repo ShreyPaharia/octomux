@@ -11,6 +11,7 @@ export function getNeedsYou(): Task[] {
       `SELECT DISTINCT t.*
        FROM tasks t
        WHERE t.deleted_at IS NULL
+         AND (t.source IS NULL OR t.source <> 'auto_review')
          AND (
            EXISTS (
              SELECT 1 FROM permission_prompts pp
@@ -36,6 +37,7 @@ export function getActivity(): Task[] {
       `SELECT t.*
        FROM tasks t
        WHERE t.deleted_at IS NULL
+         AND (t.source IS NULL OR t.source <> 'auto_review')
          AND t.runtime_state = 'idle'
          AND (t.last_viewed_at IS NULL OR t.last_viewed_at < t.updated_at)
          AND t.updated_at > datetime('now', '-7 days')
