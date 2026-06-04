@@ -51,9 +51,7 @@ function groupKeyFor(task: Task): { key: string; label: string } {
 }
 
 export function groupTasksForSidebar(tasks: Task[]): SidebarGroup[] {
-  const active = tasks.filter(
-    (t) => isRegularTask(t) && ACTIVE_STATUSES.includes(t.runtime_state),
-  );
+  const active = tasks.filter((t) => isRegularTask(t) && ACTIVE_STATUSES.includes(t.runtime_state));
 
   const grouped = new Map<string, { label: string; items: SidebarItem[]; tasks: Task[] }>();
 

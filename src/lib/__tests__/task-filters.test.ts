@@ -8,11 +8,7 @@ describe('task-filters', () => {
   });
 
   it('regularTasksOnly filters list', () => {
-    const out = regularTasksOnly([
-      { source: null },
-      { source: 'auto_review' },
-      { source: null },
-    ]);
+    const out = regularTasksOnly([{ source: null }, { source: 'auto_review' }, { source: null }]);
     expect(out).toHaveLength(2);
   });
 });
