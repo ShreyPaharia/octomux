@@ -3,6 +3,15 @@ import { groupTasksForSidebar, type SidebarItem, type SidebarGroup } from './sid
 import { makeTask } from '@/test-helpers';
 
 describe('groupTasksForSidebar', () => {
+  it('excludes auto_review tasks', () => {
+    const tasks = [
+      makeTask({ id: '1', runtime_state: 'running', source: null }),
+      makeTask({ id: '2', runtime_state: 'running', source: 'auto_review' }),
+    ];
+    const ids = groupTasksForSidebar(tasks).flatMap((g) => g.items.map((i) => i.id));
+    expect(ids).toEqual(['1']);
+  });
+
   it('excludes draft and closed tasks', () => {
     const tasks = [
       makeTask({ id: '1', runtime_state: 'running', title: 'A' }),

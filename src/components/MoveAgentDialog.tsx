@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
+import { isRegularTask } from '@/lib/task-filters';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { Task } from '../../server/types';
@@ -40,8 +41,10 @@ export function MoveAgentDialog({
       try {
         const all = await api.listTasks();
         if (cancelled) return;
-        const active = all.filter((t) =>
-          (['setting_up', 'running'] as const).includes(t.runtime_state as 'running'),
+        const active = all.filter(
+          (t) =>
+            isRegularTask(t) &&
+            (['setting_up', 'running'] as const).includes(t.runtime_state as 'running'),
         );
         setTasks(active);
         setSelected(STANDALONE_OPTION);

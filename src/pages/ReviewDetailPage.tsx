@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
 import { subscribe } from '../lib/event-source';
 import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
@@ -29,6 +29,7 @@ function defaultCommentsPanelOpen(): boolean {
 
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
@@ -170,6 +171,7 @@ export default function ReviewDetailPage() {
           isRunning={isRunning}
           onPublished={refresh}
           onReRun={refresh}
+          onDeleted={() => navigate('/reviews')}
         />
 
         {walkthrough && <WalkthroughPanel walkthrough={walkthrough} />}

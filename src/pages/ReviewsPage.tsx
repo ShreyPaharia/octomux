@@ -1,10 +1,12 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { api, type ReviewInboxRow } from '../lib/api';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
+import { ConfirmDeleteReviewDialog } from '@/components/review/ConfirmDeleteReviewDialog';
 import { displayReviewTitle, parseActivityDate } from '@/lib/review-display';
 import { timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -53,6 +55,7 @@ function sortRows(rows: ReviewInboxRow[]): ReviewInboxRow[] {
 export default function ReviewsPage() {
   const [rows, setRows] = useState<ReviewInboxRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<ReviewInboxRow | null>(null);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -88,6 +91,19 @@ export default function ReviewsPage() {
     }
     return map;
   }, [rows]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.task_id;
+    try {
+      await api.deleteTask(id);
+      setRows((prev) => prev.filter((r) => r.task_id !== id));
+      toast.success('Review deleted');
+    } catch (e) {
+      toast.error(`Delete failed: ${(e as Error).message}`);
+      throw e;
+    }
+  }, [deleteTarget]);
 
   if (loading) {
     return (
@@ -170,14 +186,24 @@ export default function ReviewsPage() {
                           <p className="mt-0.5 text-[10px] text-muted-soft">@{r.author_login}</p>
                         )}
                       </button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() => nav(`/reviews/${r.task_id}`)}
-                      >
-                        Open review
-                      </Button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => nav(`/reviews/${r.task_id}`)}
+                        >
+                          Open review
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          data-testid={`review-delete-${r.task_id}`}
+                          onClick={() => setDeleteTarget(r)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </GlassPanel>
                   </li>
                 );
@@ -186,6 +212,15 @@ export default function ReviewsPage() {
           </section>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteReviewDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          reviewLabel={displayReviewTitle(deleteTarget.pr_title)}
+          onConfirm={handleDeleteConfirm}
+        />
+      )}
     </div>
   );
 }

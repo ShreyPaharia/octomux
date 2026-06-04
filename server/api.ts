@@ -48,6 +48,7 @@ import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.j
 import { SELECT_TASK_SQL } from './task-select.js';
 import { sendMessageToAgent } from './tmux-input.js';
 import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
+import { SQL_EXCLUDE_AUTO_REVIEW } from './task-query.js';
 import { getReviewRun, getCurrentRun, setWalkthrough } from './review-runs.js';
 import { listPublishedReviews } from './published-reviews.js';
 import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
@@ -438,14 +439,15 @@ export function setupRoutes(app: Express): void {
     const trash = req.query.trash === 'true';
     const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
     const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
+    const listPredicate = `${trashPredicate} AND ${SQL_EXCLUDE_AUTO_REVIEW}`;
 
     let tasks: Task[];
     if (repoPath) {
       tasks = db
-        .prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} AND w.repo_path = ? ${orderBy}`)
+        .prepare(`${SELECT_TASK_SQL} WHERE ${listPredicate} AND w.repo_path = ? ${orderBy}`)
         .all(repoPath) as Task[];
     } else {
-      tasks = db.prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} ${orderBy}`).all() as Task[];
+      tasks = db.prepare(`${SELECT_TASK_SQL} WHERE ${listPredicate} ${orderBy}`).all() as Task[];
     }
 
     if (tasks.length === 0) {
