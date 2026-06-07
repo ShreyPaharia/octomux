@@ -58,3 +58,41 @@ export function ensureToken(): string {
   logger.info({ tokenFile: file }, 'generated new remote-access token');
   return token;
 }
+
+export const COOKIE_NAME = 'octomux_session';
+
+/** Constant-time compare of two strings (hashes first to avoid length leaks/throws). */
+function safeEqual(a: string, b: string): boolean {
+  const ha = crypto.createHash('sha256').update(a).digest();
+  const hb = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+/**
+ * Derive the session cookie value from the token. The cookie never contains the
+ * raw token; only a holder of the token at login time could have obtained it.
+ */
+export function sessionCookieValue(token: string): string {
+  return crypto.createHmac('sha256', token).update('octomux-session-v1').digest('hex');
+}
+
+/** True if `provided` equals the real token (constant-time). */
+export function validToken(provided: string, token: string): boolean {
+  return provided.length > 0 && safeEqual(provided, token);
+}
+
+/** True if a presented cookie value matches the derived session value. */
+export function validSessionCookie(value: string | undefined, token: string): boolean {
+  return value !== undefined && value.length > 0 && safeEqual(value, sessionCookieValue(token));
+}
+
+export function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    out[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
+  }
+  return out;
+}

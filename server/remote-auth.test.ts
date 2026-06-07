@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import { getBindHost, isRemoteMode, isLoopbackAddress } from './remote-auth.js';
 import { ensureToken, tokenFilePath } from './remote-auth.js';
+import { sessionCookieValue, parseCookies, validSessionCookie, COOKIE_NAME } from './remote-auth.js';
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -87,5 +88,28 @@ describe('remote-auth token', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(tokenFilePath(), token, {
       mode: 0o600,
     });
+  });
+});
+
+describe('remote-auth cookies', () => {
+  it('sessionCookieValue is a stable 64-char hex HMAC of the token', () => {
+    const v = sessionCookieValue('tok');
+    expect(v).toMatch(/^[0-9a-f]{64}$/);
+    expect(sessionCookieValue('tok')).toBe(v); // deterministic
+    expect(sessionCookieValue('other')).not.toBe(v); // keyed by token
+  });
+
+  it('parseCookies extracts name/value pairs', () => {
+    expect(parseCookies(`a=1; ${COOKIE_NAME}=xyz; b=2`)[COOKIE_NAME]).toBe('xyz');
+    expect(parseCookies(undefined)).toEqual({});
+    expect(parseCookies('')).toEqual({});
+  });
+
+  it('validSessionCookie accepts the matching signed value only', () => {
+    const good = sessionCookieValue('tok');
+    expect(validSessionCookie(good, 'tok')).toBe(true);
+    expect(validSessionCookie('deadbeef', 'tok')).toBe(false);
+    expect(validSessionCookie('', 'tok')).toBe(false);
+    expect(validSessionCookie(undefined, 'tok')).toBe(false);
   });
 });
