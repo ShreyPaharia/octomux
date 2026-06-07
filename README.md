@@ -168,6 +168,33 @@ flowchart LR
 | `OCTOMUX_DB_PATH`         | Override task DB path            |
 | `OCTOMUX_GITHUB_LOGIN`    | Reviewer-request polling account |
 
+## Remote access over Tailscale
+
+octomux binds to `127.0.0.1` by default — reachable only from the host machine. To view
+and control sessions from your other devices (phone, second laptop), put them on a
+[Tailscale](https://tailscale.com) tailnet and enable remote mode:
+
+1. Install Tailscale on the host and each device; run `tailscale up` on each. Enable
+   MagicDNS so the host is reachable by name.
+2. Start octomux in remote mode:
+   ```bash
+   octomux start --bind 0.0.0.0
+   # or: OCTOMUX_BIND=0.0.0.0 octomux start
+   ```
+   On first start a random access token is generated and its file path is logged
+   (`~/.octomux/data/remote-token`). Override it with `OCTOMUX_REMOTE_TOKEN=<secret>`.
+3. (Optional) Restrict the accepted `Host` header to your tailnet name:
+   `OCTOMUX_ALLOWED_HOSTS=mybox.your-tailnet.ts.net`. The `100.64.0.0/10` tailnet IP range
+   is accepted automatically.
+4. From a device on the tailnet, open `http://<host-magicdns-name>:7777` and sign in once
+   with the token. Local (loopback) access never requires the token.
+
+**Security notes:** only devices on your tailnet can reach the port; the token is a second
+factor so a single compromised tailnet device cannot silently drive your agents. Binding
+`0.0.0.0` also exposes the port on any other LAN the host is on — the token gates those out,
+and you can add a host firewall rule limiting port 7777 to the `100.64.0.0/10` range for
+belt-and-suspenders. For HTTPS, front octomux with `tailscale serve`.
+
 ## FAQ
 
 **What's the difference between octomux and just running tmux + Claude Code?**
