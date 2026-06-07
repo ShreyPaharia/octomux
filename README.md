@@ -14,12 +14,14 @@ npm install -g octomux && octomux init && cd your-repo && octomux start
 
 Open [http://localhost:7777](http://localhost:7777) — describe a task in the composer, pick **Claude Code** or **Cursor**, and watch agents work in place.
 
+![octomux demo](assets/demo.gif)
+
 ## From prompt to merged PR
 
 Three phases, one window:
 
-- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira links, or GitHub issue URLs. Drop a second agent on the same branch with one click.
-- **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
+- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira links, or GitHub issue URLs. Drop a second agent on the same branch with one click — or paste a whole list and **bulk-create** a worktree, branch, and agent for each.
+- **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. The **Monitor** view tiles every running agent into one grid so you can scan the whole fleet at a glance. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
 - **03 — Review & Ship.** Diff review in the same window. File tree, per-file reviewed state, inline comments. Hit **Ship** and the PR auto-links to the task — closes itself when the PR merges.
 
 Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
@@ -37,7 +39,9 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 ## Features
 
 - **Sessions inbox** — every permission prompt and question lands in one place; reply once, agents keep going. Tab title shows `(N) octomux` when something needs you.
-- **Command center** — kanban for backlog → done; drag status, archive, workflow from draft → ship.
+- **Command center** — kanban for backlog → done; drag status, archive, workflow from draft → ship. Empty board? A first-run guide shows you where to start.
+- **Monitor grid** — every running agent tiled into one auto-sized grid; scan the whole fleet's activity (active / idle / waiting) without opening each task.
+- **Bulk dispatch** — paste a list of prompts or a GitHub issue list and spin up one task — worktree, branch, agent — per line in a single shot.
 - **In-app diff review** — compare to `main`, mark files reviewed, queue inline comments, open lazygit in-editor.
 - **Dual harnesses** — run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**.
 - **Worktrees keep agents off each other** — each task gets its own git worktree and `agents/<task-id>` branch; five agents can edit `auth.ts` at the same time without conflicts on your main tree.
@@ -148,10 +152,12 @@ flowchart LR
 
 ## Requirements
 
-- macOS (ARM64 or x64), Node.js 20+
+- macOS (ARM64 or x64), Node.js 20+ (24 LTS recommended)
 - `tmux`, `git`
 - At least one harness: **Claude Code** (`claude`) and/or **Cursor CLI** (`cursor-agent`)
 - Recommended: `lazygit`, `neovim`
+
+> First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira and other integrations are configured later from the in-app **Integrations** page.
 
 ## Configuration
 
@@ -161,6 +167,33 @@ flowchart LR
 | `OCTOMUX_URL`             | CLI → API base URL               |
 | `OCTOMUX_DB_PATH`         | Override task DB path            |
 | `OCTOMUX_GITHUB_LOGIN`    | Reviewer-request polling account |
+
+## Remote access over Tailscale
+
+octomux binds to `127.0.0.1` by default — reachable only from the host machine. To view
+and control sessions from your other devices (phone, second laptop), put them on a
+[Tailscale](https://tailscale.com) tailnet and enable remote mode:
+
+1. Install Tailscale on the host and each device; run `tailscale up` on each. Enable
+   MagicDNS so the host is reachable by name.
+2. Start octomux in remote mode:
+   ```bash
+   octomux start --bind 0.0.0.0
+   # or: OCTOMUX_BIND=0.0.0.0 octomux start
+   ```
+   On first start a random access token is generated and its file path is logged
+   (`~/.octomux/data/remote-token`). Override it with `OCTOMUX_REMOTE_TOKEN=<secret>`.
+3. (Optional) Restrict the accepted `Host` header to your tailnet name:
+   `OCTOMUX_ALLOWED_HOSTS=mybox.your-tailnet.ts.net`. The `100.64.0.0/10` tailnet IP range
+   is accepted automatically.
+4. From a device on the tailnet, open `http://<host-magicdns-name>:7777` and sign in once
+   with the token. Local (loopback) access never requires the token.
+
+**Security notes:** only devices on your tailnet can reach the port; the token is a second
+factor so a single compromised tailnet device cannot silently drive your agents. Binding
+`0.0.0.0` also exposes the port on any other LAN the host is on — the token gates those out,
+and you can add a host firewall rule limiting port 7777 to the `100.64.0.0/10` range for
+belt-and-suspenders. For HTTPS, front octomux with `tailscale serve`.
 
 ## FAQ
 

@@ -5,6 +5,7 @@ import fs from 'fs';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
+import { getBindHost, isRemoteMode, isUpgradeAuthorized, ensureToken } from './remote-auth.js';
 import {
   setupTerminalWebSocket,
   handleTerminalUpgrade,
@@ -37,6 +38,10 @@ setupTerminalWebSocket();
 setupEventWebSocket();
 
 server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  if (!isUpgradeAuthorized(req)) {
+    socket.destroy();
+    return;
+  }
   if (handleTerminalUpgrade(req, socket, head)) return;
   if (handleEventUpgrade(req, socket, head)) return;
   socket.destroy();
@@ -110,8 +115,24 @@ server.on('error', (err: NodeJS.ErrnoException) => {
   throw err;
 });
 
-server.listen(Number(PORT), '127.0.0.1', () => {
-  logger.info({ port: PORT }, 'octomux listening on 127.0.0.1');
+const HOST = getBindHost();
+server.listen(Number(PORT), HOST, () => {
+  logger.info({ port: PORT, host: HOST }, `octomux listening on ${HOST}`);
+  if (isRemoteMode()) {
+    try {
+      ensureToken(); // generate + log the token file path on first remote start
+    } catch (err) {
+      logger.error(
+        { err },
+        'remote mode: failed to read/create remote-access token — set OCTOMUX_REMOTE_TOKEN or fix permissions on the token dir',
+      );
+      process.exit(1);
+    }
+    logger.warn(
+      { host: HOST },
+      'remote access ENABLED — clients must present the token at /login (see remote-token file or OCTOMUX_REMOTE_TOKEN)',
+    );
+  }
 });
 
 // ─── Graceful Shutdown ──────────────────────────────────────────────────────
