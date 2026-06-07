@@ -6,7 +6,10 @@ import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalTouchIsolation } from '@/lib/terminal-touch-isolation';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
+import { MobileTerminalScrollControls } from '@/components/MobileTerminalScrollControls';
 import { CloudOffIcon } from './icons';
+
+const MOBILE_SCROLL_LINES = 5;
 
 interface TerminalViewProps {
   taskId?: string;
@@ -68,6 +71,18 @@ export function TerminalView({
     if (textarea && document.activeElement === textarea) {
       term.scrollToBottom();
     }
+  }, []);
+
+  const scrollOlder = useCallback(() => {
+    termRef.current?.scrollLines(-MOBILE_SCROLL_LINES);
+  }, []);
+
+  const scrollNewer = useCallback(() => {
+    termRef.current?.scrollLines(MOBILE_SCROLL_LINES);
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    termRef.current?.scrollToBottom();
   }, []);
 
   // Helper to fit terminal and send resize dimensions over WebSocket
@@ -359,6 +374,14 @@ export function TerminalView({
             </span>
           </span>
         </div>
+      )}
+      {isMobile && visible && !connecting && (
+        <MobileTerminalScrollControls
+          onScrollOlder={scrollOlder}
+          onScrollNewer={scrollNewer}
+          onScrollToBottom={scrollToLatest}
+          className="absolute bottom-2 right-2 z-20 md:hidden"
+        />
       )}
       {showOverlay && (
         <div
