@@ -4,6 +4,8 @@ import { getBindHost, isRemoteMode, isLoopbackAddress } from './remote-auth.js';
 import { ensureToken, tokenFilePath } from './remote-auth.js';
 import { sessionCookieValue, parseCookies, validSessionCookie, COOKIE_NAME } from './remote-auth.js';
 import { authorizeRequest, authorizeUpgrade, sessionCookieValue as sig } from './remote-auth.js';
+import { isUpgradeAuthorized } from './remote-auth.js';
+import type { IncomingMessage } from 'http';
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -198,5 +200,40 @@ describe('authorizeUpgrade (pure)', () => {
     expect(
       authorizeUpgrade({ ...input, token } as Parameters<typeof authorizeUpgrade>[0]),
     ).toBe(expected);
+  });
+});
+
+describe('isUpgradeAuthorized wrapper', () => {
+  afterEach(() => {
+    delete process.env.OCTOMUX_BIND;
+    delete process.env.OCTOMUX_REMOTE_TOKEN;
+  });
+
+  it('allows when remote mode is off regardless of address', () => {
+    const req = {
+      socket: { remoteAddress: '100.64.1.2' },
+      headers: {},
+    } as unknown as IncomingMessage;
+    expect(isUpgradeAuthorized(req)).toBe(true);
+  });
+
+  it('rejects a remote upgrade without a valid cookie', () => {
+    process.env.OCTOMUX_BIND = '0.0.0.0';
+    process.env.OCTOMUX_REMOTE_TOKEN = 'tok';
+    const req = {
+      socket: { remoteAddress: '100.64.1.2' },
+      headers: {},
+    } as unknown as IncomingMessage;
+    expect(isUpgradeAuthorized(req)).toBe(false);
+  });
+
+  it('allows a loopback upgrade in remote mode', () => {
+    process.env.OCTOMUX_BIND = '0.0.0.0';
+    process.env.OCTOMUX_REMOTE_TOKEN = 'tok';
+    const req = {
+      socket: { remoteAddress: '127.0.0.1' },
+      headers: {},
+    } as unknown as IncomingMessage;
+    expect(isUpgradeAuthorized(req)).toBe(true);
   });
 });

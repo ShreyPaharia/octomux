@@ -130,3 +130,66 @@ export function authorizeUpgrade(input: {
   if (isLoopback) return true;
   return validSessionCookie(parseCookies(cookieHeader)[COOKIE_NAME], token);
 }
+
+/** Express middleware: enforce the auth decision. No-op when remote mode is off. */
+export function remoteAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const decision = authorizeRequest({
+    remoteMode: isRemoteMode(),
+    isLoopback: isLoopbackAddress(req.socket.remoteAddress),
+    path: req.path,
+    cookieHeader: req.headers.cookie,
+    token: ensureToken(),
+  });
+  if (decision === 'allow') return next();
+  if (decision === 'unauthorized') {
+    logger.warn({ ip: req.ip, path: req.path }, 'remote-auth: rejected request');
+    res.status(401).json({ error: 'unauthorized' });
+    return;
+  }
+  res.redirect('/login');
+}
+
+/** Wrapper around authorizeUpgrade that reads from a raw IncomingMessage. */
+export function isUpgradeAuthorized(req: IncomingMessage): boolean {
+  const ok = authorizeUpgrade({
+    remoteMode: isRemoteMode(),
+    isLoopback: isLoopbackAddress(req.socket.remoteAddress),
+    cookieHeader: req.headers.cookie,
+    token: ensureToken(),
+  });
+  if (!ok) logger.warn({ url: req.url, addr: req.socket.remoteAddress }, 'remote-auth: rejected upgrade');
+  return ok;
+}
+
+const LOGIN_PAGE = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>octomux login</title>
+<body style="font-family:system-ui;max-width:24rem;margin:4rem auto;padding:0 1rem">
+<h1>🐙 octomux</h1>
+<form method="post" action="/login">
+<label>Access token<br><input name="token" type="password" autofocus style="width:100%;padding:.5rem;margin:.5rem 0"></label>
+<button type="submit" style="padding:.5rem 1rem">Sign in</button>
+</form></body>`;
+
+/** Register /login and /logout. Call BEFORE remoteAuthMiddleware so they stay reachable. */
+export function registerAuthRoutes(app: import('express').Express): void {
+  app.get('/login', (_req, res) => {
+    res.type('html').send(LOGIN_PAGE);
+  });
+  app.post('/login', (req, res) => {
+    const provided = (req.body?.token ?? '') as string;
+    if (!validToken(provided, ensureToken())) {
+      res.status(401).type('html').send(LOGIN_PAGE);
+      return;
+    }
+    const value = sessionCookieValue(ensureToken());
+    res.setHeader(
+      'Set-Cookie',
+      `${COOKIE_NAME}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`,
+    );
+    res.redirect('/');
+  });
+  app.post('/logout', (_req, res) => {
+    res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+    res.redirect('/login');
+  });
+}
