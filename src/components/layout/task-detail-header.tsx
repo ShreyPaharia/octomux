@@ -75,7 +75,7 @@ export function TaskDetailHeader({
     <GlassPanel
       chrome
       data-testid="task-detail-header"
-      className="flex shrink-0 items-center justify-between gap-3 rounded-none border-x-0 border-t-0 px-6 py-4"
+      className="flex shrink-0 flex-col gap-3 rounded-none border-x-0 border-t-0 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4"
     >
       <div className="flex min-w-0 items-center gap-2.5">
         <h1
@@ -96,7 +96,7 @@ export function TaskDetailHeader({
         <StatusBadge status={task.derived_status || task.runtime_state} />
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+      <div className="flex w-full shrink-0 flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end sm:gap-2">
         {canResume && (
           <Button
             variant="default"

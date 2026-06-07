@@ -9,6 +9,7 @@ import ReviewsPage from './pages/ReviewsPage';
 import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SHIP_EVENT } from './pages/TaskDetail';
@@ -107,7 +108,7 @@ export function AppShell() {
         />
         <GlobalNotifications />
         <UniversalSidebar />
-        <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
+        <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <div className="ambient-tint-backdrop" aria-hidden="true" />
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
             <Suspense
@@ -142,6 +143,7 @@ export function AppShell() {
           onClose={() => setPrSheetTask(null)}
           onShipped={() => refreshTasks()}
         />
+        <MobileBottomNav />
       </div>
     </div>
   );

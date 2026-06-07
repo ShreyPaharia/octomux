@@ -127,9 +127,9 @@ function BoardFilterBar({
       level={1}
       specular
       data-testid="board-filter-bar"
-      className="my-3 flex items-center justify-between gap-2 rounded-2xl px-2 py-1.5"
+      className="my-3 flex flex-col gap-2 rounded-2xl px-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:py-1.5"
     >
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {/* Needs attention toggle */}
         <button
           type="button"
@@ -159,7 +159,7 @@ function BoardFilterBar({
           placeholder="Search tasks…"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="focus-ring h-7 w-40 rounded-lg border border-input bg-transparent px-2.5 text-xs text-foreground placeholder:text-muted-soft"
+          className="focus-ring h-7 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2.5 text-xs text-foreground placeholder:text-muted-soft sm:w-40 sm:flex-none"
           data-testid="board-search"
         />
       </div>
