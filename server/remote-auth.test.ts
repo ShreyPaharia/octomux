@@ -1,5 +1,19 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import fs from 'fs';
 import { getBindHost, isRemoteMode, isLoopbackAddress } from './remote-auth.js';
+import { ensureToken, tokenFilePath } from './remote-auth.js';
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  const mocked = {
+    ...actual,
+    existsSync: vi.fn(() => false),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(() => ''),
+  };
+  return { ...mocked, default: mocked };
+});
 
 describe('remote-auth config', () => {
   afterEach(() => {
@@ -38,5 +52,40 @@ describe('remote-auth config', () => {
     [undefined, false],
   ])('isLoopbackAddress(%s) → %s', (addr, expected) => {
     expect(isLoopbackAddress(addr)).toBe(expected);
+  });
+});
+
+describe('remote-auth token', () => {
+  afterEach(() => {
+    delete process.env.OCTOMUX_REMOTE_TOKEN;
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+    vi.mocked(fs.mkdirSync).mockReset();
+    vi.mocked(fs.writeFileSync).mockReset();
+  });
+
+  it('returns OCTOMUX_REMOTE_TOKEN when set, without touching fs', () => {
+    process.env.OCTOMUX_REMOTE_TOKEN = 'env-token-123';
+    expect(ensureToken()).toBe('env-token-123');
+    expect(vi.mocked(fs.readFileSync)).not.toHaveBeenCalled();
+  });
+
+  it('reads an existing token file', () => {
+    delete process.env.OCTOMUX_REMOTE_TOKEN;
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue('file-token-abc');
+    expect(ensureToken()).toBe('file-token-abc');
+  });
+
+  it('generates and persists a token (mode 0600) when none exists', () => {
+    delete process.env.OCTOMUX_REMOTE_TOKEN;
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined as unknown as string);
+    vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+    const token = ensureToken();
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(tokenFilePath(), token, {
+      mode: 0o600,
+    });
   });
 });
