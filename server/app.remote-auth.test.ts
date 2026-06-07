@@ -7,6 +7,7 @@ describe('app remote-auth integration', () => {
   afterEach(() => {
     delete process.env.OCTOMUX_BIND;
     delete process.env.OCTOMUX_REMOTE_TOKEN;
+    delete process.env.OCTOMUX_ALLOWED_HOSTS;
   });
 
   it('remote mode off: /login still serves and api is open (loopback)', async () => {
@@ -41,7 +42,6 @@ describe('app remote-auth integration', () => {
     const app = createApp();
     const res = await request(app).get('/login').set('Host', 'mybox.tailnet.ts.net');
     expect(res.status).toBe(200);
-    delete process.env.OCTOMUX_ALLOWED_HOSTS;
   });
 
   it('disallowed host is rejected with 403', async () => {
