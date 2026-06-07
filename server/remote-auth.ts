@@ -157,7 +157,8 @@ export function isUpgradeAuthorized(req: IncomingMessage): boolean {
     cookieHeader: req.headers.cookie,
     token: ensureToken(),
   });
-  if (!ok) logger.warn({ url: req.url, addr: req.socket.remoteAddress }, 'remote-auth: rejected upgrade');
+  if (!ok)
+    logger.warn({ url: req.url, addr: req.socket.remoteAddress }, 'remote-auth: rejected upgrade');
   return ok;
 }
 
@@ -176,12 +177,14 @@ export function registerAuthRoutes(app: import('express').Express): void {
     res.type('html').send(LOGIN_PAGE);
   });
   app.post('/login', (req, res) => {
+    // requires express.urlencoded() to be registered in app.ts (the login form posts urlencoded)
     const provided = (req.body?.token ?? '') as string;
-    if (!validToken(provided, ensureToken())) {
+    const token = ensureToken();
+    if (!validToken(provided, token)) {
       res.status(401).type('html').send(LOGIN_PAGE);
       return;
     }
-    const value = sessionCookieValue(ensureToken());
+    const value = sessionCookieValue(token);
     res.setHeader(
       'Set-Cookie',
       `${COOKIE_NAME}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`,

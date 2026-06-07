@@ -1,10 +1,21 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'fs';
-import { getBindHost, isRemoteMode, isLoopbackAddress } from './remote-auth.js';
-import { ensureToken, tokenFilePath } from './remote-auth.js';
-import { sessionCookieValue, parseCookies, validSessionCookie, COOKIE_NAME } from './remote-auth.js';
-import { authorizeRequest, authorizeUpgrade, sessionCookieValue as sig } from './remote-auth.js';
-import { isUpgradeAuthorized } from './remote-auth.js';
+import {
+  getBindHost,
+  isRemoteMode,
+  isLoopbackAddress,
+  ensureToken,
+  tokenFilePath,
+  sessionCookieValue,
+  sessionCookieValue as sig,
+  parseCookies,
+  validSessionCookie,
+  validToken,
+  COOKIE_NAME,
+  authorizeRequest,
+  authorizeUpgrade,
+  isUpgradeAuthorized,
+} from './remote-auth.js';
 import type { IncomingMessage } from 'http';
 
 vi.mock('fs', async (importOriginal) => {
@@ -117,6 +128,16 @@ describe('remote-auth cookies', () => {
   });
 });
 
+describe('validToken', () => {
+  it.each([
+    ['correct-token', 'correct-token', true],
+    ['wrong-token', 'correct-token', false],
+    ['', 'correct-token', false],
+  ])('validToken(%s, %s) → %s', (provided, token, expected) => {
+    expect(validToken(provided, token)).toBe(expected);
+  });
+});
+
 describe('authorizeRequest (pure)', () => {
   const token = 'tok';
   const cookie = `${COOKIE_NAME}=${sig(token)}`;
@@ -147,7 +168,13 @@ describe('authorizeRequest (pure)', () => {
 
   it.each(['/login', '/logout', '/api/hooks/permission'])('exempts %s', (p) => {
     expect(
-      authorizeRequest({ remoteMode: true, isLoopback: false, path: p, cookieHeader: undefined, token }),
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: false,
+        path: p,
+        cookieHeader: undefined,
+        token,
+      }),
     ).toBe('allow');
   });
 
@@ -197,9 +224,9 @@ describe('authorizeUpgrade (pure)', () => {
     [{ remoteMode: true, isLoopback: false, cookieHeader: `${COOKIE_NAME}=${sig('tok')}` }, true],
     [{ remoteMode: true, isLoopback: false, cookieHeader: `${COOKIE_NAME}=bad` }, false],
   ])('%o → %s', (input, expected) => {
-    expect(
-      authorizeUpgrade({ ...input, token } as Parameters<typeof authorizeUpgrade>[0]),
-    ).toBe(expected);
+    expect(authorizeUpgrade({ ...input, token } as Parameters<typeof authorizeUpgrade>[0])).toBe(
+      expected,
+    );
   });
 });
 
