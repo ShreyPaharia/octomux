@@ -13,7 +13,8 @@ import { DiffViewer } from '../components/DiffViewer';
 import { CommentsSidePanel } from '../components/CommentsSidePanel';
 import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
-
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 const COMMENTS_PANEL_KEY = 'octomux:review:comments-panel-open';
 
 function defaultCommentsPanelOpen(): boolean {
@@ -35,6 +36,7 @@ export default function ReviewDetailPage() {
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
+  const [mobileFileTreeOpen, setMobileFileTreeOpen] = useState(false);
   const diffListRef = useRef<DiffFileListHandle | null>(null);
 
   useEffect(() => {
@@ -126,6 +128,7 @@ export default function ReviewDetailPage() {
   const handleSelectFile = useCallback((path: string) => {
     setSelectedPath(path);
     diffListRef.current?.scrollToFile(path);
+    setMobileFileTreeOpen(false);
   }, []);
 
   const handleJumpToComment = useCallback(
@@ -133,6 +136,7 @@ export default function ReviewDetailPage() {
       setSelectedPath(filePath);
       diffListRef.current?.revealLineInFile(filePath, line, side);
       taskComments.setFocusedId(commentId);
+      setShowCommentsPanel(false);
       window.setTimeout(() => {
         if (taskComments.focusedId === commentId) taskComments.setFocusedId(null);
       }, 1600);
@@ -140,8 +144,8 @@ export default function ReviewDetailPage() {
     [taskComments],
   );
 
-  if (error) return <div className="p-6 text-red-500">{error}</div>;
-  if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
+  if (error) return <div className="p-4 text-red-500 md:p-6">{error}</div>;
+  if (!detail) return <div className="p-4 text-sm text-muted-foreground md:p-6">Loading…</div>;
 
   const draftCount = detail.comments.filter((c) => c.status === 'draft').length;
   const acceptedCount = detail.comments.filter((c) => c.status === 'accepted').length;
@@ -149,6 +153,29 @@ export default function ReviewDetailPage() {
 
   const isRunning =
     detail.latest_run?.status === 'running' || detail.all_runs.some((r) => r.status === 'running');
+
+  const fileTree = (
+    <ReviewFileTree
+      files={filesInDiff}
+      walkthrough={walkthrough}
+      comments={detail.comments}
+      selectedPath={selectedPath}
+      reviewedFiles={reviewedFiles}
+      onToggleReviewed={handleToggleReviewed}
+      onSelect={handleSelectFile}
+    />
+  );
+
+  const commentsPanel = (
+    <CommentsSidePanel
+      agents={[]}
+      filesInDiff={filesInDiffSet}
+      rangeIsBase={true}
+      onJumpTo={handleJumpToComment}
+      onClose={() => setShowCommentsPanel(false)}
+      className="h-full w-full max-w-none lg:w-80"
+    />
+  );
 
   return (
     <TaskCommentsContext.Provider value={taskComments}>
@@ -181,20 +208,29 @@ export default function ReviewDetailPage() {
         <div className="flex min-h-0 flex-1">
           <aside
             data-testid="review-file-tree-pane"
-            className="glass-chrome flex w-[320px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
+            className="glass-chrome hidden w-[320px] shrink-0 flex-col overflow-hidden border-r border-glass-edge lg:flex"
           >
-            <ReviewFileTree
-              files={filesInDiff}
-              walkthrough={walkthrough}
-              comments={detail.comments}
-              selectedPath={selectedPath}
-              reviewedFiles={reviewedFiles}
-              onToggleReviewed={handleToggleReviewed}
-              onSelect={handleSelectFile}
-            />
+            {fileTree}
           </aside>
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex items-center gap-2 border-b border-glass-edge px-4 py-2 lg:hidden">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                data-testid="review-mobile-files-button"
+                onClick={() => setMobileFileTreeOpen(true)}
+              >
+                Files{filesInDiff.length > 0 ? ` (${filesInDiff.length})` : ''}
+              </Button>
+              {selectedPath ? (
+                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                  {selectedPath}
+                </span>
+              ) : null}
+            </div>
+
             <DiffViewer
               taskId={id!}
               isRunning={isRunning}
@@ -211,16 +247,37 @@ export default function ReviewDetailPage() {
             />
           </div>
 
-          {showCommentsPanel && (
-            <CommentsSidePanel
-              agents={[]}
-              filesInDiff={filesInDiffSet}
-              rangeIsBase={true}
-              onJumpTo={handleJumpToComment}
-              onClose={() => setShowCommentsPanel(false)}
-            />
-          )}
+          {showCommentsPanel ? (
+            <div className="hidden shrink-0 lg:flex">{commentsPanel}</div>
+          ) : null}
         </div>
+
+        {showCommentsPanel ? (
+          <div
+            className="fixed inset-0 z-50 flex lg:hidden"
+            data-testid="review-mobile-comments-overlay"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/60"
+              aria-label="Close comments"
+              onClick={() => setShowCommentsPanel(false)}
+            />
+            <div className="relative ml-auto h-full w-full max-w-sm">{commentsPanel}</div>
+          </div>
+        ) : null}
+
+        <Dialog open={mobileFileTreeOpen} onOpenChange={setMobileFileTreeOpen}>
+          <DialogContent
+            className="flex max-h-[min(85dvh,100dvh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
+            showCloseButton
+          >
+            <DialogHeader className="border-b border-glass-edge px-4 py-3">
+              <DialogTitle>Changed files</DialogTitle>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-auto">{fileTree}</div>
+          </DialogContent>
+        </Dialog>
       </div>
     </TaskCommentsContext.Provider>
   );
