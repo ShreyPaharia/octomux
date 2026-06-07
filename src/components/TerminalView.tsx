@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
+import { installTerminalTouchIsolation } from '@/lib/terminal-touch-isolation';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { CloudOffIcon } from './icons';
 
@@ -38,6 +39,7 @@ export function TerminalView({
   const unmounted = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewportCleanup = useRef<(() => void) | null>(null);
+  const touchIsolationCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
@@ -173,6 +175,8 @@ export function TerminalView({
     }
     viewportCleanup.current?.();
     viewportCleanup.current = null;
+    touchIsolationCleanup.current?.();
+    touchIsolationCleanup.current = null;
 
     const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
 
@@ -202,6 +206,10 @@ export function TerminalView({
     const viewport = containerRef.current.querySelector('.xterm-viewport');
     if (viewport) {
       (viewport as HTMLElement).style.overflowY = 'scroll';
+    }
+
+    if (isMobile && containerRef.current) {
+      touchIsolationCleanup.current = installTerminalTouchIsolation(containerRef.current);
     }
 
     termRef.current = term;
@@ -264,6 +272,8 @@ export function TerminalView({
       termRef.current?.dispose();
       viewportCleanup.current?.();
       viewportCleanup.current = null;
+      touchIsolationCleanup.current?.();
+      touchIsolationCleanup.current = null;
     };
   }, [connect]);
 
@@ -291,6 +301,13 @@ export function TerminalView({
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [fitAndSendResize]);
+
+  // Disable pull-to-refresh while an agent session terminal is visible on mobile.
+  useEffect(() => {
+    if (!isMobile || !visible) return;
+    document.documentElement.classList.add('octomux-agent-session-active');
+    return () => document.documentElement.classList.remove('octomux-agent-session-active');
+  }, [isMobile, visible]);
 
   // On mobile, size the terminal to the visible viewport when the soft keyboard
   // opens — xterm handles touch scroll natively; we only manage layout height.
