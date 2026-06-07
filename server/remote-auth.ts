@@ -97,7 +97,11 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out;
 }
 
-const EXEMPT_PREFIXES = ['/login', '/logout', '/api/hooks'];
+// Harness hook callbacks always originate from loopback (hookBaseUrl() → http://127.0.0.1:<port>)
+// so they are already allowed by the isLoopback check above. Listing '/api/hooks' here would
+// additionally exempt admin routes like POST /api/hooks/install and GET /api/hooks/registry
+// from authentication in remote mode — so it must NOT appear here.
+const EXEMPT_PREFIXES = ['/login', '/logout'];
 
 export type AuthDecision = 'allow' | 'redirect' | 'unauthorized';
 
@@ -180,6 +184,10 @@ export function registerAuthRoutes(app: import('express').Express): void {
   });
   app.post('/login', (req, res) => {
     // requires express.urlencoded() to be registered in app.ts (the login form posts urlencoded)
+    if (!isRemoteMode()) {
+      res.redirect('/');
+      return;
+    }
     const provided = (req.body?.token ?? '') as string;
     const token = ensureToken();
     if (!validToken(provided, token)) {

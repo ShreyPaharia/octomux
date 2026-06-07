@@ -16,6 +16,15 @@ describe('app remote-auth integration', () => {
     expect(login.status).toBe(200);
   });
 
+  it('remote mode off: POST /login redirects to / without creating a token file', async () => {
+    // Remote mode is off (OCTOMUX_BIND defaults to 127.0.0.1), so POST /login must
+    // short-circuit before calling ensureToken() — no token file side effects.
+    const app = createApp();
+    const res = await request(app).post('/login').type('form').send({ token: 'any' });
+    expect(res.status).toBe(302);
+    expect(res.headers['location']).toBe('/');
+  });
+
   it('login with correct token sets the session cookie', async () => {
     process.env.OCTOMUX_BIND = '0.0.0.0';
     process.env.OCTOMUX_REMOTE_TOKEN = 'tok';

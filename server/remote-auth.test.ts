@@ -166,12 +166,36 @@ describe('authorizeRequest (pure)', () => {
     ).toBe('allow');
   });
 
-  it.each(['/login', '/logout', '/api/hooks/permission'])('exempts %s', (p) => {
+  it.each(['/login', '/logout'])('exempts %s from auth in remote mode', (p) => {
     expect(
       authorizeRequest({
         remoteMode: true,
         isLoopback: false,
         path: p,
+        cookieHeader: undefined,
+        token,
+      }),
+    ).toBe('allow');
+  });
+
+  it('rejects /api/hooks/install from non-loopback in remote mode (admin route now protected)', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: false,
+        path: '/api/hooks/install',
+        cookieHeader: undefined,
+        token,
+      }),
+    ).toBe('unauthorized');
+  });
+
+  it('allows /api/hooks/permission-request from loopback in remote mode (real harness callback)', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: true,
+        path: '/api/hooks/permission-request',
         cookieHeader: undefined,
         token,
       }),

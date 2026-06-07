@@ -119,7 +119,15 @@ const HOST = getBindHost();
 server.listen(Number(PORT), HOST, () => {
   logger.info({ port: PORT, host: HOST }, `octomux listening on ${HOST}`);
   if (isRemoteMode()) {
-    ensureToken(); // generate + log the token file path on first remote start
+    try {
+      ensureToken(); // generate + log the token file path on first remote start
+    } catch (err) {
+      logger.error(
+        { err },
+        'remote mode: failed to read/create remote-access token — set OCTOMUX_REMOTE_TOKEN or fix permissions on the token dir',
+      );
+      process.exit(1);
+    }
     logger.warn(
       { host: HOST },
       'remote access ENABLED — clients must present the token at /login (see remote-token file or OCTOMUX_REMOTE_TOKEN)',
