@@ -133,12 +133,13 @@ export function authorizeUpgrade(input: {
 
 /** Express middleware: enforce the auth decision. No-op when remote mode is off. */
 export function remoteAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const remoteMode = isRemoteMode();
   const decision = authorizeRequest({
-    remoteMode: isRemoteMode(),
+    remoteMode,
     isLoopback: isLoopbackAddress(req.socket.remoteAddress),
     path: req.path,
     cookieHeader: req.headers.cookie,
-    token: ensureToken(),
+    token: remoteMode ? ensureToken() : '',
   });
   if (decision === 'allow') return next();
   if (decision === 'unauthorized') {
@@ -151,11 +152,12 @@ export function remoteAuthMiddleware(req: Request, res: Response, next: NextFunc
 
 /** Wrapper around authorizeUpgrade that reads from a raw IncomingMessage. */
 export function isUpgradeAuthorized(req: IncomingMessage): boolean {
+  const remoteMode = isRemoteMode();
   const ok = authorizeUpgrade({
-    remoteMode: isRemoteMode(),
+    remoteMode,
     isLoopback: isLoopbackAddress(req.socket.remoteAddress),
     cookieHeader: req.headers.cookie,
-    token: ensureToken(),
+    token: remoteMode ? ensureToken() : '',
   });
   if (!ok)
     logger.warn({ url: req.url, addr: req.socket.remoteAddress }, 'remote-auth: rejected upgrade');
