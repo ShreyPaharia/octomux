@@ -65,7 +65,7 @@ describe('TasksPage (board layout)', () => {
       expect(screen.getByText('Command center')).toBeInTheDocument();
     });
     expect(screen.getByTestId('page-eyebrow')).toHaveTextContent('Tasks');
-    expect(screen.getByRole('heading', { level: 1 })).toHaveClass('text-[28px]');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveClass('sm:text-[28px]');
   });
 
   // ─── Board columns ────────────────────────────────────────────────────────
