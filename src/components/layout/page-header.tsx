@@ -31,7 +31,7 @@ export function PageHeader({
   const content = (
     <div
       className={cn(
-        'motion-fade-in flex items-end justify-between gap-4',
+        'motion-fade-in flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between',
         variant === 'glass' && 'px-6 py-4',
       )}
     >
@@ -50,13 +50,17 @@ export function PageHeader({
         )}
         <h1
           data-testid={titleTestId}
-          className="font-display text-[28px] font-semibold leading-tight tracking-tight text-foreground"
+          className="font-display text-2xl font-semibold leading-tight tracking-tight text-foreground sm:text-[28px]"
         >
           {title}
         </h1>
         {description && <p className="max-w-2xl text-sm text-muted-foreground">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {actions}
+        </div>
+      )}
     </div>
   );
 
