@@ -47,7 +47,63 @@ export async function cleanupTask(page: Page, taskId: string) {
   await page.request.delete(`${API}/tasks/${taskId}`);
 }
 
-/** Delete all tasks (cleanup between tests). */
+/** Tracks tasks created during a test file and cleans up only those IDs. */
+export class E2eTaskTracker {
+  private readonly ids: string[] = [];
+
+  async create(
+    page: Page,
+    overrides: { title?: string; description?: string; repo_path?: string } = {},
+  ) {
+    const task = await createTaskViaAPI(page, overrides);
+    this.ids.push(task.id);
+    return task;
+  }
+
+  async createWithData(page: Page, data: Record<string, unknown>) {
+    const res = await page.request.post(`${API}/tasks`, { data });
+    expect(res.ok()).toBeTruthy();
+    const task = (await res.json()) as { id: string };
+    this.ids.push(task.id);
+    return task;
+  }
+
+  track(taskId: string) {
+    this.ids.push(taskId);
+  }
+
+  untrack(taskId: string) {
+    const i = this.ids.indexOf(taskId);
+    if (i >= 0) this.ids.splice(i, 1);
+  }
+
+  async cleanup(page: Page) {
+    const batch = this.ids.splice(0);
+    await cleanupTasks(page, batch);
+  }
+}
+
+/** Close + delete only the given task IDs (best-effort; ignores failures). */
+export async function cleanupTasks(page: Page, taskIds: readonly string[]) {
+  for (const id of taskIds) {
+    try {
+      const res = await page.request.get(`${API}/tasks/${id}`);
+      if (!res.ok()) continue;
+      const task = (await res.json()) as { status: string };
+      if (task.status === 'running' || task.status === 'setting_up') {
+        await page.request.patch(`${API}/tasks/${id}`, { data: { status: 'closed' } });
+      }
+      await page.request.delete(`${API}/tasks/${id}`);
+    } catch {
+      // task may already be gone
+    }
+  }
+}
+
+/**
+ * Delete all tasks. Avoid in E2E — use {@link E2eTaskTracker} against shared dev/prod servers.
+ * @deprecated Prefer E2eTaskTracker so existing tasks are not wiped.
+ */
 export async function deleteAllTasks(page: Page) {
   const res = await page.request.get(`${API}/tasks`);
   const tasks = (await res.json()) as { id: string; status: string }[];
