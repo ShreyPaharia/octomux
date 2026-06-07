@@ -1,42 +1,52 @@
 /**
- * iOS Safari often won't scroll xterm's viewport when swiping the canvas layer.
- * Mirror touch drags into viewport.scrollTop so agent session history is reachable on mobile.
+ * Mobile browsers route vertical swipes to the document unless we capture them.
+ * Scroll xterm's viewport manually and block default so the page does not move.
  */
-export function installTerminalTouchScroll(root: HTMLElement): () => void {
-  const xtermRoot = root.querySelector('.xterm');
-  const viewport = root.querySelector('.xterm-viewport') as HTMLElement | null;
-  if (!xtermRoot || !viewport) return () => {};
+export function installTerminalTouchScroll(host: HTMLElement): () => void {
+  const viewport = host.querySelector('.xterm-viewport') as HTMLElement | null;
+  if (!viewport) return () => {};
 
-  let touchStartY = 0;
-  let touchStartScrollTop = 0;
+  host.classList.add('octomux-terminal-touch-scroll');
+
+  let lastTouchY = 0;
   let touching = false;
 
   const onTouchStart = (e: TouchEvent) => {
     if (e.touches.length !== 1) return;
     touching = true;
-    touchStartY = e.touches[0].clientY;
-    touchStartScrollTop = viewport.scrollTop;
+    lastTouchY = e.touches[0].clientY;
   };
 
   const onTouchMove = (e: TouchEvent) => {
     if (!touching || e.touches.length !== 1) return;
-    const deltaY = touchStartY - e.touches[0].clientY;
-    viewport.scrollTop = touchStartScrollTop + deltaY;
+    const y = e.touches[0].clientY;
+    const delta = lastTouchY - y;
+    if (delta !== 0) {
+      viewport.scrollTop += delta;
+      lastTouchY = y;
+    }
+    e.preventDefault();
+    e.stopPropagation();
   };
 
   const onTouchEnd = () => {
     touching = false;
   };
 
-  xtermRoot.addEventListener('touchstart', onTouchStart, { passive: true });
-  xtermRoot.addEventListener('touchmove', onTouchMove, { passive: true });
-  xtermRoot.addEventListener('touchend', onTouchEnd);
-  xtermRoot.addEventListener('touchcancel', onTouchEnd);
+  const capture = { capture: true } as const;
+  const capturePassive = { capture: true, passive: true } as const;
+  const captureActive = { capture: true, passive: false } as const;
+
+  host.addEventListener('touchstart', onTouchStart, capturePassive);
+  host.addEventListener('touchmove', onTouchMove, captureActive);
+  host.addEventListener('touchend', onTouchEnd, capture);
+  host.addEventListener('touchcancel', onTouchEnd, capture);
 
   return () => {
-    xtermRoot.removeEventListener('touchstart', onTouchStart);
-    xtermRoot.removeEventListener('touchmove', onTouchMove);
-    xtermRoot.removeEventListener('touchend', onTouchEnd);
-    xtermRoot.removeEventListener('touchcancel', onTouchEnd);
+    host.removeEventListener('touchstart', onTouchStart, capturePassive);
+    host.removeEventListener('touchmove', onTouchMove, captureActive);
+    host.removeEventListener('touchend', onTouchEnd, capture);
+    host.removeEventListener('touchcancel', onTouchEnd, capture);
+    host.classList.remove('octomux-terminal-touch-scroll');
   };
 }

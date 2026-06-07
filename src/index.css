@@ -414,15 +414,30 @@
   background: var(--bg-elevated, #14151c);
 }
 
-/* Agent session terminal — touch-friendly scrollback on mobile */
+/* Agent session terminal — capture touch scroll on mobile, not the page */
+.octomux-terminal-host.octomux-terminal-touch-scroll,
 .octomux-terminal-host .xterm,
 .octomux-terminal-host .xterm-viewport,
 .octomux-terminal-host .octomux-xterm-viewport {
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 .octomux-terminal-host .xterm-viewport,
 .octomux-terminal-host .octomux-xterm-viewport {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+}
+
+@media (max-width: 767px) {
+  html.octomux-terminal-active,
+  html.octomux-terminal-active body {
+    overflow: hidden;
+    height: 100%;
+    overscroll-behavior: none;
+  }
+
+  html.octomux-terminal-active #root {
+    height: 100%;
+    overflow: hidden;
+  }
 }

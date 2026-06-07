@@ -643,8 +643,14 @@ export default function TaskDetail() {
   const hasTerminal =
     !!task.tmux_session && agents.length > 0 && activeWindow !== null && isTerminalAlive;
 
+  const lockPageScroll = hasTerminal && mode === 'agents';
+
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className={
+        lockPageScroll ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'flex h-full flex-col'
+      }
+    >
       <TaskDetailHeader
         task={task}
         mode={mode}
@@ -697,7 +703,7 @@ export default function TaskDetail() {
       {task.runtime_state === 'error' ||
       (task.runtime_state === 'setting_up' && !hasTerminal) ? null : hasTerminal ? (
         <div className={mode === 'agents' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <div className="min-w-0 flex-1">
               <AgentTabs
                 agents={agents}

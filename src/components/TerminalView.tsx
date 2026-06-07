@@ -280,6 +280,15 @@ export function TerminalView({
     };
   }, [fitAndSendResize]);
 
+  // On mobile, lock page scroll while a terminal session is visible — otherwise
+  // iOS Safari routes vertical swipes to the document instead of xterm scrollback.
+  useEffect(() => {
+    if (!isMobile || !visible) return;
+    const html = document.documentElement;
+    html.classList.add('octomux-terminal-active');
+    return () => html.classList.remove('octomux-terminal-active');
+  }, [isMobile, visible]);
+
   // Fit terminal when it becomes visible (e.g. toggling between agent/editor views).
   // Use double-rAF to ensure the browser has fully reflowed after CSS hidden→flex toggle.
   useEffect(() => {
@@ -298,7 +307,7 @@ export function TerminalView({
     <div className="relative h-full w-full">
       <div
         ref={containerRef}
-        className="octomux-terminal-host h-full w-full touch-pan-y overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
+        className="octomux-terminal-host h-full w-full touch-none overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
         style={{ opacity: showOverlay ? 0.7 : 1 }}
       />
       {connecting && (

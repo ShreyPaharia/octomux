@@ -95,7 +95,7 @@ export function AppShell() {
   }, [tasks]);
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="flex h-dvh flex-col bg-background text-foreground">
       <OfflineBanner />
       <SetupBanner />
       <div className="flex min-h-0 flex-1">

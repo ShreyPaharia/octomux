@@ -40,7 +40,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 md:gap-3 md:px-6 md:py-3">
         <span className="text-[10px] font-bold uppercase tracking-wider text-[#6a6a6a]">
           // CHAT
