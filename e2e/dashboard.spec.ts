@@ -1,16 +1,25 @@
 import { test, expect } from '@playwright/test';
-import { deleteAllTasks, fillCreateDialog } from './helpers';
+import { E2eTaskTracker, fillCreateDialog } from './helpers';
 
-test.beforeEach(async ({ page }) => {
-  await deleteAllTasks(page);
-});
+const tracker = new E2eTaskTracker();
 
 test.afterEach(async ({ page }) => {
-  await deleteAllTasks(page);
+  await tracker.cleanup(page);
 });
 
 test.describe('Dashboard', () => {
   test('shows empty state when no tasks exist', async ({ page }) => {
+    await page.route('**/api/tasks', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([]),
+        });
+      } else {
+        route.continue();
+      }
+    });
     await page.goto('/');
     await expect(page.getByText('No tasks yet')).toBeVisible();
     await expect(page.getByText('Create a task to get started')).toBeVisible();
@@ -35,6 +44,17 @@ test.describe('Dashboard', () => {
   });
 
   test('creates a task via dialog and shows it in the list', async ({ page }) => {
+    await page.route('**/api/tasks', async (route) => {
+      if (route.request().method() === 'POST') {
+        const response = await route.fetch();
+        const body = (await response.json()) as { id: string };
+        tracker.track(body.id);
+        await route.fulfill({ response });
+        return;
+      }
+      await route.continue();
+    });
+
     await page.goto('/');
     await page.getByRole('button', { name: 'New Task' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -57,15 +77,11 @@ test.describe('Dashboard', () => {
   });
 
   test('deletes a task from the dashboard', async ({ page }) => {
-    // Create task via API for speed
-    const res = await page.request.post('http://localhost:7777/api/tasks', {
-      data: {
-        title: 'To Be Deleted',
-        description: 'Will be removed',
-        repo_path: process.cwd(),
-      },
+    const task = await tracker.createWithData(page, {
+      title: 'To Be Deleted',
+      description: 'Will be removed',
+      repo_path: process.cwd(),
     });
-    const _task = await res.json();
 
     await page.goto('/');
     await expect(page.getByText('To Be Deleted')).toBeVisible({ timeout: 10_000 });
@@ -73,8 +89,10 @@ test.describe('Dashboard', () => {
     // Click the delete button (trash icon)
     await page.locator('button:has(> svg)').last().click();
 
-    // Task disappears, empty state returns
+    // Task disappears — may or may not return to empty state if other tasks exist
     await expect(page.getByText('To Be Deleted')).toBeHidden();
-    await expect(page.getByText('No tasks yet')).toBeVisible();
+
+    // Already deleted via UI — drop from tracker so afterEach doesn't retry
+    tracker.untrack(task.id);
   });
 });

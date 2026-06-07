@@ -7,6 +7,7 @@
  * Prerequisites: Both servers must be running (bun run dev)
  */
 import { test, expect } from '@playwright/test';
+import { cleanupTasks } from './helpers';
 import { createReviewFixture } from './helpers-review';
 
 const API = 'http://localhost:7777/api';
@@ -51,9 +52,7 @@ const testTaskIds: string[] = [];
 test.describe.serial('UI Screenshots', () => {
   test.afterAll(async ({ browser }) => {
     const page = await browser.newPage();
-    for (const id of testTaskIds) {
-      await page.request.delete(`${API}/tasks/${id}`).catch(() => {});
-    }
+    await cleanupTasks(page, testTaskIds);
     await page.close();
   });
 
