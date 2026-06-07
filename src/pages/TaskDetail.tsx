@@ -675,7 +675,12 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {!isScratch && <TaskDetailMeta task={task} />}
+      {!isScratch && (
+        <TaskDetailMeta
+          task={task}
+          className={hasTerminal && mode === 'agents' ? 'hidden md:flex' : undefined}
+        />
+      )}
 
       {/* Dedicated lifecycle state: setting_up */}
       {task.runtime_state === 'setting_up' && !hasTerminal && mode === 'agents' && (

@@ -413,3 +413,16 @@
 .octomux-comment-composer-zone {
   background: var(--bg-elevated, #14151c);
 }
+
+/* Agent session terminal — touch-friendly scrollback on mobile */
+.octomux-terminal-host .xterm,
+.octomux-terminal-host .xterm-viewport,
+.octomux-terminal-host .octomux-xterm-viewport {
+  touch-action: pan-y;
+}
+
+.octomux-terminal-host .xterm-viewport,
+.octomux-terminal-host .octomux-xterm-viewport {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}

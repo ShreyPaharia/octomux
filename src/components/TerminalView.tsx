@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { useMediaQuery } from '@/lib/use-media-query';
+import { installTerminalTouchScroll } from '@/lib/terminal-touch-scroll';
 import { CloudOffIcon } from './icons';
 
 interface TerminalViewProps {
@@ -35,6 +37,8 @@ export function TerminalView({
   const reconnectDelay = useRef(INITIAL_RECONNECT_DELAY);
   const unmounted = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const touchScrollCleanup = useRef<(() => void) | null>(null);
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
   // True while the WebSocket is opening (initial connect or a reconnect) and no
@@ -152,11 +156,15 @@ export function TerminalView({
       termRef.current.dispose();
       termRef.current = null;
     }
+    touchScrollCleanup.current?.();
+    touchScrollCleanup.current = null;
+
+    const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
 
     const term = new Terminal({
       cursorBlink: !readOnly,
       disableStdin: readOnly,
-      fontSize,
+      fontSize: resolvedFontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
         background: '#09090b',
@@ -178,8 +186,12 @@ export function TerminalView({
     // column gets clipped when the scrollbar appears.
     const viewport = containerRef.current.querySelector('.xterm-viewport');
     if (viewport) {
-      (viewport as HTMLElement).style.overflowY = 'scroll';
+      const el = viewport as HTMLElement;
+      el.style.overflowY = 'scroll';
+      el.classList.add('octomux-xterm-viewport');
     }
+
+    touchScrollCleanup.current = installTerminalTouchScroll(containerRef.current);
 
     termRef.current = term;
     fitRef.current = fitAddon;
@@ -205,7 +217,7 @@ export function TerminalView({
     });
 
     connectWs(term);
-  }, [connectWs, readOnly, fontSize, scrollback]);
+  }, [connectWs, readOnly, fontSize, scrollback, isMobile]);
 
   const handleRetryNow = useCallback(() => {
     if (reconnectTimer.current) {
@@ -238,6 +250,8 @@ export function TerminalView({
       }
       wsRef.current?.close();
       termRef.current?.dispose();
+      touchScrollCleanup.current?.();
+      touchScrollCleanup.current = null;
     };
   }, [connect]);
 
@@ -284,7 +298,7 @@ export function TerminalView({
     <div className="relative h-full w-full">
       <div
         ref={containerRef}
-        className="h-full w-full overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
+        className="octomux-terminal-host h-full w-full touch-pan-y overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
         style={{ opacity: showOverlay ? 0.7 : 1 }}
       />
       {connecting && (
