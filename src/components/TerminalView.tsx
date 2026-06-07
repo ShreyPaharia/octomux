@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { installTerminalTouchScroll } from '@/lib/terminal-touch-scroll';
+import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { CloudOffIcon } from './icons';
 
 interface TerminalViewProps {
@@ -37,7 +37,7 @@ export function TerminalView({
   const reconnectDelay = useRef(INITIAL_RECONNECT_DELAY);
   const unmounted = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const touchScrollCleanup = useRef<(() => void) | null>(null);
+  const viewportCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
@@ -57,24 +57,39 @@ export function TerminalView({
       : `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}`;
   }, [taskId, windowIndex, wsUrlProp]);
 
-  // Helper to fit terminal and send resize dimensions over WebSocket
-  const fitAndSendResize = useCallback((ws: WebSocket) => {
-    if (!fitRef.current || !termRef.current || !containerRef.current) return;
-    // Skip when container is hidden (0 dimensions) — fitting a hidden terminal
-    // sends a 0×0 resize to the PTY, which garbles apps like nvim.
-    const { clientWidth, clientHeight } = containerRef.current;
-    if (clientWidth === 0 || clientHeight === 0) return;
-    fitRef.current.fit();
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: 'resize',
-          cols: termRef.current.cols,
-          rows: termRef.current.rows,
-        }),
-      );
+  const scrollCursorIntoView = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const textarea = containerRef.current?.querySelector(
+      '.xterm-helper-textarea',
+    ) as HTMLTextAreaElement | null;
+    if (textarea && document.activeElement === textarea) {
+      term.scrollToBottom();
     }
   }, []);
+
+  // Helper to fit terminal and send resize dimensions over WebSocket
+  const fitAndSendResize = useCallback(
+    (ws: WebSocket) => {
+      if (!fitRef.current || !termRef.current || !containerRef.current) return;
+      // Skip when container is hidden (0 dimensions) — fitting a hidden terminal
+      // sends a 0×0 resize to the PTY, which garbles apps like nvim.
+      const { clientWidth, clientHeight } = containerRef.current;
+      if (clientWidth === 0 || clientHeight === 0) return;
+      fitRef.current.fit();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'resize',
+            cols: termRef.current.cols,
+            rows: termRef.current.rows,
+          }),
+        );
+      }
+      scrollCursorIntoView();
+    },
+    [scrollCursorIntoView],
+  );
 
   const connectWs = useCallback(
     (term: Terminal) => {
@@ -156,8 +171,8 @@ export function TerminalView({
       termRef.current.dispose();
       termRef.current = null;
     }
-    touchScrollCleanup.current?.();
-    touchScrollCleanup.current = null;
+    viewportCleanup.current?.();
+    viewportCleanup.current = null;
 
     const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
 
@@ -186,12 +201,8 @@ export function TerminalView({
     // column gets clipped when the scrollbar appears.
     const viewport = containerRef.current.querySelector('.xterm-viewport');
     if (viewport) {
-      const el = viewport as HTMLElement;
-      el.style.overflowY = 'scroll';
-      el.classList.add('octomux-xterm-viewport');
+      (viewport as HTMLElement).style.overflowY = 'scroll';
     }
-
-    touchScrollCleanup.current = installTerminalTouchScroll(containerRef.current);
 
     termRef.current = term;
     fitRef.current = fitAddon;
@@ -206,6 +217,7 @@ export function TerminalView({
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(data);
         }
+        scrollCursorIntoView();
       });
     }
 
@@ -217,7 +229,7 @@ export function TerminalView({
     });
 
     connectWs(term);
-  }, [connectWs, readOnly, fontSize, scrollback, isMobile]);
+  }, [connectWs, readOnly, fontSize, scrollback, isMobile, scrollCursorIntoView]);
 
   const handleRetryNow = useCallback(() => {
     if (reconnectTimer.current) {
@@ -250,8 +262,8 @@ export function TerminalView({
       }
       wsRef.current?.close();
       termRef.current?.dispose();
-      touchScrollCleanup.current?.();
-      touchScrollCleanup.current = null;
+      viewportCleanup.current?.();
+      viewportCleanup.current = null;
     };
   }, [connect]);
 
@@ -280,14 +292,20 @@ export function TerminalView({
     };
   }, [fitAndSendResize]);
 
-  // On mobile, lock page scroll while a terminal session is visible — otherwise
-  // iOS Safari routes vertical swipes to the document instead of xterm scrollback.
+  // On mobile, size the terminal to the visible viewport when the soft keyboard
+  // opens — xterm handles touch scroll natively; we only manage layout height.
   useEffect(() => {
-    if (!isMobile || !visible) return;
-    const html = document.documentElement;
-    html.classList.add('octomux-terminal-active');
-    return () => html.classList.remove('octomux-terminal-active');
-  }, [isMobile, visible]);
+    if (!isMobile || !visible || !containerRef.current) return;
+    viewportCleanup.current?.();
+    viewportCleanup.current = installTerminalVisualViewport(containerRef.current, () => {
+      const ws = wsRef.current;
+      if (ws) fitAndSendResize(ws);
+    });
+    return () => {
+      viewportCleanup.current?.();
+      viewportCleanup.current = null;
+    };
+  }, [isMobile, visible, fitAndSendResize]);
 
   // Fit terminal when it becomes visible (e.g. toggling between agent/editor views).
   // Use double-rAF to ensure the browser has fully reflowed after CSS hidden→flex toggle.
@@ -304,10 +322,10 @@ export function TerminalView({
   }, [visible, fitAndSendResize]);
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full min-h-0">
       <div
         ref={containerRef}
-        className="octomux-terminal-host h-full w-full touch-none overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
+        className="octomux-terminal-host h-full w-full min-h-0 overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
         style={{ opacity: showOverlay ? 0.7 : 1 }}
       />
       {connecting && (

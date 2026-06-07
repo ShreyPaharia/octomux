@@ -643,12 +643,14 @@ export default function TaskDetail() {
   const hasTerminal =
     !!task.tmux_session && agents.length > 0 && activeWindow !== null && isTerminalAlive;
 
-  const lockPageScroll = hasTerminal && mode === 'agents';
+  const agentSession = hasTerminal && mode === 'agents';
 
   return (
     <div
       className={
-        lockPageScroll ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'flex h-full flex-col'
+        agentSession
+          ? 'octomux-agent-session flex h-full min-h-0 flex-col overflow-hidden'
+          : 'flex h-full flex-col'
       }
     >
       <TaskDetailHeader
