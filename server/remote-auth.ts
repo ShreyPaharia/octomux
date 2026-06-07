@@ -96,3 +96,37 @@ export function parseCookies(header: string | undefined): Record<string, string>
   }
   return out;
 }
+
+const EXEMPT_PREFIXES = ['/login', '/logout', '/api/hooks'];
+
+export type AuthDecision = 'allow' | 'redirect' | 'unauthorized';
+
+export function authorizeRequest(input: {
+  remoteMode: boolean;
+  isLoopback: boolean;
+  path: string;
+  cookieHeader: string | undefined;
+  token: string;
+}): AuthDecision {
+  const { remoteMode, isLoopback, path: p, cookieHeader, token } = input;
+  if (!remoteMode) return 'allow';
+  if (isLoopback) return 'allow';
+  if (EXEMPT_PREFIXES.some((pre) => p === pre || p.startsWith(pre + '/'))) return 'allow';
+
+  const cookie = parseCookies(cookieHeader)[COOKIE_NAME];
+  if (validSessionCookie(cookie, token)) return 'allow';
+
+  return p.startsWith('/api/') ? 'unauthorized' : 'redirect';
+}
+
+export function authorizeUpgrade(input: {
+  remoteMode: boolean;
+  isLoopback: boolean;
+  cookieHeader: string | undefined;
+  token: string;
+}): boolean {
+  const { remoteMode, isLoopback, cookieHeader, token } = input;
+  if (!remoteMode) return true;
+  if (isLoopback) return true;
+  return validSessionCookie(parseCookies(cookieHeader)[COOKIE_NAME], token);
+}

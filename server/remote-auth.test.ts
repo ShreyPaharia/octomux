@@ -3,6 +3,7 @@ import fs from 'fs';
 import { getBindHost, isRemoteMode, isLoopbackAddress } from './remote-auth.js';
 import { ensureToken, tokenFilePath } from './remote-auth.js';
 import { sessionCookieValue, parseCookies, validSessionCookie, COOKIE_NAME } from './remote-auth.js';
+import { authorizeRequest, authorizeUpgrade, sessionCookieValue as sig } from './remote-auth.js';
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -111,5 +112,91 @@ describe('remote-auth cookies', () => {
     expect(validSessionCookie('deadbeef', 'tok')).toBe(false);
     expect(validSessionCookie('', 'tok')).toBe(false);
     expect(validSessionCookie(undefined, 'tok')).toBe(false);
+  });
+});
+
+describe('authorizeRequest (pure)', () => {
+  const token = 'tok';
+  const cookie = `${COOKIE_NAME}=${sig(token)}`;
+
+  it('allows everything when remote mode is off', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: false,
+        isLoopback: false,
+        path: '/api/tasks',
+        cookieHeader: undefined,
+        token,
+      }),
+    ).toBe('allow');
+  });
+
+  it('allows loopback requests without a cookie', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: true,
+        path: '/api/tasks',
+        cookieHeader: undefined,
+        token,
+      }),
+    ).toBe('allow');
+  });
+
+  it.each(['/login', '/logout', '/api/hooks/permission'])('exempts %s', (p) => {
+    expect(
+      authorizeRequest({ remoteMode: true, isLoopback: false, path: p, cookieHeader: undefined, token }),
+    ).toBe('allow');
+  });
+
+  it('allows a remote request with a valid cookie', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: false,
+        path: '/api/tasks',
+        cookieHeader: cookie,
+        token,
+      }),
+    ).toBe('allow');
+  });
+
+  it('returns "unauthorized" for an API path without a cookie', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: false,
+        path: '/api/tasks',
+        cookieHeader: undefined,
+        token,
+      }),
+    ).toBe('unauthorized');
+  });
+
+  it('returns "redirect" for a non-API path without a cookie', () => {
+    expect(
+      authorizeRequest({
+        remoteMode: true,
+        isLoopback: false,
+        path: '/tasks/abc',
+        cookieHeader: undefined,
+        token,
+      }),
+    ).toBe('redirect');
+  });
+});
+
+describe('authorizeUpgrade (pure)', () => {
+  const token = 'tok';
+  it.each([
+    [{ remoteMode: false, isLoopback: false, cookieHeader: undefined }, true],
+    [{ remoteMode: true, isLoopback: true, cookieHeader: undefined }, true],
+    [{ remoteMode: true, isLoopback: false, cookieHeader: undefined }, false],
+    [{ remoteMode: true, isLoopback: false, cookieHeader: `${COOKIE_NAME}=${sig('tok')}` }, true],
+    [{ remoteMode: true, isLoopback: false, cookieHeader: `${COOKIE_NAME}=bad` }, false],
+  ])('%o → %s', (input, expected) => {
+    expect(
+      authorizeUpgrade({ ...input, token } as Parameters<typeof authorizeUpgrade>[0]),
+    ).toBe(expected);
   });
 });
