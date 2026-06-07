@@ -127,7 +127,7 @@ describe('ReviewDetailPage', () => {
     expect(await screen.findByText(/not found/i)).toBeTruthy();
   });
 
-  it('renders WalkthroughHeader as a one-line peek strip', async () => {
+  it('renders WalkthroughPanel with summary and key review points', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
         latest_run: {
@@ -139,13 +139,30 @@ describe('ReviewDetailPage', () => {
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    const strip = await screen.findByTestId('walkthrough-header');
-    expect(strip).toBeTruthy();
-    // summary first-sentence visible inline
-    expect(strip.textContent).toMatch(/adds the thing/i);
-    // meta pills rendered inline (risk + key points count)
-    expect(strip.textContent).toMatch(/risk: low/);
-    expect(strip.textContent).toMatch(/1 key point/);
+    const panel = await screen.findByTestId('walkthrough-panel');
+    expect(panel).toBeTruthy();
+    expect(screen.getByText(/adds the thing/i)).toBeTruthy();
+    expect(screen.getByText(/risk: low/)).toBeTruthy();
+    expect(screen.getByText('watch migration')).toBeTruthy();
+  });
+
+  it('renders ReviewContextStrip with file notes when a file is selected', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(
+      makeDetail({
+        latest_run: {
+          id: 'r1',
+          pr_head_sha: 'sha1',
+          walkthrough: WALKTHROUGH_JSON,
+          status: 'done',
+        },
+      }),
+    );
+    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    await screen.findByTestId('review-file-tree');
+    const row = await screen.findByTestId('review-file-row-server/db.ts');
+    fireEvent.click(row.querySelector('button')!);
+    const fileCtx = await screen.findByTestId('review-context-file');
+    expect(fileCtx.textContent).toMatch(/migration/);
   });
 
   it('renders one ReviewFileTree section per walkthrough group', async () => {

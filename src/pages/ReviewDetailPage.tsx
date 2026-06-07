@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
 import { subscribe } from '../lib/event-source';
-import { WalkthroughHeader, type Walkthrough } from '../components/review/WalkthroughHeader';
+import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
+import type { Walkthrough } from '../components/review/walkthrough-types';
 import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
 import { ReviewFileTree } from '../components/review/ReviewFileTree';
+import { ReviewContextStrip } from '../components/review/ReviewContextStrip';
 import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
 import { DiffViewer } from '../components/DiffViewer';
@@ -27,6 +29,7 @@ function defaultCommentsPanelOpen(): boolean {
 
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
@@ -168,14 +171,17 @@ export default function ReviewDetailPage() {
           isRunning={isRunning}
           onPublished={refresh}
           onReRun={refresh}
+          onDeleted={() => navigate('/reviews')}
         />
 
-        {walkthrough && <WalkthroughHeader walkthrough={walkthrough} />}
+        {walkthrough && <WalkthroughPanel walkthrough={walkthrough} />}
+
+        <ReviewContextStrip groups={orderedGroups} selectedPath={selectedPath} />
 
         <div className="flex min-h-0 flex-1">
           <aside
             data-testid="review-file-tree-pane"
-            className="glass-chrome flex w-[300px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
+            className="glass-chrome flex w-[320px] shrink-0 flex-col overflow-hidden border-r border-glass-edge"
           >
             <ReviewFileTree
               files={filesInDiff}

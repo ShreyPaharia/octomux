@@ -6,6 +6,7 @@ import type { DiffFileEntry, FileDiffResponse } from '@/lib/api';
 import type { Agent } from '../../server/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { ClampedExplainer } from '@/components/review/ClampedExplainer';
 import { useDiffEditorHostSize } from '@/hooks/useDiffEditorHostSize';
 import { useDiffEditorLayout } from '@/hooks/useDiffEditorLayout';
 import { useInlineCommentZones } from '@/hooks/useInlineCommentZones';
@@ -66,6 +67,8 @@ export interface DiffFileRowProps {
   /** When true, inline comment threads render. Defaults to true if a comments
    *  context is available — false in standalone use. */
   enableComments?: boolean;
+  /** Walkthrough file summary — shown below the file header in review mode. */
+  explainer?: string;
 }
 
 export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function DiffFileRow(
@@ -85,6 +88,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
     agents = [],
     rangeIsBase = true,
     enableComments = false,
+    explainer,
   },
   ref,
 ) {
@@ -190,6 +194,19 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
           ) : null}
         </span>
       </header>
+      {explainer ? (
+        <div
+          data-testid={`diff-file-explainer-${path}`}
+          className="border-b border-glass-edge/60 bg-glass-l1/30 px-4 py-2"
+        >
+          <ClampedExplainer
+            text={explainer}
+            lines={3}
+            clampChars={200}
+            className="text-xs leading-relaxed text-muted-foreground"
+          />
+        </div>
+      ) : null}
       <div className="min-w-0 w-full">
         {error ? (
           <div className="flex h-32 items-center justify-center text-sm text-destructive">

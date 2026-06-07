@@ -2,10 +2,12 @@ import { useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Badge } from '../ui/badge';
 import { ChevronDownIcon } from '../icons';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { InlineCommentDTO } from '@/lib/api';
-import type { Walkthrough, WalkthroughFile } from './WalkthroughHeader';
+import { DIFF_TREE_ACTIVE, DIFF_TREE_ROW } from '@/lib/design-tokens';
+import type { Walkthrough, WalkthroughFile } from './walkthrough-types';
 import { buildGroups } from '@/lib/review-file-groups';
+import { ReviewProgressBar } from './ReviewProgressBar';
+import { ClampedExplainer } from './ClampedExplainer';
 
 interface Props {
   files: string[];
@@ -43,6 +45,10 @@ function shortPath(path: string): string {
   return idx === -1 ? path : path.slice(idx + 1);
 }
 
+function groupReviewedCount(files: WalkthroughFile[], reviewed: Set<string>): number {
+  return files.filter((f) => reviewed.has(f.path)).length;
+}
+
 interface FileRowProps {
   file: WalkthroughFile;
   selected: boolean;
@@ -71,8 +77,7 @@ function FileRow({
       data-selected={selected ? 'true' : undefined}
       data-reviewed={isReviewed ? 'true' : 'false'}
       className={cn(
-        'flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-glass-l2/40',
-        selected && 'bg-glass-l2/60',
+        'flex items-start gap-2 px-2 py-1 text-left text-xs',
         'data-[reviewed=true]:opacity-60',
       )}
       role="treeitem"
@@ -88,59 +93,64 @@ function FileRow({
           e.stopPropagation();
           onToggleReviewed(file.path, isReviewed);
         }}
-        className="h-3.5 w-3.5 shrink-0 cursor-pointer"
+        className="mt-1.5 h-3.5 w-3.5 shrink-0 cursor-pointer"
       />
       <button
         type="button"
         onClick={() => onSelect(file.path)}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className={cn(
+          DIFF_TREE_ROW,
+          'min-w-0 flex-1 flex-col items-stretch gap-0.5 py-1.5',
+          selected && DIFF_TREE_ACTIVE,
+        )}
         tabIndex={selected ? 0 : -1}
+        title={file.path}
       >
-        <code className="min-w-0 flex-1 truncate font-mono text-foreground" title={file.path}>
-          {shortPath(file.path)}
-        </code>
-        {file.label && (
-          <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
-            {file.label}
-          </Badge>
+        <span className="flex min-w-0 items-center gap-2">
+          <code className="min-w-0 flex-1 truncate font-mono text-foreground">
+            {shortPath(file.path)}
+          </code>
+          {file.label && (
+            <Badge variant="outline" className="shrink-0 px-1 text-[10px]">
+              {file.label}
+            </Badge>
+          )}
+        </span>
+        {file.summary && (
+          <ClampedExplainer
+            text={file.summary}
+            lines={2}
+            clampChars={120}
+            className="text-[10px] leading-snug text-muted-foreground"
+          />
         )}
       </button>
-      {file.summary && (
-        <Popover>
-          <PopoverTrigger
-            render={<span />}
-            nativeButton={false}
-            aria-label={`Summary for ${file.path}`}
-            className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
-            onClick={(e) => e.stopPropagation()}
-          >
-            info
-          </PopoverTrigger>
-          <PopoverContent className="w-72 text-xs">{file.summary}</PopoverContent>
-        </Popover>
+      {(open > 0 || stale > 0) && (
+        <div className="flex shrink-0 flex-col items-end gap-1 pt-1">
+          {open > 0 && (
+            <span
+              data-testid={`comment-count-${file.path}`}
+              data-tone={serious ? 'serious' : 'muted'}
+              className={cn(
+                'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                serious
+                  ? 'bg-destructive/20 text-destructive'
+                  : 'bg-glass-l2 text-muted-foreground',
+              )}
+            >
+              {open}
+            </span>
+          )}
+          {stale > 0 && (
+            <span
+              data-testid={`stale-count-${file.path}`}
+              className="inline-flex items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+            >
+              stale: {stale}
+            </span>
+          )}
+        </div>
       )}
-      <div className="flex shrink-0 flex-col items-end gap-1">
-        {open > 0 && (
-          <span
-            data-testid={`comment-count-${file.path}`}
-            data-tone={serious ? 'serious' : 'muted'}
-            className={cn(
-              'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-              serious ? 'bg-destructive/20 text-destructive' : 'bg-glass-l2 text-muted-foreground',
-            )}
-          >
-            {open}
-          </span>
-        )}
-        {stale > 0 && (
-          <span
-            data-testid={`stale-count-${file.path}`}
-            className="inline-flex items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
-          >
-            stale: {stale}
-          </span>
-        )}
-      </div>
     </li>
   );
 }
@@ -157,6 +167,12 @@ export function ReviewFileTree({
   const groups = useMemo(() => buildGroups(files, walkthrough), [files, walkthrough]);
   const counts = useMemo(() => countsByFile(comments), [comments]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const openCommentFiles = useMemo(() => {
+    let n = 0;
+    for (const c of counts.values()) n += c.open;
+    return n;
+  }, [counts]);
 
   function toggle(name: string) {
     setCollapsed((prev) => {
@@ -193,67 +209,93 @@ export function ReviewFileTree({
   }
 
   return (
-    <nav
-      data-testid="review-file-tree"
-      role="tree"
-      className="flex h-full min-h-0 flex-col overflow-y-auto"
-      onKeyDown={handleKeyDown}
-    >
-      {groups.map((group) => {
-        const open = !collapsed.has(group.name);
-        return (
-          <section
-            key={group.name}
-            role="group"
-            data-testid={`review-file-group-${group.name}`}
-            className="border-b border-glass-edge/60"
-          >
-            <button
-              type="button"
-              onClick={() => toggle(group.name)}
-              className="flex w-full items-center gap-2 overflow-hidden px-3 py-2 text-left text-xs font-semibold hover:bg-glass-l2/40"
-              aria-expanded={open}
-              role="treeitem"
-              title={group.name}
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="shrink-0 space-y-2 border-b border-glass-edge px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Files
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {reviewedFiles.size}/{files.length}
+          </span>
+        </div>
+        <ReviewProgressBar
+          done={reviewedFiles.size}
+          total={files.length}
+          data-testid="review-file-tree-progress"
+        />
+        {openCommentFiles > 0 && (
+          <p className="text-[10px] text-muted-foreground">
+            {openCommentFiles} open comment{openCommentFiles === 1 ? '' : 's'} in tree
+          </p>
+        )}
+      </header>
+
+      <nav
+        data-testid="review-file-tree"
+        role="tree"
+        className="min-h-0 flex-1 overflow-y-auto"
+        onKeyDown={handleKeyDown}
+      >
+        {groups.map((group) => {
+          const open = !collapsed.has(group.name);
+          const reviewedInGroup = groupReviewedCount(group.files, reviewedFiles);
+          return (
+            <section
+              key={group.name}
+              role="group"
+              data-testid={`review-file-group-${group.name}`}
+              className="border-b border-glass-edge/60"
             >
-              <ChevronDownIcon
-                aria-hidden
-                className={cn(
-                  'shrink-0',
-                  open ? 'transition-transform' : '-rotate-90 transition-transform',
-                )}
-              />
-              <span className="min-w-0 flex-1 truncate">{group.name}</span>
-              <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
-                {group.files.length}
-              </span>
-            </button>
-            {open && group.summary && (
-              <div
-                className="line-clamp-1 px-3 pb-1 text-[11px] text-muted-foreground"
-                title={group.summary}
+              <button
+                type="button"
+                onClick={() => toggle(group.name)}
+                className="flex w-full items-center gap-2 overflow-hidden px-3 py-2 text-left text-xs font-semibold hover:bg-glass-l2/40"
+                aria-expanded={open}
+                role="treeitem"
+                title={group.name}
               >
-                {group.summary}
-              </div>
-            )}
-            {open && (
-              <ul>
-                {group.files.map((f) => (
-                  <FileRow
-                    key={f.path}
-                    file={f}
-                    selected={selectedPath === f.path}
-                    counts={counts.get(f.path)}
-                    reviewedFiles={reviewedFiles}
-                    onToggleReviewed={onToggleReviewed}
-                    onSelect={onSelect}
+                <ChevronDownIcon
+                  aria-hidden
+                  className={cn(
+                    'size-3.5 shrink-0',
+                    open ? 'transition-transform' : '-rotate-90 transition-transform',
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                <span className="shrink-0 font-mono text-[10px] font-normal text-muted-foreground">
+                  {reviewedInGroup}/{group.files.length}
+                </span>
+              </button>
+              {open && group.summary && (
+                <div className="px-3 pb-1.5">
+                  <ClampedExplainer
+                    text={group.summary}
+                    lines={2}
+                    clampChars={120}
+                    className="text-[11px] leading-snug text-muted-foreground"
                   />
-                ))}
-              </ul>
-            )}
-          </section>
-        );
-      })}
-    </nav>
+                </div>
+              )}
+              {open && (
+                <ul>
+                  {group.files.map((f) => (
+                    <FileRow
+                      key={f.path}
+                      file={f}
+                      selected={selectedPath === f.path}
+                      counts={counts.get(f.path)}
+                      reviewedFiles={reviewedFiles}
+                      onToggleReviewed={onToggleReviewed}
+                      onSelect={onSelect}
+                    />
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </nav>
+    </div>
   );
 }

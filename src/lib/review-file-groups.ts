@@ -1,4 +1,4 @@
-import type { Walkthrough, WalkthroughFile } from '@/components/review/WalkthroughHeader';
+import type { Walkthrough, WalkthroughFile } from '@/components/review/walkthrough-types';
 
 export const OTHER_GROUP_NAME = 'Other';
 
@@ -33,4 +33,32 @@ export function buildGroups(files: string[], walkthrough: Walkthrough | null): R
 
 export function orderedPathsFromGroups(groups: RenderGroup[]): string[] {
   return groups.flatMap((g) => g.files.map((f) => f.path));
+}
+
+export interface WalkthroughFileContext {
+  group: RenderGroup;
+  file: WalkthroughFile;
+}
+
+/** Resolve walkthrough metadata for a diff file path. */
+export function lookupWalkthroughFile(
+  groups: RenderGroup[],
+  path: string,
+): WalkthroughFileContext | null {
+  for (const group of groups) {
+    const file = group.files.find((f) => f.path === path);
+    if (file) return { group, file };
+  }
+  return null;
+}
+
+/** Map file path → walkthrough file summary (when present). */
+export function fileSummariesFromGroups(groups: RenderGroup[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const g of groups) {
+    for (const f of g.files) {
+      if (f.summary) m.set(f.path, f.summary);
+    }
+  }
+  return m;
 }

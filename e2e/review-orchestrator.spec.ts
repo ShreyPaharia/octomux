@@ -22,13 +22,13 @@ test.describe('Review orchestrator — happy path', () => {
     await page.goto('/reviews');
 
     // 2. Seeded review should appear — match by PR title text
-    const reviewCard = page
-      .locator('[class*="cursor-pointer"]')
-      .filter({ hasText: /E2E review PR #99/ });
-    await expect(reviewCard).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/E2E review PR #99/)).toBeVisible({ timeout: 10_000 });
 
-    // 3. Click the row → navigate to /reviews/:id
-    await reviewCard.click();
+    // 3. Open review → navigate to /reviews/:id
+    await page
+      .getByTestId(`review-inbox-row-${taskId}`)
+      .getByRole('button', { name: 'Open review' })
+      .click();
     await expect(page).toHaveURL(new RegExp(`/reviews/${taskId}`), { timeout: 10_000 });
   });
 

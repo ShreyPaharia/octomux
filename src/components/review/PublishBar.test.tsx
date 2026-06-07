@@ -3,15 +3,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PublishBar } from './PublishBar';
 
-const { mockPublishReview, mockRequestReReview } = await vi.hoisted(async () => ({
+const { mockPublishReview, mockRequestReReview, mockDeleteTask } = await vi.hoisted(async () => ({
   mockPublishReview: vi.fn(),
   mockRequestReReview: vi.fn(),
+  mockDeleteTask: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({
   api: {
     publishReview: mockPublishReview,
     requestReReview: mockRequestReReview,
+    deleteTask: mockDeleteTask,
   },
 }));
 
@@ -75,7 +77,8 @@ describe('PublishBar', () => {
   it('shows reviewed progress when reviewedTotal > 0', () => {
     render(<PublishBar {...defaultProps({ reviewedDone: 2, reviewedTotal: 5 })} />);
     expect(screen.getByTestId('pr-review-progress')).toBeTruthy();
-    expect(screen.getByText('2/5 reviewed')).toBeTruthy();
+    expect(screen.getByText(/2\/5 files reviewed/)).toBeTruthy();
+    expect(screen.getByRole('progressbar')).toBeTruthy();
   });
 
   it('does not show reviewed progress when reviewedTotal is 0', () => {
@@ -134,6 +137,19 @@ describe('PublishBar', () => {
     await waitFor(() => {
       expect(mockRequestReReview).toHaveBeenCalledWith('t1');
       expect(onReRun).toHaveBeenCalled();
+    });
+  });
+
+  it('deletes review and calls onDeleted after confirmation', async () => {
+    const user = userEvent.setup();
+    mockDeleteTask.mockResolvedValue(undefined);
+    const onDeleted = vi.fn();
+    render(<PublishBar {...defaultProps({ onDeleted })} />);
+    await user.click(screen.getByTestId('review-delete-btn'));
+    await user.click(screen.getByTestId('confirm-delete-review-confirm'));
+    await waitFor(() => {
+      expect(mockDeleteTask).toHaveBeenCalledWith('t1');
+      expect(onDeleted).toHaveBeenCalled();
     });
   });
 });

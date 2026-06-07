@@ -13,6 +13,9 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
@@ -31,6 +34,7 @@ function makeRow(
     rejected_count: number;
     stale_count: number;
     author_login: string | null;
+    last_activity_at: string;
   }> = {},
 ) {
   return {
@@ -46,7 +50,7 @@ function makeRow(
     accepted_count: 1,
     rejected_count: 0,
     stale_count: 0,
-    last_activity_at: '2026-05-28',
+    last_activity_at: '2026-05-28T12:00:00.000Z',
     ...overrides,
   };
 }
@@ -62,7 +66,7 @@ describe('ReviewsPage', () => {
     expect(await screen.findByText(/no open review requests/i)).toBeTruthy();
   });
 
-  it('renders one row per inbox entry grouped by repo', async () => {
+  it('renders inbox rows with glass cards grouped by repo', async () => {
     apiMock.listReviewsInbox.mockResolvedValue([
       makeRow({
         task_id: 't1',
@@ -80,29 +84,32 @@ describe('ReviewsPage', () => {
     ]);
     renderWithRouter(<ReviewsPage />);
     expect(await screen.findByText('Add foo')).toBeTruthy();
-    expect(await screen.findByText('Fix bar')).toBeTruthy();
+    expect(screen.getByText('Fix bar')).toBeTruthy();
     expect(screen.getByText('drafts ready')).toBeTruthy();
     expect(screen.getByText('reviewing')).toBeTruthy();
+    expect(screen.getByTestId('review-inbox-row-t1')).toBeTruthy();
   });
 
-  it('groups rows under their repo_path header', async () => {
+  it('groups rows under repo name header', async () => {
     apiMock.listReviewsInbox.mockResolvedValue([
       makeRow({ task_id: 't1', pr_title: 'PR one', repo_path: '/repos/alpha' }),
       makeRow({ task_id: 't2', pr_number: 2, pr_title: 'PR two', repo_path: '/repos/beta' }),
     ]);
     renderWithRouter(<ReviewsPage />);
-    expect(await screen.findByText('/repos/alpha')).toBeTruthy();
-    expect(screen.getByText('/repos/beta')).toBeTruthy();
+    expect(await screen.findByText('PR one')).toBeTruthy();
+    expect(screen.getByText('PR two')).toBeTruthy();
+    expect(screen.getByText('alpha')).toBeTruthy();
+    expect(screen.getByText('beta')).toBeTruthy();
   });
 
-  it('clicking a row navigates to /reviews/:id', async () => {
+  it('Open review navigates to /reviews/:id', async () => {
     const user = userEvent.setup();
     apiMock.listReviewsInbox.mockResolvedValue([
       makeRow({ task_id: 'task-abc', pr_title: 'Clickable PR' }),
     ]);
     renderWithRouter(<ReviewsPage />);
-    await screen.findByText('Clickable PR');
-    await user.click(screen.getByText('Clickable PR'));
+    const row = await screen.findByText('Clickable PR');
+    await user.click(row);
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/reviews/task-abc'));
   });
 
@@ -110,5 +117,19 @@ describe('ReviewsPage', () => {
     apiMock.listReviewsInbox.mockResolvedValue([makeRow({ stale_count: 3 })]);
     renderWithRouter(<ReviewsPage />);
     expect(await screen.findByText(/3 stale/)).toBeTruthy();
+  });
+
+  it('deletes a review from the inbox after confirmation', async () => {
+    const user = userEvent.setup();
+    apiMock.deleteTask.mockResolvedValue(undefined);
+    apiMock.listReviewsInbox.mockResolvedValue([
+      makeRow({ task_id: 'del-me', pr_title: 'Remove me' }),
+    ]);
+    renderWithRouter(<ReviewsPage />);
+    await screen.findByText('Remove me');
+    await user.click(screen.getByTestId('review-delete-del-me'));
+    await user.click(screen.getByTestId('confirm-delete-review-confirm'));
+    await waitFor(() => expect(apiMock.deleteTask).toHaveBeenCalledWith('del-me'));
+    await waitFor(() => expect(screen.queryByText('Remove me')).toBeNull());
   });
 });

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { isRegularTask } from '@/lib/task-filters';
 import type { Task } from '../../../server/types';
 import { ChevronDownIcon } from '@/components/icons';
 
@@ -22,7 +23,9 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
     setLoading(true);
     api
       .listTasks()
-      .then((all) => setTasks(all.filter((t) => ALLOWED_STATUSES.has(t.runtime_state))))
+      .then((all) =>
+        setTasks(all.filter((t) => isRegularTask(t) && ALLOWED_STATUSES.has(t.runtime_state))),
+      )
       .catch(() => setTasks([]))
       .finally(() => setLoading(false));
   }, []);

@@ -1,8 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { api, type ReviewInboxRow } from '../lib/api';
-import { Card } from '../components/ui/card';
+import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { PageHeader } from '@/components/layout/page-header';
+import { ConfirmDeleteReviewDialog } from '@/components/review/ConfirmDeleteReviewDialog';
+import { displayReviewTitle, parseActivityDate } from '@/lib/review-display';
+import { timeAgo } from '@/lib/time';
+import { cn } from '@/lib/utils';
 
 const STATUS_PILL: Record<
   ReviewInboxRow['status'],
@@ -15,9 +22,40 @@ const STATUS_PILL: Record<
   failed: { label: 'failed', variant: 'destructive' },
 };
 
+function formatActivityAt(iso: string): string {
+  if (!iso) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  try {
+    const ms = parseActivityDate(iso).getTime();
+    if (Number.isNaN(ms)) return iso;
+    return timeAgo(new Date(ms).toISOString());
+  } catch {
+    return iso;
+  }
+}
+
+function metaLine(r: ReviewInboxRow): string {
+  const parts = [
+    `${r.draft_count} draft${r.draft_count === 1 ? '' : 's'}`,
+    `${r.accepted_count} accepted`,
+  ];
+  if (r.rejected_count > 0) parts.push(`${r.rejected_count} rejected`);
+  if (r.stale_count > 0) parts.push(`${r.stale_count} stale`);
+  return parts.join(' · ');
+}
+
+function sortRows(rows: ReviewInboxRow[]): ReviewInboxRow[] {
+  return [...rows].sort((a, b) => {
+    const ta = parseActivityDate(a.last_activity_at).getTime();
+    const tb = parseActivityDate(b.last_activity_at).getTime();
+    return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
+  });
+}
+
 export default function ReviewsPage() {
   const [rows, setRows] = useState<ReviewInboxRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<ReviewInboxRow | null>(null);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -37,7 +75,6 @@ export default function ReviewsPage() {
           if (!cancelled) setRows(r);
         })
         .catch(() => {});
-      // TODO(badge): update sidebar unread badge count here
     }, 10_000);
     return () => {
       cancelled = true;
@@ -45,55 +82,145 @@ export default function ReviewsPage() {
     };
   }, []);
 
-  if (loading) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
-  if (rows.length === 0) {
+  const byRepo = useMemo(() => {
+    const map = new Map<string, ReviewInboxRow[]>();
+    for (const r of sortRows(rows)) {
+      const list = map.get(r.repo_path) ?? [];
+      list.push(r);
+      map.set(r.repo_path, list);
+    }
+    return map;
+  }, [rows]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.task_id;
+    try {
+      await api.deleteTask(id);
+      setRows((prev) => prev.filter((r) => r.task_id !== id));
+      toast.success('Review deleted');
+    } catch (e) {
+      toast.error(`Delete failed: ${(e as Error).message}`);
+      throw e;
+    }
+  }, [deleteTarget]);
+
+  if (loading) {
     return (
-      <div className="p-6 text-sm text-muted-foreground">No open review requests right now.</div>
+      <div className="p-6">
+        <PageHeader title="Reviews" />
+        <div className="mt-4 space-y-2">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-20 animate-pulse rounded-2xl border border-glass-edge bg-glass-l1"
+            />
+          ))}
+        </div>
+      </div>
     );
   }
 
-  // Group by repo_path
-  const byRepo = new Map<string, ReviewInboxRow[]>();
-  for (const r of rows) {
-    const list = byRepo.get(r.repo_path) ?? [];
-    list.push(r);
-    byRepo.set(r.repo_path, list);
+  if (rows.length === 0) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Reviews" />
+        <p className="text-sm text-muted-foreground">No open review requests right now.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-lg font-semibold">Reviews</h1>
-      {Array.from(byRepo.entries()).map(([repo, repoRows]) => (
-        <section key={repo}>
-          <h2 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">
-            {repo}
-          </h2>
-          <div className="space-y-2">
-            {repoRows.map((r) => (
-              <Card
-                key={r.task_id}
-                className="px-4 py-3 cursor-pointer hover:bg-muted transition-colors"
-                onClick={() => nav(`/reviews/${r.task_id}`)}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium">{r.pr_title}</span>
-                  <span className="text-xs text-muted-foreground">#{r.pr_number}</span>
-                  <Badge variant={STATUS_PILL[r.status].variant}>
-                    {STATUS_PILL[r.status].label}
-                  </Badge>
-                  {r.author_login && (
-                    <span className="text-xs text-muted-foreground ml-auto">@{r.author_login}</span>
-                  )}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {r.accepted_count} accepted · {r.draft_count} drafts · {r.rejected_count} rejected
-                  {r.stale_count > 0 && ` · ${r.stale_count} stale`}
-                </div>
-              </Card>
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className="flex h-full min-h-0 flex-col p-6">
+      <PageHeader title="Reviews" />
+      <div className="mt-4 space-y-8">
+        {Array.from(byRepo.entries()).map(([repo, repoRows]) => (
+          <section key={repo}>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {repo.split('/').pop() ?? repo}
+              </h2>
+              <span className="truncate text-[10px] text-muted-soft" title={repo}>
+                {repo}
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {repoRows.map((r) => {
+                const pill = STATUS_PILL[r.status];
+                const needsYou = r.status === 'drafts-ready' || r.status === 'head-advanced';
+                return (
+                  <li key={r.task_id}>
+                    <GlassPanel
+                      level={2}
+                      specular
+                      data-testid={`review-inbox-row-${r.task_id}`}
+                      className={cn(
+                        'group flex flex-col gap-2 rounded-2xl px-4 py-3 transition-colors sm:flex-row sm:items-center',
+                        'hover:bg-glass-l3/80',
+                        needsYou && 'border-l-2 border-l-primary',
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => nav(`/reviews/${r.task_id}`)}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-medium text-foreground group-hover:text-primary">
+                            {displayReviewTitle(r.pr_title)}
+                          </span>
+                          {r.pr_number != null && (
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                              #{r.pr_number}
+                            </span>
+                          )}
+                          <Badge variant={pill.variant}>{pill.label}</Badge>
+                          {r.last_activity_at && (
+                            <span className="text-[10px] text-muted-soft">
+                              {formatActivityAt(r.last_activity_at)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{metaLine(r)}</p>
+                        {r.author_login && (
+                          <p className="mt-0.5 text-[10px] text-muted-soft">@{r.author_login}</p>
+                        )}
+                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => nav(`/reviews/${r.task_id}`)}
+                        >
+                          Open review
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-destructive"
+                          data-testid={`review-delete-${r.task_id}`}
+                          onClick={() => setDeleteTarget(r)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </GlassPanel>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteReviewDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+          reviewLabel={displayReviewTitle(deleteTarget.pr_title)}
+          onConfirm={handleDeleteConfirm}
+        />
+      )}
     </div>
   );
 }

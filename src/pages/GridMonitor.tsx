@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
+import { regularTasksOnly } from '@/lib/task-filters';
 import { EmptyState } from '@/components/EmptyState';
 import { AgentGridCell } from '@/components/AgentGridCell';
 import { TerminalRectIcon } from '@/components/icons';
@@ -53,7 +54,7 @@ export default function GridMonitor() {
     let cancelled = false;
     const fetchTasks = async () => {
       try {
-        const data = await api.listTasks();
+        const data = regularTasksOnly(await api.listTasks());
         if (!cancelled) {
           setTasks(data);
           setLoaded(true);
