@@ -35,9 +35,18 @@ async function ensureTerminalScrollable(page: Page) {
   });
 }
 
+async function readFirstRow(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const rows = document.querySelector('.xterm-rows');
+    const first = rows?.children[0]?.textContent?.trim() ?? '';
+    return first.slice(0, 80);
+  });
+}
+
 /**
  * Simulate a one-finger vertical swipe on the xterm element (mobile touch path).
- * Negative distanceY moves the finger up, which should increase viewport.scrollTop.
+ * Content follows the finger: positive distanceY drags down and reveals older
+ * scrollback; negative drags up and returns toward the newest output.
  */
 async function swipeTerminal(page: Page, distanceY: number) {
   await page.evaluate((distance) => {
@@ -105,17 +114,19 @@ test.describe('Mobile terminal touch scroll', () => {
 
     await ensureTerminalScrollable(page);
 
-    const before = await readScrollMetrics(page);
-    expect(before.scrollHeight).toBeGreaterThan(before.clientHeight);
-    expect(before.docScroll).toBe(0);
+    const beforeRow = await readFirstRow(page);
+    expect(beforeRow.length).toBeGreaterThan(0);
 
-    // Finger up → scroll back through agent output.
-    await swipeTerminal(page, -180);
+    // Terminal opens pinned to the latest output. Finger down → older scrollback
+    // (via scrollLines, not scrollTop), the only direction that changes rows here.
+    await swipeTerminal(page, 180);
+    await page.waitForTimeout(300);
 
+    const afterRow = await readFirstRow(page);
     const after = await readScrollMetrics(page);
 
     expect(after.docScroll).toBe(0);
-    expect(after.scrollTop).toBeGreaterThan(before.scrollTop);
+    expect(afterRow).not.toBe(beforeRow);
   });
 
   test('pull-down at top of terminal does not scroll the document', async ({ page }) => {

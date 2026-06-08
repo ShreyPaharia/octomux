@@ -1,62 +1,112 @@
 /* eslint-disable no-console -- CLI verifier script */
 /**
- * One-off verifier: open a live task, touch-drag the terminal, screenshot before/after.
+ * Verifier: open a live task on mobile viewport, exercise terminal scroll paths.
  * Usage: bunx tsx scripts/verify-mobile-terminal-scroll.ts [taskUrl]
+ *
+ * IMPORTANT: target a task whose terminal is in xterm's NORMAL buffer with
+ * scrollback (tmux `alternate_on=0`, `history_size > rows`). Agents running a
+ * full-screen TUI (Claude Code) sit in the ALTERNATE screen buffer, which has no
+ * scrollback — neither touch nor the Older button can scroll it, so the run is
+ * inconclusive. Find a suitable session with:
+ *   tmux list-windows -t octomux-agent-<id> -F '#{alternate_on} #{history_size}'
  */
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 
-const TASK_URL = process.argv[2] ?? 'http://localhost:7777/tasks/bUQ3yScIXxSV';
+const TASK_URL = process.argv[2] ?? 'http://localhost:5173/tasks/bUQ3yScIXxSV';
 const OUT_DIR = path.resolve('ui-review/mobile-scroll-check');
 
-type Metrics = {
+type RowSnapshot = {
+  firstRow: string;
+  rows: string[];
   scrollTop: number;
-  scrollHeight: number;
-  clientHeight: number;
   docScroll: number;
 };
 
-async function readMetrics(page: import('playwright').Page): Promise<Metrics | null> {
+async function readRowSnapshot(page: import('playwright').Page): Promise<RowSnapshot | null> {
   return page.evaluate(() => {
     const viewport = document.querySelector('.xterm-viewport') as HTMLElement | null;
-    if (!viewport) return null;
+    const rowEls = document.querySelectorAll('.xterm-rows > div');
+    const rows = Array.from(rowEls)
+      .slice(0, 5)
+      .map((el) => el.textContent?.trim() ?? '');
     return {
-      scrollTop: viewport.scrollTop,
-      scrollHeight: viewport.scrollHeight,
-      clientHeight: viewport.clientHeight,
+      firstRow: rows[0] ?? '',
+      rows,
+      scrollTop: viewport?.scrollTop ?? 0,
       docScroll: document.documentElement.scrollTop,
     };
   });
 }
 
-async function cdpTouchDrag(
-  page: import('playwright').Page,
-  startX: number,
-  startY: number,
-  deltaY: number,
-  steps = 14,
-) {
-  const cdp = await page.context().newCDPSession(page);
-  const step = deltaY / steps;
+function rowsChanged(before: RowSnapshot, after: RowSnapshot): boolean {
+  if (before.firstRow !== after.firstRow) return true;
+  return before.rows.some((row, i) => row !== after.rows[i]);
+}
 
-  await cdp.send('Input.dispatchTouchEvent', {
-    type: 'touchStart',
-    touchPoints: [{ x: Math.round(startX), y: Math.round(startY) }],
-  });
+/**
+ * Finger swipe on the terminal host (same path as the real mobile touch handler).
+ * Written as a single linear block with no nested functions so esbuild/tsx does
+ * not inject its `__name` keepNames helper (undefined in the page context).
+ */
+async function swipeTerminalHost(page: import('playwright').Page, distanceY: number) {
+  await page.evaluate((distance) => {
+    const host = document.querySelector('.octomux-terminal-host');
+    if (!host) throw new Error('octomux-terminal-host not found');
 
-  for (let i = 1; i <= steps; i++) {
-    await cdp.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [{ x: Math.round(startX), y: Math.round(startY + step * i) }],
-    });
-    await page.waitForTimeout(16);
+    const target = host.querySelector('.xterm-rows > div') ?? host;
+    const rect = host.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const startY = rect.top + rect.height * 0.45;
+    const steps = 14;
+
+    const ys: number[] = [startY];
+    for (let i = 1; i <= steps; i++) ys.push(startY + (distance / steps) * i);
+    ys.push(startY + distance);
+
+    for (let i = 0; i < ys.length; i++) {
+      const type = i === 0 ? 'touchstart' : i === ys.length - 1 ? 'touchend' : 'touchmove';
+      const y = ys[i];
+      const touch = new Touch({
+        identifier: 1,
+        target,
+        clientX: cx,
+        clientY: y,
+        pageX: cx,
+        pageY: y,
+        screenX: cx,
+        screenY: y,
+        radiusX: 2.5,
+        radiusY: 2.5,
+        rotationAngle: 0,
+        force: 0.5,
+      });
+      const list = type === 'touchend' ? [] : [touch];
+      host.dispatchEvent(
+        new TouchEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          touches: list,
+          targetTouches: list,
+          changedTouches: [touch],
+        }),
+      );
+    }
+  }, distanceY);
+}
+
+async function ensureAgentsMode(page: import('playwright').Page) {
+  const diffToggle = page.getByTestId('diff-toggle');
+  if (await diffToggle.isVisible().catch(() => false)) {
+    const active = await diffToggle.getAttribute('data-active');
+    if (active === 'true') {
+      await diffToggle.click();
+      await page.waitForTimeout(400);
+    }
   }
-
-  await cdp.send('Input.dispatchTouchEvent', {
-    type: 'touchEnd',
-    touchPoints: [],
-  });
+  await page.locator('.octomux-terminal-host').first().waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 async function main() {
@@ -75,106 +125,74 @@ async function main() {
 
   console.log(`Opening ${TASK_URL}`);
   await page.goto(TASK_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(2000);
+  await ensureAgentsMode(page);
+  await page.getByTestId('mobile-terminal-scroll-controls').waitFor({ state: 'visible', timeout: 30_000 });
+  // The first row is frequently blank; wait on the whole rows container instead.
+  await page.waitForFunction(
+    () => (document.querySelector('.xterm-rows')?.textContent?.trim().length ?? 0) > 20,
+    { timeout: 45_000 },
+  );
 
   await page.screenshot({ path: path.join(OUT_DIR, '00-page-loaded.png'), fullPage: true });
 
-  const hasTerminal = await page
-    .locator('.xterm-viewport')
-    .isVisible()
-    .catch(() => false);
-
-  if (!hasTerminal) {
-    const bodyText = await page.locator('body').innerText();
-    console.log('No xterm viewport visible. Page text snippet:', bodyText.slice(0, 500));
-    console.log(`Screenshot saved: ${path.join(OUT_DIR, '00-page-loaded.png')}`);
-    await browser.close();
-    process.exitCode = 2;
-    return;
-  }
+  const baseline = await readRowSnapshot(page);
+  if (!baseline) throw new Error('could not read terminal rows');
+  console.log('Baseline first row:', JSON.stringify(baseline.firstRow.slice(0, 80)));
 
   const host = page.locator('.octomux-terminal-host').first();
-  const target = (await host.isVisible()) ? host : page.locator('.xterm-viewport').first();
+  await host.screenshot({ path: path.join(OUT_DIR, '01-terminal-baseline.png') });
 
-  const box = await target.boundingBox();
-  if (!box) throw new Error('terminal target has no bounding box');
+  const scrollControls = page.getByTestId('mobile-terminal-scroll-controls');
+  const hasScrollControls = await scrollControls
+    .waitFor({ state: 'visible', timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
 
-  const before = await readMetrics(page);
-  console.log('Before:', before);
+  let buttonScrollWorked = false;
+  if (hasScrollControls) {
+    await page.getByRole('button', { name: 'Older output' }).click();
+    await page.waitForTimeout(400);
+    const afterButton = await readRowSnapshot(page);
+    buttonScrollWorked = !!afterButton && rowsChanged(baseline, afterButton);
+    console.log('After Older button:', afterButton?.firstRow.slice(0, 80));
+    await host.screenshot({ path: path.join(OUT_DIR, '02-after-older-button.png') });
+    await page.getByRole('button', { name: 'Jump to latest output' }).click();
+    await page.waitForTimeout(400);
+  } else {
+    console.log('Mobile scroll controls not visible (still connecting or not mobile?)');
+  }
 
-  await page.screenshot({ path: path.join(OUT_DIR, '01-before-scroll.png'), fullPage: true });
-  await target.screenshot({ path: path.join(OUT_DIR, '02-terminal-before.png') });
+  const beforeTouch = await readRowSnapshot(page);
+  if (!beforeTouch) throw new Error('could not read rows before touch');
 
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height * 0.55;
-
-  console.log(`CDP touch drag from (${cx.toFixed(0)}, ${cy.toFixed(0)}) deltaY=-220`);
-  await cdpTouchDrag(page, cx, cy, -220);
+  // The terminal opens pinned to the latest output. Content follows the finger,
+  // so dragging DOWN reveals older scrollback (the only direction that changes
+  // rows from the bottom); dragging UP afterwards returns to the newest output.
+  console.log('DOM touch swipe DOWN on host (finger down → older), deltaY=+200');
+  await swipeTerminalHost(page, 200);
   await page.waitForTimeout(500);
 
-  const afterUp = await readMetrics(page);
-  console.log('After finger-up drag:', afterUp);
+  const afterTouchDown = await readRowSnapshot(page);
+  const touchScrollWorked = !!afterTouchDown && rowsChanged(beforeTouch, afterTouchDown);
+  console.log('After finger-down swipe:', afterTouchDown?.firstRow.slice(0, 80));
+  await host.screenshot({ path: path.join(OUT_DIR, '03-after-touch-down.png') });
 
-  await page.screenshot({ path: path.join(OUT_DIR, '03-after-finger-up.png'), fullPage: true });
-  await target.screenshot({ path: path.join(OUT_DIR, '04-terminal-after-finger-up.png') });
-
-  await cdpTouchDrag(page, cx, cy, 220);
-  await page.waitForTimeout(500);
-
-  const afterDown = await readMetrics(page);
-  console.log('After finger-down drag:', afterDown);
-
-  await page.screenshot({ path: path.join(OUT_DIR, '05-after-finger-down.png'), fullPage: true });
-  await target.screenshot({ path: path.join(OUT_DIR, '06-terminal-after-finger-down.png') });
-
-  const domInfo = await page.evaluate(() => {
-    const area = document.querySelector('.xterm-scroll-area') as HTMLElement | null;
-    const rows = document.querySelector('.xterm-rows');
-    return {
-      scrollAreaStyleHeight: area?.style.height ?? null,
-      scrollAreaOffsetHeight: area?.offsetHeight ?? null,
-      rowCount: rows?.children.length ?? 0,
-      rowTextLen: rows?.textContent?.length ?? 0,
-    };
-  });
-  console.log('DOM:', domInfo);
-
-  // Control: programmatic scroll — does the viewport move at all?
-  const programmatic = await page.evaluate(() => {
-    const viewport = document.querySelector('.xterm-viewport') as HTMLElement;
-    const before = viewport.scrollTop;
-    viewport.scrollTop = Math.min(200, viewport.scrollHeight - viewport.clientHeight);
-    return {
-      before,
-      after: viewport.scrollTop,
-      max: viewport.scrollHeight - viewport.clientHeight,
-    };
-  });
-  console.log('Programmatic scroll:', programmatic);
-  await page.waitForTimeout(300);
-  await target.screenshot({ path: path.join(OUT_DIR, '07-after-programmatic-scroll.png') });
-
-  const scrolledUp = !!before && !!afterUp && afterUp.scrollTop > before.scrollTop;
-  const programmaticWorked = programmatic.after > programmatic.before;
-  const docStable =
-    !!before &&
-    !!afterUp &&
-    !!afterDown &&
-    before.docScroll === 0 &&
-    afterUp.docScroll === 0 &&
-    afterDown.docScroll === 0;
+  // Swipe back up to return to the latest output.
+  await swipeTerminalHost(page, -200);
+  await page.waitForTimeout(400);
 
   console.log('\n--- Result ---');
-  console.log(
-    `scrollTop changed on finger-up drag: ${scrolledUp} (${before?.scrollTop} → ${afterUp?.scrollTop})`,
-  );
-  console.log(`programmatic scroll worked: ${programmaticWorked}`);
-  console.log(`document scroll stayed 0: ${docStable}`);
+  console.log(`scroll controls visible: ${hasScrollControls}`);
+  console.log(`Older button changed visible rows: ${buttonScrollWorked}`);
+  console.log(`touch swipe changed visible rows: ${touchScrollWorked}`);
+  console.log(`viewport scrollTop (informational): ${baseline.scrollTop} → ${afterTouchDown?.scrollTop}`);
+  console.log(`document scroll stayed 0: ${baseline.docScroll === 0 && (afterTouchDown?.docScroll ?? 0) === 0}`);
   console.log(`Screenshots: ${OUT_DIR}`);
 
   await browser.close();
 
-  if (!scrolledUp) {
+  if (!buttonScrollWorked && !touchScrollWorked) {
     process.exitCode = 1;
   }
 }

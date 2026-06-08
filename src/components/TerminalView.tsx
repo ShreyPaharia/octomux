@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { installTerminalTouchIsolation } from '@/lib/terminal-touch-isolation';
+import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { MobileTerminalScrollControls } from '@/components/MobileTerminalScrollControls';
 import { CloudOffIcon } from './icons';
@@ -42,7 +42,7 @@ export function TerminalView({
   const unmounted = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewportCleanup = useRef<(() => void) | null>(null);
-  const touchIsolationCleanup = useRef<(() => void) | null>(null);
+  const mobileTouchCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
@@ -190,8 +190,8 @@ export function TerminalView({
     }
     viewportCleanup.current?.();
     viewportCleanup.current = null;
-    touchIsolationCleanup.current?.();
-    touchIsolationCleanup.current = null;
+    mobileTouchCleanup.current?.();
+    mobileTouchCleanup.current = null;
 
     const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
 
@@ -224,7 +224,9 @@ export function TerminalView({
     }
 
     if (isMobile && containerRef.current) {
-      touchIsolationCleanup.current = installTerminalTouchIsolation(containerRef.current);
+      mobileTouchCleanup.current = installTerminalMobileTouch(containerRef.current, {
+        onScrollLines: (lines) => term.scrollLines(lines),
+      });
     }
 
     termRef.current = term;
@@ -287,8 +289,8 @@ export function TerminalView({
       termRef.current?.dispose();
       viewportCleanup.current?.();
       viewportCleanup.current = null;
-      touchIsolationCleanup.current?.();
-      touchIsolationCleanup.current = null;
+      mobileTouchCleanup.current?.();
+      mobileTouchCleanup.current = null;
     };
   }, [connect]);
 

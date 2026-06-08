@@ -6,8 +6,8 @@ const useMediaQueryMock = vi.fn(() => false);
 vi.mock('@/lib/use-media-query', () => ({
   useMediaQuery: (...args: unknown[]) => useMediaQueryMock(...args),
 }));
-vi.mock('@/lib/terminal-touch-isolation', () => ({
-  installTerminalTouchIsolation: () => () => {},
+vi.mock('@/lib/terminal-mobile-touch', () => ({
+  installTerminalMobileTouch: () => () => {},
 }));
 vi.mock('@/lib/terminal-visual-viewport', () => ({
   installTerminalVisualViewport: () => () => {},
