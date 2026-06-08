@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
+import { installTerminalMobileTouch, scrollTerminalByWheel } from '@/lib/terminal-mobile-touch';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { MobileTerminalScrollControls } from '@/components/MobileTerminalScrollControls';
 import { CloudOffIcon } from './icons';
@@ -73,12 +73,14 @@ export function TerminalView({
     }
   }, []);
 
+  // Buttons scroll via synthetic wheel events (same path as touch) so they work
+  // in both the normal buffer and an alternate-buffer TUI like Claude Code.
   const scrollOlder = useCallback(() => {
-    termRef.current?.scrollLines(-MOBILE_SCROLL_LINES);
+    if (containerRef.current) scrollTerminalByWheel(containerRef.current, -MOBILE_SCROLL_LINES);
   }, []);
 
   const scrollNewer = useCallback(() => {
-    termRef.current?.scrollLines(MOBILE_SCROLL_LINES);
+    if (containerRef.current) scrollTerminalByWheel(containerRef.current, MOBILE_SCROLL_LINES);
   }, []);
 
   const scrollToLatest = useCallback(() => {
@@ -224,9 +226,7 @@ export function TerminalView({
     }
 
     if (isMobile && containerRef.current) {
-      mobileTouchCleanup.current = installTerminalMobileTouch(containerRef.current, {
-        onScrollLines: (lines) => term.scrollLines(lines),
-      });
+      mobileTouchCleanup.current = installTerminalMobileTouch(containerRef.current);
     }
 
     termRef.current = term;
