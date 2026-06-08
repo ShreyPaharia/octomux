@@ -96,6 +96,7 @@ export function registerCreateTask(program: Command): void {
       '--harness <id>',
       'coding agent (harness id): claude-code | cursor (default: server setting)',
     )
+    .option('--model <id>', 'per-task model override (e.g. claude-opus-4-8, claude-sonnet-4-6)')
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
@@ -160,6 +161,7 @@ export function registerCreateTask(program: Command): void {
         run_mode: mode,
         worktree_path: opts.worktreePath,
         ...(opts.harness ? { harness_id: opts.harness } : {}),
+        ...(opts.model ? { model: opts.model } : {}),
       });
 
       if (json) {

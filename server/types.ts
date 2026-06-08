@@ -84,6 +84,8 @@ export interface Task {
   worktree_id: string | null;
   /** Optional agent name (matches `agents/<name>.md`); null launches plain `claude`. */
   agent: string | null;
+  /** Optional per-task model override (e.g. 'claude-sonnet-4-6'). Overrides global flag. */
+  model: string | null;
   harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */
@@ -188,6 +190,7 @@ export interface CreateTaskRequest {
   agent?: string;
   workflow_status?: WorkflowStatus;
   harness_id?: string;
+  model?: string | null;
 }
 
 export interface AddAgentRequest {

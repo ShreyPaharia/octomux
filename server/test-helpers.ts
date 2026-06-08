@@ -382,6 +382,7 @@ export const TASKS_TABLE_COLUMNS = [
   'created_at',
   'updated_at',
   'agent',
+  'model',
 ];
 
 export const AGENTS_TABLE_COLUMNS = [

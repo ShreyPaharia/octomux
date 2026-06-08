@@ -614,6 +614,23 @@ describe('POST /api/tasks', () => {
     const task = getTask(db, res.body.id);
     expect(task?.run_mode).toBe('new');
   });
+
+  it('persists model when provided', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ ...validPayload, model: 'claude-sonnet-4-6' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.model).toBe('claude-sonnet-4-6');
+    const task = getTask(db, res.body.id);
+    expect((task as any).model).toBe('claude-sonnet-4-6');
+  });
+
+  it('returns null model when not provided', async () => {
+    const res = await request(app).post('/api/tasks').send(validPayload);
+    expect(res.status).toBe(201);
+    expect(res.body.model).toBeNull();
+  });
 });
 
 // ─── POST /api/tasks/:id/start ──────────────────────────────────────────────

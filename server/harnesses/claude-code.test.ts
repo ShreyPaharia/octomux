@@ -61,6 +61,52 @@ describe('claudeCodeHarness', () => {
   });
 });
 
+describe('buildLaunchCommand model override', () => {
+  it('appends --model when model is set and flags has no --model', () => {
+    expect(
+      claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', model: 'sonnet' }),
+    ).toBe('claude --session-id s1 --model sonnet');
+  });
+
+  it('replaces --model in flags with per-task model', () => {
+    expect(
+      claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', flags: ' --model opus', model: 'sonnet' }),
+    ).toBe('claude --session-id s1 --model sonnet');
+  });
+
+  it('preserves non-model flags alongside per-task model', () => {
+    expect(
+      claudeCodeHarness.buildLaunchCommand({
+        sessionId: 's1',
+        flags: ' --dangerously-skip-permissions --model opus',
+        model: 'sonnet',
+      }),
+    ).toBe('claude --session-id s1 --dangerously-skip-permissions --model sonnet');
+  });
+
+  it('leaves flags unchanged when no per-task model', () => {
+    expect(
+      claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', flags: ' --model opus' }),
+    ).toBe('claude --session-id s1 --model opus');
+  });
+});
+
+describe('buildResumeCommand model override', () => {
+  it('replaces --model in flags with per-task model', () => {
+    expect(
+      claudeCodeHarness.buildResumeCommand({ sessionId: 's1', flags: ' --model opus', model: 'sonnet' }),
+    ).toBe('claude --resume s1 --model sonnet');
+  });
+});
+
+describe('buildContinueCommand model override', () => {
+  it('replaces --model in flags with per-task model', () => {
+    expect(
+      claudeCodeHarness.buildContinueCommand({ sessionId: 's1', flags: ' --model opus', model: 'sonnet' }),
+    ).toBe('claude --continue --session-id s1 --model sonnet');
+  });
+});
+
 describe('claudeCodeHarness.installHooks', () => {
   it('writes settings.local.json with token in URLs', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));

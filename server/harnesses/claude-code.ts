@@ -5,6 +5,13 @@ import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import type { OctomuxSettings } from '../settings.js';
 
+/** Strip any existing --model <value> from a flags string, then append --model <model>. */
+function applyModel(flags: string, model: string | null | undefined): string {
+  if (!model) return flags;
+  const stripped = flags.replace(/\s*--model\s+\S+/g, '');
+  return `${stripped} --model ${model}`;
+}
+
 function buildHookEvents(baseUrl: string, token: string) {
   const url = (event: string) => `${baseUrl}/api/hooks/${event}?token=${encodeURIComponent(token)}`;
   return {
@@ -24,17 +31,20 @@ export const claudeCodeHarness: Harness = {
     return crypto.randomUUID();
   },
 
-  buildLaunchCommand({ sessionId, agent, flags = '' }: HarnessLaunchOpts): string {
+  buildLaunchCommand({ sessionId, agent, flags = '', model }: HarnessLaunchOpts): string {
     const agentPart = agent ? ` --agent ${validateAgentName(agent)}` : '';
-    return `claude${agentPart} --session-id ${sessionId}${flags}`;
+    const resolvedFlags = applyModel(flags, model);
+    return `claude${agentPart} --session-id ${sessionId}${resolvedFlags}`;
   },
 
-  buildResumeCommand({ sessionId, flags = '' }: HarnessResumeOpts): string {
-    return `claude --resume ${sessionId}${flags}`;
+  buildResumeCommand({ sessionId, flags = '', model }: HarnessResumeOpts): string {
+    const resolvedFlags = applyModel(flags, model);
+    return `claude --resume ${sessionId}${resolvedFlags}`;
   },
 
-  buildContinueCommand({ sessionId, flags = '' }: HarnessResumeOpts): string {
-    return `claude --continue --session-id ${sessionId}${flags}`;
+  buildContinueCommand({ sessionId, flags = '', model }: HarnessResumeOpts): string {
+    const resolvedFlags = applyModel(flags, model);
+    return `claude --continue --session-id ${sessionId}${resolvedFlags}`;
   },
 
   async installHooks(worktreePath: string, baseUrl: string, hookToken: string) {

@@ -471,6 +471,7 @@ export function initDb(instance: Database.Database): void {
     `harness_id TEXT NOT NULL DEFAULT 'claude-code'`,
     taskColsForAgent,
   );
+  addColumn('tasks', 'model', 'model TEXT', taskColsForAgent);
 
   // ─── Drop legacy columns from tasks ──────────────────────────────────────
   // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),

@@ -266,6 +266,22 @@ describe('startTask', () => {
     expect(promptFileCall).toBeUndefined();
   });
 
+  // ─── Per-task model ─────────────────────────────────────────────────────
+
+  it('threads task.model into the launch command', async () => {
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task, model: 'claude-sonnet-4-6' } as any);
+
+    const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'tmux',
+      argsInclude: ['send-keys', 'Enter'],
+    });
+    const claudeCmd = (sendKeysCall![1] as string[]).find((a: string) =>
+      a.includes('claude --session-id'),
+    );
+    expect(claudeCmd).toContain('--model claude-sonnet-4-6');
+  });
+
   // ─── Custom branch and base branch ─────────────────────────────────────
 
   it('uses user-specified branch name when provided', async () => {

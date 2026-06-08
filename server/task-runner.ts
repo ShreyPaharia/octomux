@@ -818,6 +818,7 @@ export async function startTask(task: Task): Promise<void> {
       sessionId: sessionIdForLaunch,
       agent: agentName,
       flags,
+      model: (task as any).model ?? null,
       workspacePath: setup.worktreePath,
     });
     await sendHarnessCommand({
@@ -936,6 +937,7 @@ export async function addAgent(
     sessionId: sessionIdForLaunch,
     agent: resolvedAgent,
     flags,
+    model: (task as any).model ?? null,
     workspacePath: task.worktree!,
   });
   (async () => {
@@ -1423,11 +1425,13 @@ export async function resumeTask(task: Task): Promise<void> {
         const harness = getHarness(agent.harness_id);
         const flags = harness.resolveFlags(await getSettings());
 
+        const taskModel = (task as any).model ?? null;
         let baseCmd: string;
         if (agent.harness_session_id) {
           baseCmd = harness.buildResumeCommand({
             sessionId: agent.harness_session_id,
             flags,
+            model: taskModel,
             workspacePath: cwd,
           });
         } else {
@@ -1435,6 +1439,7 @@ export async function resumeTask(task: Task): Promise<void> {
           const continueCmd = harness.buildContinueCommand({
             sessionId: newId,
             flags,
+            model: taskModel,
             workspacePath: cwd,
           });
           if (continueCmd !== null) {
@@ -1444,6 +1449,7 @@ export async function resumeTask(task: Task): Promise<void> {
               sessionId: newId,
               agent: agent.agent,
               flags,
+              model: taskModel,
               workspacePath: cwd,
             });
             logger.warn(
@@ -1596,6 +1602,15 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   const harness = getHarness(agent.harness_id);
   const flags = harness.resolveFlags(await getSettings());
 
+  // Inherit model from the target task (if hopping to a task).
+  let hopModel: string | null = null;
+  if (targetTaskId) {
+    const hopTask = db.prepare(`SELECT model FROM tasks WHERE id = ?`).get(targetTaskId) as
+      | { model: string | null }
+      | undefined;
+    hopModel = hopTask?.model ?? null;
+  }
+
   await harness.syncAgents(cwd);
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
@@ -1604,6 +1619,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     baseCmd = harness.buildResumeCommand({
       sessionId: agent.harness_session_id,
       flags,
+      model: hopModel,
       workspacePath: cwd,
     });
   } else {
@@ -1611,6 +1627,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     const continueCmd = harness.buildContinueCommand({
       sessionId: newId,
       flags,
+      model: hopModel,
       workspacePath: cwd,
     });
     if (continueCmd !== null) {
@@ -1620,6 +1637,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
         sessionId: newId,
         agent: agent.agent,
         flags,
+        model: hopModel,
         workspacePath: cwd,
       });
       logger.warn(

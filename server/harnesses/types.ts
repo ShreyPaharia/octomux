@@ -44,6 +44,8 @@ export interface HarnessLaunchOpts {
   sessionId: string;
   agent?: string | null;
   flags?: string;
+  /** Per-task model override. When set, replaces any --model in flags. */
+  model?: string | null;
   /** Absolute cwd for harnesses where the CLI needs an explicit `--workspace` (Cursor). */
   workspacePath?: string;
 }
@@ -51,6 +53,8 @@ export interface HarnessLaunchOpts {
 export interface HarnessResumeOpts {
   sessionId: string;
   flags?: string;
+  /** Per-task model override. When set, replaces any --model in flags. */
+  model?: string | null;
   workspacePath?: string;
 }
 

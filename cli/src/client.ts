@@ -109,6 +109,7 @@ export interface OctomuxClient {
     run_mode?: RunMode;
     worktree_path?: string;
     harness_id?: string;
+    model?: string | null;
   }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
@@ -116,7 +117,7 @@ export interface OctomuxClient {
   deleteTask(id: string): Promise<void>;
   addAgent(
     taskId: string,
-    data?: { prompt?: string; agent?: string; label?: string },
+    data?: { prompt?: string; agent?: string; label?: string; model?: string },
   ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
