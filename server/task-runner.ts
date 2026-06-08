@@ -16,6 +16,7 @@ import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
 import { computeMergeBase } from './git-commits.js';
+import { sendMessageToAgent, normalizePromptForPaste } from './tmux-input.js';
 
 const logger = childLogger('task-runner');
 
@@ -123,6 +124,76 @@ async function sendHarnessCommand(args: {
   }
 }
 
+/** How long to let an agent boot + submit its prompt before we start checking. */
+const PROMPT_DELIVERY_GRACE_MS = 15000;
+/** Additional window to keep polling for first hook activity after the grace. */
+const PROMPT_DELIVERY_TIMEOUT_MS = 30000;
+const PROMPT_DELIVERY_POLL_MS = 2500;
+
+/**
+ * Decide whether a launched agent's initial prompt needs re-delivering.
+ *
+ * An agent that actually received its prompt submits it, firing a
+ * UserPromptSubmit hook (and later PostToolUse/Stop) — each stamps
+ * `hook_activity_updated_at`. No SessionStart hook is installed, so an agent
+ * that launched idle (prompt dropped by a shell race) never stamps it. A still
+ * null timestamp on a still running agent therefore means the prompt was lost.
+ */
+export function shouldRedeliverPrompt(
+  row: { status: string; hook_activity_updated_at: string | null } | undefined,
+): boolean {
+  if (!row) return false; // agent row gone (task deleted) — nothing to do
+  if (row.status === 'stopped') return false; // closed/stopped — leave it
+  return row.hook_activity_updated_at == null;
+}
+
+/**
+ * Safety net for the launch-time prompt-delivery race. After the first agent
+ * is launched with an initial prompt, watch for the first sign the prompt was
+ * actually consumed (any hook firing). If nothing fires within the grace +
+ * timeout window, the prompt was dropped before the shell/TUI could read it —
+ * re-deliver it via the proven bracketed-paste path. Fire-and-forget.
+ */
+function verifyPromptDelivered(args: {
+  taskId: string;
+  agentId: string;
+  session: string;
+  windowIndex: number;
+  prompt: string;
+}): void {
+  if (process.env.NODE_ENV === 'test') return;
+  const db = getDb();
+  const read = () =>
+    db
+      .prepare('SELECT status, hook_activity_updated_at FROM agents WHERE id = ?')
+      .get(args.agentId) as { status: string; hook_activity_updated_at: string | null } | undefined;
+  void (async () => {
+    await sleep(PROMPT_DELIVERY_GRACE_MS);
+    const deadline = Date.now() + PROMPT_DELIVERY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (!shouldRedeliverPrompt(read())) return; // consumed, stopped, or gone
+      await sleep(PROMPT_DELIVERY_POLL_MS);
+    }
+    if (!shouldRedeliverPrompt(read())) return;
+    logger.warn(
+      { task_id: args.taskId, agent_id: args.agentId, operation: 'verifyPromptDelivered' },
+      'initial prompt not consumed after launch — re-delivering',
+    );
+    try {
+      await sendMessageToAgent(
+        args.session,
+        args.windowIndex,
+        normalizePromptForPaste(args.prompt),
+      );
+    } catch (err) {
+      logger.error(
+        { task_id: args.taskId, agent_id: args.agentId, err },
+        'verifyPromptDelivered: re-delivery failed',
+      );
+    }
+  })();
+}
+
 export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
   // Auto-fix formatting drift
   try {
@@ -148,27 +219,55 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
   }
 }
 
+const SHELL_READY_SENTINEL = 'OCTOMUX_SHELL_READY_';
+
 /**
- * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
+ * Wait for the shell in a tmux pane to be ready before sending it a command.
+ *
+ * We can't reliably detect readiness by scraping the prompt: custom prompts
+ * (starship, powerlevel10k, right-aligned segments) don't end the captured
+ * line with a `$`/`❯`/`>` character, so a prompt-regex either never matches
+ * (degrading to a blind timeout) or matches a transient redraw and fires too
+ * early — sending the real command into a shell that isn't yet consuming
+ * input, which silently drops it. That race is the root cause of agents that
+ * launch idle with their initial prompt never delivered.
+ *
+ * Instead we run a sentinel handshake: repeatedly `echo` a unique token and
+ * wait until that token's *output* shows up in the pane. The output only
+ * appears once the shell's line editor is actually executing input, so a
+ * round-trip is positive proof the shell will accept the command that follows.
+ * The token is split with `""` so the typed command line (which contains
+ * `echo OCTOMUX_SHELL_READY_""<nonce>`) never matches the resolved token,
+ * letting us distinguish the command echo from its result.
  */
 async function waitForShellReady(
   target: string,
-  timeoutMs = 4500,
-  intervalMs = 100,
+  timeoutMs = 8000,
+  intervalMs = 250,
   initialDelayMs = 75,
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
+  const nonce = nanoid(10);
+  const token = `${SHELL_READY_SENTINEL}${nonce}`;
+  const sentinelCmd = `echo ${SHELL_READY_SENTINEL}""${nonce}`;
   await sleep(initialDelayMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    // (Re)send the sentinel each iteration: if the shell wasn't accepting
+    // input yet, the earlier attempt was dropped — keep poking until one
+    // round-trips.
+    await execFile('tmux', ['send-keys', '-t', target, '-l', sentinelCmd]).catch(() => {});
+    await execFile('tmux', ['send-keys', '-t', target, 'Enter']).catch(() => {});
+    await sleep(intervalMs);
     try {
       const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      if (/[$%>❯#]\s*$/m.test(stdout)) return;
+      if (stdout.includes(token)) return;
     } catch {
       // pane may not exist yet
     }
-    await sleep(intervalMs);
   }
+  // Timed out without a confirmed round-trip — proceed best-effort. The
+  // post-launch delivery check (verifyPromptDelivered) is the safety net.
 }
 
 /**
@@ -730,6 +829,17 @@ export async function startTask(task: Task): Promise<void> {
     });
     // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
     void harness.postLaunch?.(`${session}:${windowIndex}`);
+    // Fire-and-forget: re-deliver the prompt if the launch-time send was
+    // dropped before the shell/TUI could read it (see verifyPromptDelivered).
+    if (task.initial_prompt) {
+      verifyPromptDelivered({
+        taskId: id,
+        agentId,
+        session,
+        windowIndex,
+        prompt: task.initial_prompt,
+      });
+    }
     logger.info(
       {
         task_id: id,

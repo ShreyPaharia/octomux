@@ -107,6 +107,7 @@ const {
   cleanupOrphanedViewerSessions,
   preflightWorktree,
   hopAgent,
+  shouldRedeliverPrompt,
 } = await import('./task-runner.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
@@ -142,6 +143,33 @@ describe('slugifyTitle', () => {
 
   it.each(cases)('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
     expect(slugifyTitle(title, id)).toBe(expected);
+  });
+});
+
+// ─── shouldRedeliverPrompt ──────────────────────────────────────────────────
+
+describe('shouldRedeliverPrompt', () => {
+  it('re-delivers when a running agent never recorded hook activity', () => {
+    expect(shouldRedeliverPrompt({ status: 'running', hook_activity_updated_at: null })).toBe(true);
+  });
+
+  it('does not re-deliver once any hook activity is recorded', () => {
+    expect(
+      shouldRedeliverPrompt({
+        status: 'running',
+        hook_activity_updated_at: '2026-06-08 21:46:55',
+      }),
+    ).toBe(false);
+  });
+
+  it('does not re-deliver a stopped agent', () => {
+    expect(shouldRedeliverPrompt({ status: 'stopped', hook_activity_updated_at: null })).toBe(
+      false,
+    );
+  });
+
+  it('does not re-deliver when the agent row is gone', () => {
+    expect(shouldRedeliverPrompt(undefined)).toBe(false);
   });
 });
 
