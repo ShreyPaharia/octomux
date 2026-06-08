@@ -183,6 +183,27 @@ CREATE TABLE IF NOT EXISTS hook_settings (
   PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS team_schedules (
+  name        TEXT PRIMARY KEY,
+  repo_path   TEXT NOT NULL,
+  config_path TEXT NOT NULL,
+  cron        TEXT NOT NULL,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS team_runs (
+  id           TEXT PRIMARY KEY,
+  team         TEXT NOT NULL,
+  lead_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE SET NULL,
+  started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  status       TEXT NOT NULL DEFAULT 'running'
+);
+CREATE INDEX IF NOT EXISTS idx_team_runs_team ON team_runs(team);
+CREATE INDEX IF NOT EXISTS idx_team_runs_status ON team_runs(status);
+
 `;
 
 /**

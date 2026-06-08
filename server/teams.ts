@@ -1,0 +1,284 @@
+import fs from 'fs';
+import path from 'path';
+import yaml from 'js-yaml';
+import { nanoid } from 'nanoid';
+import { getDb } from './db.js';
+import { startTask } from './task-runner.js';
+import { SELECT_TASK_SQL } from './task-select.js';
+import { childLogger } from './logger.js';
+import type { Task } from './types.js';
+
+const logger = childLogger('teams');
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface TeamRosterEntry {
+  role: string;
+  skeleton: string;
+  model: string;
+  overlay?: string;
+}
+
+export interface TeamConfig {
+  name: string;
+  repo?: string;
+  base_branch?: string;
+  schedule?: string;
+  notify_command?: string;
+  journal_dir?: string;
+  incidents_dir?: string;
+  roster: TeamRosterEntry[];
+}
+
+// ─── Parsing + Validation ─────────────────────────────────────────────────────
+
+export function parseTeamConfig(raw: string): TeamConfig {
+  const doc = yaml.load(raw);
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    throw new Error('team.yaml must be a YAML mapping');
+  }
+  return doc as TeamConfig;
+}
+
+export function validateTeamConfig(config: unknown): TeamConfig {
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+    throw new Error('team config must be an object');
+  }
+  const c = config as Record<string, unknown>;
+
+  if (!c.name || typeof c.name !== 'string') {
+    throw new Error('team config: name is required');
+  }
+  if (!Array.isArray(c.roster) || c.roster.length === 0) {
+    throw new Error('team config: roster must be a non-empty array');
+  }
+  const roster = c.roster as TeamRosterEntry[];
+  const hasLead = roster.some((r) => r.role === 'lead');
+  if (!hasLead) {
+    throw new Error('team config: roster must include a lead role');
+  }
+
+  return c as unknown as TeamConfig;
+}
+
+// ─── Skeleton loading ─────────────────────────────────────────────────────────
+
+function skeletonPath(skeletonName: string): string {
+  const builtInDir = path.resolve(new URL('../agents', import.meta.url).pathname);
+  return path.join(builtInDir, `${skeletonName}.md`);
+}
+
+function loadSkeleton(skeletonName: string): string {
+  const p = skeletonPath(skeletonName);
+  if (!fs.existsSync(p)) {
+    throw new Error(`skeleton not found: ${skeletonName} (expected at ${p})`);
+  }
+  return fs.readFileSync(p, 'utf-8');
+}
+
+// ─── runTeam ─────────────────────────────────────────────────────────────────
+
+export interface RunTeamOpts {
+  name: string;
+  repoPath: string;
+}
+
+/**
+ * Read .octomux/team.yaml from repoPath, create a Lead task, start it.
+ * Returns the new task id.
+ */
+export async function runTeam(opts: RunTeamOpts): Promise<string> {
+  const { name, repoPath } = opts;
+
+  const configPath = path.join(repoPath, '.octomux', 'team.yaml');
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`team.yaml not found at ${configPath}`);
+  }
+
+  const raw = fs.readFileSync(configPath, 'utf-8');
+  const parsed = parseTeamConfig(raw);
+  const config = validateTeamConfig(parsed);
+
+  const lead = config.roster.find((r) => r.role === 'lead')!;
+
+  // Load lead skeleton
+  const skeletonContent = loadSkeleton(lead.skeleton);
+
+  // Load optional overlay from target repo
+  let overlayContent = '';
+  if (lead.overlay) {
+    const overlayPath = path.join(repoPath, lead.overlay);
+    if (fs.existsSync(overlayPath)) {
+      overlayContent = fs.readFileSync(overlayPath, 'utf-8');
+    }
+  }
+
+  // Build kick-off prompt for the Lead
+  const rosterSummary = config.roster
+    .map((r) => `  - role: ${r.role}, skeleton: ${r.skeleton}, model: ${r.model}`)
+    .join('\n');
+
+  const prompt = [
+    `# Team: ${config.name}`,
+    '',
+    '## Your Role: Lead',
+    '',
+    skeletonContent,
+    overlayContent ? `\n## Repo-specific overlay\n\n${overlayContent}` : '',
+    '',
+    '## Team Configuration',
+    '',
+    `Team config: ${configPath}`,
+    `Base branch: ${config.base_branch ?? 'main'}`,
+    `Journal dir: ${config.journal_dir ?? 'desk/journal'}`,
+    `Incidents dir: ${config.incidents_dir ?? 'desk/incidents'}`,
+    `Notify command: ${config.notify_command ?? ''}`,
+    '',
+    '## Full Roster',
+    '',
+    rosterSummary,
+    '',
+    '## Instructions',
+    '',
+    `Spawn worker tasks via: octomux create-task --model <role model> ...`,
+    `After workers finish, run: ${config.notify_command ?? 'echo "No notify_command configured"'}`,
+    'Never merge, deploy, or write live config. Open PRs; let the human decide.',
+  ]
+    .filter((l) => l !== null)
+    .join('\n');
+
+  const db = getDb();
+  const id = nanoid(12);
+  const worktreeId = nanoid(12);
+
+  db.prepare(
+    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
+     VALUES (?, '', ?, NULL, ?, 'new', 'available')`,
+  ).run(worktreeId, repoPath, config.base_branch ?? 'main');
+
+  db.prepare(
+    `INSERT INTO tasks
+       (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, harness_id, model, source)
+     VALUES (?, ?, ?, 'setting_up', 'planned', ?, ?, 'claude-code', ?, 'team_run')`,
+  ).run(
+    id,
+    `Team run: ${name}`,
+    `Automated desk crew run for team ${name}`,
+    prompt,
+    worktreeId,
+    lead.model ?? null,
+  );
+
+  const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
+  await startTask(created);
+
+  logger.info({ task_id: id, team: name }, 'team run started');
+  return id;
+}
+
+// ─── Schedule management ──────────────────────────────────────────────────────
+
+export interface TeamScheduleRow {
+  name: string;
+  repo_path: string;
+  config_path: string;
+  cron: string;
+  enabled: number;
+  last_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamRunRow {
+  id: string;
+  team: string;
+  lead_task_id: string;
+  started_at: string;
+  status: string;
+}
+
+export function upsertTeamSchedule(opts: { name: string; repoPath: string; cron: string }): void {
+  const db = getDb();
+  const configPath = path.join(opts.repoPath, '.octomux', 'team.yaml');
+  db.prepare(
+    `INSERT INTO team_schedules (name, repo_path, config_path, cron, enabled, updated_at)
+     VALUES (?, ?, ?, ?, 1, datetime('now'))
+     ON CONFLICT(name) DO UPDATE SET
+       repo_path   = excluded.repo_path,
+       config_path = excluded.config_path,
+       cron        = excluded.cron,
+       enabled     = 1,
+       updated_at  = datetime('now')`,
+  ).run(opts.name, opts.repoPath, configPath, opts.cron);
+}
+
+export function listTeamSchedules(): TeamScheduleRow[] {
+  const db = getDb();
+  return db.prepare(`SELECT * FROM team_schedules ORDER BY name`).all() as TeamScheduleRow[];
+}
+
+// ─── Cron evaluation ─────────────────────────────────────────────────────────
+
+/**
+ * Minimal 5-field cron parser: "min hour dom mon dow"
+ * Supports: exact values, asterisks. Returns true if now matches the expr.
+ * Does NOT support ranges, step values, or lists — sufficient for daily schedules.
+ */
+export function cronMatches(expr: string, now: Date): boolean {
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  const [min, hour, dom, mon, dow] = fields;
+
+  const matches = (field: string, value: number): boolean => {
+    if (field === '*') return true;
+    const n = parseInt(field, 10);
+    return !isNaN(n) && n === value;
+  };
+
+  return (
+    matches(min!, now.getUTCMinutes()) &&
+    matches(hour!, now.getUTCHours()) &&
+    matches(dom!, now.getUTCDate()) &&
+    matches(mon!, now.getUTCMonth() + 1) &&
+    matches(dow!, now.getUTCDay())
+  );
+}
+
+/**
+ * Called on each poller tick. For each enabled schedule, if the cron matches
+ * the current minute AND no active team_run exists, fire a team run.
+ */
+export async function pollTeamSchedules(now: Date = new Date()): Promise<void> {
+  const db = getDb();
+  const schedules = db
+    .prepare(`SELECT * FROM team_schedules WHERE enabled = 1`)
+    .all() as TeamScheduleRow[];
+
+  for (const schedule of schedules) {
+    if (!cronMatches(schedule.cron, now)) continue;
+
+    // Idempotency: skip if already a running team_run for this team
+    const active = db
+      .prepare(`SELECT 1 FROM team_runs WHERE team = ? AND status = 'running' LIMIT 1`)
+      .get(schedule.name);
+    if (active) {
+      logger.info({ team: schedule.name }, 'team run already active, skipping');
+      continue;
+    }
+
+    try {
+      const leadTaskId = await runTeam({ name: schedule.name, repoPath: schedule.repo_path });
+      const runId = nanoid(12);
+      db.prepare(
+        `INSERT INTO team_runs (id, team, lead_task_id, started_at, status)
+         VALUES (?, ?, ?, datetime('now'), 'running')`,
+      ).run(runId, schedule.name, leadTaskId);
+      db.prepare(`UPDATE team_schedules SET last_run_at = datetime('now') WHERE name = ?`).run(
+        schedule.name,
+      );
+      logger.info({ team: schedule.name, task_id: leadTaskId }, 'team schedule fired');
+    } catch (err) {
+      logger.error({ team: schedule.name, err }, 'team schedule run failed');
+    }
+  }
+}

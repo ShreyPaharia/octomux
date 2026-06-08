@@ -161,6 +161,12 @@ export interface OctomuxClient {
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
   getTaskRefs(taskId: string): Promise<{ refs: TaskExternalRef[] }>;
+
+  teamRun(data: { name: string; repo_path: string }): Promise<{ task_id: string }>;
+  teamSchedule(data: { name: string; repo_path: string; cron: string }): Promise<{ ok: boolean }>;
+  listTeams(): Promise<
+    Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
+  >;
 }
 
 function qs(params: Record<string, string | undefined>): string {
@@ -335,6 +341,23 @@ export function createClient(serverUrl: string): OctomuxClient {
         baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/refs`,
       );
+    },
+    teamRun(data) {
+      return request<{ task_id: string }>(baseUrl, '/teams/run', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    teamSchedule(data) {
+      return request<{ ok: boolean }>(baseUrl, '/teams/schedule', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    listTeams() {
+      return request<
+        Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
+      >(baseUrl, '/teams');
     },
   };
 }

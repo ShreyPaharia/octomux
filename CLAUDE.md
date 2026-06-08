@@ -40,6 +40,8 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
     `installHooks`, `syncAgents`, `resolveFlags`, `validateSettings`. Spec at
     `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
   - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
+  - `teams.ts` — team feature: `parseTeamConfig`, `validateTeamConfig`, `runTeam`, `upsertTeamSchedule`,
+    `listTeamSchedules`, `cronMatches`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
 - `src/` — React SPA (pages, components, lib/api.ts)
 - `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
 - `e2e/` — Playwright E2E tests
@@ -75,6 +77,74 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 
 - **close** = stop agents + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
+
+## Agent Teams
+
+Reusable crews of agents that run on a schedule against any repo. Config-as-code: definitions
+live in `<repo>/.octomux/team.yaml`; octomux reads at run time, never stores in DB.
+
+### CLI commands
+
+```
+octomux team run <name> [-r <repo-path>]       # fire immediately from .octomux/team.yaml
+octomux team schedule <name> --cron <expr> [-r <path>]  # upsert cron schedule
+octomux team list                              # list configured schedules
+```
+
+### team.yaml schema
+
+```yaml
+name: my-team # must match name passed to CLI
+base_branch: main # optional; default main
+schedule: '0 7 * * 1-5' # optional; only used as reference — use `team schedule` to activate
+notify_command: "slack-notify.sh '#alerts'" # optional; passed to Lead
+journal_dir: desk/journal # optional; default desk/journal
+incidents_dir: desk/incidents # optional; default desk/incidents
+roster:
+  - role: lead # REQUIRED; exactly one lead
+    skeleton: desk-lead # filename under agents/ (no .md)
+    model: claude-opus-4-8
+    overlay: .octomux/overlays/lead.md # optional repo-specific override
+  - role: researcher
+    skeleton: researcher
+    model: claude-sonnet-4-6
+  - role: risk-ops
+    skeleton: risk-ops
+    model: claude-sonnet-4-6
+```
+
+### Skeletons
+
+Generic agent skeletons live in `agents/<name>.md` (same dir as `orchestrator.md`).
+Built-in: `desk-lead`, `researcher`, `risk-ops`. A Lead receives the full roster in its
+kick-off prompt and spawns workers via `octomux create-task --model <model> ...`.
+
+### Per-task model override
+
+`tasks.model TEXT` column added in Phase 0. Propagated through:
+
+- `POST /api/tasks` body: `{ model: "claude-opus-4-8" }` → stored in DB
+- `POST /api/tasks/:id/agents` body: `{ model: ... }` → stored on agent launch
+- `octomux create-task --model <id>` and `octomux add-agent --model <id>`
+- Harness: `applyModel(flags, model)` strips any existing `--model` then appends the per-task one
+
+### DB tables (additive migrations)
+
+```sql
+-- operational state only; definitions stay in team.yaml
+team_schedules (name PK, repo_path, config_path, cron, enabled, last_run_at, created_at, updated_at)
+team_runs      (id PK, team, lead_task_id → tasks.id, started_at, status)
+```
+
+### Poller integration
+
+`startPolling()` sets a 60 s interval calling `pollTeamSchedules()`. For each enabled schedule:
+
+1. evaluate 5-field cron (`* * * * *`) against current UTC minute
+2. skip if a `team_runs` row with `status='running'` already exists (idempotent)
+3. call `runTeam()`, insert `team_runs` row, update `last_run_at`
+
+Cron parser supports exact values and `*` only — no ranges, steps, or lists.
 
 ## Testing Patterns
 

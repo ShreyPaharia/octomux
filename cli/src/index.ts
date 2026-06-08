@@ -29,6 +29,7 @@ import { registerHooksInstall } from './commands/hooks-install.js';
 import { registerHooksList } from './commands/hooks-list.js';
 import { registerListIntegrations } from './commands/list-integrations.js';
 import { registerInit } from './commands/init.js';
+import { registerTeam } from './commands/team.js';
 
 const program = new Command();
 
@@ -69,6 +70,7 @@ registerHooksInstall(program);
 registerHooksList(program);
 registerListIntegrations(program);
 registerInit(program);
+registerTeam(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();

@@ -49,6 +49,7 @@ export const TASK_DEFAULTS: Task = {
   worktree_id: null,
   harness_id: 'claude-code',
   agent: null,
+  model: null,
   error: null,
   current_summary: null,
   current_summary_updated_at: null,

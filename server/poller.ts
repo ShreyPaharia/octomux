@@ -22,11 +22,13 @@ const STATUS_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const DELETE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60 * 60 * 1000; // 1h
+const TEAM_SCHEDULE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000; // check every minute
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
 let mergedPrTimer: ReturnType<typeof setInterval> | null = null;
 let deleteTimer: ReturnType<typeof setInterval> | null = null;
+let teamScheduleTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
@@ -911,6 +913,16 @@ export function startPolling(): void {
   if (DELETE_INTERVAL > 0) {
     deleteTimer = setInterval(pollSoftDeletes, DELETE_INTERVAL);
   }
+  if (TEAM_SCHEDULE_INTERVAL > 0) {
+    teamScheduleTimer = setInterval(async () => {
+      try {
+        const { pollTeamSchedules } = await import('./teams.js');
+        await pollTeamSchedules();
+      } catch (err) {
+        logger.error({ err, operation: 'pollTeamSchedules' }, 'pollTeamSchedules failed');
+      }
+    }, TEAM_SCHEDULE_INTERVAL);
+  }
 }
 
 export function stopPolling(): void {
@@ -929,5 +941,9 @@ export function stopPolling(): void {
   if (deleteTimer) {
     clearInterval(deleteTimer);
     deleteTimer = null;
+  }
+  if (teamScheduleTimer) {
+    clearInterval(teamScheduleTimer);
+    teamScheduleTimer = null;
   }
 }
