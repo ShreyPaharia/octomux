@@ -25,8 +25,10 @@ let tmpDir: string;
 beforeEach(() => {
   db = createTestDb();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-teams-'));
-  // Create a fake target repo dir
-  fs.mkdirSync(path.join(tmpDir, '.octomux'), { recursive: true });
+  // Create .octomux/agents/ so skeleton loading works
+  fs.mkdirSync(path.join(tmpDir, '.octomux', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, '.octomux', 'agents', 'desk-lead.md'), '# Lead');
+  fs.writeFileSync(path.join(tmpDir, '.octomux', 'agents', 'researcher.md'), '# Researcher');
 });
 
 afterEach(() => {

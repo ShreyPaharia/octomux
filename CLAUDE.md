@@ -115,9 +115,9 @@ roster:
 
 ### Skeletons
 
-Generic agent skeletons live in `agents/<name>.md` (same dir as `orchestrator.md`).
-Built-in: `desk-lead`, `researcher`, `risk-ops`. A Lead receives the full roster in its
-kick-off prompt and spawns workers via `octomux create-task --model <model> ...`.
+Skeletons live in the **target repo** at `<repo>/.octomux/agents/<name>.md`. octomux
+ships no built-in skeletons — each consuming repo owns its own. A Lead receives the full
+roster in its kick-off prompt and spawns workers via `octomux create-task --model <model> ...`.
 
 ### Per-task model override
 

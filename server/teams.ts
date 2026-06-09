@@ -63,13 +63,8 @@ export function validateTeamConfig(config: unknown): TeamConfig {
 
 // ─── Skeleton loading ─────────────────────────────────────────────────────────
 
-function skeletonPath(skeletonName: string): string {
-  const builtInDir = path.resolve(new URL('../agents', import.meta.url).pathname);
-  return path.join(builtInDir, `${skeletonName}.md`);
-}
-
-function loadSkeleton(skeletonName: string): string {
-  const p = skeletonPath(skeletonName);
+function loadSkeleton(skeletonName: string, repoPath: string): string {
+  const p = path.join(repoPath, '.octomux', 'agents', `${skeletonName}.md`);
   if (!fs.existsSync(p)) {
     throw new Error(`skeleton not found: ${skeletonName} (expected at ${p})`);
   }
@@ -101,8 +96,8 @@ export async function runTeam(opts: RunTeamOpts): Promise<string> {
 
   const lead = config.roster.find((r) => r.role === 'lead')!;
 
-  // Load lead skeleton
-  const skeletonContent = loadSkeleton(lead.skeleton);
+  // Load lead skeleton from target repo's .octomux/agents/
+  const skeletonContent = loadSkeleton(lead.skeleton, repoPath);
 
   // Load optional overlay from target repo
   let overlayContent = '';

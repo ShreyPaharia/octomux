@@ -38,8 +38,9 @@ roster:
 beforeEach(() => {
   db = createTestDb();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-sched-'));
-  fs.mkdirSync(path.join(tmpDir, '.octomux'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.octomux', 'agents'), { recursive: true });
   fs.writeFileSync(path.join(tmpDir, '.octomux', 'team.yaml'), VALID_YAML);
+  fs.writeFileSync(path.join(tmpDir, '.octomux', 'agents', 'desk-lead.md'), '# Lead');
 });
 
 afterEach(() => {
