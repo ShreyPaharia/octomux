@@ -1,6 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
-import { Toaster } from 'sonner';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import HomePage from './pages/HomePage';
@@ -9,6 +8,8 @@ import ReviewsPage from './pages/ReviewsPage';
 import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/UniversalSidebar';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { ResponsiveToaster } from './components/ResponsiveToaster';
 import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SHIP_EVENT } from './pages/TaskDetail';
@@ -94,20 +95,14 @@ export function AppShell() {
   }, [tasks]);
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="flex h-dvh flex-col bg-background text-foreground">
       <OfflineBanner />
       <SetupBanner />
       <div className="flex min-h-0 flex-1">
-        <Toaster
-          theme="dark"
-          position="bottom-right"
-          toastOptions={{
-            unstyled: true,
-          }}
-        />
+        <ResponsiveToaster />
         <GlobalNotifications />
         <UniversalSidebar />
-        <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
+        <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <div className="ambient-tint-backdrop" aria-hidden="true" />
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
             <Suspense
@@ -142,6 +137,7 @@ export function AppShell() {
           onClose={() => setPrSheetTask(null)}
           onShipped={() => refreshTasks()}
         />
+        <MobileBottomNav />
       </div>
     </div>
   );

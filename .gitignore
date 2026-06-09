@@ -11,6 +11,7 @@ docs
 test-results/
 playwright-report/
 blob-report/
+ui-review/
 .playwright-mcp/
 .worktrees/
 demo-fixtures/

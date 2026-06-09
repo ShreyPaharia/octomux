@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { repoName } from '@/lib/utils';
+import { cn, repoName } from '@/lib/utils';
 import type { RunMode, Task } from '../../../server/types';
 
 const MODE_BRANCH_LABEL: Record<RunMode, string> = {
@@ -10,13 +10,16 @@ const MODE_BRANCH_LABEL: Record<RunMode, string> = {
   scratch: 'Branch',
 };
 
-export function TaskDetailMeta({ task }: { task: Task }) {
+export function TaskDetailMeta({ task, className }: { task: Task; className?: string }) {
   const runMode: RunMode = task.run_mode ?? 'new';
 
   return (
     <div
       data-testid="task-detail-meta"
-      className="diff-pane-header flex flex-wrap items-center gap-x-4 gap-y-1 px-6 py-2.5 text-xs"
+      className={cn(
+        'diff-pane-header flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs md:px-6 md:py-2.5',
+        className,
+      )}
     >
       {task.repo_path && <MetaItem label="Repo" value={repoName(task.repo_path)} />}
       {task.branch && (

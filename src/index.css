@@ -413,3 +413,37 @@
 .octomux-comment-composer-zone {
   background: var(--bg-elevated, #14151c);
 }
+
+/* Agent session terminal — xterm is the only scroll container on mobile */
+.octomux-terminal-host .xterm-viewport {
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  transform: translate3d(0, 0, 0);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .octomux-terminal-host .xterm-viewport {
+    scrollbar-width: none;
+  }
+
+  .octomux-terminal-host .xterm-viewport::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+}
+
+/* Agent session: block pull-to-refresh / rubber-band on real mobile devices */
+@media (max-width: 767px) {
+  html.octomux-agent-session-active,
+  html.octomux-agent-session-active body {
+    overscroll-behavior: none;
+  }
+
+  html.octomux-agent-session-active #root,
+  html.octomux-agent-session-active main,
+  .octomux-agent-session {
+    overscroll-behavior: none;
+  }
+}

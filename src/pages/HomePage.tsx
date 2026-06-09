@@ -22,7 +22,7 @@ function FirstRunEmptyState() {
   return (
     <div
       data-testid="home-first-run"
-      className="bg-glass-l2 glass-blur-l2 motion-fade-in mx-auto flex max-w-xl flex-col items-center gap-5 rounded-2xl border border-glass-edge p-12 text-center shadow-[0_12px_30px_-8px_rgba(0,0,0,0.5)]"
+      className="bg-glass-l2 glass-blur-l2 motion-fade-in mx-auto flex max-w-xl flex-col items-center gap-4 rounded-2xl border border-glass-edge p-6 text-center shadow-[0_12px_30px_-8px_rgba(0,0,0,0.5)] sm:gap-5 sm:p-12"
     >
       <div
         className="flex size-14 items-center justify-center rounded-full border border-primary/40 bg-primary/10"
@@ -61,14 +61,14 @@ export default function HomePage() {
       : 'inbox zero';
 
   return (
-    <div className="relative flex h-full flex-col">
-      <div className="flex-1 overflow-auto">
-        <div className="motion-fade-in flex flex-col gap-8 px-[72px] pt-12 pb-[160px]">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div className="motion-fade-in flex flex-col gap-6 px-4 pt-6 pb-4 sm:gap-8 md:px-[72px] md:pt-12 md:pb-[160px]">
           <PageHeader
             title="Welcome back"
             eyebrowTestId="home-eyebrow"
             eyebrowContent={
-              <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-muted-foreground">
                 <span>Inbox</span>
                 <span className="text-muted-soft">·</span>
                 <span className="text-muted-soft">{todayLabel()}</span>
@@ -79,7 +79,7 @@ export default function HomePage() {
               </div>
             }
             actions={
-              <div data-testid="home-search" className="w-[280px] max-w-full">
+              <div data-testid="home-search" className="w-full sm:w-[280px]">
                 <CommandPalette />
               </div>
             }
@@ -91,9 +91,9 @@ export default function HomePage() {
       </div>
       <div
         data-testid="composer-dock"
-        className="pointer-events-none absolute inset-x-0 bottom-10 flex justify-center px-[72px]"
+        className="shrink-0 px-4 pt-2 md:pointer-events-none md:absolute md:inset-x-0 md:bottom-10 md:px-[72px] md:pt-0"
       >
-        <div className="pointer-events-auto w-full max-w-[1056px] motion-fade-in">
+        <div className="pointer-events-auto mx-auto w-full max-w-[1056px] motion-fade-in">
           <Composer />
         </div>
       </div>

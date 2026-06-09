@@ -37,6 +37,9 @@ async function runStart(startArgs) {
     if (startArgs[i] === '--port' && startArgs[i + 1]) {
       port = parseInt(startArgs[i + 1], 10);
       i++;
+    } else if (startArgs[i] === '--bind' && startArgs[i + 1]) {
+      process.env.OCTOMUX_BIND = startArgs[i + 1];
+      i++;
     } else if (startArgs[i] === '--no-open') {
       autoOpen = false;
     }
@@ -82,7 +85,8 @@ async function runStart(startArgs) {
   }
 
   checkNeovimVersion();
-  console.log('Open Setup in the dashboard to install dependencies and configure defaults.\n');
+  console.log('Open Setup in the dashboard to install dependencies and configure defaults.');
+  console.log('Tip: use --bind 0.0.0.0 to enable remote access over Tailscale.\n');
 
   // Start server
   process.env.NODE_ENV = 'production';
