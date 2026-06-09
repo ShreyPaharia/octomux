@@ -116,15 +116,34 @@ describe('pollTeamSchedules', () => {
     expect(runs).toHaveLength(0);
   });
 
-  it('is idempotent — skips if a run is already active', async () => {
+  it('is idempotent — skips while the lead task is still running', async () => {
     upsertTeamSchedule({ name: 'sched-team', repoPath: tmpDir, cron: '0 7 * * *' });
 
     const dueTime = new Date('2026-06-09T07:00:00Z');
     await pollTeamSchedules(dueTime);
+    // Lead task is still runtime_state='running' (set by mock) — must skip
     await pollTeamSchedules(dueTime);
 
     const runs = db.prepare(`SELECT * FROM team_runs`).all() as any[];
     expect(runs).toHaveLength(1);
+  });
+
+  it('re-fires on the next day after the lead task has completed (regression)', async () => {
+    upsertTeamSchedule({ name: 'sched-team', repoPath: tmpDir, cron: '0 7 * * *' });
+
+    // Day 1 — first fire
+    await pollTeamSchedules(new Date('2026-06-09T07:00:00Z'));
+    let runs = db.prepare(`SELECT * FROM team_runs`).all() as any[];
+    expect(runs).toHaveLength(1);
+
+    // Simulate the lead task reaching idle (as pollStatuses sets after tmux session dies)
+    const taskId = runs[0].lead_task_id as string;
+    db.prepare(`UPDATE tasks SET runtime_state = 'idle' WHERE id = ?`).run(taskId);
+
+    // Day 2 — same cron minute — should fire a new run
+    await pollTeamSchedules(new Date('2026-06-10T07:00:00Z'));
+    runs = db.prepare(`SELECT * FROM team_runs`).all() as any[];
+    expect(runs).toHaveLength(2);
   });
 
   it('advances last_run_at after a successful run', async () => {

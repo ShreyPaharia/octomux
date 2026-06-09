@@ -54,7 +54,7 @@ Read and follow them exactly.
 ```bash
 octomux task-summary --task <your-task-id> --summary "$(cat <<'EOF'
 ## Health Check
-<probe: result — e.g. "make engine-status: OK" or "reconcile drift: 3 rows">
+<probe>: <result>  — e.g. "healthcheck: ok" or "lint: 3 warnings"
 
 ## Issues Found
 <issue with evidence, severity>

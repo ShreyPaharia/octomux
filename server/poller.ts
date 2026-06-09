@@ -80,6 +80,9 @@ export async function pollStatuses(): Promise<void> {
     } else {
       continue;
     }
+    db.prepare(
+      `UPDATE team_runs SET status = 'done' WHERE lead_task_id = ? AND status = 'running'`,
+    ).run(task.id);
     stopAgentsSql.run(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
   }

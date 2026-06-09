@@ -257,11 +257,20 @@ export async function pollTeamSchedules(now: Date = new Date()): Promise<void> {
   for (const schedule of schedules) {
     if (!cronMatches(schedule.cron, now)) continue;
 
-    // Idempotency: skip if already a running team_run for this team
-    const active = db
-      .prepare(`SELECT 1 FROM team_runs WHERE team = ? AND status = 'running' LIMIT 1`)
+    // Idempotency: skip only if the linked Lead task is still actually running.
+    // Joining tasks avoids the stuck-forever bug where team_runs.status never
+    // transitions off 'running' — self-correcting even without an explicit status update.
+    const activeRun = db
+      .prepare(
+        `SELECT tr.id FROM team_runs tr
+         INNER JOIN tasks t ON tr.lead_task_id = t.id
+         WHERE tr.team = ?
+           AND tr.status = 'running'
+           AND t.runtime_state IN ('running', 'setting_up')
+         LIMIT 1`,
+      )
       .get(schedule.name);
-    if (active) {
+    if (activeRun) {
       logger.info({ team: schedule.name }, 'team run already active, skipping');
       continue;
     }
