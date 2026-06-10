@@ -122,6 +122,7 @@ export interface Agent {
   tmux_session: string | null;
   /** Optional agent name used at launch (`claude --agent <name>`). */
   agent: string | null;
+  notify_agent_id: string | null;
   created_at: string;
 }
 
