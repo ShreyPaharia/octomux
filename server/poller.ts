@@ -115,6 +115,73 @@ export async function pollStatuses(): Promise<void> {
   }
 
   await pollTerminalActivity();
+  await pollAgentWindows();
+}
+
+// ─── Agent Window Polling ─────────────────────────────────────────────────────
+
+async function checkWindowStatus(session: string, windowIndex: number): Promise<'alive' | 'dead'> {
+  try {
+    await execFile('tmux', ['display-message', '-t', `${session}:${windowIndex}`, '-p', '#I']);
+    return 'alive';
+  } catch {
+    return 'dead';
+  }
+}
+
+async function pollAgentWindows(): Promise<void> {
+  const db = getDb();
+  const watchedAgents = db
+    .prepare(
+      `SELECT a.id, a.task_id, a.window_index, a.label,
+              t.tmux_session, a.notify_agent_id
+       FROM agents a
+       INNER JOIN tasks t ON a.task_id = t.id
+       WHERE a.status = 'running'
+         AND a.notify_agent_id IS NOT NULL
+         AND t.runtime_state = 'running'
+         AND t.tmux_session IS NOT NULL`,
+    )
+    .all() as Array<{
+    id: string;
+    task_id: string;
+    window_index: number;
+    label: string;
+    tmux_session: string;
+    notify_agent_id: string;
+  }>;
+
+  const results = await Promise.allSettled(
+    watchedAgents.map(async (agent) => {
+      const status = await checkWindowStatus(agent.tmux_session, agent.window_index);
+      return { agent, status };
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { agent, status } = result.value;
+    if (status !== 'dead') continue;
+
+    db.prepare(
+      `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+        hook_activity_updated_at = datetime('now') WHERE id = ?`,
+    ).run(agent.id);
+
+    const target = db
+      .prepare(
+        `SELECT a.window_index, t.tmux_session
+         FROM agents a
+         INNER JOIN tasks t ON a.task_id = t.id
+         WHERE a.id = ? AND a.status != 'stopped' AND t.runtime_state = 'running'`,
+      )
+      .get(agent.notify_agent_id) as { window_index: number; tmux_session: string } | undefined;
+
+    if (!target) continue;
+
+    const msg = `[octomux] Sub-agent ${agent.id} ("${agent.label}") finished. Check results: octomux get-task --json ${agent.task_id}`;
+    await sendMessageToAgent(target.tmux_session, target.window_index, msg);
+  }
 }
 
 // ─── Hook Installation ──────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import {
   execFileFail,
   DEFAULTS,
 } from './test-helpers.js';
+import { getDb } from './db.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -1286,5 +1287,74 @@ describe('startPolling / stopPolling', () => {
   it('stopPolling cleans up after startPolling', () => {
     startPolling();
     expect(() => stopPolling()).not.toThrow();
+  });
+});
+
+// ─── pollAgentWindows ────────────────────────────────────────────────────────
+
+describe('pollAgentWindows', () => {
+  it('sends completion message to notify_agent when worker window dies within a living session', async () => {
+    createTestDb();
+    const db = getDb();
+
+    // Orchestrator task with a living session
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'orch-task-01',
+      tmux_session: 'octomux-agent-orch-task-01',
+      branch: 'agents/orch',
+      worktree: '/tmp/test-repo/.worktrees/orch',
+    });
+    insertAgent(db, {
+      id: 'orch-agent-01',
+      task_id: 'orch-task-01',
+      window_index: 1,
+      status: 'running',
+    });
+
+    // Worker agent in a separate task sharing the same session, notifying orchestrator agent
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'worker-task-01',
+      tmux_session: 'octomux-agent-orch-task-01',
+      branch: 'agents/worker',
+      worktree: '/tmp/test-repo/.worktrees/worker',
+    });
+    insertAgent(db, {
+      id: 'worker-agent-01',
+      task_id: 'worker-task-01',
+      window_index: 2,
+      status: 'running',
+      notify_agent_id: 'orch-agent-01',
+    });
+
+    // tmux: session alive, but worker window 2 is dead
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const [, cmdArgs] = args as [string, string[], ...any[]];
+      const cb = findCallback(...args);
+      if (cmdArgs.includes('has-session')) {
+        cb?.(null, { stdout: '', stderr: '' });
+        return undefined as any;
+      }
+      if (cmdArgs.includes('display-message') && cmdArgs.some((a: string) => a.endsWith(':2'))) {
+        cb?.(Object.assign(new Error("can't find window: 2"), { stderr: "can't find window: 2" }));
+        return undefined as any;
+      }
+      cb?.(null, { stdout: '1', stderr: '' });
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      'octomux-agent-orch-task-01',
+      1,
+      expect.stringContaining('worker-agent-01'),
+    );
+
+    const agentRow = db
+      .prepare('SELECT status FROM agents WHERE id = ?')
+      .get('worker-agent-01') as { status: string };
+    expect(agentRow.status).toBe('stopped');
   });
 });
