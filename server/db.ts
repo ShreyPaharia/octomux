@@ -540,6 +540,7 @@ export function initDb(instance: Database.Database): void {
   addColumn('tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
   addColumn('tasks', 'current_summary_updated_at', 'current_summary_updated_at TEXT', taskColsV2);
   addColumn('tasks', 'deleted_at', 'deleted_at TEXT', taskColsV2);
+  addColumn('tasks', 'notify_task_id', 'notify_task_id TEXT', taskColsV2);
 
   // Partial index for the purge poller's hot path.
   instance.exec(

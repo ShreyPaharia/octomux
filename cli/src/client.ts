@@ -110,6 +110,7 @@ export interface OctomuxClient {
     worktree_path?: string;
     harness_id?: string;
     model?: string | null;
+    notify_task_id?: string | null;
   }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;

@@ -752,8 +752,8 @@ export function setupRoutes(app: Express): void {
 
       db.prepare(
         `INSERT INTO tasks
-           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         resolvedTitle,
@@ -765,6 +765,7 @@ export function setupRoutes(app: Express): void {
         body.agent ?? null,
         body.harness_id ?? 'claude-code',
         body.model ?? null,
+        body.notify_task_id ?? null,
       );
     } catch (err) {
       const e = err as NodeJS.ErrnoException;

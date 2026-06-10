@@ -32,6 +32,29 @@ let teamScheduleTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
+async function notifyParentTask(
+  db: ReturnType<typeof getDb>,
+  parentTaskId: string,
+  finishedTask: Task,
+): Promise<void> {
+  const parent = db
+    .prepare(
+      `SELECT tmux_session FROM tasks WHERE id = ? AND runtime_state IN ('running', 'setting_up')`,
+    )
+    .get(parentTaskId) as { tmux_session: string | null } | undefined;
+  if (!parent?.tmux_session) return;
+
+  const agent = db
+    .prepare(
+      `SELECT window_index FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index ASC LIMIT 1`,
+    )
+    .get(parentTaskId) as { window_index: number } | undefined;
+  if (!agent) return;
+
+  const msg = `[octomux] Worker task ${finishedTask.id} ("${finishedTask.title}") finished. Check results: octomux get-task --json ${finishedTask.id}`;
+  await sendMessageToAgent(parent.tmux_session, agent.window_index, msg);
+}
+
 export async function checkTaskStatus(task: Task): Promise<'alive' | 'dead'> {
   if (!task.tmux_session) return 'dead';
   try {
@@ -85,6 +108,10 @@ export async function pollStatuses(): Promise<void> {
     ).run(task.id);
     stopAgentsSql.run(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+
+    if (task.notify_task_id) {
+      notifyParentTask(db, task.notify_task_id, task).catch(() => {});
+    }
   }
 
   await pollTerminalActivity();

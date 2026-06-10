@@ -108,6 +108,9 @@ export async function runTeam(opts: RunTeamOpts): Promise<string> {
     }
   }
 
+  const db = getDb();
+  const id = nanoid(12);
+
   // Build kick-off prompt for the Lead
   const rosterSummary = config.roster
     .map((r) => `  - role: ${r.role}, skeleton: ${r.skeleton}, model: ${r.model}`)
@@ -135,15 +138,13 @@ export async function runTeam(opts: RunTeamOpts): Promise<string> {
     '',
     '## Instructions',
     '',
-    `Spawn worker tasks via: octomux create-task --model <role model> ...`,
+    `Your task ID (Lead): ${id}`,
+    `Spawn worker tasks via: octomux create-task --notify-task ${id} --model <role model> ...`,
     `After workers finish, run: ${config.notify_command ?? 'echo "No notify_command configured"'}`,
     'Never merge, deploy, or write live config. Open PRs; let the human decide.',
   ]
     .filter((l) => l !== null)
     .join('\n');
-
-  const db = getDb();
-  const id = nanoid(12);
   const worktreeId = nanoid(12);
 
   db.prepare(

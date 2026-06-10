@@ -97,6 +97,7 @@ export function registerCreateTask(program: Command): void {
       'coding agent (harness id): claude-code | cursor (default: server setting)',
     )
     .option('--model <id>', 'per-task model override (e.g. claude-opus-4-8, claude-sonnet-4-6)')
+    .option('--notify-task <id>', 'task ID to notify when this task finishes')
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
@@ -162,6 +163,7 @@ export function registerCreateTask(program: Command): void {
         worktree_path: opts.worktreePath,
         ...(opts.harness ? { harness_id: opts.harness } : {}),
         ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.notifyTask ? { notify_task_id: opts.notifyTask } : {}),
       });
 
       if (json) {

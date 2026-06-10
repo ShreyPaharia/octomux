@@ -50,6 +50,7 @@ export const TASK_DEFAULTS: Task = {
   harness_id: 'claude-code',
   agent: null,
   model: null,
+  notify_task_id: null,
   error: null,
   current_summary: null,
   current_summary_updated_at: null,
