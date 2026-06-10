@@ -123,8 +123,10 @@ describe('diff module', () => {
         status: 'A',
         additions: 2,
         deletions: 0,
-        post_blob_sha: null,
       });
+      // Untracked files carry the working-tree content hash so edits to them are
+      // detected for refetch / "changed since review".
+      expect(files[0].post_blob_sha).toMatch(/^[0-9a-f]{40}$/);
     });
 
     // Regression: when a directory contains tracked files but a sub-tree (e.g.
@@ -224,6 +226,37 @@ describe('diff module', () => {
       expect(file?.reviewed).toBe(false);
       expect(file?.changed_since_review).toBe(true);
       expect(summary.reviewed_count).toBe(0);
+    });
+
+    it('stays reviewed when reviewed against uncommitted content that has not changed', async () => {
+      // Review a file *while it has uncommitted edits*, capturing the working-tree
+      // blob. Since the working tree is unchanged since, it must remain reviewed —
+      // the commit-blob fallback would wrongly flag it (HEAD differs from disk).
+      await fs.promises.writeFile(path.join(repo, 'a.txt'), 'dirty but reviewed\n');
+      const { stdout: blob } = await execFile('git', ['-C', repo, 'hash-object', '--', 'a.txt']);
+      const { stdout: head } = await execFile('git', ['-C', repo, 'rev-parse', 'HEAD']);
+      insertTestTask({ id: 't-wd', worktree: repo, base_sha: baseSha, base_branch: null });
+      setReviewed('t-wd', 'a.txt', head.trim(), blob.trim());
+
+      const summary = await getDiffSummary({ task: makeTaskForRepo({ id: 't-wd' }) });
+      const file = summary.files.find((f) => f.path === 'a.txt');
+      expect(file?.reviewed).toBe(true);
+      expect(file?.changed_since_review).toBe(false);
+      expect(summary.reviewed_count).toBe(1);
+    });
+
+    it('post_blob_sha reflects the working-tree content (base), not HEAD', async () => {
+      await commit(repo, { 'a.txt': 'committed\n' }, 'commit a');
+      await fs.promises.writeFile(path.join(repo, 'a.txt'), 'uncommitted edit\n');
+      const { files } = await getDiffSummary({ task: makeTaskForRepo() });
+      const { stdout: workingHash } = await execFile('git', [
+        '-C',
+        repo,
+        'hash-object',
+        '--',
+        'a.txt',
+      ]);
+      expect(files.find((f) => f.path === 'a.txt')?.post_blob_sha).toBe(workingHash.trim());
     });
 
     it('total_count excludes ignored files', async () => {

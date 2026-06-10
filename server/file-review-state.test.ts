@@ -34,6 +34,26 @@ describe('file_review_state DAO', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].reviewed_at_commit).toBe('new-sha');
     });
+
+    it('stores the reviewed content blob sha when provided', () => {
+      setReviewed('task1', 'src/foo.ts', 'commit-sha', 'blob-sha-123');
+      const rows = listReviewState('task1');
+      expect(rows[0].reviewed_blob_sha).toBe('blob-sha-123');
+    });
+
+    it('leaves reviewed_blob_sha null when omitted (back-compat)', () => {
+      setReviewed('task1', 'src/foo.ts', 'commit-sha');
+      const rows = listReviewState('task1');
+      expect(rows[0].reviewed_blob_sha).toBeNull();
+    });
+
+    it('refreshes reviewed_blob_sha on re-click', () => {
+      setReviewed('task1', 'src/foo.ts', 'c1', 'blob-1');
+      setReviewed('task1', 'src/foo.ts', 'c2', 'blob-2');
+      const rows = listReviewState('task1');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].reviewed_blob_sha).toBe('blob-2');
+    });
   });
 
   describe('clearReviewed', () => {
