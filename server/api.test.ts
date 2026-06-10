@@ -55,7 +55,7 @@ vi.mock('./task-runner.js', async () => {
         "UPDATE agents SET status = 'running' WHERE task_id = ? AND status = 'stopped'",
       ).run(task.id);
     }),
-    addAgent: vi.fn(async (_task: any, _prompt?: string) => ({
+    addAgent: vi.fn(async (_task: any, _opts?: any) => ({
       id: 'new-agent-id',
       task_id: _task.id,
       window_index: 1,
@@ -1320,14 +1320,16 @@ describe('POST /api/tasks/:id/agents', () => {
       .post(`/api/tasks/${DEFAULTS.task.id}/agents`)
       .send({ prompt: 'Write comprehensive tests' });
 
-    expect(vi.mocked(addAgent).mock.calls[0][1]).toBe('Write comprehensive tests');
+    expect(vi.mocked(addAgent).mock.calls[0][1]).toMatchObject({
+      prompt: 'Write comprehensive tests',
+    });
   });
 
   it('works without prompt', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
     expect(res.status).toBe(201);
-    expect(vi.mocked(addAgent).mock.calls[0][1]).toBeUndefined();
+    expect(vi.mocked(addAgent).mock.calls[0][1]).toMatchObject({ prompt: undefined });
   });
 });
 

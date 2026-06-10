@@ -28,6 +28,7 @@ vi.mock('fs', async (importOriginal) => {
     mkdirSync: vi.fn(),
     copyFileSync: vi.fn(),
     writeFileSync: vi.fn(),
+    readFileSync: vi.fn(),
     unlinkSync: vi.fn(),
   };
   return { ...mocked, default: mocked };
@@ -1018,7 +1019,7 @@ describe('addAgent', () => {
 
   it('includes prompt via temp file in claude launch command when provided', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await addAgent(runningTask, 'Write tests');
+    await addAgent(runningTask, { prompt: 'Write tests' });
 
     const sendKeysCalls = vi
       .mocked(execFile)
@@ -1124,6 +1125,58 @@ describe('addAgent', () => {
         cb(null, { stdout: 'true', stderr: '' });
       }
     }) as any);
+  });
+});
+
+// ─── addAgent opts ────────────────────────────────────────────────────────────
+
+describe('addAgent opts', () => {
+  const task = { ...DEFAULTS.runningTask } as Task;
+
+  it('prepends skeleton content to the prompt', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const skeletonContent = '# Researcher\nYou research things.';
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValueOnce(skeletonContent as any);
+
+    await addAgent(task, { prompt: 'Go find X', skeleton: 'researcher' });
+
+    // The combined prompt should be written to the temp file
+    const writeCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c: any[]) => typeof c[1] === 'string' && c[1].includes('# Researcher'));
+    expect(writeCall).toBeDefined();
+    expect(writeCall![1]).toContain('# Researcher');
+    expect(writeCall![1]).toContain('Go find X');
+  });
+
+  it('throws when skeleton file does not exist', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    vi.mocked(fs.existsSync).mockReturnValueOnce(false);
+
+    await expect(addAgent(task, { prompt: 'Go', skeleton: 'nonexistent' })).rejects.toThrow(
+      'skeleton not found: nonexistent',
+    );
+  });
+
+  it('stores notify_agent_id on the agent row', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await addAgent(task, { prompt: 'Go', notify_agent_id: 'parent-agent-01' });
+    const row = db
+      .prepare(
+        'SELECT notify_agent_id FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
+      )
+      .get(task.id) as { notify_agent_id: string | null };
+    expect(row.notify_agent_id).toBe('parent-agent-01');
+  });
+
+  it('uses custom label when provided', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    await addAgent(task, { prompt: 'Go', label: 'Researcher' });
+    const row = db
+      .prepare('SELECT label FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
+      .get(task.id) as { label: string };
+    expect(row.label).toBe('Researcher');
   });
 });
 

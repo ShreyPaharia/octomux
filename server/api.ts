@@ -1029,7 +1029,14 @@ export function setupRoutes(app: Express): void {
       }
     }
 
-    const agent = await addAgent(task, body.prompt, body.agent);
+    const agent = await addAgent(task, {
+      prompt: body.prompt,
+      agent: body.agent,
+      label: body.label,
+      model: body.model,
+      skeleton: body.skeleton,
+      notify_agent_id: body.notify_agent_id,
+    });
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.status(201).json(agent);
   });

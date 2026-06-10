@@ -877,19 +877,26 @@ export async function startTask(task: Task): Promise<void> {
   }
 }
 
-export async function addAgent(
-  task: Task,
-  prompt?: string,
-  agentName?: string | null,
-): Promise<Agent> {
+export interface AddAgentOpts {
+  prompt?: string;
+  agent?: string | null;
+  label?: string;
+  model?: string | null;
+  skeleton?: string;
+  notify_agent_id?: string | null;
+}
+
+export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Agent> {
   const db = getDb();
 
-  logger.info({ task_id: task.id, operation: 'addAgent', agent: agentName }, 'addAgent: start');
+  const resolvedAgent = opts.agent ?? null;
+
+  logger.info({ task_id: task.id, operation: 'addAgent', agent: resolvedAgent }, 'addAgent: start');
 
   const activeAgents = db
     .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
     .all(task.id) as Agent[];
-  const label = `Agent ${activeAgents.length + 1}`;
+  const label = opts.label ?? `Agent ${activeAgents.length + 1}`;
 
   await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
 
@@ -910,7 +917,18 @@ export async function addAgent(
     .get(task.id) as { hook_token: string } | undefined;
   const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
   const flags = harness.resolveFlags(await getSettings());
-  const resolvedAgent = agentName ?? null;
+
+  let resolvedPrompt = opts.prompt;
+  if (opts.skeleton) {
+    const skeletonPath = path.join(task.worktree!, '.octomux', 'agents', `${opts.skeleton}.md`);
+    if (!fs.existsSync(skeletonPath)) {
+      throw new Error(`skeleton not found: ${opts.skeleton} (expected at ${skeletonPath})`);
+    }
+    const skeletonContent = fs.readFileSync(skeletonPath, 'utf-8') as string;
+    resolvedPrompt = opts.prompt
+      ? `${skeletonContent}\n\n# Task\n\n${opts.prompt}`
+      : skeletonContent;
+  }
 
   let sessionIdForDb: string | null;
   let sessionIdForLaunch: string;
@@ -925,9 +943,19 @@ export async function addAgent(
 
   db.prepare(
     `INSERT INTO agents
-       (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(agentId, task.id, windowIndex, label, harness.id, sessionIdForDb, hookToken, resolvedAgent);
+       (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent, notify_agent_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    agentId,
+    task.id,
+    windowIndex,
+    label,
+    harness.id,
+    sessionIdForDb,
+    hookToken,
+    resolvedAgent,
+    opts.notify_agent_id ?? null,
+  );
 
   await harness.syncAgents(task.worktree!);
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
@@ -937,7 +965,7 @@ export async function addAgent(
     sessionId: sessionIdForLaunch,
     agent: resolvedAgent,
     flags,
-    model: (task as any).model ?? null,
+    model: opts.model ?? (task as any).model ?? null,
     workspacePath: task.worktree!,
   });
   (async () => {
@@ -945,7 +973,7 @@ export async function addAgent(
       await sendHarnessCommand({
         target: addTarget,
         baseCmd,
-        prompt,
+        prompt: resolvedPrompt,
         worktreePath: task.worktree!,
         agentId,
       });
