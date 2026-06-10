@@ -843,4 +843,9 @@ export function initDb(instance: Database.Database): void {
     `CREATE INDEX IF NOT EXISTS idx_tasks_review_of_task_id
        ON tasks(review_of_task_id) WHERE review_of_task_id IS NOT NULL`,
   );
+
+  // ── Intra-task sub-agents: notify_agent_id on agents (2026-06-11) ──────────
+  // When a sub-agent completes, its parent agent is notified via this link.
+  const agentCols3 = columnsOf('agents');
+  addColumn('agents', 'notify_agent_id', 'notify_agent_id TEXT', agentCols3);
 }

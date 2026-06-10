@@ -76,6 +76,7 @@ export const DEFAULTS = {
     harness_session_id: 'test-session-uuid-01',
     tmux_session: null,
     agent: null as string | null,
+    notify_agent_id: null as string | null,
     created_at: '2026-01-01 00:00:00',
   },
 
@@ -193,7 +194,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
@@ -203,6 +204,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
     (agent as any).harness_session_id ?? (agent as any).claude_session_id ?? null,
     (agent as any).hook_activity || 'active',
     (agent as any).hook_token ?? '',
+    (agent as any).notify_agent_id ?? null,
   );
 
   return agent;
@@ -400,6 +402,7 @@ export const AGENTS_TABLE_COLUMNS = [
   'hook_activity_updated_at',
   'tmux_session',
   'agent',
+  'notify_agent_id',
   'created_at',
 ];
 
