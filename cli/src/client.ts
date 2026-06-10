@@ -118,7 +118,14 @@ export interface OctomuxClient {
   deleteTask(id: string): Promise<void>;
   addAgent(
     taskId: string,
-    data?: { prompt?: string; agent?: string; label?: string; model?: string },
+    data?: {
+      prompt?: string;
+      agent?: string;
+      label?: string;
+      model?: string;
+      skeleton?: string;
+      notify_agent_id?: string | null;
+    },
   ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;

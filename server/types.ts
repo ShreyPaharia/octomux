@@ -200,6 +200,10 @@ export interface CreateTaskRequest {
 export interface AddAgentRequest {
   prompt?: string;
   agent?: string;
+  label?: string;
+  model?: string;
+  skeleton?: string;
+  notify_agent_id?: string | null;
 }
 
 export interface UpdateTaskRequest {
