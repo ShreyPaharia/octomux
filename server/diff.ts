@@ -423,7 +423,11 @@ export async function getFileDiff(opts: {
   let newRef: string | typeof WORKDIR;
   if (opts.range) {
     oldRef = rangeOldRef(opts.range, opts.taskBaseSha ?? '');
-    newRef = rangeNewRef(opts.range);
+    // Ranges that fold in uncommitted work (`base`, `working`) diff against the
+    // working tree on disk, so the per-file view matches what the summary counts
+    // (base → working tree). Historical commit/range views use the committed
+    // post-image ref.
+    newRef = rangeIncludesWorkingTree(opts.range) ? WORKDIR : rangeNewRef(opts.range);
   } else {
     if (!opts.base) throw new Error('getFileDiff requires either `range` or `base`');
     oldRef = opts.base;

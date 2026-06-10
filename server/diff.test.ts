@@ -478,6 +478,24 @@ describe('diff module', () => {
       expect(diff.oldContent).toBe('hello\n');
       expect(diff.newContent).toBe('workdir-only\n');
     });
+
+    it('getFileDiff with range=base reads old from base and new from the working tree', async () => {
+      // Commit a change on the feature branch, then layer an uncommitted edit on
+      // top. The full diff must show base → working tree (committed + uncommitted),
+      // not base → HEAD.
+      await commitOnBranch({ 'a.txt': 'committed change\n' }, 'commit on feature');
+      await fs.promises.writeFile(path.join(repo, 'a.txt'), 'committed change\nplus uncommitted\n');
+
+      const diff = await getFileDiff({
+        worktree: repo,
+        range: { kind: 'base' },
+        taskBaseSha: baseSha,
+        relPath: 'a.txt',
+      });
+      expect(diff.oldContent).toBe('hello\n');
+      expect(diff.newContent).toBe('committed change\nplus uncommitted\n');
+      expect(diff.status).toBe('M');
+    });
   });
 
   describe('safeResolvePath', () => {
