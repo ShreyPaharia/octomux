@@ -106,7 +106,10 @@ async function ensureAgentsMode(page: import('playwright').Page) {
       await page.waitForTimeout(400);
     }
   }
-  await page.locator('.octomux-terminal-host').first().waitFor({ state: 'visible', timeout: 15_000 });
+  await page
+    .locator('.octomux-terminal-host')
+    .first()
+    .waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 async function main() {
@@ -127,7 +130,9 @@ async function main() {
   await page.goto(TASK_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForTimeout(2000);
   await ensureAgentsMode(page);
-  await page.getByTestId('mobile-terminal-scroll-controls').waitFor({ state: 'visible', timeout: 30_000 });
+  await page
+    .getByTestId('mobile-terminal-scroll-controls')
+    .waitFor({ state: 'visible', timeout: 30_000 });
   // The first row is frequently blank; wait on the whole rows container instead.
   await page.waitForFunction(
     () => (document.querySelector('.xterm-rows')?.textContent?.trim().length ?? 0) > 20,
@@ -186,8 +191,12 @@ async function main() {
   console.log(`scroll controls visible: ${hasScrollControls}`);
   console.log(`Older button changed visible rows: ${buttonScrollWorked}`);
   console.log(`touch swipe changed visible rows: ${touchScrollWorked}`);
-  console.log(`viewport scrollTop (informational): ${baseline.scrollTop} → ${afterTouchDown?.scrollTop}`);
-  console.log(`document scroll stayed 0: ${baseline.docScroll === 0 && (afterTouchDown?.docScroll ?? 0) === 0}`);
+  console.log(
+    `viewport scrollTop (informational): ${baseline.scrollTop} → ${afterTouchDown?.scrollTop}`,
+  );
+  console.log(
+    `document scroll stayed 0: ${baseline.docScroll === 0 && (afterTouchDown?.docScroll ?? 0) === 0}`,
+  );
   console.log(`Screenshots: ${OUT_DIR}`);
 
   await browser.close();

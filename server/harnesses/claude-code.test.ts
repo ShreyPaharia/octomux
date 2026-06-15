@@ -63,14 +63,18 @@ describe('claudeCodeHarness', () => {
 
 describe('buildLaunchCommand model override', () => {
   it('appends --model when model is set and flags has no --model', () => {
-    expect(
-      claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', model: 'sonnet' }),
-    ).toBe('claude --session-id s1 --model sonnet');
+    expect(claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', model: 'sonnet' })).toBe(
+      'claude --session-id s1 --model sonnet',
+    );
   });
 
   it('replaces --model in flags with per-task model', () => {
     expect(
-      claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', flags: ' --model opus', model: 'sonnet' }),
+      claudeCodeHarness.buildLaunchCommand({
+        sessionId: 's1',
+        flags: ' --model opus',
+        model: 'sonnet',
+      }),
     ).toBe('claude --session-id s1 --model sonnet');
   });
 
@@ -85,16 +89,20 @@ describe('buildLaunchCommand model override', () => {
   });
 
   it('leaves flags unchanged when no per-task model', () => {
-    expect(
-      claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', flags: ' --model opus' }),
-    ).toBe('claude --session-id s1 --model opus');
+    expect(claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', flags: ' --model opus' })).toBe(
+      'claude --session-id s1 --model opus',
+    );
   });
 });
 
 describe('buildResumeCommand model override', () => {
   it('replaces --model in flags with per-task model', () => {
     expect(
-      claudeCodeHarness.buildResumeCommand({ sessionId: 's1', flags: ' --model opus', model: 'sonnet' }),
+      claudeCodeHarness.buildResumeCommand({
+        sessionId: 's1',
+        flags: ' --model opus',
+        model: 'sonnet',
+      }),
     ).toBe('claude --resume s1 --model sonnet');
   });
 });
@@ -102,7 +110,11 @@ describe('buildResumeCommand model override', () => {
 describe('buildContinueCommand model override', () => {
   it('replaces --model in flags with per-task model', () => {
     expect(
-      claudeCodeHarness.buildContinueCommand({ sessionId: 's1', flags: ' --model opus', model: 'sonnet' }),
+      claudeCodeHarness.buildContinueCommand({
+        sessionId: 's1',
+        flags: ' --model opus',
+        model: 'sonnet',
+      }),
     ).toBe('claude --continue --session-id s1 --model sonnet');
   });
 });
