@@ -220,6 +220,39 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
 }
 
 const SHELL_READY_SENTINEL = 'OCTOMUX_SHELL_READY_';
+/** Let Ctrl-L redraw settle before clearing scrollback, so the echoes can't
+ *  scroll back into history after we purge it. */
+const SHELL_READY_CLEAR_SETTLE_MS = 60;
+/** Cap on the drain barrier wait — the shell is already proven alive, so its
+ *  output round-trips fast; this just bounds a wedged shell. */
+const SHELL_DRAIN_TIMEOUT_MS = 2000;
+
+/** Make a fresh sentinel: a unique token and the `echo` line that prints it.
+ *  The `""` split keeps the *typed* command from matching the *resolved*
+ *  token, so a capture can tell the command echo from its output. */
+function makeSentinel(): { token: string; cmd: string } {
+  const nonce = nanoid(10);
+  return {
+    token: `${SHELL_READY_SENTINEL}${nonce}`,
+    cmd: `echo ${SHELL_READY_SENTINEL}""${nonce}`,
+  };
+}
+
+/** Type one sentinel line into the pane (literal text, then Enter). */
+async function sendSentinel(target: string, cmd: string): Promise<void> {
+  await execFile('tmux', ['send-keys', '-t', target, '-l', cmd]).catch(() => {});
+  await execFile('tmux', ['send-keys', '-t', target, 'Enter']).catch(() => {});
+}
+
+/** True once `token`'s output has appeared in the pane's captured contents. */
+async function paneHasToken(target: string, token: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
+    return stdout.includes(token);
+  } catch {
+    return false; // pane may not exist yet
+  }
+}
 
 /**
  * Wait for the shell in a tmux pane to be ready before sending it a command.
@@ -232,13 +265,25 @@ const SHELL_READY_SENTINEL = 'OCTOMUX_SHELL_READY_';
  * input, which silently drops it. That race is the root cause of agents that
  * launch idle with their initial prompt never delivered.
  *
- * Instead we run a sentinel handshake: repeatedly `echo` a unique token and
- * wait until that token's *output* shows up in the pane. The output only
- * appears once the shell's line editor is actually executing input, so a
- * round-trip is positive proof the shell will accept the command that follows.
- * The token is split with `""` so the typed command line (which contains
- * `echo OCTOMUX_SHELL_READY_""<nonce>`) never matches the resolved token,
- * letting us distinguish the command echo from its result.
+ * Instead we run a sentinel handshake in two phases:
+ *
+ *  1. Readiness — repeatedly `echo` a unique token until its *output* shows up
+ *     in the pane. Output only appears once the shell's line editor is actually
+ *     executing input, so a round-trip proves the shell will accept input.
+ *     Re-sending guards against a first probe sent before the pty was reading.
+ *
+ *  2. Drain barrier — a slow-starting shell *buffers* the re-sent probes rather
+ *     than dropping them, so several `echo`s (and their Enters) can still be
+ *     queued when phase 1 first sees the token. We send ONE more fresh sentinel
+ *     and wait for it alone: because pty input is FIFO, its output appearing
+ *     proves every earlier queued keystroke — including any stray Enter — has
+ *     drained. Skipping this lets the caller's real command be typed while a
+ *     queued Enter is pending, submitting it half-finished (unterminated quote
+ *     → the shell sits at a continuation prompt and the agent never launches).
+ *
+ * Finally we wipe the handshake from the pane (clear the input line, the
+ * visible screen, and scrollback) so the user never sees the echo tokens and
+ * the real command renders onto a clean pane.
  */
 async function waitForShellReady(
   target: string,
@@ -247,27 +292,40 @@ async function waitForShellReady(
   initialDelayMs = 75,
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
-  const nonce = nanoid(10);
-  const token = `${SHELL_READY_SENTINEL}${nonce}`;
-  const sentinelCmd = `echo ${SHELL_READY_SENTINEL}""${nonce}`;
   await sleep(initialDelayMs);
+
+  // Phase 1: readiness — re-send until a probe round-trips.
+  const ready = makeSentinel();
   const deadline = Date.now() + timeoutMs;
+  let isReady = false;
   while (Date.now() < deadline) {
-    // (Re)send the sentinel each iteration: if the shell wasn't accepting
-    // input yet, the earlier attempt was dropped — keep poking until one
-    // round-trips.
-    await execFile('tmux', ['send-keys', '-t', target, '-l', sentinelCmd]).catch(() => {});
-    await execFile('tmux', ['send-keys', '-t', target, 'Enter']).catch(() => {});
+    await sendSentinel(target, ready.cmd);
     await sleep(intervalMs);
-    try {
-      const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      if (stdout.includes(token)) return;
-    } catch {
-      // pane may not exist yet
+    if (await paneHasToken(target, ready.token)) {
+      isReady = true;
+      break;
     }
   }
   // Timed out without a confirmed round-trip — proceed best-effort. The
-  // post-launch delivery check (verifyPromptDelivered) is the safety net.
+  // post-launch verifyPromptDelivered check is the safety net.
+  if (!isReady) return;
+
+  // Phase 2: drain barrier — send one fresh sentinel and wait for it alone, so
+  // every earlier queued keystroke is consumed before the caller types.
+  const drain = makeSentinel();
+  await sendSentinel(target, drain.cmd);
+  const drainDeadline = Date.now() + SHELL_DRAIN_TIMEOUT_MS;
+  while (Date.now() < drainDeadline) {
+    await sleep(intervalMs);
+    if (await paneHasToken(target, drain.token)) break;
+  }
+
+  // Wipe the handshake. C-u discards any partial line, C-l clears the visible
+  // screen, clear-history drops the scrolled-off echo lines from scrollback.
+  await execFile('tmux', ['send-keys', '-t', target, 'C-u']).catch(() => {});
+  await execFile('tmux', ['send-keys', '-t', target, 'C-l']).catch(() => {});
+  await sleep(SHELL_READY_CLEAR_SETTLE_MS);
+  await execFile('tmux', ['clear-history', '-t', target]).catch(() => {});
 }
 
 /**
