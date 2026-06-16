@@ -355,6 +355,13 @@ export function initDb(instance: Database.Database): void {
   const taskRefCols = columnsOf('task_external_refs');
   addColumn('task_external_refs', 'metadata', 'metadata TEXT', taskRefCols);
 
+  // reviewed_blob_sha records the git blob hash of the file content a reviewer
+  // approved (working-tree content), so "changed since review" can detect both
+  // new commits and uncommitted edits. Null on legacy rows → callers fall back
+  // to the commit-blob comparison.
+  const fileReviewCols = columnsOf('file_review_state');
+  addColumn('file_review_state', 'reviewed_blob_sha', 'reviewed_blob_sha TEXT', fileReviewCols);
+
   // Ensure the index exists (created here rather than SCHEMA to avoid ordering
   // issues when the old column is still named claude_session_id at SCHEMA time).
   instance.exec(

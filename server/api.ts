@@ -1432,7 +1432,17 @@ export function setupRoutes(app: Express): void {
     try {
       const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
       const headSha = stdout.trim();
-      setReviewed(task.id, relPath, headSha);
+      // Capture the blob hash of the content actually reviewed (the working
+      // tree), so "changed since review" reacts to uncommitted edits too. Null
+      // when the file is gone (e.g. a reviewed deletion).
+      let blobSha: string | null = null;
+      try {
+        const { stdout: bs } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
+        blobSha = bs.trim() || null;
+      } catch {
+        blobSha = null;
+      }
+      setReviewed(task.id, relPath, headSha, blobSha);
       res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

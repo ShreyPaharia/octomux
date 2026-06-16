@@ -24,6 +24,27 @@ describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
     expect(rows[0]).toMatchObject({ file_path: 'src/foo.ts', reviewed_at_commit: 'headSha' });
   });
 
+  it('POST records the working-tree blob hash as reviewed_blob_sha', async () => {
+    // Distinguish `git rev-parse HEAD` from `git hash-object` in the mock.
+    vi.mocked(execFile).mockImplementation(((...args: unknown[]) => {
+      const gitArgs = args[1] as string[];
+      const cb = args.find((a) => typeof a === 'function') as
+        | ((e: unknown, r?: { stdout: string; stderr: string }) => void)
+        | undefined;
+      const out = gitArgs.includes('hash-object') ? 'blobSha\n' : 'headSha\n';
+      cb?.(null, { stdout: out, stderr: '' });
+      return undefined;
+    }) as unknown as typeof execFile);
+
+    const res = await request(app).post('/api/tasks/t1/files/src/foo.ts/reviewed').send();
+    expect(res.status).toBe(204);
+    const { listReviewState } = await import('./file-review-state.js');
+    expect(listReviewState('t1')[0]).toMatchObject({
+      reviewed_at_commit: 'headSha',
+      reviewed_blob_sha: 'blobSha',
+    });
+  });
+
   it('DELETE removes the row', async () => {
     await request(app).post('/api/tasks/t1/files/src/foo.ts/reviewed').send();
     const res = await request(app).delete('/api/tasks/t1/files/src/foo.ts/reviewed').send();

@@ -5,22 +5,36 @@ export interface FileReviewRow {
   file_path: string;
   reviewed_at: string;
   reviewed_at_commit: string;
+  /**
+   * git blob hash of the working-tree content that was approved. Used to detect
+   * any change to the displayed (base → working tree) diff since review, whether
+   * committed or not. Null on legacy rows recorded before this column existed.
+   */
+  reviewed_blob_sha: string | null;
 }
 
 /**
- * Mark a file as reviewed for a task at the given HEAD commit.
- * Upserts on (task_id, file_path) so re-clicking refreshes both the
- * timestamp and the commit sha.
+ * Mark a file as reviewed for a task at the given HEAD commit. `blobSha` is the
+ * git blob hash of the reviewed (working-tree) content; pass null when unknown.
+ * Upserts on (task_id, file_path) so re-clicking refreshes the timestamp, the
+ * commit sha, and the content blob sha.
  */
-export function setReviewed(taskId: string, filePath: string, headSha: string): void {
+export function setReviewed(
+  taskId: string,
+  filePath: string,
+  headSha: string,
+  blobSha: string | null = null,
+): void {
   getDb()
     .prepare(
-      `INSERT INTO file_review_state (task_id, file_path, reviewed_at, reviewed_at_commit)
-       VALUES (?, ?, datetime('now'), ?)
+      `INSERT INTO file_review_state (task_id, file_path, reviewed_at, reviewed_at_commit, reviewed_blob_sha)
+       VALUES (?, ?, datetime('now'), ?, ?)
        ON CONFLICT(task_id, file_path)
-       DO UPDATE SET reviewed_at = datetime('now'), reviewed_at_commit = excluded.reviewed_at_commit`,
+       DO UPDATE SET reviewed_at = datetime('now'),
+                     reviewed_at_commit = excluded.reviewed_at_commit,
+                     reviewed_blob_sha = excluded.reviewed_blob_sha`,
     )
-    .run(taskId, filePath, headSha);
+    .run(taskId, filePath, headSha, blobSha);
 }
 
 /**
