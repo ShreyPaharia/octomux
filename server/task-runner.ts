@@ -284,6 +284,18 @@ async function paneHasToken(target: string, token: string): Promise<boolean> {
  * Finally we wipe the handshake from the pane (clear the input line, the
  * visible screen, and scrollback) so the user never sees the echo tokens and
  * the real command renders onto a clean pane.
+ *
+ * CRITICAL: the drain barrier and the wipe run UNCONDITIONALLY, even when
+ * phase 1 never confirmed readiness. A slow-starting shell (heavy zsh init:
+ * starship/p10k, plugins, nvm) is exactly the case that overruns the phase-1
+ * timeout — and exactly the case where re-sent probes pile up buffered in the
+ * pty. Early-returning on timeout (the prior behaviour) skipped both the drain
+ * and the wipe precisely when they were needed most: the caller then typed the
+ * launch command into a backlog of queued echoes + Enters, a stray Enter split
+ * it mid-quote, and the agent never launched. Sending the drain sentinel + C-u
+ * before returning guarantees, by FIFO ordering, that every queued keystroke is
+ * ahead of the launch command, so no pending Enter can land inside it. On a
+ * genuinely wedged shell the drain just times out and C-u/C-l are no-ops.
  */
 async function waitForShellReady(
   target: string,
@@ -292,6 +304,21 @@ async function waitForShellReady(
   initialDelayMs = 75,
 ): Promise<void> {
   if (process.env.NODE_ENV === 'test') return;
+  await runShellReadyHandshake(target, timeoutMs, intervalMs, initialDelayMs);
+}
+
+/**
+ * Core of the readiness handshake, split out from {@link waitForShellReady}
+ * (which short-circuits in test env) so the slow-shell/timeout path is unit
+ * testable. See {@link waitForShellReady} for the full rationale.
+ */
+export async function runShellReadyHandshake(
+  target: string,
+  timeoutMs = 8000,
+  intervalMs = 250,
+  initialDelayMs = 75,
+  drainTimeoutMs = SHELL_DRAIN_TIMEOUT_MS,
+): Promise<void> {
   await sleep(initialDelayMs);
 
   // Phase 1: readiness — re-send until a probe round-trips.
@@ -306,22 +333,30 @@ async function waitForShellReady(
       break;
     }
   }
-  // Timed out without a confirmed round-trip — proceed best-effort. The
-  // post-launch verifyPromptDelivered check is the safety net.
-  if (!isReady) return;
+  if (!isReady) {
+    // Timed out without a confirmed round-trip — proceed best-effort, but still
+    // run the drain + wipe below. A slow shell that crosses the deadline is the
+    // worst case for queued-probe backlog, so we must NOT skip them here.
+    logger.warn(
+      { target, operation: 'waitForShellReady', timeout_ms: timeoutMs },
+      'shell readiness not confirmed before timeout — draining + wiping best-effort',
+    );
+  }
 
   // Phase 2: drain barrier — send one fresh sentinel and wait for it alone, so
   // every earlier queued keystroke is consumed before the caller types.
   const drain = makeSentinel();
   await sendSentinel(target, drain.cmd);
-  const drainDeadline = Date.now() + SHELL_DRAIN_TIMEOUT_MS;
+  const drainDeadline = Date.now() + drainTimeoutMs;
   while (Date.now() < drainDeadline) {
     await sleep(intervalMs);
     if (await paneHasToken(target, drain.token)) break;
   }
 
-  // Wipe the handshake. C-u discards any partial line, C-l clears the visible
-  // screen, clear-history drops the scrolled-off echo lines from scrollback.
+  // Wipe the handshake. C-u discards any partial/queued line, C-l clears the
+  // visible screen, clear-history drops the scrolled-off echo lines from
+  // scrollback. Sent ahead of the caller's command so it renders onto a clean
+  // pane and any queued Enter is ordered before the command, never inside it.
   await execFile('tmux', ['send-keys', '-t', target, 'C-u']).catch(() => {});
   await execFile('tmux', ['send-keys', '-t', target, 'C-l']).catch(() => {});
   await sleep(SHELL_READY_CLEAR_SETTLE_MS);

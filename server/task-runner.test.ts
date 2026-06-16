@@ -109,6 +109,7 @@ const {
   preflightWorktree,
   hopAgent,
   shouldRedeliverPrompt,
+  runShellReadyHandshake,
 } = await import('./task-runner.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
@@ -171,6 +172,54 @@ describe('shouldRedeliverPrompt', () => {
 
   it('does not re-deliver when the agent row is gone', () => {
     expect(shouldRedeliverPrompt(undefined)).toBe(false);
+  });
+});
+
+// ─── runShellReadyHandshake ─────────────────────────────────────────────────────
+
+describe('runShellReadyHandshake', () => {
+  const TARGET = 'octomux-agent-x:0.0';
+  // Small timings keep the test fast: phase-1 + drain windows of a few cycles.
+  const fast = (drainMs = 30) => runShellReadyHandshake(TARGET, 40, 10, 0, drainMs);
+
+  it('still drains + wipes the pane when readiness never round-trips (slow-shell regression)', async () => {
+    // Default child_process mock returns stdout:'true' for capture-pane, so the
+    // sentinel token never appears → phase 1 always times out. This is the
+    // slow-starting-shell case that previously early-returned, skipping the
+    // drain barrier and the wipe and letting the launch command be typed into a
+    // backlog of queued probes (unterminated-quote launch failures).
+    await fast();
+
+    // The wipe must run despite the timeout: C-u (clear queued line) + C-l +
+    // clear-history. Their presence proves execution reached phase 2, not the
+    // old `if (!isReady) return` shortcut.
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys', 'C-u'] }),
+    ).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys', 'C-l'] }),
+    ).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['clear-history'] }),
+    ).toBeDefined();
+  });
+
+  it('sends the drain sentinel before the C-u wipe so queued keystrokes order ahead of the command', async () => {
+    await fast();
+
+    const calls = vi.mocked(execFile).mock.calls as unknown as [string, string[]][];
+    const isSentinelSend = (a: string[]) =>
+      a.includes('send-keys') && a.includes('-l') && a.some((s) => s.startsWith('echo '));
+    const lastSentinelIdx = calls.reduce(
+      (acc, [, args], i) => (args && isSentinelSend(args) ? i : acc),
+      -1,
+    );
+    const firstCuIdx = calls.findIndex(([, args]) => args?.includes('C-u'));
+
+    // A drain sentinel was sent (literal `echo` line) and the C-u wipe comes
+    // after it — FIFO then guarantees no queued Enter lands inside the command.
+    expect(lastSentinelIdx).toBeGreaterThanOrEqual(0);
+    expect(firstCuIdx).toBeGreaterThan(lastSentinelIdx);
   });
 });
 
