@@ -108,8 +108,7 @@ const {
   cleanupOrphanedViewerSessions,
   preflightWorktree,
   hopAgent,
-  shouldRedeliverPrompt,
-  runShellReadyHandshake,
+  buildAgentStartupCommand,
 } = await import('./task-runner.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
@@ -148,78 +147,48 @@ describe('slugifyTitle', () => {
   });
 });
 
-// ─── shouldRedeliverPrompt ──────────────────────────────────────────────────
+// ─── buildAgentStartupCommand ───────────────────────────────────────────────
+//
+// The harness is launched AS the tmux window's startup process (not typed into
+// an already-spawned shell), which removes the shell-readiness race entirely.
+// These tests pin the shape of that startup command.
 
-describe('shouldRedeliverPrompt', () => {
-  it('re-delivers when a running agent never recorded hook activity', () => {
-    expect(shouldRedeliverPrompt({ status: 'running', hook_activity_updated_at: null })).toBe(true);
+describe('buildAgentStartupCommand', () => {
+  const shell = process.env.SHELL || '/bin/sh';
+
+  it('runs the harness command under an interactive shell and keeps the pane alive', () => {
+    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc --model opus' });
+    // Interactive shell so it inherits the user's env (PATH/nvm/etc.).
+    expect(cmd.startsWith(`${shell} -ic `)).toBe(true);
+    expect(cmd).toContain('claude --session-id abc --model opus');
+    // exec a shell after the harness exits so the window persists.
+    expect(cmd).toContain(`exec ${shell} -i`);
+    // No prompt → no command-substitution of a prompt file.
+    expect(cmd).not.toContain('$(cat ');
   });
 
-  it('does not re-deliver once any hook activity is recorded', () => {
-    expect(
-      shouldRedeliverPrompt({
-        status: 'running',
-        hook_activity_updated_at: '2026-06-08 21:46:55',
-      }),
-    ).toBe(false);
-  });
-
-  it('does not re-deliver a stopped agent', () => {
-    expect(shouldRedeliverPrompt({ status: 'stopped', hook_activity_updated_at: null })).toBe(
-      false,
+  it('embeds the prompt via $(cat <file>) and writes the prompt file', () => {
+    const cmd = buildAgentStartupCommand({
+      baseCmd: 'claude --session-id abc',
+      prompt: 'Do the thing',
+      worktreePath: '/wt',
+      agentId: 'agent123',
+    });
+    expect(cmd).toContain('"$(cat ');
+    expect(cmd).toContain('.claude-prompt-agent123');
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      expect.stringContaining('.claude-prompt-agent123'),
+      'Do the thing',
+      { mode: 0o600, flag: 'wx' },
     );
   });
 
-  it('does not re-deliver when the agent row is gone', () => {
-    expect(shouldRedeliverPrompt(undefined)).toBe(false);
-  });
-});
-
-// ─── runShellReadyHandshake ─────────────────────────────────────────────────────
-
-describe('runShellReadyHandshake', () => {
-  const TARGET = 'octomux-agent-x:0.0';
-  // Small timings keep the test fast: phase-1 + drain windows of a few cycles.
-  const fast = (drainMs = 30) => runShellReadyHandshake(TARGET, 40, 10, 0, drainMs);
-
-  it('still drains + wipes the pane when readiness never round-trips (slow-shell regression)', async () => {
-    // Default child_process mock returns stdout:'true' for capture-pane, so the
-    // sentinel token never appears → phase 1 always times out. This is the
-    // slow-starting-shell case that previously early-returned, skipping the
-    // drain barrier and the wipe and letting the launch command be typed into a
-    // backlog of queued probes (unterminated-quote launch failures).
-    await fast();
-
-    // The wipe must run despite the timeout: C-u (clear queued line) + C-l +
-    // clear-history. Their presence proves execution reached phase 2, not the
-    // old `if (!isReady) return` shortcut.
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys', 'C-u'] }),
-    ).toBeDefined();
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['send-keys', 'C-l'] }),
-    ).toBeDefined();
-    expect(
-      findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['clear-history'] }),
-    ).toBeDefined();
-  });
-
-  it('sends the drain sentinel before the C-u wipe so queued keystrokes order ahead of the command', async () => {
-    await fast();
-
-    const calls = vi.mocked(execFile).mock.calls as unknown as [string, string[]][];
-    const isSentinelSend = (a: string[]) =>
-      a.includes('send-keys') && a.includes('-l') && a.some((s) => s.startsWith('echo '));
-    const lastSentinelIdx = calls.reduce(
-      (acc, [, args], i) => (args && isSentinelSend(args) ? i : acc),
-      -1,
-    );
-    const firstCuIdx = calls.findIndex(([, args]) => args?.includes('C-u'));
-
-    // A drain sentinel was sent (literal `echo` line) and the C-u wipe comes
-    // after it — FIFO then guarantees no queued Enter lands inside the command.
-    expect(lastSentinelIdx).toBeGreaterThanOrEqual(0);
-    expect(firstCuIdx).toBeGreaterThan(lastSentinelIdx);
+  it('does not write a prompt file when prompt is absent', () => {
+    buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
+    const promptFileCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-'));
+    expect(promptFileCall).toBeUndefined();
   });
 });
 
@@ -268,7 +237,6 @@ describe('startTask', () => {
     { name: 'creates worktree', cmd: 'git', argsInclude: ['worktree', 'add'] },
     { name: 'creates tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['display-message'] },
-    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
   ];
 
   it.each(expectedShellCalls)('$name', async ({ cmd, argsInclude }) => {
@@ -277,19 +245,19 @@ describe('startTask', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
+  // The harness is launched as the new-session window's startup command (no
+  // send-keys), so the claude invocation lives in the new-session args.
+  const findLaunchCmd = () => {
+    const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-session'] });
+    expect(call).toBeDefined();
+    return (call![1] as string[]).find((a: string) => a.includes('claude --session-id'));
+  };
+
   it('includes prompt via temp file in claude launch command', async () => {
     insertTask(db, { initial_prompt: 'Do the thing' });
     await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
 
-    const sendKeysCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'tmux',
-      argsInclude: ['send-keys', 'Enter'],
-    });
-    expect(sendKeysCall).toBeDefined();
-    const claudeCmd = (sendKeysCall![1] as string[]).find((a: string) =>
-      a.includes('claude --session-id'),
-    );
-    expect(claudeCmd).toContain('$(cat ');
+    expect(findLaunchCmd()).toContain('$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Do the thing',
@@ -301,14 +269,7 @@ describe('startTask', () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
 
-    const sendKeysCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'tmux',
-      argsInclude: ['send-keys', 'Enter'],
-    });
-    const claudeCmd = (sendKeysCall![1] as string[]).find((a: string) =>
-      a.includes('claude --session-id'),
-    );
-    expect(claudeCmd).not.toContain('$(cat ');
+    expect(findLaunchCmd()).not.toContain('$(cat ');
     // No .claude-prompt-* temp file should be written (hook settings file is OK)
     const promptFileCall = vi
       .mocked(fs.writeFileSync)
@@ -322,14 +283,7 @@ describe('startTask', () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task, model: 'claude-sonnet-4-6' } as any);
 
-    const sendKeysCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'tmux',
-      argsInclude: ['send-keys', 'Enter'],
-    });
-    const claudeCmd = (sendKeysCall![1] as string[]).find((a: string) =>
-      a.includes('claude --session-id'),
-    );
-    expect(claudeCmd).toContain('--model claude-sonnet-4-6');
+    expect(findLaunchCmd()).toContain('--model claude-sonnet-4-6');
   });
 
   // ─── Custom branch and base branch ─────────────────────────────────────
@@ -1057,7 +1011,6 @@ describe('addAgent', () => {
   const addAgentShellCalls = [
     { name: 'creates tmux window', cmd: 'tmux', argsInclude: ['new-window'] },
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['list-windows'] },
-    { name: 'launches claude', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
   ];
 
   it.each(addAgentShellCalls)('$name', async ({ cmd, argsInclude }) => {
@@ -1066,22 +1019,26 @@ describe('addAgent', () => {
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
   });
 
+  // The harness is launched as the new-window's startup command (no send-keys),
+  // so the claude invocation lives in the new-window args.
+  const findAddAgentLaunchCmd = () => {
+    const call = vi
+      .mocked(execFile)
+      .mock.calls.find(
+        (c: any[]) =>
+          c[0] === 'tmux' &&
+          (c[1] as string[]).includes('new-window') &&
+          (c[1] as string[]).some((a: string) => a.includes('claude --session-id')),
+      );
+    expect(call).toBeDefined();
+    return (call![1] as string[]).find((a: string) => a.includes('claude --session-id'));
+  };
+
   it('includes prompt via temp file in claude launch command when provided', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(runningTask, { prompt: 'Write tests' });
 
-    const sendKeysCalls = vi
-      .mocked(execFile)
-      .mock.calls.filter(
-        (c: any[]) =>
-          c[0] === 'tmux' &&
-          (c[1] as string[]).includes('send-keys') &&
-          (c[1] as string[]).some((a: string) => a.includes('claude --session-id')),
-      );
-    const claudeCmd = (sendKeysCalls[0][1] as string[]).find((a: string) =>
-      a.includes('claude --session-id'),
-    );
-    expect(claudeCmd).toContain('$(cat ');
+    expect(findAddAgentLaunchCmd()).toContain('$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Write tests',
@@ -1093,18 +1050,7 @@ describe('addAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(runningTask);
 
-    const sendKeysCalls = vi
-      .mocked(execFile)
-      .mock.calls.filter(
-        (c: any[]) =>
-          c[0] === 'tmux' &&
-          (c[1] as string[]).includes('send-keys') &&
-          (c[1] as string[]).some((a: string) => a.includes('claude --session-id')),
-      );
-    const claudeCmd = (sendKeysCalls[0][1] as string[]).find((a: string) =>
-      a.includes('claude --session-id'),
-    );
-    expect(claudeCmd).not.toContain('$(cat ');
+    expect(findAddAgentLaunchCmd()).not.toContain('$(cat ');
   });
 
   it('persists agent to database', async () => {
@@ -1116,64 +1062,40 @@ describe('addAgent', () => {
     expect(dbAgents[0].id).toBe(agent.id);
   });
 
-  it('marks agent as stopped if async claude launch fails', async () => {
+  it('throws and persists no agent row if the launch window cannot be created', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
-    // Make send-keys fail (but let new-window and list-windows succeed)
+    // Make new-window (which now carries the launch command) fail.
     vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
       if (args.includes('new-window')) {
-        nextWindowIndex++;
-        cb(null, { stdout: '', stderr: '' });
+        cb(new Error('tmux new-window failed'), null);
       } else if (args.includes('list-windows')) {
         cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('send-keys')) {
-        cb(new Error('tmux send-keys failed'), null);
       } else {
         cb(null, { stdout: '', stderr: '' });
       }
     }) as any);
-
-    const chunks: string[] = [];
-    const originalLogger = getLogger();
-    setLogger(
-      pino(
-        { level: 'trace' },
-        {
-          write(chunk: string) {
-            chunks.push(chunk);
-          },
-        },
-      ),
-    );
 
     try {
-      const agent = await addAgent(runningTask);
-      // Flush the fire-and-forget async IIFE
-      await new Promise((r) => setTimeout(r, 0));
-
-      // Agent should be marked as stopped in DB
-      const agents = getAgents(db, DEFAULTS.task.id);
-      const dbAgent = agents.find((a) => a.id === agent.id)!;
-      expect(dbAgent.status).toBe('stopped');
-      const logged = chunks.join('');
-      expect(logged).toContain('addAgent');
-      expect(logged).toContain('tmux send-keys failed');
+      // The launch is part of window creation now, so a failure rejects before
+      // the agent row is inserted — no orphaned 'stopped' row is left behind.
+      await expect(addAgent(runningTask)).rejects.toThrow('tmux new-window failed');
+      expect(getAgents(db, DEFAULTS.task.id)).toHaveLength(0);
     } finally {
-      setLogger(originalLogger);
+      // Restore default execFile implementation for subsequent tests
+      vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+        if (args.includes('display-message')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('list-windows')) {
+          cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+        } else if (args.includes('new-window')) {
+          nextWindowIndex++;
+          cb(null, { stdout: '', stderr: '' });
+        } else {
+          cb(null, { stdout: 'true', stderr: '' });
+        }
+      }) as any);
     }
-    // Restore default execFile implementation for subsequent tests
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('display-message')) {
-        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('list-windows')) {
-        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('new-window')) {
-        nextWindowIndex++;
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: 'true', stderr: '' });
-      }
-    }) as any);
   });
 });
 
@@ -1532,12 +1454,15 @@ describe('resumeTask', () => {
 
     await resumeTask(closedTask);
 
+    // Each agent is launched as its window's startup command (new-session for
+    // the first, new-window for the rest), not via send-keys.
     const claudeLaunches = vi
       .mocked(execFile)
       .mock.calls.filter(
         (c: any[]) =>
           c[0] === 'tmux' &&
-          (c[1] as string[]).includes('send-keys') &&
+          ((c[1] as string[]).includes('new-session') ||
+            (c[1] as string[]).includes('new-window')) &&
           ((c[1] as string[]).find((a) => typeof a === 'string' && a.includes('claude')) ?? false),
       );
     expect(claudeLaunches.length).toBeGreaterThanOrEqual(2);
@@ -1550,7 +1475,6 @@ describe('resumeTask', () => {
   const resumeShellCalls = [
     { name: 'kills stale tmux session', cmd: 'tmux', argsInclude: ['kill-session'] },
     { name: 'creates fresh tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
-    { name: 'launches claude in window', cmd: 'tmux', argsInclude: ['send-keys', 'Enter'] },
   ];
 
   it.each(resumeShellCalls)('$name', async ({ cmd, argsInclude }) => {
@@ -1580,12 +1504,13 @@ describe('resumeTask', () => {
 
       await resumeTask(closedTask);
 
-      const sendKeysCall = findExecCall(vi.mocked(execFile), {
+      // First (only) agent is launched as the new-session window's startup cmd.
+      const launchCall = findExecCall(vi.mocked(execFile), {
         cmd: 'tmux',
-        argsInclude: ['send-keys'],
+        argsInclude: ['new-session'],
       });
-      expect(sendKeysCall).toBeDefined();
-      const args = sendKeysCall![1] as string[];
+      expect(launchCall).toBeDefined();
+      const args = launchCall![1] as string[];
       const claudeCmd = args.find((a: string) => a.includes('claude'));
       expect(claudeCmd).toContain(expectedFlag);
       if (expectedId) expect(claudeCmd).toContain(expectedId);
@@ -1705,12 +1630,19 @@ describe('resumeTask', () => {
 
 describe('claude launch flags', () => {
   function findClaudeCmd(): string | undefined {
-    const sendKeysCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'tmux',
-      argsInclude: ['send-keys', 'Enter'],
-    });
-    if (!sendKeysCall) return undefined;
-    return (sendKeysCall[1] as string[]).find((a: string) => a.includes('claude'));
+    // The harness launches as the window's startup command — new-session for the
+    // first agent of a task, new-window for additional agents.
+    const launchCall = vi
+      .mocked(execFile)
+      .mock.calls.find(
+        (c: any[]) =>
+          c[0] === 'tmux' &&
+          ((c[1] as string[]).includes('new-session') ||
+            (c[1] as string[]).includes('new-window')) &&
+          (c[1] as string[]).some((a: string) => typeof a === 'string' && a.includes('claude')),
+      );
+    if (!launchCall) return undefined;
+    return (launchCall[1] as string[]).find((a: string) => a.includes('claude'));
   }
 
   beforeEach(() => {
@@ -2501,6 +2433,30 @@ describe('preflightWorktree', () => {
 // ─── hopAgent ────────────────────────────────────────────────────────────────
 
 describe('hopAgent', () => {
+  // Self-contained mock: hopAgent now queries the window index for standalone
+  // hops too (launch-as-startup), so the mock must answer display-message /
+  // list-windows with a real index rather than leaked state from prior tests.
+  beforeEach(() => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      if (args.includes('display-message')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: 'true', stderr: '' });
+      }
+    }) as any);
+  });
+
   it('detaches a task agent to a standalone chat session', async () => {
     insertTask(db, {
       id: 'tFrom',
@@ -2526,11 +2482,13 @@ describe('hopAgent', () => {
     });
     expect(newSessionCall).toBeDefined();
 
+    // Standalone hop launches the harness as the new-session window's startup
+    // command, so the `claude --resume` invocation rides on new-session.
     const resumeCall = vi.mocked(execFile).mock.calls.find((c) => {
       const args = c[1] as string[];
       return (
         c[0] === 'tmux' &&
-        args.includes('send-keys') &&
+        args.includes('new-session') &&
         args.some((a) => typeof a === 'string' && a.includes('claude --resume'))
       );
     });

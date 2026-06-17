@@ -16,7 +16,6 @@ import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
 import { computeMergeBase } from './git-commits.js';
-import { sendMessageToAgent, normalizePromptForPaste } from './tmux-input.js';
 
 const logger = childLogger('task-runner');
 
@@ -71,9 +70,12 @@ async function getLastWindowIndex(session: string): Promise<number> {
   return Math.max(...indices);
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const PROMPT_FILE_CLEANUP_MS = 5000;
+/** Delay before removing the on-disk prompt file after launch. Must outlast the
+ *  worst-case interactive-shell init: the prompt is read by `cat` as part of the
+ *  window's startup command, which only runs after the shell sources its rc
+ *  files (can be ~10s on a heavy zsh). 5s was safe when the command was typed
+ *  in after a readiness wait; as a startup process the read happens later. */
+const PROMPT_FILE_CLEANUP_MS = 60000;
 
 const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
 
@@ -92,106 +94,47 @@ function writeAgentLocalSettings(worktreePath: string): void {
 }
 
 /**
- * Write `prompt` to a temp file inside `worktreePath`, send `baseCmd "$(cat <file>)"`
- * as a tmux send-keys to `target`, then clean up the file after a delay. If `prompt`
- * is absent, sends `baseCmd` as-is.
+ * Build the command that launches an agent AS a tmux window's startup process.
+ *
+ * Running the harness command as the pane's initial process (rather than
+ * spawning an interactive shell and typing the command into it with send-keys)
+ * removes the shell-readiness race entirely: tmux starts the process when it
+ * creates the pane, so there is no prompt to detect, no sentinel handshake, and
+ * no possibility of a half-typed or interleaved command. This is the documented
+ * fix for the `send-keys`-races-shell-init bug class.
+ *
+ * The command runs under an interactive shell (`$SHELL -ic`) so it inherits the
+ * user's full environment (PATH, nvm, etc.) — exactly what the typed-in command
+ * got from the window's default interactive shell before. When the harness
+ * exits we `exec $SHELL -i` so the window persists as a usable shell (matching
+ * the prior UX). The initial prompt is passed via `"$(cat <file>)"` to keep
+ * arbitrary prompt text out of the command line; the file is removed after a
+ * delay (see PROMPT_FILE_CLEANUP_MS).
  */
-async function sendHarnessCommand(args: {
-  target: string;
+export function buildAgentStartupCommand(args: {
   baseCmd: string;
   prompt?: string | null;
   worktreePath?: string;
   agentId?: string;
-}): Promise<void> {
-  let cmd = args.baseCmd;
-  let promptFile: string | null = null;
+}): string {
+  let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
-    promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
+    const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
     fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
-    cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
-  }
-  await waitForShellReady(args.target);
-  await execFile('tmux', ['send-keys', '-t', args.target, cmd, 'Enter']);
-  if (promptFile) {
-    const pf = promptFile;
+    inner += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
     setTimeout(() => {
       try {
-        fs.unlinkSync(pf);
+        fs.unlinkSync(promptFile);
       } catch {
         // already removed or never existed
       }
     }, PROMPT_FILE_CLEANUP_MS);
   }
-}
-
-/** How long to let an agent boot + submit its prompt before we start checking. */
-const PROMPT_DELIVERY_GRACE_MS = 15000;
-/** Additional window to keep polling for first hook activity after the grace. */
-const PROMPT_DELIVERY_TIMEOUT_MS = 30000;
-const PROMPT_DELIVERY_POLL_MS = 2500;
-
-/**
- * Decide whether a launched agent's initial prompt needs re-delivering.
- *
- * An agent that actually received its prompt submits it, firing a
- * UserPromptSubmit hook (and later PostToolUse/Stop) — each stamps
- * `hook_activity_updated_at`. No SessionStart hook is installed, so an agent
- * that launched idle (prompt dropped by a shell race) never stamps it. A still
- * null timestamp on a still running agent therefore means the prompt was lost.
- */
-export function shouldRedeliverPrompt(
-  row: { status: string; hook_activity_updated_at: string | null } | undefined,
-): boolean {
-  if (!row) return false; // agent row gone (task deleted) — nothing to do
-  if (row.status === 'stopped') return false; // closed/stopped — leave it
-  return row.hook_activity_updated_at == null;
-}
-
-/**
- * Safety net for the launch-time prompt-delivery race. After the first agent
- * is launched with an initial prompt, watch for the first sign the prompt was
- * actually consumed (any hook firing). If nothing fires within the grace +
- * timeout window, the prompt was dropped before the shell/TUI could read it —
- * re-deliver it via the proven bracketed-paste path. Fire-and-forget.
- */
-function verifyPromptDelivered(args: {
-  taskId: string;
-  agentId: string;
-  session: string;
-  windowIndex: number;
-  prompt: string;
-}): void {
-  if (process.env.NODE_ENV === 'test') return;
-  const db = getDb();
-  const read = () =>
-    db
-      .prepare('SELECT status, hook_activity_updated_at FROM agents WHERE id = ?')
-      .get(args.agentId) as { status: string; hook_activity_updated_at: string | null } | undefined;
-  void (async () => {
-    await sleep(PROMPT_DELIVERY_GRACE_MS);
-    const deadline = Date.now() + PROMPT_DELIVERY_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (!shouldRedeliverPrompt(read())) return; // consumed, stopped, or gone
-      await sleep(PROMPT_DELIVERY_POLL_MS);
-    }
-    if (!shouldRedeliverPrompt(read())) return;
-    logger.warn(
-      { task_id: args.taskId, agent_id: args.agentId, operation: 'verifyPromptDelivered' },
-      'initial prompt not consumed after launch — re-delivering',
-    );
-    try {
-      await sendMessageToAgent(
-        args.session,
-        args.windowIndex,
-        normalizePromptForPaste(args.prompt),
-      );
-    } catch (err) {
-      logger.error(
-        { task_id: args.taskId, agent_id: args.agentId, err },
-        'verifyPromptDelivered: re-delivery failed',
-      );
-    }
-  })();
+  const shell = process.env.SHELL || '/bin/sh';
+  // Keep the window alive as an interactive shell once the harness exits, so
+  // the pane stays usable (matches the prior typed-command behaviour).
+  const script = `${inner}; exec ${shell} -i`;
+  return `${shell} -ic ${shellQuoteSingle(script)}`;
 }
 
 export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
@@ -217,150 +160,6 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
       cwd: worktreePath,
     });
   }
-}
-
-const SHELL_READY_SENTINEL = 'OCTOMUX_SHELL_READY_';
-/** Let Ctrl-L redraw settle before clearing scrollback, so the echoes can't
- *  scroll back into history after we purge it. */
-const SHELL_READY_CLEAR_SETTLE_MS = 60;
-/** Cap on the drain barrier wait — the shell is already proven alive, so its
- *  output round-trips fast; this just bounds a wedged shell. */
-const SHELL_DRAIN_TIMEOUT_MS = 2000;
-
-/** Make a fresh sentinel: a unique token and the `echo` line that prints it.
- *  The `""` split keeps the *typed* command from matching the *resolved*
- *  token, so a capture can tell the command echo from its output. */
-function makeSentinel(): { token: string; cmd: string } {
-  const nonce = nanoid(10);
-  return {
-    token: `${SHELL_READY_SENTINEL}${nonce}`,
-    cmd: `echo ${SHELL_READY_SENTINEL}""${nonce}`,
-  };
-}
-
-/** Type one sentinel line into the pane (literal text, then Enter). */
-async function sendSentinel(target: string, cmd: string): Promise<void> {
-  await execFile('tmux', ['send-keys', '-t', target, '-l', cmd]).catch(() => {});
-  await execFile('tmux', ['send-keys', '-t', target, 'Enter']).catch(() => {});
-}
-
-/** True once `token`'s output has appeared in the pane's captured contents. */
-async function paneHasToken(target: string, token: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-    return stdout.includes(token);
-  } catch {
-    return false; // pane may not exist yet
-  }
-}
-
-/**
- * Wait for the shell in a tmux pane to be ready before sending it a command.
- *
- * We can't reliably detect readiness by scraping the prompt: custom prompts
- * (starship, powerlevel10k, right-aligned segments) don't end the captured
- * line with a `$`/`❯`/`>` character, so a prompt-regex either never matches
- * (degrading to a blind timeout) or matches a transient redraw and fires too
- * early — sending the real command into a shell that isn't yet consuming
- * input, which silently drops it. That race is the root cause of agents that
- * launch idle with their initial prompt never delivered.
- *
- * Instead we run a sentinel handshake in two phases:
- *
- *  1. Readiness — repeatedly `echo` a unique token until its *output* shows up
- *     in the pane. Output only appears once the shell's line editor is actually
- *     executing input, so a round-trip proves the shell will accept input.
- *     Re-sending guards against a first probe sent before the pty was reading.
- *
- *  2. Drain barrier — a slow-starting shell *buffers* the re-sent probes rather
- *     than dropping them, so several `echo`s (and their Enters) can still be
- *     queued when phase 1 first sees the token. We send ONE more fresh sentinel
- *     and wait for it alone: because pty input is FIFO, its output appearing
- *     proves every earlier queued keystroke — including any stray Enter — has
- *     drained. Skipping this lets the caller's real command be typed while a
- *     queued Enter is pending, submitting it half-finished (unterminated quote
- *     → the shell sits at a continuation prompt and the agent never launches).
- *
- * Finally we wipe the handshake from the pane (clear the input line, the
- * visible screen, and scrollback) so the user never sees the echo tokens and
- * the real command renders onto a clean pane.
- *
- * CRITICAL: the drain barrier and the wipe run UNCONDITIONALLY, even when
- * phase 1 never confirmed readiness. A slow-starting shell (heavy zsh init:
- * starship/p10k, plugins, nvm) is exactly the case that overruns the phase-1
- * timeout — and exactly the case where re-sent probes pile up buffered in the
- * pty. Early-returning on timeout (the prior behaviour) skipped both the drain
- * and the wipe precisely when they were needed most: the caller then typed the
- * launch command into a backlog of queued echoes + Enters, a stray Enter split
- * it mid-quote, and the agent never launched. Sending the drain sentinel + C-u
- * before returning guarantees, by FIFO ordering, that every queued keystroke is
- * ahead of the launch command, so no pending Enter can land inside it. On a
- * genuinely wedged shell the drain just times out and C-u/C-l are no-ops.
- */
-async function waitForShellReady(
-  target: string,
-  timeoutMs = 8000,
-  intervalMs = 250,
-  initialDelayMs = 75,
-): Promise<void> {
-  if (process.env.NODE_ENV === 'test') return;
-  await runShellReadyHandshake(target, timeoutMs, intervalMs, initialDelayMs);
-}
-
-/**
- * Core of the readiness handshake, split out from {@link waitForShellReady}
- * (which short-circuits in test env) so the slow-shell/timeout path is unit
- * testable. See {@link waitForShellReady} for the full rationale.
- */
-export async function runShellReadyHandshake(
-  target: string,
-  timeoutMs = 8000,
-  intervalMs = 250,
-  initialDelayMs = 75,
-  drainTimeoutMs = SHELL_DRAIN_TIMEOUT_MS,
-): Promise<void> {
-  await sleep(initialDelayMs);
-
-  // Phase 1: readiness — re-send until a probe round-trips.
-  const ready = makeSentinel();
-  const deadline = Date.now() + timeoutMs;
-  let isReady = false;
-  while (Date.now() < deadline) {
-    await sendSentinel(target, ready.cmd);
-    await sleep(intervalMs);
-    if (await paneHasToken(target, ready.token)) {
-      isReady = true;
-      break;
-    }
-  }
-  if (!isReady) {
-    // Timed out without a confirmed round-trip — proceed best-effort, but still
-    // run the drain + wipe below. A slow shell that crosses the deadline is the
-    // worst case for queued-probe backlog, so we must NOT skip them here.
-    logger.warn(
-      { target, operation: 'waitForShellReady', timeout_ms: timeoutMs },
-      'shell readiness not confirmed before timeout — draining + wiping best-effort',
-    );
-  }
-
-  // Phase 2: drain barrier — send one fresh sentinel and wait for it alone, so
-  // every earlier queued keystroke is consumed before the caller types.
-  const drain = makeSentinel();
-  await sendSentinel(target, drain.cmd);
-  const drainDeadline = Date.now() + drainTimeoutMs;
-  while (Date.now() < drainDeadline) {
-    await sleep(intervalMs);
-    if (await paneHasToken(target, drain.token)) break;
-  }
-
-  // Wipe the handshake. C-u discards any partial/queued line, C-l clears the
-  // visible screen, clear-history drops the scrolled-off echo lines from
-  // scrollback. Sent ahead of the caller's command so it renders onto a clean
-  // pane and any queued Enter is ordered before the command, never inside it.
-  await execFile('tmux', ['send-keys', '-t', target, 'C-u']).catch(() => {});
-  await execFile('tmux', ['send-keys', '-t', target, 'C-l']).catch(() => {});
-  await sleep(SHELL_READY_CLEAR_SETTLE_MS);
-  await execFile('tmux', ['clear-history', '-t', target]).catch(() => {});
 }
 
 /**
@@ -865,21 +664,6 @@ export async function startTask(task: Task): Promise<void> {
       await preflightWorktree(setup.worktreePath, repoConfig);
     }
 
-    stage = 'tmux_session';
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', setup.worktreePath]);
-    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
-    // Session exists now — persist the column. See race-avoidance comment above.
-    db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      session,
-      id,
-    );
-    logger.info(
-      { task_id: id, operation: 'createTask', tmux_session: session },
-      'createTask: tmux session created',
-    );
-
-    const windowIndex = await getActiveWindowIndex(session);
-
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
     const agentId = nanoid(12);
@@ -898,12 +682,9 @@ export async function startTask(task: Task): Promise<void> {
       sessionIdForLaunch = harness.newSessionId();
     }
 
-    db.prepare(
-      `INSERT INTO agents
-         (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(agentId, id, windowIndex, 'Agent 1', harness.id, sessionIdForDb, hookToken, agentName);
-
+    // Hooks must be on disk BEFORE the window launches the harness — with the
+    // launch-as-startup-command model the harness starts the instant the pane
+    // is created, so there is no readiness wait to install them during.
     await harness.syncAgents(setup.worktreePath);
     await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
@@ -914,26 +695,45 @@ export async function startTask(task: Task): Promise<void> {
       model: (task as any).model ?? null,
       workspacePath: setup.worktreePath,
     });
-    await sendHarnessCommand({
-      target: `${session}:${windowIndex}`,
+    const startupCmd = buildAgentStartupCommand({
       baseCmd,
       prompt: task.initial_prompt,
       worktreePath: setup.worktreePath,
       agentId,
     });
+
+    stage = 'tmux_session';
+    // Launch the harness as the session's first window's startup process: tmux
+    // starts it when it creates the pane, so there is no shell-readiness race.
+    await execFile('tmux', [
+      'new-session',
+      '-d',
+      '-s',
+      session,
+      '-c',
+      setup.worktreePath,
+      startupCmd,
+    ]);
+    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    // Session exists now — persist the column. See race-avoidance comment above.
+    db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      session,
+      id,
+    );
+    logger.info(
+      { task_id: id, operation: 'createTask', tmux_session: session },
+      'createTask: tmux session created',
+    );
+
+    const windowIndex = await getActiveWindowIndex(session);
+    db.prepare(
+      `INSERT INTO agents
+         (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(agentId, id, windowIndex, 'Agent 1', harness.id, sessionIdForDb, hookToken, agentName);
+
     // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
     void harness.postLaunch?.(`${session}:${windowIndex}`);
-    // Fire-and-forget: re-deliver the prompt if the launch-time send was
-    // dropped before the shell/TUI could read it (see verifyPromptDelivered).
-    if (task.initial_prompt) {
-      verifyPromptDelivered({
-        taskId: id,
-        agentId,
-        session,
-        windowIndex,
-        prompt: task.initial_prompt,
-      });
-    }
     logger.info(
       {
         task_id: id,
@@ -991,14 +791,6 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
     .all(task.id) as Agent[];
   const label = opts.label ?? `Agent ${activeAgents.length + 1}`;
 
-  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
-
-  const windowIndex = await getLastWindowIndex(task.tmux_session!);
-  logger.info(
-    { task_id: task.id, operation: 'addAgent', window_index: windowIndex, label },
-    'addAgent: tmux window created',
-  );
-
   const harness = getHarness(task.harness_id);
   const agentId = nanoid(12);
   // All agents in one task share a single worktree settings.local.json, so
@@ -1034,6 +826,36 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
     sessionIdForLaunch = harness.newSessionId();
   }
 
+  // Hooks on disk before the window launches the harness (starts on pane create).
+  await harness.syncAgents(task.worktree!);
+  await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
+
+  const baseCmd = harness.buildLaunchCommand({
+    sessionId: sessionIdForLaunch,
+    agent: resolvedAgent,
+    flags,
+    model: opts.model ?? (task as any).model ?? null,
+    workspacePath: task.worktree!,
+  });
+  const startupCmd = buildAgentStartupCommand({
+    baseCmd,
+    prompt: resolvedPrompt,
+    worktreePath: task.worktree!,
+    agentId,
+  });
+
+  // Launch as the new window's startup process — no shell-readiness race.
+  await execFile('tmux', [
+    'new-window',
+    '-t',
+    task.tmux_session!,
+    '-c',
+    task.worktree!,
+    startupCmd,
+  ]);
+  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+  const addTarget = `${task.tmux_session}:${windowIndex}`;
+
   db.prepare(
     `INSERT INTO agents
        (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent, notify_agent_id)
@@ -1050,56 +872,18 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
     opts.notify_agent_id ?? null,
   );
 
-  await harness.syncAgents(task.worktree!);
-  await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
-
-  const addTarget = `${task.tmux_session}:${windowIndex}`;
-  const baseCmd = harness.buildLaunchCommand({
-    sessionId: sessionIdForLaunch,
-    agent: resolvedAgent,
-    flags,
-    model: opts.model ?? (task as any).model ?? null,
-    workspacePath: task.worktree!,
-  });
-  (async () => {
-    try {
-      await sendHarnessCommand({
-        target: addTarget,
-        baseCmd,
-        prompt: resolvedPrompt,
-        worktreePath: task.worktree!,
-        agentId,
-      });
-      void harness.postLaunch?.(addTarget);
-      logger.info(
-        {
-          task_id: task.id,
-          agent_id: agentId,
-          operation: 'addAgent',
-          window_index: windowIndex,
-          harness: harness.id,
-          harness_session_id: sessionIdForDb,
-        },
-        'addAgent: claude launched',
-      );
-    } catch (err) {
-      logger.error(
-        {
-          task_id: task.id,
-          agent_id: agentId,
-          window_index: windowIndex,
-          operation: 'addAgent',
-          err,
-        },
-        'addAgent: failed to launch claude',
-      );
-      try {
-        getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
-      } catch {
-        /* DB may be closed in edge cases */
-      }
-    }
-  })().catch(() => {});
+  void harness.postLaunch?.(addTarget);
+  logger.info(
+    {
+      task_id: task.id,
+      agent_id: agentId,
+      operation: 'addAgent',
+      window_index: windowIndex,
+      harness: harness.id,
+      harness_session_id: sessionIdForDb,
+    },
+    'addAgent: claude launched',
+  );
 
   return {
     id: agentId,
@@ -1506,8 +1290,6 @@ export async function resumeTask(task: Task): Promise<void> {
     ).run(task.id);
 
     const cwd = task.worktree!;
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
-    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
     const agents = db
       .prepare(
@@ -1515,97 +1297,94 @@ export async function resumeTask(task: Task): Promise<void> {
       )
       .all(task.id) as Agent[];
 
-    const agentTargets: Array<{ agent: Agent; windowIndex: number; target: string }> = [];
+    // Install hooks once, before any window launches its harness — each window
+    // starts its harness the instant the pane is created (launch-as-startup),
+    // so there is no readiness wait during which to install them.
+    if (agents.length > 0) {
+      const bootstrapHarness = getHarness(agents[0]!.harness_id);
+      await bootstrapHarness.syncAgents(cwd);
+      await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agents[0]!.hook_token);
+    } else {
+      // No agents to recover, but recreate the session so callers that expect
+      // the task's tmux session to exist after resume still find it.
+      await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
+      await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    }
 
+    let sessionCreated = false;
     for (let i = 0; i < agents.length; i++) {
-      const agent = agents[i];
-      let windowIndex: number;
+      const agent = agents[i]!;
+      const harness = getHarness(agent.harness_id);
+      const flags = harness.resolveFlags(await getSettings());
 
-      if (i === 0) {
-        windowIndex = await getActiveWindowIndex(session);
+      const taskModel = (task as any).model ?? null;
+      let baseCmd: string;
+      if (agent.harness_session_id) {
+        baseCmd = harness.buildResumeCommand({
+          sessionId: agent.harness_session_id,
+          flags,
+          model: taskModel,
+          workspacePath: cwd,
+        });
       } else {
-        await execFile('tmux', ['new-window', '-t', session, '-c', cwd]);
-        windowIndex = await getLastWindowIndex(session);
+        const newId = harness.newSessionId();
+        const continueCmd = harness.buildContinueCommand({
+          sessionId: newId,
+          flags,
+          model: taskModel,
+          workspacePath: cwd,
+        });
+        if (continueCmd !== null) {
+          baseCmd = continueCmd;
+        } else {
+          baseCmd = harness.buildLaunchCommand({
+            sessionId: newId,
+            agent: agent.agent,
+            flags,
+            model: taskModel,
+            workspacePath: cwd,
+          });
+          logger.warn(
+            { agent_id: agent.id, harness: harness.id },
+            'continue unsupported, launching fresh',
+          );
+        }
+        if (harness.sessionIdMode === 'orchestrator-assigned') {
+          db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
+        }
       }
 
-      agentTargets.push({
-        agent,
+      // Resume/continue carries no initial prompt; launch as the window's
+      // startup process so there is no shell-readiness race.
+      const startupCmd = buildAgentStartupCommand({ baseCmd });
+      let windowIndex: number;
+      if (!sessionCreated) {
+        await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
+        await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+        sessionCreated = true;
+        windowIndex = await getActiveWindowIndex(session);
+      } else {
+        await execFile('tmux', ['new-window', '-t', session, '-c', cwd, startupCmd]);
+        windowIndex = await getLastWindowIndex(session);
+      }
+      void harness.postLaunch?.(`${session}:${windowIndex}`);
+
+      db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
         windowIndex,
-        target: `${session}:${windowIndex}`,
-      });
+        agent.id,
+      );
+      logger.info(
+        {
+          task_id: task.id,
+          agent_id: agent.id,
+          operation: 'resumeTask',
+          window_index: windowIndex,
+          harness: harness.id,
+          harness_session_id: agent.harness_session_id,
+        },
+        'resumeTask: agent recovered',
+      );
     }
-
-    if (agentTargets.length > 0) {
-      const bootstrapHarness = getHarness(agentTargets[0]!.agent.harness_id);
-      await bootstrapHarness.syncAgents(cwd);
-      await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agentTargets[0]!.agent.hook_token);
-    }
-
-    await Promise.all(
-      agentTargets.map(async ({ agent, windowIndex, target }) => {
-        const harness = getHarness(agent.harness_id);
-        const flags = harness.resolveFlags(await getSettings());
-
-        const taskModel = (task as any).model ?? null;
-        let baseCmd: string;
-        if (agent.harness_session_id) {
-          baseCmd = harness.buildResumeCommand({
-            sessionId: agent.harness_session_id,
-            flags,
-            model: taskModel,
-            workspacePath: cwd,
-          });
-        } else {
-          const newId = harness.newSessionId();
-          const continueCmd = harness.buildContinueCommand({
-            sessionId: newId,
-            flags,
-            model: taskModel,
-            workspacePath: cwd,
-          });
-          if (continueCmd !== null) {
-            baseCmd = continueCmd;
-          } else {
-            baseCmd = harness.buildLaunchCommand({
-              sessionId: newId,
-              agent: agent.agent,
-              flags,
-              model: taskModel,
-              workspacePath: cwd,
-            });
-            logger.warn(
-              { agent_id: agent.id, harness: harness.id },
-              'continue unsupported, launching fresh',
-            );
-          }
-          if (harness.sessionIdMode === 'orchestrator-assigned') {
-            db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(
-              newId,
-              agent.id,
-            );
-          }
-        }
-
-        await sendHarnessCommand({ target, baseCmd });
-        void harness.postLaunch?.(target);
-
-        db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
-          windowIndex,
-          agent.id,
-        );
-        logger.info(
-          {
-            task_id: task.id,
-            agent_id: agent.id,
-            operation: 'resumeTask',
-            window_index: windowIndex,
-            harness: harness.id,
-            harness_session_id: agent.harness_session_id,
-          },
-          'resumeTask: agent recovered',
-        );
-      }),
-    );
 
     db.prepare(
       `UPDATE tasks SET runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
@@ -1707,19 +1486,6 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     }
   }
 
-  // Create the new tmux destination.
-  let newWindowIndex: number;
-  if (isStandalone) {
-    await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd]);
-    await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
-    newWindowIndex = 0;
-  } else {
-    await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd]);
-    newWindowIndex = await getLastWindowIndex(newSession);
-  }
-
-  // Resume claude in the new target.
-  const target = `${newSession}:${newWindowIndex}`;
   const harness = getHarness(agent.harness_id);
   const flags = harness.resolveFlags(await getSettings());
 
@@ -1732,6 +1498,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     hopModel = hopTask?.model ?? null;
   }
 
+  // Hooks on disk before the window launches the harness (starts on pane create).
   await harness.syncAgents(cwd);
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
@@ -1770,7 +1537,20 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
       db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
     }
   }
-  await sendHarnessCommand({ target, baseCmd });
+
+  // Create the new tmux destination, launching the harness as the window's
+  // startup process so there is no shell-readiness race.
+  const startupCmd = buildAgentStartupCommand({ baseCmd });
+  let newWindowIndex: number;
+  if (isStandalone) {
+    await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd, startupCmd]);
+    await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
+    newWindowIndex = await getActiveWindowIndex(newSession);
+  } else {
+    await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd, startupCmd]);
+    newWindowIndex = await getLastWindowIndex(newSession);
+  }
+  const target = `${newSession}:${newWindowIndex}`;
   void harness.postLaunch?.(target);
 
   // Update DB row. For standalone agents we persist tmux_session; for
