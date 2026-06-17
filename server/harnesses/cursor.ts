@@ -8,6 +8,7 @@ import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import type { OctomuxSettings } from '../settings.js';
 import { childLogger } from '../logger.js';
+import { shellQuoteSingle } from '../shell-quote.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('harness:cursor');
@@ -40,10 +41,6 @@ const OCTOMUX_CURSOR_RULE_PREFIX = 'octomux-agent-';
 const TRUST_PROMPT_RE = /trust this (?:workspace|folder)|do you trust/i;
 const TRUST_POLL_INTERVAL_MS = 200;
 const TRUST_POLL_TIMEOUT_MS = 5000;
-
-function shellQuoteSingle(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 function workspaceCliArg(workspacePath: string): string {
   return ` --workspace ${shellQuoteSingle(workspacePath)}`;

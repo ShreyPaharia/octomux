@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { DIFF_FILTER_ACTIVE } from '@/lib/design-tokens';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { timeAgo } from '@/lib/time';
+import { authorLabel } from '@/lib/comment-format';
 import { useTaskCommentsContext } from '@/hooks/useTaskComments';
 import type { InlineCommentWithOutdated } from '@/lib/api';
 import type { Agent } from '../../server/types';
@@ -22,11 +23,6 @@ export interface CommentsSidePanelProps {
   onJumpTo: (filePath: string, line: number, side: 'old' | 'new', commentId: string) => void;
   onClose?: () => void;
   className?: string;
-}
-
-function authorLabel(c: InlineCommentWithOutdated, agents: Agent[]): string {
-  if (c.agent_id == null) return 'You';
-  return agents.find((a) => a.id === c.agent_id)?.label ?? 'agent';
 }
 
 export function CommentsSidePanel({

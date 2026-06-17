@@ -1,16 +1,9 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import type { ListTaskBranchesResponse, ListTaskCommitsResponse, TaskCommit } from './types.js';
+import { gitEnv } from './git-env.js';
 
 const execFile = promisify(execFileCb);
-
-function gitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_')) env[k] = v;
-  }
-  return env;
-}
 
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFile('git', ['-C', cwd, ...args], {
