@@ -4,7 +4,7 @@ import type { Agent } from '../../server/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/time';
-import { linkify } from '@/lib/comment-format';
+import { linkify, authorLabel } from '@/lib/comment-format';
 
 export interface InlineCommentThreadProps {
   comments: InlineCommentWithOutdated[];
@@ -24,11 +24,6 @@ export interface InlineCommentThreadProps {
   focusedId?: string | null;
   className?: string;
   showReply?: boolean;
-}
-
-function authorLabel(c: InlineCommentWithOutdated, agents: Agent[]): string {
-  if (c.agent_id == null) return 'You';
-  return agents.find((a) => a.id === c.agent_id)?.label ?? 'agent';
 }
 
 function authorIsAgent(c: InlineCommentWithOutdated): boolean {

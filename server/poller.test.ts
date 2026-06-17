@@ -14,6 +14,7 @@ import {
   execFileFail,
   DEFAULTS,
 } from './test-helpers.js';
+import { getDb } from './db.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -46,6 +47,10 @@ vi.mock('./events.js', () => ({
   broadcast: vi.fn(),
 }));
 
+vi.mock('./tmux-input.js', () => ({
+  sendMessageToAgent: vi.fn(async () => undefined),
+}));
+
 vi.mock('./github-login.js', () => ({
   readGithubLogin: vi.fn(() => 'owner-login'),
 }));
@@ -64,6 +69,7 @@ const {
   stopPolling,
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
+const { sendMessageToAgent } = await import('./tmux-input.js');
 const { closeTask, deleteTask, startTask } = await import('./task-runner.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
@@ -228,6 +234,50 @@ describe('pollStatuses', () => {
     const task = getTask(db, DEFAULTS.task.id)!;
     expect(task.runtime_state).toBe('setting_up');
     expect(task.error).toBeNull();
+  });
+
+  it('sends completion message to notify_task when worker session dies', async () => {
+    // Lead (notify target) — running with an active agent
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'lead-task-01',
+      tmux_session: 'octomux-agent-lead-01',
+      branch: 'agents/lead',
+      worktree: '/tmp/test-repo/.worktrees/lead',
+    });
+    insertAgent(db, { id: 'lead-agent-01', task_id: 'lead-task-01', window_index: 1 });
+
+    // Worker — running, will die, notify_task_id points to lead
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'worker-task-01',
+      title: 'Worker: research',
+      tmux_session: 'octomux-agent-worker-01',
+      branch: 'agents/worker',
+      worktree: '/tmp/test-repo/.worktrees/worker',
+      notify_task_id: 'lead-task-01',
+    });
+    insertAgent(db, { id: 'worker-agent-01', task_id: 'worker-task-01', window_index: 1 });
+
+    // Worker session dead; lead session alive
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const session = args[1]?.[2];
+      const cb = findCallback(...args);
+      if (session === 'octomux-agent-worker-01') {
+        if (cb) cb(new Error('session not found'));
+      } else {
+        if (cb) cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      'octomux-agent-lead-01',
+      1,
+      expect.stringContaining('worker-task-01'),
+    );
   });
 });
 
@@ -845,28 +895,13 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const sendKeysCalls = vi
-      .mocked(execFile)
-      .mock.calls.filter(
-        (c: unknown[]) =>
-          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
-      );
-
-    expect(sendKeysCalls).toHaveLength(2);
-
-    const literalArgs = sendKeysCalls[0][1] as string[];
-    expect(literalArgs).toContain('-t');
-    expect(literalArgs).toContain('octomux-agent-running-review:0');
-    expect(literalArgs).toContain('-l');
-    const message = literalArgs.find((a) => a.includes('Re-review requested'));
-    expect(message).toBeDefined();
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
+    const [session, windowIdx, message] = vi.mocked(sendMessageToAgent).mock.calls[0];
+    expect(session).toBe('octomux-agent-running-review');
+    expect(windowIdx).toBe(0);
+    expect(message).toContain('Re-review requested');
     expect(message).toContain('sha-new');
     expect(message).toContain('#42');
-
-    const enterArgs = sendKeysCalls[1][1] as string[];
-    expect(enterArgs).toContain('-t');
-    expect(enterArgs).toContain('octomux-agent-running-review:0');
-    expect(enterArgs).toContain('Enter');
 
     // SHA recorded so we don't re-nudge on the next tick
     const task = getTask(db, 'running-review')!;
@@ -914,20 +949,8 @@ describe('pollReviewerRequests', () => {
     expect(fetchIdx).toBeGreaterThanOrEqual(0);
     expect(checkoutIdx).toBeGreaterThan(fetchIdx);
 
-    // Both git calls precede the first tmux send-keys (allCalls order).
-    const allCalls = vi.mocked(execFile).mock.calls;
-    const sendKeysAt = allCalls.findIndex(
-      (c: unknown[]) =>
-        c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
-    );
-    const checkoutAt = allCalls.findIndex(
-      (c: unknown[]) =>
-        c[0] === 'git' &&
-        Array.isArray(c[1]) &&
-        (c[1] as string[]).includes('checkout') &&
-        (c[1] as string[]).includes('sha-new'),
-    );
-    expect(sendKeysAt).toBeGreaterThan(checkoutAt);
+    // sendMessageToAgent (the nudge) was called after the git checkout
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
   });
 
   it('falls back to full re-review when prev head is unreachable from new head', async () => {
@@ -985,16 +1008,9 @@ describe('pollReviewerRequests', () => {
 
     await pollReviewerRequests();
 
-    const sendKeysCalls = vi
-      .mocked(execFile)
-      .mock.calls.filter(
-        (c: unknown[]) =>
-          c[0] === 'tmux' && Array.isArray(c[1]) && (c[1] as string[]).includes('send-keys'),
-      );
-    const literal = sendKeysCalls[0][1] as string[];
-    const message = literal.find((a) => a.startsWith('Re-review'));
-    expect(message).toBeDefined();
-    expect(message).toMatch(/previous_head_unreachable=true/);
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
+    const nudgeMessage = vi.mocked(sendMessageToAgent).mock.calls[0][2];
+    expect(nudgeMessage).toMatch(/previous_head_unreachable=true/);
   });
 
   it('does not re-nudge a running review when head SHA is unchanged', async () => {
@@ -1271,5 +1287,74 @@ describe('startPolling / stopPolling', () => {
   it('stopPolling cleans up after startPolling', () => {
     startPolling();
     expect(() => stopPolling()).not.toThrow();
+  });
+});
+
+// ─── pollAgentWindows ────────────────────────────────────────────────────────
+
+describe('pollAgentWindows', () => {
+  it('sends completion message to notify_agent when worker window dies within a living session', async () => {
+    createTestDb();
+    const db = getDb();
+
+    // Orchestrator task with a living session
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'orch-task-01',
+      tmux_session: 'octomux-agent-orch-task-01',
+      branch: 'agents/orch',
+      worktree: '/tmp/test-repo/.worktrees/orch',
+    });
+    insertAgent(db, {
+      id: 'orch-agent-01',
+      task_id: 'orch-task-01',
+      window_index: 1,
+      status: 'running',
+    });
+
+    // Worker agent in a separate task sharing the same session, notifying orchestrator agent
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      id: 'worker-task-01',
+      tmux_session: 'octomux-agent-orch-task-01',
+      branch: 'agents/worker',
+      worktree: '/tmp/test-repo/.worktrees/worker',
+    });
+    insertAgent(db, {
+      id: 'worker-agent-01',
+      task_id: 'worker-task-01',
+      window_index: 2,
+      status: 'running',
+      notify_agent_id: 'orch-agent-01',
+    });
+
+    // tmux: session alive, but worker window 2 is dead
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const [, cmdArgs] = args as [string, string[], ...any[]];
+      const cb = findCallback(...args);
+      if (cmdArgs.includes('has-session')) {
+        cb?.(null, { stdout: '', stderr: '' });
+        return undefined as any;
+      }
+      if (cmdArgs.includes('display-message') && cmdArgs.some((a: string) => a.endsWith(':2'))) {
+        cb?.(Object.assign(new Error("can't find window: 2"), { stderr: "can't find window: 2" }));
+        return undefined as any;
+      }
+      cb?.(null, { stdout: '1', stderr: '' });
+      return undefined as any;
+    });
+
+    await pollStatuses();
+
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      'octomux-agent-orch-task-01',
+      1,
+      expect.stringContaining('worker-agent-01'),
+    );
+
+    const agentRow = db
+      .prepare('SELECT status FROM agents WHERE id = ?')
+      .get('worker-agent-01') as { status: string };
+    expect(agentRow.status).toBe('stopped');
   });
 });

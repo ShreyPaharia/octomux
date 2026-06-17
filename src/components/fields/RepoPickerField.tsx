@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import type { BrowseResult, RecentRepo } from '@/lib/api';
 import { ChevronLeftIcon, CloseIcon } from '@/components/icons';
 import { repoBasename } from '@/lib/utils';
+import { timeAgo } from '@/lib/time';
 
 export type RepoValidation = 'idle' | 'loading' | 'valid' | 'invalid';
 
@@ -13,18 +14,6 @@ interface RepoPickerFieldProps {
   value: string;
   onChange: (value: string) => void;
   onValidationChange?: (state: RepoValidation) => void;
-}
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr + 'Z').getTime();
-  const diff = Math.max(0, now - then);
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 export function RepoPickerField({ value, onChange, onValidationChange }: RepoPickerFieldProps) {

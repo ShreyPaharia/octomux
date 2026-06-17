@@ -5,7 +5,36 @@ vi.mock('child_process', () => ({ execFile: vi.fn() }));
 
 const mockedExecFile = vi.mocked(execFile);
 
-import { sendMessageToAgent } from './tmux-input.js';
+import { sendMessageToAgent, normalizePromptForPaste } from './tmux-input.js';
+
+describe('normalizePromptForPaste', () => {
+  it('leaves a plain prose prompt untouched (newlines preserved)', () => {
+    const prompt = 'Fix the bug.\n\nIt is in the parser.';
+    expect(normalizePromptForPaste(prompt)).toBe(prompt);
+  });
+
+  it('collapses a leading-slash command prompt to a single line', () => {
+    // Claude Code parses a paste starting with "/" as a single-line slash
+    // command and strips newlines — gluing tokens together. Pre-collapsing to
+    // one line keeps the command name intact with inline args.
+    const prompt = '/review-orchestrator\n\nReview task id: abc123\nPass --task abc123.';
+    expect(normalizePromptForPaste(prompt)).toBe(
+      '/review-orchestrator Review task id: abc123 Pass --task abc123.',
+    );
+  });
+
+  it('collapses runs of whitespace for slash prompts', () => {
+    expect(normalizePromptForPaste('/foo   \n   bar')).toBe('/foo bar');
+  });
+
+  it('treats leading whitespace before the slash as a slash command', () => {
+    expect(normalizePromptForPaste('  /foo\nbar')).toBe('/foo bar');
+  });
+
+  it('returns empty string unchanged', () => {
+    expect(normalizePromptForPaste('')).toBe('');
+  });
+});
 
 describe('sendMessageToAgent', () => {
   beforeEach(() => {

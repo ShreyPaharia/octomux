@@ -183,6 +183,27 @@ CREATE TABLE IF NOT EXISTS hook_settings (
   PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS team_schedules (
+  name        TEXT PRIMARY KEY,
+  repo_path   TEXT NOT NULL,
+  config_path TEXT NOT NULL,
+  cron        TEXT NOT NULL,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS team_runs (
+  id           TEXT PRIMARY KEY,
+  team         TEXT NOT NULL,
+  lead_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE SET NULL,
+  started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  status       TEXT NOT NULL DEFAULT 'running'
+);
+CREATE INDEX IF NOT EXISTS idx_team_runs_team ON team_runs(team);
+CREATE INDEX IF NOT EXISTS idx_team_runs_status ON team_runs(status);
+
 `;
 
 /**
@@ -334,6 +355,13 @@ export function initDb(instance: Database.Database): void {
   const taskRefCols = columnsOf('task_external_refs');
   addColumn('task_external_refs', 'metadata', 'metadata TEXT', taskRefCols);
 
+  // reviewed_blob_sha records the git blob hash of the file content a reviewer
+  // approved (working-tree content), so "changed since review" can detect both
+  // new commits and uncommitted edits. Null on legacy rows → callers fall back
+  // to the commit-blob comparison.
+  const fileReviewCols = columnsOf('file_review_state');
+  addColumn('file_review_state', 'reviewed_blob_sha', 'reviewed_blob_sha TEXT', fileReviewCols);
+
   // Ensure the index exists (created here rather than SCHEMA to avoid ordering
   // issues when the old column is still named claude_session_id at SCHEMA time).
   instance.exec(
@@ -471,6 +499,7 @@ export function initDb(instance: Database.Database): void {
     `harness_id TEXT NOT NULL DEFAULT 'claude-code'`,
     taskColsForAgent,
   );
+  addColumn('tasks', 'model', 'model TEXT', taskColsForAgent);
 
   // ─── Drop legacy columns from tasks ──────────────────────────────────────
   // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),
@@ -518,6 +547,7 @@ export function initDb(instance: Database.Database): void {
   addColumn('tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
   addColumn('tasks', 'current_summary_updated_at', 'current_summary_updated_at TEXT', taskColsV2);
   addColumn('tasks', 'deleted_at', 'deleted_at TEXT', taskColsV2);
+  addColumn('tasks', 'notify_task_id', 'notify_task_id TEXT', taskColsV2);
 
   // Partial index for the purge poller's hot path.
   instance.exec(
@@ -820,4 +850,9 @@ export function initDb(instance: Database.Database): void {
     `CREATE INDEX IF NOT EXISTS idx_tasks_review_of_task_id
        ON tasks(review_of_task_id) WHERE review_of_task_id IS NOT NULL`,
   );
+
+  // ── Intra-task sub-agents: notify_agent_id on agents (2026-06-11) ──────────
+  // When a sub-agent completes, its parent agent is notified via this link.
+  const agentCols3 = columnsOf('agents');
+  addColumn('agents', 'notify_agent_id', 'notify_agent_id TEXT', agentCols3);
 }

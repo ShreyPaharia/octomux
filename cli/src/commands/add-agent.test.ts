@@ -111,4 +111,38 @@ describe('add-agent command', () => {
       label: 'Reviewer',
     });
   });
+
+  it('passes skeleton to addAgent', async () => {
+    const addAgent = vi.fn(async () => makeAgent());
+    const program = buildProgram(makeClient(addAgent));
+    await program.parseAsync(
+      ['add-agent', '--task', 'task-1', '--prompt', 'do the thing', '--skeleton', 'researcher'],
+      { from: 'user' },
+    );
+    expect(addAgent).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ skeleton: 'researcher' }),
+    );
+  });
+
+  it('passes notify-agent to addAgent as notify_agent_id', async () => {
+    const addAgent = vi.fn(async () => makeAgent());
+    const program = buildProgram(makeClient(addAgent));
+    await program.parseAsync(
+      [
+        'add-agent',
+        '--task',
+        'task-1',
+        '--prompt',
+        'do the thing',
+        '--notify-agent',
+        'parent-agent-01',
+      ],
+      { from: 'user' },
+    );
+    expect(addAgent).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({ notify_agent_id: 'parent-agent-01' }),
+    );
+  });
 });

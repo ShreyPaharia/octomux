@@ -10,14 +10,27 @@ export function registerAddAgent(program: Command): void {
     .requiredOption('-p, --prompt <prompt>', 'initial prompt for the new agent')
     .option('-a, --agent <agent-type>', 'Claude Code agent type (e.g. code-reviewer)')
     .option('-l, --label <label>', 'label for the new agent (default: server-assigned "Agent N")')
+    .option('--model <id>', 'per-agent model override (e.g. claude-opus-4-8, claude-sonnet-4-6)')
+    .option('--skeleton <name>', 'role skeleton to load from <repo>/.octomux/agents/<name>.md')
+    .option('--notify-agent <agent-id>', 'agent ID to notify when this agent finishes')
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      const payload: { prompt: string; agent?: string; label?: string } = {
+      const payload: {
+        prompt: string;
+        agent?: string;
+        label?: string;
+        model?: string;
+        skeleton?: string;
+        notify_agent_id?: string;
+      } = {
         prompt: opts.prompt,
       };
       if (opts.agent) payload.agent = opts.agent;
       if (opts.label) payload.label = opts.label;
+      if (opts.model) payload.model = opts.model;
+      if (opts.skeleton) payload.skeleton = opts.skeleton;
+      if (opts.notifyAgent) payload.notify_agent_id = opts.notifyAgent;
 
       const agent = await client.addAgent(opts.task, payload);
 

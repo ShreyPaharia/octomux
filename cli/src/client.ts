@@ -109,6 +109,8 @@ export interface OctomuxClient {
     run_mode?: RunMode;
     worktree_path?: string;
     harness_id?: string;
+    model?: string | null;
+    notify_task_id?: string | null;
   }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
@@ -116,7 +118,14 @@ export interface OctomuxClient {
   deleteTask(id: string): Promise<void>;
   addAgent(
     taskId: string,
-    data?: { prompt?: string; agent?: string; label?: string },
+    data?: {
+      prompt?: string;
+      agent?: string;
+      label?: string;
+      model?: string;
+      skeleton?: string;
+      notify_agent_id?: string | null;
+    },
   ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
@@ -160,6 +169,12 @@ export interface OctomuxClient {
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
   getTaskRefs(taskId: string): Promise<{ refs: TaskExternalRef[] }>;
+
+  teamRun(data: { name: string; repo_path: string }): Promise<{ task_id: string }>;
+  teamSchedule(data: { name: string; repo_path: string; cron: string }): Promise<{ ok: boolean }>;
+  listTeams(): Promise<
+    Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
+  >;
 }
 
 function qs(params: Record<string, string | undefined>): string {
@@ -334,6 +349,23 @@ export function createClient(serverUrl: string): OctomuxClient {
         baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/refs`,
       );
+    },
+    teamRun(data) {
+      return request<{ task_id: string }>(baseUrl, '/teams/run', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    teamSchedule(data) {
+      return request<{ ok: boolean }>(baseUrl, '/teams/schedule', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+    listTeams() {
+      return request<
+        Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
+      >(baseUrl, '/teams');
     },
   };
 }

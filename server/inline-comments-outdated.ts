@@ -2,6 +2,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { childLogger } from './logger.js';
 import * as diffMod from './diff.js';
+import { gitEnv } from './git-env.js';
 import type { InlineCommentRow } from './inline-comments.js';
 
 const execFile = promisify(execFileCb);
@@ -9,14 +10,6 @@ const logger = childLogger('inline-comments-outdated');
 
 function splitLines(s: string): string[] {
   return s.split('\n');
-}
-
-function gitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_')) env[k] = v;
-  }
-  return env;
 }
 
 async function gitShow(worktree: string, sha: string, relPath: string): Promise<string | null> {

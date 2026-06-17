@@ -84,6 +84,10 @@ export interface Task {
   worktree_id: string | null;
   /** Optional agent name (matches `agents/<name>.md`); null launches plain `claude`. */
   agent: string | null;
+  /** Optional per-task model override (e.g. 'claude-sonnet-4-6'). Overrides global flag. */
+  model: string | null;
+  /** If set, poller sends a completion message to this task's active agent when this task finishes. */
+  notify_task_id: string | null;
   harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */
@@ -118,6 +122,7 @@ export interface Agent {
   tmux_session: string | null;
   /** Optional agent name used at launch (`claude --agent <name>`). */
   agent: string | null;
+  notify_agent_id: string | null;
   created_at: string;
 }
 
@@ -188,11 +193,17 @@ export interface CreateTaskRequest {
   agent?: string;
   workflow_status?: WorkflowStatus;
   harness_id?: string;
+  model?: string | null;
+  notify_task_id?: string | null;
 }
 
 export interface AddAgentRequest {
   prompt?: string;
   agent?: string;
+  label?: string;
+  model?: string;
+  skeleton?: string;
+  notify_agent_id?: string | null;
 }
 
 export interface UpdateTaskRequest {

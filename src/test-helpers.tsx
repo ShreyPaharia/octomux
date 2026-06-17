@@ -18,6 +18,7 @@ export const AGENT_DEFAULTS: Agent = {
   hook_activity_updated_at: null,
   tmux_session: null,
   agent: null,
+  notify_agent_id: null,
   created_at: '2026-01-01 00:00:00',
 };
 
@@ -49,6 +50,8 @@ export const TASK_DEFAULTS: Task = {
   worktree_id: null,
   harness_id: 'claude-code',
   agent: null,
+  model: null,
+  notify_task_id: null,
   error: null,
   current_summary: null,
   current_summary_updated_at: null,

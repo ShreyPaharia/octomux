@@ -45,7 +45,11 @@ function wheelTarget(host: HTMLElement): HTMLElement | null {
  * One wheel event is dispatched per line so the alternate-buffer mouse-wheel
  * encoding (which ignores deltaY magnitude) advances proportionally too.
  */
-export function scrollTerminalByWheel(host: HTMLElement, lines: number, linePx = DEFAULT_LINE_PX): void {
+export function scrollTerminalByWheel(
+  host: HTMLElement,
+  lines: number,
+  linePx = DEFAULT_LINE_PX,
+): void {
   if (!lines) return;
   const target = wheelTarget(host);
   if (!target) return;

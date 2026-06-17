@@ -112,49 +112,76 @@ export function deriveSummaryFromToolUse(toolName: unknown, toolInput: unknown):
 }
 
 /**
- * Returns an Express middleware that verifies the `?token=...` query param
- * against the originating agent's `hook_token` column. Caller supplies a
- * function that returns the agent id from the request (typically by looking
- * up `harness_session_id` from `req.body.session_id`).
+ * Express middleware: authorize a hook request by its `?token=...` query param.
  *
- * Logs and responds 401 on missing token, missing agent, or token mismatch.
+ * The token is the per-task secret octomux bakes into the worktree's hook
+ * config; possessing it proves the request originates from a managed worktree.
+ * Authorization is deliberately decoupled from *attribution*: we accept any
+ * request whose token matches a known agent's `hook_token`, even when the
+ * body's session id can't be mapped to a specific agent. A live Claude session
+ * id routinely drifts from the one we recorded (resume / compaction / manual
+ * relaunch); treating that as an auth failure produced a flood of 401s that
+ * spammed the agent's terminal. Unresolvable attribution is now the handler's
+ * concern (it no-ops via `resolveHookAgent`), not a 401.
+ *
+ * 401 only when the token is absent or matches no agent.
  */
-function requireHookToken(getAgentId: (req: Request) => Promise<string | null>) {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const provided = (req.query.token ?? '') as string;
-    if (!provided) {
-      logger.warn({ path: req.path, ip: req.ip }, 'hook request missing token');
-      return res.status(401).send();
-    }
-    const agentId = await getAgentId(req);
-    if (!agentId) {
-      logger.warn({ path: req.path, ip: req.ip }, 'hook request: agent not found');
-      return res.status(401).send();
-    }
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = ?`).get(agentId) as
-      | { hook_token: string }
-      | undefined;
-    if (!row || row.hook_token === '' || row.hook_token !== provided) {
-      logger.warn({ path: req.path, ip: req.ip, agent_id: agentId }, 'hook token mismatch');
-      return res.status(401).send();
-    }
-    next();
-  };
+function requireHookToken(req: Request, res: Response, next: NextFunction) {
+  const provided = (req.query.token ?? '') as string;
+  if (!provided) {
+    logger.warn({ path: req.path, ip: req.ip }, 'hook request missing token');
+    return res.status(401).send();
+  }
+  const row = getDb()
+    .prepare(`SELECT 1 AS ok FROM agents WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
+    .get(provided) as { ok: number } | undefined;
+  if (!row) {
+    logger.warn({ path: req.path, ip: req.ip }, 'hook token not recognized');
+    return res.status(401).send();
+  }
+  next();
 }
 
-function getAgentIdFromBody(req: Request): Promise<string | null> {
-  const { session_id, conversation_id } = req.body ?? {};
-  const sid = (session_id ?? conversation_id) as string | undefined;
-  if (!sid) return Promise.resolve(null);
-  const agent = getDb()
-    .prepare(`SELECT id FROM agents WHERE harness_session_id = ? AND status != 'stopped'`)
-    .get(sid) as { id: string } | undefined;
-  return Promise.resolve(agent?.id ?? null);
+/**
+ * Resolve which agent a hook should update.
+ *
+ * Prefers an exact, live `harness_session_id` match. When the live session id
+ * has drifted from what we recorded the exact match misses; if the request's
+ * token maps to exactly one non-stopped agent the sender is unambiguous, so we
+ * attribute to it and rebind `harness_session_id` to the live id — subsequent
+ * hooks then exact-match and dashboard telemetry resumes. Ambiguous
+ * (multi-agent) tokens, or a missing session id, return undefined and the
+ * caller no-ops (still HTTP 200).
+ */
+export function resolveHookAgent(
+  token: string,
+  sessionId?: string | null,
+): { id: string; task_id: string } | undefined {
+  if (!sessionId) return undefined;
+  const exact = findAgentBySessionId(sessionId);
+  if (exact) return exact;
+  if (!token) return undefined;
+
+  const live = getDb()
+    .prepare(
+      `SELECT id, task_id FROM agents
+       WHERE hook_token = ? AND hook_token != '' AND status != 'stopped'`,
+    )
+    .all(token) as { id: string; task_id: string }[];
+  if (live.length !== 1) return undefined;
+
+  const only = live[0];
+  getDb().prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(sessionId, only.id);
+  logger.info(
+    { agent_id: only.id, task_id: only.task_id, session_id: sessionId },
+    'hook session-id drift: rebound sole agent to live session',
+  );
+  return only;
 }
 
 // POST /api/hooks/user-prompt-submit
 // Fires when the user submits a prompt — agent resumes working
-router.post('/user-prompt-submit', requireHookToken(getAgentIdFromBody), (req, res) => {
+router.post('/user-prompt-submit', requireHookToken, (req, res) => {
   const { session_id, conversation_id } = req.body;
   const sid = (session_id ?? conversation_id) as string | undefined;
   if (!sid) {
@@ -162,7 +189,7 @@ router.post('/user-prompt-submit', requireHookToken(getAgentIdFromBody), (req, r
     return;
   }
 
-  const agent = findAgentBySessionId(sid);
+  const agent = resolveHookAgent((req.query.token ?? '') as string, sid);
   if (!agent) {
     res.status(200).send();
     return;
@@ -206,7 +233,7 @@ router.post('/user-prompt-submit', requireHookToken(getAgentIdFromBody), (req, r
 });
 
 // POST /api/hooks/permission-request
-router.post('/permission-request', requireHookToken(getAgentIdFromBody), (req, res) => {
+router.post('/permission-request', requireHookToken, (req, res) => {
   const { session_id, conversation_id, tool_name, tool_input } = req.body;
   const sid = (session_id ?? conversation_id) as string | undefined;
   if (!sid || !tool_name) {
@@ -214,7 +241,7 @@ router.post('/permission-request', requireHookToken(getAgentIdFromBody), (req, r
     return;
   }
 
-  const agent = findAgentBySessionId(sid);
+  const agent = resolveHookAgent((req.query.token ?? '') as string, sid);
   if (!agent) {
     res.status(200).send();
     return;
@@ -242,7 +269,7 @@ router.post('/permission-request', requireHookToken(getAgentIdFromBody), (req, r
 });
 
 // POST /api/hooks/post-tool-use
-router.post('/post-tool-use', requireHookToken(getAgentIdFromBody), (req, res) => {
+router.post('/post-tool-use', requireHookToken, (req, res) => {
   const { session_id, conversation_id, tool_name, tool_input } = req.body;
   const sid = (session_id ?? conversation_id) as string | undefined;
   if (!sid) {
@@ -250,7 +277,7 @@ router.post('/post-tool-use', requireHookToken(getAgentIdFromBody), (req, res) =
     return;
   }
 
-  const agent = findAgentBySessionId(sid);
+  const agent = resolveHookAgent((req.query.token ?? '') as string, sid);
   if (!agent) {
     res.status(200).send();
     return;
@@ -305,15 +332,7 @@ router.post(
     }
     next();
   },
-  requireHookToken(async (req) => {
-    const { session_id, conversation_id } = req.body ?? {};
-    const sid = (session_id ?? conversation_id) as string | undefined;
-    if (!sid) return null;
-    const agent = getDb()
-      .prepare(`SELECT id FROM agents WHERE harness_session_id = ? AND status != 'stopped'`)
-      .get(sid) as { id: string } | undefined;
-    return agent?.id ?? null;
-  }),
+  requireHookToken,
   (req, res) => {
     const { session_id, conversation_id } = req.body;
     const sid = (session_id ?? conversation_id) as string | undefined;
@@ -322,7 +341,7 @@ router.post(
       return;
     }
 
-    const agent = findAgentBySessionId(sid);
+    const agent = resolveHookAgent((req.query.token ?? '') as string, sid);
     if (!agent) {
       res.status(200).send();
       return;

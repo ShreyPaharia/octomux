@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
 import { resolveDiffBase } from './diff-base.js';
+import { gitEnv } from './git-env.js';
+import { taskWorkingDir } from './task-paths.js';
 import {
   WORKDIR,
   rangeIncludesWorkingTree,
@@ -80,22 +82,27 @@ export interface FileDiff {
   isDirectory: boolean;
 }
 
-// Strip GIT_* env vars so our git calls target the worktree we pass via -C,
-// not whatever repo an outer caller (e.g. a git hook) happens to be in.
-function gitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_')) env[k] = v;
-  }
-  return env;
-}
-
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFile('git', ['-C', cwd, ...args], {
     maxBuffer: 64 * 1024 * 1024,
     env: gitEnv(),
   });
   return stdout;
+}
+
+/**
+ * `git hash-object <relPath>` — the blob sha the working-tree file content
+ * would have if committed. Matches `git show <commit>:<path>`'s blob sha when
+ * the content is identical, so it's directly comparable to committed blobs.
+ * Null when the file is missing or git errors.
+ */
+export async function hashObject(worktree: string, relPath: string): Promise<string | null> {
+  try {
+    const sha = (await git(worktree, ['hash-object', '--', relPath])).trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function blobAt(opts: {
@@ -153,7 +160,7 @@ export async function getDiffSummary(opts: {
   range?: DiffRange;
 }): Promise<DiffSummary> {
   const { task, range = { kind: 'base' as const } } = opts;
-  const worktree = task.run_mode === 'none' ? task.repo_path : task.worktree;
+  const worktree = taskWorkingDir(task);
   if (!worktree) throw new Error('Task has no worktree');
 
   const resolved = await resolveDiffBase(task);
@@ -278,10 +285,20 @@ export async function getDiffSummary(opts: {
       deletions = inCommitted.deletions;
     }
 
-    const post_blob_sha =
-      status === 'D' || newRefForBlob == null
-        ? null
-        : await blobAt({ worktree, commit: newRefForBlob, relPath: p });
+    let post_blob_sha: string | null;
+    if (status === 'D') {
+      post_blob_sha = null;
+    } else if (includeWorking) {
+      // base/working: the displayed "new" side is the working tree, so hash the
+      // on-disk content. post_blob_sha then changes on any uncommitted edit,
+      // driving both the file-tree refetch and "changed since review".
+      post_blob_sha = existsOnDisk ? await hashObject(worktree, p) : null;
+    } else {
+      post_blob_sha =
+        newRefForBlob == null
+          ? null
+          : await blobAt({ worktree, commit: newRefForBlob, relPath: p });
+    }
     files.push({ path: p, status, additions, deletions, post_blob_sha });
   }
 
@@ -301,15 +318,25 @@ export async function getDiffSummary(opts: {
       entry.changed_since_review = false;
       continue;
     }
-    const blobAtReviewedCommit = await blobAt({
-      worktree,
-      commit: row.reviewed_at_commit,
-      relPath: entry.path,
-    });
-    const same =
-      blobAtReviewedCommit !== null &&
-      entry.post_blob_sha != null &&
-      blobAtReviewedCommit === entry.post_blob_sha;
+    let same: boolean;
+    if (row.reviewed_blob_sha != null) {
+      // Content-hash comparison: the reviewer approved this exact content. For
+      // base/working `post_blob_sha` is the current working-tree hash, so any
+      // change — committed or not — since review flips this to false.
+      same = entry.post_blob_sha != null && row.reviewed_blob_sha === entry.post_blob_sha;
+    } else {
+      // Legacy row (recorded before reviewed_blob_sha existed): fall back to
+      // comparing the blob at the reviewed commit against the current post-image.
+      const blobAtReviewedCommit = await blobAt({
+        worktree,
+        commit: row.reviewed_at_commit,
+        relPath: entry.path,
+      });
+      same =
+        blobAtReviewedCommit !== null &&
+        entry.post_blob_sha != null &&
+        blobAtReviewedCommit === entry.post_blob_sha;
+    }
     entry.reviewed = same;
     entry.reviewed_at = row.reviewed_at;
     entry.reviewed_at_commit = row.reviewed_at_commit;
@@ -423,7 +450,11 @@ export async function getFileDiff(opts: {
   let newRef: string | typeof WORKDIR;
   if (opts.range) {
     oldRef = rangeOldRef(opts.range, opts.taskBaseSha ?? '');
-    newRef = rangeNewRef(opts.range);
+    // Ranges that fold in uncommitted work (`base`, `working`) diff against the
+    // working tree on disk, so the per-file view matches what the summary counts
+    // (base → working tree). Historical commit/range views use the committed
+    // post-image ref.
+    newRef = rangeIncludesWorkingTree(opts.range) ? WORKDIR : rangeNewRef(opts.range);
   } else {
     if (!opts.base) throw new Error('getFileDiff requires either `range` or `base`');
     oldRef = opts.base;

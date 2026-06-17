@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const useMediaQueryMock = vi.fn(() => false);
+const useMediaQueryMock = vi.fn((..._args: unknown[]) => false);
 vi.mock('@/lib/use-media-query', () => ({
   useMediaQuery: (...args: unknown[]) => useMediaQueryMock(...args),
 }));

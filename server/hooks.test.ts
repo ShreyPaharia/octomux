@@ -47,16 +47,12 @@ describe('Hook endpoints', () => {
       },
     );
 
-    const ignoreCases = [
-      { name: 'unknown session_id', body: { session_id: 'unknown' } },
-      { name: 'missing session_id', body: {} },
-    ];
+    it('no-ops (200) when session_id is missing — valid token, nothing to attribute', async () => {
+      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
-    it.each(ignoreCases)('ignores request with $name', async ({ body }) => {
-      await request(app)
-        .post('/api/hooks/user-prompt-submit?token=tok-test')
-        .send(body)
-        .expect(401);
+      await request(app).post('/api/hooks/user-prompt-submit?token=tok-test').send({}).expect(200);
+
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
   });
 
@@ -81,22 +77,10 @@ describe('Hook endpoints', () => {
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('waiting');
     });
 
-    const ignoreCases = [
-      {
-        name: 'unknown session_id',
-        body: { session_id: 'unknown', tool_name: 'Bash', tool_input: {} },
-      },
-      { name: 'missing fields', body: {} },
-    ];
+    it('no-ops (200) when required fields are missing — valid token', async () => {
+      await request(app).post('/api/hooks/permission-request?token=tok-test').send({}).expect(200);
 
-    it.each(ignoreCases)('ignores request with $name', async ({ body }) => {
-      await request(app)
-        .post('/api/hooks/permission-request?token=tok-test')
-        .send(body)
-        .expect(401);
-
-      const prompts = getPermissionPrompts(db, 't1');
-      expect(prompts).toHaveLength(0);
+      expect(getPermissionPrompts(db, 't1')).toHaveLength(0);
     });
   });
 
@@ -298,6 +282,69 @@ describe('Hook endpoints', () => {
 
       // Agent should remain active — subagent stop must not set it to idle
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
+    });
+  });
+
+  describe('session-id drift recovery', () => {
+    // a1 was recorded as sess-123 but the live Claude session drifts to sess-NEW
+    // (resume / compaction / manual relaunch). Hooks then arrive with a session
+    // id we never recorded.
+    it('reattaches a drifted session to the sole agent and rebinds harness_session_id', async () => {
+      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+
+      await request(app)
+        .post('/api/hooks/user-prompt-submit?token=tok-test')
+        .send({ session_id: 'sess-NEW' })
+        .expect(200);
+
+      // Rebound so subsequent hooks exact-match…
+      const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+        harness_session_id: string;
+      };
+      expect(row.harness_session_id).toBe('sess-NEW');
+      // …and telemetry resumed.
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('active');
+    });
+
+    it('does not reattach when the token maps to multiple live agents (ambiguous)', async () => {
+      insertAgent(db, {
+        id: 'a2',
+        task_id: 't1',
+        harness_session_id: 'sess-456',
+        hook_token: 'tok-test',
+        hook_activity: 'idle',
+      } as any);
+      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+
+      await request(app)
+        .post('/api/hooks/user-prompt-submit?token=tok-test')
+        .send({ session_id: 'sess-NEW' })
+        .expect(200);
+
+      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+        harness_session_id: string;
+      };
+      const a2 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a2'`).get() as {
+        harness_session_id: string;
+      };
+      expect(a1.harness_session_id).toBe('sess-123');
+      expect(a2.harness_session_id).toBe('sess-456');
+      expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
+      expect(getAgentActivity(db, 'a2').hook_activity).toBe('idle');
+    });
+
+    it('does not resurrect a stopped agent (no live match for the token)', async () => {
+      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+
+      await request(app)
+        .post('/api/hooks/user-prompt-submit?token=tok-test')
+        .send({ session_id: 'sess-NEW' })
+        .expect(200);
+
+      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+        harness_session_id: string;
+      };
+      expect(a1.harness_session_id).toBe('sess-123');
     });
   });
 

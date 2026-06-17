@@ -24,6 +24,7 @@ import {
   hopAgent,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
+import { taskWorkingDir } from './task-paths.js';
 import { parseDiffRange } from './diff-range.js';
 import {
   BaseBranchMissingError,
@@ -752,8 +753,8 @@ export function setupRoutes(app: Express): void {
 
       db.prepare(
         `INSERT INTO tasks
-           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         resolvedTitle,
@@ -764,6 +765,8 @@ export function setupRoutes(app: Express): void {
         worktreeId,
         body.agent ?? null,
         body.harness_id ?? 'claude-code',
+        body.model ?? null,
+        body.notify_task_id ?? null,
       );
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
@@ -1027,7 +1030,14 @@ export function setupRoutes(app: Express): void {
       }
     }
 
-    const agent = await addAgent(task, body.prompt, body.agent);
+    const agent = await addAgent(task, {
+      prompt: body.prompt,
+      agent: body.agent,
+      label: body.label,
+      model: body.model,
+      skeleton: body.skeleton,
+      notify_agent_id: body.notify_agent_id,
+    });
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.status(201).json(agent);
   });
@@ -1159,7 +1169,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1202,7 +1212,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1264,7 +1274,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd || !fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Task has no usable worktree' });
       return;
@@ -1285,7 +1295,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd || !fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Task has no usable worktree' });
       return;
@@ -1352,7 +1362,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'task has no worktree row to update' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd || !fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Task has no usable worktree' });
       return;
@@ -1406,7 +1416,7 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1423,7 +1433,17 @@ export function setupRoutes(app: Express): void {
     try {
       const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
       const headSha = stdout.trim();
-      setReviewed(task.id, relPath, headSha);
+      // Capture the blob hash of the content actually reviewed (the working
+      // tree), so "changed since review" reacts to uncommitted edits too. Null
+      // when the file is gone (e.g. a reviewed deletion).
+      let blobSha: string | null = null;
+      try {
+        const { stdout: bs } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
+        blobSha = bs.trim() || null;
+      } catch {
+        blobSha = null;
+      }
+      setReviewed(task.id, relPath, headSha, blobSha);
       res.status(204).send();
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -1433,7 +1453,7 @@ export function setupRoutes(app: Express): void {
   app.delete('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1460,7 +1480,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1586,7 +1606,7 @@ export function setupRoutes(app: Express): void {
     const fileFilter = typeof req.query.file === 'string' ? req.query.file : undefined;
     const rows = listComments(task.id, fileFilter ? { file: fileFilter } : undefined);
 
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     const haveWorktree = !!cwd && fs.existsSync(cwd) && task.run_mode !== 'scratch';
 
     if (!haveWorktree || !task.base_sha) {
@@ -2576,6 +2596,64 @@ export function setupRoutes(app: Express): void {
     res.json(executions);
   });
 
+  // ─── Teams ───────────────────────────────────────────────────────────────────
+
+  app.post('/api/teams/run', async (req: Request, res: Response) => {
+    const { name, repo_path } = req.body as { name?: string; repo_path?: string };
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    if (!repo_path) {
+      res.status(400).json({ error: 'repo_path is required' });
+      return;
+    }
+    try {
+      const { runTeam } = await import('./teams.js');
+      const taskId = await runTeam({ name, repoPath: repo_path });
+      res.status(201).json({ task_id: taskId });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/teams/schedule', async (req: Request, res: Response) => {
+    const { name, repo_path, cron } = req.body as {
+      name?: string;
+      repo_path?: string;
+      cron?: string;
+    };
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    if (!repo_path) {
+      res.status(400).json({ error: 'repo_path is required' });
+      return;
+    }
+    if (!cron) {
+      res.status(400).json({ error: 'cron is required' });
+      return;
+    }
+    try {
+      const { upsertTeamSchedule } = await import('./teams.js');
+      upsertTeamSchedule({ name, repoPath: repo_path, cron });
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get('/api/teams', async (_req: Request, res: Response) => {
+    try {
+      const { listTeamSchedules } = await import('./teams.js');
+      const schedules = listTeamSchedules();
+      res.json(schedules);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // ─── Skills ──────────────────────────────────────────────────────────────────
 
   app.get('/api/skills', async (_req: Request, res: Response) => {
@@ -3147,7 +3225,7 @@ export function setupRoutes(app: Express): void {
     // review agent has a concrete sha to diff base..head against.
     let prHeadSha = task.pr_head_sha;
     if (!prHeadSha) {
-      const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+      const cwd = taskWorkingDir(task);
       try {
         const { stdout } = await execFile('git', ['-C', cwd!, 'rev-parse', 'HEAD']);
         prHeadSha = stdout.trim();

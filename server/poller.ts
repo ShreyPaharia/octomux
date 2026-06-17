@@ -22,13 +22,38 @@ const STATUS_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const DELETE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60 * 60 * 1000; // 1h
+const TEAM_SCHEDULE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000; // check every minute
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
 let mergedPrTimer: ReturnType<typeof setInterval> | null = null;
 let deleteTimer: ReturnType<typeof setInterval> | null = null;
+let teamScheduleTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
+
+async function notifyParentTask(
+  db: ReturnType<typeof getDb>,
+  parentTaskId: string,
+  finishedTask: Task,
+): Promise<void> {
+  const parent = db
+    .prepare(
+      `SELECT tmux_session FROM tasks WHERE id = ? AND runtime_state IN ('running', 'setting_up')`,
+    )
+    .get(parentTaskId) as { tmux_session: string | null } | undefined;
+  if (!parent?.tmux_session) return;
+
+  const agent = db
+    .prepare(
+      `SELECT window_index FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index ASC LIMIT 1`,
+    )
+    .get(parentTaskId) as { window_index: number } | undefined;
+  if (!agent) return;
+
+  const msg = `[octomux] Worker task ${finishedTask.id} ("${finishedTask.title}") finished. Check results: octomux get-task --json ${finishedTask.id}`;
+  await sendMessageToAgent(parent.tmux_session, agent.window_index, msg);
+}
 
 export async function checkTaskStatus(task: Task): Promise<'alive' | 'dead'> {
   if (!task.tmux_session) return 'dead';
@@ -78,11 +103,85 @@ export async function pollStatuses(): Promise<void> {
     } else {
       continue;
     }
+    db.prepare(
+      `UPDATE team_runs SET status = 'done' WHERE lead_task_id = ? AND status = 'running'`,
+    ).run(task.id);
     stopAgentsSql.run(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+
+    if (task.notify_task_id) {
+      notifyParentTask(db, task.notify_task_id, task).catch(() => {});
+    }
   }
 
   await pollTerminalActivity();
+  await pollAgentWindows();
+}
+
+// ─── Agent Window Polling ─────────────────────────────────────────────────────
+
+async function checkWindowStatus(session: string, windowIndex: number): Promise<'alive' | 'dead'> {
+  try {
+    await execFile('tmux', ['display-message', '-t', `${session}:${windowIndex}`, '-p', '#I']);
+    return 'alive';
+  } catch {
+    return 'dead';
+  }
+}
+
+async function pollAgentWindows(): Promise<void> {
+  const db = getDb();
+  const watchedAgents = db
+    .prepare(
+      `SELECT a.id, a.task_id, a.window_index, a.label,
+              t.tmux_session, a.notify_agent_id
+       FROM agents a
+       INNER JOIN tasks t ON a.task_id = t.id
+       WHERE a.status = 'running'
+         AND a.notify_agent_id IS NOT NULL
+         AND t.runtime_state = 'running'
+         AND t.tmux_session IS NOT NULL`,
+    )
+    .all() as Array<{
+    id: string;
+    task_id: string;
+    window_index: number;
+    label: string;
+    tmux_session: string;
+    notify_agent_id: string;
+  }>;
+
+  const results = await Promise.allSettled(
+    watchedAgents.map(async (agent) => {
+      const status = await checkWindowStatus(agent.tmux_session, agent.window_index);
+      return { agent, status };
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    const { agent, status } = result.value;
+    if (status !== 'dead') continue;
+
+    db.prepare(
+      `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+        hook_activity_updated_at = datetime('now') WHERE id = ?`,
+    ).run(agent.id);
+
+    const target = db
+      .prepare(
+        `SELECT a.window_index, t.tmux_session
+         FROM agents a
+         INNER JOIN tasks t ON a.task_id = t.id
+         WHERE a.id = ? AND a.status != 'stopped' AND t.runtime_state = 'running'`,
+      )
+      .get(agent.notify_agent_id) as { window_index: number; tmux_session: string } | undefined;
+
+    if (!target) continue;
+
+    const msg = `[octomux] Sub-agent ${agent.id} ("${agent.label}") finished. Check results: octomux get-task --json ${agent.task_id}`;
+    await sendMessageToAgent(target.tmux_session, target.window_index, msg);
+  }
 }
 
 // ─── Hook Installation ──────────────────────────────────────────────────────
@@ -911,6 +1010,16 @@ export function startPolling(): void {
   if (DELETE_INTERVAL > 0) {
     deleteTimer = setInterval(pollSoftDeletes, DELETE_INTERVAL);
   }
+  if (TEAM_SCHEDULE_INTERVAL > 0) {
+    teamScheduleTimer = setInterval(async () => {
+      try {
+        const { pollTeamSchedules } = await import('./teams.js');
+        await pollTeamSchedules();
+      } catch (err) {
+        logger.error({ err, operation: 'pollTeamSchedules' }, 'pollTeamSchedules failed');
+      }
+    }, TEAM_SCHEDULE_INTERVAL);
+  }
 }
 
 export function stopPolling(): void {
@@ -929,5 +1038,9 @@ export function stopPolling(): void {
   if (deleteTimer) {
     clearInterval(deleteTimer);
     deleteTimer = null;
+  }
+  if (teamScheduleTimer) {
+    clearInterval(teamScheduleTimer);
+    teamScheduleTimer = null;
   }
 }

@@ -15,6 +15,7 @@ import { childLogger } from './logger.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
+import { shellQuoteSingle } from './shell-quote.js';
 import { computeMergeBase } from './git-commits.js';
 
 const logger = childLogger('task-runner');
@@ -70,15 +71,14 @@ async function getLastWindowIndex(session: string): Promise<number> {
   return Math.max(...indices);
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const PROMPT_FILE_CLEANUP_MS = 5000;
+/** Delay before removing the on-disk prompt file after launch. Must outlast the
+ *  worst-case interactive-shell init: the prompt is read by `cat` as part of the
+ *  window's startup command, which only runs after the shell sources its rc
+ *  files (can be ~10s on a heavy zsh). 5s was safe when the command was typed
+ *  in after a readiness wait; as a startup process the read happens later. */
+const PROMPT_FILE_CLEANUP_MS = 60000;
 
 const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
-
-function shellQuoteSingle(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 function writeAgentLocalSettings(worktreePath: string): void {
   const claudeDir = path.join(worktreePath, '.claude');
@@ -91,36 +91,47 @@ function writeAgentLocalSettings(worktreePath: string): void {
 }
 
 /**
- * Write `prompt` to a temp file inside `worktreePath`, send `baseCmd "$(cat <file>)"`
- * as a tmux send-keys to `target`, then clean up the file after a delay. If `prompt`
- * is absent, sends `baseCmd` as-is.
+ * Build the command that launches an agent AS a tmux window's startup process.
+ *
+ * Running the harness command as the pane's initial process (rather than
+ * spawning an interactive shell and typing the command into it with send-keys)
+ * removes the shell-readiness race entirely: tmux starts the process when it
+ * creates the pane, so there is no prompt to detect, no sentinel handshake, and
+ * no possibility of a half-typed or interleaved command. This is the documented
+ * fix for the `send-keys`-races-shell-init bug class.
+ *
+ * The command runs under an interactive shell (`$SHELL -ic`) so it inherits the
+ * user's full environment (PATH, nvm, etc.) — exactly what the typed-in command
+ * got from the window's default interactive shell before. When the harness
+ * exits we `exec $SHELL -i` so the window persists as a usable shell (matching
+ * the prior UX). The initial prompt is passed via `"$(cat <file>)"` to keep
+ * arbitrary prompt text out of the command line; the file is removed after a
+ * delay (see PROMPT_FILE_CLEANUP_MS).
  */
-async function sendHarnessCommand(args: {
-  target: string;
+export function buildAgentStartupCommand(args: {
   baseCmd: string;
   prompt?: string | null;
   worktreePath?: string;
   agentId?: string;
-}): Promise<void> {
-  let cmd = args.baseCmd;
-  let promptFile: string | null = null;
+}): string {
+  let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
-    promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
+    const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
     fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
-    cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
-  }
-  await waitForShellReady(args.target);
-  await execFile('tmux', ['send-keys', '-t', args.target, cmd, 'Enter']);
-  if (promptFile) {
-    const pf = promptFile;
+    inner += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
     setTimeout(() => {
       try {
-        fs.unlinkSync(pf);
+        fs.unlinkSync(promptFile);
       } catch {
         // already removed or never existed
       }
     }, PROMPT_FILE_CLEANUP_MS);
   }
+  const shell = process.env.SHELL || '/bin/sh';
+  // Keep the window alive as an interactive shell once the harness exits, so
+  // the pane stays usable (matches the prior typed-command behaviour).
+  const script = `${inner}; exec ${shell} -i`;
+  return `${shell} -ic ${shellQuoteSingle(script)}`;
 }
 
 export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
@@ -145,29 +156,6 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
     await execFile('git', ['commit', '-m', 'chore: fix pre-existing formatting'], {
       cwd: worktreePath,
     });
-  }
-}
-
-/**
- * Wait for the shell in a tmux pane to be ready by polling for a shell prompt.
- */
-async function waitForShellReady(
-  target: string,
-  timeoutMs = 4500,
-  intervalMs = 100,
-  initialDelayMs = 75,
-): Promise<void> {
-  if (process.env.NODE_ENV === 'test') return;
-  await sleep(initialDelayMs);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const { stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']);
-      if (/[$%>❯#]\s*$/m.test(stdout)) return;
-    } catch {
-      // pane may not exist yet
-    }
-    await sleep(intervalMs);
   }
 }
 
@@ -673,21 +661,6 @@ export async function startTask(task: Task): Promise<void> {
       await preflightWorktree(setup.worktreePath, repoConfig);
     }
 
-    stage = 'tmux_session';
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', setup.worktreePath]);
-    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
-    // Session exists now — persist the column. See race-avoidance comment above.
-    db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      session,
-      id,
-    );
-    logger.info(
-      { task_id: id, operation: 'createTask', tmux_session: session },
-      'createTask: tmux session created',
-    );
-
-    const windowIndex = await getActiveWindowIndex(session);
-
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
     const agentId = nanoid(12);
@@ -706,12 +679,9 @@ export async function startTask(task: Task): Promise<void> {
       sessionIdForLaunch = harness.newSessionId();
     }
 
-    db.prepare(
-      `INSERT INTO agents
-         (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(agentId, id, windowIndex, 'Agent 1', harness.id, sessionIdForDb, hookToken, agentName);
-
+    // Hooks must be on disk BEFORE the window launches the harness — with the
+    // launch-as-startup-command model the harness starts the instant the pane
+    // is created, so there is no readiness wait to install them during.
     await harness.syncAgents(setup.worktreePath);
     await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
@@ -719,15 +689,46 @@ export async function startTask(task: Task): Promise<void> {
       sessionId: sessionIdForLaunch,
       agent: agentName,
       flags,
+      model: (task as any).model ?? null,
       workspacePath: setup.worktreePath,
     });
-    await sendHarnessCommand({
-      target: `${session}:${windowIndex}`,
+    const startupCmd = buildAgentStartupCommand({
       baseCmd,
       prompt: task.initial_prompt,
       worktreePath: setup.worktreePath,
       agentId,
     });
+
+    stage = 'tmux_session';
+    // Launch the harness as the session's first window's startup process: tmux
+    // starts it when it creates the pane, so there is no shell-readiness race.
+    await execFile('tmux', [
+      'new-session',
+      '-d',
+      '-s',
+      session,
+      '-c',
+      setup.worktreePath,
+      startupCmd,
+    ]);
+    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    // Session exists now — persist the column. See race-avoidance comment above.
+    db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
+      session,
+      id,
+    );
+    logger.info(
+      { task_id: id, operation: 'createTask', tmux_session: session },
+      'createTask: tmux session created',
+    );
+
+    const windowIndex = await getActiveWindowIndex(session);
+    db.prepare(
+      `INSERT INTO agents
+         (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(agentId, id, windowIndex, 'Agent 1', harness.id, sessionIdForDb, hookToken, agentName);
+
     // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
     void harness.postLaunch?.(`${session}:${windowIndex}`);
     logger.info(
@@ -766,27 +767,26 @@ export async function startTask(task: Task): Promise<void> {
   }
 }
 
-export async function addAgent(
-  task: Task,
-  prompt?: string,
-  agentName?: string | null,
-): Promise<Agent> {
+export interface AddAgentOpts {
+  prompt?: string;
+  agent?: string | null;
+  label?: string;
+  model?: string | null;
+  skeleton?: string;
+  notify_agent_id?: string | null;
+}
+
+export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Agent> {
   const db = getDb();
 
-  logger.info({ task_id: task.id, operation: 'addAgent', agent: agentName }, 'addAgent: start');
+  const resolvedAgent = opts.agent ?? null;
+
+  logger.info({ task_id: task.id, operation: 'addAgent', agent: resolvedAgent }, 'addAgent: start');
 
   const activeAgents = db
     .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
     .all(task.id) as Agent[];
-  const label = `Agent ${activeAgents.length + 1}`;
-
-  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
-
-  const windowIndex = await getLastWindowIndex(task.tmux_session!);
-  logger.info(
-    { task_id: task.id, operation: 'addAgent', window_index: windowIndex, label },
-    'addAgent: tmux window created',
-  );
+  const label = opts.label ?? `Agent ${activeAgents.length + 1}`;
 
   const harness = getHarness(task.harness_id);
   const agentId = nanoid(12);
@@ -799,7 +799,18 @@ export async function addAgent(
     .get(task.id) as { hook_token: string } | undefined;
   const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
   const flags = harness.resolveFlags(await getSettings());
-  const resolvedAgent = agentName ?? null;
+
+  let resolvedPrompt = opts.prompt;
+  if (opts.skeleton) {
+    const skeletonPath = path.join(task.worktree!, '.octomux', 'agents', `${opts.skeleton}.md`);
+    if (!fs.existsSync(skeletonPath)) {
+      throw new Error(`skeleton not found: ${opts.skeleton} (expected at ${skeletonPath})`);
+    }
+    const skeletonContent = fs.readFileSync(skeletonPath, 'utf-8') as string;
+    resolvedPrompt = opts.prompt
+      ? `${skeletonContent}\n\n# Task\n\n${opts.prompt}`
+      : skeletonContent;
+  }
 
   let sessionIdForDb: string | null;
   let sessionIdForLaunch: string;
@@ -812,61 +823,64 @@ export async function addAgent(
     sessionIdForLaunch = harness.newSessionId();
   }
 
-  db.prepare(
-    `INSERT INTO agents
-       (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(agentId, task.id, windowIndex, label, harness.id, sessionIdForDb, hookToken, resolvedAgent);
-
+  // Hooks on disk before the window launches the harness (starts on pane create).
   await harness.syncAgents(task.worktree!);
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
-  const addTarget = `${task.tmux_session}:${windowIndex}`;
   const baseCmd = harness.buildLaunchCommand({
     sessionId: sessionIdForLaunch,
     agent: resolvedAgent,
     flags,
+    model: opts.model ?? (task as any).model ?? null,
     workspacePath: task.worktree!,
   });
-  (async () => {
-    try {
-      await sendHarnessCommand({
-        target: addTarget,
-        baseCmd,
-        prompt,
-        worktreePath: task.worktree!,
-        agentId,
-      });
-      void harness.postLaunch?.(addTarget);
-      logger.info(
-        {
-          task_id: task.id,
-          agent_id: agentId,
-          operation: 'addAgent',
-          window_index: windowIndex,
-          harness: harness.id,
-          harness_session_id: sessionIdForDb,
-        },
-        'addAgent: claude launched',
-      );
-    } catch (err) {
-      logger.error(
-        {
-          task_id: task.id,
-          agent_id: agentId,
-          window_index: windowIndex,
-          operation: 'addAgent',
-          err,
-        },
-        'addAgent: failed to launch claude',
-      );
-      try {
-        getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
-      } catch {
-        /* DB may be closed in edge cases */
-      }
-    }
-  })().catch(() => {});
+  const startupCmd = buildAgentStartupCommand({
+    baseCmd,
+    prompt: resolvedPrompt,
+    worktreePath: task.worktree!,
+    agentId,
+  });
+
+  // Launch as the new window's startup process — no shell-readiness race.
+  await execFile('tmux', [
+    'new-window',
+    '-t',
+    task.tmux_session!,
+    '-c',
+    task.worktree!,
+    startupCmd,
+  ]);
+  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+  const addTarget = `${task.tmux_session}:${windowIndex}`;
+
+  db.prepare(
+    `INSERT INTO agents
+       (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent, notify_agent_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    agentId,
+    task.id,
+    windowIndex,
+    label,
+    harness.id,
+    sessionIdForDb,
+    hookToken,
+    resolvedAgent,
+    opts.notify_agent_id ?? null,
+  );
+
+  void harness.postLaunch?.(addTarget);
+  logger.info(
+    {
+      task_id: task.id,
+      agent_id: agentId,
+      operation: 'addAgent',
+      window_index: windowIndex,
+      harness: harness.id,
+      harness_session_id: sessionIdForDb,
+    },
+    'addAgent: claude launched',
+  );
 
   return {
     id: agentId,
@@ -881,6 +895,7 @@ export async function addAgent(
     hook_activity_updated_at: null,
     tmux_session: null,
     agent: resolvedAgent,
+    notify_agent_id: opts.notify_agent_id ?? null,
     created_at: new Date().toISOString(),
   };
 }
@@ -1273,8 +1288,6 @@ export async function resumeTask(task: Task): Promise<void> {
     ).run(task.id);
 
     const cwd = task.worktree!;
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
-    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
 
     const agents = db
       .prepare(
@@ -1282,93 +1295,94 @@ export async function resumeTask(task: Task): Promise<void> {
       )
       .all(task.id) as Agent[];
 
-    const agentTargets: Array<{ agent: Agent; windowIndex: number; target: string }> = [];
+    // Install hooks once, before any window launches its harness — each window
+    // starts its harness the instant the pane is created (launch-as-startup),
+    // so there is no readiness wait during which to install them.
+    if (agents.length > 0) {
+      const bootstrapHarness = getHarness(agents[0]!.harness_id);
+      await bootstrapHarness.syncAgents(cwd);
+      await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agents[0]!.hook_token);
+    } else {
+      // No agents to recover, but recreate the session so callers that expect
+      // the task's tmux session to exist after resume still find it.
+      await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
+      await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    }
 
+    let sessionCreated = false;
     for (let i = 0; i < agents.length; i++) {
-      const agent = agents[i];
-      let windowIndex: number;
+      const agent = agents[i]!;
+      const harness = getHarness(agent.harness_id);
+      const flags = harness.resolveFlags(await getSettings());
 
-      if (i === 0) {
-        windowIndex = await getActiveWindowIndex(session);
+      const taskModel = (task as any).model ?? null;
+      let baseCmd: string;
+      if (agent.harness_session_id) {
+        baseCmd = harness.buildResumeCommand({
+          sessionId: agent.harness_session_id,
+          flags,
+          model: taskModel,
+          workspacePath: cwd,
+        });
       } else {
-        await execFile('tmux', ['new-window', '-t', session, '-c', cwd]);
-        windowIndex = await getLastWindowIndex(session);
+        const newId = harness.newSessionId();
+        const continueCmd = harness.buildContinueCommand({
+          sessionId: newId,
+          flags,
+          model: taskModel,
+          workspacePath: cwd,
+        });
+        if (continueCmd !== null) {
+          baseCmd = continueCmd;
+        } else {
+          baseCmd = harness.buildLaunchCommand({
+            sessionId: newId,
+            agent: agent.agent,
+            flags,
+            model: taskModel,
+            workspacePath: cwd,
+          });
+          logger.warn(
+            { agent_id: agent.id, harness: harness.id },
+            'continue unsupported, launching fresh',
+          );
+        }
+        if (harness.sessionIdMode === 'orchestrator-assigned') {
+          db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
+        }
       }
 
-      agentTargets.push({
-        agent,
+      // Resume/continue carries no initial prompt; launch as the window's
+      // startup process so there is no shell-readiness race.
+      const startupCmd = buildAgentStartupCommand({ baseCmd });
+      let windowIndex: number;
+      if (!sessionCreated) {
+        await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
+        await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+        sessionCreated = true;
+        windowIndex = await getActiveWindowIndex(session);
+      } else {
+        await execFile('tmux', ['new-window', '-t', session, '-c', cwd, startupCmd]);
+        windowIndex = await getLastWindowIndex(session);
+      }
+      void harness.postLaunch?.(`${session}:${windowIndex}`);
+
+      db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
         windowIndex,
-        target: `${session}:${windowIndex}`,
-      });
+        agent.id,
+      );
+      logger.info(
+        {
+          task_id: task.id,
+          agent_id: agent.id,
+          operation: 'resumeTask',
+          window_index: windowIndex,
+          harness: harness.id,
+          harness_session_id: agent.harness_session_id,
+        },
+        'resumeTask: agent recovered',
+      );
     }
-
-    if (agentTargets.length > 0) {
-      const bootstrapHarness = getHarness(agentTargets[0]!.agent.harness_id);
-      await bootstrapHarness.syncAgents(cwd);
-      await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agentTargets[0]!.agent.hook_token);
-    }
-
-    await Promise.all(
-      agentTargets.map(async ({ agent, windowIndex, target }) => {
-        const harness = getHarness(agent.harness_id);
-        const flags = harness.resolveFlags(await getSettings());
-
-        let baseCmd: string;
-        if (agent.harness_session_id) {
-          baseCmd = harness.buildResumeCommand({
-            sessionId: agent.harness_session_id,
-            flags,
-            workspacePath: cwd,
-          });
-        } else {
-          const newId = harness.newSessionId();
-          const continueCmd = harness.buildContinueCommand({
-            sessionId: newId,
-            flags,
-            workspacePath: cwd,
-          });
-          if (continueCmd !== null) {
-            baseCmd = continueCmd;
-          } else {
-            baseCmd = harness.buildLaunchCommand({
-              sessionId: newId,
-              agent: agent.agent,
-              flags,
-              workspacePath: cwd,
-            });
-            logger.warn(
-              { agent_id: agent.id, harness: harness.id },
-              'continue unsupported, launching fresh',
-            );
-          }
-          if (harness.sessionIdMode === 'orchestrator-assigned') {
-            db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(
-              newId,
-              agent.id,
-            );
-          }
-        }
-
-        await sendHarnessCommand({ target, baseCmd });
-        void harness.postLaunch?.(target);
-
-        db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
-          windowIndex,
-          agent.id,
-        );
-        logger.info(
-          {
-            task_id: task.id,
-            agent_id: agent.id,
-            operation: 'resumeTask',
-            window_index: windowIndex,
-            harness: harness.id,
-            harness_session_id: agent.harness_session_id,
-          },
-          'resumeTask: agent recovered',
-        );
-      }),
-    );
 
     db.prepare(
       `UPDATE tasks SET runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
@@ -1470,22 +1484,19 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     }
   }
 
-  // Create the new tmux destination.
-  let newWindowIndex: number;
-  if (isStandalone) {
-    await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd]);
-    await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
-    newWindowIndex = 0;
-  } else {
-    await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd]);
-    newWindowIndex = await getLastWindowIndex(newSession);
-  }
-
-  // Resume claude in the new target.
-  const target = `${newSession}:${newWindowIndex}`;
   const harness = getHarness(agent.harness_id);
   const flags = harness.resolveFlags(await getSettings());
 
+  // Inherit model from the target task (if hopping to a task).
+  let hopModel: string | null = null;
+  if (targetTaskId) {
+    const hopTask = db.prepare(`SELECT model FROM tasks WHERE id = ?`).get(targetTaskId) as
+      | { model: string | null }
+      | undefined;
+    hopModel = hopTask?.model ?? null;
+  }
+
+  // Hooks on disk before the window launches the harness (starts on pane create).
   await harness.syncAgents(cwd);
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
@@ -1494,6 +1505,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     baseCmd = harness.buildResumeCommand({
       sessionId: agent.harness_session_id,
       flags,
+      model: hopModel,
       workspacePath: cwd,
     });
   } else {
@@ -1501,6 +1513,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     const continueCmd = harness.buildContinueCommand({
       sessionId: newId,
       flags,
+      model: hopModel,
       workspacePath: cwd,
     });
     if (continueCmd !== null) {
@@ -1510,6 +1523,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
         sessionId: newId,
         agent: agent.agent,
         flags,
+        model: hopModel,
         workspacePath: cwd,
       });
       logger.warn(
@@ -1521,7 +1535,20 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
       db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
     }
   }
-  await sendHarnessCommand({ target, baseCmd });
+
+  // Create the new tmux destination, launching the harness as the window's
+  // startup process so there is no shell-readiness race.
+  const startupCmd = buildAgentStartupCommand({ baseCmd });
+  let newWindowIndex: number;
+  if (isStandalone) {
+    await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd, startupCmd]);
+    await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
+    newWindowIndex = await getActiveWindowIndex(newSession);
+  } else {
+    await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd, startupCmd]);
+    newWindowIndex = await getLastWindowIndex(newSession);
+  }
+  const target = `${newSession}:${newWindowIndex}`;
   void harness.postLaunch?.(target);
 
   // Update DB row. For standalone agents we persist tmux_session; for
