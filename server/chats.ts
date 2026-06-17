@@ -1,5 +1,3 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import crypto from 'crypto';
 import path from 'path';
 import os from 'os';
@@ -10,9 +8,9 @@ import { getSettings } from './settings.js';
 import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
 import { childLogger } from './logger.js';
+import { execTmux } from './tmux-bin.js';
 import type { Agent } from './types.js';
 
-const execFile = promisify(execFileCb);
 const logger = childLogger('chats');
 
 /**
@@ -86,8 +84,8 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     await harness.syncAgents(cwd);
     await harness.installHooks(cwd, hookBaseUrl(), hookToken);
 
-    await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
-    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    await execTmux(['new-session', '-d', '-s', session, '-c', cwd]);
+    await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
 
     const baseCmd = harness.buildLaunchCommand({
       sessionId: sessionIdForLaunch,
@@ -103,7 +101,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
       fs.writeFileSync(promptFile, initialPrompt, { mode: 0o600, flag: 'wx' });
       cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
     }
-    await execFile('tmux', ['send-keys', '-t', session, cmd, 'Enter']);
+    await execTmux(['send-keys', '-t', session, cmd, 'Enter']);
     if (promptFile) {
       const pf = promptFile;
       setTimeout(() => {
@@ -163,7 +161,7 @@ function isTmuxTargetMissing(err: unknown): boolean {
 
 async function killChatSession(id: string, session: string, op: string): Promise<void> {
   try {
-    await execFile('tmux', ['kill-session', '-t', session]);
+    await execTmux(['kill-session', '-t', session]);
     logger.info(
       { chat_id: id, operation: op, tmux_session: session },
       `${op}: tmux session killed`,

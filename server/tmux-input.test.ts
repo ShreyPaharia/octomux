@@ -42,8 +42,14 @@ describe('sendMessageToAgent', () => {
     mockedExecFile.mockReset();
     // execFile is callback-style; promisify wraps it. The mock has to invoke
     // the callback synchronously to play well with promisify + fake timers.
-    mockedExecFile.mockImplementation(((_cmd: string, _args: string[], cb: any) => {
-      cb(null, { stdout: '', stderr: '' });
+    mockedExecFile.mockImplementation(((...args: any[]) => {
+      // promisify may pass options as 3rd arg and callback as 4th; find callback from end
+      for (let i = args.length - 1; i >= 0; i--) {
+        if (typeof args[i] === 'function') {
+          args[i](null, { stdout: '', stderr: '' });
+          break;
+        }
+      }
       return {} as ReturnType<typeof execFile>;
     }) as unknown as typeof execFile);
   });
@@ -55,13 +61,29 @@ describe('sendMessageToAgent', () => {
 
     expect(mockedExecFile).toHaveBeenCalledTimes(2);
 
+    // execTmux prepends '-S <sock>' to all tmux invocations; strip it for assertion
+    function stripSocketPrefix(args: string[]): string[] {
+      return args[0] === '-S' ? args.slice(2) : args;
+    }
+
     const firstCall = mockedExecFile.mock.calls[0];
     expect(firstCall[0]).toBe('tmux');
-    expect(firstCall[1]).toEqual(['send-keys', '-t', 'octomux-agent-abc:0', '-l', 'hello world']);
+    expect(stripSocketPrefix(firstCall[1] as string[])).toEqual([
+      'send-keys',
+      '-t',
+      'octomux-agent-abc:0',
+      '-l',
+      'hello world',
+    ]);
 
     const secondCall = mockedExecFile.mock.calls[1];
     expect(secondCall[0]).toBe('tmux');
-    expect(secondCall[1]).toEqual(['send-keys', '-t', 'octomux-agent-abc:0', 'Enter']);
+    expect(stripSocketPrefix(secondCall[1] as string[])).toEqual([
+      'send-keys',
+      '-t',
+      'octomux-agent-abc:0',
+      'Enter',
+    ]);
   });
 
   it('forwards multi-line messages literally (newlines stay inside the message arg)', async () => {
@@ -70,6 +92,8 @@ describe('sendMessageToAgent', () => {
     await vi.advanceTimersByTimeAsync(60);
     await promise;
 
-    expect(mockedExecFile.mock.calls[0][1]).toEqual(['send-keys', '-t', 's:3', '-l', message]);
+    const args0 = mockedExecFile.mock.calls[0][1] as string[];
+    const strippedArgs0 = args0[0] === '-S' ? args0.slice(2) : args0;
+    expect(strippedArgs0).toEqual(['send-keys', '-t', 's:3', '-l', message]);
   });
 });

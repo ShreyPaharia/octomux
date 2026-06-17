@@ -113,9 +113,11 @@ describe('checkTaskStatus', () => {
 
   it('calls tmux has-session with correct session name', async () => {
     await checkTaskStatus({ ...DEFAULTS.runningTask } as Task);
+    // execTmux prepends '-S <sock>', so args includes the socket prefix too
     expect(execFile).toHaveBeenCalledWith(
       'tmux',
-      ['has-session', '-t', DEFAULTS.runningTask.tmux_session],
+      expect.arrayContaining(['has-session', '-t', DEFAULTS.runningTask.tmux_session]),
+      expect.anything(),
       expect.any(Function),
     );
   });
@@ -260,8 +262,13 @@ describe('pollStatuses', () => {
     insertAgent(db, { id: 'worker-agent-01', task_id: 'worker-task-01', window_index: 1 });
 
     // Worker session dead; lead session alive
+    // execTmux prepends '-S <sock>', so args look like:
+    //   ['tmux', ['-S', sock, 'has-session', '-t', sessionName], {env}, cb]
     vi.mocked(execFile).mockImplementation((...args: any[]) => {
-      const session = args[1]?.[2];
+      const tmuxArgs: string[] = args[1] ?? [];
+      // Find session name after '-t' flag (strip '-S sock' prefix if present)
+      const tIdx = tmuxArgs.indexOf('-t');
+      const session = tIdx >= 0 ? tmuxArgs[tIdx + 1] : undefined;
       const cb = findCallback(...args);
       if (session === 'octomux-agent-worker-01') {
         if (cb) cb(new Error('session not found'));

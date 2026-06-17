@@ -21,6 +21,7 @@ import {
   gcScratchDirs,
 } from './task-runner.js';
 import { getDb } from './db.js';
+import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
@@ -79,6 +80,9 @@ async function recoverTasks(): Promise<void> {
     }
   }
 }
+
+// Create the run/ dir holding the private tmux socket before any tmux call.
+ensureTmuxRuntimeDir();
 
 await reconcileOrphanSettingUp();
 await recoverTasks();

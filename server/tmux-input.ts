@@ -1,7 +1,4 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-
-const execFile = promisify(execFileCb);
+import { execTmux } from './tmux-bin.js';
 
 const PASTE_TO_ENTER_DELAY_MS = 50;
 
@@ -42,7 +39,7 @@ export async function sendMessageToAgent(
   message: string,
 ): Promise<void> {
   const target = `${session}:${windowIndex}`;
-  await execFile('tmux', ['send-keys', '-t', target, '-l', message]);
+  await execTmux(['send-keys', '-t', target, '-l', message]);
   await new Promise<void>((resolve) => setTimeout(resolve, PASTE_TO_ENTER_DELAY_MS));
-  await execFile('tmux', ['send-keys', '-t', target, 'Enter']);
+  await execTmux(['send-keys', '-t', target, 'Enter']);
 }

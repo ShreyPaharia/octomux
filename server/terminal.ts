@@ -1,5 +1,3 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import { WebSocketServer, WebSocket } from 'ws';
 import { spawn, type IPty } from 'node-pty';
 import type { IncomingMessage } from 'http';
@@ -8,8 +6,7 @@ import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import type { Task } from './types.js';
 import { SELECT_TASK_SQL } from './task-select.js';
-
-const execFile = promisify(execFileCb);
+import { execTmux, tmuxSpawnSpec } from './tmux-bin.js';
 
 interface TerminalConnection {
   ws: WebSocket;
@@ -55,11 +52,12 @@ function attachToTmuxSession(
 ): void {
   let pty: IPty;
   try {
-    pty = spawn('tmux', ['attach-session', '-t', tmuxTarget], {
+    const spec = tmuxSpawnSpec(['attach-session', '-t', tmuxTarget]);
+    pty = spawn(spec.file, spec.args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
-      env: process.env as Record<string, string>,
+      env: spec.env as Record<string, string>,
     });
   } catch {
     ws.close(4005, closeReason);
@@ -132,7 +130,7 @@ function attachToTmuxSession(
 
   const cleanupLinkedSession = () => {
     if (linkedSession) {
-      execFile('tmux', ['kill-session', '-t', linkedSession]).catch(() => {});
+      execTmux(['kill-session', '-t', linkedSession]).catch(() => {});
     }
   };
 
@@ -183,12 +181,10 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   // meaning switching tabs in one browser would affect all other viewers.
   const linkedSession = `${task.tmux_session}-v-${nanoid(6)}`;
   try {
-    await execFile('tmux', ['new-session', '-d', '-t', task.tmux_session, '-s', linkedSession]);
+    await execTmux(['new-session', '-d', '-t', task.tmux_session, '-s', linkedSession]);
     // Prevent grouped sessions from constraining window size to the smallest client
-    await execFile('tmux', ['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(
-      () => {},
-    );
-    await execFile('tmux', ['select-window', '-t', `${linkedSession}:${windowIndex}`]);
+    await execTmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
+    await execTmux(['select-window', '-t', `${linkedSession}:${windowIndex}`]);
   } catch {
     ws.close(4005, 'Failed to create terminal view session');
     return;

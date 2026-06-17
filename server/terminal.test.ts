@@ -39,7 +39,17 @@ const mockExecFile = vi.fn(
 );
 
 vi.mock('child_process', () => ({
-  execFile: (...args: any[]) => mockExecFile(args[0], args[1], args[2]),
+  execFile: (...args: any[]) => {
+    // promisify passes options as 3rd arg and callback as 4th; find callback from end
+    let cb: ((...a: any[]) => void) | undefined;
+    for (let i = args.length - 1; i >= 0; i--) {
+      if (typeof args[i] === 'function') {
+        cb = args[i];
+        break;
+      }
+    }
+    return mockExecFile(args[0], args[1], cb);
+  },
 }));
 
 const { setupTerminalWebSocket, handleTerminalUpgrade } = await import('./terminal.js');
@@ -170,9 +180,11 @@ describe('terminal WebSocket', () => {
     // Should attach to the linked session, not directly to session:windowIndex
     const spawnCall = vi.mocked(nodePty.spawn).mock.calls[0];
     expect(spawnCall[0]).toBe('tmux');
-    expect(spawnCall[1][0]).toBe('attach-session');
+    // tmuxSpawnSpec prepends '-S <sock>', so 'attach-session' is at index 2
+    expect(spawnCall[1]).toContain('attach-session');
     // The target should be the linked session name (contains '-v-'), not session:0
-    const target = spawnCall[1][2];
+    const attachIdx = (spawnCall[1] as string[]).indexOf('attach-session');
+    const target = (spawnCall[1] as string[])[attachIdx + 2]; // -t <target>
     expect(target).toContain(`${DEFAULTS.runningTask.tmux_session}-v-`);
     expect(target).not.toContain(':');
 
@@ -188,11 +200,14 @@ describe('terminal WebSocket', () => {
     await waitForSetup();
 
     // The select-window call should target windowIndex 1
+    // tmuxSpawnSpec/execTmux prepends '-S <sock>', so 'select-window' is at index 2
     const selectCall = mockExecFile.mock.calls.find(
-      (c: any[]) => c[0] === 'tmux' && c[1]?.[0] === 'select-window',
+      (c: any[]) => c[0] === 'tmux' && (c[1] as string[])?.includes('select-window'),
     );
     expect(selectCall).toBeDefined();
-    const selectTarget = selectCall![1][2] as string;
+    const selArgs = selectCall![1] as string[];
+    const selIdx = selArgs.indexOf('select-window');
+    const selectTarget = selArgs[selIdx + 2] as string; // -t <target>
     expect(selectTarget).toMatch(/:1$/);
 
     ws.close();
@@ -298,7 +313,7 @@ describe('terminal WebSocket', () => {
 
     // Should kill the linked session on cleanup
     const killCall = mockExecFile.mock.calls.find(
-      (c: any[]) => c[0] === 'tmux' && c[1]?.[0] === 'kill-session',
+      (c: any[]) => c[0] === 'tmux' && (c[1] as string[])?.includes('kill-session'),
     );
     expect(killCall).toBeDefined();
   });
@@ -343,7 +358,7 @@ describe('terminal WebSocket', () => {
     // Should kill linked session on PTY exit too
     await new Promise((r) => setTimeout(r, 50));
     const killCall = mockExecFile.mock.calls.find(
-      (c: any[]) => c[0] === 'tmux' && c[1]?.[0] === 'kill-session',
+      (c: any[]) => c[0] === 'tmux' && (c[1] as string[])?.includes('kill-session'),
     );
     expect(killCall).toBeDefined();
   });
