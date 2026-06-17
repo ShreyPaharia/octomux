@@ -895,6 +895,7 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
     hook_activity_updated_at: null,
     tmux_session: null,
     agent: resolvedAgent,
+    notify_agent_id: opts.notify_agent_id ?? null,
     created_at: new Date().toISOString(),
   };
 }
