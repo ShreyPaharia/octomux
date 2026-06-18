@@ -1,0 +1,75 @@
+# electron-builder configuration for octomux desktop app.
+# Build with: bun run dist:electron
+#
+# Native modules (better-sqlite3, node-pty) are rebuilt for Electron's ABI
+# automatically via npmRebuild: true. The mechanism is @electron/rebuild, which
+# electron-builder invokes internally during the packaging step.
+
+appId: io.ostium.octomux
+productName: octomux
+
+# Entry point for the Electron main process (overrides package.json "main"
+# only within the packaged app via extraMetadata, so the npm CLI main is untouched).
+extraMetadata:
+  main: dist-electron/main.js
+
+directories:
+  output: release
+
+# Files to include in the package. node_modules/** pulls in runtime deps;
+# the three dist dirs carry compiled JS.
+files:
+  - dist/**
+  - dist-server/**
+  - dist-electron/**
+  - node_modules/**
+  - package.json
+
+# These native/binary directories must be outside the asar archive so
+# Node can dlopen .node files and exec the tmux binary at runtime.
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+  - '**/node_modules/better-sqlite3/**'
+  - '**/node_modules/@octomux/tmux-darwin-arm64/**'
+  - '**/node_modules/@octomux/tmux-darwin-x64/**'
+  - '**/node_modules/@octomux/tmux-linux-x64/**'
+  - '**/node_modules/@octomux/tmux-linux-arm64/**'
+
+# Rebuild native modules (better-sqlite3, node-pty) for Electron's ABI.
+# Mechanism: electron-builder calls @electron/rebuild under the hood when
+# npmRebuild is true.
+npmRebuild: true
+
+# macOS target
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.developer-tools
+
+# Windows target
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+
+# Linux targets
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+  category: Development

@@ -49,7 +49,9 @@
     "prepublishOnly": "bun run build",
     "postinstall": "bash scripts/postinstall.sh",
     "prepare": "husky",
-    "changelog": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s"
+    "changelog": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "dist:electron": "bun run build && bun run build:electron && electron-builder"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -74,6 +76,7 @@
     "@fontsource/space-grotesk": "^5.2.10",
     "@monaco-editor/react": "^4.7.0",
     "better-sqlite3": "^12.0.0",
+    "fix-path": "^4.0.0",
     "chalk": "^5.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -99,6 +102,7 @@
     "@octomux/tmux-linux-arm64": "1.0.30"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.0.0",
     "@commitlint/cli": "^20.0.0",
     "@commitlint/config-conventional": "^20.0.0",
     "@eslint/js": "^9.0.0",
@@ -139,6 +143,8 @@
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.0.0",
     "vite": "^6.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
     "vitest": "^3.2.4"
   }
 }
