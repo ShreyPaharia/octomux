@@ -51,6 +51,15 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      # node-gyp (used by @electron/rebuild to rebuild node-pty for Electron's
+      # ABI) imports Python's distutils, which was REMOVED from the stdlib in
+      # Python 3.12. The runners default to 3.12+, so pin 3.11 (still ships
+      # distutils) to keep the native rebuild working.
+      - name: Set up Python 3.11 (node-gyp needs distutils)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install build tools (pkg-config for the static tmux build)
         run: brew install pkg-config || true
 
