@@ -67,10 +67,15 @@ mac:
         - arm64
         - x64
   category: public.app-category.developer-tools
-  # TODO(signing): unsigned for now. CI sets CSC_IDENTITY_AUTO_DISCOVERY=false so
-  # the build doesn't fail looking for a cert; users get a Gatekeeper warning on
-  # first open (right-click → Open). To sign+notarize later, add an Apple
-  # Developer cert (CSC_LINK/CSC_KEY_PASSWORD) and APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD.
+  # Ad-hoc sign (identity: "-"). Earlier the build set
+  # CSC_IDENTITY_AUTO_DISCOVERY=false, which SUPPRESSED electron-builder's
+  # signing pass — leaving only the linker's bare ad-hoc sig whose resource seal
+  # was inconsistent, so macOS reported the app as "damaged". An explicit ad-hoc
+  # identity makes electron-builder run a proper codesign pass that seals
+  # resources → a VALID signature. (Still not notarized: downloaded copies hit a
+  # Gatekeeper warning → right-click → Open. Real fix = Developer ID cert
+  # CSC_LINK/CSC_KEY_PASSWORD + APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD for notarization.)
+  identity: '-'
 
 # Windows target
 win:

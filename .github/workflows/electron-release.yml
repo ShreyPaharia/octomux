@@ -89,11 +89,13 @@ jobs:
           bun run build
           bun run build:electron
 
-      # Package + (on a tag) publish to GitHub Releases. Unsigned for now.
+      # Package + (on a tag) publish to GitHub Releases. Ad-hoc signed (no Apple
+      # cert): electron-builder.yml sets mac.identity '-'. We do NOT set
+      # CSC_IDENTITY_AUTO_DISCOVERY=false here — that suppressed the signing pass
+      # and produced a broken seal ("damaged" on launch).
       - name: Package and publish Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false' # skip code signing (unsigned build)
         run: |
           # --publish always uploads to the GitHub Release on a tag; on a manual
           # (workflow_dispatch) run with no tag, electron-builder still builds and
