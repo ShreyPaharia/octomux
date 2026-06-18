@@ -41,12 +41,19 @@ asarUnpack:
 npmRebuild: true
 
 # Where built installers are uploaded. The electron-release workflow runs with
-# `--publish always` on a v* tag, which attaches the artifacts to a GitHub
-# Release at https://github.com/ShreyPaharia/octomux/releases.
+# `--publish always`, which attaches the artifacts to the GitHub Release at
+# https://github.com/ShreyPaharia/octomux/releases.
+#
+# releaseType: release — publish.yml already creates the v<ver> release (a
+# PUBLISHED release, with notes). electron-builder defaults to publishing into a
+# DRAFT, and on a type mismatch it SKIPS uploading ("existing type not
+# compatible with publishing type"). Setting 'release' makes it upload into the
+# existing published release instead of skipping.
 publish:
   provider: github
   owner: ShreyPaharia
   repo: octomux
+  releaseType: release
 
 # macOS target
 mac:
