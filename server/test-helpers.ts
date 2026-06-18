@@ -295,8 +295,23 @@ export interface ShellCallMatch {
 }
 
 /**
+ * Strip the leading `-S <socket>` prefix that execTmux prepends to every tmux
+ * invocation so that arg-matching helpers remain independent of the socket path.
+ * Non-tmux calls (git, gh, …) are returned unchanged.
+ */
+function normalizeTmuxArgs(cmd: string, args: string[]): string[] {
+  if (cmd === 'tmux' && args[0] === '-S') {
+    // args = ['-S', '<path>', <subcommand>, ...]
+    return args.slice(2);
+  }
+  return args;
+}
+
+/**
  * Find a matching call in the mocked execFile calls.
  * Returns the full call args or undefined.
+ * For tmux calls, the leading `-S <socket>` prefix is transparently stripped
+ * before matching so tests don't need to account for the private socket path.
  */
 export function findExecCall(
   mock: ReturnType<typeof vi.fn>,
@@ -304,7 +319,7 @@ export function findExecCall(
 ): any[] | undefined {
   return mock.mock.calls.find((c: any[]) => {
     if (c[0] !== match.cmd) return false;
-    const args = c[1] as string[];
+    const args = normalizeTmuxArgs(c[0] as string, c[1] as string[]);
     if (match.argsInclude && !match.argsInclude.every((a) => args?.includes(a))) return false;
     if (match.argsExclude && match.argsExclude.some((a) => args?.includes(a))) return false;
     return true;
@@ -313,11 +328,12 @@ export function findExecCall(
 
 /**
  * Count matching calls in the mocked execFile calls.
+ * For tmux calls, the leading `-S <socket>` prefix is transparently stripped.
  */
 export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallMatch): number {
   return mock.mock.calls.filter((c: any[]) => {
     if (c[0] !== match.cmd) return false;
-    const args = c[1] as string[];
+    const args = normalizeTmuxArgs(c[0] as string, c[1] as string[]);
     if (match.argsInclude && !match.argsInclude.every((a) => args?.includes(a))) return false;
     return true;
   }).length;
@@ -338,6 +354,7 @@ export function getAgentActivity(
 
 /**
  * Creates an execFile mock implementation that calls back with (null, { stdout, stderr }).
+ * Works with both promisify-style (opts as 3rd arg, cb as 4th) and direct callback style.
  */
 export function execFileOk(stdout = '', stderr = ''): (...args: any[]) => any {
   return (...args: any[]) => {
@@ -349,6 +366,7 @@ export function execFileOk(stdout = '', stderr = ''): (...args: any[]) => any {
 
 /**
  * Creates an execFile mock implementation that calls back with an error.
+ * Works with both promisify-style (opts as 3rd arg, cb as 4th) and direct callback style.
  */
 export function execFileFail(err: Error | string = 'exec failed'): (...args: any[]) => any {
   const error = typeof err === 'string' ? new Error(err) : err;

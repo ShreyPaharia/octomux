@@ -84,8 +84,8 @@ install_with_npm_global() {
   echo "⚠  Could not install $name automatically. $hint"
 }
 
-# tmux
-install_with_brew "tmux" "tmux" "Install with: brew install tmux"
+# tmux is now bundled via @octomux/tmux-<platform>-<arch> optional dependencies.
+# No system-level tmux install is needed.
 
 # git
 install_with_brew "git" "git" "Install with: brew install git"

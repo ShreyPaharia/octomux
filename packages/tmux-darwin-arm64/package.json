@@ -1,0 +1,18 @@
+{
+  "name": "@octomux/tmux-darwin-arm64",
+  "version": "1.0.30",
+  "description": "Prebuilt static tmux for octomux (darwin arm64)",
+  "license": "ISC",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "bin/",
+    "share/"
+  ]
+}

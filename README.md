@@ -110,17 +110,17 @@ DISPATCH → BRANCH → CODE → INBOX → REVIEW → MERGE
 
 ## CLI
 
-| Command                              | Description                                              |
-| ------------------------------------ | -------------------------------------------------------- |
-| `octomux start`                      | Dashboard at `:7777`                                     |
-| `octomux init`                       | Defaults wizard (Jira, base branch, harness prefs)       |
-| `octomux create-task`                | New task (`--harness cursor` optional)                   |
-| `octomux list-tasks` / `get-task`    | Inspect tasks                                            |
-| `octomux close-task` / `delete-task` | Stop or fully remove                                     |
-| `octomux resume-task`                | Resume a closed task                                     |
-| `octomux add-agent`                  | Another agent window (`--skeleton`, `--model` optional)  |
-| `octomux send-message`               | Message a running agent — course-correct without restart |
-| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml` |
+| Command                                  | Description                                              |
+| ---------------------------------------- | -------------------------------------------------------- |
+| `octomux start`                          | Dashboard at `:7777`                                     |
+| `octomux init`                           | Defaults wizard (Jira, base branch, harness prefs)       |
+| `octomux create-task`                    | New task (`--harness cursor` optional)                   |
+| `octomux list-tasks` / `get-task`        | Inspect tasks                                            |
+| `octomux close-task` / `delete-task`     | Stop or fully remove                                     |
+| `octomux resume-task`                    | Resume a closed task                                     |
+| `octomux add-agent`                      | Another agent window (`--skeleton`, `--model` optional)  |
+| `octomux send-message`                   | Message a running agent — course-correct without restart |
+| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`  |
 
 ## Architecture
 

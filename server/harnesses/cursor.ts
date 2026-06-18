@@ -1,16 +1,14 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import type { OctomuxSettings } from '../settings.js';
 import { childLogger } from '../logger.js';
+import { execTmux } from '../tmux-bin.js';
 import { shellQuoteSingle } from '../shell-quote.js';
 
-const execFile = promisify(execFileCb);
 const logger = childLogger('harness:cursor');
 
 /** Default cursor-agent model when harnesses.cursor.model and flags omit --model. */
@@ -237,7 +235,7 @@ export const cursorHarness: Harness = {
     while (Date.now() - start < TRUST_POLL_TIMEOUT_MS) {
       let stdout: string;
       try {
-        ({ stdout } = await execFile('tmux', ['capture-pane', '-t', target, '-p']));
+        ({ stdout } = await execTmux(['capture-pane', '-t', target, '-p']));
       } catch (err) {
         logger.warn(
           { target, err: (err as Error).message },
@@ -247,7 +245,7 @@ export const cursorHarness: Harness = {
       }
       if (TRUST_PROMPT_RE.test(stdout)) {
         try {
-          await execFile('tmux', ['send-keys', '-t', target, 'a']);
+          await execTmux(['send-keys', '-t', target, 'a']);
           logger.info(
             { target, elapsed_ms: Date.now() - start },
             'cursor postLaunch: accepted Workspace Trust prompt',
