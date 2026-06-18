@@ -62,6 +62,16 @@ function resolve(): TmuxResolution {
     return _resolution;
   }
 
+  // In tests, skip bundled/Electron resolution so the result is deterministic
+  // (PATH fallback) regardless of whether the optional @octomux/tmux-* package
+  // happens to be installed in node_modules — otherwise publishing those
+  // packages would silently change what the unit tests resolve.
+  if (process.env.NODE_ENV === 'test') {
+    const verified = probeBinary({ cmd: 'tmux', checkArgs: ['-V'] }).ok;
+    _resolution = { path: 'tmux', source: 'path', verified };
+    return _resolution;
+  }
+
   // 2a. Packaged Electron mode — look inside asar.unpacked under resourcesPath.
   //     This branch is a no-op under plain Node (process.versions.electron is undefined).
   //     process.resourcesPath is injected by Electron but absent from Node's Process type,
