@@ -77,6 +77,9 @@ export default tseslint.config(
       // electron/ has its own tsconfig and uses Electron types not in the main project.
       'electron/',
       'dist-electron/',
+      // .cjs files are intentional CommonJS (build/electron hooks) — the ESM
+      // TS rules (e.g. no-require-imports) don't apply to them.
+      '**/*.cjs',
     ],
   },
 );
