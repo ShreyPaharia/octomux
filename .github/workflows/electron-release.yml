@@ -1,0 +1,105 @@
+# electron-release.yml — Build and publish the macOS Electron app.
+#
+# Trigger: push a version tag (e.g. v1.0.31), or run manually via the Actions
+# tab (workflow_dispatch) to test without cutting a release.
+#
+# Each arch is built on its OWN native runner (arm64 on Apple Silicon, x64 on
+# Intel) — native modules (node-pty, better-sqlite3) are rebuilt for Electron's
+# ABI by electron-builder (npmRebuild), and those can't be cross-compiled, so
+# per-arch native runners are required.
+#
+# On a v* tag the build runs `electron-builder --publish always`, which uploads
+# the .dmg / .zip to a GitHub Release:
+#   https://github.com/ShreyPaharia/octomux/releases
+#
+# Scope: macOS only for now. Windows/Linux targets exist in electron-builder.yml
+# but are intentionally not built here yet.
+
+name: Electron Release (macOS)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: # manual runs build the app but only publish on a real tag
+
+permissions:
+  contents: write # required for electron-builder to create/upload the GitHub Release
+
+jobs:
+  build-mac:
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14 # Apple Silicon
+            arch: arm64
+          - runner: macos-13 # Intel
+            arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install build tools (pkg-config for the static tmux build)
+        run: brew install pkg-config || true
+
+      - name: Install dependencies
+        run: bun install
+
+      # Build the statically-linked tmux for THIS runner's arch (scripts/build-tmux.sh
+      # keys off uname, so macos-14 -> darwin-arm64, macos-13 -> darwin-x64).
+      - name: Build bundled static tmux
+        run: bash scripts/build-tmux.sh
+
+      # Stage the freshly-built tmux package into node_modules so electron-builder's
+      # asarUnpack glob (**/node_modules/@octomux/tmux-darwin-*/**) picks it up and
+      # the packaged resolver finds it under app.asar.unpacked at runtime.
+      - name: Stage tmux package into node_modules
+        run: |
+          PKG="@octomux/tmux-darwin-${{ matrix.arch }}"
+          mkdir -p node_modules/@octomux
+          rm -rf "node_modules/$PKG"
+          cp -R "packages/tmux-darwin-${{ matrix.arch }}" "node_modules/$PKG"
+          test -x "node_modules/$PKG/bin/tmux"
+          "node_modules/$PKG/bin/tmux" -V
+
+      # Build web bundle + server bundle + the Electron main process.
+      - name: Build app bundles
+        run: |
+          bun run build
+          bun run build:electron
+
+      # Package + (on a tag) publish to GitHub Releases. Unsigned for now.
+      - name: Package and publish Electron app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false' # skip code signing (unsigned build)
+        run: |
+          # --publish always uploads to the GitHub Release on a tag; on a manual
+          # (workflow_dispatch) run with no tag, electron-builder still builds and
+          # simply has nothing to publish to.
+          bunx electron-builder --mac --${{ matrix.arch }} --publish always
+
+      # Always keep the installers as workflow artifacts too (handy for manual
+      # runs / debugging, and a fallback if the Release upload is skipped).
+      - name: Upload installers as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: octomux-macos-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.zip
+          retention-days: 14
+          if-no-files-found: ignore
