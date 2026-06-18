@@ -4,6 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
 import { resolveDiffBase } from './diff-base.js';
+import { gitEnv } from './git-env.js';
+import { taskWorkingDir } from './task-paths.js';
 import {
   WORKDIR,
   rangeIncludesWorkingTree,
@@ -78,16 +80,6 @@ export interface FileDiff {
   tooLarge: boolean;
   binary: boolean;
   isDirectory: boolean;
-}
-
-// Strip GIT_* env vars so our git calls target the worktree we pass via -C,
-// not whatever repo an outer caller (e.g. a git hook) happens to be in.
-function gitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_')) env[k] = v;
-  }
-  return env;
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -168,7 +160,7 @@ export async function getDiffSummary(opts: {
   range?: DiffRange;
 }): Promise<DiffSummary> {
   const { task, range = { kind: 'base' as const } } = opts;
-  const worktree = task.run_mode === 'none' ? task.repo_path : task.worktree;
+  const worktree = taskWorkingDir(task);
   if (!worktree) throw new Error('Task has no worktree');
 
   const resolved = await resolveDiffBase(task);

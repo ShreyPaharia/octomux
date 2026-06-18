@@ -1,6 +1,16 @@
 import { createElement, type ReactNode } from 'react';
+import type { Agent } from '../../server/types';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
+
+/**
+ * Display name for a comment author: "You" for the local user (no agent id),
+ * otherwise the agent's label (falling back to "agent" if it's gone).
+ */
+export function authorLabel(c: { agent_id: string | null }, agents: Agent[]): string {
+  if (c.agent_id == null) return 'You';
+  return agents.find((a) => a.id === c.agent_id)?.label ?? 'agent';
+}
 
 /**
  * Render plain-text comment bodies with bare http/https URLs turned into anchors.

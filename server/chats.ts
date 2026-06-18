@@ -9,6 +9,7 @@ import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
+import { shellQuoteSingle } from './shell-quote.js';
 import type { Agent } from './types.js';
 
 const logger = childLogger('chats');
@@ -38,10 +39,6 @@ export interface CreateChatOptions {
   agent?: string | null;
   prompt?: string | null;
   harnessId?: string | null;
-}
-
-function shellQuoteSingle(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 /**

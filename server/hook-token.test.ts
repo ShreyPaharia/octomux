@@ -31,6 +31,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     hook_activity_updated_at: null,
     tmux_session: null,
     agent: null,
+    notify_agent_id: null,
     created_at: '2026-01-01 00:00:00',
     ...overrides,
   };

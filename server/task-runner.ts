@@ -16,6 +16,7 @@ import { execTmux } from './tmux-bin.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
+import { shellQuoteSingle } from './shell-quote.js';
 import { computeMergeBase } from './git-commits.js';
 
 const logger = childLogger('task-runner');
@@ -67,10 +68,6 @@ async function getLastWindowIndex(session: string): Promise<number> {
 const PROMPT_FILE_CLEANUP_MS = 60000;
 
 const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
-
-function shellQuoteSingle(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
 
 function writeAgentLocalSettings(worktreePath: string): void {
   const claudeDir = path.join(worktreePath, '.claude');
@@ -872,6 +869,7 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
     hook_activity_updated_at: null,
     tmux_session: null,
     agent: resolvedAgent,
+    notify_agent_id: opts.notify_agent_id ?? null,
     created_at: new Date().toISOString(),
   };
 }

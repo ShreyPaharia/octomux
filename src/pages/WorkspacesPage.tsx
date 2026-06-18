@@ -3,13 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/page-header';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { api } from '@/lib/api';
+import { repoName } from '@/lib/utils';
 import type { RunMode, WorktreeSummary } from '../../server/types';
-
-function shortRepoName(repoPath: string | null): string {
-  if (!repoPath) return '—';
-  const parts = repoPath.split('/').filter(Boolean);
-  return parts[parts.length - 1] || repoPath;
-}
 
 function truncate(s: string, n = 48): string {
   if (!s) return '—';
@@ -115,7 +110,7 @@ export default function WorkspacesPage() {
               <option value="all">All</option>
               {repoOptions.map((r) => (
                 <option key={r} value={r}>
-                  {shortRepoName(r)}
+                  {repoName(r)}
                 </option>
               ))}
             </select>
@@ -168,7 +163,7 @@ export default function WorkspacesPage() {
                     onClick={() => navigate(`/workspaces/${w.id}`)}
                     className="cursor-pointer border-t border-glass-edge transition-colors hover:bg-glass-l1"
                   >
-                    <td className="px-4 py-2.5 text-foreground">{shortRepoName(w.repo_path)}</td>
+                    <td className="px-4 py-2.5 text-foreground">{repoName(w.repo_path)}</td>
                     <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
                       {w.branch ?? '—'}
                     </td>

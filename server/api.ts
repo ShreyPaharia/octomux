@@ -24,6 +24,7 @@ import {
   hopAgent,
 } from './task-runner.js';
 import * as diffMod from './diff.js';
+import { taskWorkingDir } from './task-paths.js';
 import { parseDiffRange } from './diff-range.js';
 import {
   BaseBranchMissingError,
@@ -1168,7 +1169,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1211,7 +1212,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1273,7 +1274,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd || !fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Task has no usable worktree' });
       return;
@@ -1294,7 +1295,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd || !fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Task has no usable worktree' });
       return;
@@ -1361,7 +1362,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'task has no worktree row to update' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd || !fs.existsSync(cwd)) {
       res.status(400).json({ error: 'Task has no usable worktree' });
       return;
@@ -1415,7 +1416,7 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1452,7 +1453,7 @@ export function setupRoutes(app: Express): void {
   app.delete('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1479,7 +1480,7 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'no repo for scratch task' });
       return;
     }
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     if (!cwd) {
       res.status(400).json({ error: 'Task has no worktree' });
       return;
@@ -1605,7 +1606,7 @@ export function setupRoutes(app: Express): void {
     const fileFilter = typeof req.query.file === 'string' ? req.query.file : undefined;
     const rows = listComments(task.id, fileFilter ? { file: fileFilter } : undefined);
 
-    const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+    const cwd = taskWorkingDir(task);
     const haveWorktree = !!cwd && fs.existsSync(cwd) && task.run_mode !== 'scratch';
 
     if (!haveWorktree || !task.base_sha) {
@@ -3224,7 +3225,7 @@ export function setupRoutes(app: Express): void {
     // review agent has a concrete sha to diff base..head against.
     let prHeadSha = task.pr_head_sha;
     if (!prHeadSha) {
-      const cwd = task.run_mode === 'none' ? task.repo_path : task.worktree;
+      const cwd = taskWorkingDir(task);
       try {
         const { stdout } = await execFile('git', ['-C', cwd!, 'rev-parse', 'HEAD']);
         prHeadSha = stdout.trim();
