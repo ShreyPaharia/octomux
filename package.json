@@ -1,6 +1,6 @@
 {
   "name": "octomux",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -96,10 +96,10 @@
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
-    "@octomux/tmux-darwin-arm64": "1.0.31",
-    "@octomux/tmux-darwin-x64": "1.0.31",
-    "@octomux/tmux-linux-x64": "1.0.31",
-    "@octomux/tmux-linux-arm64": "1.0.31"
+    "@octomux/tmux-darwin-arm64": "1.0.32",
+    "@octomux/tmux-darwin-x64": "1.0.32",
+    "@octomux/tmux-linux-x64": "1.0.32",
+    "@octomux/tmux-linux-arm64": "1.0.32"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.0.0",
