@@ -67,6 +67,12 @@ fetch_and_extract "$NCURSES_URL" "$NCURSES_SRC"
 
 (
   cd "$NCURSES_SRC"
+  # Install the terminfo DB into the build prefix (writable). The original
+  # --with-default-terminfo-dir=/usr/share/terminfo made `make install` try to
+  # write the DB into the root-owned system dir → "permission denied" and the
+  # whole build aborted (on CI runners too). We point the install/default dir at
+  # the prefix, but keep the system dirs in the compiled-in RUNTIME search path
+  # so the shipped binary still finds terminfo before TERMINFO_DIRS is set.
   ./configure \
     --prefix="$INSTALL_PREFIX" \
     --without-shared \
@@ -75,7 +81,8 @@ fetch_and_extract "$NCURSES_URL" "$NCURSES_SRC"
     --without-tests \
     --enable-widec \
     --disable-stripping \
-    --with-default-terminfo-dir=/usr/share/terminfo
+    --with-default-terminfo-dir="$INSTALL_PREFIX/share/terminfo" \
+    --with-terminfo-dirs="/usr/share/terminfo:/etc/terminfo:/lib/terminfo:/usr/lib/terminfo:$INSTALL_PREFIX/share/terminfo"
   make -j"$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
   make install
 )
@@ -112,18 +119,32 @@ fetch_and_extract "$TMUX_URL" "$TMUX_SRC"
   LDFLAGS="-L${INSTALL_PREFIX}/lib"
   LIBS="-lncursesw"
 
+  # Static-linking strategy differs by platform:
+  #   Linux  — fully static (-static + --enable-static): libevent, ncurses AND
+  #            libc are all linked in, giving a distro-portable binary.
+  #   macOS  — Apple does not support statically linking libSystem, and tmux's
+  #            configure HARD-ERRORS on --enable-static. So we omit it: tmux
+  #            links the libevent/ncurses *.a archives from our prefix (only
+  #            static libs exist there — we built them --disable-shared) while
+  #            libSystem stays dynamic. That's the standard "static enough" mac
+  #            binary that runs on any machine of the same arch.
+  # Single token, no spaces — safe to leave unquoted below (and empty-expands
+  # cleanly under `set -u`, unlike an empty array on macOS bash 3.2).
+  STATIC_FLAG=""
   if [ "$PLATFORM" = "linux" ]; then
-    # On Linux we can fully static-link (libSystem equivalent is glibc musl).
     LDFLAGS="$LDFLAGS -static"
+    STATIC_FLAG="--enable-static"
   fi
 
+  # shellcheck disable=SC2086 # STATIC_FLAG is a deliberate single optional flag
   PKG_CONFIG_PATH="$INSTALL_PREFIX/lib/pkgconfig" \
     CFLAGS="$CFLAGS" \
     LDFLAGS="$LDFLAGS" \
     LIBS="$LIBS" \
     ./configure \
       --prefix="$INSTALL_PREFIX" \
-      --enable-static
+      --disable-utf8proc \
+      $STATIC_FLAG
   make -j"$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
   make install
 )
@@ -134,26 +155,27 @@ echo "==> Compiling terminfo entries ..."
 TERMINFO_DIR="$BUILD_DIR/terminfo"
 mkdir -p "$TERMINFO_DIR"
 
-# tic ships with ncurses; use the just-built one if available.
+# Use the just-built ncurses 6.5 tic/infocmp, with TERMINFO pointed at the DB
+# we just installed into the prefix — that DB ships tmux-256color even though
+# the macOS system ncurses does not. infocmp regenerates the source, tic
+# compiles it into our bundle dir. (The previous version piped infocmp through
+# `head -1 | awk` and passed a capability string to tic as if it were a
+# filename, so nothing was ever compiled.)
 TIC_BIN="$INSTALL_PREFIX/bin/tic"
-if [ ! -x "$TIC_BIN" ]; then
-  TIC_BIN="$(command -v tic)"
-fi
+[ -x "$TIC_BIN" ] || TIC_BIN="$(command -v tic)"
+INFOCMP_BIN="$INSTALL_PREFIX/bin/infocmp"
+[ -x "$INFOCMP_BIN" ] || INFOCMP_BIN="$(command -v infocmp)"
 
 for term in tmux-256color screen-256color xterm-256color; do
-  # Compile from the system terminfo source (works on both macOS + Linux).
-  if "$TIC_BIN" -x -o "$TERMINFO_DIR" "$(infocmp -x "$term" 2>/dev/null | head -1 | awk '{print $1}' || true)" 2>/dev/null; then
-    echo "  ✓ $term (from infocmp)"
+  src="$BUILD_DIR/${term}.terminfo"
+  if TERMINFO="$INSTALL_PREFIX/share/terminfo" "$INFOCMP_BIN" -x "$term" >"$src" 2>/dev/null && [ -s "$src" ]; then
+    if "$TIC_BIN" -x -o "$TERMINFO_DIR" "$src" 2>/dev/null; then
+      echo "  ✓ $term"
+    else
+      echo "  ⚠  $term: tic failed to compile"
+    fi
   else
-    # Fallback: compile from /usr/share/terminfo source file if present.
-    for src_dir in /usr/share/terminfo /lib/terminfo /etc/terminfo; do
-      first_char="${term:0:1}"
-      src_file="$src_dir/$first_char/$term"
-      if [ -f "$src_file" ]; then
-        TERMINFO="$TERMINFO_DIR" tic -x -o "$TERMINFO_DIR" "$src_file" 2>/dev/null && \
-          echo "  ✓ $term (from $src_file)" && break || true
-      fi
-    done
+    echo "  ⚠  $term: not found in source terminfo DB"
   fi
 done
 

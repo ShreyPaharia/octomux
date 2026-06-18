@@ -26,3 +26,11 @@ docs/superpowers
 designs/
 octomux.pen
 .DS_Store
+
+# Prebuilt tmux binaries + terminfo are produced by scripts/build-tmux.sh in CI
+# and published from there — never commit the build artifacts (keep the .gitkeep
+# placeholders so the empty dirs stay tracked).
+packages/*/bin/*
+!packages/*/bin/.gitkeep
+packages/*/share/terminfo/*
+!packages/*/share/terminfo/.gitkeep
