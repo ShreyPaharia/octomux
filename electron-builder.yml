@@ -8,6 +8,11 @@
 appId: io.ostium.octomux
 productName: octomux
 
+# Ad-hoc sign the .app after packing (we have no Developer ID). electron-builder
+# can't ad-hoc sign on its own (identity: '-' is read as a keychain name and
+# signing is skipped → unsigned → "damaged"), so a hook runs `codesign --sign -`.
+afterPack: scripts/electron-adhoc-sign.cjs
+
 # Entry point for the Electron main process (overrides package.json "main"
 # only within the packaged app via extraMetadata, so the npm CLI main is untouched).
 extraMetadata:
@@ -77,15 +82,13 @@ mac:
         - arm64
         - x64
   category: public.app-category.developer-tools
-  # Ad-hoc sign (identity: "-"). Earlier the build set
-  # CSC_IDENTITY_AUTO_DISCOVERY=false, which SUPPRESSED electron-builder's
-  # signing pass — leaving only the linker's bare ad-hoc sig whose resource seal
-  # was inconsistent, so macOS reported the app as "damaged". An explicit ad-hoc
-  # identity makes electron-builder run a proper codesign pass that seals
-  # resources → a VALID signature. (Still not notarized: downloaded copies hit a
-  # Gatekeeper warning → right-click → Open. Real fix = Developer ID cert
-  # CSC_LINK/CSC_KEY_PASSWORD + APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD for notarization.)
-  identity: '-'
+  # No Developer ID → disable electron-builder's signing; the afterPack hook
+  # (scripts/electron-adhoc-sign.cjs) ad-hoc signs with `codesign --sign -`,
+  # which produces a VALID seal (electron-builder's own attempts left it
+  # unsigned or with a broken seal → "damaged"). Not notarized: downloaded
+  # copies still hit the "unidentified developer" prompt → right-click → Open.
+  # Real fix = Developer ID cert (CSC_LINK/CSC_KEY_PASSWORD) + notarization.
+  identity: null
 
 # Windows target
 win:
