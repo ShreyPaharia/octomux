@@ -40,6 +40,16 @@ asarUnpack:
 # npmRebuild is true.
 npmRebuild: true
 
+# Compile native deps from source instead of downloading prebuilt binaries.
+# Without this, @electron/rebuild fetched a prebuilt better-sqlite3 for the
+# WRONG arch (x86_64) on the arm64 runner — the packaged app then crashed at
+# boot with "incompatible architecture (have 'x86_64', need 'arm64')" and
+# showed a blank window. node-pty was unaffected (it has no matching prebuild,
+# so it already compiled from source). Building from source pins the arch to
+# the build host/target. (Requires the Python 3.11 step in electron-release.yml
+# for node-gyp's distutils.)
+buildDependenciesFromSource: true
+
 # Where built installers are uploaded. The electron-release workflow runs with
 # `--publish always`, which attaches the artifacts to the GitHub Release at
 # https://github.com/ShreyPaharia/octomux/releases.
