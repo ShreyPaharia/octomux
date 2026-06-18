@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { octomuxRoot } from './octomux-root.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { getDb } from './db.js';
 import { childLogger } from './logger.js';
@@ -2867,7 +2868,7 @@ export function setupRoutes(app: Express): void {
 
   const isProduction = process.env.NODE_ENV === 'production';
   const hooksLogsDir = isProduction
-    ? path.join(os.homedir(), '.octomux', 'logs', 'hooks')
+    ? path.join(octomuxRoot(), 'logs', 'hooks')
     : path.join(__dirname, '..', 'data', 'logs', 'hooks');
 
   interface HookRegistryEntry {
@@ -3005,7 +3006,7 @@ export function setupRoutes(app: Express): void {
     });
 
     // Global hooks: ~/.octomux/hooks/
-    const globalHooksBase = path.join(os.homedir(), '.octomux', 'hooks');
+    const globalHooksBase = path.join(octomuxRoot(), 'hooks');
     entries.push(...discoverHookScripts(globalHooksBase, 'global'));
 
     // Repo hooks: collect from every active task's repo_path

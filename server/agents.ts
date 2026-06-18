@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
+import { octomuxRoot } from './octomux-root.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +23,7 @@ function builtInDir(): string {
 }
 
 function customDir(): string {
-  return process.env.OCTOMUX_AGENTS_DIR || path.join(os.homedir(), '.octomux', 'agents');
+  return process.env.OCTOMUX_AGENTS_DIR || path.join(octomuxRoot(), 'agents');
 }
 
 function parseFrontmatter(content: string): { name: string; description: string } {

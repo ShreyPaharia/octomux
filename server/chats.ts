@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
+import { octomuxRoot } from './octomux-root.js';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { getSettings } from './settings.js';
@@ -22,7 +22,7 @@ const logger = childLogger('chats');
 
 /** Root directory for chat scratch working dirs. */
 export function chatRoot(): string {
-  return path.join(os.homedir(), '.octomux', 'chats');
+  return path.join(octomuxRoot(), 'chats');
 }
 
 export function chatDirFor(id: string): string {

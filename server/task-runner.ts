@@ -2,8 +2,8 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
+import { octomuxRoot } from './octomux-root.js';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { getSettings } from './settings.js';
@@ -30,7 +30,7 @@ const execFile = promisify(execFileCb);
 
 /** Root directory for scratch-mode task working dirs. */
 export function scratchRoot(): string {
-  return path.join(os.homedir(), '.octomux', 'scratch');
+  return path.join(octomuxRoot(), 'scratch');
 }
 
 export function scratchDirFor(taskId: string): string {

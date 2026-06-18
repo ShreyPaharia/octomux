@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
+import { octomuxRoot } from './octomux-root.js';
 import { getDb } from './db.js';
 import type { HookEventName, HookEnvelope } from './hook-types.js';
 
@@ -60,7 +61,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 function resolveHooksLogsDir(): string {
   return isProduction
-    ? path.join(os.homedir(), '.octomux', 'logs', 'hooks')
+    ? path.join(octomuxRoot(), 'logs', 'hooks')
     : path.join(__dirname, '..', 'data', 'logs', 'hooks');
 }
 
@@ -68,7 +69,7 @@ function resolveHookDirs(event: HookEventName, taskRepoPath?: string): string[] 
   const dirs: string[] = [];
 
   // Global hooks dir
-  const globalDir = path.join(os.homedir(), '.octomux', 'hooks', `${event}.d`);
+  const globalDir = path.join(octomuxRoot(), 'hooks', `${event}.d`);
   dirs.push(globalDir);
 
   // Repo-local hooks dir
@@ -477,7 +478,7 @@ export async function fireHook(event: HookEventName, envelope: HookEnvelope): Pr
     const cwd = worktreePath ?? taskRepoPath ?? os.homedir();
     const logsDir = resolveHooksLogsDir();
 
-    const globalHooksBase = path.join(os.homedir(), '.octomux', 'hooks');
+    const globalHooksBase = path.join(octomuxRoot(), 'hooks');
     const hookDirs = resolveHookDirs(event, taskRepoPath);
     // Track which dir each script came from so we can build the correct scope.
     const scriptsWithScope: Array<{ script: string; scope: string }> = [];

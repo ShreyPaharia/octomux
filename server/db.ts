@@ -1,16 +1,16 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import { nanoid } from 'nanoid';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
+import { octomuxRoot } from './octomux-root.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('db');
 const isProduction = process.env.NODE_ENV === 'production';
 
-const PROD_DB_DIR = path.join(os.homedir(), '.octomux', 'data');
+const PROD_DB_DIR = path.join(octomuxRoot(), 'data');
 const DEV_DB_DIR = path.join(__dirname, '..', 'data');
 const DB_DIR = isProduction ? PROD_DB_DIR : DEV_DB_DIR;
 /** Override for docs screenshots / isolated demo data (`scripts/seed-docs-demo.ts`). */

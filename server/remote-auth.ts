@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
+import { octomuxRoot } from './octomux-root.js';
 import type { IncomingMessage } from 'http';
 import type { Request, Response, NextFunction } from 'express';
 import { childLogger } from './logger.js';
@@ -31,7 +31,7 @@ export function isLoopbackAddress(addr: string | undefined): boolean {
 /** Directory mirrors server/db.ts: ~/.octomux/data (prod) or ./data (dev). */
 function dataDir(): string {
   return process.env.NODE_ENV === 'production'
-    ? path.join(os.homedir(), '.octomux', 'data')
+    ? path.join(octomuxRoot(), 'data')
     : path.join(__dirname, '..', 'data');
 }
 

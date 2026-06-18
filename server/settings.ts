@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { childLogger } from './logger.js';
+import { octomuxRoot } from './octomux-root.js';
 
 const logger = childLogger('settings');
 
@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: OctomuxSettings = {
 const VALID_EDITORS: EditorChoice[] = ['nvim', 'vscode', 'cursor'];
 
 function settingsPath(): string {
-  return path.join(os.homedir(), '.octomux', 'settings.json');
+  return path.join(octomuxRoot(), 'settings.json');
 }
 
 let _deprecatedWarnEmitted = false;

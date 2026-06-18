@@ -12,6 +12,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'path';
 import net from 'net';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,6 +129,19 @@ app.on('activate', () => {
 let _serverPort: number | null = null;
 
 app.whenReady().then(async () => {
+  // 0. Isolate the desktop app from the CLI BEFORE importing the server.
+  //    Its own data dir → own SQLite DB, own tmux socket, own logs — so it never
+  //    collides with the CLI's ~/.octomux (which also avoids the bundled-tmux vs
+  //    system-tmux version clash on a shared socket). NODE_ENV=production is
+  //    required for the server to honor OCTOMUX_DATA_DIR (the dev branch ignores
+  //    it). HOME can be empty under a GUI/Finder launch, which broke ~/.claude
+  //    paths (mkdir '/.claude') — pin it.
+  if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production';
+  if (!process.env.OCTOMUX_DATA_DIR) {
+    process.env.OCTOMUX_DATA_DIR = path.join(app.getPath('userData'), 'data');
+  }
+  if (!process.env.HOME) process.env.HOME = os.homedir();
+
   // 1. Pick a free port and tell the server to use it.
   const port = await findFreePort();
   _serverPort = port;

@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
+import { octomuxRoot } from './octomux-root.js';
 
 const logger = childLogger('hooks-install');
 
@@ -38,7 +38,7 @@ export function listHookTemplates(): string[] {
 
 export function isHookTemplateInstalled(
   template: string,
-  hooksBase = path.join(os.homedir(), '.octomux', 'hooks'),
+  hooksBase = path.join(octomuxRoot(), 'hooks'),
 ): boolean {
   const manifest = readTemplateManifest(template);
   if (!manifest) return false;
@@ -60,7 +60,7 @@ function readTemplateManifest(template: string): TemplateManifest | null {
 /** Install a hook template into ~/.octomux/hooks (or hooksBase). Returns installed file paths. */
 export function installHookTemplate(
   template: string,
-  hooksBase = path.join(os.homedir(), '.octomux', 'hooks'),
+  hooksBase = path.join(octomuxRoot(), 'hooks'),
 ): string[] {
   const templatesBase = resolveTemplatesHooksDir();
   const templateDir = path.join(templatesBase, template);

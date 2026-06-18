@@ -15,11 +15,11 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { probeBinary } from './binary-check.js';
 import { childLogger } from './logger.js';
+import { octomuxRoot } from './octomux-root.js';
 
 const logger = childLogger('tmux-bin');
 const execFileProm = promisify(execFileCb);
@@ -29,7 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ─── Data directory (same logic as db.ts) ─────────────────────────────────────
 
 const isProduction = process.env.NODE_ENV === 'production';
-const PROD_DATA_DIR = path.join(os.homedir(), '.octomux');
+const PROD_DATA_DIR = octomuxRoot();
 const DEV_DATA_DIR = path.join(__dirname, '..', 'data');
 const DATA_DIR = isProduction ? PROD_DATA_DIR : DEV_DATA_DIR;
 

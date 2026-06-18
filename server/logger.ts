@@ -1,8 +1,8 @@
 import pino, { type Logger, type TransportTargetOptions } from 'pino';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import { fileURLToPath } from 'url';
+import { octomuxRoot } from './octomux-root.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
@@ -11,7 +11,7 @@ const isTest = process.env.NODE_ENV === 'test';
 /** Resolve the log directory lazily so mocked fs/os in tests don't fail at module load. */
 function resolveLogDir(): string {
   return isProduction
-    ? path.join(os.homedir(), '.octomux', 'logs')
+    ? path.join(octomuxRoot(), 'logs')
     : path.join(__dirname, '..', 'data', 'logs');
 }
 
