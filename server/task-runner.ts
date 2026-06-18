@@ -12,6 +12,7 @@ import { hookBaseUrl } from './hook-base-url.js';
 import { getOrCreateRepoConfig } from './repo-config.js';
 import { inferRefs } from './ref-inference.js';
 import { childLogger } from './logger.js';
+import { execTmux } from './tmux-bin.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
@@ -47,25 +48,13 @@ function isTmuxTargetMissing(err: unknown): boolean {
 
 /** Get the active window index of a tmux session. */
 async function getActiveWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execFile('tmux', [
-    'display-message',
-    '-t',
-    session,
-    '-p',
-    '#{window_index}',
-  ]);
+  const { stdout } = await execTmux(['display-message', '-t', session, '-p', '#{window_index}']);
   return parseInt(stdout.trim(), 10);
 }
 
 /** Get the index of the last window in a tmux session. */
 async function getLastWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execFile('tmux', [
-    'list-windows',
-    '-t',
-    session,
-    '-F',
-    '#{window_index}',
-  ]);
+  const { stdout } = await execTmux(['list-windows', '-t', session, '-F', '#{window_index}']);
   const indices = stdout.trim().split('\n').map(Number);
   return Math.max(...indices);
 }
@@ -168,7 +157,7 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
 export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> {
   let stdout: string;
   try {
-    ({ stdout } = await execFile('tmux', ['list-sessions', '-F', '#{session_name}']));
+    ({ stdout } = await execTmux(['list-sessions', '-F', '#{session_name}']));
   } catch {
     return;
   }
@@ -180,7 +169,7 @@ export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> 
     .filter((name) => name.startsWith(prefix));
 
   for (const session of linked) {
-    await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
+    await execTmux(['kill-session', '-t', session]).catch(() => {});
   }
 }
 
@@ -190,7 +179,7 @@ export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> 
 export async function cleanupOrphanedViewerSessions(): Promise<void> {
   let stdout: string;
   try {
-    ({ stdout } = await execFile('tmux', ['list-sessions', '-F', '#{session_name}']));
+    ({ stdout } = await execTmux(['list-sessions', '-F', '#{session_name}']));
   } catch {
     return;
   }
@@ -203,7 +192,7 @@ export async function cleanupOrphanedViewerSessions(): Promise<void> {
     if (match) {
       const parentSession = match[1];
       if (!sessions.has(parentSession)) {
-        await execFile('tmux', ['kill-session', '-t', name]).catch(() => {});
+        await execTmux(['kill-session', '-t', name]).catch(() => {});
       }
     }
   }
@@ -239,7 +228,7 @@ export async function reconcileOrphanSettingUp(): Promise<void> {
     let alive = false;
     if (row.tmux_session) {
       try {
-        await execFile('tmux', ['has-session', '-t', row.tmux_session]);
+        await execTmux(['has-session', '-t', row.tmux_session]);
         alive = true;
       } catch {
         alive = false;
@@ -705,16 +694,8 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'tmux_session';
     // Launch the harness as the session's first window's startup process: tmux
     // starts it when it creates the pane, so there is no shell-readiness race.
-    await execFile('tmux', [
-      'new-session',
-      '-d',
-      '-s',
-      session,
-      '-c',
-      setup.worktreePath,
-      startupCmd,
-    ]);
-    await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+    await execTmux(['new-session', '-d', '-s', session, '-c', setup.worktreePath, startupCmd]);
+    await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
     // Session exists now — persist the column. See race-avoidance comment above.
     db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
       session,
@@ -845,14 +826,7 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
   });
 
   // Launch as the new window's startup process — no shell-readiness race.
-  await execFile('tmux', [
-    'new-window',
-    '-t',
-    task.tmux_session!,
-    '-c',
-    task.worktree!,
-    startupCmd,
-  ]);
+  await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!, startupCmd]);
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
   const addTarget = `${task.tmux_session}:${windowIndex}`;
 
@@ -936,7 +910,7 @@ export async function closeTask(task: Task): Promise<void> {
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
     try {
-      await execFile('tmux', ['kill-session', '-t', task.tmux_session]);
+      await execTmux(['kill-session', '-t', task.tmux_session]);
       logger.info(
         { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session },
         'closeTask: tmux session killed',
@@ -972,7 +946,7 @@ export async function softDeleteTask(task: Task): Promise<void> {
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
     try {
-      await execFile('tmux', ['kill-session', '-t', task.tmux_session]);
+      await execTmux(['kill-session', '-t', task.tmux_session]);
     } catch (err) {
       if (!isTmuxTargetMissing(err)) {
         logger.warn(
@@ -1012,7 +986,7 @@ export async function deleteTask(task: Task): Promise<void> {
   if (task.tmux_session) {
     await cleanupLinkedSessions(task.tmux_session);
     try {
-      await execFile('tmux', ['kill-session', '-t', task.tmux_session]);
+      await execTmux(['kill-session', '-t', task.tmux_session]);
       logger.info(
         { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session },
         'deleteTask: tmux session killed',
@@ -1136,7 +1110,7 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
      WHERE agent_id = ? AND status = 'pending'`,
   ).run(agent.id);
 
-  await execFile('tmux', ['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
+  await execTmux(['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
     (err) => {
       if (isTmuxTargetMissing(err)) {
         logger.debug(
@@ -1178,16 +1152,10 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
 
   const db = getDb();
 
-  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
+  await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
-  await execFile('tmux', [
-    'send-keys',
-    '-t',
-    `${task.tmux_session}:${windowIndex}`,
-    'nvim .',
-    'Enter',
-  ]);
+  await execTmux(['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'nvim .', 'Enter']);
 
   db.prepare(
     `UPDATE tasks SET user_window_index = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -1198,7 +1166,7 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
 
 export async function createShellTerminal(task: Task): Promise<UserTerminal> {
   const db = getDb();
-  await execFile('tmux', ['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
+  await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
   const { count } = db
@@ -1223,11 +1191,9 @@ export async function createShellTerminal(task: Task): Promise<UserTerminal> {
 
 export async function closeShellTerminal(task: Task, terminal: UserTerminal): Promise<void> {
   const db = getDb();
-  await execFile('tmux', [
-    'kill-window',
-    '-t',
-    `${task.tmux_session}:${terminal.window_index}`,
-  ]).catch(() => {});
+  await execTmux(['kill-window', '-t', `${task.tmux_session}:${terminal.window_index}`]).catch(
+    () => {},
+  );
   db.prepare('DELETE FROM user_terminals WHERE id = ?').run(terminal.id);
 }
 
@@ -1278,7 +1244,7 @@ export async function resumeTask(task: Task): Promise<void> {
     db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
 
     await cleanupLinkedSessions(session);
-    await execFile('tmux', ['kill-session', '-t', session]).catch(() => {});
+    await execTmux(['kill-session', '-t', session]).catch(() => {});
 
     // Killing the tmux session means every agent on this task is, by
     // definition, no longer running. Reconcile the DB before we read it back —
@@ -1307,8 +1273,8 @@ export async function resumeTask(task: Task): Promise<void> {
     } else {
       // No agents to recover, but recreate the session so callers that expect
       // the task's tmux session to exist after resume still find it.
-      await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd]);
-      await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+      await execTmux(['new-session', '-d', '-s', session, '-c', cwd]);
+      await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
     }
 
     let sessionCreated = false;
@@ -1359,12 +1325,12 @@ export async function resumeTask(task: Task): Promise<void> {
       const startupCmd = buildAgentStartupCommand({ baseCmd });
       let windowIndex: number;
       if (!sessionCreated) {
-        await execFile('tmux', ['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
-        await execFile('tmux', ['set-option', '-t', session, 'aggressive-resize', 'on']);
+        await execTmux(['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
+        await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
         sessionCreated = true;
         windowIndex = await getActiveWindowIndex(session);
       } else {
-        await execFile('tmux', ['new-window', '-t', session, '-c', cwd, startupCmd]);
+        await execTmux(['new-window', '-t', session, '-c', cwd, startupCmd]);
         windowIndex = await getLastWindowIndex(session);
       }
       void harness.postLaunch?.(`${session}:${windowIndex}`);
@@ -1472,9 +1438,9 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   if (oldTarget) {
     try {
       if (!agent.task_id && agent.tmux_session) {
-        await execFile('tmux', ['kill-session', '-t', agent.tmux_session]);
+        await execTmux(['kill-session', '-t', agent.tmux_session]);
       } else {
-        await execFile('tmux', ['kill-window', '-t', `${oldTarget.session}:${oldTarget.window}`]);
+        await execTmux(['kill-window', '-t', `${oldTarget.session}:${oldTarget.window}`]);
       }
     } catch (err) {
       if (!isTmuxTargetMissing(err)) {
@@ -1543,11 +1509,11 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   const startupCmd = buildAgentStartupCommand({ baseCmd });
   let newWindowIndex: number;
   if (isStandalone) {
-    await execFile('tmux', ['new-session', '-d', '-s', newSession, '-c', cwd, startupCmd]);
-    await execFile('tmux', ['set-option', '-t', newSession, 'aggressive-resize', 'on']);
+    await execTmux(['new-session', '-d', '-s', newSession, '-c', cwd, startupCmd]);
+    await execTmux(['set-option', '-t', newSession, 'aggressive-resize', 'on']);
     newWindowIndex = await getActiveWindowIndex(newSession);
   } else {
-    await execFile('tmux', ['new-window', '-t', newSession, '-c', cwd, startupCmd]);
+    await execTmux(['new-window', '-t', newSession, '-c', cwd, startupCmd]);
     newWindowIndex = await getLastWindowIndex(newSession);
   }
   const target = `${newSession}:${newWindowIndex}`;

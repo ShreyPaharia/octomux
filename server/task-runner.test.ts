@@ -1066,7 +1066,13 @@ describe('addAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
     // Make new-window (which now carries the launch command) fail.
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (args.includes('new-window')) {
         cb(new Error('tmux new-window failed'), null);
       } else if (args.includes('list-windows')) {
@@ -1083,7 +1089,13 @@ describe('addAgent', () => {
       expect(getAgents(db, DEFAULTS.task.id)).toHaveLength(0);
     } finally {
       // Restore default execFile implementation for subsequent tests
-      vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
         if (args.includes('display-message')) {
           cb(null, { stdout: String(nextWindowIndex), stderr: '' });
         } else if (args.includes('list-windows')) {
@@ -1212,7 +1224,13 @@ describe('closeTask', () => {
 
   it('logs tmux "session not found" at debug, not warn', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (
         args.includes('kill-session') &&
         args.includes(DEFAULTS.runningTask.tmux_session as string)
@@ -1249,7 +1267,13 @@ describe('closeTask', () => {
       setLogger(originalLogger);
       // Restore default execFile mock for subsequent tests (mirrors the
       // addAgent send-keys-failure test).
-      vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+      vi.mocked(execFile).mockImplementation(((
+        _cmd: string,
+        args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
         if (args.includes('display-message')) {
           cb(null, { stdout: String(nextWindowIndex), stderr: '' });
         } else if (args.includes('list-windows')) {
@@ -1793,7 +1817,13 @@ describe('createUserTerminal', () => {
 
   beforeEach(() => {
     // Restore the default execFile mock in case a previous test overrode it
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (args.includes('display-message')) {
         cb(null, { stdout: String(nextWindowIndex), stderr: '' });
       } else if (args.includes('list-windows')) {
@@ -2037,7 +2067,13 @@ describe('hook integration', () => {
 describe('cleanupLinkedSessions', () => {
   it('kills all linked viewer sessions matching the prefix', async () => {
     const session = DEFAULTS.runningTask.tmux_session!;
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (args.includes('list-sessions')) {
         cb(null, {
           stdout: `${session}\n${session}-v-abc123\n${session}-v-def456\nother-session\n`,
@@ -2070,7 +2106,13 @@ describe('cleanupLinkedSessions', () => {
 
   it('does nothing when no linked sessions exist', async () => {
     const session = DEFAULTS.runningTask.tmux_session!;
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (args.includes('list-sessions')) {
         cb(null, { stdout: `${session}\nother-session\n`, stderr: '' });
       } else {
@@ -2086,7 +2128,13 @@ describe('cleanupLinkedSessions', () => {
   });
 
   it('handles tmux not running gracefully', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, _args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      _args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       cb(new Error('no server running'), null);
     }) as any);
 
@@ -2098,7 +2146,13 @@ describe('cleanupLinkedSessions', () => {
 
 describe('cleanupOrphanedViewerSessions', () => {
   it('kills viewer sessions whose parent no longer exists', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (args.includes('list-sessions')) {
         cb(null, {
           stdout: [
@@ -2143,7 +2197,13 @@ describe('cleanupOrphanedViewerSessions', () => {
   });
 
   it('does nothing when no orphaned sessions exist', async () => {
-    vi.mocked(execFile).mockImplementation(((_cmd: string, args: string[], cb: Function) => {
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       if (args.includes('list-sessions')) {
         cb(null, { stdout: 'octomux-agent-task1\noctomux-agent-task1-v-abc\n', stderr: '' });
       } else {

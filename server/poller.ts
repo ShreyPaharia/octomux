@@ -12,6 +12,7 @@ import { SELECT_TASK_SQL } from './task-select.js';
 import { fireHook } from './hook-dispatcher.js';
 import { sendMessageToAgent } from './tmux-input.js';
 import { buildPrReviewPrompt, insertReviewTask, repoShortName } from './review-tasks.js';
+import { execTmux } from './tmux-bin.js';
 import type { Task, UserTerminal } from './types.js';
 
 const logger = childLogger('poller');
@@ -58,7 +59,7 @@ async function notifyParentTask(
 export async function checkTaskStatus(task: Task): Promise<'alive' | 'dead'> {
   if (!task.tmux_session) return 'dead';
   try {
-    await execFile('tmux', ['has-session', '-t', task.tmux_session]);
+    await execTmux(['has-session', '-t', task.tmux_session]);
     return 'alive';
   } catch {
     return 'dead';
@@ -122,7 +123,7 @@ export async function pollStatuses(): Promise<void> {
 
 async function checkWindowStatus(session: string, windowIndex: number): Promise<'alive' | 'dead'> {
   try {
-    await execFile('tmux', ['display-message', '-t', `${session}:${windowIndex}`, '-p', '#I']);
+    await execTmux(['display-message', '-t', `${session}:${windowIndex}`, '-p', '#I']);
     return 'alive';
   } catch {
     return 'dead';
@@ -879,7 +880,7 @@ export async function pollTerminalActivity(): Promise<void> {
   const changedTasks = new Set<string>();
   for (const row of rows) {
     try {
-      const { stdout } = await execFile('tmux', [
+      const { stdout } = await execTmux([
         'list-panes',
         '-t',
         `${row.tmux_session}:${row.window_index}`,

@@ -3,6 +3,7 @@
 import { execFileSync, exec as execCb } from 'child_process';
 import { readFileSync, existsSync, mkdirSync, readdirSync, cpSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import path from 'path';
 import os from 'os';
 
@@ -24,6 +25,24 @@ if (command === 'start') {
 } else {
   // Delegate to CLI (commander-based) for all other commands
   await import('../cli/dist/index.js');
+}
+
+// ─── tmux binary resolver ────────────────────────────────────────────────────
+// Mirrors the resolution logic in server/tmux-bin.ts (kept in sync manually).
+// Uses createRequire so the optional CJS package can be loaded from ESM context.
+
+const _require = createRequire(import.meta.url);
+
+function resolveTmuxBin() {
+  if (process.env.OCTOMUX_TMUX_BIN) return process.env.OCTOMUX_TMUX_BIN;
+  try {
+    const pkg = `@octomux/tmux-${process.platform}-${process.arch}`;
+    const { tmuxBin } = _require(pkg);
+    if (tmuxBin) return tmuxBin;
+  } catch {
+    /* not installed yet — fall back to PATH */
+  }
+  return 'tmux';
 }
 
 // ─── start command ───────────────────────────────────────────────────────────
@@ -61,8 +80,16 @@ async function runStart(startArgs) {
   // Preflight: warn about missing tools (install from dashboard Setup — no blocking exit)
   const { warnBinary, checkNeovimVersion } = await import('../dist-server/startup.js');
 
+  const resolvedTmux = resolveTmuxBin();
   const preflight = [
-    { cmd: 'tmux', checkArgs: ['-V'], brewPkg: 'tmux' },
+    {
+      cmd: resolvedTmux,
+      checkArgs: ['-V'],
+      name: 'tmux',
+      // No brewPkg — tmux is bundled via @octomux/tmux-<platform>-<arch>.
+      // If the bundled package isn't available and PATH tmux is also missing,
+      // the bundled binary isn't available for this platform/arch and PATH tmux is also missing.
+    },
     { cmd: 'git', checkArgs: ['--version'], brewPkg: 'git' },
     {
       cmd: 'claude',

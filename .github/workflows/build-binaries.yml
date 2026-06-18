@@ -1,0 +1,235 @@
+# build-binaries.yml — Build and publish per-platform tmux + node-pty binaries.
+#
+# Runs on:
+#   - push to main (builds + uploads artifacts, no publish)
+#   - release tag push (builds + publishes @octomux/tmux-* packages to npm)
+#
+# Matrix covers all four supported platform/arch combos. Each job:
+#   1. Runs scripts/build-tmux.sh to build a statically-linked tmux binary.
+#   2. Builds node-pty native prebuilds for the Node ABI and for Electron's ABI.
+#   3. Uploads the resulting artifacts.
+#
+# The `publish` job is gated on a release tag and runs after all build jobs pass.
+
+name: Build Binaries
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─── Build matrix ────────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS arm64 (Apple Silicon)
+          - runner: macos-14
+            platform: darwin
+            arch: arm64
+            node_arch: arm64
+
+          # macOS x64 (Intel)
+          - runner: macos-13
+            platform: darwin
+            arch: x64
+            node_arch: x64
+
+          # Linux x64
+          - runner: ubuntu-latest
+            platform: linux
+            arch: x64
+            node_arch: x64
+
+          # Linux arm64
+          # NOTE: 'ubuntu-24.04-arm' is GitHub's hosted arm64 runner label (in public beta).
+          # If unavailable, replace with a self-hosted arm64 runner or QEMU emulation.
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            node_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node + Bun setup ────────────────────────────────────────────────────
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      # ── Install repo deps ───────────────────────────────────────────────────
+      - name: Install dependencies
+        run: bun install --ignore-scripts
+
+      # ── Build static tmux ───────────────────────────────────────────────────
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl bzip2 zlib1g-dev
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: |
+          # Xcode CLT provides clang + make. pkg-config needed for configure checks.
+          brew install pkg-config || true
+
+      - name: Build tmux binary
+        run: bash scripts/build-tmux.sh
+
+      # ── Build node-pty prebuilds ─────────────────────────────────────────────
+      # We build prebuilds for:
+      #   - The active Node.js ABI (for npm/bun users)
+      #   - The Electron ABI for the latest stable Electron (for future Electron packaging)
+      #
+      # TODO: The exact Electron ABI version to target may change. Update ELECTRON_VERSION
+      # below when a new Electron major is adopted. @electron/rebuild or prebuildify can
+      # both drive this; we use prebuildify here because it produces self-contained
+      # .node files that land in node_modules/node-pty/prebuilds/.
+      - name: Build node-pty prebuilds (Node ABI)
+        run: |
+          cd node_modules/node-pty
+          npx --yes prebuildify \
+            --napi \
+            --strip \
+            --arch ${{ matrix.node_arch }} \
+            --out ../../artifacts/node-pty-prebuilds
+
+      - name: Build node-pty prebuilds (Electron ABI)
+        env:
+          # TODO: bump ELECTRON_VERSION to match the Electron version used in packaging.
+          ELECTRON_VERSION: '33.0.0'
+        run: |
+          cd node_modules/node-pty
+          npx --yes prebuildify \
+            --runtime electron \
+            --target "$ELECTRON_VERSION" \
+            --strip \
+            --arch ${{ matrix.node_arch }} \
+            --out ../../artifacts/node-pty-prebuilds
+
+      # ── Upload artifacts ─────────────────────────────────────────────────────
+      - name: Upload tmux package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmux-${{ matrix.platform }}-${{ matrix.arch }}
+          path: packages/tmux-${{ matrix.platform }}-${{ matrix.arch }}/
+          retention-days: 30
+
+      - name: Upload node-pty prebuild artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-pty-prebuilds-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifacts/node-pty-prebuilds/
+          retention-days: 30
+
+  # ─── Publish to npm (release tags only) ─────────────────────────────────────
+  publish:
+    name: Publish @octomux/tmux-* packages
+    needs: build
+    runs-on: ubuntu-latest
+    # Only run on version tag pushes (e.g. v1.0.30), not on branch pushes or PRs.
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: read
+      id-token: write # Required for npm provenance publishing.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Download all four tmux package artifacts into their respective packages/ dirs.
+      - name: Download darwin-arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tmux-darwin-arm64
+          path: packages/tmux-darwin-arm64/
+
+      - name: Download darwin-x64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tmux-darwin-x64
+          path: packages/tmux-darwin-x64/
+
+      - name: Download linux-x64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tmux-linux-x64
+          path: packages/tmux-linux-x64/
+
+      - name: Download linux-arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tmux-linux-arm64
+          path: packages/tmux-linux-arm64/
+
+      # Sync version from git tag into each package's package.json.
+      - name: Sync package versions from tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "Syncing version to $TAG_VERSION"
+          for pkg_dir in packages/tmux-darwin-arm64 packages/tmux-darwin-x64 packages/tmux-linux-x64 packages/tmux-linux-arm64; do
+            node -e "
+              const fs = require('fs');
+              const p = '$pkg_dir/package.json';
+              const json = JSON.parse(fs.readFileSync(p, 'utf8'));
+              json.version = '$TAG_VERSION';
+              fs.writeFileSync(p, JSON.stringify(json, null, 2) + '\n');
+            "
+            echo "  ✓ $pkg_dir -> $TAG_VERSION"
+          done
+
+      # Ensure the tmux binary is executable after artifact download.
+      - name: Fix binary permissions
+        run: |
+          for pkg_dir in packages/tmux-darwin-arm64 packages/tmux-darwin-x64 packages/tmux-linux-x64 packages/tmux-linux-arm64; do
+            if [ -f "$pkg_dir/bin/tmux" ]; then
+              chmod +x "$pkg_dir/bin/tmux"
+            fi
+          done
+
+      # Publish each platform package independently.
+      - name: Publish @octomux/tmux-darwin-arm64
+        run: npm publish --access public
+        working-directory: packages/tmux-darwin-arm64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Publish @octomux/tmux-darwin-x64
+        run: npm publish --access public
+        working-directory: packages/tmux-darwin-x64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Publish @octomux/tmux-linux-x64
+        run: npm publish --access public
+        working-directory: packages/tmux-linux-x64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Publish @octomux/tmux-linux-arm64
+        run: npm publish --access public
+        working-directory: packages/tmux-linux-arm64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
