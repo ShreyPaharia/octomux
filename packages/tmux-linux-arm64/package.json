@@ -1,0 +1,18 @@
+{
+  "name": "@octomux/tmux-linux-arm64",
+  "version": "1.0.30",
+  "description": "Prebuilt static tmux for octomux (linux arm64)",
+  "license": "ISC",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "bin/",
+    "share/"
+  ]
+}

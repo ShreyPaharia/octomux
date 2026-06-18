@@ -41,6 +41,22 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  // Guard: ban direct 'tmux' invocations in server source — use execTmux()/tmuxSpawnSpec() instead.
+  {
+    files: ['server/**/*.ts'],
+    ignores: ['server/**/*.test.ts', 'server/tmux-bin.ts', 'server/test-helpers.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.name=/^(execFile|execFileSync|spawn)$/] Literal[value='tmux']",
+          message:
+            "Do not invoke 'tmux' directly — use execTmux()/tmuxSpawnSpec() from server/tmux-bin.ts.",
+        },
+      ],
+    },
+  },
   {
     ignores: [
       'dist/',
@@ -56,6 +72,8 @@ export default tseslint.config(
       '.remember/',
       '*.config.js',
       '*.config.ts',
+      // Per-platform tmux packages are pure CJS modules published separately.
+      'packages/',
     ],
   },
 );
