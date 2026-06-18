@@ -1,15 +1,20 @@
-# build-binaries.yml — Build and publish per-platform tmux + node-pty binaries.
+# build-binaries.yml — Build and publish per-platform static tmux binaries.
 #
 # Runs on:
 #   - push to main (builds + uploads artifacts, no publish)
 #   - release tag push (builds + publishes @octomux/tmux-* packages to npm)
 #
-# Matrix covers all four supported platform/arch combos. Each job:
-#   1. Runs scripts/build-tmux.sh to build a statically-linked tmux binary.
-#   2. Builds node-pty native prebuilds for the Node ABI and for Electron's ABI.
-#   3. Uploads the resulting artifacts.
+# Matrix covers all four supported platform/arch combos. Each job runs
+# scripts/build-tmux.sh to build a statically-linked tmux binary and uploads it.
 #
 # The `publish` job is gated on a release tag and runs after all build jobs pass.
+#
+# NOTE: node-pty delivery is intentionally NOT handled here. npm/CLI users get
+# node-pty from upstream (Linux compiles from source — a known gap), and the
+# Electron app rebuilds node-pty for its ABI at package time via electron-builder
+# (npmRebuild). Wiring our own node-pty prebuilds into the install is a separate
+# TODO and must consume them somewhere — building orphan artifacts here only
+# broke CI without delivering anything.
 
 name: Build Binaries
 
@@ -35,19 +40,16 @@ jobs:
           - runner: macos-14
             platform: darwin
             arch: arm64
-            node_arch: arm64
 
           # macOS x64 (Intel)
           - runner: macos-13
             platform: darwin
             arch: x64
-            node_arch: x64
 
           # Linux x64
           - runner: ubuntu-latest
             platform: linux
             arch: x64
-            node_arch: x64
 
           # Linux arm64
           # NOTE: 'ubuntu-24.04-arm' is GitHub's hosted arm64 runner label (in public beta).
@@ -55,7 +57,6 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: linux
             arch: arm64
-            node_arch: arm64
 
     steps:
       - name: Checkout
@@ -91,50 +92,12 @@ jobs:
       - name: Build tmux binary
         run: bash scripts/build-tmux.sh
 
-      # ── Build node-pty prebuilds ─────────────────────────────────────────────
-      # We build prebuilds for:
-      #   - The active Node.js ABI (for npm/bun users)
-      #   - The Electron ABI for the latest stable Electron (for future Electron packaging)
-      #
-      # TODO: The exact Electron ABI version to target may change. Update ELECTRON_VERSION
-      # below when a new Electron major is adopted. @electron/rebuild or prebuildify can
-      # both drive this; we use prebuildify here because it produces self-contained
-      # .node files that land in node_modules/node-pty/prebuilds/.
-      - name: Build node-pty prebuilds (Node ABI)
-        run: |
-          cd node_modules/node-pty
-          npx --yes prebuildify \
-            --napi \
-            --strip \
-            --arch ${{ matrix.node_arch }} \
-            --out ../../artifacts/node-pty-prebuilds
-
-      - name: Build node-pty prebuilds (Electron ABI)
-        env:
-          # TODO: bump ELECTRON_VERSION to match the Electron version used in packaging.
-          ELECTRON_VERSION: '33.0.0'
-        run: |
-          cd node_modules/node-pty
-          npx --yes prebuildify \
-            --runtime electron \
-            --target "$ELECTRON_VERSION" \
-            --strip \
-            --arch ${{ matrix.node_arch }} \
-            --out ../../artifacts/node-pty-prebuilds
-
       # ── Upload artifacts ─────────────────────────────────────────────────────
       - name: Upload tmux package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: tmux-${{ matrix.platform }}-${{ matrix.arch }}
           path: packages/tmux-${{ matrix.platform }}-${{ matrix.arch }}/
-          retention-days: 30
-
-      - name: Upload node-pty prebuild artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-pty-prebuilds-${{ matrix.platform }}-${{ matrix.arch }}
-          path: artifacts/node-pty-prebuilds/
           retention-days: 30
 
   # ─── Publish to npm (release tags only) ─────────────────────────────────────
