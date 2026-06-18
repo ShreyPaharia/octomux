@@ -74,6 +74,9 @@ export default tseslint.config(
       '*.config.ts',
       // Per-platform tmux packages are pure CJS modules published separately.
       'packages/',
+      // electron/ has its own tsconfig and uses Electron types not in the main project.
+      'electron/',
+      'dist-electron/',
     ],
   },
 );

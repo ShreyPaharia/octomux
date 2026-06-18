@@ -55,6 +55,46 @@ afterEach(() => {
   _resetTmuxResolution();
 });
 
+// ─── Packaged Electron mode ───────────────────────────────────────────────────
+
+describe('packaged Electron mode (process.versions.electron + resourcesPath)', () => {
+  const FAKE_RESOURCES = '/Applications/octomux.app/Contents/Resources';
+  // Cast helpers to avoid TS errors on non-standard process properties
+  type AugmentedVersions = typeof process.versions & { electron?: string };
+  type AugmentedProcess = typeof process & { resourcesPath?: string };
+
+  afterEach(() => {
+    // Restore process globals mutated by this suite
+    delete (process.versions as AugmentedVersions).electron;
+    delete (process as AugmentedProcess).resourcesPath;
+    _resetTmuxResolution();
+  });
+
+  it('is a no-op under plain Node (process.versions.electron undefined)', () => {
+    // Ensure electron version is NOT set (it shouldn't be in vitest/Node)
+    delete (process.versions as AugmentedVersions).electron;
+
+    _resetTmuxResolution();
+    const res = tmuxResolution();
+    // Without electron set, falls through to PATH fallback
+    expect(res.source).toBe('path');
+  });
+
+  it('does not crash and falls through gracefully when Electron globals are set but asar dir is absent', () => {
+    // Simulate a packaged Electron environment
+    (process.versions as AugmentedVersions).electron = '33.0.0';
+    (process as AugmentedProcess).resourcesPath = FAKE_RESOURCES;
+
+    // fs.existsSync returns false for the asar index.js (dir does not exist)
+    // so the branch exits early and falls through to the PATH fallback.
+    _resetTmuxResolution();
+    const res = tmuxResolution();
+
+    // Branch is entered but falls through — PATH fallback is used.
+    expect(['bundled', 'path']).toContain(res.source);
+  });
+});
+
 // ─── tmuxBinPath ──────────────────────────────────────────────────────────────
 
 describe('tmuxBinPath', () => {

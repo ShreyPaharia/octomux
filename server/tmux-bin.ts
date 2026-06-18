@@ -3,7 +3,8 @@
  *
  * Binary resolution order (memoized):
  *   1. OCTOMUX_TMUX_BIN env var
- *   2. Bundled @octomux/tmux-<platform>-<arch> package (optional dep, may not exist)
+ *   2a. Packaged Electron: asar.unpacked under process.resourcesPath (no-op in plain Node)
+ *   2b. Bundled @octomux/tmux-<platform>-<arch> package (optional dep, may not exist)
  *   3. PATH 'tmux' fallback
  *
  * All callers should use execTmux() (async) or tmuxBinPath() + tmuxBaseArgs()
@@ -61,7 +62,54 @@ function resolve(): TmuxResolution {
     return _resolution;
   }
 
-  // 2. Bundled package
+  // 2a. Packaged Electron mode — look inside asar.unpacked under resourcesPath.
+  //     This branch is a no-op under plain Node (process.versions.electron is undefined).
+  //     process.resourcesPath is injected by Electron but absent from Node's Process type,
+  //     so we access it via a cast.
+  const electronResourcesPath = (process as unknown as { resourcesPath?: string }).resourcesPath;
+  if (process.versions.electron && electronResourcesPath) {
+    try {
+      const platform = process.platform;
+      const arch = process.arch;
+      const pkgName = `@octomux/tmux-${platform}-${arch}`;
+      // Under electron-builder, asarUnpack places the package here:
+      const unpackedPkgDir = path.join(
+        electronResourcesPath,
+        'app.asar.unpacked',
+        'node_modules',
+        pkgName,
+      );
+      const indexPath = path.join(unpackedPkgDir, 'index.js');
+      if (fs.existsSync(indexPath)) {
+        const req = createRequire(indexPath);
+        const bundled = req(indexPath) as { tmuxBin: string; terminfoDir?: string };
+        if (bundled.tmuxBin && fs.existsSync(bundled.tmuxBin)) {
+          const verified = probeBinary({ cmd: bundled.tmuxBin, checkArgs: ['-V'] }).ok;
+          _resolution = {
+            path: bundled.tmuxBin,
+            source: 'bundled',
+            verified,
+            terminfoDir: bundled.terminfoDir,
+          };
+          logger.debug(
+            {
+              path: bundled.tmuxBin,
+              source: 'bundled',
+              verified,
+              terminfoDir: bundled.terminfoDir,
+              electron: true,
+            },
+            'tmux resolved via packaged Electron asar.unpacked',
+          );
+          return _resolution;
+        }
+      }
+    } catch {
+      // Fall through to the standard bundled-package attempt below.
+    }
+  }
+
+  // 2b. Bundled package (standard Node / npm install path)
   try {
     const platform = process.platform; // 'darwin' | 'linux' | …
     const arch = process.arch; // 'arm64' | 'x64' | …
