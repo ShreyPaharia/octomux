@@ -20,8 +20,11 @@
 name: Build Binaries
 
 on:
+  # Tags publish; PRs build-verify; dispatch re-publishes a missed platform.
+  # Deliberately NO 'push: branches: [main]' — PRs already verify the tmux build,
+  # and a 4-platform matrix on every main commit just floods the (concurrency-
+  # capped) macOS/arm64 runner queue for no added signal.
   push:
-    branches: [main]
     tags:
       - 'v*'
   pull_request:
