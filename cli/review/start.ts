@@ -5,6 +5,7 @@ import { getLatestPublishedReview } from '../../server/published-reviews.js';
 import { listLearningsForRepo } from '../../server/review-learnings.js';
 import { findInstructionFiles } from '../../server/instruction-files.js';
 import { markStaleDrafts } from '../../server/review-staleness.js';
+import { readPlaybook } from '../../server/review-playbook.js';
 import { SELECT_TASK_SQL } from '../../server/task-select.js';
 import type { Task } from '../../server/types.js';
 import type { InlineCommentRow } from '../../server/inline-comments.js';
@@ -92,6 +93,8 @@ export async function runStart(argv: string[]): Promise<void> {
   const repoPath = task.repo_path ?? '';
   const learnings = repoPath ? listLearningsForRepo(repoPath) : [];
   const instruction_files = task.worktree ? findInstructionFiles(task.worktree) : [];
+  const playbook = repoPath ? readPlaybook(repoPath) : { index: null, files: [] };
+  const walkthrough = run.walkthrough ? safeParse(run.walkthrough) : null;
 
   const carry_forward = db
     .prepare(
@@ -114,6 +117,8 @@ export async function runStart(argv: string[]): Promise<void> {
         learnings: learnings.map((l) => ({ id: l.id, why: l.why })),
         instruction_files,
         carry_forward,
+        playbook,
+        walkthrough,
       },
       null,
       2,

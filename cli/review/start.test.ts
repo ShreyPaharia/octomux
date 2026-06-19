@@ -1,11 +1,20 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { createTestDb } from '../../server/test-helpers.js';
 import { runStart } from './start.js';
 
 let stdoutBuf = '';
 let stderrBuf = '';
+let tmpHome = '';
+let origHome: string | undefined;
 
 beforeEach(() => {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-test-'));
+  origHome = process.env.HOME;
+  process.env.HOME = tmpHome;
+
   stdoutBuf = '';
   stderrBuf = '';
   vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
@@ -16,6 +25,11 @@ beforeEach(() => {
     stderrBuf += String(chunk);
     return true;
   }) as typeof process.stderr.write);
+});
+
+afterEach(() => {
+  process.env.HOME = origHome;
+  fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
 function seedTask(db: ReturnType<typeof createTestDb>): void {
@@ -111,5 +125,27 @@ describe('octomux review start', () => {
     await expect(runStart(['--task', 'dev1'])).rejects.toThrow(/exit 2/);
     expect(stderrBuf).toMatch(/review task id/i);
     exitSpy.mockRestore();
+  });
+
+  it('includes playbook (empty when none) and walkthrough (null before ingest)', async () => {
+    const db = createTestDb();
+    seedTask(db);
+    await runStart(['--task', 't1']);
+    const out = JSON.parse(stdoutBuf);
+    expect(out.playbook).toEqual({ index: null, files: [] });
+    expect(out.walkthrough).toBeNull();
+  });
+
+  it('returns the ingested walkthrough on the current run', async () => {
+    const db = createTestDb();
+    seedTask(db);
+    await runStart(['--task', 't1']); // creates the run
+    db.prepare(`UPDATE review_runs SET walkthrough = ? WHERE task_id = 't1'`).run(
+      JSON.stringify({ global: { type: 'Bug fix' } }),
+    );
+    stdoutBuf = '';
+    await runStart(['--task', 't1']);
+    const out = JSON.parse(stdoutBuf);
+    expect(out.walkthrough).toEqual({ global: { type: 'Bug fix' } });
   });
 });
