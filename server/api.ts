@@ -3094,6 +3094,168 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // POST /api/reviews — create an auto_review task for a GitHub PR URL.
+  // Idempotent: if a live (non-deleted, non-error) review task already exists
+  // for the same repo+PR, returns that instead of creating a duplicate.
+  app.post('/api/reviews', async (req: Request, res: Response) => {
+    const body = req.body as { pr_url?: unknown; repo_path?: unknown };
+    const prUrl = typeof body.pr_url === 'string' ? body.pr_url.trim() : '';
+    const bodyRepoPath = typeof body.repo_path === 'string' ? body.repo_path.trim() : '';
+
+    // Parse GitHub PR URL
+    const prMatch = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+    if (!prMatch) {
+      res.status(400).json({ error: 'invalid pr_url' });
+      return;
+    }
+    const [, owner, repo, numberStr] = prMatch;
+    const number = parseInt(numberStr, 10);
+    const ownerRepo = `${owner}/${repo}`;
+
+    // Resolve the local repo path
+    let repoPath = bodyRepoPath;
+    if (!repoPath) {
+      const db = getDb();
+      const rows = db
+        .prepare(`SELECT DISTINCT repo_path FROM worktrees WHERE repo_path IS NOT NULL`)
+        .all() as Array<{ repo_path: string }>;
+
+      for (const row of rows) {
+        const candidatePath = row.repo_path;
+        try {
+          const { stdout } = await execFile('git', [
+            '-C',
+            candidatePath,
+            'remote',
+            'get-url',
+            'origin',
+          ]);
+          const remoteUrl = stdout.trim();
+          // Handle both ssh (git@github.com:owner/repo.git) and https
+          const sshMatch = remoteUrl.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
+          const httpsMatch = remoteUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
+          const remoteOwnerRepo = (sshMatch?.[1] ?? httpsMatch?.[1] ?? '').toLowerCase();
+          if (remoteOwnerRepo === ownerRepo.toLowerCase()) {
+            repoPath = candidatePath;
+            break;
+          }
+        } catch {
+          // skip this candidate
+        }
+      }
+    }
+
+    if (!repoPath) {
+      res.status(400).json({
+        error: `could not resolve a local repo for ${ownerRepo}; pass repo_path`,
+      });
+      return;
+    }
+
+    // Dedup: check for an existing live review task for this repo+PR
+    const db = getDb();
+    const existing = db
+      .prepare(
+        `SELECT t.id FROM tasks t JOIN worktrees w ON t.worktree_id = w.id
+          WHERE w.repo_path = ? AND t.pr_number = ? AND t.source = 'auto_review'
+            AND t.deleted_at IS NULL AND t.runtime_state != 'error'
+          ORDER BY t.created_at DESC LIMIT 1`,
+      )
+      .get(repoPath, number) as { id: string } | undefined;
+
+    if (existing) {
+      res.status(200).json({ id: existing.id, reused: true });
+      return;
+    }
+
+    // Fetch PR metadata via gh CLI
+    let pr: {
+      title: string;
+      headRefOid: string;
+      baseRefName: string;
+      author: { login: string } | null;
+      state: string;
+      url: string;
+    };
+    try {
+      const { stdout } = await execFile(
+        'gh',
+        [
+          'pr',
+          'view',
+          String(number),
+          '--repo',
+          ownerRepo,
+          '--json',
+          'title,headRefOid,baseRefName,author,state,url',
+        ],
+        { cwd: repoPath },
+      );
+      pr = JSON.parse(stdout) as typeof pr;
+    } catch (err) {
+      res.status(400).json({ error: `failed to fetch PR metadata: ${(err as Error).message}` });
+      return;
+    }
+
+    if (pr.state !== 'OPEN') {
+      res.status(400).json({ error: `PR #${number} is ${pr.state}` });
+      return;
+    }
+
+    // Create the review task
+    const id = nanoid(12);
+    const short = repoShortName(repoPath);
+    const branch = `review/${short}-pr-${number}`;
+
+    const initialPrompt = buildPrReviewPrompt({
+      reviewTaskId: id,
+      title: pr.title,
+      number,
+      url: pr.url,
+      author: pr.author?.login ?? null,
+      headRefOid: pr.headRefOid,
+      requestedAt: new Date().toISOString(),
+    });
+
+    insertReviewTask({
+      id,
+      repoPath,
+      branch,
+      baseBranch: pr.baseRefName,
+      title: `Review: ${pr.title} (#${number})`,
+      description: `Review task for PR #${number}`,
+      initialPrompt,
+      prUrl: pr.url,
+      prNumber: number,
+      prHeadSha: pr.headRefOid,
+    });
+
+    broadcast({ type: 'task:created', payload: { taskId: id } });
+
+    const fresh = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
+    if (fresh) {
+      fresh.agents = [];
+      fresh.user_terminals = [];
+      // Fire-and-forget: start the task in the background
+      startTask(fresh)
+        .then(() => broadcast({ type: 'task:updated', payload: { taskId: id } }))
+        .catch((err) => {
+          apiLogger.error(
+            { task_id: id, err: (err as Error).message },
+            'failed to auto-start review create task',
+          );
+          broadcast({ type: 'task:updated', payload: { taskId: id } });
+        });
+    }
+
+    apiLogger.info(
+      { task_id: id, pr_number: number, repo: ownerRepo, repo_path: repoPath },
+      'review create task created',
+    );
+
+    res.status(201).json({ id, reused: false });
+  });
+
   // ─── Review runs ─────────────────────────────────────────────────────────────
 
   // PATCH /api/tasks/:id/review-runs/:rid/walkthrough — deep-merge walkthrough
