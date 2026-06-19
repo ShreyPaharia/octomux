@@ -28,7 +28,10 @@ export function readPlaybook(repoPath: string): {
     .readdirSync(dir)
     .filter((f) => f.endsWith('.md') && f !== INDEX_FILE)
     .sort()
-    .map((f) => ({ slug: f.replace(/\.md$/, ''), body: fs.readFileSync(path.join(dir, f), 'utf-8') }));
+    .map((f) => ({
+      slug: f.replace(/\.md$/, ''),
+      body: fs.readFileSync(path.join(dir, f), 'utf-8'),
+    }));
   return { index, files };
 }
 
@@ -42,12 +45,12 @@ export function appendPlaybookNote(repoPath: string, slug: string, note: string)
   fs.appendFileSync(topicPath, `- ${note.trim()}\n`, 'utf-8');
 
   const indexPath = path.join(dir, INDEX_FILE);
-  const indexBody = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : '# Review playbook\n\n';
+  const indexBody = fs.existsSync(indexPath)
+    ? fs.readFileSync(indexPath, 'utf-8')
+    : '# Review playbook\n\n';
   const link = `- [${safe}](${safe}.md)`;
   if (!indexBody.includes(`(${safe}.md)`)) {
     fs.writeFileSync(indexPath, `${indexBody.replace(/\n*$/, '\n')}${link}\n`, 'utf-8');
-  } else if (!fs.existsSync(indexPath)) {
-    fs.writeFileSync(indexPath, indexBody, 'utf-8');
   }
   logger.info({ repo_path: repoPath, slug: safe }, 'playbook note appended');
 }
