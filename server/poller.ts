@@ -1009,7 +1009,7 @@ export async function attachDeepReviewAgent(task: Task): Promise<void> {
   await addAgent(task, prompt, null);
   getDb()
     .prepare(
-      `UPDATE review_runs SET deep_review_attached = 1 WHERE task_id = ? AND walkthrough IS NOT NULL`,
+      `UPDATE review_runs SET deep_review_attached = 1 WHERE task_id = ? AND walkthrough IS NOT NULL AND status = 'running'`,
     )
     .run(task.id);
   logger.info(

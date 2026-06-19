@@ -778,7 +778,7 @@ describe('pollReviewerRequests', () => {
     expect((created!.branch as string).startsWith('review/')).toBe(true);
     expect(created!.branch).toContain('pr-42');
     expect(created!.title).toContain('#42');
-    expect((created!.initial_prompt as string).startsWith('/review-orchestrator')).toBe(true);
+    expect((created!.initial_prompt as string).startsWith('/review-walkthrough')).toBe(true);
     expect(created!.initial_prompt).toContain('https://github.com');
     // Prompt pins the new review task's own id for the review CLI.
     expect(created!.initial_prompt).toContain(`Review task id: ${created!.id}`);

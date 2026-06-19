@@ -103,7 +103,7 @@ Apply the following rules:
    - `risk: "high"` → threshold ≥ **70** (lower bar; more scrutiny warranted)
    - `uncertain` findings below the threshold are dropped.
 3. **Zero surviving findings is a valid, expected outcome** — state nothing if nothing survives. Do not manufacture findings to meet a quota.
-4. **Cap inline drafts** to a sensible top-N (e.g. 10 per review). If more findings survive than the cap, keep the highest-severity, highest-confidence ones and log the count of dropped findings (via the structured logger — e.g. `logger.info({ dropped: N }, 'findings dropped by abstain cap')`). Do NOT silently truncate.
+4. **Cap inline drafts** to a sensible top-N (e.g. 10 per review). If more findings survive than the cap, keep the highest-severity, highest-confidence ones and state how many findings were dropped by the cap in your summary. Do NOT silently truncate.
 
 ## Phase 4: Draft inline comments
 
