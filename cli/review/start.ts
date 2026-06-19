@@ -60,6 +60,21 @@ export async function runStart(argv: string[]): Promise<void> {
   let run = getCurrentRun(taskId);
   if (!run || run.pr_head_sha !== task.pr_head_sha) {
     run = createReviewRun({ task_id: taskId, pr_head_sha: task.pr_head_sha });
+  } else if (run.status !== 'running') {
+    // Re-review of the same head. review_runs is UNIQUE(task_id, pr_head_sha) so
+    // we can't create a second run — reset this one in place: clear the ingested
+    // walkthrough and the handoff flag so the walkthrough re-ingests and the
+    // poller re-attaches the deep-review agent (otherwise deep_review_attached
+    // stays 1 and the deep phase never re-runs).
+    getDb()
+      .prepare(
+        `UPDATE review_runs
+            SET status = 'running', deep_review_attached = 0,
+                walkthrough = NULL, completed_at = NULL, error = NULL
+          WHERE id = ?`,
+      )
+      .run(run.id);
+    run = getCurrentRun(taskId) as typeof run;
   }
 
   const prev = getLatestPublishedReview(taskId);

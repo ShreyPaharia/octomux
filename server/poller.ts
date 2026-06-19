@@ -649,7 +649,6 @@ async function upsertReviewTask(
          FROM tasks t
          INNER JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.pr_number = ?
-          AND t.runtime_state != 'error'
           AND t.deleted_at IS NULL
         ORDER BY t.created_at DESC LIMIT 1`,
     )
@@ -1005,13 +1004,24 @@ export async function pollSoftDeletes(): Promise<void> {
 // ─── Walkthrough Handoff ─────────────────────────────────────────────────────
 
 export async function attachDeepReviewAgent(task: Task): Promise<void> {
-  const prompt = buildDeepReviewPrompt({ reviewTaskId: task.id });
-  await addAgent(task, { prompt });
-  getDb()
+  // Claim the handoff ATOMICALLY before the slow addAgent work (tmux new-window +
+  // hooks + DB, which can exceed the 5s poll interval). Without this, an
+  // overlapping tick — or a crash/retry — would re-select the row (flag still 0)
+  // and attach a SECOND deep-review agent. The conditional UPDATE wins the race:
+  // only the tick that flips 0→1 proceeds.
+  const claim = getDb()
     .prepare(
-      `UPDATE review_runs SET deep_review_attached = 1 WHERE task_id = ? AND walkthrough IS NOT NULL AND status = 'running'`,
+      `UPDATE review_runs SET deep_review_attached = 1
+         WHERE task_id = ? AND walkthrough IS NOT NULL AND status = 'running'
+               AND deep_review_attached = 0`,
     )
     .run(task.id);
+  if (claim.changes !== 1) {
+    // Another tick already claimed (or there is no eligible run) — do nothing.
+    return;
+  }
+  const prompt = buildDeepReviewPrompt({ reviewTaskId: task.id });
+  await addAgent(task, { prompt });
   logger.info(
     { task_id: task.id, operation: 'attachDeepReviewAgent' },
     'deep-review agent attached',

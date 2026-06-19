@@ -148,4 +148,36 @@ describe('octomux review start', () => {
     const out = JSON.parse(stdoutBuf);
     expect(out.walkthrough).toEqual({ global: { type: 'Bug fix' } });
   });
+
+  it('resets the existing run in place on re-review so the deep agent re-attaches', async () => {
+    const db = createTestDb();
+    seedTask(db);
+    await runStart(['--task', 't1']);
+    const run1 = (
+      db.prepare(`SELECT id FROM review_runs WHERE task_id = 't1'`).get() as {
+        id: string;
+      }
+    ).id;
+    // Simulate the first review finishing: walkthrough ingested, deep attached, completed.
+    db.prepare(
+      `UPDATE review_runs SET status = 'completed', deep_review_attached = 1, walkthrough = '{}' WHERE id = ?`,
+    ).run(run1);
+    stdoutBuf = '';
+    await runStart(['--task', 't1']); // re-review at the same head
+    const out = JSON.parse(stdoutBuf);
+    // Same run reused (UNIQUE task_id+head), but reset for a fresh pass.
+    expect(out.review_run_id).toBe(run1);
+    expect(out.walkthrough).toBeNull();
+    const count = (
+      db.prepare(`SELECT count(*) AS c FROM review_runs WHERE task_id = 't1'`).get() as {
+        c: number;
+      }
+    ).c;
+    expect(count).toBe(1);
+    const r = db
+      .prepare(`SELECT status, deep_review_attached FROM review_runs WHERE id = ?`)
+      .get(run1) as { status: string; deep_review_attached: number };
+    expect(r.status).toBe('running');
+    expect(r.deep_review_attached).toBe(0);
+  });
 });
