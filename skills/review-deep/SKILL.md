@@ -118,7 +118,7 @@ For each candidate finding, run a **separate skeptic pass** whose only job is to
 - Is it pre-existing — present at `base_sha` — or on an unmodified line?
 - **Is it caught by a formatter / linter / compiler? If so, REFUTE it outright** — gofmt/prettier whitespace and blank lines, unused imports, magic-string-vs-named-constant, type errors, duplicate adjacent comments. These must never become drafts, regardless of confidence.
 - For a **test-coverage candidate**: is the behaviour genuinely high-risk, or is this just "more coverage would be nice"? Refute unless a concrete failure mode goes undetected without the test.
-- For a **behaviour/concurrency claim**: don't refute it just because there's no test — verify the runtime claim against the code (does that call really block? is that loop really serial?). A real blocking/race bug stands on its own.
+- For a **behaviour / concurrency / correctness / architecture claim**: refute ONLY with a concrete reason you traced in the code (the call doesn't block; the loop isn't serial; the value can't be null here). **"I'm not sure" is NOT grounds to refute** — mark it `uncertain`, not `refuted`. A plausible real bug must survive for the author to judge; over-refuting substantive findings is how an automated review becomes useless.
 - Is it a false positive under light scrutiny (e.g. the "issue" is already handled two lines down)?
 - Does a `learning` from Phase 1 say this pattern is intentional?
 
@@ -133,11 +133,10 @@ The skeptic outputs per finding:
 Apply the following rules:
 
 1. **Drop `refuted` findings** — they are eliminated entirely.
-2. **Apply the confidence threshold**, which scales with `walkthrough.global.risk`:
-   - `risk: "low"` → threshold ≥ **85** (high bar; low-risk PRs are unlikely to harbour subtle bugs)
-   - `risk: "medium"` → threshold ≥ **75**
-   - `risk: "high"` → threshold ≥ **70** (lower bar; more scrutiny warranted)
-   - `uncertain` findings below the threshold are dropped.
+2. **Apply a category-aware confidence bar:**
+   - **Substantive findings** (bug, concurrency, dead-abstraction, architecture, error-handling) survive at confidence ≥ **55** — including `uncertain` ones. These are the valuable categories; let a plausible real bug reach the author rather than over-prune it.
+   - **Test-gap and `nit` findings** must clear the higher risk-scaled threshold: `low` → ≥ **85**, `medium` → ≥ **75**, `high` → ≥ **70**. Below that, drop them.
+   - This asymmetry is deliberate: be generous with bugs, strict with low-value noise.
 3. **Zero surviving findings is a valid, expected outcome** — state nothing if nothing survives. Do not manufacture findings to meet a quota.
 4. **Cap inline drafts** to a sensible top-N (e.g. 10 per review). If more findings survive than the cap, keep the highest-severity, highest-confidence ones and state how many findings were dropped by the cap in your summary. Do NOT silently truncate.
 5. **Composition guard.** Test-gap and `nit`-severity findings together must not exceed **one-third** of the drafted comments, and never the majority. If after filtering your survivors are mostly test-gaps/nits, that is a signal the behaviour/dead-abstraction/architecture lenses (2, 3) under-delivered — go back and reason harder about runtime behaviour and data flow before drafting. A review that is all test-gaps and nits is a failed review even if every individual comment is technically correct.

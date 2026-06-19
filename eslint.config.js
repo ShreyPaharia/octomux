@@ -67,6 +67,9 @@ export default tseslint.config(
       'coverage/',
       '.worktrees/',
       '.claude/',
+      // Workflow scripts run in the Workflow runtime with injected globals
+      // (agent/parallel/pipeline/phase/log/args/budget) — not lintable as app code.
+      'workflows/',
       '.local/',
       '.config/',
       '.remember/',
