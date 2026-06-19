@@ -12,6 +12,11 @@ import {
   cleanupAllConnections,
 } from './terminal.js';
 import { setupEventWebSocket, handleEventUpgrade, cleanupEventClients } from './events.js';
+import {
+  setupOrchestratorWebSocket,
+  handleOrchestratorUpgrade,
+  cleanupOrchestratorClients,
+} from './orchestrator/stream.js';
 import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
 import {
@@ -37,6 +42,7 @@ const PORT = process.env.OCTOMUX_PORT || process.env.PORT || 7777;
 // WebSocket setup
 setupTerminalWebSocket();
 setupEventWebSocket();
+setupOrchestratorWebSocket();
 
 server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
   if (!isUpgradeAuthorized(req)) {
@@ -45,6 +51,7 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
   }
   if (handleTerminalUpgrade(req, socket, head)) return;
   if (handleEventUpgrade(req, socket, head)) return;
+  if (handleOrchestratorUpgrade(req, socket, head)) return;
   socket.destroy();
 });
 
@@ -146,6 +153,7 @@ function shutdown() {
   logger.info('Shutdown: cleaning up connections');
   cleanupAllConnections();
   cleanupEventClients();
+  cleanupOrchestratorClients();
   logger.info('Shutdown: closing HTTP server');
   server.close(() => {
     logger.info('Shutdown: done');

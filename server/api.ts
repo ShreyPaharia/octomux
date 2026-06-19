@@ -55,6 +55,12 @@ import { getReviewRun, getCurrentRun, setWalkthrough } from './review-runs.js';
 import { listPublishedReviews } from './published-reviews.js';
 import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
 import { updateCommentFields } from './inline-comments.js';
+import {
+  createConversation,
+  getConversation,
+  listConversations,
+  listMessages as listOrchestratorMessages,
+} from './orchestrator/store.js';
 
 import {
   buildManualReviewPrompt,
@@ -3313,6 +3319,70 @@ export function setupRoutes(app: Express): void {
     );
 
     res.status(201).json({ id: newId, action: 'created' });
+  });
+
+  // ─── Orchestrator chat ───────────────────────────────────────────────────────
+
+  // POST /api/orchestrator/conversations — create a new orchestrator conversation
+  app.post('/api/orchestrator/conversations', (req: Request, res: Response) => {
+    const { title, cwd } = req.body as { title?: string; cwd?: string };
+    if (!title?.trim()) {
+      res.status(400).json({ error: 'title is required' });
+      return;
+    }
+    try {
+      const id = createConversation({ title: title.trim() });
+      apiLogger.info(
+        { conversation_id: id, operation: 'createConversation', cwd: cwd ?? null },
+        'orchestrator conversation created',
+      );
+      const conv = getConversation(id);
+      res.status(201).json(conv);
+    } catch (err) {
+      apiLogger.error(
+        { err, operation: 'createConversation' },
+        'failed to create orchestrator conversation',
+      );
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations — list all conversations
+  app.get('/api/orchestrator/conversations', (_req: Request, res: Response) => {
+    try {
+      res.json(listConversations());
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations/:id — get a single conversation
+  app.get('/api/orchestrator/conversations/:id', (req: Request, res: Response) => {
+    try {
+      const conv = getConversation((req.params as Record<string, string>).id);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      res.json(conv);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations/:id/messages — list messages for a conversation
+  app.get('/api/orchestrator/conversations/:id/messages', (req: Request, res: Response) => {
+    try {
+      const convId = (req.params as Record<string, string>).id;
+      const conv = getConversation(convId);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      res.json(listOrchestratorMessages(convId));
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // ─── Review learnings ────────────────────────────────────────────────────────
