@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { getSettings } from './settings.js';
-import { closeTask, deleteTask, startTask } from './task-runner.js';
+import { closeTask, deleteTask, startTask, addAgent } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
@@ -11,7 +11,12 @@ import { readGithubLogin } from './github-login.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 import { fireHook } from './hook-dispatcher.js';
 import { sendMessageToAgent } from './tmux-input.js';
-import { buildPrReviewPrompt, insertReviewTask, repoShortName } from './review-tasks.js';
+import {
+  buildDeepReviewPrompt,
+  buildPrReviewPrompt,
+  insertReviewTask,
+  repoShortName,
+} from './review-tasks.js';
 import { execTmux } from './tmux-bin.js';
 import type { Task, UserTerminal } from './types.js';
 
@@ -24,12 +29,14 @@ const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const DELETE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60 * 60 * 1000; // 1h
 const TEAM_SCHEDULE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000; // check every minute
+const HANDOFF_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
 let mergedPrTimer: ReturnType<typeof setInterval> | null = null;
 let deleteTimer: ReturnType<typeof setInterval> | null = null;
 let teamScheduleTimer: ReturnType<typeof setInterval> | null = null;
+let handoffTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
@@ -995,6 +1002,44 @@ export async function pollSoftDeletes(): Promise<void> {
   }
 }
 
+// ─── Walkthrough Handoff ─────────────────────────────────────────────────────
+
+export async function attachDeepReviewAgent(task: Task): Promise<void> {
+  const prompt = buildDeepReviewPrompt({ reviewTaskId: task.id });
+  await addAgent(task, prompt, null);
+  getDb()
+    .prepare(
+      `UPDATE review_runs SET deep_review_attached = 1 WHERE task_id = ? AND walkthrough IS NOT NULL`,
+    )
+    .run(task.id);
+  logger.info(
+    { task_id: task.id, operation: 'attachDeepReviewAgent' },
+    'deep-review agent attached',
+  );
+}
+
+export async function pollWalkthroughHandoffs(): Promise<void> {
+  const rows = getDb()
+    .prepare(
+      `${SELECT_TASK_SQL}
+         WHERE t.id IN (
+           SELECT task_id FROM review_runs
+            WHERE walkthrough IS NOT NULL AND deep_review_attached = 0 AND status = 'running'
+         ) AND t.source = 'auto_review'`,
+    )
+    .all() as Task[];
+  for (const task of rows) {
+    try {
+      await attachDeepReviewAgent(task);
+    } catch (err) {
+      logger.error(
+        { err, task_id: task.id, operation: 'pollWalkthroughHandoffs' },
+        'handoff failed',
+      );
+    }
+  }
+}
+
 export function startPolling(): void {
   // Install hooks in any running worktrees that might be missing them
   ensureHooksInstalled();
@@ -1021,6 +1066,9 @@ export function startPolling(): void {
       }
     }, TEAM_SCHEDULE_INTERVAL);
   }
+  if (HANDOFF_INTERVAL > 0) {
+    handoffTimer = setInterval(pollWalkthroughHandoffs, HANDOFF_INTERVAL);
+  }
 }
 
 export function stopPolling(): void {
@@ -1043,5 +1091,9 @@ export function stopPolling(): void {
   if (teamScheduleTimer) {
     clearInterval(teamScheduleTimer);
     teamScheduleTimer = null;
+  }
+  if (handoffTimer) {
+    clearInterval(handoffTimer);
+    handoffTimer = null;
   }
 }
