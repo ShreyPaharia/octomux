@@ -763,7 +763,8 @@ export function initDb(instance: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'running',
       started_at TIMESTAMP NOT NULL DEFAULT (datetime('now')),
       completed_at TIMESTAMP,
-      error TEXT
+      error TEXT,
+      deep_review_attached INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_review_runs_task ON review_runs(task_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_review_runs_task_sha_status
@@ -793,6 +794,14 @@ export function initDb(instance: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_review_learnings_repo ON review_learnings(repo_path);
   `);
+
+  const reviewRunCols = columnsOf('review_runs');
+  addColumn(
+    'review_runs',
+    'deep_review_attached',
+    'deep_review_attached INTEGER NOT NULL DEFAULT 0',
+    reviewRunCols,
+  );
 
   const inlineCommentCols = columnsOf('inline_comments');
   addColumn('inline_comments', 'status', `status TEXT NOT NULL DEFAULT 'draft'`, inlineCommentCols);
