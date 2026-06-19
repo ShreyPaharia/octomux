@@ -1006,7 +1006,7 @@ export async function pollSoftDeletes(): Promise<void> {
 
 export async function attachDeepReviewAgent(task: Task): Promise<void> {
   const prompt = buildDeepReviewPrompt({ reviewTaskId: task.id });
-  await addAgent(task, prompt, null);
+  await addAgent(task, { prompt });
   getDb()
     .prepare(
       `UPDATE review_runs SET deep_review_attached = 1 WHERE task_id = ? AND walkthrough IS NOT NULL AND status = 'running'`,
