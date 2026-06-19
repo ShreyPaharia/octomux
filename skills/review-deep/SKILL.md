@@ -55,18 +55,52 @@ For `resolved` and `partial`, do not pass `--reflag-body`.
 
 The engine runs three stages. Use the `walkthrough.global.key_review_points` and `walkthrough.groups` from Phase 1 as seeds for all lenses.
 
+### What a high-value review looks like (read this first)
+
+The best human reviewers almost never comment "this has no test" or "stray blank
+line." They flag, in roughly this priority order:
+
+1. **Correctness & concurrency bugs** — logic that's wrong, _and_ runtime-behaviour
+   bugs that only appear when you reason about execution: a sync RPC/IO call inside
+   a loop that blocks N×latency, lock ordering, goroutine/resource leaks, blocking
+   the hot path, off-by-one, mishandled error/edge state.
+2. **Dead abstractions & redundant work** — a parameter/map/field that is _always_
+   the same value (so the abstraction is dead), a value recomputed when it's already
+   stored/derived upstream, a partial fork of an existing helper that will drift, an
+   encode-then-reparse round-trip.
+3. **Extensibility / architecture** — hardcoded per-type/per-venue branches that a
+   new case would force a code edit for, when the behaviour should be derived from a
+   single source of truth; leaky or misplaced responsibilities.
+4. **Genuine error-handling gaps** — swallowed errors, missing status checks.
+5. **High-risk untested behaviour** — a test gap ONLY when the untested code is
+   non-trivial, high-risk behaviour (a new state machine, an idempotency guard, a
+   cold-start/reconcile path). Never "function X has no test" as a generic note.
+6. **Nits** — last resort, and never anything a formatter/linter/compiler catches.
+
+Lenses 1–3 are where the value is and where automated reviews chronically
+under-deliver. **Spend your effort there.** If your draft set is mostly test-gaps
+and nits, you have failed the review — go back and reason harder about behaviour
+and data flow.
+
 ### Stage A — Parallel lenses
 
 Dispatch read-only sub-agents, one per lens. These sub-agents have NO worktree isolation (reviews don't mutate files), so parallel dispatch is safe. Each lens returns candidate findings in the form `{ file, line(s), severity, bucket, kind, body, lens }`.
 
+**Use reasoning sub-agents (general-purpose), NOT code-locator agents** for the
+analytical lenses (2, 3, 5). A locator that only greps "comes back empty" — these
+lenses require reading the changed functions, tracing values, and reasoning about
+behaviour. **Trace changed symbols across files** (into builders, config, callers,
+the helpers they call) — several of the highest-value findings only appear when you
+follow a value out of the diff to where it's set or consumed.
+
 Lenses to dispatch:
 
 1. **Instruction adherence** — check the diff against `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and any other instruction files within their declared scope.
-2. **Bug scan** — logic errors, null/undefined dereferences, race conditions, edge cases. Diff-focused.
-3. **Git-history / blame context** — does git history reveal a regression? Was the code recently changed for a specific reason that this diff undoes?
-4. **Error handling / silent failures** — swallowed errors, missing catch branches, unhandled promise rejections, missing status checks.
-5. **Test coverage** — does the changed behaviour have test coverage? Are there gaps in the test cases for the changed code?
-6. **Simplify lens (reuse / clarity / dead code)** — quality issues: duplication, unused imports/variables, unclear naming, dead code paths. Quality only, not bugs.
+2. **Behaviour & concurrency bug scan** — logic errors, null/undefined, edge cases, AND runtime-behaviour bugs: for every changed loop, ask "does a call inside it block? how long? is it on a hot path?" — flag serial sync RPC/IO in loops (could it fan out like sibling code?), races, lock ordering, leaks, blocking the hot path. Reason about execution, not syntax.
+3. **Dead-abstraction & redundant-work scan** — trace data flow: is a map/param/field _always_ one value (dead abstraction to delete)? Is something recomputed that's already stored/derived upstream? Is this a partial fork of an existing shared helper that will drift? An encode-then-reparse round-trip? A per-type/per-venue hardcode that should be derived from one source of truth? This is the simplification lens — and it means data-flow reasoning, **not** whitespace/naming/import nits.
+4. **Git-history / blame context** — does git history reveal a regression? Was the code recently changed for a specific reason that this diff undoes?
+5. **Error handling / silent failures** — swallowed errors, missing catch branches, unhandled promise rejections, missing status checks.
+6. **Test coverage (high-risk only)** — flag a gap ONLY for non-trivial, high-risk untested behaviour (new state machine, idempotency guard, cold-start/reconcile path). Do NOT emit generic "X has no test" findings. At most **2** test-gap candidates per review.
 
 Each sub-agent receives:
 
@@ -82,7 +116,9 @@ For each candidate finding, run a **separate skeptic pass** whose only job is to
 
 - Does it reproduce? Is the cited code actually reached under normal execution?
 - Is it pre-existing — present at `base_sha` — or on an unmodified line?
-- Is it a lint/type/format nit that CI would catch automatically?
+- **Is it caught by a formatter / linter / compiler? If so, REFUTE it outright** — gofmt/prettier whitespace and blank lines, unused imports, magic-string-vs-named-constant, type errors, duplicate adjacent comments. These must never become drafts, regardless of confidence.
+- For a **test-coverage candidate**: is the behaviour genuinely high-risk, or is this just "more coverage would be nice"? Refute unless a concrete failure mode goes undetected without the test.
+- For a **behaviour/concurrency claim**: don't refute it just because there's no test — verify the runtime claim against the code (does that call really block? is that loop really serial?). A real blocking/race bug stands on its own.
 - Is it a false positive under light scrutiny (e.g. the "issue" is already handled two lines down)?
 - Does a `learning` from Phase 1 say this pattern is intentional?
 
@@ -104,6 +140,7 @@ Apply the following rules:
    - `uncertain` findings below the threshold are dropped.
 3. **Zero surviving findings is a valid, expected outcome** — state nothing if nothing survives. Do not manufacture findings to meet a quota.
 4. **Cap inline drafts** to a sensible top-N (e.g. 10 per review). If more findings survive than the cap, keep the highest-severity, highest-confidence ones and state how many findings were dropped by the cap in your summary. Do NOT silently truncate.
+5. **Composition guard.** Test-gap and `nit`-severity findings together must not exceed **one-third** of the drafted comments, and never the majority. If after filtering your survivors are mostly test-gaps/nits, that is a signal the behaviour/dead-abstraction/architecture lenses (2, 3) under-delivered — go back and reason harder about runtime behaviour and data flow before drafting. A review that is all test-gaps and nits is a failed review even if every individual comment is technically correct.
 
 ## Phase 4: Draft inline comments
 
