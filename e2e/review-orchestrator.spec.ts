@@ -1,3 +1,14 @@
+// Two-phase review flow: review tasks now run two agents in sequence on the same task.
+//   Agent 1 (window 0) — /review-walkthrough: bootstraps, reads instruction files,
+//     understands the diff, produces .octomux/review-walkthrough.json, ingests it via
+//     `octomux review walkthrough`. Stops without drafting comments or calling complete.
+//   Agent 2 (window 1) — /review-deep: auto-attached by the server poller once the
+//     walkthrough is ingested. Runs parallel lenses, adversarial validation, threshold
+//     filter, drafts surviving findings, optionally appends playbook notes, then calls
+//     `octomux review complete --require-walkthrough`.
+// The tests below are agnostic to this split (they only exercise task creation, review
+// run state, comment drafts seeded by the fixture, and the publish flow), so no
+// assertions need to change. See spec/two-session-review-flow.md for the full design.
 import { test, expect } from '@playwright/test';
 import { createReviewFixture, deleteReviewTask } from './helpers-review';
 
@@ -16,7 +27,7 @@ test.afterEach(async ({ page }) => {
   }
 });
 
-test.describe('Review orchestrator — happy path', () => {
+test.describe('Review — happy path', () => {
   test('shows review in /reviews list and navigates to detail', async ({ page }) => {
     // 1. Navigate to /reviews
     await page.goto('/reviews');
