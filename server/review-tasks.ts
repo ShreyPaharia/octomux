@@ -40,7 +40,7 @@ function reviewTaskIdLines(reviewTaskId: string): string[] {
 export function buildPrReviewPrompt(input: PrReviewPromptInput): string {
   const author = input.author ?? 'unknown';
   return [
-    `/review-orchestrator`,
+    `/review-walkthrough`,
     '',
     ...reviewTaskIdLines(input.reviewTaskId),
     '',
@@ -49,7 +49,8 @@ export function buildPrReviewPrompt(input: PrReviewPromptInput): string {
     `Head: ${input.headRefOid}`,
     `Review requested: ${input.requestedAt}`,
     '',
-    'Use the review-orchestrator skill to produce a structured walkthrough and inline draft comments via the `octomux review` CLI. Do NOT post to GitHub directly.',
+    'Use the review-walkthrough skill to produce the structured walkthrough via the `octomux review` CLI.' +
+      ' Do NOT draft comments or post to GitHub.',
   ].join('\n');
 }
 
@@ -69,7 +70,7 @@ export interface ManualReviewPromptInput {
 /** Prompt used when the source task has no PR yet — manual pre-PR review. */
 export function buildManualReviewPrompt(input: ManualReviewPromptInput): string {
   return [
-    `/review-orchestrator`,
+    `/review-walkthrough`,
     '',
     ...reviewTaskIdLines(input.reviewTaskId),
     '',
@@ -80,7 +81,26 @@ export function buildManualReviewPrompt(input: ManualReviewPromptInput): string 
     `Head: ${input.prHeadSha}`,
     `Review requested: ${input.requestedAt}`,
     '',
-    'This is a manual pre-PR review. Use the review-orchestrator skill to produce a walkthrough and inline draft comments via the `octomux review` CLI. Do NOT post to GitHub directly.',
+    'This is a manual pre-PR review. Use the review-walkthrough skill to produce the structured' +
+      ' walkthrough via the `octomux review` CLI. Do NOT draft comments or post to GitHub.',
+  ].join('\n');
+}
+
+export interface DeepReviewPromptInput {
+  /** Id of THIS review task — the id every `octomux review` command must target. */
+  reviewTaskId: string;
+}
+
+/** Prompt for the auto-chained deep-review agent (phase 2). */
+export function buildDeepReviewPrompt(input: DeepReviewPromptInput): string {
+  return [
+    `/review-deep`,
+    '',
+    ...reviewTaskIdLines(input.reviewTaskId),
+    '',
+    'The walkthrough is already ingested. Run `octomux review start` to load it ' +
+      '(plus playbook, learnings, previous review), then run the deep-review engine, ' +
+      'draft inline comments, and complete. Do NOT post to GitHub directly.',
   ].join('\n');
 }
 

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildPrReviewPrompt, buildManualReviewPrompt, insertReviewTask } from './review-tasks.js';
+import {
+  buildPrReviewPrompt,
+  buildManualReviewPrompt,
+  buildDeepReviewPrompt,
+  insertReviewTask,
+} from './review-tasks.js';
 import { createTestDb } from './test-helpers.js';
 
 describe('buildPrReviewPrompt', () => {
@@ -13,7 +18,7 @@ describe('buildPrReviewPrompt', () => {
       headRefOid: 'deadbeef',
       requestedAt: '2026-01-01T00:00:00Z',
     });
-    expect(prompt.startsWith('/review-orchestrator')).toBe(true);
+    expect(prompt.startsWith('/review-walkthrough')).toBe(true);
     expect(prompt).toContain('Review task id: REVIEW123abc');
     expect(prompt).toMatch(/--task REVIEW123abc/);
     expect(prompt).toContain('PR: Fix the thing (#42)');
@@ -33,7 +38,7 @@ describe('buildManualReviewPrompt', () => {
       prHeadSha: 'headsha',
       requestedAt: '2026-01-01T00:00:00Z',
     });
-    expect(prompt.startsWith('/review-orchestrator')).toBe(true);
+    expect(prompt.startsWith('/review-walkthrough')).toBe(true);
     // The review task's own id is what the CLI must be invoked with.
     expect(prompt).toContain('Review task id: REVIEW123abc');
     expect(prompt).toMatch(/--task REVIEW123abc/);
@@ -42,6 +47,27 @@ describe('buildManualReviewPrompt', () => {
     // ...but must NOT be presented as the --task value (the original bug).
     expect(prompt).not.toMatch(/--task SOURCE999xyz/);
   });
+});
+
+it('pr + manual prompts invoke the walkthrough skill', () => {
+  const pr = buildPrReviewPrompt({
+    reviewTaskId: 'rt1',
+    title: 'T',
+    number: 1,
+    url: 'u',
+    author: 'a',
+    headRefOid: 'h',
+    requestedAt: 'now',
+  });
+  expect(pr).toContain('/review-walkthrough');
+  expect(pr).not.toContain('/review-orchestrator');
+});
+
+it('buildDeepReviewPrompt invokes the deep skill and pins the task id', () => {
+  const p = buildDeepReviewPrompt({ reviewTaskId: 'rt1' });
+  expect(p).toContain('/review-deep');
+  expect(p).toContain('Review task id: rt1');
+  expect(p).toContain('--task rt1');
 });
 
 describe('insertReviewTask', () => {
