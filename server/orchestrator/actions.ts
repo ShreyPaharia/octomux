@@ -1,7 +1,7 @@
 /**
  * server/orchestrator/actions.ts
  *
- * Orchestrator write-action dispatcher (SHR-142).
+ * Orchestrator write-action dispatcher (SHR-142, SHR-145).
  *
  * The conductor takes write actions via typed MCP tools (`mcp__octomux__*`)
  * instead of gated `octomux` Bash commands. Each MCP write tool RPCs to the main
@@ -19,49 +19,27 @@
  * Validation is done via the canonical schemas in command-schemas.ts — the same
  * schemas that power the MCP tool inputSchemas and are tested by the CLI drift
  * test. Any field mismatch is caught at parse time, not at runtime worker launch.
+ *
+ * SHR-145: dispatch is now generated from COMMANDS (command-registry.ts); no
+ * per-action switch. Adding a new action only requires a new CommandDef entry.
  */
 
 import { childLogger } from '../logger.js';
 import { pushToConversation } from './stream.js';
-import {
-  runCreateTask,
-  runSendMessage,
-  runAddAgent,
-  runSetStatus,
-  runCloseTask,
-  runResumeTask,
-  runDeleteTask,
-} from './exec.js';
-import {
-  createTaskInputSchema,
-  sendMessageInputSchema,
-  setStatusInputSchema,
-  addAgentInputSchema,
-  closeTaskInputSchema,
-  deleteTaskInputSchema,
-} from './command-schemas.js';
-import type { WorkflowStatus } from '../types.js';
+import { COMMANDS, getCommandByAction } from './command-registry.js';
+import type { OrchestratorAction } from './command-registry.js';
+
+// Re-export OrchestratorAction so existing importers (gate.ts, api.ts, etc.)
+// keep working without change. The canonical definition lives in command-registry.ts
+// to avoid a circular dependency between this module and the registry.
+export type { OrchestratorAction };
 
 const logger = childLogger('orchestrator/actions');
 
-export type OrchestratorAction =
-  | 'create-task'
-  | 'send-message'
-  | 'add-agent'
-  | 'set-status'
-  | 'close-task'
-  | 'resume-task'
-  | 'delete-task';
-
-export const ORCHESTRATOR_ACTIONS: ReadonlySet<string> = new Set<OrchestratorAction>([
-  'create-task',
-  'send-message',
-  'add-agent',
-  'set-status',
-  'close-task',
-  'resume-task',
-  'delete-task',
-]);
+/** The full set of supported OrchestratorActions, derived from the registry. */
+export const ORCHESTRATOR_ACTIONS: ReadonlySet<string> = new Set<OrchestratorAction>(
+  COMMANDS.map((c) => c.action),
+);
 
 /** Push a concise activity update (receipt) for a completed action. */
 function pushActivity(conversationId: string, text: string): void {
@@ -77,8 +55,13 @@ function pushActivity(conversationId: string, text: string): void {
  * supervisor relays its phase/error events (when absent, the action still runs
  * but isn't tracked — e.g. a non-conductor caller).
  *
- * Validation uses the canonical schemas from command-schemas.ts. Unknown extra
- * fields are stripped (zod .strip() default). Missing required fields throw.
+ * Validation uses the canonical schemas from command-schemas.ts (via the
+ * command-registry). Unknown extra fields are stripped (zod .strip() default).
+ * Missing required fields throw.
+ *
+ * Activity push semantics (preserved from pre-SHR-145):
+ *  - create-task: always pushes, even when conversationId is undefined (uses "" fallback).
+ *  - all other actions: push only when conversationId is set.
  */
 export async function runOrchestratorAction(
   conversationId: string | undefined,
@@ -87,84 +70,40 @@ export async function runOrchestratorAction(
 ): Promise<unknown> {
   logger.info({ conversation_id: conversationId ?? null, action }, 'orchestrator action: run');
 
-  switch (action) {
-    case 'create-task': {
-      // The conductor's MCP create_task tool sends the goal-oriented brief as
-      // `description`. That brief IS the worker's prompt, so default
-      // `initial_prompt` to the description when no explicit prompt is given —
-      // otherwise the worker launches with NO prompt and does nothing. (runCreateTask
-      // uses initial_prompt for the worker and description for display.)
-      //
-      // Apply the description→initial_prompt default BEFORE schema.parse so the
-      // validator sees the resolved value.
-      const withDefault = {
-        ...input,
-        initial_prompt:
-          input['initial_prompt'] ??
-          (typeof input['description'] === 'string' ? input['description'] : undefined),
-      };
-      // conversation_id is server-injected (not from the tool input).
-      const parsed = createTaskInputSchema.parse(withDefault);
-      const result = await runCreateTask({
-        ...parsed,
-        conversation_id: conversationId,
-      });
-      pushActivity(conversationId ?? '', `created task \`${result.task_id}\` — ${result.title}`);
-      return result;
-    }
+  const cmd = getCommandByAction(action);
+  if (!cmd) throw new Error(`unknown orchestrator action: ${action as string}`);
 
-    case 'send-message': {
-      const parsed = sendMessageInputSchema.parse(input);
-      await runSendMessage(parsed.task_id, parsed.message);
-      if (conversationId)
-        pushActivity(conversationId, `sent a message to task \`${parsed.task_id}\``);
-      return { task_id: parsed.task_id };
-    }
+  // ── create-task: apply description→initial_prompt default before parse ──────
+  // The conductor's MCP create_task tool sends the goal-oriented brief as
+  // `description`. That brief IS the worker's prompt, so default
+  // `initial_prompt` to the description when no explicit prompt is given —
+  // otherwise the worker launches with NO prompt and does nothing. (runCreateTask
+  // uses initial_prompt for the worker and description for display.)
+  //
+  // Apply BEFORE schema.parse so the validator sees the resolved value.
+  const resolvedInput =
+    action === 'create-task'
+      ? {
+          ...input,
+          initial_prompt:
+            input['initial_prompt'] ??
+            (typeof input['description'] === 'string' ? input['description'] : undefined),
+        }
+      : input;
 
-    case 'add-agent': {
-      const parsed = addAgentInputSchema.parse(input);
-      const { task_id, ...opts } = parsed;
-      const result = await runAddAgent(task_id, opts);
-      if (conversationId)
-        pushActivity(conversationId, `added agent \`${result.agent_id}\` to task \`${task_id}\``);
-      return result;
-    }
+  const parsed = cmd.input.parse(resolvedInput);
 
-    case 'set-status': {
-      const parsed = setStatusInputSchema.parse(input);
-      await runSetStatus(parsed.task_id, parsed.status as WorkflowStatus);
-      if (conversationId)
-        pushActivity(
-          conversationId,
-          `set task \`${parsed.task_id}\` status to \`${parsed.status}\``,
-        );
-      return { task_id: parsed.task_id, status: parsed.status };
-    }
+  const { result, activity } = await cmd.handler(parsed, { conversationId });
 
-    case 'close-task': {
-      const parsed = closeTaskInputSchema.parse(input);
-      await runCloseTask(parsed.task_id);
-      if (conversationId) pushActivity(conversationId, `closed task \`${parsed.task_id}\``);
-      return { task_id: parsed.task_id };
+  if (activity) {
+    // create-task: always push (even with no conversationId — use "" fallback).
+    // All other actions: only push when conversationId is defined.
+    if (action === 'create-task') {
+      pushActivity(conversationId ?? '', activity);
+    } else if (conversationId) {
+      pushActivity(conversationId, activity);
     }
-
-    case 'resume-task': {
-      // resume-task is not exposed as an MCP tool (no schema), so accept task_id directly.
-      const taskId = String(input['task_id'] ?? input['taskId'] ?? '');
-      if (!taskId) throw new Error('resume-task requires task_id');
-      await runResumeTask(taskId);
-      if (conversationId) pushActivity(conversationId, `resumed task \`${taskId}\``);
-      return { task_id: taskId };
-    }
-
-    case 'delete-task': {
-      const parsed = deleteTaskInputSchema.parse(input);
-      await runDeleteTask(parsed.task_id);
-      if (conversationId) pushActivity(conversationId, `deleted task \`${parsed.task_id}\``);
-      return { task_id: parsed.task_id };
-    }
-
-    default:
-      throw new Error(`unknown orchestrator action: ${action as string}`);
   }
+
+  return result;
 }
