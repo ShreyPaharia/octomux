@@ -61,6 +61,7 @@ import {
   listConversations,
   listMessages as listOrchestratorMessages,
 } from './orchestrator/store.js';
+import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 
 import {
   buildManualReviewPrompt,
@@ -263,6 +264,7 @@ function augmentDashboardSettings(settings: OctomuxSettings): OctomuxSettings & 
 
 export function setupRoutes(app: Express): void {
   app.use('/api/hooks', hookRoutes);
+  mountArtifactEndpoint(app);
 
   // GET /api/harnesses — list registered harness implementations
   app.get('/api/harnesses', (_req: Request, res: Response) => {
