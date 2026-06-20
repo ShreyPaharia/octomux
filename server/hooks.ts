@@ -7,6 +7,7 @@ import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
 import { isOrchestratorManaged, upsertManagedTask, getManagedTask } from './orchestrator/store.js';
+import { handlePreToolUse } from './orchestrator/gate.js';
 
 const logger = childLogger('hooks');
 
@@ -505,6 +506,75 @@ router.post('/session-start', (req: Request, res: Response) => {
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).json({});
+});
+
+// POST /api/hooks/pre-tool-use
+// Called by the orchestrator's PreToolUse HTTP hook (matcher: "Bash(octomux *)").
+// Classifies the tool call via the policy engine and returns an allow/deny decision
+// in the hookSpecificOutput format Claude Code expects (Phase-0 finding: §Spike 3).
+//
+// Body: { hook_event_name, tool_name, tool_input, ... }
+// Query: ?token=<hook_token>&conversation_id=<conv_id>
+//
+// Response format (Phase-0 verified):
+//   { hookSpecificOutput: { hookEventName: 'PreToolUse',
+//                           permissionDecision: 'allow' | 'deny',
+//                           permissionDecisionReason?: string } }
+router.post('/pre-tool-use', requireHookToken, (req: Request, res: Response) => {
+  const { tool_name, tool_input } = req.body as {
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+  };
+  const conversationId = (req.query.conversation_id ?? '') as string | undefined;
+  // Generate a synthetic tool_use_id when the hook payload doesn't carry one
+  const toolUseId = (req.body.tool_use_id as string | undefined) ?? nanoid(12);
+
+  if (!tool_name) {
+    // No tool_name → can't classify; fail open
+    res.status(200).json({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+      },
+    });
+    return;
+  }
+
+  handlePreToolUse({
+    conversation_id: conversationId || undefined,
+    tool_name,
+    tool_input: tool_input ?? {},
+    tool_use_id: toolUseId,
+  })
+    .then((result) => {
+      if (result.decision === 'allow') {
+        res.status(200).json({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+          },
+        });
+      } else {
+        res.status(200).json({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason:
+              result.reason ?? `queued for approval — card ${result.card_id ?? 'unknown'}`,
+          },
+        });
+      }
+    })
+    .catch((err: unknown) => {
+      logger.error({ err, path: req.path }, 'pre-tool-use: unexpected error — failing open');
+      // Fail open on unexpected errors so the orchestrator isn't permanently blocked
+      res.status(200).json({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+        },
+      });
+    });
 });
 
 export { router as hookRoutes };

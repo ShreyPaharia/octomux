@@ -35,6 +35,7 @@ import { sendTurn } from './runner.js';
 import { tailTranscript } from './transcript.js';
 import type { ChatEvent } from './transcript.js';
 import type { StopFn } from './transcript.js';
+import { executeCard } from './gate.js';
 
 const logger = childLogger('orchestrator/stream');
 
@@ -81,8 +82,11 @@ export interface WsClientTurn {
 export interface WsClientCardDecision {
   type: 'card_decision';
   card_id: string;
-  decision: 'approve' | 'reject';
-  args?: Record<string, unknown>;
+  decision: 'approve' | 'edit' | 'reject' | 'respond';
+  /** For 'edit': the user-adjusted command/args to run instead. */
+  edited_input?: Record<string, unknown>;
+  /** For 'reject'/'respond': optional free-text to inject. */
+  respond_text?: string;
 }
 
 export type WsClientMessage = WsClientTurn | WsClientCardDecision;
@@ -372,8 +376,24 @@ export function handleOrchestratorUpgrade(
           push(JSON.stringify({ type: 'error', error: errMsg }));
         });
       } else if (msg.type === 'card_decision') {
-        // Phase 3: card decision handling — not yet implemented in Phase 1
-        push(JSON.stringify({ type: 'error', error: 'card_decision not yet implemented' }));
+        // Phase 3: gate card decision — Approve / Edit / Reject / Respond
+        if (!msg.card_id) {
+          push(JSON.stringify({ type: 'error', error: 'card_id is required' }));
+          return;
+        }
+        executeCard({
+          card_id: msg.card_id,
+          decision: msg.decision,
+          edited_input: msg.edited_input,
+          respond_text: msg.respond_text,
+        }).catch((err) => {
+          const errMsg = (err as Error).message ?? 'unknown error';
+          logger.warn(
+            { conversation_id: convId, card_id: msg.card_id, err },
+            'stream: card_decision failed',
+          );
+          push(JSON.stringify({ type: 'error', error: errMsg }));
+        });
       } else {
         push(
           JSON.stringify({
