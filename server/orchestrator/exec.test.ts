@@ -52,6 +52,8 @@ import {
   validatePlanJson,
   PLAN_SCHEMA_VERSION,
   PLAN_KIND,
+  WORKFLOW_KIND,
+  buildWorkflowTemplate,
 } from './exec.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -216,6 +218,104 @@ describe('exec.runCreateTask', () => {
       expect(mt).toBeDefined();
       expect(mt!['phase']).toBe('planning');
       expect(mt!['conversation_id']).toBe(convId);
+    });
+  });
+
+  describe('workflow kind — spec→plan→implement', () => {
+    it('injects the workflow template into initial_prompt when kind=workflow', async () => {
+      const result = await runCreateTask({
+        title: 'Workflow auth feature',
+        repo_path: '/tmp/test-repo',
+        initial_prompt: 'Build an auth system.',
+        kind: WORKFLOW_KIND,
+      });
+
+      const row = getDb()
+        .prepare('SELECT initial_prompt FROM tasks WHERE id = ?')
+        .get(result.task_id) as { initial_prompt: string } | undefined;
+
+      const prompt = row?.initial_prompt ?? '';
+      // Must mention all three phases
+      expect(prompt).toMatch(/Phase 1.*SPEC|spec/i);
+      expect(prompt).toMatch(/Phase 2.*PLAN|plan\.json/i);
+      expect(prompt).toMatch(/Phase 3.*IMPLEMENT|implement-done/i);
+      // Must reference the sentinel
+      expect(prompt).toContain('implement-done');
+      // Must include original prompt
+      expect(prompt).toContain('Build an auth system.');
+    });
+
+    it('includes schema_version in the workflow template', async () => {
+      const result = await runCreateTask({
+        title: 'Workflow schema version test',
+        repo_path: '/tmp/test-repo',
+        initial_prompt: 'Plan something.',
+        kind: WORKFLOW_KIND,
+      });
+
+      const row = getDb()
+        .prepare('SELECT initial_prompt FROM tasks WHERE id = ?')
+        .get(result.task_id) as { initial_prompt: string } | undefined;
+
+      expect(row?.initial_prompt).toContain(PLAN_SCHEMA_VERSION);
+    });
+
+    it('sets managed_tasks phase=speccing when kind=workflow and conversation_id provided', async () => {
+      const { createConversation } = await import('./store.js');
+      const convId = createConversation({ title: 'Workflow conv' });
+
+      const result = await runCreateTask({
+        title: 'Workflow feature',
+        repo_path: '/tmp/test-repo',
+        initial_prompt: 'Build the feature end-to-end.',
+        kind: WORKFLOW_KIND,
+        conversation_id: convId,
+      });
+
+      const mt = getDb()
+        .prepare('SELECT * FROM managed_tasks WHERE task_id = ?')
+        .get(result.task_id) as Record<string, unknown> | undefined;
+
+      expect(mt).toBeDefined();
+      expect(mt!['phase']).toBe('speccing');
+      expect(mt!['conversation_id']).toBe(convId);
+    });
+
+    it('kind=plan still sets phase=planning (unchanged)', async () => {
+      const { createConversation } = await import('./store.js');
+      const convId = createConversation({ title: 'Plan conv' });
+
+      const result = await runCreateTask({
+        title: 'Plan feature',
+        repo_path: '/tmp/test-repo',
+        initial_prompt: 'Plan the feature.',
+        kind: PLAN_KIND,
+        conversation_id: convId,
+      });
+
+      const mt = getDb()
+        .prepare('SELECT * FROM managed_tasks WHERE task_id = ?')
+        .get(result.task_id) as Record<string, unknown> | undefined;
+
+      expect(mt!['phase']).toBe('planning');
+    });
+
+    it('default kind (no kind) still sets phase=implementing', async () => {
+      const { createConversation } = await import('./store.js');
+      const convId = createConversation({ title: 'Default conv' });
+
+      const result = await runCreateTask({
+        title: 'Default feature',
+        repo_path: '/tmp/test-repo',
+        initial_prompt: 'Implement the feature.',
+        conversation_id: convId,
+      });
+
+      const mt = getDb()
+        .prepare('SELECT * FROM managed_tasks WHERE task_id = ?')
+        .get(result.task_id) as Record<string, unknown> | undefined;
+
+      expect(mt!['phase']).toBe('implementing');
     });
   });
 });
@@ -515,5 +615,45 @@ describe('exec.runDeleteTask', () => {
   it('throws when task is not found', async () => {
     await expect(runDeleteTask('nonexistent')).rejects.toThrow(/not found/i);
     expect(mockDeleteTask).not.toHaveBeenCalled();
+  });
+});
+
+// ─── buildWorkflowTemplate ────────────────────────────────────────────────────
+
+describe('buildWorkflowTemplate', () => {
+  it('produces a template that references spec.md, plan.json, and implement-done', () => {
+    const tpl = buildWorkflowTemplate('Build user auth.');
+    expect(tpl).toContain('spec.md');
+    expect(tpl).toContain('plan.json');
+    expect(tpl).toContain('implement-done');
+  });
+
+  it('injects the user prompt into the template', () => {
+    const prompt = 'Add real-time notifications to the dashboard.';
+    const tpl = buildWorkflowTemplate(prompt);
+    expect(tpl).toContain(prompt);
+  });
+
+  it('includes the plan schema_version', () => {
+    const tpl = buildWorkflowTemplate('test prompt');
+    expect(tpl).toContain(PLAN_SCHEMA_VERSION);
+  });
+
+  it('instructs the worker to end turn after each phase', () => {
+    const tpl = buildWorkflowTemplate('test prompt');
+    // Must mention ending the turn after spec
+    expect(tpl).toMatch(/end your turn/i);
+  });
+
+  it('instructs the worker to re-read plan.json from disk before implementing', () => {
+    const tpl = buildWorkflowTemplate('test prompt');
+    expect(tpl).toMatch(/re-read.*plan\.json.*from disk/i);
+  });
+
+  it('the plan.json schema section includes all required fields', () => {
+    const tpl = buildWorkflowTemplate('test prompt');
+    expect(tpl).toContain('"schema_version"');
+    expect(tpl).toContain('"summary"');
+    expect(tpl).toContain('"files"');
   });
 });

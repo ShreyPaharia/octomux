@@ -36,6 +36,7 @@ import {
 } from 'react';
 import { MessageThread, type ThreadMessage } from '../components/orchestrator/MessageThread';
 import { PlanCard } from '../components/orchestrator/PlanCard';
+import { SpecCard } from '../components/orchestrator/SpecCard';
 import { ActionCard, type ActionCardDecision } from '../components/orchestrator/ActionCard';
 import { ConversationList } from '../components/orchestrator/ConversationList';
 import {
@@ -63,6 +64,20 @@ interface PlanCardItem {
 }
 
 /**
+ * A read-only spec card for the workflow kind (SHR-143).
+ * Rendered by SpecCard; no ws decision event — local dismiss only.
+ */
+interface SpecCardItem {
+  kind: 'spec-card';
+  id: string;
+  taskId: string;
+  specPath: string;
+  artifactUrl: string;
+  /** true when the user has locally dismissed the card */
+  resolved: boolean;
+}
+
+/**
  * An action card for a gated write-command (Task 3.3 / SHR-132).
  * Rendered by ActionCard; user can Approve/Edit/Reject/Respond.
  */
@@ -78,7 +93,7 @@ interface ActionCardItem {
 }
 
 /** A union of everything that can appear in the thread. */
-type ThreadItem = ThreadMessage | PlanCardItem | ActionCardItem;
+type ThreadItem = ThreadMessage | PlanCardItem | SpecCardItem | ActionCardItem;
 
 const SIDEBAR_WIDTH = 240;
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6]';
@@ -175,11 +190,17 @@ function ChatInput({ onSubmit, disabled = false }: ChatInputProps) {
 interface MixedThreadProps {
   items: ThreadItem[];
   onCardDecision: (d: ActionCardDecision) => void;
+  onSpecCardDismiss: (cardId: string) => void;
   /** True while the orchestrator is processing a turn (shows a working indicator). */
   working?: boolean;
 }
 
-function MixedThread({ items, onCardDecision, working = false }: MixedThreadProps) {
+function MixedThread({
+  items,
+  onCardDecision,
+  onSpecCardDismiss,
+  working = false,
+}: MixedThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -214,6 +235,19 @@ function MixedThread({ items, onCardDecision, working = false }: MixedThreadProp
     if ('role' in item) {
       // It's a ThreadMessage
       msgBatch.push(item as ThreadMessage);
+    } else if (item.kind === 'spec-card' && !item.resolved) {
+      flushBatch();
+      rendered.push(
+        <div key={item.id} className="px-4 py-2">
+          <SpecCard
+            cardId={item.id}
+            taskId={item.taskId}
+            specPath={item.specPath}
+            artifactUrl={item.artifactUrl}
+            onDismiss={() => onSpecCardDismiss(item.id)}
+          />
+        </div>,
+      );
     } else if (item.kind === 'plan-card' && !item.resolved) {
       flushBatch();
       rendered.push(
@@ -381,7 +415,25 @@ export default function OrchestratorPage() {
           });
         } else if (event.type === 'card') {
           // Dispatch the right card variant based on command
-          if (event.command === 'approve-plan') {
+          if (event.command === 'view-spec') {
+            const args = event.args as {
+              task_id?: string;
+              spec_path?: string;
+              artifact_url?: string;
+            };
+            const card: SpecCardItem = {
+              kind: 'spec-card',
+              id: event.id,
+              taskId: args.task_id ?? '',
+              specPath: args.spec_path ?? 'spec.md',
+              artifactUrl: args.artifact_url ?? '',
+              resolved: false,
+            };
+            setItems((prev) => {
+              if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
+              return [...prev, card];
+            });
+          } else if (event.command === 'approve-plan') {
             const args = event.args as {
               task_id?: string;
               plan_path?: string;
@@ -522,7 +574,24 @@ export default function OrchestratorPage() {
     setItems((prev) =>
       prev.map((item) => {
         if (!('kind' in item)) return item;
-        if ((item.kind === 'plan-card' || item.kind === 'action-card') && item.id === card_id) {
+        if (
+          (item.kind === 'plan-card' || item.kind === 'action-card' || item.kind === 'spec-card') &&
+          item.id === card_id
+        ) {
+          return { ...item, resolved: true };
+        }
+        return item;
+      }),
+    );
+  }, []);
+
+  // ─── Spec card dismiss (local only — no ws event) ────────────────────────
+
+  const handleSpecCardDismiss = useCallback((cardId: string) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (!('kind' in item)) return item;
+        if (item.kind === 'spec-card' && item.id === cardId) {
           return { ...item, resolved: true };
         }
         return item;
@@ -582,8 +651,13 @@ export default function OrchestratorPage() {
                 {usage !== null && <LeanessIndicator usage={usage} />}
               </div>
 
-              {/* Mixed thread (messages + plan cards) */}
-              <MixedThread items={items} onCardDecision={handleCardDecision} working={working} />
+              {/* Mixed thread (messages + plan cards + spec cards) */}
+              <MixedThread
+                items={items}
+                onCardDecision={handleCardDecision}
+                onSpecCardDismiss={handleSpecCardDismiss}
+                working={working}
+              />
 
               {/* Input */}
               <ChatInput onSubmit={handleSend} />

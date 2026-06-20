@@ -18,6 +18,9 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import request from 'supertest';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { createApp } from '../app.js';
 import { createTestDb, insertTask, insertAgent } from '../test-helpers.js';
 import {
@@ -721,5 +724,96 @@ describe('gate.executeCard — approve-plan relay', () => {
 
     expect(mockRunSendMessage).not.toHaveBeenCalled();
     expect(getCard(cardId)!.status).toBe('rejected');
+  });
+});
+
+// ─── executeApprovePlan sentinel reset (SHR-143) ──────────────────────────────
+
+describe('gate.executeApprovePlan — stale sentinel reset', () => {
+  let worktreeDir: string;
+
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    // Use a real temp dir so fs operations work
+    worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-gate-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
+    vi.clearAllMocks();
+  });
+
+  it('deletes a stale implement-done sentinel before sending the implement turn', async () => {
+    const db = createTestDb();
+    // Create a task with a real worktree path so the sentinel lookup finds it
+    const task = insertTask(db, {
+      id: 'task-sentinel-01',
+      title: 'Sentinel task',
+      runtime_state: 'running',
+      worktree: worktreeDir,
+    });
+
+    const convId = createConversation({ title: 'Sentinel conv' });
+    upsertManagedTask({
+      conversation_id: convId,
+      task_id: task.id,
+      phase: 'awaiting_approval',
+    });
+
+    // Write a stale sentinel
+    const sentinelDir = path.join(worktreeDir, '.octomux');
+    fs.mkdirSync(sentinelDir, { recursive: true });
+    const sentinelPath = path.join(sentinelDir, 'implement-done');
+    fs.writeFileSync(sentinelPath, '');
+    expect(fs.existsSync(sentinelPath)).toBe(true);
+
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'relay-sentinel',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: task.id, plan_path: 'plan.json' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    // Sentinel must be gone
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    // runSendMessage must have been called with implement directive
+    expect(mockRunSendMessage).toHaveBeenCalledWith(task.id, expect.stringMatching(/implement/i));
+    expect(getCard(cardId)!.status).toBe('executed');
+    expect(getManagedTask(task.id)!.phase).toBe('implementing');
+  });
+
+  it('proceeds normally when no stale sentinel exists', async () => {
+    const db = createTestDb();
+    const task = insertTask(db, {
+      id: 'task-sentinel-02',
+      title: 'No sentinel task',
+      runtime_state: 'running',
+      worktree: worktreeDir,
+    });
+
+    const convId = createConversation({ title: 'No sentinel conv' });
+    upsertManagedTask({
+      conversation_id: convId,
+      task_id: task.id,
+      phase: 'awaiting_approval',
+    });
+
+    // No sentinel written
+
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'relay-no-sentinel',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: task.id, plan_path: 'plan.json' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    // Should still succeed
+    expect(mockRunSendMessage).toHaveBeenCalledWith(task.id, expect.stringMatching(/implement/i));
+    expect(getCard(cardId)!.status).toBe('executed');
   });
 });

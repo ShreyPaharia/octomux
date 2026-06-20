@@ -275,8 +275,13 @@ function registerWriteTools(server: McpServer): void {
         'Create an octomux worker task and start it. Pass a GOAL-ORIENTED brief in ' +
         'description (Goal / Why / verifiable Acceptance criteria / Hard constraints / ' +
         'Non-goals / Pointers) — never a step-by-step plan; the worker explores the code ' +
-        'and owns the implementation. Use kind="plan" for ambiguous/larger work (the ' +
-        'worker plans first for your review). Returns the task id (a pointer).',
+        'and owns the implementation. ' +
+        'kind="workflow" → full spec→plan→implement with review gates at spec (read-only ' +
+        'view card) and plan (approval card); use for non-trivial/larger work. ' +
+        'kind="plan" → worker plans first for your review, then implements; use for ' +
+        'plan-only or moderately ambiguous work. ' +
+        'Omit kind for small/clear work (implements directly). ' +
+        'Returns the task id (a pointer).',
       inputSchema: {
         title: z.string().describe('Short task title (< 60 chars)'),
         description: z
@@ -285,7 +290,13 @@ function registerWriteTools(server: McpServer): void {
         repo_path: z.string().describe('Absolute path to the git repository'),
         base_branch: z.string().optional().describe('Base branch (default: main)'),
         branch: z.string().optional().describe('Branch name (auto-generated if omitted)'),
-        kind: z.enum(['plan', 'implement']).optional().describe('"plan" → worker plans first'),
+        kind: z
+          .enum(['plan', 'implement', 'workflow'])
+          .optional()
+          .describe(
+            '"workflow" → spec→plan→implement with spec view card + plan approval gate; ' +
+              '"plan" → plan first for review then implement; omit for small/clear work',
+          ),
         model: z.string().optional().describe('Per-task model override (e.g. claude-sonnet-4-6)'),
       },
     },

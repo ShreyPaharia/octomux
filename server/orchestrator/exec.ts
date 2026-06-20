@@ -51,6 +51,9 @@ export const PLAN_SCHEMA_VERSION = '1.0.0';
 /** The `kind` value that triggers planning-template injection. */
 export const PLAN_KIND = 'plan' as const;
 
+/** The `kind` value that triggers the full spec→plan→implement workflow. */
+export const WORKFLOW_KIND = 'workflow' as const;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface CreateTaskInput {
@@ -71,8 +74,9 @@ export interface CreateTaskInput {
   /** 'new' | 'existing' | 'none' | 'scratch'. Defaults to 'new'. */
   run_mode?: RunMode;
   /** When 'plan': injects the planning template into initial_prompt and registers
-   *  the task in managed_tasks with phase='planning'. */
-  kind?: typeof PLAN_KIND | string;
+   *  the task in managed_tasks with phase='planning'.
+   *  When 'workflow': injects the workflow template and registers with phase='speccing'. */
+  kind?: typeof PLAN_KIND | typeof WORKFLOW_KIND | string;
   /** Optional model override (e.g. 'claude-sonnet-4-6'). */
   model?: string | null;
   /**
@@ -257,6 +261,95 @@ will send you an "implement" message. At that point:
 `;
 }
 
+/**
+ * Build the workflow template for a kind:'workflow' task that runs spec→plan→implement
+ * in a SINGLE worker session, with review gates at each phase boundary.
+ *
+ * The worker contract:
+ *  1) Write spec.md (goal / why / acceptance criteria / constraints / non-goals)
+ *     to the repo root and END THE TURN. Do not start planning yet — you'll be prompted.
+ *  2) When prompted, produce the implementation plan and write it to plan.json
+ *     (same schema as buildPlanningTemplate). Then END THE TURN.
+ *  3) When the plan is approved you'll be told to implement: re-read plan.json
+ *     from disk, implement it, then create .octomux/ and write an empty
+ *     .octomux/implement-done file, and END THE TURN.
+ *
+ * Pointers discipline: orchestrator holds only task_id pointer — never spec/plan body.
+ */
+export function buildWorkflowTemplate(userPrompt: string): string {
+  return `## Workflow Session Instructions
+
+You are a **workflow session** for an octomux orchestrator. You will run through
+three phases in sequence — **spec**, **plan**, and **implement** — in this single
+session. The orchestrator will prompt you at each phase boundary.
+
+### Your task
+
+${userPrompt}
+
+---
+
+## Phase 1: SPEC
+
+Write a concise specification to \`spec.md\` at the repo root covering:
+
+- **Goal** — 1–2 sentences: what capability should exist when done.
+- **Why / Context** — intent and how it fits, so implementers make sound tradeoffs.
+- **Acceptance criteria** — verifiable: passing tests / build+lint green / concrete examples.
+- **Constraints** — non-negotiables (don't break X, no new deps, follow CLAUDE.md).
+- **Non-goals** — explicitly what NOT to touch (prevents scope-creep).
+
+After writing \`spec.md\`, **end your turn immediately**. Do not start planning yet —
+the orchestrator will share the spec for review and then prompt you to plan.
+
+---
+
+## Phase 2: PLAN (you will be prompted)
+
+When the orchestrator prompts you to plan, write \`plan.json\` to the repo root.
+It **must** conform to the following structure (schema_version \`${PLAN_SCHEMA_VERSION}\`):
+
+\`\`\`json
+{
+  "schema_version": "${PLAN_SCHEMA_VERSION}",
+  "summary": "<1–3 sentence summary of what you will build>",
+  "files": [
+    {
+      "path": "<relative file path from repo root>",
+      "action": "<create|modify|delete|rename>",
+      "steps": ["<concrete step 1>", "<concrete step 2>"]
+    }
+  ],
+  "open_questions": ["<question for the user if anything is unclear>"],
+  "detail": "<optional: full prose plan body>"
+}
+\`\`\`
+
+Rules:
+- \`schema_version\` must be exactly \`"${PLAN_SCHEMA_VERSION}"\`.
+- \`summary\` must be a non-empty string.
+- \`files\` must be an array (may be empty if no file changes are needed).
+- Each \`files\` entry must have \`path\` (string) and \`action\` (one of: create, modify, delete, rename).
+- \`open_questions\` is optional; include it when clarification is needed before implementation.
+
+After writing \`plan.json\`, **end your turn immediately**. The orchestrator will
+present it for review. Do not start implementing yet.
+
+---
+
+## Phase 3: IMPLEMENT (you will be prompted after plan approval)
+
+When the orchestrator tells you to implement:
+
+1. **Re-read \`plan.json\` from disk** — do not rely on your memory of what you wrote.
+   The user may have edited it, and those edits are the authoritative source of truth.
+2. Implement exactly what the re-read \`plan.json\` specifies.
+3. When implementation is complete, create the directory \`.octomux/\` (if it does not
+   exist) and write an **empty file** \`.octomux/implement-done\` as a sentinel.
+4. **End your turn.** The orchestrator detects the sentinel automatically.
+`;
+}
+
 // ─── runCreateTask ────────────────────────────────────────────────────────────
 
 /**
@@ -277,6 +370,7 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
   const id = nanoid(12);
   const runMode: RunMode = input.run_mode ?? 'new';
   const isPlanning = input.kind === PLAN_KIND;
+  const isWorkflow = input.kind === WORKFLOW_KIND;
 
   logger.info(
     {
@@ -297,10 +391,12 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
     input.title?.trim() || initialPromptTrimmed.split('\n')[0]?.slice(0, 80) || 'Untitled task';
   const resolvedDescription = input.description?.trim() || initialPromptTrimmed || '';
 
-  // For plan kind, inject the planning template.
-  const resolvedPrompt = isPlanning
-    ? buildPlanningTemplate(initialPromptTrimmed)
-    : (input.initial_prompt ?? null);
+  // For plan kind, inject the planning template; for workflow, inject the workflow template.
+  const resolvedPrompt = isWorkflow
+    ? buildWorkflowTemplate(initialPromptTrimmed)
+    : isPlanning
+      ? buildPlanningTemplate(initialPromptTrimmed)
+      : (input.initial_prompt ?? null);
 
   // Phase 2a: always create a worktree row. For 'new' mode, path starts empty
   // (startTask fills it in during setup). For 'existing' mode, use worktree_path.
@@ -343,11 +439,16 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
 
   // Register in managed_tasks so the supervisor can route events to the
   // owning conversation (spec §6, §9). Only when a conversation is provided.
+  // Phase column:
+  //   kind:'workflow'  → 'speccing'    (spec → plan → implement in one session)
+  //   kind:'plan'      → 'planning'    (plan → await approval → implement)
+  //   default          → 'implementing' (implements directly)
   if (input.conversation_id) {
+    const initialPhase = isWorkflow ? 'speccing' : isPlanning ? 'planning' : 'implementing';
     upsertManagedTask({
       conversation_id: input.conversation_id,
       task_id: id,
-      phase: isPlanning ? 'planning' : 'implementing',
+      phase: initialPhase,
     });
   }
 
@@ -358,7 +459,7 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
       title: resolvedTitle,
       kind: input.kind ?? 'default',
       conversation_id: input.conversation_id ?? null,
-      prompt_injected: isPlanning,
+      prompt_injected: isPlanning || isWorkflow,
     },
     'runCreateTask: task created, starting',
   );

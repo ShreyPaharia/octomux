@@ -33,12 +33,16 @@
  * contents — only command args that are pointers (task ids, paths).
  */
 
+import fs from 'fs';
+import path from 'path';
 import { childLogger } from '../logger.js';
 import { getDb } from '../db.js';
 import { classify } from './policy.js';
 import { createCard, getCard, resolveCard, upsertManagedTask } from './store.js';
 import type { ActionCard } from './store.js';
 import { pushToConversation } from './stream.js';
+import { SELECT_TASK_SQL } from '../task-select.js';
+import type { Task } from '../types.js';
 import {
   runCreateTask,
   runSendMessage,
@@ -347,10 +351,34 @@ async function executeApprovePlan(card: ActionCard): Promise<void> {
     'gate.executeApprovePlan: approving plan — sending implement turn to worker',
   );
 
+  // Delete any stale implement-done sentinel so the upcoming implement turn
+  // starts fresh (the hook detector must not see a leftover from a prior run).
+  try {
+    const taskRow = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as
+      | Task
+      | undefined;
+    const worktree = taskRow?.worktree ?? null;
+    if (worktree) {
+      const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
+      fs.rmSync(sentinelPath, { force: true });
+      logger.debug(
+        { card_id: card.id, task_id: taskId, sentinel_path: sentinelPath },
+        'gate.executeApprovePlan: cleared stale implement-done sentinel',
+      );
+    }
+  } catch (cleanupErr) {
+    // Non-fatal — if sentinel cleanup fails, the hook detector handles it gracefully
+    // (the implement phase will only fire when a NEW sentinel is written).
+    logger.warn(
+      { card_id: card.id, task_id: taskId, err: cleanupErr },
+      'gate.executeApprovePlan: sentinel cleanup failed (non-fatal)',
+    );
+  }
+
   try {
     await runSendMessage(
       taskId,
-      'The plan has been approved. Re-read plan.json from disk (it may have been edited) and implement exactly what it specifies. Signal phase complete when done.',
+      'The plan has been approved. Re-read plan.json from disk (it may have been edited) and implement exactly what it specifies. When done, create .octomux/ and write an empty .octomux/implement-done file, then end your turn.',
     );
   } catch (err) {
     const errMsg = (err as Error).message ?? String(err);

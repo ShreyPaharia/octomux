@@ -432,12 +432,14 @@ router.post(
       );
     }
 
-    // Orchestrator plan-complete detection (spec §6.5). A managed task in the
-    // 'planning' phase signals plan-complete by writing plan.json and ending its
-    // turn — we detect it here via the worker's already-authenticated Stop hook,
-    // so the worker needs no extra env/command. Fires the phase_complete(plan)
-    // event the supervisor relays into an approval card.
-    maybeSignalPlanComplete(agent.task_id);
+    // Orchestrator phase-complete detection (spec §6.5). A managed task signals
+    // phase-complete by writing a marker file and ending its turn — we detect it
+    // here via the worker's already-authenticated Stop hook, so the worker needs
+    // no extra env/command. Dispatches on managed_tasks.phase:
+    //   speccing    + spec.md        → spec phase complete
+    //   planning    + plan.json      → plan phase complete (awaiting_approval)
+    //   implementing + .octomux/implement-done → implement done
+    maybeSignalPhaseComplete(agent.task_id);
 
     // C3: fire-and-forget Haiku summarizer (only when builtin is enabled + API key set)
     void summarizeAgentProgress(agent.task_id, agent.id);
@@ -448,15 +450,22 @@ router.post(
 );
 
 /**
- * If `taskId` is an orchestrator-managed task in the 'planning' phase and its
- * worktree now contains plan.json, advance the phase and emit
- * `task:phase_complete{phase:'plan'}`. Idempotent: advancing the phase to
- * 'awaiting_approval' before broadcasting prevents a rapid second Stop from
- * firing a duplicate event (and therefore a duplicate approval card).
+ * Dispatch on managed_tasks.phase to detect phase completion from marker files:
+ *
+ *   phase 'speccing'    + spec.md present          → advance to 'planning'   → broadcast phase:'spec'
+ *   phase 'planning'    + plan.json present         → advance to 'awaiting_approval' → broadcast phase:'plan'
+ *   phase 'implementing'+ .octomux/implement-done   → advance to 'done' → delete sentinel → broadcast phase:'implement'
+ *
+ * Idempotent: phase is advanced synchronously (before broadcast) so a rapid
+ * second Stop from the same turn cannot double-fire.
+ *
+ * NOTE: managed_tasks.phase COLUMN values ('speccing'/'planning'/...) are
+ * DISTINCT from the broadcast payload.phase LABEL ('spec'/'plan'/'implement').
+ * The supervisor switches on the LABEL.
  */
-function maybeSignalPlanComplete(taskId: string): void {
+function maybeSignalPhaseComplete(taskId: string): void {
   const managed = getManagedTask(taskId);
-  if (!managed || managed.phase !== 'planning') return;
+  if (!managed) return;
 
   const row = getDb()
     .prepare(
@@ -468,25 +477,77 @@ function maybeSignalPlanComplete(taskId: string): void {
   const worktree = row?.worktree;
   if (!worktree) return;
 
-  const planPath = path.join(worktree, 'plan.json');
-  if (!fs.existsSync(planPath)) return;
+  if (managed.phase === 'speccing') {
+    const specPath = path.join(worktree, 'spec.md');
+    if (!fs.existsSync(specPath)) return;
 
-  // Advance synchronously so a concurrent/rapid second Stop won't re-fire.
-  upsertManagedTask({
-    conversation_id: managed.conversation_id,
-    task_id: taskId,
-    phase: 'awaiting_approval',
-  });
+    // Advance synchronously so a rapid second Stop won't re-fire.
+    upsertManagedTask({
+      conversation_id: managed.conversation_id,
+      task_id: taskId,
+      phase: 'planning',
+    });
 
-  logger.info(
-    { task_id: taskId, operation: 'plan_complete_detected' },
-    'Stop hook: plan.json present for managed planning task — emitting phase_complete(plan)',
-  );
+    logger.info(
+      { task_id: taskId, operation: 'spec_complete_detected' },
+      'Stop hook: spec.md present for managed speccing task — emitting phase_complete(spec)',
+    );
 
-  broadcast({
-    type: 'task:phase_complete',
-    payload: { taskId, phase: 'plan', artifacts: ['plan.json'] },
-  });
+    broadcast({
+      type: 'task:phase_complete',
+      payload: { taskId, phase: 'spec', artifacts: ['spec.md'] },
+    });
+    return;
+  }
+
+  if (managed.phase === 'planning') {
+    const planPath = path.join(worktree, 'plan.json');
+    if (!fs.existsSync(planPath)) return;
+
+    // Advance synchronously so a concurrent/rapid second Stop won't re-fire.
+    upsertManagedTask({
+      conversation_id: managed.conversation_id,
+      task_id: taskId,
+      phase: 'awaiting_approval',
+    });
+
+    logger.info(
+      { task_id: taskId, operation: 'plan_complete_detected' },
+      'Stop hook: plan.json present for managed planning task — emitting phase_complete(plan)',
+    );
+
+    broadcast({
+      type: 'task:phase_complete',
+      payload: { taskId, phase: 'plan', artifacts: ['plan.json'] },
+    });
+    return;
+  }
+
+  if (managed.phase === 'implementing') {
+    const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
+    if (!fs.existsSync(sentinelPath)) return;
+
+    // Advance synchronously so a rapid second Stop won't re-fire.
+    upsertManagedTask({
+      conversation_id: managed.conversation_id,
+      task_id: taskId,
+      phase: 'done',
+    });
+
+    // Delete the sentinel so it never appears in the diff.
+    fs.rmSync(sentinelPath, { force: true });
+
+    logger.info(
+      { task_id: taskId, operation: 'implement_complete_detected' },
+      'Stop hook: implement-done sentinel present for managed implementing task — emitting phase_complete(implement)',
+    );
+
+    broadcast({
+      type: 'task:phase_complete',
+      payload: { taskId, phase: 'implement' },
+    });
+    return;
+  }
 }
 
 // POST /api/hooks/phase-complete

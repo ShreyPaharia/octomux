@@ -45,6 +45,7 @@ import {
   createCard,
 } from './store.js';
 import { pushToConversation } from './stream.js';
+import { runSendMessage } from './exec.js';
 
 const logger = childLogger('orchestrator/supervisor');
 
@@ -241,6 +242,70 @@ export function createSupervisor(): Supervisor {
       const artifacts = Array.isArray(payload.artifacts)
         ? (payload.artifacts as unknown[]).filter((a) => typeof a === 'string')
         : [];
+
+      if (phase === 'spec') {
+        // ── Spec phase complete: push a read-only spec card + auto-advance ──
+        // The spec card is read-only (no DB row, no decision). After pushing
+        // the card we immediately send the worker a message to produce plan.json
+        // so the workflow auto-advances to the planning phase.
+        const specPath = (artifacts[0] as string | undefined) ?? 'spec.md';
+        const artifactUrl = `/api/orchestrator/artifact?task=${encodeURIComponent(event.task_id)}&path=${encodeURIComponent(specPath)}`;
+
+        // Push a read-only spec card event (no action_cards row — it's informational only).
+        const specCardId = nanoid(12);
+        const specCardEvent = {
+          type: 'card' as const,
+          id: specCardId,
+          command: 'view-spec',
+          args: {
+            task_id: event.task_id,
+            spec_path: specPath,
+            artifact_url: artifactUrl,
+          },
+        };
+        pushToConversation(convId, JSON.stringify(specCardEvent));
+
+        // Concise assistant note so the ws history shows what happened.
+        pushToConversation(
+          convId,
+          JSON.stringify({
+            type: 'message',
+            role: 'assistant',
+            text: `📋 spec ready — open to review; planning is underway.`,
+          }),
+        );
+
+        // Update last_event_seq before the async send so replay doesn't re-fire.
+        upsertManagedTask({
+          conversation_id: convId,
+          task_id: event.task_id,
+          last_event_seq: event.seq,
+        });
+
+        logger.info(
+          {
+            conversation_id: convId,
+            task_id: event.task_id,
+            spec_path: specPath,
+            operation: 'relay_spec_complete',
+          },
+          'supervisor: spec phase complete — spec card pushed, sending plan prompt to worker',
+        );
+
+        // Auto-advance: tell the worker to start planning.
+        void runSendMessage(
+          event.task_id,
+          'Spec written and shared for review. Now produce the implementation plan as plan.json per the template, then end your turn.',
+        ).catch((err) => {
+          logger.warn(
+            { conversation_id: convId, task_id: event.task_id, err },
+            'supervisor: spec phase — runSendMessage failed (worker may not be alive yet)',
+          );
+        });
+
+        emitter.emit('inject', injection);
+        return;
+      }
 
       if (phase === 'plan') {
         // ── Plan phase complete: gate the artifact for user review ──────────

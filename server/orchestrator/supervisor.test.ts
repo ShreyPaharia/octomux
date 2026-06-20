@@ -22,6 +22,9 @@ import {
   getGlobalMonitorConversation,
 } from './store.js';
 
+// We need to capture runSendMessage calls from supervisor's spec branch
+const mockRunSendMessage = vi.fn().mockResolvedValue(undefined);
+
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 // Mock stream.ts pushToConversation so we can capture injected notes without ws
@@ -39,6 +42,22 @@ vi.mock('./runner.js', () => ({
   sendTurn: vi.fn().mockResolvedValue(undefined),
   stopConversation: vi.fn().mockResolvedValue(undefined),
   conversationTmuxTarget: vi.fn().mockReturnValue('mock-session:1'),
+}));
+
+// Mock exec.js so the supervisor's runSendMessage doesn't need real tmux
+vi.mock('./exec.js', () => ({
+  runSendMessage: vi.fn((...args: unknown[]) => mockRunSendMessage(...args)),
+  runCreateTask: vi.fn().mockResolvedValue({ task_id: 'mock', title: 'mock' }),
+  runAddAgent: vi.fn().mockResolvedValue({ agent_id: 'mock', window_index: 1 }),
+  runSetStatus: vi.fn().mockResolvedValue(undefined),
+  runCloseTask: vi.fn().mockResolvedValue(undefined),
+  runResumeTask: vi.fn().mockResolvedValue(undefined),
+  runDeleteTask: vi.fn().mockResolvedValue(undefined),
+  validatePlanJson: vi.fn().mockReturnValue({ valid: true }),
+  PLAN_SCHEMA_VERSION: '1.0.0',
+  PLAN_KIND: 'plan',
+  WORKFLOW_KIND: 'workflow',
+  buildWorkflowTemplate: vi.fn().mockReturnValue('workflow template'),
 }));
 
 // ─── Imports (after mocks) ─────────────────────────────────────────────────
@@ -510,5 +529,183 @@ describe('supervisor', () => {
       const monitor = getGlobalMonitorConversation();
       expect(monitor).toBeNull();
     });
+  });
+});
+
+// ─── Supervisor spec branch (SHR-143) ─────────────────────────────────────────
+
+describe('supervisor spec branch — phase:spec relay', () => {
+  let supervisor: ReturnType<typeof createSupervisor>;
+
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    supervisor = createSupervisor();
+  });
+
+  afterEach(() => {
+    supervisor.stop();
+    vi.clearAllMocks();
+  });
+
+  it('phase=spec → pushes a view-spec card event (read-only, no action_cards row)', async () => {
+    const convId = createConversation({ title: 'Spec conv' });
+    const task = insertTask(getDb(), { id: 'task-spec-sup-01', worktree: null });
+    upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'speccing' });
+
+    const seq = appendEvent({
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    await supervisor.processEvent({
+      seq,
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    // The supervisor must have pushed at least one message to the conversation
+    expect(mockPush).toHaveBeenCalled();
+
+    // Find the spec card event
+    const pushed = mockPush.mock.calls.map((c) => {
+      try {
+        return JSON.parse(String(c[0])) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    });
+    const cardEvent = pushed.find((p) => p && p['type'] === 'card');
+    expect(cardEvent).toBeDefined();
+    expect(cardEvent!['command']).toBe('view-spec');
+    expect((cardEvent!['args'] as Record<string, unknown>)['spec_path']).toBe('spec.md');
+    expect((cardEvent!['args'] as Record<string, unknown>)['artifact_url']).toContain('spec.md');
+  });
+
+  it('phase=spec → no action_cards row created (read-only card)', async () => {
+    const convId = createConversation({ title: 'Spec conv 2' });
+    const task = insertTask(getDb(), { id: 'task-spec-sup-02', worktree: null });
+    upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'speccing' });
+
+    const seq = appendEvent({
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    await supervisor.processEvent({
+      seq,
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    // No action_cards row should be created (read-only)
+    const cards = getDb()
+      .prepare(`SELECT * FROM action_cards WHERE conversation_id = ?`)
+      .all(convId) as unknown[];
+    expect(cards).toHaveLength(0);
+  });
+
+  it('phase=spec → calls runSendMessage to auto-advance worker to planning', async () => {
+    const convId = createConversation({ title: 'Spec auto-advance conv' });
+    const task = insertTask(getDb(), { id: 'task-spec-sup-03', worktree: null });
+    upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'speccing' });
+
+    const seq = appendEvent({
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    await supervisor.processEvent({
+      seq,
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    // Wait for the fire-and-forget runSendMessage to resolve
+    await vi.runAllTimersAsync().catch(() => {});
+    // Give any pending microtasks a chance to run
+    await Promise.resolve();
+
+    expect(mockRunSendMessage).toHaveBeenCalledWith(
+      task.id,
+      expect.stringMatching(/spec.*review.*plan\.json/i),
+    );
+  });
+
+  it('phase=spec → also pushes a concise assistant note', async () => {
+    const convId = createConversation({ title: 'Spec note conv' });
+    const task = insertTask(getDb(), { id: 'task-spec-sup-04', worktree: null });
+    upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'speccing' });
+
+    const seq = appendEvent({
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    await supervisor.processEvent({
+      seq,
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'spec', artifacts: ['spec.md'] }),
+    });
+
+    const messages = mockPush.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0])) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((p) => p && p['type'] === 'message');
+    expect(messages.length).toBeGreaterThan(0);
+    const note = messages.find(
+      (m) => typeof m!['text'] === 'string' && (m!['text'] as string).includes('spec'),
+    );
+    expect(note).toBeDefined();
+  });
+
+  it('phase=plan still pushes an approve-plan card (existing behavior unchanged)', async () => {
+    const convId = createConversation({ title: 'Plan conv sup' });
+    const task = insertTask(getDb(), { id: 'task-plan-sup-01', worktree: null });
+    upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'planning' });
+
+    const seq = appendEvent({
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'plan', artifacts: ['plan.json'] }),
+    });
+
+    await supervisor.processEvent({
+      seq,
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'plan', artifacts: ['plan.json'] }),
+    });
+
+    const pushed = mockPush.mock.calls.map((c) => {
+      try {
+        return JSON.parse(String(c[0])) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    });
+    const planCard = pushed.find(
+      (p) => p && p['type'] === 'card' && p['command'] === 'approve-plan',
+    );
+    expect(planCard).toBeDefined();
+
+    // action_cards row should exist for plan (requires user decision)
+    const cards = getDb()
+      .prepare(`SELECT * FROM action_cards WHERE conversation_id = ?`)
+      .all(convId) as Array<{ tool_name: string }>;
+    expect(cards.some((c) => c.tool_name === 'approve-plan')).toBe(true);
   });
 });
