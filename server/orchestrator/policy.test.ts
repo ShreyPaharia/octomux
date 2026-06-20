@@ -19,6 +19,12 @@ describe('policy engine', () => {
       ['get_task_output', ['task-abc'], 'auto'],
       ['pull_linear_issue', ['LIN-123'], 'auto'],
 
+      // read-only octomux subcommands are auto (never gated — context gathering)
+      ['octomux', ['recent-repos'], 'auto'],
+      ['octomux', ['default-branch', '--repo-path', '/tmp/repo'], 'auto'],
+      ['octomux', ['list-tasks'], 'auto'],
+      ['octomux', ['get-task', 'task-abc'], 'auto'],
+
       // ask tier (reversible writes via Bash)
       ['octomux', ['create-task', '--title', 'Foo'], 'ask'],
       ['octomux', ['add-agent', '--task', 'task-abc'], 'ask'],

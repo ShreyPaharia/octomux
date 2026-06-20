@@ -30,6 +30,27 @@ const AUTO_TOOLS = new Set([
 ]);
 
 /**
+ * Read-only octomux subcommands. These never mutate state — they query the
+ * running server (recent repos, default branch, task listings, …). They must
+ * NOT be gated: the conductor uses them to gather context (e.g. find the repo
+ * path before creating a task). Auto-allowed so they run without an approval
+ * card. (Fixes: `octomux recent-repos` being denied then failing because it has
+ * no server-side executor — it's a read, not a write.)
+ */
+const READ_SUBCOMMANDS = new Set([
+  'list-tasks',
+  'get-task',
+  'recent-repos',
+  'default-branch',
+  'list-skills',
+  'get-skill',
+  'task-summary',
+  'task-updates',
+  'hooks-list',
+  'list-integrations',
+]);
+
+/**
  * octomux subcommands that are reversible writes.
  * A learnable allow-rule can promote these to 'auto'.
  */
@@ -89,6 +110,11 @@ export function classify(command: string, args: string[]): PolicyDecision {
   // ── octomux CLI commands ──────────────────────────────────────────────────
   if (command === 'octomux') {
     const subcommand = args[0] ?? '';
+
+    // Read-only commands are never gated — they only query the server.
+    if (READ_SUBCOMMANDS.has(subcommand)) {
+      return 'auto';
+    }
 
     // Destructive — always-ask, cannot be overridden by rules.
     if (ALWAYS_ASK_SUBCOMMANDS.has(subcommand)) {
