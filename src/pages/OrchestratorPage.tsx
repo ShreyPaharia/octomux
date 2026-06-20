@@ -3,10 +3,10 @@
  *
  * Route: /orchestrator
  *
- * Orchestrator chat UI (Tasks 1.7 / SHR-123, 2.6 / SHR-129).
+ * Orchestrator chat UI (Tasks 1.7 / SHR-123, 2.6 / SHR-129, 5.1 / SHR-136).
  *
  * Layout:
- *   Left:   conversation list + "New conversation" button
+ *   Left:   conversation list + "New conversation" button + global-monitor toggle
  *   Right:  message thread (streamed ws events) + message input
  *
  * Consumes the ws protocol from 1.6:
@@ -37,6 +37,7 @@ import {
 import { MessageThread, type ThreadMessage } from '../components/orchestrator/MessageThread';
 import { PlanCard } from '../components/orchestrator/PlanCard';
 import { ActionCard, type ActionCardDecision } from '../components/orchestrator/ActionCard';
+import { ConversationList } from '../components/orchestrator/ConversationList';
 import {
   orchestratorApi,
   openOrchestratorWs,
@@ -80,104 +81,6 @@ type ThreadItem = ThreadMessage | PlanCardItem | ActionCardItem;
 
 const SIDEBAR_WIDTH = 240;
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6]';
-
-// ─── ConversationList ─────────────────────────────────────────────────────────
-
-interface ConversationListProps {
-  conversations: OrchestratorConversation[];
-  activeId: string | null;
-  onSelect: (id: string) => void;
-  onNew: () => void;
-  loading: boolean;
-}
-
-function ConversationList({
-  conversations,
-  activeId,
-  onSelect,
-  onNew,
-  loading,
-}: ConversationListProps) {
-  return (
-    <div
-      className="flex flex-col border-r border-[rgba(255,255,255,0.08)] bg-[#0e1116]"
-      style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.08)] px-4 py-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-[rgba(255,255,255,0.45)]">
-          Conversations
-        </span>
-        <button
-          type="button"
-          onClick={onNew}
-          aria-label="New conversation"
-          title="New conversation"
-          data-testid="new-conversation-btn"
-          className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md text-[rgba(255,255,255,0.55)] hover:text-white',
-            FOCUS_RING,
-          )}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <line
-              x1="7"
-              y1="1"
-              x2="7"
-              y2="13"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="1"
-              y1="7"
-              x2="13"
-              y2="7"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {loading && (
-          <div className="px-4 py-2 text-xs text-[rgba(255,255,255,0.35)]">Loading...</div>
-        )}
-        {!loading && conversations.length === 0 && (
-          <div className="px-4 py-2 text-xs text-[rgba(255,255,255,0.35)]">
-            No conversations yet.
-          </div>
-        )}
-        {conversations.map((conv) => {
-          const isActive = conv.id === activeId;
-          return (
-            <button
-              key={conv.id}
-              type="button"
-              onClick={() => onSelect(conv.id)}
-              aria-current={isActive ? 'true' : undefined}
-              data-testid={`conv-row-${conv.id}`}
-              className={cn(
-                'flex w-full items-center truncate rounded-lg px-3 py-2 text-left text-xs transition-colors',
-                isActive
-                  ? 'bg-[rgba(59,130,246,0.14)] font-semibold text-[#3B82F6]'
-                  : 'text-[rgba(255,255,255,0.65)] hover:bg-[rgba(255,255,255,0.04)] hover:text-white',
-                FOCUS_RING,
-              )}
-              style={{ margin: '1px 8px', width: 'calc(100% - 16px)' }}
-            >
-              <span className="truncate">{conv.title}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // ─── ChatInput ────────────────────────────────────────────────────────────────
 
@@ -492,6 +395,31 @@ export default function OrchestratorPage() {
     }
   }, [creatingConv, openConversation]);
 
+  // ─── Toggle global-monitor mode ──────────────────────────────────────────
+
+  const handleToggleMonitor = useCallback(async (convId: string) => {
+    try {
+      const result = await orchestratorApi.toggleGlobalMonitor(convId);
+      // Update conversations list to reflect the new global-monitor state.
+      // At most one conversation can be global-monitor at a time, so we must
+      // clear the flag on all others when enabling.
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id === convId) {
+            return { ...c, is_global_monitor: result.is_global_monitor ? 1 : 0 };
+          }
+          // Clear global-monitor on other conversations when enabling one
+          if (result.is_global_monitor) {
+            return { ...c, is_global_monitor: 0 };
+          }
+          return c;
+        }),
+      );
+    } catch {
+      // silent — network errors are temporary
+    }
+  }, []);
+
   // ─── Send user turn ──────────────────────────────────────────────────────
 
   const handleSend = useCallback((text: string) => {
@@ -563,13 +491,19 @@ export default function OrchestratorPage() {
 
       <div className="flex min-h-0 flex-1">
         {/* Conversation list */}
-        <ConversationList
-          conversations={conversations}
-          activeId={activeConvId}
-          onSelect={openConversation}
-          onNew={handleNewConversation}
-          loading={loadingConvs}
-        />
+        <div
+          className="border-r border-[rgba(255,255,255,0.08)]"
+          style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
+        >
+          <ConversationList
+            conversations={conversations}
+            activeId={activeConvId}
+            onSelect={openConversation}
+            onNew={handleNewConversation}
+            onToggleMonitor={handleToggleMonitor}
+            loading={loadingConvs}
+          />
+        </div>
 
         {/* Chat area */}
         <div className="flex min-h-0 flex-1 flex-col">

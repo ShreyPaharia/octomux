@@ -27,6 +27,8 @@ export interface OrchestratorConversation {
   claude_session_id: string | null;
   transcript_path: string | null;
   status: string;
+  /** 1 when this conversation is in global-monitor mode, 0 otherwise. */
+  is_global_monitor: number;
   created_at: string;
   updated_at: string;
 }
@@ -113,6 +115,15 @@ export const orchestratorApi = {
   /** List messages for a conversation (used to populate history). */
   listMessages(conversationId: string): Promise<OrchestratorMessage[]> {
     return get(`/conversations/${conversationId}/messages`);
+  },
+
+  /**
+   * Toggle global-monitor mode on a conversation.
+   * If the conversation is already the global monitor, clears it.
+   * Otherwise, designates it as the global monitor (clearing any previous one).
+   */
+  toggleGlobalMonitor(conversationId: string): Promise<{ is_global_monitor: boolean }> {
+    return post(`/conversations/${conversationId}/global-monitor`, {});
   },
 };
 

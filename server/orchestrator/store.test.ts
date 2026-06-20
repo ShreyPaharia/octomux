@@ -12,6 +12,9 @@ import {
   appendEvent,
   eventsSince,
   getManagedTask,
+  setGlobalMonitor,
+  clearGlobalMonitor,
+  getGlobalMonitorConversation,
 } from './store.js';
 
 describe('orchestrator store', () => {
@@ -202,6 +205,43 @@ describe('orchestrator store', () => {
       const events = eventsSince(s1 - 1);
       expect(events.some((e) => e.type === 'task:phase_complete')).toBe(true);
       expect(events.some((e) => e.type === 'task:stuck')).toBe(true);
+    });
+  });
+
+  describe('global-monitor mode (SHR-136)', () => {
+    it('getGlobalMonitorConversation returns null when none is set', () => {
+      expect(getGlobalMonitorConversation()).toBeNull();
+    });
+
+    it('setGlobalMonitor sets the global-monitor conversation', () => {
+      const id = createConversation({ title: 'Monitor' });
+      setGlobalMonitor(id);
+      expect(getGlobalMonitorConversation()).toBe(id);
+    });
+
+    it('setGlobalMonitor clears any previous global-monitor', () => {
+      const id1 = createConversation({ title: 'Monitor 1' });
+      const id2 = createConversation({ title: 'Monitor 2' });
+      setGlobalMonitor(id1);
+      setGlobalMonitor(id2);
+      expect(getGlobalMonitorConversation()).toBe(id2);
+    });
+
+    it('clearGlobalMonitor removes the global-monitor designation', () => {
+      const id = createConversation({ title: 'Monitor To Clear' });
+      setGlobalMonitor(id);
+      clearGlobalMonitor();
+      expect(getGlobalMonitorConversation()).toBeNull();
+    });
+
+    it('getConversation reflects is_global_monitor field', () => {
+      const id = createConversation({ title: 'GM Conv' });
+      setGlobalMonitor(id);
+      const conv = getConversation(id);
+      expect(conv!.is_global_monitor).toBe(1);
+      clearGlobalMonitor();
+      const conv2 = getConversation(id);
+      expect(conv2!.is_global_monitor).toBe(0);
     });
   });
 });

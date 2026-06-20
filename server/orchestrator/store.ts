@@ -10,6 +10,8 @@ export interface OrchestratorConversation {
   claude_session_id: string | null;
   transcript_path: string | null;
   status: string;
+  /** 1 when this conversation is in global-monitor mode, 0 otherwise. */
+  is_global_monitor: number;
   created_at: string;
   updated_at: string;
 }
@@ -302,4 +304,48 @@ export function eventsSince(sinceSeq: number): StoredEvent[] {
   return getDb()
     .prepare(`SELECT * FROM events WHERE seq > ? ORDER BY seq ASC`)
     .all(sinceSeq) as StoredEvent[];
+}
+
+// ─── global-monitor mode ──────────────────────────────────────────────────────
+
+/**
+ * Designate a conversation as the global-monitor.
+ * Exactly one conversation may be in global-monitor mode at a time.
+ * Clears any previously designated conversation before setting the new one.
+ */
+export function setGlobalMonitor(conversationId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    // Clear any existing global-monitor designation
+    db.prepare(
+      `UPDATE orchestrator_conversations SET is_global_monitor = 0 WHERE is_global_monitor = 1`,
+    ).run();
+    // Set the new global-monitor
+    db.prepare(`UPDATE orchestrator_conversations SET is_global_monitor = 1 WHERE id = ?`).run(
+      conversationId,
+    );
+  })();
+}
+
+/**
+ * Clear the global-monitor designation from all conversations.
+ */
+export function clearGlobalMonitor(): void {
+  getDb()
+    .prepare(
+      `UPDATE orchestrator_conversations SET is_global_monitor = 0 WHERE is_global_monitor = 1`,
+    )
+    .run();
+}
+
+/**
+ * Return the id of the conversation currently in global-monitor mode, or null if none.
+ */
+export function getGlobalMonitorConversation(): string | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM orchestrator_conversations WHERE is_global_monitor = 1 AND status != 'deleted' LIMIT 1`,
+    )
+    .get() as { id: string } | undefined;
+  return row?.id ?? null;
 }

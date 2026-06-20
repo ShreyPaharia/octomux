@@ -946,4 +946,18 @@ export function initDb(instance: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_task_id
       ON events(task_id, seq);
   `);
+
+  // ── Global-monitor mode column (2026-06-20, SHR-136) ────────────────────────
+  // Exactly one conversation may be designated as global-monitor (receives
+  // read-only notices for unowned tasks). Forward-only, addColumn-guarded.
+  const orchConvCols = columnsOf('orchestrator_conversations');
+  addColumn(
+    'orchestrator_conversations',
+    'is_global_monitor',
+    'is_global_monitor INTEGER NOT NULL DEFAULT 0',
+    orchConvCols,
+  );
+  // Ensure at most one row has is_global_monitor=1 (partial unique index — SQLite
+  // WHERE clause filters NULLs but since we use 0/1 we need a different approach;
+  // enforce uniqueness in application logic via setGlobalMonitor clearing old value).
 }

@@ -12,7 +12,15 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { getDb } from '../db.js';
-import { createConversation, upsertManagedTask, appendEvent, getManagedTask } from './store.js';
+import {
+  createConversation,
+  upsertManagedTask,
+  appendEvent,
+  getManagedTask,
+  setGlobalMonitor,
+  clearGlobalMonitor,
+  getGlobalMonitorConversation,
+} from './store.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -325,6 +333,114 @@ describe('supervisor', () => {
       await supervisor.processEvent({ seq, task_id: task.id, type: 'task:updated', payload: '{}' });
 
       expect(pushToConversation).toHaveBeenCalledWith(convId, expect.any(String));
+    });
+  });
+
+  describe('global-monitor mode (Phase 5 / SHR-136)', () => {
+    it('routes unowned task events to the global-monitor conversation as read-only notices', async () => {
+      const monitorConvId = createConversation({ title: 'Global Monitor' });
+      setGlobalMonitor(monitorConvId);
+      // task not in managed_tasks (unowned)
+      makeTask('task-gm-01');
+      const seq = appendEvent({ task_id: 'task-gm-01', type: 'task:updated', payload: '{}' });
+
+      const injections: SupervisorInjection[] = [];
+      supervisor.on('inject', (inj) => injections.push(inj));
+      await supervisor.processEvent({
+        seq,
+        task_id: 'task-gm-01',
+        type: 'task:updated',
+        payload: '{}',
+      });
+
+      // The global-monitor conversation should receive the event
+      expect(injections).toHaveLength(1);
+      expect(injections[0]!.conversation_id).toBe(monitorConvId);
+    });
+
+    it('marks global-monitor injections with read-only prefix', async () => {
+      const monitorConvId = createConversation({ title: 'Global Monitor Read-Only' });
+      setGlobalMonitor(monitorConvId);
+      makeTask('task-gm-readonly-01');
+      const seq = appendEvent({
+        task_id: 'task-gm-readonly-01',
+        type: 'task:stuck',
+        payload: '{"reason":"inactive"}',
+      });
+
+      const injections: SupervisorInjection[] = [];
+      supervisor.on('inject', (inj) => injections.push(inj));
+      await supervisor.processEvent({
+        seq,
+        task_id: 'task-gm-readonly-01',
+        type: 'task:stuck',
+        payload: '{"reason":"inactive"}',
+      });
+
+      // The note must indicate read-only (monitor) status
+      expect(injections[0]!.note).toMatch(/\[monitor\]/);
+    });
+
+    it('does NOT route to global-monitor if the task is already owned by a conversation', async () => {
+      const ownerConvId = createConversation({ title: 'Owner Conv' });
+      const monitorConvId = createConversation({ title: 'Monitor Conv' });
+      setGlobalMonitor(monitorConvId);
+      const task = makeTask('task-gm-owned-01');
+      upsertManagedTask({ conversation_id: ownerConvId, task_id: task.id });
+
+      const seq = appendEvent({ task_id: task.id, type: 'task:updated', payload: '{}' });
+
+      const injections: SupervisorInjection[] = [];
+      supervisor.on('inject', (inj) => injections.push(inj));
+      await supervisor.processEvent({
+        seq,
+        task_id: task.id,
+        type: 'task:updated',
+        payload: '{}',
+      });
+
+      // Only the owner gets the event, not the monitor
+      expect(injections).toHaveLength(1);
+      expect(injections[0]!.conversation_id).toBe(ownerConvId);
+    });
+
+    it('drops events when no global-monitor is set and task is unowned', async () => {
+      // No global monitor set
+      makeTask('task-gm-dropped-01');
+      const seq = appendEvent({
+        task_id: 'task-gm-dropped-01',
+        type: 'task:updated',
+        payload: '{}',
+      });
+
+      const injections: SupervisorInjection[] = [];
+      supervisor.on('inject', (inj) => injections.push(inj));
+      await supervisor.processEvent({
+        seq,
+        task_id: 'task-gm-dropped-01',
+        type: 'task:updated',
+        payload: '{}',
+      });
+
+      expect(injections).toHaveLength(0);
+    });
+
+    it('only one conversation can be global-monitor at a time', () => {
+      const conv1 = createConversation({ title: 'Monitor 1' });
+      const conv2 = createConversation({ title: 'Monitor 2' });
+      setGlobalMonitor(conv1);
+      setGlobalMonitor(conv2); // overrides conv1
+
+      const monitor = getGlobalMonitorConversation();
+      expect(monitor).toBe(conv2);
+    });
+
+    it('clearGlobalMonitor removes global-monitor designation', () => {
+      const convId = createConversation({ title: 'Monitor To Clear' });
+      setGlobalMonitor(convId);
+      clearGlobalMonitor();
+      const monitor = getGlobalMonitorConversation();
+      expect(monitor).toBeNull();
     });
   });
 });

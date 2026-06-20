@@ -38,7 +38,7 @@ import { EventEmitter } from 'events';
 import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 import { getDb } from '../db.js';
-import { eventsSince, upsertManagedTask } from './store.js';
+import { eventsSince, upsertManagedTask, getGlobalMonitorConversation } from './store.js';
 import { pushToConversation } from './stream.js';
 
 const logger = childLogger('orchestrator/supervisor');
@@ -160,6 +160,41 @@ export function createSupervisor(): Supervisor {
       logger.warn({ conversation_id: convId, err }, 'supervisor: injection queue error');
     });
     convQueues.set(convId, next);
+  }
+
+  /**
+   * Inject a read-only monitor notice into the global-monitor conversation.
+   * These notes are marked with [monitor] and never trigger auto-actions.
+   * (spec §6 — "read-only notices that never auto-act", SHR-136)
+   */
+  async function injectMonitorNotice(monitorConvId: string, event: RawEvent): Promise<void> {
+    const baseNote = formatNote(event);
+    // Prefix with [monitor] so the UI can distinguish read-only notices
+    const note = `[monitor] ${baseNote}`;
+
+    const injection: SupervisorInjection = {
+      conversation_id: monitorConvId,
+      task_id: event.task_id,
+      seq: event.seq,
+      note,
+    };
+
+    logger.info(
+      {
+        conversation_id: monitorConvId,
+        task_id: event.task_id,
+        event_type: event.type,
+        seq: event.seq,
+      },
+      'supervisor: injecting global-monitor notice',
+    );
+
+    // Push as a read-only message to the monitor conversation
+    const wsMessage = JSON.stringify({ type: 'message', role: 'assistant', text: note });
+    pushToConversation(monitorConvId, wsMessage);
+
+    // Emit inject event for test listeners
+    emitter.emit('inject', injection);
   }
 
   /**
@@ -313,7 +348,10 @@ export function createSupervisor(): Supervisor {
 
   /**
    * Process a single raw event.
-   * - Route to the owning conversation (drop if unowned).
+   * - Route to the owning conversation via managed_tasks.
+   * - If the task is unowned, check for a global-monitor conversation; if one
+   *   exists, send a read-only notice there (never auto-act). (§6 / SHR-136)
+   * - Drop if unowned and no global-monitor is set.
    * - Idempotency: skip if (task_id, seq) already seen.
    * - Enqueue in the per-conversation serialized queue.
    */
@@ -329,10 +367,24 @@ export function createSupervisor(): Supervisor {
 
     const convId = findConversationForTask(event.task_id);
     if (!convId) {
+      // Task is unowned — check for global-monitor conversation
+      const monitorConvId = getGlobalMonitorConversation();
+      if (!monitorConvId) {
+        logger.debug(
+          { task_id: event.task_id, type: event.type },
+          'supervisor: unowned task, no global-monitor, dropping event',
+        );
+        return;
+      }
+
+      // Route to global-monitor as a read-only notice (never auto-act)
+      seen.add(key);
       logger.debug(
-        { task_id: event.task_id, type: event.type },
-        'supervisor: unowned task, dropping event',
+        { task_id: event.task_id, type: event.type, monitor_conv_id: monitorConvId },
+        'supervisor: unowned task, routing to global-monitor',
       );
+      enqueue(monitorConvId, () => injectMonitorNotice(monitorConvId, event));
+      await convQueues.get(monitorConvId);
       return;
     }
 

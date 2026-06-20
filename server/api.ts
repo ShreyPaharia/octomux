@@ -60,6 +60,9 @@ import {
   getConversation,
   listConversations,
   listMessages as listOrchestratorMessages,
+  setGlobalMonitor,
+  clearGlobalMonitor,
+  getGlobalMonitorConversation,
 } from './orchestrator/store.js';
 import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 
@@ -3382,6 +3385,38 @@ export function setupRoutes(app: Express): void {
         return;
       }
       res.json(listOrchestratorMessages(convId));
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // POST /api/orchestrator/conversations/:id/global-monitor — toggle global-monitor mode
+  // Exactly one conversation may be in global-monitor mode at a time.
+  // If the conversation is already the global monitor, clears it.
+  // Otherwise, designates it as the global monitor (clearing the previous one).
+  app.post('/api/orchestrator/conversations/:id/global-monitor', (req: Request, res: Response) => {
+    try {
+      const convId = (req.params as Record<string, string>).id;
+      const conv = getConversation(convId);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      // Toggle: if already global-monitor, clear; otherwise set
+      const currentMonitor = getGlobalMonitorConversation();
+      let isMonitor: boolean;
+      if (currentMonitor === convId) {
+        clearGlobalMonitor();
+        isMonitor = false;
+      } else {
+        setGlobalMonitor(convId);
+        isMonitor = true;
+      }
+      apiLogger.info(
+        { conversation_id: convId, is_global_monitor: isMonitor },
+        'orchestrator: global-monitor toggled',
+      );
+      res.json({ is_global_monitor: isMonitor });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
