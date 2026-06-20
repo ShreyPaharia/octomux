@@ -161,6 +161,38 @@ describe('orchestrator store', () => {
       expect(mt!.phase).toBe('awaiting_approval');
       expect(mt!.artifacts).toBe(JSON.stringify({ plan: 'PLAN.md' }));
     });
+
+    it('preserves phase when a later upsert omits it (supervisor seq bump)', () => {
+      const db = getDb();
+      const task = insertTask(db, { id: 'task-mt3-seqbump', worktree: null });
+      const convId = createConversation({ title: 'MT seq bump' });
+      // Task registered directly in the implement phase (plain managed task).
+      upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'implementing' });
+      // The supervisor routes events by bumping last_event_seq WITHOUT a phase —
+      // this must NOT clobber the phase back to the 'planning' default.
+      upsertManagedTask({ conversation_id: convId, task_id: task.id, last_event_seq: 42 });
+      const mt = getManagedTask(task.id);
+      expect(mt!.phase).toBe('implementing');
+      expect(mt!.last_event_seq).toBe(42);
+    });
+
+    it('preserves attempts/last_event_seq when a later upsert omits them', () => {
+      const db = getDb();
+      const task = insertTask(db, { id: 'task-mt4-counters', worktree: null });
+      const convId = createConversation({ title: 'MT counters' });
+      upsertManagedTask({
+        conversation_id: convId,
+        task_id: task.id,
+        attempts: 3,
+        last_event_seq: 99,
+      });
+      // A phase-only update must leave the counters intact.
+      upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'done' });
+      const mt = getManagedTask(task.id);
+      expect(mt!.phase).toBe('done');
+      expect(mt!.attempts).toBe(3);
+      expect(mt!.last_event_seq).toBe(99);
+    });
   });
 
   describe('appendEvent / eventsSince', () => {

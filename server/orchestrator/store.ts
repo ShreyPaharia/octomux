@@ -268,22 +268,41 @@ export interface UpsertManagedTaskInput {
 
 /**
  * Insert or update a managed_tasks row.
- * On conflict (conversation_id, task_id), updates the provided fields only.
+ *
+ * On conflict (conversation_id, task_id) we update ONLY the fields the caller
+ * explicitly provided. The previous implementation used
+ * `COALESCE(excluded.col, col)` while binding `input.phase ?? 'planning'` (and
+ * `?? 0` for the counters), so `excluded.col` was never NULL — every upsert that
+ * omitted `phase` silently reset it back to 'planning'. The supervisor bumps
+ * `last_event_seq` on every routed event without a phase, which clobbered a
+ * worker's real phase ('implementing') back to 'planning' — and then
+ * advancePhaseForLabel('implement') no-op'd because the phase no longer matched,
+ * so report_complete never reached the orchestrator. Build the UPDATE SET
+ * dynamically from the provided keys so omitted fields are left untouched.
  */
 export function upsertManagedTask(input: UpsertManagedTaskInput): void {
+  const setClauses: string[] = [];
+  const setValues: unknown[] = [];
+  const setField = (col: string, value: unknown) => {
+    setClauses.push(`${col} = ?`);
+    setValues.push(value);
+  };
+  if (input.phase !== undefined) setField('phase', input.phase);
+  if (input.artifacts !== undefined) setField('artifacts', input.artifacts);
+  if (input.depends_on !== undefined) setField('depends_on', input.depends_on);
+  if (input.attempts !== undefined) setField('attempts', input.attempts);
+  if (input.last_event_seq !== undefined) setField('last_event_seq', input.last_event_seq);
+  if (input.artifact_lock_owner !== undefined)
+    setField('artifact_lock_owner', input.artifact_lock_owner);
+  setClauses.push(`updated_at = datetime('now')`);
+
   getDb()
     .prepare(
       `INSERT INTO managed_tasks
          (conversation_id, task_id, phase, artifacts, depends_on, attempts, last_event_seq, artifact_lock_owner)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(conversation_id, task_id) DO UPDATE SET
-         phase               = COALESCE(excluded.phase, phase),
-         artifacts           = COALESCE(excluded.artifacts, artifacts),
-         depends_on          = COALESCE(excluded.depends_on, depends_on),
-         attempts            = COALESCE(excluded.attempts, attempts),
-         last_event_seq      = COALESCE(excluded.last_event_seq, last_event_seq),
-         artifact_lock_owner = excluded.artifact_lock_owner,
-         updated_at          = datetime('now')`,
+         ${setClauses.join(',\n         ')}`,
     )
     .run(
       input.conversation_id,
@@ -294,6 +313,7 @@ export function upsertManagedTask(input: UpsertManagedTaskInput): void {
       input.attempts ?? 0,
       input.last_event_seq ?? 0,
       input.artifact_lock_owner ?? null,
+      ...setValues,
     );
 }
 
