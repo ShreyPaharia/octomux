@@ -396,9 +396,33 @@ describe('orchestrator runner', () => {
       expect(pasteArgs[msgIndex]).toBe(multiLine);
     });
 
-    it('rejects when conversation has no tmux session', async () => {
-      const convId = createConversation({ title: 'No session send' });
-      await expect(sendTurn(convId, 'hello')).rejects.toThrow(/no tmux/i);
+    it('resumes a dead session (--resume) then delivers the turn', async () => {
+      // A conversation whose tmux session is gone (server restart / crash / stop):
+      // no tmux_window → not alive → sendTurn must resume the SAME claude session
+      // and then deliver, instead of throwing.
+      const convId = createConversation({
+        title: 'Resume on send',
+        claude_session_id: 'sess-resume-1',
+      });
+
+      const promise = sendTurn(convId, 'hello after resume');
+      await vi.advanceTimersByTimeAsync(500); // flush capture-pane poll / paste sleep
+      await promise;
+
+      // It recreated the tmux session via `claude --resume <session_id>`.
+      const newSession = findTmuxCall('new-session');
+      expect(newSession).toBeDefined();
+      const cmd = newSession!.find((a) => a.includes('claude'));
+      expect(cmd).toContain('--resume sess-resume-1');
+
+      // And then delivered the turn (a `-l` paste).
+      const pasteCall = mockedExecFile.mock.calls.find(
+        (c) =>
+          c[0] === 'tmux' &&
+          stripSocketArgs(c[1] as string[]).includes('send-keys') &&
+          stripSocketArgs(c[1] as string[]).includes('-l'),
+      );
+      expect(pasteCall).toBeDefined();
     });
   });
 });

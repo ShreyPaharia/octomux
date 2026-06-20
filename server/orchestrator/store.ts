@@ -14,6 +14,8 @@ export interface OrchestratorConversation {
   is_global_monitor: number;
   /** Random token authenticating the conductor's PreToolUse gate hook callbacks. */
   hook_token: string | null;
+  /** The cwd the conductor session was launched from (used to resume a dead session). */
+  cwd: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -122,7 +124,13 @@ export function updateConversation(
   fields: Partial<
     Pick<
       OrchestratorConversation,
-      'title' | 'tmux_window' | 'claude_session_id' | 'transcript_path' | 'status' | 'hook_token'
+      | 'title'
+      | 'tmux_window'
+      | 'claude_session_id'
+      | 'transcript_path'
+      | 'status'
+      | 'hook_token'
+      | 'cwd'
     >
   >,
 ): void {
@@ -131,6 +139,10 @@ export function updateConversation(
   if (fields.title !== undefined) {
     sets.push('title = ?');
     vals.push(fields.title);
+  }
+  if (fields.cwd !== undefined) {
+    sets.push('cwd = ?');
+    vals.push(fields.cwd);
   }
   if (fields.hook_token !== undefined) {
     sets.push('hook_token = ?');

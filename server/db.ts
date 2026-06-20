@@ -962,6 +962,11 @@ export function initDb(instance: Database.Database): void {
   // token has nowhere to live in the agents table. Persist it here so
   // requireHookToken can authenticate the conductor's gate callbacks. Forward-only.
   addColumn('orchestrator_conversations', 'hook_token', 'hook_token TEXT', orchConvCols);
+  // ── Conductor cwd (for resume) ──────────────────────────────────────────────
+  // The working dir the conductor session was launched from. Needed to RESUME a
+  // conversation whose tmux/claude session died (server restart, crash, stop) —
+  // resumeConversation relaunches `claude --resume <id>` from this cwd. Forward-only.
+  addColumn('orchestrator_conversations', 'cwd', 'cwd TEXT', orchConvCols);
   // Ensure at most one row has is_global_monitor=1 (partial unique index — SQLite
   // WHERE clause filters NULLs but since we use 0/1 we need a different approach;
   // enforce uniqueness in application logic via setGlobalMonitor clearing old value).

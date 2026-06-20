@@ -343,6 +343,7 @@ export async function startConversation(
     claude_session_id: sessionId,
     transcript_path: transcriptPathFor(cwd, sessionId),
     hook_token: hookToken,
+    cwd,
   });
 
   logger.info(
@@ -492,7 +493,28 @@ export async function stopConversation(convId: string): Promise<void> {
  * This replaces the blind fixed-50ms sleep from the original `sendMessageToAgent`.
  */
 export async function sendTurn(convId: string, text: string): Promise<void> {
-  const conv = getConversation(convId);
+  let conv = getConversation(convId);
+  if (!conv) {
+    throw new Error(`orchestrator runner: conversation ${convId} not found`);
+  }
+
+  // Resume the session if it died (server restart, crash, or a prior stop). The
+  // conductor is one interactive `claude` session in tmux; reopening a chat and
+  // sending a turn must transparently restart it via `--resume <session_id>`
+  // (same session id → same transcript, history intact) before delivering.
+  if (!(await isConversationSessionAlive(conv))) {
+    logger.info(
+      { conversation_id: convId, operation: 'sendTurn' },
+      'sendTurn: session not alive — resuming before delivering turn',
+    );
+    await resumeConversation(convId, conv.cwd ?? process.cwd());
+    // Let the --resume continuation settle before injecting the real turn.
+    if (RESUME_QUIET_WINDOW_MS > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, RESUME_QUIET_WINDOW_MS));
+    }
+    conv = getConversation(convId); // reload — resume updated tmux_window
+  }
+
   if (!conv?.tmux_window) {
     throw new Error(`orchestrator runner: no tmux session for conversation ${convId}`);
   }
@@ -524,6 +546,23 @@ export async function sendTurn(convId: string, text: string): Promise<void> {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the conversation's tmux session is currently alive. False when there's
+ * no recorded window, or `tmux has-session` reports the session is gone (the
+ * server restarted, the session was killed, or claude exited).
+ */
+async function isConversationSessionAlive(conv: OrchestratorConversation): Promise<boolean> {
+  if (!conv.tmux_window) return false;
+  const session = conv.tmux_window.split(':')[0];
+  if (!session) return false;
+  try {
+    await execTmux(['has-session', '-t', session]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface LaunchOpts {
   sessionId: string;
