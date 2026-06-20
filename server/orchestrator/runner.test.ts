@@ -178,6 +178,9 @@ describe('orchestrator runner', () => {
       const content = JSON.parse(orchestratorSettingsWrite![1] as string);
       // Conductor is pure-MCP: no hooks, Bash hard-denied, repo mutation tools denied.
       expect(content.hooks).toBeUndefined();
+      // Non-interactive: bypassPermissions so a prompt never hangs the tmux TUI —
+      // deny still applies in this mode, so Bash/Edit/Write remain blocked.
+      expect(content.permissions?.defaultMode).toBe('bypassPermissions');
       const deny: string[] = content.permissions?.deny ?? [];
       expect(deny).toContain('Bash');
       expect(deny).toContain('Edit');

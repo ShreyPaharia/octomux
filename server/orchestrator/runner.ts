@@ -145,8 +145,17 @@ function writeOrchestratorsettings(convId: string): string {
     // onboarding already done), and an object `tui` value is rejected by claude
     // ("Invalid value. Expected one of: default, fullscreen") which blocks the
     // session on a settings-error dialog.
-    // Orchestrator's allowed tools: MCP read + write tools only.
     permissions: {
+      // CONDUCTOR IS NON-INTERACTIVE — nobody is at its tmux TUI (the user talks
+      // to it via the web chat). A permission prompt there hangs the session
+      // forever (and isn't surfaced: pending tool calls aren't in the transcript
+      // the chat tails, and the conductor has no PermissionRequest hook). So we
+      // run in `bypassPermissions` mode: NO prompt ever appears. Crucially, the
+      // `deny` list below is STILL enforced in this mode (per Claude Code docs —
+      // deny/ask rules apply in every mode), so Bash/Edit/Write remain hard-
+      // blocked. Net: never hangs, MCP tools (incl. future ones) just work, and
+      // the conductor still structurally cannot shell out or touch files.
+      defaultMode: 'bypassPermissions',
       allow: [
         // Whole-server allow: approves EVERY tool the octomux MCP server exposes,
         // present and future. Critical because an un-allowed MCP tool triggers an
