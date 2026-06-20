@@ -65,6 +65,11 @@ export interface MonitorStatusResult {
   total: number;
   by_runtime_state: Record<string, number>;
   by_workflow_status: Record<string, number>;
+  /**
+   * Counts by managed phase from managed_tasks (planning / awaiting_approval /
+   * implementing / reviewing / done). Only present for orchestrator-managed tasks.
+   */
+  by_phase: Record<string, number>;
   /** Tasks in error state or awaiting attention (id + title only). */
   needs_attention: Array<{ id: string; title: string; reason: string }>;
 }
@@ -191,6 +196,15 @@ export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusRe
     by_workflow_status[r.workflow_status] = r.n;
   }
 
+  // Counts by managed phase (Task 5.3: monitor summaries)
+  const phaseRows = db
+    .prepare(`SELECT phase, COUNT(*) AS n FROM managed_tasks GROUP BY phase`)
+    .all() as Array<{ phase: string; n: number }>;
+  const by_phase: Record<string, number> = {};
+  for (const r of phaseRows) {
+    by_phase[r.phase] = r.n;
+  }
+
   // Needs-attention: error tasks + tasks with pending permission prompts
   const errorTasks = db
     .prepare(
@@ -207,12 +221,49 @@ export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusRe
     )
     .all() as Array<{ id: string; title: string }>;
 
+  // Needs-attention: tasks in awaiting_approval phase (waiting for human to approve)
+  const awaitingApprovalTasks = db
+    .prepare(
+      `SELECT DISTINCT t.id, t.title
+         FROM tasks t
+         INNER JOIN managed_tasks mt ON mt.task_id = t.id AND mt.phase = 'awaiting_approval'
+         WHERE t.deleted_at IS NULL`,
+    )
+    .all() as Array<{ id: string; title: string }>;
+
+  // Needs-attention: tasks whose agents have hook_activity='waiting'
+  const hookWaitingTasks = db
+    .prepare(
+      `SELECT DISTINCT t.id, t.title
+         FROM tasks t
+         INNER JOIN agents a ON a.task_id = t.id AND a.hook_activity = 'waiting'
+         WHERE t.deleted_at IS NULL`,
+    )
+    .all() as Array<{ id: string; title: string }>;
+
+  // Needs-attention: tasks with recent task:stuck events (most recent per task)
+  const stuckTasks = db
+    .prepare(
+      `SELECT DISTINCT t.id, t.title
+         FROM tasks t
+         INNER JOIN events e ON e.task_id = t.id AND e.type = 'task:stuck'
+         WHERE t.deleted_at IS NULL`,
+    )
+    .all() as Array<{ id: string; title: string }>;
+
   const needs_attention: MonitorStatusResult['needs_attention'] = [
     ...errorTasks.map((t) => ({ id: t.id, title: t.title, reason: 'error' })),
     ...pendingPromptTasks.map((t) => ({ id: t.id, title: t.title, reason: 'pending_prompt' })),
+    ...awaitingApprovalTasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      reason: 'awaiting_approval',
+    })),
+    ...hookWaitingTasks.map((t) => ({ id: t.id, title: t.title, reason: 'hook_waiting' })),
+    ...stuckTasks.map((t) => ({ id: t.id, title: t.title, reason: 'stuck' })),
   ];
 
-  // Deduplicate by id in case a task is both errored and has pending prompts
+  // Deduplicate by id (first reason wins — priority order: error > pending_prompt > awaiting_approval > hook_waiting > stuck)
   const seen = new Set<string>();
   const deduped = needs_attention.filter((t) => {
     if (seen.has(t.id)) return false;
@@ -224,6 +275,7 @@ export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusRe
     total: totalRow.n,
     by_runtime_state,
     by_workflow_status,
+    by_phase,
     needs_attention: deduped,
   };
 }

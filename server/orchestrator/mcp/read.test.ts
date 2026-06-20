@@ -180,6 +180,122 @@ describe('orchestrator mcp read tools', () => {
       const errored = result.needs_attention.find((t: { id: string }) => t.id === 'task-ms-err');
       expect(errored).toBeDefined();
     });
+
+    // ── Task 5.3: monitor summaries ─────────────────────────────────────────
+
+    it('returns by_phase rollup from managed_tasks (planning/awaiting_approval/implementing/done)', () => {
+      const db = getDb();
+      // Insert tasks + managed_tasks rows in different phases
+      insertTask(db, { id: 'task-ph-01', title: 'Planning task', runtime_state: 'running' });
+      insertTask(db, { id: 'task-ph-02', title: 'Awaiting task', runtime_state: 'idle' });
+      insertTask(db, { id: 'task-ph-03', title: 'Implementing task', runtime_state: 'running' });
+
+      db.prepare(
+        `INSERT INTO orchestrator_conversations (id, title) VALUES ('conv-ph-01', 'Test conv')`,
+      ).run();
+      upsertManagedTask({
+        conversation_id: 'conv-ph-01',
+        task_id: 'task-ph-01',
+        phase: 'planning',
+      });
+      upsertManagedTask({
+        conversation_id: 'conv-ph-01',
+        task_id: 'task-ph-02',
+        phase: 'awaiting_approval',
+      });
+      upsertManagedTask({
+        conversation_id: 'conv-ph-01',
+        task_id: 'task-ph-03',
+        phase: 'implementing',
+      });
+
+      const result = handleMonitorStatus({});
+      expect(result).toHaveProperty('by_phase');
+      expect(result.by_phase['planning']).toBeGreaterThanOrEqual(1);
+      expect(result.by_phase['awaiting_approval']).toBeGreaterThanOrEqual(1);
+      expect(result.by_phase['implementing']).toBeGreaterThanOrEqual(1);
+    });
+
+    it('surfaces awaiting_approval tasks in needs_attention', () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-awa-01',
+        title: 'Plan pending approval',
+        runtime_state: 'idle',
+        workflow_status: 'in_progress',
+      });
+      db.prepare(
+        `INSERT INTO orchestrator_conversations (id, title) VALUES ('conv-awa-01', 'Awa conv')`,
+      ).run();
+      upsertManagedTask({
+        conversation_id: 'conv-awa-01',
+        task_id: 'task-awa-01',
+        phase: 'awaiting_approval',
+      });
+
+      const result = handleMonitorStatus({});
+      const awaiting = result.needs_attention.find((t) => t.id === 'task-awa-01');
+      expect(awaiting).toBeDefined();
+      expect(awaiting!.reason).toBe('awaiting_approval');
+    });
+
+    it('surfaces tasks with agents in hook_activity=waiting in needs_attention', () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-hw-01',
+        title: 'Hook waiting task',
+        runtime_state: 'running',
+        workflow_status: 'in_progress',
+      });
+      // Insert an agent with hook_activity=waiting
+      insertAgent(db, {
+        id: 'agent-hw-01',
+        task_id: 'task-hw-01',
+        hook_activity: 'waiting',
+      } as Parameters<typeof insertAgent>[1]);
+
+      const result = handleMonitorStatus({});
+      const hooking = result.needs_attention.find((t) => t.id === 'task-hw-01');
+      expect(hooking).toBeDefined();
+      expect(hooking!.reason).toBe('hook_waiting');
+    });
+
+    it('surfaces tasks with recent task:stuck events in needs_attention', () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-stk-01',
+        title: 'Stuck task',
+        runtime_state: 'running',
+        workflow_status: 'in_progress',
+      });
+      // Insert a task:stuck event
+      db.prepare(
+        `INSERT INTO events (task_id, type, payload) VALUES ('task-stk-01', 'task:stuck', '{"reason":"inactive"}')`,
+      ).run();
+
+      const result = handleMonitorStatus({});
+      const stuck = result.needs_attention.find((t) => t.id === 'task-stk-01');
+      expect(stuck).toBeDefined();
+      expect(stuck!.reason).toBe('stuck');
+    });
+
+    it('deduplicates tasks appearing in multiple needs_attention categories', () => {
+      const db = getDb();
+      // A task that is both errored AND has a task:stuck event
+      insertTask(db, {
+        id: 'task-dup-01',
+        title: 'Dup task',
+        runtime_state: 'error',
+        workflow_status: 'in_progress',
+      });
+      db.prepare(
+        `INSERT INTO events (task_id, type, payload) VALUES ('task-dup-01', 'task:stuck', '{"reason":"error"}')`,
+      ).run();
+
+      const result = handleMonitorStatus({});
+      const appearances = result.needs_attention.filter((t) => t.id === 'task-dup-01');
+      expect(appearances).toHaveLength(1);
+    });
   });
 
   // ─── get_task_output ───────────────────────────────────────────────────────
