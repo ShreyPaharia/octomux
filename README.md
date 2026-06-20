@@ -20,7 +20,7 @@ Open [http://localhost:7777](http://localhost:7777) — describe a task in the c
 
 Three phases, one window:
 
-- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira links, or GitHub issue URLs. Drop a second agent on the same branch with one click — or paste a whole list and **bulk-create** a worktree, branch, and agent for each.
+- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira or Linear links, or GitHub issue URLs. Drop a second agent on the same branch with one click — or paste a whole list and **bulk-create** a worktree, branch, and agent for each.
 - **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. The **Monitor** view tiles every running agent into one grid so you can scan the whole fleet at a glance. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
 - **03 — Review & Ship.** Diff review in the same window. File tree, per-file reviewed state, inline comments. Hit **Ship** and the PR auto-links to the task — closes itself when the PR merges.
 
@@ -51,7 +51,7 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 - **Per-task model** — pin any task or added agent to a specific model (`--model claude-opus-4-8`); mix models across a fleet so the right one lands on each job.
 - **Completion notifications** — link a worker to an orchestrator with `add-agent --notify-agent`; the lead gets pinged when each worker finishes. Teams wire this up automatically.
 - **Mobile-ready dashboard** — bottom nav, responsive pages, and mobile-friendly terminal scroll buttons; check the fleet and answer prompts from your phone.
-- **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake.
+- **Integrations** — Jira and Linear sync (status push + comment-back, composer prefill) plus orchestrator skills for GitHub / auto-review intake.
 - **CLI ↔ dashboard parity** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows.
 - **Reboot-proof** — WAL SQLite + preserved worktrees across restarts.
 - **Local-only** — no telemetry, no cloud sync, no analytics. Your `.env` stays on the host.
@@ -172,7 +172,7 @@ flowchart LR
 - Recommended: `lazygit`, `neovim`
 - macOS desktop app (`.dmg`) available on [GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) as an alternative to the npm CLI
 
-> First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira and other integrations are configured later from the in-app **Integrations** page.
+> First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira, Linear, and other integrations are configured later from the in-app **Integrations** page.
 
 ## Configuration
 
