@@ -77,7 +77,7 @@ Give an agent the orchestrator skills. It plans the work, breaks down the spec, 
 ## Quick start
 
 ```bash
-brew install tmux git
+brew install git
 npm install -g @anthropic-ai/claude-code    # and/or Cursor CLI
 npm install -g octomux
 octomux init
@@ -85,10 +85,19 @@ cd your-project
 octomux start
 ```
 
+`tmux` ships bundled — octomux installs a static `tmux` for your platform (macOS and Linux,
+arm64/x64) and uses it automatically, so there's no separate `brew install tmux` step.
+
 ```bash
 octomux create-task -t "Add OAuth login" -r .
 octomux create-task -t "Spike with Cursor" -r . --harness cursor
 ```
+
+**Prefer a desktop app?** macOS users can download the `.dmg` from
+[GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) instead of the npm CLI.
+It bundles its own `tmux` and runs against an isolated data directory (its own DB, tmux
+socket, and logs), so it never collides with a CLI install on the same machine. The build is
+ad-hoc signed (not notarized) — if macOS warns on first launch, right-click the app → **Open**.
 
 Step-by-step setup, Jira, and orchestrator skills: [ONBOARDING.md](./ONBOARDING.md)
 
@@ -156,9 +165,10 @@ flowchart LR
 ## Requirements
 
 - macOS (ARM64 or x64), Node.js 20+ (24 LTS recommended)
-- `tmux`, `git`
+- `git` (`tmux` ships bundled — installed automatically, no manual step)
 - At least one harness: **Claude Code** (`claude`) and/or **Cursor CLI** (`cursor-agent`)
 - Recommended: `lazygit`, `neovim`
+- macOS desktop app (`.dmg`) available on [GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) as an alternative to the npm CLI
 
 > First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira and other integrations are configured later from the in-app **Integrations** page.
 

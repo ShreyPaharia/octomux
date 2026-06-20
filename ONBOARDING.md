@@ -5,10 +5,12 @@ Install once, open the dashboard, dispatch your first agent. Optional sections c
 ## 1. Prerequisites
 
 ```bash
-brew install tmux git neovim lazygit
+brew install git neovim lazygit
 npm install -g @anthropic-ai/claude-code   # Claude Code harness
 npm install -g octomux
 ```
+
+`tmux` ships bundled with octomux (a static binary per platform, installed automatically), so it is not in the list above. macOS users can also grab the desktop `.dmg` from [GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) instead of the npm CLI — it bundles its own tmux and uses an isolated data directory.
 
 **Cursor harness (optional):** install the [Cursor CLI](https://cursor.com/docs/cli) so `cursor-agent` is on your PATH. You can run Claude-only, Cursor-only, or both and switch per task.
 
