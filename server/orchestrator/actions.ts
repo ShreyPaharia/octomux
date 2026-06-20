@@ -88,12 +88,17 @@ export async function runOrchestratorAction(
 
   switch (action) {
     case 'create-task': {
+      // The conductor's MCP create_task tool sends the goal-oriented brief as
+      // `description`. That brief IS the worker's prompt, so default
+      // `initial_prompt` to the description when no explicit prompt is given —
+      // otherwise the worker launches with NO prompt and does nothing. (runCreateTask
+      // uses initial_prompt for the worker and description for display.)
       const result = await runCreateTask({
         ...(input as CreateTaskInput),
         // accept either repo_path or repoPath etc. — CreateTaskInput uses snake_case
         repo_path: s('repo_path', 'repoPath', 'repo'),
         base_branch: s('base_branch', 'baseBranch'),
-        initial_prompt: s('initial_prompt', 'initialPrompt', 'prompt'),
+        initial_prompt: s('initial_prompt', 'initialPrompt', 'prompt') ?? s('description'),
         run_mode: (s('run_mode', 'runMode', 'mode') as CreateTaskInput['run_mode']) ?? 'new',
         conversation_id: conversationId,
       });

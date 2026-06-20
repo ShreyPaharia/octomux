@@ -48,6 +48,10 @@ describe('runOrchestratorAction', () => {
     expect(mockRunCreateTask).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Do the thing',
+        description: '## Goal\nx',
+        // The brief (description) becomes the worker's prompt — else the worker
+        // launches with no prompt and does nothing.
+        initial_prompt: '## Goal\nx',
         repo_path: '/tmp/repo', // structured — no string parsing
         base_branch: 'next',
         kind: 'plan',
