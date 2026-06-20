@@ -65,6 +65,7 @@ import {
   getGlobalMonitorConversation,
   getConversationUsage,
 } from './orchestrator/store.js';
+import { startConversation } from './orchestrator/runner.js';
 import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 
 import {
@@ -3330,7 +3331,7 @@ export function setupRoutes(app: Express): void {
   // ─── Orchestrator chat ───────────────────────────────────────────────────────
 
   // POST /api/orchestrator/conversations — create a new orchestrator conversation
-  app.post('/api/orchestrator/conversations', (req: Request, res: Response) => {
+  app.post('/api/orchestrator/conversations', async (req: Request, res: Response) => {
     const { title, cwd } = req.body as { title?: string; cwd?: string };
     if (!title?.trim()) {
       res.status(400).json({ error: 'title is required' });
@@ -3338,9 +3339,13 @@ export function setupRoutes(app: Express): void {
     }
     try {
       const id = createConversation({ title: title.trim() });
+      // The conductor runs in a trusted cwd (default: the server's repo root).
+      const convCwd = cwd?.trim() || process.cwd();
+      // Launch the interactive claude session for this conversation (tmux + transcript).
+      await startConversation(id, convCwd);
       apiLogger.info(
-        { conversation_id: id, operation: 'createConversation', cwd: cwd ?? null },
-        'orchestrator conversation created',
+        { conversation_id: id, operation: 'createConversation', cwd: convCwd },
+        'orchestrator conversation created + session launched',
       );
       const conv = getConversation(id);
       res.status(201).json(conv);

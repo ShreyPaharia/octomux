@@ -280,23 +280,31 @@ export async function tailTranscript(
   // Initial read of existing content
   readNewContent();
 
-  // Watch for future appends
+  // Watch for future appends. `fs.watch` gives low latency but is unreliable on
+  // macOS for appends made by another process (claude writes the transcript) —
+  // it often does not fire a 'change' event. So we ALSO poll on an interval,
+  // which reliably catches every append on all platforms. (Both call the same
+  // idempotent offset-advancing reader, so double-firing is harmless.)
   try {
     watcher = fs.watch(filePath, { persistent: false }, (eventType) => {
-      if (eventType === 'change') {
+      if (eventType === 'change' || eventType === 'rename') {
         readNewContent();
       }
     });
-
     watcher.on('error', (err) => {
       logger.warn({ err, filePath }, 'transcript watcher error');
     });
   } catch (err) {
-    logger.warn({ err, filePath }, 'transcript: could not watch file, tailing disabled');
+    logger.warn({ err, filePath }, 'transcript: fs.watch unavailable, relying on poll');
   }
+
+  const TRANSCRIPT_POLL_MS = 250;
+  const poll: ReturnType<typeof setInterval> = setInterval(readNewContent, TRANSCRIPT_POLL_MS);
+  if (typeof poll.unref === 'function') poll.unref();
 
   const stop: StopFn = () => {
     stopped = true;
+    clearInterval(poll);
     if (watcher) {
       try {
         watcher.close();

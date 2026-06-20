@@ -96,11 +96,10 @@ function writeOrchestratorsettings(convId: string, hookToken: string): string {
   const preToolUseUrl = `${hookBaseUrl()}/api/hooks/pre-tool-use?token=${encodeURIComponent(hookToken)}`;
 
   const settings = {
-    // Pre-clear first-run TUI dialogs (Phase-0 finding)
-    theme: 'dark',
-    tui: {
-      autoAcceptPolicyChecks: true,
-    },
+    // NOTE: no `theme`/`tui` here — we run with the DEFAULT config dir (auth +
+    // onboarding already done), and an object `tui` value is rejected by claude
+    // ("Invalid value. Expected one of: default, fullscreen") which blocks the
+    // session on a settings-error dialog.
     // PreToolUse gate hook (deny-now for Bash(octomux *) calls)
     hooks: {
       PreToolUse: [
