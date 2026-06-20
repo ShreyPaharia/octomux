@@ -302,6 +302,25 @@ function WorkspacesIcon({ color }: { color: string }) {
   );
 }
 
+function OrchestratorIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
 function SettingsIcon({ color }: { color: string }) {
   return (
     <svg
@@ -341,6 +360,7 @@ const NAV_ITEMS: ReadonlyArray<{
 const MORE_ITEMS = [
   { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
+  { key: 'orchestrator', label: 'Orchestrator', to: '/orchestrator', Icon: OrchestratorIcon },
 ] as const;
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────
