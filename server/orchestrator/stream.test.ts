@@ -24,7 +24,9 @@ import {
   persistAndPush,
   setupOrchestratorWebSocket,
   handleOrchestratorUpgrade,
+  chatEventToWsEvent,
 } from './stream.js';
+import type { ChatEvent } from './transcript.js';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 
@@ -250,6 +252,43 @@ describe('persistAndPush', () => {
     const parsed = JSON.parse(pushed[0]);
     expect(parsed.type).toBe('card');
     expect(parsed.id).toBe('card-123');
+  });
+});
+
+describe('chatEventToWsEvent', () => {
+  const base = { uuid: 'u1', timestamp: '2026-01-01T00:00:00Z' };
+
+  it('forwards non-empty assistant/user text as message events', () => {
+    expect(chatEventToWsEvent({ type: 'assistant', text: 'hello', ...base } as ChatEvent)).toEqual({
+      type: 'message',
+      role: 'assistant',
+      text: 'hello',
+      id: 'u1',
+    });
+    expect(chatEventToWsEvent({ type: 'user', text: 'hi', ...base } as ChatEvent)).toEqual({
+      type: 'message',
+      role: 'user',
+      text: 'hi',
+      id: 'u1',
+    });
+  });
+
+  it('skips empty/whitespace-only messages (no blank bubbles)', () => {
+    // Assistant turns that are pure tool_use/thinking carry empty text.
+    expect(chatEventToWsEvent({ type: 'assistant', text: '', ...base } as ChatEvent)).toBeNull();
+    expect(
+      chatEventToWsEvent({ type: 'assistant', text: '   \n', ...base } as ChatEvent),
+    ).toBeNull();
+    expect(chatEventToWsEvent({ type: 'user', text: '', ...base } as ChatEvent)).toBeNull();
+  });
+
+  it('does not forward tool_use / tool_result / system events', () => {
+    expect(
+      chatEventToWsEvent({ type: 'tool_use', toolName: 'Bash', ...base } as unknown as ChatEvent),
+    ).toBeNull();
+    expect(
+      chatEventToWsEvent({ type: 'system', subtype: 'compact_boundary', ...base } as ChatEvent),
+    ).toBeNull();
   });
 });
 

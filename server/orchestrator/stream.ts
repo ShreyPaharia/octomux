@@ -171,8 +171,14 @@ export function persistAndPush(convId: string, event: OrchestratorWsEvent, push:
 export function chatEventToWsEvent(event: ChatEvent): OrchestratorWsEvent | null {
   switch (event.type) {
     case 'user':
+      // Skip empty turns (e.g. a turn that carried only a tool_result) — they'd
+      // render as blank bubbles.
+      if (!event.text.trim()) return null;
       return { type: 'message', role: 'user', text: event.text, id: event.uuid };
     case 'assistant':
+      // Assistant lines that are pure tool_use / thinking have no text — skip
+      // them so the thread doesn't fill with empty assistant bubbles.
+      if (!event.text.trim()) return null;
       return { type: 'message', role: 'assistant', text: event.text, id: event.uuid };
     case 'tool_use':
       // Tool use events are not forwarded as messages — they may become cards in Phase 3

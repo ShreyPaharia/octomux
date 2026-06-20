@@ -56,6 +56,31 @@ const PASTE_TO_ENTER_MIN_DELAY_MS = 50;
 /** Delay after --resume auto-turn before we allow real turns to be sent. */
 export const RESUME_QUIET_WINDOW_MS = process.env.NODE_ENV === 'test' ? 0 : 2000;
 
+// ─── Orchestrator role (system prompt) ──────────────────────────────────────
+
+/**
+ * The conductor's role, appended to claude's default system prompt via
+ * `--append-system-prompt`. It establishes the orchestrator as a thin
+ * coordination layer that DELEGATES work to octomux worker tasks rather than
+ * doing the work itself. Paired with the `permissions.deny` mutation block, this
+ * fixes the conductor editing the repo directly instead of creating + tracking a
+ * worker task.
+ */
+const ORCHESTRATOR_SYSTEM_PROMPT = [
+  'You are the octomux ORCHESTRATOR (the conductor). Your job is to COORDINATE work — never to do it yourself.',
+  '',
+  'HARD RULES:',
+  '- NEVER implement work yourself. Do not write code, edit files, run git, or modify anything. You have no Edit/Write tools by design — that is intentional.',
+  '- For ANY task the user asks for, DELEGATE it to an octomux worker task instead of doing it:',
+  '    octomux create-task --title "<short title>" --description "<full self-contained instructions for the worker>" --repo <absolute repo path>',
+  '  Add --kind plan when the user wants to review a plan before implementation begins.',
+  '- These octomux commands are GATED: the user approves each one before it runs. After approval, octomux creates the worker and it starts working. You only hold the task id — never the file contents.',
+  '- TRACK progress with your read tools only: mcp__octomux__list_tasks, mcp__octomux__get_task, mcp__octomux__monitor_status, mcp__octomux__get_task_output. Do not read or edit the repo directly — inspect tasks and their artifacts through these tools.',
+  '- KEEP THE USER INFORMED: when you create a task, tell them its id and what it will do; when a worker finishes a phase, summarize the outcome and propose the next step.',
+  '',
+  'You are a thin coordination layer: delegate everything, track it, and report status. Never touch the code.',
+].join('\n');
+
 // ─── Config dir ───────────────────────────────────────────────────────────────
 
 /**
@@ -136,6 +161,12 @@ function writeOrchestratorsettings(convId: string, hookToken: string): string {
         'mcp__octomux__get_task_output',
         'mcp__octomux__pull_linear_issue',
       ],
+      // The conductor COORDINATES work — it must never do the work itself.
+      // Hard-deny the mutation tools so it structurally cannot edit the repo,
+      // write files, or implement; it can only delegate via `octomux create-task`
+      // (gated) and observe via the read tools. (Fixes: conductor editing files
+      // directly instead of creating + tracking a worker task.)
+      deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'],
       // NOTE: 'octomux *' is NOT in allow — the PreToolUse hook must remain active
     },
   };
@@ -526,7 +557,7 @@ function buildLaunchCommand({
   mcpConfigPath,
   extraFlags = '',
 }: LaunchOpts): string {
-  return `claude --session-id ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${mcpConfigFlags(mcpConfigPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
+  return `claude --session-id ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${mcpConfigFlags(mcpConfigPath)}${orchestratorRoleFlag()}${extraFlags ? ` ${extraFlags}` : ''}`;
 }
 
 /** Build the `claude --resume <id>` command (default config dir + `--settings`). */
@@ -536,7 +567,12 @@ function buildResumeCommand({
   mcpConfigPath,
   extraFlags = '',
 }: ResumeOpts): string {
-  return `claude --resume ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${mcpConfigFlags(mcpConfigPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
+  return `claude --resume ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${mcpConfigFlags(mcpConfigPath)}${orchestratorRoleFlag()}${extraFlags ? ` ${extraFlags}` : ''}`;
+}
+
+/** The `--append-system-prompt` flag carrying the orchestrator role. */
+function orchestratorRoleFlag(): string {
+  return ` --append-system-prompt ${shellQuoteSingle(ORCHESTRATOR_SYSTEM_PROMPT)}`;
 }
 
 /**

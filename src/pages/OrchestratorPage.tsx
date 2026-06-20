@@ -175,16 +175,18 @@ function ChatInput({ onSubmit, disabled = false }: ChatInputProps) {
 interface MixedThreadProps {
   items: ThreadItem[];
   onCardDecision: (d: ActionCardDecision) => void;
+  /** True while the orchestrator is processing a turn (shows a working indicator). */
+  working?: boolean;
 }
 
-function MixedThread({ items, onCardDecision }: MixedThreadProps) {
+function MixedThread({ items, onCardDecision, working = false }: MixedThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [items.length]);
+  }, [items.length, working]);
 
-  if (items.length === 0) {
+  if (items.length === 0 && !working) {
     return (
       <div
         className="flex flex-1 items-center justify-center text-sm text-muted-foreground"
@@ -252,7 +254,26 @@ function MixedThread({ items, onCardDecision }: MixedThreadProps) {
       aria-live="polite"
     >
       {rendered}
+      {working && <WorkingIndicator />}
       <div ref={bottomRef} aria-hidden="true" />
+    </div>
+  );
+}
+
+/** Animated "orchestrator is working" indicator shown while a turn is in flight. */
+function WorkingIndicator() {
+  return (
+    <div
+      className="flex items-center gap-2 px-4 py-3"
+      aria-live="polite"
+      aria-label="Orchestrator is working"
+    >
+      <span className="flex gap-1">
+        <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+        <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+        <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground" />
+      </span>
+      <span className="text-xs text-muted-foreground">orchestrator is working…</span>
     </div>
   );
 }
@@ -266,6 +287,9 @@ export default function OrchestratorPage() {
   /** Mixed thread of messages + inline cards. */
   const [items, setItems] = useState<ThreadItem[]>([]);
   const [wsReady, setWsReady] = useState(false);
+  // True from when the user sends a turn until the orchestrator's next output
+  // (a message or a card) arrives — drives the "working" indicator.
+  const [working, setWorking] = useState(false);
   const [creatingConv, setCreatingConv] = useState(false);
   /** Conductor-leanness usage stats for the active conversation (§6.7). */
   const [usage, setUsage] = useState<ConversationUsage | null>(null);
@@ -302,6 +326,7 @@ export default function OrchestratorPage() {
     setActiveConvId(convId);
     setItems([]);
     setWsReady(false);
+    setWorking(false);
     setUsage(null);
 
     // Load message history and usage stats in parallel
@@ -322,6 +347,8 @@ export default function OrchestratorPage() {
       onOpen: () => setWsReady(true),
       onClose: () => setWsReady(false),
       onMessage: (event: WsIncomingEvent) => {
+        // Any orchestrator output (message or card) ends the "working" state.
+        setWorking(false);
         if (event.type === 'message') {
           const msg: ThreadMessage = {
             id: event.id ?? `ws-${Date.now()}-${Math.random()}`,
@@ -331,6 +358,25 @@ export default function OrchestratorPage() {
           setItems((prev) => {
             // Avoid duplicate message ids (history + ws replay)
             if (msg.id && prev.some((m) => 'id' in m && m.id === msg.id)) return prev;
+            // Dedup the optimistic user echo: handleSend adds a `local-…` user
+            // message immediately; the transcript tail then streams the SAME turn
+            // back with the real id. Match the pending local echo by text and
+            // adopt the real id instead of appending a second bubble.
+            if (msg.role === 'user') {
+              const echoIdx = prev.findIndex(
+                (m) =>
+                  'role' in m &&
+                  m.role === 'user' &&
+                  typeof m.id === 'string' &&
+                  m.id.startsWith('local-') &&
+                  m.text === msg.text,
+              );
+              if (echoIdx !== -1) {
+                const next = [...prev];
+                next[echoIdx] = { ...(next[echoIdx] as ThreadMessage), id: msg.id };
+                return next;
+              }
+            }
             return [...prev, msg];
           });
         } else if (event.type === 'card') {
@@ -440,6 +486,7 @@ export default function OrchestratorPage() {
       text,
     };
     setItems((prev) => [...prev, msg]);
+    setWorking(true);
   }, []);
 
   // ─── Card decision ───────────────────────────────────────────────────────
@@ -457,6 +504,7 @@ export default function OrchestratorPage() {
         text,
       };
       setItems((prev) => [...prev, msg]);
+      setWorking(true);
       return;
     }
 
@@ -535,7 +583,7 @@ export default function OrchestratorPage() {
               </div>
 
               {/* Mixed thread (messages + plan cards) */}
-              <MixedThread items={items} onCardDecision={handleCardDecision} />
+              <MixedThread items={items} onCardDecision={handleCardDecision} working={working} />
 
               {/* Input */}
               <ChatInput onSubmit={handleSend} />
