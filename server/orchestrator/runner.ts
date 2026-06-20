@@ -170,15 +170,14 @@ export async function startConversation(
   );
 
   const hookToken = crypto.randomBytes(32).toString('hex');
-  writeOrchestratorsettings(convId, hookToken);
+  const settingsPath = writeOrchestratorsettings(convId, hookToken);
 
   const sessionName = orchestratorSessionName(convId);
-  const configDir = path.join(convConfigDir(convId), '.claude');
 
   // Generate a fresh session id for this new conversation
   const sessionId = crypto.randomUUID();
 
-  const claudeCmd = buildLaunchCommand({ sessionId, configDir, extraFlags: opts.extraFlags });
+  const claudeCmd = buildLaunchCommand({ sessionId, settingsPath, extraFlags: opts.extraFlags });
   const shell = process.env.SHELL || '/bin/sh';
   const script = `${claudeCmd}; exec ${shell} -i`;
   const startupCmd = `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
@@ -200,6 +199,7 @@ export async function startConversation(
   updateConversation(convId, {
     tmux_window: tmuxWindow,
     claude_session_id: sessionId,
+    transcript_path: transcriptPathFor(cwd, sessionId),
   });
 
   logger.info(
@@ -231,10 +231,9 @@ export async function resumeConversation(
   );
 
   const hookToken = crypto.randomBytes(32).toString('hex');
-  writeOrchestratorsettings(convId, hookToken);
+  const settingsPath = writeOrchestratorsettings(convId, hookToken);
 
   const sessionName = orchestratorSessionName(convId);
-  const configDir = path.join(convConfigDir(convId), '.claude');
 
   const claudeSessionId = opts.claudeSessionId ?? conv.claude_session_id;
 
@@ -242,7 +241,7 @@ export async function resumeConversation(
   if (claudeSessionId) {
     claudeCmd = buildResumeCommand({
       sessionId: claudeSessionId,
-      configDir,
+      settingsPath,
       extraFlags: opts.extraFlags,
     });
   } else {
@@ -250,10 +249,13 @@ export async function resumeConversation(
     const newSessionId = crypto.randomUUID();
     claudeCmd = buildLaunchCommand({
       sessionId: newSessionId,
-      configDir,
+      settingsPath,
       extraFlags: opts.extraFlags,
     });
-    updateConversation(convId, { claude_session_id: newSessionId });
+    updateConversation(convId, {
+      claude_session_id: newSessionId,
+      transcript_path: transcriptPathFor(cwd, newSessionId),
+    });
   }
 
   const shell = process.env.SHELL || '/bin/sh';
@@ -379,24 +381,43 @@ export async function sendTurn(convId: string, text: string): Promise<void> {
 
 interface LaunchOpts {
   sessionId: string;
-  configDir: string;
+  settingsPath: string;
   extraFlags?: string;
 }
 
 interface ResumeOpts {
   sessionId: string;
-  configDir: string;
+  settingsPath: string;
   extraFlags?: string;
 }
 
-/** Build the `claude --session-id <id>` command using the isolated config dir. */
-function buildLaunchCommand({ sessionId, configDir, extraFlags = '' }: LaunchOpts): string {
-  return `claude --session-id ${sessionId} --config-dir ${shellQuoteSingle(configDir)}${extraFlags ? ` ${extraFlags}` : ''}`;
+/**
+ * Build the `claude --session-id <id>` launch command.
+ *
+ * Uses the DEFAULT config dir so the user's subscription OAuth applies — an
+ * isolated `CLAUDE_CONFIG_DIR` logs the session out (verified end-to-end). Tool
+ * isolation is via `--settings <file>` (gate hook + read-only allowlist), not a
+ * separate config home. (`--config-dir` is not a real claude flag — it was
+ * rejected with "unknown option".)
+ */
+function buildLaunchCommand({ sessionId, settingsPath, extraFlags = '' }: LaunchOpts): string {
+  return `claude --session-id ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
 }
 
-/** Build the `claude --resume <id>` command using the isolated config dir. */
-function buildResumeCommand({ sessionId, configDir, extraFlags = '' }: ResumeOpts): string {
-  return `claude --resume ${sessionId} --config-dir ${shellQuoteSingle(configDir)}${extraFlags ? ` ${extraFlags}` : ''}`;
+/** Build the `claude --resume <id>` command (default config dir + `--settings`). */
+function buildResumeCommand({ sessionId, settingsPath, extraFlags = '' }: ResumeOpts): string {
+  return `claude --resume ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
+}
+
+/**
+ * Derive the transcript path Claude Code writes under the default config dir:
+ * `~/.claude/projects/<cwd-with-non-alnum-as-dash>/<session-id>.jsonl`.
+ * (Verified: cwd `/private/tmp` → `~/.claude/projects/-private-tmp/<id>.jsonl`.)
+ */
+export function transcriptPathFor(cwd: string, sessionId: string): string {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+  return path.join(home, '.claude', 'projects', encoded, `${sessionId}.jsonl`);
 }
 
 /** Single-quote a string safe for use inside a shell command. */
