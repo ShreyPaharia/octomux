@@ -3,7 +3,7 @@
  *
  * Route: /orchestrator
  *
- * Minimal streamed orchestrator chat UI (Task 1.7 / SHR-123).
+ * Orchestrator chat UI (Tasks 1.7 / SHR-123, 2.6 / SHR-129).
  *
  * Layout:
  *   Left:   conversation list + "New conversation" button
@@ -21,7 +21,8 @@
  *   The page never fetches or renders plan/diff file bodies.
  *   Tool-use and tool-result events arrive as 'message' type with text from
  *   the transcript; artifact paths surface as text in the thread, not as
- *   inlined content.
+ *   inlined content. PlanCards receive only the artifact_url pointer and
+ *   fetch the plan body browser-side; the orchestrator LLM never sees the body.
  */
 
 import {
@@ -31,8 +32,10 @@ import {
   useCallback,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import { MessageThread, type ThreadMessage } from '../components/orchestrator/MessageThread';
+import { PlanCard } from '../components/orchestrator/PlanCard';
 import {
   orchestratorApi,
   openOrchestratorWs,
@@ -42,6 +45,30 @@ import {
   type WsOutgoingEvent,
 } from '../lib/orchestrator-api';
 import { cn } from '@/lib/utils';
+
+// ─── Thread item types ────────────────────────────────────────────────────────
+
+/** A plan-approval card that appears inline in the message thread. */
+interface PlanCardItem {
+  kind: 'plan-card';
+  id: string;
+  taskId: string;
+  planPath: string;
+  artifactUrl: string;
+  /** resolved once the user decides; removes the card from the thread */
+  resolved: boolean;
+}
+
+/** A generic (unknown-command) card displayed as informational text. */
+interface GenericCardItem {
+  kind: 'generic-card';
+  id: string;
+  command: string;
+  args: Record<string, unknown>;
+}
+
+/** A union of everything that can appear in the thread. */
+type ThreadItem = ThreadMessage | PlanCardItem | GenericCardItem;
 
 const SIDEBAR_WIDTH = 240;
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6]';
@@ -227,13 +254,106 @@ function ChatInput({ onSubmit, disabled = false }: ChatInputProps) {
   );
 }
 
+// ─── MixedThread ─────────────────────────────────────────────────────────────
+
+/**
+ * Renders the thread: a mix of chat messages and inline plan-approval cards.
+ * ThreadMessages are delegated to MessageThread; cards are rendered inline.
+ */
+interface MixedThreadProps {
+  items: ThreadItem[];
+  onCardDecision: (cardId: string, decision: 'approve' | 'reject') => void;
+}
+
+function MixedThread({ items, onCardDecision }: MixedThreadProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [items.length]);
+
+  if (items.length === 0) {
+    return (
+      <div
+        className="flex flex-1 items-center justify-center text-sm text-muted-foreground"
+        aria-live="polite"
+        aria-label="Message thread"
+      >
+        No messages yet. Start a conversation below.
+      </div>
+    );
+  }
+
+  // Collect contiguous message runs to pass to MessageThread in batches;
+  // cards break the run and are rendered inline.
+  const rendered: ReactNode[] = [];
+  let msgBatch: ThreadMessage[] = [];
+
+  function flushBatch() {
+    if (msgBatch.length === 0) return;
+    const key = msgBatch[0].id;
+    rendered.push(<MessageThread key={`msg-batch-${key}`} messages={msgBatch} />);
+    msgBatch = [];
+  }
+
+  for (const item of items) {
+    if ('role' in item) {
+      // It's a ThreadMessage
+      msgBatch.push(item as ThreadMessage);
+    } else if (item.kind === 'plan-card' && !item.resolved) {
+      flushBatch();
+      rendered.push(
+        <div key={item.id} className="px-4 py-2">
+          <PlanCard
+            cardId={item.id}
+            taskId={item.taskId}
+            planPath={item.planPath}
+            artifactUrl={item.artifactUrl}
+            onDecision={({ decision, card_id }) => onCardDecision(card_id, decision)}
+          />
+        </div>,
+      );
+    } else if (item.kind === 'generic-card') {
+      flushBatch();
+      rendered.push(
+        <div
+          key={item.id}
+          className="mx-4 my-2 rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] px-4 py-3 text-xs text-[rgba(255,255,255,0.55)]"
+          data-testid={`generic-card-${item.id}`}
+        >
+          <span className="font-semibold">{item.command}</span>
+          {Object.keys(item.args).length > 0 && (
+            <pre className="mt-1 whitespace-pre-wrap text-[rgba(255,255,255,0.4)]">
+              {JSON.stringify(item.args, null, 2)}
+            </pre>
+          )}
+        </div>,
+      );
+    }
+  }
+  flushBatch();
+
+  return (
+    <div
+      className="flex flex-1 flex-col overflow-y-auto"
+      role="log"
+      aria-label="Message thread"
+      aria-live="polite"
+    >
+      {rendered}
+      <div ref={bottomRef} aria-hidden="true" />
+    </div>
+  );
+}
+
 // ─── OrchestratorPage ─────────────────────────────────────────────────────────
 
 export default function OrchestratorPage() {
   const [conversations, setConversations] = useState<OrchestratorConversation[]>([]);
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  /** Mixed thread of messages + inline cards. */
+  const [items, setItems] = useState<ThreadItem[]>([]);
   const [wsReady, setWsReady] = useState(false);
   const [creatingConv, setCreatingConv] = useState(false);
 
@@ -267,14 +387,14 @@ export default function OrchestratorPage() {
     }
 
     setActiveConvId(convId);
-    setMessages([]);
+    setItems([]);
     setWsReady(false);
 
     // Load message history
     try {
       const history = await orchestratorApi.listMessages(convId);
-      const displayMsgs = history.map(parseMessage);
-      setMessages(displayMsgs);
+      const displayMsgs: ThreadItem[] = history.map(parseMessage);
+      setItems(displayMsgs);
     } catch {
       // No history yet is fine
     }
@@ -290,13 +410,46 @@ export default function OrchestratorPage() {
             role: event.role,
             text: event.text,
           };
-          setMessages((prev) => {
+          setItems((prev) => {
             // Avoid duplicate message ids (history + ws replay)
-            if (msg.id && prev.some((m) => m.id === msg.id)) return prev;
+            if (msg.id && prev.some((m) => 'id' in m && m.id === msg.id)) return prev;
             return [...prev, msg];
           });
+        } else if (event.type === 'card') {
+          // Dispatch the right card variant based on command
+          if (event.command === 'approve-plan') {
+            const args = event.args as {
+              task_id?: string;
+              plan_path?: string;
+              artifact_url?: string;
+            };
+            const card: PlanCardItem = {
+              kind: 'plan-card',
+              id: event.id,
+              taskId: args.task_id ?? '',
+              planPath: args.plan_path ?? 'plan.json',
+              artifactUrl: args.artifact_url ?? '',
+              resolved: false,
+            };
+            setItems((prev) => {
+              if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
+              return [...prev, card];
+            });
+          } else {
+            // Generic card (unknown command) — display as informational
+            const card: GenericCardItem = {
+              kind: 'generic-card',
+              id: event.id,
+              command: event.command,
+              args: event.args,
+            };
+            setItems((prev) => {
+              if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
+              return [...prev, card];
+            });
+          }
         }
-        // card, status, error events are handled in Phase 3+
+        // status, error events are handled in Phase 3+
       },
     });
 
@@ -337,8 +490,31 @@ export default function OrchestratorPage() {
       role: 'user',
       text,
     };
-    setMessages((prev) => [...prev, msg]);
+    setItems((prev) => [...prev, msg]);
   }, []);
+
+  // ─── Card decision ───────────────────────────────────────────────────────
+
+  const handleCardDecision = useCallback((cardId: string, decision: 'approve' | 'reject') => {
+    if (!wsRef.current) return;
+    wsRef.current.send({ type: 'card_decision', card_id: cardId, decision });
+    // Mark the card as resolved so it disappears from the thread
+    setItems((prev) =>
+      prev.map((item) =>
+        'kind' in item && item.kind === 'plan-card' && item.id === cardId
+          ? { ...item, resolved: true }
+          : item,
+      ),
+    );
+  }, []);
+
+  // ─── Expose messages for tests (backward compat) ─────────────────────────
+
+  // The existing OrchestratorPage tests reference `messages` via the
+  // MessageThread render; we use MixedThread but keep the legacy path for
+  // pure message rendering via MessageThread when there are no cards.
+  // This is transparent to the test suite since MixedThread still renders
+  // MessageThread internally for message runs.
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -375,8 +551,8 @@ export default function OrchestratorPage() {
                 )}
               </div>
 
-              {/* Message thread */}
-              <MessageThread messages={messages} className="flex-1" />
+              {/* Mixed thread (messages + plan cards) */}
+              <MixedThread items={items} onCardDecision={handleCardDecision} />
 
               {/* Input */}
               <ChatInput onSubmit={handleSend} />
