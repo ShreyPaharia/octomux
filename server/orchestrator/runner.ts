@@ -148,12 +148,22 @@ function writeOrchestratorsettings(convId: string): string {
     // Orchestrator's allowed tools: MCP read + write tools only.
     permissions: {
       allow: [
-        // MCP orchestrator reads (added in Phase 1 / SHR-121)
+        // Whole-server allow: approves EVERY tool the octomux MCP server exposes,
+        // present and future. Critical because an un-allowed MCP tool triggers an
+        // interactive permission prompt in the conductor's tmux TUI that nobody can
+        // answer (the user interacts via the web chat) — hanging the session. The
+        // whole-server form (`mcp__<server>`, no trailing tool) works; the
+        // `mcp__<server>__*` wildcard does NOT (claude-code#13077). The explicit
+        // tools below are kept for documentation + as a fallback.
+        'mcp__octomux',
+        // MCP orchestrator reads (Phase 1 / SHR-121 + SHR-142 discovery reads).
         'mcp__octomux__list_tasks',
         'mcp__octomux__get_task',
         'mcp__octomux__monitor_status',
         'mcp__octomux__get_task_output',
         'mcp__octomux__pull_linear_issue',
+        'mcp__octomux__recent_repos',
+        'mcp__octomux__default_branch',
         // MCP write tools (SHR-142) — execute immediately, no Bash, no gate.
         'mcp__octomux__create_task',
         'mcp__octomux__send_message',

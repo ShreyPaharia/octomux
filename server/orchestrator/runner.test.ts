@@ -186,6 +186,31 @@ describe('orchestrator runner', () => {
       expect(deny).toContain('NotebookEdit');
     });
 
+    it('allows ALL octomux MCP tools so no call ever triggers a hanging permission prompt', async () => {
+      const convId = createConversation({ title: 'Allow list test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const { writeFileSync } = await import('fs');
+      const settingsWrite = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(
+          (c) =>
+            typeof c[0] === 'string' &&
+            (c[0] as string).includes(convId) &&
+            (c[0] as string).endsWith('settings.local.json'),
+        );
+      const allow: string[] = JSON.parse(settingsWrite![1] as string).permissions?.allow ?? [];
+      // Whole-server allow is the robust catch-all (an un-allowed MCP tool prompts
+      // in the tmux TUI and hangs the conductor).
+      expect(allow).toContain('mcp__octomux');
+      // The discovery read tools added in SHR-142 must be explicitly allowed too —
+      // their omission is exactly what hung a real conversation on default_branch.
+      expect(allow).toContain('mcp__octomux__recent_repos');
+      expect(allow).toContain('mcp__octomux__default_branch');
+      // And the write tools.
+      expect(allow).toContain('mcp__octomux__create_task');
+    });
+
     it('launches with --mcp-config and --strict-mcp-config (octomux read tools)', async () => {
       const convId = createConversation({ title: 'MCP test' });
       await startConversation(convId, '/tmp/test-repo');
