@@ -17,11 +17,15 @@
  * directly so they are exported as plain functions (no transport coupling).
  */
 
+import { promisify } from 'util';
+import { execFile as execFileCb } from 'child_process';
 import { getDb } from '../../db.js';
 import { SELECT_TASK_SQL } from '../../task-select.js';
 import { getManagedTask } from '../store.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';
+
+const execFile = promisify(execFileCb);
 
 const logger = childLogger('orchestrator/mcp/read');
 
@@ -322,4 +326,68 @@ export function handleGetTaskOutput(input: GetTaskOutputInput): TaskOutputPointe
   }
 
   return pointers;
+}
+
+// ─── recent_repos ─────────────────────────────────────────────────────────────
+
+export interface RecentRepoRow {
+  repo_path: string;
+  last_used: string;
+}
+
+/**
+ * Return the 10 most-recently-used distinct repo paths from past tasks.
+ * Never returns deleted tasks' repos.
+ */
+export function handleRecentRepos(): RecentRepoRow[] {
+  logger.debug({ operation: 'recent_repos' }, 'recent_repos called');
+
+  const rows = getDb()
+    .prepare(
+      `SELECT w.repo_path AS repo_path, MAX(t.created_at) AS last_used
+         FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path IS NOT NULL
+          AND t.deleted_at IS NULL
+        GROUP BY w.repo_path
+        ORDER BY last_used DESC
+        LIMIT 10`,
+    )
+    .all() as RecentRepoRow[];
+
+  return rows;
+}
+
+// ─── default_branch ───────────────────────────────────────────────────────────
+
+export interface DefaultBranchInput {
+  repo_path: string;
+}
+
+export interface DefaultBranchResult {
+  branch: string;
+}
+
+/**
+ * Return the default branch of a git repo by inspecting refs/remotes/origin/HEAD.
+ * Falls back to 'main' on any error (missing remote, not a git repo, etc.).
+ */
+export async function handleDefaultBranch(input: DefaultBranchInput): Promise<DefaultBranchResult> {
+  const { repo_path } = input;
+
+  logger.debug({ operation: 'default_branch', repo_path }, 'default_branch called');
+
+  try {
+    const { stdout } = await execFile('git', [
+      '-C',
+      repo_path,
+      'symbolic-ref',
+      'refs/remotes/origin/HEAD',
+    ]);
+    const branch = stdout.trim().replace('refs/remotes/origin/', '');
+    return { branch };
+  } catch {
+    logger.debug({ operation: 'default_branch', repo_path }, 'default_branch fallback to main');
+    return { branch: 'main' };
+  }
 }

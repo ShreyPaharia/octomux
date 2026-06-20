@@ -28,6 +28,8 @@ import {
   handleGetTask,
   handleMonitorStatus,
   handleGetTaskOutput,
+  handleRecentRepos,
+  handleDefaultBranch,
 } from './read.js';
 import { handlePullLinearIssue } from './seed.js';
 import { callOrchestratorAction, orchestratorWriteEnabled } from './write.js';
@@ -186,6 +188,59 @@ export function createOctomuxMcpServer(): McpServer {
           {
             type: 'text' as const,
             text: JSON.stringify(summary, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── recent_repos ────────────────────────────────────────────────────────────
+  server.registerTool(
+    'recent_repos',
+    {
+      description:
+        'List the 10 most-recently-used distinct git repo paths from past octomux tasks. ' +
+        'Use this for discovery — never use Bash to find repos. ' +
+        'Returns [{repo_path, last_used}] ordered by most-recent first.',
+      inputSchema: {},
+    },
+    (_args) => {
+      logger.debug({ operation: 'recent_repos' }, 'MCP recent_repos invoked');
+      const result = handleRecentRepos();
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── default_branch ──────────────────────────────────────────────────────────
+  server.registerTool(
+    'default_branch',
+    {
+      description:
+        'Return the default branch of a git repo (e.g. "main" or "master") by inspecting ' +
+        'refs/remotes/origin/HEAD. Falls back to "main" when the remote is absent or the ' +
+        'path is not a git repo. Use instead of running Bash git commands.',
+      inputSchema: {
+        repo_path: z.string().describe('Absolute path to the git repo'),
+      },
+    },
+    async (args) => {
+      logger.debug(
+        { operation: 'default_branch', repo_path: args.repo_path },
+        'MCP default_branch invoked',
+      );
+      const result = await handleDefaultBranch(args);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
           },
         ],
       };

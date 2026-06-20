@@ -16,6 +16,8 @@ import {
   handleGetTask,
   handleMonitorStatus,
   handleGetTaskOutput,
+  handleRecentRepos,
+  handleDefaultBranch,
 } from './read.js';
 import { upsertManagedTask } from '../store.js';
 
@@ -378,6 +380,88 @@ describe('orchestrator mcp read tools', () => {
       expect(result.diff_url).toMatch(/^\/tasks\/task-gto-04/);
       // A URL is a pointer, never the actual diff text
       expect(result.diff_url!.length).toBeLessThan(256);
+    });
+  });
+
+  // ─── recent_repos ──────────────────────────────────────────────────────────
+
+  describe('handleRecentRepos', () => {
+    it('returns repo_path and last_used for tasks with worktrees', () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-rr-01',
+        title: 'Repo task',
+        repo_path: '/tmp/my-repo',
+        runtime_state: 'idle',
+        workflow_status: 'backlog',
+        created_at: '2026-01-02 00:00:00',
+        updated_at: '2026-01-02 00:00:00',
+      });
+
+      const result = handleRecentRepos();
+      expect(Array.isArray(result)).toBe(true);
+      const row = result.find((r) => r.repo_path === '/tmp/my-repo');
+      expect(row).toBeDefined();
+      expect(row).toHaveProperty('repo_path');
+      expect(row).toHaveProperty('last_used');
+    });
+
+    it('returns empty array when no tasks with worktrees exist', () => {
+      const result = handleRecentRepos();
+      expect(result).toEqual([]);
+    });
+
+    it('deduplicates multiple tasks from the same repo, taking max created_at', () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-rr-02',
+        title: 'Older task',
+        repo_path: '/tmp/shared-repo',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+      });
+      insertTask(db, {
+        id: 'task-rr-03',
+        title: 'Newer task',
+        repo_path: '/tmp/shared-repo',
+        created_at: '2026-01-03 00:00:00',
+        updated_at: '2026-01-03 00:00:00',
+      });
+
+      const result = handleRecentRepos();
+      const rows = result.filter((r) => r.repo_path === '/tmp/shared-repo');
+      // Only one row per distinct repo_path
+      expect(rows).toHaveLength(1);
+      // last_used should be the newer created_at
+      expect(rows[0].last_used).toBe('2026-01-03 00:00:00');
+    });
+
+    it('excludes soft-deleted tasks', () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-rr-04',
+        title: 'Deleted task',
+        repo_path: '/tmp/deleted-repo',
+      });
+      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 'task-rr-04'`).run();
+
+      const result = handleRecentRepos();
+      expect(result.find((r) => r.repo_path === '/tmp/deleted-repo')).toBeUndefined();
+    });
+  });
+
+  // ─── default_branch ────────────────────────────────────────────────────────
+
+  describe('handleDefaultBranch', () => {
+    it('falls back to "main" for a bogus/non-git path', async () => {
+      const result = await handleDefaultBranch({ repo_path: '/tmp/__nonexistent_repo__' });
+      expect(result).toEqual({ branch: 'main' });
+    });
+
+    it('falls back to "main" when origin HEAD is not set', async () => {
+      // A directory that exists but is not a git repo
+      const result = await handleDefaultBranch({ repo_path: '/tmp' });
+      expect(result).toEqual({ branch: 'main' });
     });
   });
 });

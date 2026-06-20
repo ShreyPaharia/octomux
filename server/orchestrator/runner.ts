@@ -9,8 +9,8 @@
  * Key Phase-0 findings honored here:
  *  - Pre-clear first-run TUI dialogs via isolated `settings.local.json` in an
  *    orchestrator-specific config dir (tui + theme pre-set).
- *  - Install a `PreToolUse` hook with `matcher: "Bash(octomux *)"` in the
- *    isolated settings for the deny-now gate (Phase 3 / SHR-131).
+ *  - Conductor is PURE-MCP: no PreToolUse gate hook. All writes go through
+ *    mcp__octomux__* tools which execute immediately. Bash/Edit/Write are denied.
  *  - After `--resume`, wait for the auto-injected continuation turn's Stop hook
  *    (or a quiet window) before injecting real turns (resumeDelay guard).
  *  - `sendTurn` is hardened: paste text → capture-pane confirm it landed → Enter.
@@ -116,54 +116,35 @@ function convConfigDir(convId: string): string {
  * Write the conductor's isolated `settings.local.json` into the per-conversation
  * config dir.
  *
+ * The conductor is PURE-MCP: no PreToolUse gate hook. All orchestration writes
+ * go through mcp__octomux__* tools which execute immediately. Bash, Edit, Write,
+ * MultiEdit, and NotebookEdit are hard-denied so the conductor structurally cannot
+ * touch the repo — it can only delegate via MCP tools and observe via read tools.
+ *
+ * (The conductor's hook_token lives on the conversation and is wired into the
+ * mcp-config write-env by writeOrchestratorMcpConfig — not needed here.)
+ *
  * Contains:
- *  - `theme` + `tui` pre-set so first-run TUI dialogs (trust-folder, theme
- *    picker, onboarding) are pre-accepted and never block the session.
- *  - `PreToolUse` HTTP hook restricted to `Bash(octomux *)` for the deny-now
- *    gate (Phase 3 / SHR-131). The hook URL uses `127.0.0.1` so the backend
- *    restart window is < 1s and the fail-open risk is minimised.
- *  - `permissions.allow` intentionally omits `octomux *` so the PreToolUse hook
- *    gate remains active (documented Phase-0 constraint).
+ *  - `permissions.deny` includes Bash, Edit, Write, MultiEdit, NotebookEdit.
+ *  - `permissions.allow` lists only the mcp__octomux__* tools (reads + writes).
+ *  - No `theme`/`tui` keys — we run with the DEFAULT config dir (auth +
+ *    onboarding already done), and an object `tui` value is rejected by claude
+ *    ("Invalid value. Expected one of: default, fullscreen") which blocks the
+ *    session on a settings-error dialog.
  */
-function writeOrchestratorsettings(convId: string, hookToken: string): string {
+function writeOrchestratorsettings(convId: string): string {
   const dir = path.join(convConfigDir(convId), '.claude');
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.local.json');
-
-  // The conversation_id is REQUIRED on the gate URL: handlePreToolUse fails-open
-  // (allows the write un-gated) when it can't attach a card to a conversation.
-  const preToolUseUrl =
-    `${hookBaseUrl()}/api/hooks/pre-tool-use` +
-    `?token=${encodeURIComponent(hookToken)}` +
-    `&conversation_id=${encodeURIComponent(convId)}`;
 
   const settings = {
     // NOTE: no `theme`/`tui` here — we run with the DEFAULT config dir (auth +
     // onboarding already done), and an object `tui` value is rejected by claude
     // ("Invalid value. Expected one of: default, fullscreen") which blocks the
     // session on a settings-error dialog.
-    // PreToolUse gate hook. IMPORTANT: Claude Code hook matchers match the TOOL
-    // NAME only (as a regex) — NOT permissions-style command patterns. A matcher
-    // of 'Bash(octomux *)' silently never fires, leaving every write un-gated.
-    // We therefore match ALL 'Bash' calls and narrow to `octomux *` server-side
-    // in handlePreToolUse (non-octomux Bash is allowed through untouched).
-    hooks: {
-      PreToolUse: [
-        {
-          matcher: 'Bash',
-          hooks: [{ type: 'http', url: preToolUseUrl, timeout: 5 }],
-        },
-      ],
-    },
-    // Orchestrator's allowed tools: MCP read tools only (writes go through Bash + gate)
+    // Orchestrator's allowed tools: MCP read + write tools only.
     permissions: {
       allow: [
-        // Core read tools
-        'Bash(cat:*)',
-        'Bash(ls:*)',
-        'Bash(find:*)',
-        'Bash(grep:*)',
-        'Bash(echo:*)',
         // MCP orchestrator reads (added in Phase 1 / SHR-121)
         'mcp__octomux__list_tasks',
         'mcp__octomux__get_task',
@@ -179,12 +160,11 @@ function writeOrchestratorsettings(convId: string, hookToken: string): string {
         'mcp__octomux__delete_task',
       ],
       // The conductor COORDINATES work — it must never do the work itself.
-      // Hard-deny the mutation tools so it structurally cannot edit the repo,
-      // write files, or implement; it can only delegate via `octomux create-task`
-      // (gated) and observe via the read tools. (Fixes: conductor editing files
-      // directly instead of creating + tracking a worker task.)
-      deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'],
-      // NOTE: 'octomux *' is NOT in allow — the PreToolUse hook must remain active
+      // Hard-deny Bash and all mutation tools so it structurally cannot run
+      // shell commands, edit the repo, write files, or implement anything.
+      // All writes go through mcp__octomux__* tools. (Fixes: conductor editing
+      // files directly instead of creating + tracking a worker task.)
+      deny: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'],
     },
   };
 
@@ -321,7 +301,7 @@ export async function startConversation(
   );
 
   const hookToken = crypto.randomBytes(32).toString('hex');
-  const settingsPath = writeOrchestratorsettings(convId, hookToken);
+  const settingsPath = writeOrchestratorsettings(convId);
   const mcpConfigPath = writeOrchestratorMcpConfig(convId, hookToken);
 
   const sessionName = orchestratorSessionName(convId);
@@ -390,7 +370,7 @@ export async function resumeConversation(
   );
 
   const hookToken = crypto.randomBytes(32).toString('hex');
-  const settingsPath = writeOrchestratorsettings(convId, hookToken);
+  const settingsPath = writeOrchestratorsettings(convId);
   const mcpConfigPath = writeOrchestratorMcpConfig(convId, hookToken);
 
   const sessionName = orchestratorSessionName(convId);

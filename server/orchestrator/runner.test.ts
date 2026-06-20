@@ -151,8 +151,18 @@ describe('orchestrator runner', () => {
       expect(content).not.toHaveProperty('tui');
     });
 
-    it('installs a PreToolUse hook with a tool-name "Bash" matcher in the conductor settings', async () => {
-      const convId = createConversation({ title: 'Hook test' });
+    it('persists the conductor hook_token on the conversation (used by mcp-config env)', async () => {
+      const convId = createConversation({ title: 'Token test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const conv = getConversation(convId);
+      // The conductor stores hook_token so the MCP stdio server can authenticate
+      // back to the main server for write operations via OCTOMUX_ACTION_TOKEN.
+      expect(conv!.hook_token).toBeTruthy();
+    });
+
+    it('permissions.deny includes Bash, Edit, Write in the written settings.local.json', async () => {
+      const convId = createConversation({ title: 'Deny list test' });
       await startConversation(convId, '/tmp/test-repo');
 
       const { writeFileSync } = await import('fs');
@@ -166,60 +176,14 @@ describe('orchestrator runner', () => {
         );
       expect(orchestratorSettingsWrite).toBeDefined();
       const content = JSON.parse(orchestratorSettingsWrite![1] as string);
-      // hooks must include PreToolUse
-      expect(content.hooks).toBeDefined();
-      const preToolUse = content.hooks?.PreToolUse;
-      expect(preToolUse).toBeDefined();
-      const hook = Array.isArray(preToolUse) ? preToolUse[0] : preToolUse;
-      // Claude Code matchers are TOOL NAMES only — must be exactly "Bash" (a
-      // permissions-style "Bash(octomux *)" matcher silently never fires).
-      expect(hook.matcher).toBe('Bash');
-      // The gate narrows to octomux server-side; the hook URL still carries auth.
-      expect(JSON.stringify(hook)).toContain('pre-tool-use');
-    });
-
-    it('passes conversation_id on the PreToolUse gate URL (else the gate fails open)', async () => {
-      const convId = createConversation({ title: 'Conv id test' });
-      await startConversation(convId, '/tmp/test-repo');
-
-      const { writeFileSync } = await import('fs');
-      // The mock accumulates across tests — scope to THIS conversation's settings.
-      const settingsWrite = vi
-        .mocked(writeFileSync)
-        .mock.calls.find(
-          (c) =>
-            typeof c[0] === 'string' &&
-            (c[0] as string).includes(convId) &&
-            (c[0] as string).endsWith('settings.local.json'),
-        );
-      const content = JSON.parse(settingsWrite![1] as string);
-      const url = content.hooks.PreToolUse[0].hooks[0].url as string;
-      // Without conversation_id the gate can't attach a card and fails OPEN.
-      expect(url).toContain(`conversation_id=${convId}`);
-      expect(url).toContain('token=');
-    });
-
-    it('persists the conductor hook_token on the conversation and matches the gate URL', async () => {
-      const convId = createConversation({ title: 'Token test' });
-      await startConversation(convId, '/tmp/test-repo');
-
-      const conv = getConversation(convId);
-      // The conductor is not an `agents` row — its gate token lives here, so
-      // requireHookToken can authenticate the PreToolUse callbacks.
-      expect(conv!.hook_token).toBeTruthy();
-
-      const { writeFileSync } = await import('fs');
-      const settingsWrite = vi
-        .mocked(writeFileSync)
-        .mock.calls.find(
-          (c) =>
-            typeof c[0] === 'string' &&
-            (c[0] as string).includes(convId) &&
-            (c[0] as string).endsWith('settings.local.json'),
-        );
-      const content = JSON.parse(settingsWrite![1] as string);
-      const url = content.hooks.PreToolUse[0].hooks[0].url as string;
-      expect(url).toContain(`token=${conv!.hook_token}`);
+      // Conductor is pure-MCP: no hooks, Bash hard-denied, repo mutation tools denied.
+      expect(content.hooks).toBeUndefined();
+      const deny: string[] = content.permissions?.deny ?? [];
+      expect(deny).toContain('Bash');
+      expect(deny).toContain('Edit');
+      expect(deny).toContain('Write');
+      expect(deny).toContain('MultiEdit');
+      expect(deny).toContain('NotebookEdit');
     });
 
     it('launches with --mcp-config and --strict-mcp-config (octomux read tools)', async () => {
