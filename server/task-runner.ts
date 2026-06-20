@@ -315,6 +315,64 @@ interface SetupResult {
   runPreflight: boolean;
 }
 
+/** True if `refs/heads/<branch>` exists in the repo. */
+async function gitBranchExists(repoPath: string, branch: string): Promise<boolean> {
+  try {
+    await execFile('git', [
+      '-C',
+      repoPath,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `refs/heads/${branch}`,
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Add a git worktree, tolerating an already-existing branch so task creation
+ * never dies on a name collision (the reported failure: a prior closed task left
+ * the branch behind — octomux preserves branches on close).
+ *  - branch doesn't exist → create it (`-b <branch> [base]`).
+ *  - branch exists, free → check it out into the new worktree (no `-b`; base is
+ *    ignored, the branch already has a tip).
+ *  - branch exists but is checked out elsewhere (or any other add failure) →
+ *    retry with a unique `<branch>-<id>`.
+ * Returns the branch name actually used.
+ */
+async function addWorktreeWithBranch(
+  repoPath: string,
+  worktreePath: string,
+  branch: string,
+  baseBranch: string | null | undefined,
+): Promise<string> {
+  if (!(await gitBranchExists(repoPath, branch))) {
+    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branch];
+    if (baseBranch) args.push(baseBranch);
+    await execFile('git', args);
+    return branch;
+  }
+
+  try {
+    await execFile('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branch]);
+    logger.info({ operation: 'addWorktree', branch }, 'addWorktree: reused existing branch');
+    return branch;
+  } catch (err) {
+    const unique = `${branch}-${nanoid(6)}`;
+    logger.warn(
+      { operation: 'addWorktree', branch, unique, err },
+      'addWorktree: existing branch unusable (checked out elsewhere?); using unique branch',
+    );
+    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', unique];
+    if (baseBranch) args.push(baseBranch);
+    await execFile('git', args);
+    return unique;
+  }
+}
+
 async function setupNew(task: Task): Promise<SetupResult> {
   await validateRepo(task.repo_path);
 
@@ -326,9 +384,17 @@ async function setupNew(task: Task): Promise<SetupResult> {
   const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
   fs.mkdirSync(worktreeBaseDir, { recursive: true });
 
-  const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
-  if (task.base_branch) worktreeArgs.push(task.base_branch);
-  await execFile('git', worktreeArgs);
+  // `worktree add -b <branch>` creates a NEW branch and fails if it already
+  // exists (e.g. left over from a prior task — octomux preserves branches on
+  // close). If the branch exists and isn't checked out elsewhere, check it out
+  // into the new worktree instead; otherwise fall back to a unique branch name
+  // so task creation never dies on a name collision.
+  const finalBranch = await addWorktreeWithBranch(
+    task.repo_path,
+    worktreePath,
+    branch,
+    task.base_branch,
+  );
 
   // For review tasks, move HEAD to pr_head_sha so the diff UI and merge-base
   // see the PR's actual commit. Auto-review tasks need a fetch first (the SHA
@@ -399,7 +465,7 @@ async function setupNew(task: Task): Promise<SetupResult> {
 
   return {
     worktreePath,
-    branch,
+    branch: finalBranch,
     baseBranch: task.base_branch,
     baseSha,
     installHooksAt: worktreePath,

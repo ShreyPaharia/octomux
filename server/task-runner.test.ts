@@ -84,6 +84,15 @@ vi.mock('child_process', () => ({
         cb(null, { stdout: '1111111111111111111111111111111111111111\n', stderr: '' });
       } else if (args.includes('rev-parse') && args.includes('--abbrev-ref')) {
         cb(null, { stdout: 'main\n', stderr: '' });
+      } else if (
+        args.includes('rev-parse') &&
+        args.includes('--verify') &&
+        args.some((a) => a.startsWith('refs/heads/'))
+      ) {
+        // Branch-existence probe: default to "branch does not exist" so the
+        // worktree is created with `-b`. Tests for the existing-branch path
+        // override this mock.
+        cb(new Error('fatal: needed a single revision'), null);
       } else if (args.includes('rev-parse')) {
         cb(null, { stdout: 'abcdef0000000000000000000000000000000000\n', stderr: '' });
       } else {
@@ -308,6 +317,55 @@ describe('startTask', () => {
 
     const updated = getTask(db, DEFAULTS.task.id)!;
     expect(updated.worktree).toBe(`${DEFAULTS.task.repo_path}/.worktrees/feat/my-feature`);
+  });
+
+  it('reuses an existing branch (checks it out, not -b) instead of failing', async () => {
+    // Branch already exists (e.g. preserved from a prior closed task). The probe
+    // reports it exists, so the worktree is created by checking it out — `-b`
+    // would fail with "a branch named ... already exists". Save/restore the
+    // global mock so this branch-exists impl doesn't leak into later tests.
+    const prevImpl = vi.mocked(execFile).getMockImplementation();
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      if (args.includes('display-message') || args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (
+        args.includes('rev-parse') &&
+        args.includes('--verify') &&
+        args.some((a) => a.startsWith('refs/heads/'))
+      ) {
+        cb(null, { stdout: 'abc1234\n', stderr: '' }); // branch EXISTS
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    }) as any);
+
+    try {
+      insertTask(db, { branch: 'docs/existing-branch' });
+      await startTask({ ...DEFAULTS.task, branch: 'docs/existing-branch' } as Task);
+
+      // Worktree add checked out the existing branch — WITHOUT -b.
+      const reuseCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['worktree', 'add', 'docs/existing-branch'],
+      });
+      expect(reuseCall).toBeDefined();
+      const bCall = findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['worktree', 'add', '-b', 'docs/existing-branch'],
+      });
+      expect(bCall).toBeUndefined();
+
+      const updated = getTask(db, DEFAULTS.task.id)!;
+      expect(updated.runtime_state).not.toBe('error');
+    } finally {
+      if (prevImpl) vi.mocked(execFile).mockImplementation(prevImpl as never);
+    }
   });
 
   it('passes base_branch as start point for worktree add', async () => {
@@ -702,11 +760,22 @@ describe('startTask', () => {
 
   it('does not persist tmux_session until after tmux new-session succeeds', async () => {
     // Fail git worktree add so we bail before reaching tmux new-session.
-    vi.mocked(execFile).mockImplementationOnce(((_cmd: string, _args: string[], cb: Function) => {
-      cb(null, { stdout: '', stderr: '' }); // rev-parse
-    }) as any);
-    vi.mocked(execFile).mockImplementationOnce(((_cmd: string, args: string[], cb: Function) => {
-      if (args.includes('worktree') && args.includes('add')) {
+    // Arg-based (not positional) so the branch-existence probe between
+    // validateRepo and worktree-add doesn't shift a positional mock sequence.
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: string,
+      args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      if (
+        args.includes('rev-parse') &&
+        args.includes('--verify') &&
+        args.some((a) => a.startsWith('refs/heads/'))
+      ) {
+        cb(new Error('branch absent'), null); // branch does not exist → use -b
+      } else if (args.includes('worktree') && args.includes('add')) {
         cb(new Error('git worktree add failed'), null);
       } else {
         cb(null, { stdout: '', stderr: '' });
