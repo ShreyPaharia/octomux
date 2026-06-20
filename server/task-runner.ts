@@ -110,7 +110,12 @@ export function buildAgentStartupCommand(args: {
   if (args.prompt && args.worktreePath && args.agentId) {
     const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
     fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
-    inner += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
+    // `--` ends option parsing so the positional prompt can't be swallowed by a
+    // preceding variadic flag. `--mcp-config` (appended for orchestrator-managed
+    // tasks) is variadic in Claude Code: without the separator it consumes the
+    // prompt as a second config path and the worker dies with
+    // "Invalid MCP configuration". POSIX `--` is honoured by both harnesses.
+    inner += ` -- "$(cat ${shellQuoteSingle(promptFile)})"`;
     setTimeout(() => {
       try {
         fs.unlinkSync(promptFile);

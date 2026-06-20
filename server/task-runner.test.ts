@@ -185,6 +185,9 @@ describe('buildAgentStartupCommand', () => {
     });
     expect(cmd).toContain('"$(cat ');
     expect(cmd).toContain('.claude-prompt-agent123');
+    // `--` must precede the positional prompt so a trailing variadic flag
+    // (e.g. --mcp-config for managed tasks) can't swallow it.
+    expect(cmd).toContain('-- "$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
       'Do the thing',
