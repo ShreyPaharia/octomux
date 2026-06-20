@@ -33,12 +33,13 @@
 
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
-import { startTask } from '../task-runner.js';
+import { startTask, closeTask, deleteTask, resumeTask, addAgent } from '../task-runner.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import { upsertManagedTask } from './store.js';
 import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
-import type { Task, Agent, RunMode } from '../types.js';
+import { WORKFLOW_STATUSES } from '../types.js';
+import type { Task, Agent, RunMode, WorkflowStatus } from '../types.js';
 
 const logger = childLogger('orchestrator/exec');
 
@@ -74,6 +75,16 @@ export interface CreateTaskInput {
   kind?: typeof PLAN_KIND | string;
   /** Optional model override (e.g. 'claude-sonnet-4-6'). */
   model?: string | null;
+  /**
+   * Optional effort hint for model right-sizing (§6.7).
+   * Values: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+   * This is an advisory hint from the orchestrator — it controls how the
+   * model is chosen when model is null (e.g. 'xhigh' suggests Opus-class).
+   * When model is explicitly set, effort is informational only.
+   * The hint is logged and available to callers but is not stored in the DB
+   * (no schema column); it guides the orchestrator's model-selection policy.
+   */
+  effort?: string;
   /** Orchestrator conversation that owns this task. Required to register the task
    *  in managed_tasks so the supervisor can route events to it. */
   conversation_id?: string;
@@ -281,6 +292,8 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
       operation: 'runCreateTask',
       kind: input.kind ?? 'default',
       run_mode: runMode,
+      model: input.model ?? null,
+      effort: input.effort ?? null,
       conversation_id: input.conversation_id ?? null,
     },
     'runCreateTask: start',
@@ -443,4 +456,186 @@ export async function runSendMessage(taskId: string, message: string): Promise<v
     { task_id: taskId, agent_id: agent.id, operation: 'runSendMessage' },
     'runSendMessage: turn delivered',
   );
+}
+
+// ─── runAddAgent ──────────────────────────────────────────────────────────────
+
+export interface AddAgentInput {
+  /** Optional initial prompt for the new agent. */
+  prompt?: string;
+  /** Optional agent persona name (matches agents/<name>.md). */
+  agent?: string | null;
+  /** Optional label for the agent window. */
+  label?: string;
+  /** Optional per-agent model override. */
+  model?: string | null;
+  /** Optional skeleton name to use as the agent's template. */
+  skeleton?: string;
+}
+
+export interface AddAgentResult {
+  /** The newly added agent's id. */
+  agent_id: string;
+  /** The tmux window index of the new agent. */
+  window_index: number;
+}
+
+/**
+ * Add a new agent window to an existing running task.
+ *
+ * This is the server-side executor for the orchestrator's `add-agent` write
+ * command (gated: ask tier). Reuses task-runner's `addAgent` function.
+ *
+ * Returns only the agent_id pointer — never plan/diff/file body contents.
+ */
+export async function runAddAgent(taskId: string, opts: AddAgentInput): Promise<AddAgentResult> {
+  const db = getDb();
+
+  logger.info(
+    { task_id: taskId, operation: 'runAddAgent', label: opts.label ?? null },
+    'runAddAgent: start',
+  );
+
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  if (!task) {
+    logger.warn({ task_id: taskId, operation: 'runAddAgent' }, 'runAddAgent: task not found');
+    throw new Error(`runAddAgent: task ${taskId} not found`);
+  }
+
+  const agent = await addAgent(task, {
+    prompt: opts.prompt,
+    agent: opts.agent ?? null,
+    label: opts.label,
+    model: opts.model ?? null,
+    skeleton: opts.skeleton,
+  });
+
+  logger.info(
+    {
+      task_id: taskId,
+      agent_id: agent.id,
+      operation: 'runAddAgent',
+      window_index: agent.window_index,
+    },
+    'runAddAgent: agent added',
+  );
+
+  return { agent_id: agent.id, window_index: agent.window_index };
+}
+
+// ─── runSetStatus ─────────────────────────────────────────────────────────────
+
+/**
+ * Update the workflow_status of a task.
+ *
+ * This is the server-side executor for the orchestrator's `set-status` write
+ * command (gated: ask tier). Directly updates the workflow_status column.
+ *
+ * Valid statuses: backlog | planned | in_progress | human_review | pr | done.
+ */
+export async function runSetStatus(taskId: string, status: WorkflowStatus): Promise<void> {
+  const db = getDb();
+
+  logger.info({ task_id: taskId, operation: 'runSetStatus', status }, 'runSetStatus: start');
+
+  if (!WORKFLOW_STATUSES.includes(status)) {
+    throw new Error(
+      `runSetStatus: invalid status "${status}" (must be one of ${WORKFLOW_STATUSES.join(', ')})`,
+    );
+  }
+
+  const task = db
+    .prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL')
+    .get(taskId) as { id: string } | undefined;
+  if (!task) {
+    logger.warn({ task_id: taskId, operation: 'runSetStatus' }, 'runSetStatus: task not found');
+    throw new Error(`runSetStatus: task ${taskId} not found`);
+  }
+
+  db.prepare(`UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`).run(
+    status,
+    taskId,
+  );
+
+  logger.info(
+    { task_id: taskId, operation: 'runSetStatus', status },
+    'runSetStatus: status updated',
+  );
+}
+
+// ─── runCloseTask ─────────────────────────────────────────────────────────────
+
+/**
+ * Close a running task (stop agents + kill tmux session).
+ *
+ * This is the server-side executor for the orchestrator's `close-task` write
+ * command (gated: always-ask tier — destructive, never auto-allowed).
+ *
+ * Close preserves the worktree and branch (for resume). Use runDeleteTask for
+ * full cleanup.
+ */
+export async function runCloseTask(taskId: string): Promise<void> {
+  const db = getDb();
+
+  logger.info({ task_id: taskId, operation: 'runCloseTask' }, 'runCloseTask: start');
+
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  if (!task) {
+    logger.warn({ task_id: taskId, operation: 'runCloseTask' }, 'runCloseTask: task not found');
+    throw new Error(`runCloseTask: task ${taskId} not found`);
+  }
+
+  await closeTask(task);
+
+  logger.info({ task_id: taskId, operation: 'runCloseTask' }, 'runCloseTask: complete');
+}
+
+// ─── runResumeTask ────────────────────────────────────────────────────────────
+
+/**
+ * Resume a closed/idle task (restart tmux session + agents).
+ *
+ * This is the server-side executor for the orchestrator's `resume-task` write
+ * command (gated: ask tier).
+ */
+export async function runResumeTask(taskId: string): Promise<void> {
+  const db = getDb();
+
+  logger.info({ task_id: taskId, operation: 'runResumeTask' }, 'runResumeTask: start');
+
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  if (!task) {
+    logger.warn({ task_id: taskId, operation: 'runResumeTask' }, 'runResumeTask: task not found');
+    throw new Error(`runResumeTask: task ${taskId} not found`);
+  }
+
+  await resumeTask(task);
+
+  logger.info({ task_id: taskId, operation: 'runResumeTask' }, 'runResumeTask: complete');
+}
+
+// ─── runDeleteTask ────────────────────────────────────────────────────────────
+
+/**
+ * Hard-delete a task (kill tmux + remove worktree + delete branch + delete DB rows).
+ *
+ * This is the server-side executor for the orchestrator's `delete-task` write
+ * command (gated: always-ask tier — fully destructive, never auto-allowed).
+ *
+ * Use runCloseTask to stop a task while preserving the worktree.
+ */
+export async function runDeleteTask(taskId: string): Promise<void> {
+  const db = getDb();
+
+  logger.info({ task_id: taskId, operation: 'runDeleteTask' }, 'runDeleteTask: start');
+
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  if (!task) {
+    logger.warn({ task_id: taskId, operation: 'runDeleteTask' }, 'runDeleteTask: task not found');
+    throw new Error(`runDeleteTask: task ${taskId} not found`);
+  }
+
+  await deleteTask(task);
+
+  logger.info({ task_id: taskId, operation: 'runDeleteTask' }, 'runDeleteTask: complete');
 }

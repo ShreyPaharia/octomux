@@ -39,7 +39,15 @@ import { classify } from './policy.js';
 import { createCard, getCard, resolveCard } from './store.js';
 import type { ActionCard } from './store.js';
 import { pushToConversation } from './stream.js';
-import { runCreateTask, runSendMessage } from './exec.js';
+import {
+  runCreateTask,
+  runSendMessage,
+  runAddAgent,
+  runSetStatus,
+  runCloseTask,
+  runResumeTask,
+  runDeleteTask,
+} from './exec.js';
 
 const logger = childLogger('orchestrator/gate');
 
@@ -349,6 +357,7 @@ async function runCardCommand(
         run_mode: (args['--mode'] as import('./exec.js').CreateTaskInput['run_mode']) ?? 'new',
         kind: args['--kind'],
         model: args['--model'],
+        effort: args['--effort'],
         // Attach to the conversation so the supervisor can route events
         conversation_id: card.conversation_id,
       });
@@ -362,6 +371,62 @@ async function runCardCommand(
         throw new Error('gate: send-message requires --task and --text');
       }
       await runSendMessage(taskId, message);
+      return { task_id: taskId };
+    }
+
+    case 'add-agent': {
+      const args = parseCliArgs(parts.slice(2));
+      const taskId = args['--task'] ?? args['-t'];
+      if (!taskId) {
+        throw new Error('gate: add-agent requires --task');
+      }
+      return await runAddAgent(taskId, {
+        prompt: args['--prompt'] ?? args['-p'],
+        agent: args['--agent'] ?? args['-a'] ?? null,
+        label: args['--label'] ?? args['-l'],
+        model: args['--model'],
+        skeleton: args['--skeleton'],
+      });
+    }
+
+    case 'set-status': {
+      const args = parseCliArgs(parts.slice(2));
+      const taskId = args['--task'] ?? args['-t'];
+      const status = args['--status'] ?? args['-s'];
+      if (!taskId || !status) {
+        throw new Error('gate: set-status requires --task and --status');
+      }
+      await runSetStatus(taskId, status as import('../types.js').WorkflowStatus);
+      return { task_id: taskId, status };
+    }
+
+    case 'close-task': {
+      const args = parseCliArgs(parts.slice(2));
+      const taskId = args['--task'] ?? args['-t'];
+      if (!taskId) {
+        throw new Error('gate: close-task requires --task');
+      }
+      await runCloseTask(taskId);
+      return { task_id: taskId };
+    }
+
+    case 'resume-task': {
+      const args = parseCliArgs(parts.slice(2));
+      const taskId = args['--task'] ?? args['-t'];
+      if (!taskId) {
+        throw new Error('gate: resume-task requires --task');
+      }
+      await runResumeTask(taskId);
+      return { task_id: taskId };
+    }
+
+    case 'delete-task': {
+      const args = parseCliArgs(parts.slice(2));
+      const taskId = args['--task'] ?? args['-t'];
+      if (!taskId) {
+        throw new Error('gate: delete-task requires --task');
+      }
+      await runDeleteTask(taskId);
       return { task_id: taskId };
     }
 
@@ -409,7 +474,12 @@ function parseCliArgs(parts: string[]): Record<string, string> {
 function formatResult(card: ActionCard, result: unknown): string {
   if (result && typeof result === 'object') {
     const r = result as Record<string, unknown>;
-    if (r['task_id']) return `created task \`${String(r['task_id'])}\``;
+    if (r['agent_id'])
+      return `added agent \`${String(r['agent_id'])}\` to task \`${String(r['task_id'] ?? '')}\``;
+    if (r['task_id'] && r['title']) return `created task \`${String(r['task_id'])}\``;
+    if (r['task_id'] && r['status'])
+      return `set task \`${String(r['task_id'])}\` status to \`${String(r['status'])}\``;
+    if (r['task_id']) return `task \`${String(r['task_id'])}\` updated`;
   }
 
   let input: Record<string, unknown>;

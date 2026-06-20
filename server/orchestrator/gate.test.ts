@@ -27,10 +27,20 @@ import { createConversation, getCard, listPendingCards, createCard, resolveCard 
 // Mock exec so we don't need real task-runner / tmux
 const mockRunCreateTask = vi.fn().mockResolvedValue({ task_id: 'new-task-id', title: 'Test Task' });
 const mockRunSendMessage = vi.fn().mockResolvedValue(undefined);
+const mockRunAddAgent = vi.fn().mockResolvedValue({ agent_id: 'new-agent-id', window_index: 1 });
+const mockRunSetStatus = vi.fn().mockResolvedValue(undefined);
+const mockRunCloseTask = vi.fn().mockResolvedValue(undefined);
+const mockRunResumeTask = vi.fn().mockResolvedValue(undefined);
+const mockRunDeleteTask = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('./exec.js', () => ({
   runCreateTask: vi.fn((...args: unknown[]) => mockRunCreateTask(...args)),
   runSendMessage: vi.fn((...args: unknown[]) => mockRunSendMessage(...args)),
+  runAddAgent: vi.fn((...args: unknown[]) => mockRunAddAgent(...args)),
+  runSetStatus: vi.fn((...args: unknown[]) => mockRunSetStatus(...args)),
+  runCloseTask: vi.fn((...args: unknown[]) => mockRunCloseTask(...args)),
+  runResumeTask: vi.fn((...args: unknown[]) => mockRunResumeTask(...args)),
+  runDeleteTask: vi.fn((...args: unknown[]) => mockRunDeleteTask(...args)),
   validatePlanJson: vi.fn().mockReturnValue({ valid: true }),
   PLAN_SCHEMA_VERSION: '1.0.0',
   PLAN_KIND: 'plan',
@@ -390,5 +400,196 @@ describe('POST /api/hooks/pre-tool-use', () => {
       .expect(200);
 
     expect(res.body.hookSpecificOutput.permissionDecision).toBe('allow');
+  });
+});
+
+// ─── Task 3.4: full write-command surface gating ──────────────────────────────
+
+describe('gate: full write-command surface — tier classification (Task 3.4)', () => {
+  let convId: string;
+
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    convId = makeConversation();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each(['add-agent', 'send-message', 'set-status', 'request-review', 'resume-task'])(
+    'ask-tier subcommand %s → deny + card',
+    async (subcommand) => {
+      const result = await handlePreToolUse({
+        conversation_id: convId,
+        tool_name: 'Bash',
+        tool_input: { command: `octomux ${subcommand} --task abc123` },
+        tool_use_id: `tu-tier-${subcommand}`,
+      });
+
+      expect(result.decision).toBe('deny');
+      expect(result.card_id).toBeTruthy();
+    },
+  );
+
+  it.each(['close-task', 'delete-task'])(
+    'always-ask subcommand %s → deny + card (never auto-allowed)',
+    async (subcommand) => {
+      const result = await handlePreToolUse({
+        conversation_id: convId,
+        tool_name: 'Bash',
+        tool_input: { command: `octomux ${subcommand} --task abc123` },
+        tool_use_id: `tu-always-${subcommand}`,
+      });
+
+      expect(result.decision).toBe('deny');
+      expect(result.card_id).toBeTruthy();
+    },
+  );
+});
+
+describe('gate.executeCard — new write commands (Task 3.4)', () => {
+  let convId: string;
+
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    convId = makeConversation();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function insertCard(subcommand: string, extraArgs = ''): string {
+    const command = extraArgs
+      ? `octomux ${subcommand} ${extraArgs}`
+      : `octomux ${subcommand} --task abc123`;
+    return createCard({
+      conversation_id: convId,
+      tool_use_id: `tu-exec-${subcommand}`,
+      tool_name: 'Bash',
+      input: JSON.stringify({ command }),
+    });
+  }
+
+  it.each([
+    ['add-agent', '--task t1 --prompt Focus-on-tests'],
+    ['set-status', '--task t1 --status in_progress'],
+    ['resume-task', '--task t1'],
+  ])('Approve %s → runs op server-side + resolves to executed', async (subcommand, args) => {
+    const cardId = insertCard(subcommand, args);
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    const card = getCard(cardId)!;
+    expect(card.status).toBe('executed');
+    expect(mockPushToConversation).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['close-task', '--task t1'],
+    ['delete-task', '--task t1'],
+  ])(
+    'Approve %s (always-ask) → runs op server-side + resolves to executed',
+    async (subcommand, args) => {
+      const cardId = insertCard(subcommand, args);
+
+      await executeCard({ card_id: cardId, decision: 'approve' });
+
+      const card = getCard(cardId)!;
+      expect(card.status).toBe('executed');
+      expect(mockPushToConversation).toHaveBeenCalled();
+    },
+  );
+
+  it('add-agent: passes --prompt and --label to runAddAgent', async () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-add-agent-opts',
+      tool_name: 'Bash',
+      input: JSON.stringify({
+        // parseCliArgs splits on whitespace; use single-token values
+        command: 'octomux add-agent --task task-abc --prompt Fix-tests --label TestAgent',
+      }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunAddAgent).toHaveBeenCalledWith(
+      'task-abc',
+      expect.objectContaining({ prompt: 'Fix-tests', label: 'TestAgent' }),
+    );
+  });
+
+  it('set-status: passes taskId and status to runSetStatus', async () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-set-status',
+      tool_name: 'Bash',
+      input: JSON.stringify({ command: 'octomux set-status --task task-xyz --status done' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunSetStatus).toHaveBeenCalledWith('task-xyz', 'done');
+  });
+
+  it('close-task: passes taskId to runCloseTask', async () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-close-task',
+      tool_name: 'Bash',
+      input: JSON.stringify({ command: 'octomux close-task --task task-abc' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunCloseTask).toHaveBeenCalledWith('task-abc');
+  });
+
+  it('resume-task: passes taskId to runResumeTask', async () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-resume-task',
+      tool_name: 'Bash',
+      input: JSON.stringify({ command: 'octomux resume-task --task task-abc' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunResumeTask).toHaveBeenCalledWith('task-abc');
+  });
+
+  it('delete-task: passes taskId to runDeleteTask', async () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-delete-task',
+      tool_name: 'Bash',
+      input: JSON.stringify({ command: 'octomux delete-task --task task-abc' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunDeleteTask).toHaveBeenCalledWith('task-abc');
+  });
+
+  it('create-task with --model and --effort → model forwarded to runCreateTask', async () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-create-rightsized',
+      tool_name: 'Bash',
+      input: JSON.stringify({
+        command:
+          'octomux create-task --title "Big refactor" --repo /tmp/repo --model claude-opus-4-5 --effort xhigh',
+      }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-opus-4-5', effort: 'xhigh' }),
+    );
   });
 });

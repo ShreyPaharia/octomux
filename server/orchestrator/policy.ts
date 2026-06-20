@@ -39,6 +39,7 @@ const ASK_SUBCOMMANDS = new Set([
   'send-message',
   'set-status',
   'request-review',
+  'resume-task',
 ]);
 
 /**
