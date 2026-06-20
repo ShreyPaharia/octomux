@@ -295,6 +295,51 @@ describe('startTask', () => {
     expect(findLaunchCmd()).toContain('--model claude-sonnet-4-6');
   });
 
+  // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
+
+  it('writes worker-mcp-config.json and adds --mcp-config flag for managed tasks', async () => {
+    const { upsertManagedTask, createConversation } = await import('./orchestrator/store.js');
+    insertTask(db);
+    // Register the task as orchestrator-managed BEFORE calling startTask
+    const convId = createConversation({ title: 'test-conv-mcp' });
+    upsertManagedTask({
+      conversation_id: convId,
+      task_id: DEFAULTS.task.id,
+      phase: 'implementing',
+    });
+
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    // A worker-mcp-config.json should have been written
+    const mcpConfigCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).includes('worker-mcp-config.json'));
+    expect(mcpConfigCall).toBeDefined();
+
+    // The config should include the MCP server entry with OCTOMUX_TASK_ID env
+    const cfg = JSON.parse(String(mcpConfigCall![1]));
+    expect(cfg.mcpServers?.octomux?.env?.OCTOMUX_TASK_ID).toBe(DEFAULTS.task.id);
+
+    // The launch command should contain --mcp-config
+    const launchArg = findLaunchCmd();
+    expect(launchArg).toContain('--mcp-config');
+  });
+
+  it('does NOT write worker-mcp-config.json for non-managed tasks', async () => {
+    insertTask(db);
+    // Task is NOT in managed_tasks
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    const mcpConfigCall = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).includes('worker-mcp-config.json'));
+    expect(mcpConfigCall).toBeUndefined();
+
+    // The launch command should NOT contain --mcp-config
+    const launchArg = findLaunchCmd();
+    expect(launchArg).not.toContain('--mcp-config');
+  });
+
   // ─── Custom branch and base branch ─────────────────────────────────────
 
   it('uses user-specified branch name when provided', async () => {

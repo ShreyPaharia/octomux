@@ -378,7 +378,7 @@ async function executeApprovePlan(card: ActionCard): Promise<void> {
   try {
     await runSendMessage(
       taskId,
-      'The plan has been approved. Re-read plan.json from disk (it may have been edited) and implement exactly what it specifies. When done, create .octomux/ and write an empty .octomux/implement-done file, then end your turn.',
+      'The plan has been approved. Re-read plan.json from disk (it may have been edited) and implement exactly what it specifies. When implementation is complete, call mcp__octomux__report_complete({ phase: "implement", summary: "<1-2 lines of what was done>" }) and end your turn.',
     );
   } catch (err) {
     const errMsg = (err as Error).message ?? String(err);

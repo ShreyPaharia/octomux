@@ -450,14 +450,16 @@ router.post(
 );
 
 /**
- * Dispatch on managed_tasks.phase to detect phase completion from marker files:
+ * Backstop: detect phase completion from marker files on the Stop hook.
  *
- *   phase 'speccing'    + spec.md present          → advance to 'planning'   → broadcast phase:'spec'
- *   phase 'planning'    + plan.json present         → advance to 'awaiting_approval' → broadcast phase:'plan'
- *   phase 'implementing'+ .octomux/implement-done   → advance to 'done' → delete sentinel → broadcast phase:'implement'
+ * When the worker uses the explicit report_complete MCP tool, advancePhaseForLabel
+ * has already run before the Stop hook fires (idempotent). When the tool is not
+ * called (e.g. old workers, failures), this backstop detects the marker files and
+ * calls advancePhaseForLabel — producing identical results to the explicit path.
  *
- * Idempotent: phase is advanced synchronously (before broadcast) so a rapid
- * second Stop from the same turn cannot double-fire.
+ *   phase 'speccing'     + spec.md present          → advancePhaseForLabel('spec')
+ *   phase 'planning'     + plan.json present         → advancePhaseForLabel('plan')
+ *   phase 'implementing' + .octomux/implement-done   → advancePhaseForLabel('implement')
  *
  * NOTE: managed_tasks.phase COLUMN values ('speccing'/'planning'/...) are
  * DISTINCT from the broadcast payload.phase LABEL ('spec'/'plan'/'implement').
@@ -481,22 +483,11 @@ function maybeSignalPhaseComplete(taskId: string): void {
     const specPath = path.join(worktree, 'spec.md');
     if (!fs.existsSync(specPath)) return;
 
-    // Advance synchronously so a rapid second Stop won't re-fire.
-    upsertManagedTask({
-      conversation_id: managed.conversation_id,
-      task_id: taskId,
-      phase: 'planning',
-    });
-
     logger.info(
       { task_id: taskId, operation: 'spec_complete_detected' },
-      'Stop hook: spec.md present for managed speccing task — emitting phase_complete(spec)',
+      'Stop hook backstop: spec.md present for managed speccing task — advancing via advancePhaseForLabel',
     );
-
-    broadcast({
-      type: 'task:phase_complete',
-      payload: { taskId, phase: 'spec', artifacts: ['spec.md'] },
-    });
+    advancePhaseForLabel(taskId, 'spec', ['spec.md']);
     return;
   }
 
@@ -504,22 +495,11 @@ function maybeSignalPhaseComplete(taskId: string): void {
     const planPath = path.join(worktree, 'plan.json');
     if (!fs.existsSync(planPath)) return;
 
-    // Advance synchronously so a concurrent/rapid second Stop won't re-fire.
-    upsertManagedTask({
-      conversation_id: managed.conversation_id,
-      task_id: taskId,
-      phase: 'awaiting_approval',
-    });
-
     logger.info(
       { task_id: taskId, operation: 'plan_complete_detected' },
-      'Stop hook: plan.json present for managed planning task — emitting phase_complete(plan)',
+      'Stop hook backstop: plan.json present for managed planning task — advancing via advancePhaseForLabel',
     );
-
-    broadcast({
-      type: 'task:phase_complete',
-      payload: { taskId, phase: 'plan', artifacts: ['plan.json'] },
-    });
+    advancePhaseForLabel(taskId, 'plan', ['plan.json']);
     return;
   }
 
@@ -527,27 +507,137 @@ function maybeSignalPhaseComplete(taskId: string): void {
     const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
     if (!fs.existsSync(sentinelPath)) return;
 
-    // Advance synchronously so a rapid second Stop won't re-fire.
-    upsertManagedTask({
-      conversation_id: managed.conversation_id,
-      task_id: taskId,
-      phase: 'done',
-    });
-
-    // Delete the sentinel so it never appears in the diff.
-    fs.rmSync(sentinelPath, { force: true });
-
     logger.info(
       { task_id: taskId, operation: 'implement_complete_detected' },
-      'Stop hook: implement-done sentinel present for managed implementing task — emitting phase_complete(implement)',
+      'Stop hook backstop: implement-done sentinel present for managed implementing task — advancing via advancePhaseForLabel',
     );
-
-    broadcast({
-      type: 'task:phase_complete',
-      payload: { taskId, phase: 'implement' },
-    });
+    advancePhaseForLabel(taskId, 'implement');
     return;
   }
+}
+
+/**
+ * Map a phase LABEL (from the MCP tool / broadcast payload) to the managed_tasks
+ * COLUMN value to advance to. This is the single source of truth for the
+ * label → column mapping.
+ *
+ *   label 'spec'      → column 'planning'
+ *   label 'plan'      → column 'awaiting_approval'
+ *   label 'implement' → column 'done'
+ *
+ * Unknown labels are passed through unchanged (forward-compat).
+ */
+function phaseColumnForLabel(label: string): string {
+  switch (label) {
+    case 'spec':
+      return 'planning';
+    case 'plan':
+      return 'awaiting_approval';
+    case 'implement':
+      return 'done';
+    default:
+      return label;
+  }
+}
+
+/**
+ * Advance a managed task's phase column based on a broadcast LABEL and emit the
+ * task:phase_complete event. This is the shared transition used by both:
+ *   - The explicit MCP tool (POST /api/hooks/phase-complete)
+ *   - The marker-file backstop (maybeSignalPhaseComplete)
+ *
+ * Idempotent: if the task is already past the target phase column (or not managed),
+ * this is a no-op and does NOT double-fire the broadcast.
+ *
+ * For 'implement', also deletes <worktree>/.octomux/implement-done if present.
+ */
+export function advancePhaseForLabel(taskId: string, label: string, artifacts?: unknown): void {
+  const managed = getManagedTask(taskId);
+  if (!managed) return;
+
+  const targetColumn = phaseColumnForLabel(label);
+
+  // Idempotency: only advance if we are still in the expected "current" phase
+  // (the phase BEFORE the target). If we are already at or past the target, skip.
+  const alreadyAdvanced = managed.phase === targetColumn;
+  if (alreadyAdvanced) {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: already at target phase — no-op',
+    );
+    return;
+  }
+
+  // Additional idempotency: for implement → done, only fire from 'implementing'.
+  // For other phases the column name is already the guard.
+  if (label === 'implement' && managed.phase !== 'implementing') {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: not in implementing phase — skipping implement advance',
+    );
+    return;
+  }
+
+  // For 'spec', only fire from 'speccing'.
+  if (label === 'spec' && managed.phase !== 'speccing') {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: not in speccing phase — skipping spec advance',
+    );
+    return;
+  }
+
+  // For 'plan', only fire from 'planning'.
+  if (label === 'plan' && managed.phase !== 'planning') {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: not in planning phase — skipping plan advance',
+    );
+    return;
+  }
+
+  // Advance synchronously BEFORE broadcast so a rapid second call cannot double-fire.
+  const artifactsJson = artifacts !== undefined ? JSON.stringify(artifacts) : undefined;
+  upsertManagedTask({
+    conversation_id: managed.conversation_id,
+    task_id: taskId,
+    phase: targetColumn,
+    ...(artifactsJson !== undefined ? { artifacts: artifactsJson } : {}),
+  });
+
+  logger.info(
+    { task_id: taskId, label, phase_column: targetColumn, operation: 'advancePhaseForLabel' },
+    'advancePhaseForLabel: phase advanced',
+  );
+
+  // For implement, delete the sentinel so it never appears in the diff.
+  if (label === 'implement') {
+    const row = getDb()
+      .prepare(
+        `SELECT w.path AS worktree FROM tasks t
+           JOIN worktrees w ON t.worktree_id = w.id
+          WHERE t.id = ?`,
+      )
+      .get(taskId) as { worktree: string | null } | undefined;
+    const worktree = row?.worktree;
+    if (worktree) {
+      const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
+      try {
+        fs.rmSync(sentinelPath, { force: true });
+      } catch {
+        // Non-fatal
+      }
+    }
+  }
+
+  broadcast({
+    type: 'task:phase_complete',
+    payload: {
+      taskId,
+      phase: label,
+      ...(artifacts !== undefined ? { artifacts } : {}),
+    },
+  });
 }
 
 // POST /api/hooks/phase-complete
@@ -555,7 +645,8 @@ function maybeSignalPhaseComplete(taskId: string): void {
 // Body: { task_id, phase, artifacts? }
 // Authenticated by the worker's existing per-agent hook_token.
 // Persists + emits a typed task:phase_complete event and advances
-// managed_tasks.phase. Suppresses the Stop auto-human_review for managed tasks.
+// managed_tasks.phase. The phase field here is the BROADCAST LABEL ('spec',
+// 'plan', 'implement') — advancePhaseForLabel maps it to the column value.
 router.post('/phase-complete', requireHookToken, (req, res) => {
   const { task_id, phase, artifacts } = req.body as {
     task_id?: string;
@@ -569,38 +660,28 @@ router.post('/phase-complete', requireHookToken, (req, res) => {
     return;
   }
 
-  // Only advance phase if this task is orchestrator-managed.
   const managed = getManagedTask(task_id);
   if (managed) {
-    const artifactsJson = artifacts !== undefined ? JSON.stringify(artifacts) : null;
-    upsertManagedTask({
-      conversation_id: managed.conversation_id,
-      task_id,
-      phase,
-      ...(artifactsJson !== null ? { artifacts: artifactsJson } : {}),
-    });
-
+    advancePhaseForLabel(task_id, phase, artifacts);
     logger.info(
       { task_id, phase, operation: 'phase_complete' },
-      'phase-complete: advanced managed_tasks.phase',
+      'phase-complete: advancePhaseForLabel called',
     );
   } else {
+    // Not managed — still emit the event so supervisor can observe it.
     logger.info(
       { task_id, phase },
-      'phase-complete: task not orchestrator-managed, no-op on phase',
+      'phase-complete: task not orchestrator-managed, emitting event only',
     );
+    broadcast({
+      type: 'task:phase_complete',
+      payload: {
+        taskId: task_id,
+        phase,
+        ...(artifacts !== undefined ? { artifacts } : {}),
+      },
+    });
   }
-
-  // Always emit the typed event and broadcast (so supervisor can observe it
-  // whether or not the task is managed).
-  broadcast({
-    type: 'task:phase_complete',
-    payload: {
-      taskId: task_id,
-      phase,
-      ...(artifacts !== undefined ? { artifacts } : {}),
-    },
-  });
 
   res.status(200).send();
 });

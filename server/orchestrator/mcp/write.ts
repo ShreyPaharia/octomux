@@ -14,6 +14,13 @@
  *
  * Writes are only exposed when base url + token are present (i.e. an
  * orchestrator-started session); a plain MCP session gets read tools only.
+ *
+ * Worker-mode report_complete (SHR-160):
+ *   OCTOMUX_TASK_ID         — the worker's own task id (worker mode)
+ *   OCTOMUX_ACTION_TOKEN    — the worker's hook_token (same env var, dual purpose)
+ *   OCTOMUX_ACTION_BASE_URL — hookBaseUrl() (same env var, dual purpose)
+ *
+ * Worker writes are only exposed when OCTOMUX_TASK_ID is also set.
  */
 
 import { childLogger } from '../../logger.js';
@@ -31,7 +38,21 @@ function actionConfig(): { baseUrl?: string; token?: string; conversationId?: st
 /** True when the write tools should be registered (orchestrator-started session). */
 export function orchestratorWriteEnabled(): boolean {
   const { baseUrl, token } = actionConfig();
-  return Boolean(baseUrl && token);
+  // Must have base url + token, but must NOT be a worker session (worker has OCTOMUX_TASK_ID).
+  // The worker gets report_complete instead (workerReportEnabled).
+  return Boolean(baseUrl && token && !process.env.OCTOMUX_TASK_ID);
+}
+
+/**
+ * True when the worker report_complete tool should be registered.
+ * Requires all three worker env vars to be present.
+ */
+export function workerReportEnabled(): boolean {
+  return Boolean(
+    process.env.OCTOMUX_TASK_ID &&
+    process.env.OCTOMUX_ACTION_TOKEN &&
+    process.env.OCTOMUX_ACTION_BASE_URL,
+  );
 }
 
 /** RPC a write action to the main server. Returns the action result. */
@@ -67,4 +88,39 @@ export async function callOrchestratorAction(
     throw new Error(body.error ?? `orchestrator action '${action}' failed (HTTP ${res.status})`);
   }
   return body.result;
+}
+
+/**
+ * RPC to the main server's phase-complete endpoint, signalling that this worker
+ * has finished a phase. Mirrors callOrchestratorAction but targets the
+ * /api/hooks/phase-complete endpoint authenticated by the worker's hook_token.
+ *
+ * Used exclusively by the report_complete MCP tool in worker mode.
+ */
+export async function callPhaseComplete(phase: string, artifacts?: string[]): Promise<void> {
+  const baseUrl = process.env.OCTOMUX_ACTION_BASE_URL;
+  const token = process.env.OCTOMUX_ACTION_TOKEN;
+  const taskId = process.env.OCTOMUX_TASK_ID;
+
+  if (!baseUrl || !token || !taskId) {
+    throw new Error('worker report_complete is not configured (missing OCTOMUX_* env vars)');
+  }
+
+  const url = `${baseUrl}/api/hooks/phase-complete` + `?token=${encodeURIComponent(token)}`;
+
+  logger.debug({ phase, task_id: taskId }, 'mcp write: worker callPhaseComplete');
+
+  const body: Record<string, unknown> = { task_id: taskId, phase };
+  if (artifacts !== undefined) body['artifacts'] = artifacts;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`phase-complete RPC failed (HTTP ${res.status}): ${text}`);
+  }
 }

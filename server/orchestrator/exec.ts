@@ -162,8 +162,8 @@ export function validatePlanJson(plan: unknown): ValidatePlanResult {
 /**
  * Build the planning template that instructs a worker to:
  *  1. Analyse the request and write a conforming plan.json to its worktree.
- *  2. Call `signal_phase_complete` via the phase-complete HTTP hook so the
- *     orchestrator can route the artifact pointer to the user.
+ *  2. Call mcp__octomux__report_complete({ phase:"plan", artifacts:["plan.json"] })
+ *     so the orchestrator can route the artifact pointer to the user.
  *
  * The worker re-reads plan.json from disk after the user approves (so user edits
  * actually take effect) — this is a hard contract enforced by the template.
@@ -212,14 +212,20 @@ Rules:
 
 ### Signal phase complete
 
-**You do not need to run any command to signal.** After you have written
-\`plan.json\` to your worktree root, simply **finish your turn and stop**. The
-orchestrator watches for \`plan.json\` and detects it automatically when your turn
-ends, then presents it to the user for review.
+After you have written \`plan.json\` to your worktree root, call the MCP tool to
+signal completion:
+
+\`\`\`
+mcp__octomux__report_complete({ phase: "plan", artifacts: ["plan.json"] })
+\`\`\`
+
+Then **end your turn immediately**. The orchestrator will present \`plan.json\` to
+the user for review.
 
 So the contract is:
 1. Write \`plan.json\` (conforming to the schema above).
-2. Do nothing else and end your turn.
+2. Call \`mcp__octomux__report_complete({ phase: "plan", artifacts: ["plan.json"] })\`.
+3. End your turn.
 
 ### After the plan is approved
 
@@ -230,7 +236,7 @@ will send you an "implement" message. At that point:
 1. **Re-read \`plan.json\` from disk** — do not rely on your memory of what you wrote.
    The user may have edited it, and those edits are the authoritative source of truth.
 2. Implement exactly what the re-read \`plan.json\` specifies.
-3. When implementation is complete, end your turn.
+3. When implementation is complete, call \`mcp__octomux__report_complete({ phase: "implement", summary: "<1-2 lines>" })\` and end your turn.
 `;
 }
 
@@ -240,12 +246,14 @@ will send you an "implement" message. At that point:
  *
  * The worker contract:
  *  1) Write spec.md (goal / why / acceptance criteria / constraints / non-goals)
- *     to the repo root and END THE TURN. Do not start planning yet — you'll be prompted.
+ *     to the repo root, call mcp__octomux__report_complete({ phase:"spec", artifacts:["spec.md"] }),
+ *     then END THE TURN. Do not start planning yet — you'll be prompted.
  *  2) When prompted, produce the implementation plan and write it to plan.json
- *     (same schema as buildPlanningTemplate). Then END THE TURN.
+ *     (same schema as buildPlanningTemplate), call report_complete({ phase:"plan", artifacts:["plan.json"] }),
+ *     then END THE TURN.
  *  3) When the plan is approved you'll be told to implement: re-read plan.json
- *     from disk, implement it, then create .octomux/ and write an empty
- *     .octomux/implement-done file, and END THE TURN.
+ *     from disk, implement it, call report_complete({ phase:"implement", summary:"..." }),
+ *     and END THE TURN.
  *
  * Pointers discipline: orchestrator holds only task_id pointer — never spec/plan body.
  */
@@ -272,7 +280,13 @@ Write a concise specification to \`spec.md\` at the repo root covering:
 - **Constraints** — non-negotiables (don't break X, no new deps, follow CLAUDE.md).
 - **Non-goals** — explicitly what NOT to touch (prevents scope-creep).
 
-After writing \`spec.md\`, **end your turn immediately**. Do not start planning yet —
+After writing \`spec.md\`, call the MCP tool to signal completion:
+
+\`\`\`
+mcp__octomux__report_complete({ phase: "spec", artifacts: ["spec.md"] })
+\`\`\`
+
+Then **end your turn immediately**. Do not start planning yet —
 the orchestrator will share the spec for review and then prompt you to plan.
 
 ---
@@ -305,8 +319,14 @@ Rules:
 - Each \`files\` entry must have \`path\` (string) and \`action\` (one of: create, modify, delete, rename).
 - \`open_questions\` is optional; include it when clarification is needed before implementation.
 
-After writing \`plan.json\`, **end your turn immediately**. The orchestrator will
-present it for review. Do not start implementing yet.
+After writing \`plan.json\`, call the MCP tool to signal completion:
+
+\`\`\`
+mcp__octomux__report_complete({ phase: "plan", artifacts: ["plan.json"] })
+\`\`\`
+
+Then **end your turn immediately**. The orchestrator will present it for review.
+Do not start implementing yet.
 
 ---
 
@@ -317,9 +337,35 @@ When the orchestrator tells you to implement:
 1. **Re-read \`plan.json\` from disk** — do not rely on your memory of what you wrote.
    The user may have edited it, and those edits are the authoritative source of truth.
 2. Implement exactly what the re-read \`plan.json\` specifies.
-3. When implementation is complete, create the directory \`.octomux/\` (if it does not
-   exist) and write an **empty file** \`.octomux/implement-done\` as a sentinel.
-4. **End your turn.** The orchestrator detects the sentinel automatically.
+3. When implementation is complete, call the MCP tool to signal done:
+
+\`\`\`
+mcp__octomux__report_complete({ phase: "implement", summary: "<1-2 sentences of what was done>" })
+\`\`\`
+
+4. **End your turn.** The orchestrator will surface the diff.
+`;
+}
+
+/**
+ * Wrap a plain task brief with instructions to call report_complete when done.
+ * Used for plain orchestrator-managed tasks (conversation_id set, kind not plan/workflow).
+ * The worker implements directly and signals completion via the MCP tool.
+ */
+export function buildImplementWrapper(brief: string): string {
+  return `${brief}
+
+---
+
+## Completion signal
+
+When the task is fully complete, call the MCP tool to signal done:
+
+\`\`\`
+mcp__octomux__report_complete({ phase: "implement", summary: "<short 1-2 line summary>" })
+\`\`\`
+
+Then end your turn.
 `;
 }
 
@@ -365,11 +411,17 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
   const resolvedDescription = input.description?.trim() || initialPromptTrimmed || '';
 
   // For plan kind, inject the planning template; for workflow, inject the workflow template.
+  // For plain managed tasks (conversation_id set, no kind), wrap the brief with the
+  // report_complete instruction so EVERY managed task carries a completion signal —
+  // fall back to the description as the brief when no explicit prompt was given
+  // (else a description-only managed task would have no done-signal at all).
   const resolvedPrompt = isWorkflow
     ? buildWorkflowTemplate(initialPromptTrimmed)
     : isPlanning
       ? buildPlanningTemplate(initialPromptTrimmed)
-      : (input.initial_prompt ?? null);
+      : input.conversation_id
+        ? buildImplementWrapper(initialPromptTrimmed || resolvedDescription)
+        : (input.initial_prompt ?? null);
 
   // Phase 2a: always create a worktree row. For 'new' mode, path starts empty
   // (startTask fills it in during setup). For 'existing' mode, use worktree_path.

@@ -32,7 +32,12 @@ import {
   handleDefaultBranch,
 } from './read.js';
 import { handlePullLinearIssue } from './seed.js';
-import { callOrchestratorAction, orchestratorWriteEnabled } from './write.js';
+import {
+  callOrchestratorAction,
+  callPhaseComplete,
+  orchestratorWriteEnabled,
+  workerReportEnabled,
+} from './write.js';
 import { COMMANDS } from '../command-registry.js';
 
 const logger = childLogger('orchestrator/mcp/server');
@@ -255,6 +260,13 @@ export function createOctomuxMcpServer(): McpServer {
     registerWriteTools(server);
   }
 
+  // ── Worker report_complete (SHR-160) ──────────────────────────────────────
+  // Only registered when OCTOMUX_TASK_ID is set (worker mode). The worker calls
+  // this tool when it finishes a phase; it RPCs to the phase-complete endpoint.
+  if (workerReportEnabled()) {
+    registerWorkerTools(server);
+  }
+
   return server;
 }
 
@@ -287,6 +299,52 @@ function registerWriteTools(server: McpServer): void {
       async (args: Record<string, unknown>) => text(await callOrchestratorAction(cmd.action, args)),
     );
   }
+}
+
+/**
+ * Register the worker report_complete tool. Only active in worker mode
+ * (OCTOMUX_TASK_ID present). The tool RPCs to the main server's
+ * POST /api/hooks/phase-complete endpoint authenticated by the worker's hook_token.
+ *
+ * Distinct from the conductor write tools: conductor writes gate on
+ * OCTOMUX_CONVERSATION_ID; worker writes gate on OCTOMUX_TASK_ID.
+ */
+function registerWorkerTools(server: McpServer): void {
+  server.registerTool(
+    'report_complete',
+    {
+      description:
+        'Call this when you have finished a phase of your task. ' +
+        'phase:implement = the whole task is done. ' +
+        'The orchestrator surfaces the right update (spec/plan card, or done + diff link).',
+      inputSchema: {
+        phase: z.enum(['spec', 'plan', 'implement']).describe('which phase you just completed'),
+        summary: z.string().optional().describe('Optional 1–2 sentence summary of what was done'),
+        artifacts: z
+          .array(z.string())
+          .optional()
+          .describe('Optional list of artifact file paths produced (e.g. ["spec.md"])'),
+      },
+    },
+    async (args) => {
+      const { phase, artifacts } = args;
+      logger.info(
+        { operation: 'report_complete', phase, task_id: process.env.OCTOMUX_TASK_ID },
+        'worker MCP report_complete invoked',
+      );
+
+      await callPhaseComplete(phase, artifacts);
+
+      const msg =
+        phase === 'implement'
+          ? `Phase complete: implement. Task done — the orchestrator will surface the diff.`
+          : `Phase complete: ${phase}. The orchestrator will advance to the next phase.`;
+
+      return {
+        content: [{ type: 'text' as const, text: msg }],
+      };
+    },
+  );
 }
 
 // ─── Entrypoint (launched as --mcp-config subprocess) ────────────────────────

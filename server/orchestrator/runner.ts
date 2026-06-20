@@ -212,8 +212,11 @@ function writeOrchestratorsettings(convId: string): string {
  * All paths are absolute so the spawned subprocess works regardless of the cwd
  * claude launches it from. Returns null if no runnable server file is found
  * (caller then launches the conductor without MCP reads rather than failing).
+ *
+ * Exported so task-runner.ts can reuse this resolution when writing the worker
+ * mcp-config.json (SHR-160 — do NOT duplicate the logic there).
  */
-function mcpServerInvocation(): { command: string; args: string[] } | null {
+export function mcpServerInvocation(): { command: string; args: string[] } | null {
   const here = fileURLToPath(import.meta.url);
   const dir = path.dirname(here);
 

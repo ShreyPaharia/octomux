@@ -14,6 +14,8 @@ import { inferRefs } from './ref-inference.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
 import { broadcast } from './events.js';
+import { isOrchestratorManaged } from './orchestrator/store.js';
+import { mcpServerInvocation } from './orchestrator/runner.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
@@ -595,6 +597,66 @@ async function setupScratch(task: Task): Promise<SetupResult> {
   };
 }
 
+// ─── Worker MCP config ────────────────────────────────────────────────────────
+
+/**
+ * Write a worker mcp-config.json into the worktree's .claude directory so the
+ * worker's `claude` session gets the octomux MCP server with the report_complete
+ * tool. Only written for orchestrator-managed tasks.
+ *
+ * The worker's MCP subprocess receives OCTOMUX_TASK_ID + OCTOMUX_ACTION_TOKEN +
+ * OCTOMUX_ACTION_BASE_URL, which enables workerReportEnabled() in the server and
+ * registers the report_complete tool. Does NOT use --strict-mcp-config so the
+ * worker keeps its existing tools + the user's project MCP servers.
+ *
+ * Returns the absolute path to the written mcp-config.json, or null if the MCP
+ * server entry can't be resolved (worker still launches, but without the tool).
+ */
+function writeWorkerMcpConfig(
+  worktreePath: string,
+  taskId: string,
+  hookToken: string,
+): string | null {
+  const inv = mcpServerInvocation();
+  if (!inv) {
+    logger.warn(
+      { task_id: taskId, operation: 'writeWorkerMcpConfig' },
+      'worker MCP: server entry not found — worker will not have report_complete tool',
+    );
+    return null;
+  }
+
+  const claudeDir = path.join(worktreePath, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const cfgPath = path.join(claudeDir, 'worker-mcp-config.json');
+
+  const env: Record<string, string> = {
+    OCTOMUX_TASK_ID: taskId,
+    OCTOMUX_ACTION_TOKEN: hookToken,
+    OCTOMUX_ACTION_BASE_URL: hookBaseUrl(),
+  };
+  if (process.env.NODE_ENV) env.NODE_ENV = process.env.NODE_ENV;
+  if (process.env.OCTOMUX_DATA_DIR) env.OCTOMUX_DATA_DIR = process.env.OCTOMUX_DATA_DIR;
+
+  const cfg = {
+    mcpServers: {
+      octomux: {
+        command: inv.command,
+        args: inv.args,
+        env,
+      },
+    },
+  };
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+
+  logger.info(
+    { task_id: taskId, operation: 'writeWorkerMcpConfig', config_path: cfgPath },
+    'worker MCP: wrote worker mcp-config.json',
+  );
+
+  return cfgPath;
+}
+
 // ─── Task lifecycle ──────────────────────────────────────────────────────────
 
 export async function startTask(task: Task): Promise<void> {
@@ -722,7 +784,7 @@ export async function startTask(task: Task): Promise<void> {
     const agentId = nanoid(12);
     const agentName = task.agent ?? null;
     const hookToken = crypto.randomBytes(32).toString('hex');
-    const flags = harness.resolveFlags(await getSettings());
+    let flags = harness.resolveFlags(await getSettings());
 
     let sessionIdForDb: string | null;
     let sessionIdForLaunch: string;
@@ -740,6 +802,17 @@ export async function startTask(task: Task): Promise<void> {
     // is created, so there is no readiness wait to install them during.
     await harness.syncAgents(setup.worktreePath);
     await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
+
+    // For orchestrator-managed tasks, write a worker mcp-config.json and append
+    // --mcp-config to the launch flags so the worker gets the report_complete tool.
+    // Do NOT use --strict-mcp-config (worker keeps its normal tools + user MCP servers).
+    // managed_tasks is registered before startTask runs (runCreateTask → upsertManagedTask).
+    if (isOrchestratorManaged(id)) {
+      const workerMcpConfigPath = writeWorkerMcpConfig(setup.worktreePath, id, hookToken);
+      if (workerMcpConfigPath) {
+        flags += ` --mcp-config ${shellQuoteSingle(workerMcpConfigPath)}`;
+      }
+    }
 
     const baseCmd = harness.buildLaunchCommand({
       sessionId: sessionIdForLaunch,

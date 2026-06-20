@@ -19,6 +19,7 @@ import {
   eventsSince,
   createConversation,
 } from './orchestrator/store.js';
+import { advancePhaseForLabel } from './hooks.js';
 
 describe('Hook endpoints', () => {
   let db: Database.Database;
@@ -909,4 +910,196 @@ describe('maybeSignalPhaseComplete — Stop hook phase dispatch', () => {
     const newEvents = eventsSince(0).slice(beforeSeq);
     expect(newEvents.filter((e) => e.type === 'task:phase_complete')).toHaveLength(0);
   });
+});
+
+// ─── advancePhaseForLabel — label→column mapping + idempotency (SHR-160) ──────
+
+describe('advancePhaseForLabel', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** Insert a managed task with a real (temp) worktree path. */
+  function insertManagedTaskWithWorktree(
+    taskId: string,
+    phase: string,
+    worktreePath: string,
+  ): string {
+    insertTask(db, { id: taskId, runtime_state: 'running', worktree: worktreePath });
+    const convId = createConversation({ title: `conv-apl-${taskId}` });
+    upsertManagedTask({ conversation_id: convId, task_id: taskId, phase });
+    return convId;
+  }
+
+  it.each([
+    { label: 'spec', initialPhase: 'speccing', expectedColumn: 'planning' },
+    { label: 'plan', initialPhase: 'planning', expectedColumn: 'awaiting_approval' },
+    { label: 'implement', initialPhase: 'implementing', expectedColumn: 'done' },
+  ])(
+    'label=$label maps initial phase $initialPhase → column $expectedColumn',
+    ({ label, initialPhase, expectedColumn }) => {
+      const taskId = `task-apl-${label}`;
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-apl-'));
+      try {
+        insertManagedTaskWithWorktree(taskId, initialPhase, tmpDir);
+        const beforeSeq = eventsSince(0).length;
+
+        advancePhaseForLabel(taskId, label);
+
+        const mt = getManagedTask(taskId);
+        expect(mt!.phase).toBe(expectedColumn);
+
+        const events = eventsSince(0).slice(beforeSeq);
+        const phaseEvent = events.find((e) => e.type === 'task:phase_complete');
+        expect(phaseEvent).toBeDefined();
+        const payload = JSON.parse(phaseEvent!.payload);
+        expect(payload.phase).toBe(label);
+        expect(payload.taskId).toBe(taskId);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('is idempotent: calling twice with same label does not double-fire', () => {
+    const taskId = 'task-apl-idem-01';
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-apl-'));
+    try {
+      insertManagedTaskWithWorktree(taskId, 'planning', tmpDir);
+      const beforeSeq = eventsSince(0).length;
+
+      advancePhaseForLabel(taskId, 'plan');
+      advancePhaseForLabel(taskId, 'plan'); // second call — must be no-op
+
+      const mt = getManagedTask(taskId);
+      expect(mt!.phase).toBe('awaiting_approval');
+
+      const phaseEvents = eventsSince(0)
+        .slice(beforeSeq)
+        .filter((e) => e.type === 'task:phase_complete');
+      expect(phaseEvents).toHaveLength(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('no-ops when task is not orchestrator-managed', () => {
+    const taskId = 'task-apl-unmanaged';
+    insertTask(db, { id: taskId, runtime_state: 'running' });
+    // NOT in managed_tasks
+    const beforeSeq = eventsSince(0).length;
+
+    advancePhaseForLabel(taskId, 'plan');
+
+    const events = eventsSince(0).slice(beforeSeq);
+    expect(events.filter((e) => e.type === 'task:phase_complete')).toHaveLength(0);
+  });
+
+  it('spec label no-ops when not in speccing phase', () => {
+    const taskId = 'task-apl-wrong-phase';
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-apl-'));
+    try {
+      insertManagedTaskWithWorktree(taskId, 'planning', tmpDir); // already past speccing
+      const beforeSeq = eventsSince(0).length;
+
+      advancePhaseForLabel(taskId, 'spec');
+
+      const mt = getManagedTask(taskId);
+      expect(mt!.phase).toBe('planning'); // unchanged
+      expect(
+        eventsSince(0)
+          .slice(beforeSeq)
+          .filter((e) => e.type === 'task:phase_complete'),
+      ).toHaveLength(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('implement + deletes .octomux/implement-done sentinel if present', () => {
+    const taskId = 'task-apl-impl-clean';
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-apl-'));
+    try {
+      const sentinelDir = path.join(tmpDir, '.octomux');
+      fs.mkdirSync(sentinelDir, { recursive: true });
+      const sentinelPath = path.join(sentinelDir, 'implement-done');
+      fs.writeFileSync(sentinelPath, '');
+
+      insertManagedTaskWithWorktree(taskId, 'implementing', tmpDir);
+
+      advancePhaseForLabel(taskId, 'implement');
+
+      expect(fs.existsSync(sentinelPath)).toBe(false);
+      expect(getManagedTask(taskId)!.phase).toBe('done');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('broadcasts artifacts when provided', () => {
+    const taskId = 'task-apl-artifacts';
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-apl-'));
+    try {
+      insertManagedTaskWithWorktree(taskId, 'speccing', tmpDir);
+      const beforeSeq = eventsSince(0).length;
+
+      advancePhaseForLabel(taskId, 'spec', ['spec.md']);
+
+      const events = eventsSince(0).slice(beforeSeq);
+      const phaseEvent = events.find((e) => e.type === 'task:phase_complete');
+      expect(phaseEvent).toBeDefined();
+      const payload = JSON.parse(phaseEvent!.payload);
+      expect(payload.artifacts).toEqual(['spec.md']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── phase-complete endpoint uses advancePhaseForLabel label→column map (SHR-160) ──
+
+describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 'task-lbl', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-lbl',
+      task_id: 'task-lbl',
+      harness_session_id: 'sess-lbl',
+      hook_token: 'tok-lbl',
+    } as any);
+  });
+
+  it.each([
+    { label: 'spec', initialPhase: 'speccing', expectedColumn: 'planning' },
+    { label: 'plan', initialPhase: 'planning', expectedColumn: 'awaiting_approval' },
+    { label: 'implement', initialPhase: 'implementing', expectedColumn: 'done' },
+  ])(
+    'label=$label → managed_tasks.phase=$expectedColumn + broadcast payload.phase=$label',
+    async ({ label, initialPhase, expectedColumn }) => {
+      const convId = createConversation({ title: `conv-lbl-${label}` });
+      upsertManagedTask({ conversation_id: convId, task_id: 'task-lbl', phase: initialPhase });
+      const beforeSeq = eventsSince(0).length;
+
+      await request(app)
+        .post('/api/hooks/phase-complete?token=tok-lbl')
+        .send({ task_id: 'task-lbl', phase: label })
+        .expect(200);
+
+      const mt = getManagedTask('task-lbl');
+      expect(mt!.phase).toBe(expectedColumn);
+
+      const events = eventsSince(0).slice(beforeSeq);
+      const phaseEvent = events.find((e) => e.type === 'task:phase_complete');
+      expect(phaseEvent).toBeDefined();
+      const payload = JSON.parse(phaseEvent!.payload);
+      expect(payload.phase).toBe(label);
+    },
+  );
 });

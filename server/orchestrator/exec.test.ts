@@ -54,6 +54,7 @@ import {
   PLAN_KIND,
   WORKFLOW_KIND,
   buildWorkflowTemplate,
+  buildImplementWrapper,
 } from './exec.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -238,9 +239,9 @@ describe('exec.runCreateTask', () => {
       // Must mention all three phases
       expect(prompt).toMatch(/Phase 1.*SPEC|spec/i);
       expect(prompt).toMatch(/Phase 2.*PLAN|plan\.json/i);
-      expect(prompt).toMatch(/Phase 3.*IMPLEMENT|implement-done/i);
-      // Must reference the sentinel
-      expect(prompt).toContain('implement-done');
+      expect(prompt).toMatch(/Phase 3.*IMPLEMENT|report_complete/i);
+      // Must reference the report_complete MCP tool (new contract: explicit signal, not sentinel)
+      expect(prompt).toContain('report_complete');
       // Must include original prompt
       expect(prompt).toContain('Build an auth system.');
     });
@@ -621,11 +622,12 @@ describe('exec.runDeleteTask', () => {
 // ─── buildWorkflowTemplate ────────────────────────────────────────────────────
 
 describe('buildWorkflowTemplate', () => {
-  it('produces a template that references spec.md, plan.json, and implement-done', () => {
+  it('produces a template that references spec.md, plan.json, and report_complete signal', () => {
     const tpl = buildWorkflowTemplate('Build user auth.');
     expect(tpl).toContain('spec.md');
     expect(tpl).toContain('plan.json');
-    expect(tpl).toContain('implement-done');
+    // Completion is signalled via MCP tool, not a sentinel file (SHR-160)
+    expect(tpl).toContain('report_complete');
   });
 
   it('injects the user prompt into the template', () => {
@@ -655,5 +657,72 @@ describe('buildWorkflowTemplate', () => {
     expect(tpl).toContain('"schema_version"');
     expect(tpl).toContain('"summary"');
     expect(tpl).toContain('"files"');
+  });
+});
+
+// ─── buildImplementWrapper ───────────────────────────────────────────────────
+
+describe('buildImplementWrapper', () => {
+  it('includes the original brief', () => {
+    const brief = 'Add a dark mode toggle to the settings page.';
+    const wrapped = buildImplementWrapper(brief);
+    expect(wrapped).toContain(brief);
+  });
+
+  it('instructs the worker to call report_complete with phase:implement when done', () => {
+    const wrapped = buildImplementWrapper('Fix the login bug.');
+    expect(wrapped).toContain('report_complete');
+    expect(wrapped).toContain('implement');
+  });
+});
+
+// ─── runCreateTask — plain managed task injects implement wrapper ────────────
+
+describe('runCreateTask — plain managed task wraps brief with report_complete', () => {
+  it('injects implement wrapper when conversation_id is set and kind is omitted', async () => {
+    const db = createTestDb();
+    const { createConversation } = await import('./store.js');
+    const convId = createConversation({ title: 'test-plain-managed' });
+
+    const result = await runCreateTask({
+      title: 'Add metrics dashboard',
+      repo_path: '/tmp/test-repo',
+      initial_prompt: 'Build a metrics dashboard showing task throughput.',
+      conversation_id: convId,
+    });
+
+    const row = db.prepare(`SELECT initial_prompt FROM tasks WHERE id = ?`).get(result.task_id) as
+      | { initial_prompt: string }
+      | undefined;
+    const prompt = row?.initial_prompt ?? '';
+    expect(prompt).toContain('Build a metrics dashboard showing task throughput.');
+    expect(prompt).toContain('report_complete');
+    expect(prompt).toContain('implement');
+
+    db.close();
+  });
+
+  it('does NOT inject implement wrapper when kind=plan (uses planning template)', async () => {
+    const db = createTestDb();
+    const { createConversation } = await import('./store.js');
+    const convId = createConversation({ title: 'test-plan-no-wrap' });
+
+    const result = await runCreateTask({
+      title: 'Plan a feature',
+      repo_path: '/tmp/test-repo',
+      initial_prompt: 'Plan the redesign.',
+      kind: PLAN_KIND,
+      conversation_id: convId,
+    });
+
+    const row = db.prepare(`SELECT initial_prompt FROM tasks WHERE id = ?`).get(result.task_id) as
+      | { initial_prompt: string }
+      | undefined;
+    const prompt = row?.initial_prompt ?? '';
+    // Planning template uses report_complete too (phase:plan), not the impl wrapper heading
+    expect(prompt).toContain('plan.json');
+    expect(prompt).not.toContain('## Completion signal');
+
+    db.close();
   });
 });
