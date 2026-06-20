@@ -71,8 +71,8 @@ const ORCHESTRATOR_SYSTEM_PROMPT = [
   '',
   'HARD RULES:',
   '- NEVER implement work yourself. Do not write code, edit files, run git, or modify anything. You have no Edit/Write tools by design — that is intentional.',
-  '- DELEGATE every task to an octomux worker. Do NOT plan the implementation yourself — you have not read the code, so any step-by-step plan you write will be stale or wrong, and it duplicates the planning the worker will redo on the ground.',
-  '    octomux create-task --title "<short title>" --description "<goal-oriented brief — see below>" --repo <absolute repo path>',
+  '- DELEGATE every task to an octomux worker using your MCP tools. Do NOT plan the implementation yourself — you have not read the code, so any step-by-step plan you write will be stale or wrong, and it duplicates the planning the worker will redo on the ground.',
+  '    Call mcp__octomux__create_task({ title, description, repo_path, base_branch?, kind? }) — it runs immediately (no approval) and returns the task id.',
   '',
   'WRITE A GOAL-ORIENTED BRIEF, NOT A PLAN. The task description tells the worker WHAT to achieve and WHY — never the HOW (no "step 1, step 2, edit file X"). A capable worker owns the implementation. Use this shape:',
   '  ## Goal — 1-2 sentences: the outcome/capability that should exist when done.',
@@ -83,7 +83,8 @@ const ORCHESTRATOR_SYSTEM_PROMPT = [
   '  ## Pointers — orientation only: "follow the pattern in src/auth/" — NEVER a procedure.',
   'Put your precision into the acceptance criteria, not into steps.',
   '',
-  "- PLANNING is the WORKER's job, not yours. For ambiguous or larger work, add `--kind plan`: the worker reads the real code, writes a plan for you to review, you approve, then it implements — all in ONE session. For small/clear work (a one-sentence diff), skip the plan and let it implement directly.",
+  '- PLANNING is the WORKER\'s job, not yours. For ambiguous or larger work, pass kind:"plan" to create_task: the worker reads the real code, writes a plan for you to review, you approve, then it implements — all in ONE session. For small/clear work (a one-sentence diff), omit kind and let it implement directly.',
+  '- All other actions are MCP tools too: mcp__octomux__send_message, mcp__octomux__set_task_status, mcp__octomux__add_agent, mcp__octomux__close_task, mcp__octomux__delete_task. Use them instead of any octomux CLI command.',
   '- TRACK progress with your read tools only: mcp__octomux__list_tasks, mcp__octomux__get_task, mcp__octomux__monitor_status, mcp__octomux__get_task_output. Do not read or edit the repo directly — inspect tasks and their artifacts through these tools.',
   '- KEEP THE USER INFORMED: when you create a task, tell them its id and the goal; when a worker finishes a phase, summarize the outcome and propose the next step.',
   '',
@@ -169,6 +170,13 @@ function writeOrchestratorsettings(convId: string, hookToken: string): string {
         'mcp__octomux__monitor_status',
         'mcp__octomux__get_task_output',
         'mcp__octomux__pull_linear_issue',
+        // MCP write tools (SHR-142) — execute immediately, no Bash, no gate.
+        'mcp__octomux__create_task',
+        'mcp__octomux__send_message',
+        'mcp__octomux__set_task_status',
+        'mcp__octomux__add_agent',
+        'mcp__octomux__close_task',
+        'mcp__octomux__delete_task',
       ],
       // The conductor COORDINATES work — it must never do the work itself.
       // Hard-deny the mutation tools so it structurally cannot edit the repo,
@@ -232,7 +240,7 @@ function mcpServerInvocation(): { command: string; args: string[] } | null {
  * the per-conversation config dir. Returns the file path, or null when the MCP
  * server entry can't be located (the conductor still launches, without reads).
  */
-function writeOrchestratorMcpConfig(convId: string): string | null {
+function writeOrchestratorMcpConfig(convId: string, hookToken: string): string | null {
   const inv = mcpServerInvocation();
   if (!inv) {
     logger.warn(
@@ -248,7 +256,14 @@ function writeOrchestratorMcpConfig(convId: string): string | null {
 
   // The subprocess inherits the conductor's env (NODE_ENV, OCTOMUX_DATA_DIR) so
   // it opens the SAME sqlite DB; pass them explicitly too for robustness.
-  const env: Record<string, string> = {};
+  // The OCTOMUX_ACTION_* + OCTOMUX_CONVERSATION_ID vars enable the MCP WRITE
+  // tools (SHR-142): they RPC back to the main server's orchestrator-action
+  // endpoint, authenticated by the conductor token and scoped to this conversation.
+  const env: Record<string, string> = {
+    OCTOMUX_ACTION_BASE_URL: hookBaseUrl(),
+    OCTOMUX_ACTION_TOKEN: hookToken,
+    OCTOMUX_CONVERSATION_ID: convId,
+  };
   if (process.env.NODE_ENV) env.NODE_ENV = process.env.NODE_ENV;
   if (process.env.OCTOMUX_DATA_DIR) env.OCTOMUX_DATA_DIR = process.env.OCTOMUX_DATA_DIR;
 
@@ -307,7 +322,7 @@ export async function startConversation(
 
   const hookToken = crypto.randomBytes(32).toString('hex');
   const settingsPath = writeOrchestratorsettings(convId, hookToken);
-  const mcpConfigPath = writeOrchestratorMcpConfig(convId);
+  const mcpConfigPath = writeOrchestratorMcpConfig(convId, hookToken);
 
   const sessionName = orchestratorSessionName(convId);
 
@@ -376,7 +391,7 @@ export async function resumeConversation(
 
   const hookToken = crypto.randomBytes(32).toString('hex');
   const settingsPath = writeOrchestratorsettings(convId, hookToken);
-  const mcpConfigPath = writeOrchestratorMcpConfig(convId);
+  const mcpConfigPath = writeOrchestratorMcpConfig(convId, hookToken);
 
   const sessionName = orchestratorSessionName(convId);
 

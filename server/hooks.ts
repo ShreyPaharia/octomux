@@ -15,6 +15,11 @@ import {
   conversationIdForHookToken,
 } from './orchestrator/store.js';
 import { handlePreToolUse } from './orchestrator/gate.js';
+import {
+  runOrchestratorAction,
+  ORCHESTRATOR_ACTIONS,
+  type OrchestratorAction,
+} from './orchestrator/actions.js';
 
 const logger = childLogger('hooks');
 
@@ -635,6 +640,35 @@ router.post('/pre-tool-use', requireHookToken, (req: Request, res: Response) => 
           permissionDecision: 'allow',
         },
       });
+    });
+});
+
+// POST /api/hooks/orchestrator-action
+// The conductor's MCP write tools (mcp__octomux__create_task, …) RPC here to
+// perform a write action with STRUCTURED args (no Bash, no gate) — SHR-142.
+// Query: ?token=<conductor hook_token>&conversation_id=<conv_id>
+// Body:  { action: 'create-task'|'send-message'|…, input: {…structured…} }
+// Runs in the main process so the task lifecycle + supervisor relay stay here.
+router.post('/orchestrator-action', requireHookToken, (req: Request, res: Response) => {
+  const conversationId = ((req.query.conversation_id ?? '') as string) || undefined;
+  const { action, input } = req.body as {
+    action?: string;
+    input?: Record<string, unknown>;
+  };
+
+  if (!action || !ORCHESTRATOR_ACTIONS.has(action)) {
+    res.status(400).json({ error: `unknown or missing action: ${action ?? '(none)'}` });
+    return;
+  }
+
+  runOrchestratorAction(conversationId, action as OrchestratorAction, input ?? {})
+    .then((result) => {
+      res.status(200).json({ ok: true, result });
+    })
+    .catch((err: unknown) => {
+      const message = (err as Error).message ?? String(err);
+      logger.error({ err, action, conversation_id: conversationId }, 'orchestrator-action failed');
+      res.status(200).json({ ok: false, error: message });
     });
 });
 
