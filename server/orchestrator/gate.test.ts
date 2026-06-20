@@ -20,7 +20,15 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../app.js';
 import { createTestDb, insertTask, insertAgent } from '../test-helpers.js';
-import { createConversation, getCard, listPendingCards, createCard, resolveCard } from './store.js';
+import {
+  createConversation,
+  getCard,
+  listPendingCards,
+  createCard,
+  resolveCard,
+  upsertManagedTask,
+  getManagedTask,
+} from './store.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -194,6 +202,36 @@ describe('gate.handlePreToolUse', () => {
     });
 
     expect(result.decision).toBe('allow');
+  });
+
+  it('non-octomux bash command → allow even WITH a conversation (gate scopes to octomux)', async () => {
+    // The PreToolUse matcher catches ALL Bash, so cat/ls/grep reads reach the
+    // gate. They must pass through untouched — only `octomux *` is gated.
+    const reads = ['cat plan.json', 'ls -la', 'grep foo bar.txt', 'echo hi'];
+    for (const command of reads) {
+      const result = await handlePreToolUse({
+        conversation_id: convId,
+        tool_name: 'Bash',
+        tool_input: { command },
+        tool_use_id: `tu-read-${command.slice(0, 3)}`,
+      });
+      expect(result.decision).toBe('allow');
+      expect(result.card_id).toBeUndefined();
+    }
+    // No cards created for read passthrough.
+    expect(listPendingCards(convId)).toHaveLength(0);
+  });
+
+  it('octomux write command WITH a conversation → deny + card (gate actually fires)', async () => {
+    const result = await handlePreToolUse({
+      conversation_id: convId,
+      tool_name: 'Bash',
+      tool_input: { command: 'octomux create-task --title "Gated" --description "x"' },
+      tool_use_id: 'tu-gated',
+    });
+    expect(result.decision).toBe('deny');
+    expect(result.card_id).toBeTruthy();
+    expect(listPendingCards(convId)).toHaveLength(1);
   });
 });
 
@@ -591,5 +629,60 @@ describe('gate.executeCard — new write commands (Task 3.4)', () => {
     expect(mockRunCreateTask).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'claude-opus-4-5', effort: 'xhigh' }),
     );
+  });
+});
+
+// ─── approve-plan relay (the plan→implement handoff) ──────────────────────────
+//
+// Regression coverage for the dead relay: the supervisor mints an 'approve-plan'
+// card on plan phase-complete, and approving it must send the worker an
+// "implement" turn. Previously executeCard had no approve-plan branch, so
+// approving the plan card was a silent no-op and the loop never advanced.
+describe('gate.executeCard — approve-plan relay', () => {
+  let db: ReturnType<typeof createTestDb>;
+  beforeEach(() => {
+    db = createTestDb();
+    vi.clearAllMocks();
+  });
+
+  it('approving a plan card sends the worker an implement turn and advances phase', async () => {
+    const convId = createConversation({ title: 'Plan relay' });
+    insertTask(db, { id: 'task-plan-1', title: 'Plan task' }); // satisfy managed_tasks FK
+    upsertManagedTask({
+      conversation_id: convId,
+      task_id: 'task-plan-1',
+      phase: 'awaiting_approval',
+    });
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'relay-x',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: 'task-plan-1', plan_path: 'plan.json' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    // The heart of the loop: the worker is told to implement.
+    expect(mockRunSendMessage).toHaveBeenCalledTimes(1);
+    expect(mockRunSendMessage.mock.calls[0]![0]).toBe('task-plan-1');
+    expect(String(mockRunSendMessage.mock.calls[0]![1])).toMatch(/implement/i);
+
+    expect(getCard(cardId)!.status).toBe('executed');
+    expect(getManagedTask('task-plan-1')!.phase).toBe('implementing');
+  });
+
+  it('rejecting a plan card does NOT send an implement turn', async () => {
+    const convId = createConversation({ title: 'Plan reject' });
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'relay-y',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: 'task-plan-2' }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'reject' });
+
+    expect(mockRunSendMessage).not.toHaveBeenCalled();
+    expect(getCard(cardId)!.status).toBe('rejected');
   });
 });

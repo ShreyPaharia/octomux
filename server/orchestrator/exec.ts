@@ -235,24 +235,16 @@ Rules:
 
 ### Signal phase complete
 
-After writing \`plan.json\`, POST to the phase-complete hook to signal the
-orchestrator. Use the \`signal_phase_complete\` skill/command:
+**You do not need to run any command to signal.** After you have written
+\`plan.json\` to your worktree root, simply **finish your turn and stop**. The
+orchestrator watches for \`plan.json\` and detects it automatically when your turn
+ends, then presents it to the user for review.
 
-\`\`\`bash
-# POST /api/hooks/phase-complete authenticated with your hook_token
-signal_phase_complete plan plan.json
-\`\`\`
+So the contract is:
+1. Write \`plan.json\` (conforming to the schema above).
+2. Do nothing else and end your turn.
 
-Or, if you do not have the signal skill, call the HTTP endpoint directly:
-
-\`\`\`bash
-curl -s -X POST "$OCTOMUX_HOOK_BASE_URL/api/hooks/phase-complete" \\
-     -H "Authorization: Bearer $OCTOMUX_HOOK_TOKEN" \\
-     -H "Content-Type: application/json" \\
-     -d '{"task_id":"'"$OCTOMUX_TASK_ID"'","phase":"plan","artifacts":["plan.json"]}'
-\`\`\`
-
-### After signalling
+### After the plan is approved
 
 **Wait at your interactive prompt.** The orchestrator will present \`plan.json\` to
 the user for review. When the user approves (possibly with edits), the orchestrator
@@ -261,7 +253,7 @@ will send you an "implement" message. At that point:
 1. **Re-read \`plan.json\` from disk** — do not rely on your memory of what you wrote.
    The user may have edited it, and those edits are the authoritative source of truth.
 2. Implement exactly what the re-read \`plan.json\` specifies.
-3. When implementation is complete, signal \`signal_phase_complete implement\`.
+3. When implementation is complete, end your turn.
 `;
 }
 

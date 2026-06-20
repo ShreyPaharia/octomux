@@ -38,7 +38,12 @@ import { EventEmitter } from 'events';
 import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 import { getDb } from '../db.js';
-import { eventsSince, upsertManagedTask, getGlobalMonitorConversation } from './store.js';
+import {
+  eventsSince,
+  upsertManagedTask,
+  getGlobalMonitorConversation,
+  createCard,
+} from './store.js';
 import { pushToConversation } from './stream.js';
 
 const logger = childLogger('orchestrator/supervisor');
@@ -266,8 +271,17 @@ export function createSupervisor(): Supervisor {
           'supervisor: plan phase complete — advancing to awaiting_approval',
         );
 
-        // Push a relay card (pointer to plan artifact, not body contents)
-        const cardId = nanoid(12);
+        // Push a relay card (pointer to plan artifact, not body contents).
+        // Persist a real action_cards row so the UI's card_decision → executeCard
+        // path can resolve it on approval (without a row, approve is a silent
+        // no-op). tool_name 'approve-plan' routes executeCard to the relay branch.
+        const artifactUrl = `/api/orchestrator/artifact?task=${encodeURIComponent(event.task_id)}&path=${encodeURIComponent(planPath)}`;
+        const cardId = createCard({
+          conversation_id: convId,
+          tool_use_id: `relay-${nanoid(8)}`,
+          tool_name: 'approve-plan',
+          input: JSON.stringify({ task_id: event.task_id, plan_path: planPath }),
+        });
         const cardEvent = {
           type: 'card' as const,
           id: cardId,
@@ -276,7 +290,7 @@ export function createSupervisor(): Supervisor {
             task_id: event.task_id,
             plan_path: planPath,
             // artifact_url is the REST endpoint the UI calls to render the plan
-            artifact_url: `/api/orchestrator/artifact?task=${encodeURIComponent(event.task_id)}&path=${encodeURIComponent(planPath)}`,
+            artifact_url: artifactUrl,
           },
         };
         pushToConversation(convId, JSON.stringify(cardEvent));

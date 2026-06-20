@@ -31,7 +31,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
     "build": "vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
-    "build:server": "tsup server/index.ts server/startup.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
+    "build:server": "tsup server/index.ts server/startup.ts server/orchestrator/mcp/server.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
     "start": "NODE_ENV=production node dist-server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",

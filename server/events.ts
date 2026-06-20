@@ -39,6 +39,21 @@ const TASK_EVENT_TYPES = new Set([
 const clients = new Set<WebSocket>();
 let wss: WebSocketServer;
 
+/**
+ * In-process subscribers (e.g. the orchestrator supervisor). Unlike ws clients,
+ * these run inside the server process and receive every broadcast event with its
+ * durable `seq`. This is the hook the supervisor needs to react to task events
+ * (phase-complete relay, stuck detection) without a ws round-trip.
+ */
+type InProcessListener = (event: ServerEvent, seq: number | undefined) => void;
+const inProcessListeners = new Set<InProcessListener>();
+
+/** Subscribe an in-process listener to all broadcast events. Returns an unsubscribe fn. */
+export function subscribeServerEvents(listener: InProcessListener): () => void {
+  inProcessListeners.add(listener);
+  return () => inProcessListeners.delete(listener);
+}
+
 export function setupEventWebSocket(): void {
   wss = new WebSocketServer({ noServer: true });
 }
@@ -79,6 +94,15 @@ export function broadcast(event: ServerEvent): void {
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message);
+    }
+  }
+
+  // Notify in-process subscribers (the supervisor routes/relays from here).
+  for (const listener of inProcessListeners) {
+    try {
+      listener(event, seq);
+    } catch {
+      // A misbehaving listener must never break the broadcast fan-out.
     }
   }
 }

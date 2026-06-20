@@ -15,6 +15,8 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import path from 'path';
+import os from 'os';
+import crypto from 'crypto';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { probeBinary } from './binary-check.js';
@@ -170,12 +172,29 @@ export function tmuxBinPath(): string {
 }
 
 /**
+ * The private tmux socket path.
+ *
+ * tmux binds a Unix-domain socket whose path must fit in `sockaddr_un.sun_path`
+ * (~104 bytes on macOS, ~108 on Linux). A deep worktree in dev mode pushes
+ * `<DATA_DIR>/run/tmux.sock` past that limit and every `new-session` fails with
+ * "socket path too long". When the preferred path is too long we fall back to a
+ * short, stable tmpdir-based socket keyed by a hash of DATA_DIR (so a given data
+ * dir always maps to the same socket). Prod (`~/.octomux/run/tmux.sock`) and
+ * shallow dev paths are well under the limit and keep the preferred path.
+ */
+export function tmuxSocketPath(): string {
+  const preferred = path.join(DATA_DIR, 'run', 'tmux.sock');
+  if (preferred.length <= 100) return preferred;
+  const hash = crypto.createHash('sha1').update(DATA_DIR).digest('hex').slice(0, 8);
+  return path.join(os.tmpdir(), `octomux-${hash}`, 'tmux.sock');
+}
+
+/**
  * Base args every tmux invocation must include (the private socket).
  * Pure — no fs side effects; call ensureTmuxRuntimeDir() at boot.
  */
 export function tmuxBaseArgs(): string[] {
-  const sockPath = path.join(DATA_DIR, 'run', 'tmux.sock');
-  return ['-S', sockPath];
+  return ['-S', tmuxSocketPath()];
 }
 
 /**
@@ -230,7 +249,7 @@ export function tmuxSpawnSpec(extraArgs: string[]): {
 let _runtimeDirEnsured = false;
 export function ensureTmuxRuntimeDir(): void {
   if (_runtimeDirEnsured) return;
-  const runDir = path.join(DATA_DIR, 'run');
+  const runDir = path.dirname(tmuxSocketPath());
   fs.mkdirSync(runDir, { recursive: true });
   _runtimeDirEnsured = true;
 }

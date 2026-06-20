@@ -130,25 +130,28 @@ describe('orchestrator runner', () => {
       expect(writeCall).toBeDefined();
     });
 
-    it('pre-clears first-run TUI dialogs in the isolated settings', async () => {
+    it('omits theme/tui from the isolated settings (default config dir handles onboarding)', async () => {
       const convId = createConversation({ title: 'Dialog test' });
       await startConversation(convId, '/tmp/test-repo');
 
       const { writeFileSync } = await import('fs');
-      // Find the write to the orchestrator settings file
+      // Find the write to the conductor settings.local.json specifically (the
+      // mcp-config.json write also lives under an "orchestrator" path).
       const orchestratorSettingsWrite = vi
         .mocked(writeFileSync)
         .mock.calls.find(
-          (c) => typeof c[0] === 'string' && (c[0] as string).includes('orchestrator'),
+          (c) => typeof c[0] === 'string' && (c[0] as string).endsWith('settings.local.json'),
         );
       expect(orchestratorSettingsWrite).toBeDefined();
       const content = JSON.parse(orchestratorSettingsWrite![1] as string);
-      // TUI autoAccept / theme should be pre-set to prevent first-run dialogs
-      expect(content).toHaveProperty('theme');
-      expect(content).toHaveProperty('tui');
+      // We run with the DEFAULT config dir (auth + onboarding already done). An
+      // object `tui` value is rejected by claude and blocks the session on a
+      // settings-error dialog, so these keys must NOT be present.
+      expect(content).not.toHaveProperty('theme');
+      expect(content).not.toHaveProperty('tui');
     });
 
-    it('installs a PreToolUse hook with the Bash(octomux *) matcher in the conductor settings', async () => {
+    it('installs a PreToolUse hook with a tool-name "Bash" matcher in the conductor settings', async () => {
       const convId = createConversation({ title: 'Hook test' });
       await startConversation(convId, '/tmp/test-repo');
 
@@ -156,7 +159,10 @@ describe('orchestrator runner', () => {
       const orchestratorSettingsWrite = vi
         .mocked(writeFileSync)
         .mock.calls.find(
-          (c) => typeof c[0] === 'string' && (c[0] as string).includes('orchestrator'),
+          (c) =>
+            typeof c[0] === 'string' &&
+            (c[0] as string).includes(convId) &&
+            (c[0] as string).endsWith('settings.local.json'),
         );
       expect(orchestratorSettingsWrite).toBeDefined();
       const content = JSON.parse(orchestratorSettingsWrite![1] as string);
@@ -164,9 +170,78 @@ describe('orchestrator runner', () => {
       expect(content.hooks).toBeDefined();
       const preToolUse = content.hooks?.PreToolUse;
       expect(preToolUse).toBeDefined();
-      // Matcher should restrict to Bash(octomux *) invocations
       const hook = Array.isArray(preToolUse) ? preToolUse[0] : preToolUse;
-      expect(JSON.stringify(hook)).toContain('octomux');
+      // Claude Code matchers are TOOL NAMES only — must be exactly "Bash" (a
+      // permissions-style "Bash(octomux *)" matcher silently never fires).
+      expect(hook.matcher).toBe('Bash');
+      // The gate narrows to octomux server-side; the hook URL still carries auth.
+      expect(JSON.stringify(hook)).toContain('pre-tool-use');
+    });
+
+    it('passes conversation_id on the PreToolUse gate URL (else the gate fails open)', async () => {
+      const convId = createConversation({ title: 'Conv id test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const { writeFileSync } = await import('fs');
+      // The mock accumulates across tests — scope to THIS conversation's settings.
+      const settingsWrite = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(
+          (c) =>
+            typeof c[0] === 'string' &&
+            (c[0] as string).includes(convId) &&
+            (c[0] as string).endsWith('settings.local.json'),
+        );
+      const content = JSON.parse(settingsWrite![1] as string);
+      const url = content.hooks.PreToolUse[0].hooks[0].url as string;
+      // Without conversation_id the gate can't attach a card and fails OPEN.
+      expect(url).toContain(`conversation_id=${convId}`);
+      expect(url).toContain('token=');
+    });
+
+    it('persists the conductor hook_token on the conversation and matches the gate URL', async () => {
+      const convId = createConversation({ title: 'Token test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const conv = getConversation(convId);
+      // The conductor is not an `agents` row — its gate token lives here, so
+      // requireHookToken can authenticate the PreToolUse callbacks.
+      expect(conv!.hook_token).toBeTruthy();
+
+      const { writeFileSync } = await import('fs');
+      const settingsWrite = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(
+          (c) =>
+            typeof c[0] === 'string' &&
+            (c[0] as string).includes(convId) &&
+            (c[0] as string).endsWith('settings.local.json'),
+        );
+      const content = JSON.parse(settingsWrite![1] as string);
+      const url = content.hooks.PreToolUse[0].hooks[0].url as string;
+      expect(url).toContain(`token=${conv!.hook_token}`);
+    });
+
+    it('launches with --mcp-config and --strict-mcp-config (octomux read tools)', async () => {
+      const convId = createConversation({ title: 'MCP test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const newSession = findTmuxCall('new-session');
+      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(startupCmdArg!).toContain('--mcp-config');
+      expect(startupCmdArg!).toContain('--strict-mcp-config');
+
+      // And it writes an mcp-config.json registering the octomux stdio server.
+      const { writeFileSync } = await import('fs');
+      const mcpWrite = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(
+          (c) => typeof c[0] === 'string' && (c[0] as string).endsWith('mcp-config.json'),
+        );
+      expect(mcpWrite).toBeDefined();
+      const cfg = JSON.parse(mcpWrite![1] as string);
+      expect(cfg.mcpServers?.octomux).toBeDefined();
+      expect(Array.isArray(cfg.mcpServers.octomux.args)).toBe(true);
     });
 
     it('stores tmux session in the conversation record', async () => {

@@ -36,7 +36,7 @@
 import { childLogger } from '../logger.js';
 import { getDb } from '../db.js';
 import { classify } from './policy.js';
-import { createCard, getCard, resolveCard } from './store.js';
+import { createCard, getCard, resolveCard, upsertManagedTask } from './store.js';
 import type { ActionCard } from './store.js';
 import { pushToConversation } from './stream.js';
 import {
@@ -144,6 +144,14 @@ export async function handlePreToolUse(input: PreToolUseInput): Promise<PreToolU
     'gate: handlePreToolUse',
   );
 
+  // The PreToolUse hook matches ALL Bash calls (matchers are tool-name only),
+  // so we narrow to octomux here: any non-octomux Bash command (cat/ls/grep
+  // reads, etc.) is allowed through untouched. Only `octomux <subcommand>`
+  // write commands are gated. (Reads should use the MCP tools, not Bash.)
+  if (tool_name === 'Bash' && command !== 'octomux') {
+    return { decision: 'allow' };
+  }
+
   // Classify using the policy engine
   const tier = classify(command, args);
 
@@ -247,6 +255,16 @@ export async function executeCard(input: ExecuteCardInput): Promise<void> {
     return;
   }
 
+  // ── Relay card: plan approval → tell the worker to implement ────────────────
+  // 'approve-plan' cards are minted by the supervisor on plan phase-complete.
+  // They carry no octomux Bash command — approving them sends the worker an
+  // "implement" turn (the worker re-reads plan.json from disk, picking up any
+  // user edits made via the artifact endpoint). (spec §6.5 — the heart of the loop)
+  if (card.tool_name === 'approve-plan') {
+    await executeApprovePlan(card);
+    return;
+  }
+
   // Approve or Edit
   const effectiveInput: Record<string, unknown> = (() => {
     if (decision === 'edit' && edited_input) {
@@ -297,6 +315,80 @@ export async function executeCard(input: ExecuteCardInput): Promise<void> {
   );
 
   logger.info({ card_id, conversation_id: card.conversation_id }, 'gate.executeCard: done');
+}
+
+// ─── executeApprovePlan ───────────────────────────────────────────────────────
+
+/**
+ * Approve a plan relay card: send the worker an "implement" turn so it re-reads
+ * the (possibly user-edited) plan.json from disk and begins implementation.
+ *
+ * The card's `input` JSON carries the task_id pointer. We never pass plan
+ * contents here — only the directive (a pointer), per the pointers-not-contents
+ * discipline (§1). The worker is the source of truth for the plan body.
+ */
+async function executeApprovePlan(card: ActionCard): Promise<void> {
+  let taskId = '';
+  try {
+    const parsed = JSON.parse(card.input) as { task_id?: string };
+    taskId = parsed.task_id ?? '';
+  } catch {
+    taskId = '';
+  }
+
+  if (!taskId) {
+    logger.warn({ card_id: card.id }, 'gate.executeApprovePlan: card has no task_id');
+    resolveCard(card.id, 'executed', JSON.stringify({ error: 'no task_id on approve-plan card' }));
+    return;
+  }
+
+  logger.info(
+    { card_id: card.id, task_id: taskId, conversation_id: card.conversation_id },
+    'gate.executeApprovePlan: approving plan — sending implement turn to worker',
+  );
+
+  try {
+    await runSendMessage(
+      taskId,
+      'The plan has been approved. Re-read plan.json from disk (it may have been edited) and implement exactly what it specifies. Signal phase complete when done.',
+    );
+  } catch (err) {
+    const errMsg = (err as Error).message ?? String(err);
+    logger.error(
+      { card_id: card.id, task_id: taskId, err },
+      'gate.executeApprovePlan: failed to send implement turn',
+    );
+    resolveCard(card.id, 'executed', JSON.stringify({ error: errMsg }));
+    pushToConversation(
+      card.conversation_id,
+      JSON.stringify({
+        type: 'message',
+        role: 'system',
+        text: `[Gate] Plan approved but could not reach the worker: ${errMsg}`,
+        id: card.id,
+      }),
+    );
+    return;
+  }
+
+  // Advance the managed phase so bookkeeping reflects implementation in flight.
+  upsertManagedTask({
+    conversation_id: card.conversation_id,
+    task_id: taskId,
+    phase: 'implementing',
+    artifact_lock_owner: null, // unlock — the plan is approved, edits are done
+  });
+
+  resolveCard(card.id, 'executed', JSON.stringify({ task_id: taskId, action: 'implement' }));
+  pushToConversation(
+    card.conversation_id,
+    JSON.stringify({
+      type: 'message',
+      role: 'system',
+      text: `[Gate] Plan approved — task \`${taskId}\` is now implementing.`,
+      id: card.id,
+    }),
+  );
 }
 
 // ─── rehydratePendingCards ────────────────────────────────────────────────────

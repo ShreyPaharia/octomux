@@ -18,6 +18,7 @@
  *   node dist-server/orchestrator/mcp/server.js
  */
 
+import { fileURLToPath } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -210,9 +211,23 @@ async function main(): Promise<void> {
   logger.info({ operation: 'startup' }, 'octomux MCP server connected to stdio');
 }
 
-// Run main when executed directly
-main().catch((err) => {
-  // Use stderr to avoid corrupting the stdio MCP protocol stream
-  process.stderr.write(`octomux MCP server fatal error: ${err}\n`);
-  process.exit(1);
-});
+// Run main ONLY when executed directly (claude spawns this as an --mcp-config
+// stdio subprocess). Guard against module import (e.g. the build bundling it as
+// an entry, or a test importing createOctomuxMcpServer) auto-spawning a server.
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return fileURLToPath(import.meta.url) === entry;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  main().catch((err) => {
+    // Use stderr to avoid corrupting the stdio MCP protocol stream
+    process.stderr.write(`octomux MCP server fatal error: ${err}\n`);
+    process.exit(1);
+  });
+}

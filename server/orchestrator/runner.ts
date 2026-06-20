@@ -29,6 +29,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
 import { execTmux } from '../tmux-bin.js';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { octomuxRoot } from '../octomux-root.js';
@@ -93,18 +95,27 @@ function writeOrchestratorsettings(convId: string, hookToken: string): string {
   fs.mkdirSync(dir, { recursive: true });
   const settingsPath = path.join(dir, 'settings.local.json');
 
-  const preToolUseUrl = `${hookBaseUrl()}/api/hooks/pre-tool-use?token=${encodeURIComponent(hookToken)}`;
+  // The conversation_id is REQUIRED on the gate URL: handlePreToolUse fails-open
+  // (allows the write un-gated) when it can't attach a card to a conversation.
+  const preToolUseUrl =
+    `${hookBaseUrl()}/api/hooks/pre-tool-use` +
+    `?token=${encodeURIComponent(hookToken)}` +
+    `&conversation_id=${encodeURIComponent(convId)}`;
 
   const settings = {
     // NOTE: no `theme`/`tui` here — we run with the DEFAULT config dir (auth +
     // onboarding already done), and an object `tui` value is rejected by claude
     // ("Invalid value. Expected one of: default, fullscreen") which blocks the
     // session on a settings-error dialog.
-    // PreToolUse gate hook (deny-now for Bash(octomux *) calls)
+    // PreToolUse gate hook. IMPORTANT: Claude Code hook matchers match the TOOL
+    // NAME only (as a regex) — NOT permissions-style command patterns. A matcher
+    // of 'Bash(octomux *)' silently never fires, leaving every write un-gated.
+    // We therefore match ALL 'Bash' calls and narrow to `octomux *` server-side
+    // in handlePreToolUse (non-octomux Bash is allowed through untouched).
     hooks: {
       PreToolUse: [
         {
-          matcher: 'Bash(octomux *)',
+          matcher: 'Bash',
           hooks: [{ type: 'http', url: preToolUseUrl, timeout: 5 }],
         },
       ],
@@ -131,6 +142,87 @@ function writeOrchestratorsettings(convId: string, hookToken: string): string {
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
   return settingsPath;
+}
+
+// ─── MCP read-tools config ──────────────────────────────────────────────────
+
+/**
+ * Resolve how to launch the octomux MCP read-tools stdio server.
+ *
+ * The conductor reaches octomux's typed read tools (`list_tasks`,
+ * `get_task_output`, …) via an `--mcp-config` stdio server. We must launch it
+ * the same way the rest of the server runs:
+ *  - prod: the build emits `dist-server/orchestrator/mcp/server.js` (a tsup
+ *    entry); runner.ts is bundled into `dist-server/index.js`, so the server is
+ *    a sibling under `orchestrator/mcp/`. Launch with `node <server.js>`.
+ *  - dev: runner.ts runs from source at `server/orchestrator/runner.ts`; the
+ *    server source is at `server/orchestrator/mcp/server.ts`. Launch via the
+ *    tsx CLI (`node <tsx/cli> <server.ts>`) so TS runs without a build.
+ *
+ * All paths are absolute so the spawned subprocess works regardless of the cwd
+ * claude launches it from. Returns null if no runnable server file is found
+ * (caller then launches the conductor without MCP reads rather than failing).
+ */
+function mcpServerInvocation(): { command: string; args: string[] } | null {
+  const here = fileURLToPath(import.meta.url);
+  const dir = path.dirname(here);
+
+  // prod: bundled runner lives in dist-server/index.js → server.js sibling tree
+  const prodServer = path.join(dir, 'orchestrator', 'mcp', 'server.js');
+  if (fs.existsSync(prodServer)) {
+    return { command: process.execPath, args: [prodServer] };
+  }
+
+  // dev: runner.ts lives in server/orchestrator/ → mcp/server.ts sibling
+  const devServer = path.join(dir, 'mcp', 'server.ts');
+  if (fs.existsSync(devServer)) {
+    try {
+      const tsxCli = createRequire(import.meta.url).resolve('tsx/cli');
+      return { command: process.execPath, args: [tsxCli, devServer] };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Write the conductor's `mcp-config.json` (octomux read-tools stdio server) into
+ * the per-conversation config dir. Returns the file path, or null when the MCP
+ * server entry can't be located (the conductor still launches, without reads).
+ */
+function writeOrchestratorMcpConfig(convId: string): string | null {
+  const inv = mcpServerInvocation();
+  if (!inv) {
+    logger.warn(
+      { conversation_id: convId },
+      'orchestrator: MCP server entry not found — launching conductor without --mcp-config (read tools disabled)',
+    );
+    return null;
+  }
+
+  const dir = path.join(convConfigDir(convId), '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const cfgPath = path.join(dir, 'mcp-config.json');
+
+  // The subprocess inherits the conductor's env (NODE_ENV, OCTOMUX_DATA_DIR) so
+  // it opens the SAME sqlite DB; pass them explicitly too for robustness.
+  const env: Record<string, string> = {};
+  if (process.env.NODE_ENV) env.NODE_ENV = process.env.NODE_ENV;
+  if (process.env.OCTOMUX_DATA_DIR) env.OCTOMUX_DATA_DIR = process.env.OCTOMUX_DATA_DIR;
+
+  const cfg = {
+    mcpServers: {
+      octomux: {
+        command: inv.command,
+        args: inv.args,
+        ...(Object.keys(env).length ? { env } : {}),
+      },
+    },
+  };
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+  return cfgPath;
 }
 
 // ─── Tmux session name ────────────────────────────────────────────────────────
@@ -175,13 +267,19 @@ export async function startConversation(
 
   const hookToken = crypto.randomBytes(32).toString('hex');
   const settingsPath = writeOrchestratorsettings(convId, hookToken);
+  const mcpConfigPath = writeOrchestratorMcpConfig(convId);
 
   const sessionName = orchestratorSessionName(convId);
 
   // Generate a fresh session id for this new conversation
   const sessionId = crypto.randomUUID();
 
-  const claudeCmd = buildLaunchCommand({ sessionId, settingsPath, extraFlags: opts.extraFlags });
+  const claudeCmd = buildLaunchCommand({
+    sessionId,
+    settingsPath,
+    mcpConfigPath,
+    extraFlags: opts.extraFlags,
+  });
   const shell = process.env.SHELL || '/bin/sh';
   const script = `${claudeCmd}; exec ${shell} -i`;
   const startupCmd = `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
@@ -204,6 +302,7 @@ export async function startConversation(
     tmux_window: tmuxWindow,
     claude_session_id: sessionId,
     transcript_path: transcriptPathFor(cwd, sessionId),
+    hook_token: hookToken,
   });
 
   logger.info(
@@ -236,6 +335,7 @@ export async function resumeConversation(
 
   const hookToken = crypto.randomBytes(32).toString('hex');
   const settingsPath = writeOrchestratorsettings(convId, hookToken);
+  const mcpConfigPath = writeOrchestratorMcpConfig(convId);
 
   const sessionName = orchestratorSessionName(convId);
 
@@ -246,6 +346,7 @@ export async function resumeConversation(
     claudeCmd = buildResumeCommand({
       sessionId: claudeSessionId,
       settingsPath,
+      mcpConfigPath,
       extraFlags: opts.extraFlags,
     });
   } else {
@@ -254,6 +355,7 @@ export async function resumeConversation(
     claudeCmd = buildLaunchCommand({
       sessionId: newSessionId,
       settingsPath,
+      mcpConfigPath,
       extraFlags: opts.extraFlags,
     });
     updateConversation(convId, {
@@ -279,7 +381,7 @@ export async function resumeConversation(
   const windowIndex = parseInt(winOut.trim(), 10) || 1;
   const tmuxWindow = `${sessionName}:${windowIndex}`;
 
-  updateConversation(convId, { tmux_window: tmuxWindow });
+  updateConversation(convId, { tmux_window: tmuxWindow, hook_token: hookToken });
 
   logger.info(
     {
@@ -386,13 +488,27 @@ export async function sendTurn(convId: string, text: string): Promise<void> {
 interface LaunchOpts {
   sessionId: string;
   settingsPath: string;
+  /** Path to the conductor mcp-config.json (octomux read tools), or null. */
+  mcpConfigPath?: string | null;
   extraFlags?: string;
 }
 
 interface ResumeOpts {
   sessionId: string;
   settingsPath: string;
+  /** Path to the conductor mcp-config.json (octomux read tools), or null. */
+  mcpConfigPath?: string | null;
   extraFlags?: string;
+}
+
+/**
+ * Build the `--mcp-config <file> --strict-mcp-config` flag fragment. `--strict`
+ * limits the session to ONLY this config's servers (ignores the user's global
+ * ~/.claude MCP servers) — the conductor gets exactly octomux's read tools.
+ */
+function mcpConfigFlags(mcpConfigPath?: string | null): string {
+  if (!mcpConfigPath) return '';
+  return ` --mcp-config ${shellQuoteSingle(mcpConfigPath)} --strict-mcp-config`;
 }
 
 /**
@@ -404,13 +520,23 @@ interface ResumeOpts {
  * separate config home. (`--config-dir` is not a real claude flag — it was
  * rejected with "unknown option".)
  */
-function buildLaunchCommand({ sessionId, settingsPath, extraFlags = '' }: LaunchOpts): string {
-  return `claude --session-id ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
+function buildLaunchCommand({
+  sessionId,
+  settingsPath,
+  mcpConfigPath,
+  extraFlags = '',
+}: LaunchOpts): string {
+  return `claude --session-id ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${mcpConfigFlags(mcpConfigPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
 }
 
 /** Build the `claude --resume <id>` command (default config dir + `--settings`). */
-function buildResumeCommand({ sessionId, settingsPath, extraFlags = '' }: ResumeOpts): string {
-  return `claude --resume ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
+function buildResumeCommand({
+  sessionId,
+  settingsPath,
+  mcpConfigPath,
+  extraFlags = '',
+}: ResumeOpts): string {
+  return `claude --resume ${sessionId} --settings ${shellQuoteSingle(settingsPath)}${mcpConfigFlags(mcpConfigPath)}${extraFlags ? ` ${extraFlags}` : ''}`;
 }
 
 /**
@@ -420,7 +546,17 @@ function buildResumeCommand({ sessionId, settingsPath, extraFlags = '' }: Resume
  */
 export function transcriptPathFor(cwd: string, sessionId: string): string {
   const home = process.env.HOME || process.env.USERPROFILE || '';
-  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+  // Claude encodes the REAL (symlink-resolved) cwd: on macOS `/tmp` →
+  // `/private/tmp` → `-private-tmp`. Encoding the raw cwd would point the tail at
+  // a non-existent file, so the conductor's replies would never stream. Resolve
+  // the real path first (fall back to the raw cwd if it doesn't exist yet).
+  let realCwd = cwd;
+  try {
+    realCwd = fs.realpathSync(cwd);
+  } catch {
+    realCwd = cwd;
+  }
+  const encoded = realCwd.replace(/[^a-zA-Z0-9]/g, '-');
   return path.join(home, '.claude', 'projects', encoded, `${sessionId}.jsonl`);
 }
 

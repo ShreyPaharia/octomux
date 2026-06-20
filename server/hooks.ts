@@ -1,12 +1,19 @@
 import type { Request, Response, NextFunction } from 'express';
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
-import { isOrchestratorManaged, upsertManagedTask, getManagedTask } from './orchestrator/store.js';
+import {
+  isOrchestratorManaged,
+  upsertManagedTask,
+  getManagedTask,
+  conversationIdForHookToken,
+} from './orchestrator/store.js';
 import { handlePreToolUse } from './orchestrator/gate.js';
 
 const logger = childLogger('hooks');
@@ -138,8 +145,13 @@ function requireHookToken(req: Request, res: Response, next: NextFunction) {
     .prepare(`SELECT 1 AS ok FROM agents WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
     .get(provided) as { ok: number } | undefined;
   if (!row) {
-    logger.warn({ path: req.path, ip: req.ip }, 'hook token not recognized');
-    return res.status(401).send();
+    // The orchestrator conductor is not an `agents` row — its gate hook token
+    // lives on orchestrator_conversations. Accept it here so the PreToolUse
+    // gate can authenticate the conductor's callbacks.
+    if (!conversationIdForHookToken(provided)) {
+      logger.warn({ path: req.path, ip: req.ip }, 'hook token not recognized');
+      return res.status(401).send();
+    }
   }
   next();
 }
@@ -415,6 +427,13 @@ router.post(
       );
     }
 
+    // Orchestrator plan-complete detection (spec §6.5). A managed task in the
+    // 'planning' phase signals plan-complete by writing plan.json and ending its
+    // turn — we detect it here via the worker's already-authenticated Stop hook,
+    // so the worker needs no extra env/command. Fires the phase_complete(plan)
+    // event the supervisor relays into an approval card.
+    maybeSignalPlanComplete(agent.task_id);
+
     // C3: fire-and-forget Haiku summarizer (only when builtin is enabled + API key set)
     void summarizeAgentProgress(agent.task_id, agent.id);
 
@@ -422,6 +441,48 @@ router.post(
     res.status(200).send();
   },
 );
+
+/**
+ * If `taskId` is an orchestrator-managed task in the 'planning' phase and its
+ * worktree now contains plan.json, advance the phase and emit
+ * `task:phase_complete{phase:'plan'}`. Idempotent: advancing the phase to
+ * 'awaiting_approval' before broadcasting prevents a rapid second Stop from
+ * firing a duplicate event (and therefore a duplicate approval card).
+ */
+function maybeSignalPlanComplete(taskId: string): void {
+  const managed = getManagedTask(taskId);
+  if (!managed || managed.phase !== 'planning') return;
+
+  const row = getDb()
+    .prepare(
+      `SELECT w.path AS worktree FROM tasks t
+         JOIN worktrees w ON t.worktree_id = w.id
+        WHERE t.id = ?`,
+    )
+    .get(taskId) as { worktree: string | null } | undefined;
+  const worktree = row?.worktree;
+  if (!worktree) return;
+
+  const planPath = path.join(worktree, 'plan.json');
+  if (!fs.existsSync(planPath)) return;
+
+  // Advance synchronously so a concurrent/rapid second Stop won't re-fire.
+  upsertManagedTask({
+    conversation_id: managed.conversation_id,
+    task_id: taskId,
+    phase: 'awaiting_approval',
+  });
+
+  logger.info(
+    { task_id: taskId, operation: 'plan_complete_detected' },
+    'Stop hook: plan.json present for managed planning task — emitting phase_complete(plan)',
+  );
+
+  broadcast({
+    type: 'task:phase_complete',
+    payload: { taskId, phase: 'plan', artifacts: ['plan.json'] },
+  });
+}
 
 // POST /api/hooks/phase-complete
 // Worker agents POST this at a phase boundary (§6.5, R2-F2).

@@ -957,6 +957,11 @@ export function initDb(instance: Database.Database): void {
     'is_global_monitor INTEGER NOT NULL DEFAULT 0',
     orchConvCols,
   );
+  // ── Conductor hook token (orchestrator gate auth) ───────────────────────────
+  // The conductor session is not an `agents` row, so its PreToolUse gate hook
+  // token has nowhere to live in the agents table. Persist it here so
+  // requireHookToken can authenticate the conductor's gate callbacks. Forward-only.
+  addColumn('orchestrator_conversations', 'hook_token', 'hook_token TEXT', orchConvCols);
   // Ensure at most one row has is_global_monitor=1 (partial unique index — SQLite
   // WHERE clause filters NULLs but since we use 0/1 we need a different approach;
   // enforce uniqueness in application logic via setGlobalMonitor clearing old value).

@@ -12,6 +12,8 @@ export interface OrchestratorConversation {
   status: string;
   /** 1 when this conversation is in global-monitor mode, 0 otherwise. */
   is_global_monitor: number;
+  /** Random token authenticating the conductor's PreToolUse gate hook callbacks. */
+  hook_token: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -83,6 +85,21 @@ export function createConversation(input: CreateConversationInput): string {
   return id;
 }
 
+/**
+ * Resolve the conversation id that owns a conductor hook token, or null.
+ * Used by the hook-auth middleware to authenticate the orchestrator's
+ * PreToolUse gate callbacks (the conductor is not an `agents` row).
+ */
+export function conversationIdForHookToken(token: string): string | null {
+  if (!token) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM orchestrator_conversations WHERE hook_token = ? AND hook_token IS NOT NULL AND hook_token != '' LIMIT 1`,
+    )
+    .get(token) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
 /** Retrieve a conversation by id. Returns undefined if not found. */
 export function getConversation(id: string): OrchestratorConversation | undefined {
   return getDb().prepare(`SELECT * FROM orchestrator_conversations WHERE id = ?`).get(id) as
@@ -105,7 +122,7 @@ export function updateConversation(
   fields: Partial<
     Pick<
       OrchestratorConversation,
-      'title' | 'tmux_window' | 'claude_session_id' | 'transcript_path' | 'status'
+      'title' | 'tmux_window' | 'claude_session_id' | 'transcript_path' | 'status' | 'hook_token'
     >
   >,
 ): void {
@@ -114,6 +131,10 @@ export function updateConversation(
   if (fields.title !== undefined) {
     sets.push('title = ?');
     vals.push(fields.title);
+  }
+  if (fields.hook_token !== undefined) {
+    sets.push('hook_token = ?');
+    vals.push(fields.hook_token);
   }
   if (fields.tmux_window !== undefined) {
     sets.push('tmux_window = ?');

@@ -158,8 +158,9 @@ describe('exec.runCreateTask', () => {
       const prompt = row?.initial_prompt ?? '';
       // Template must instruct the worker to write plan.json
       expect(prompt).toMatch(/plan\.json/i);
-      // Template must instruct the worker to call signal_phase_complete
-      expect(prompt).toMatch(/signal_phase_complete/i);
+      // Template must instruct the worker to end its turn after writing the plan
+      // (the orchestrator detects plan.json via the Stop hook — no signal command).
+      expect(prompt).toMatch(/end your turn|finish your turn/i);
       // Original prompt must be included
       expect(prompt).toContain('Plan an auth system.');
     });
