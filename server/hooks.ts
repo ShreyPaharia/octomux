@@ -6,6 +6,7 @@ import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
+import { isOrchestratorManaged, upsertManagedTask, getManagedTask } from './orchestrator/store.js';
 
 const logger = childLogger('hooks');
 
@@ -365,13 +366,15 @@ router.post(
     });
     txn();
 
-    // B4: Auto-transition in_progress → human_review when the last agent stops
+    // B4: Auto-transition in_progress → human_review when the last agent stops.
+    // SUPPRESSED for orchestrator-managed tasks (§6.5, R3-I1): managed_tasks.phase
+    // is authoritative; workflow_status is set only via set_workflow_status tool.
     const db = getDb();
     const task = db
       .prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`)
       .get(agent.task_id) as { id: string; workflow_status: string } | undefined;
 
-    if (task && task.workflow_status === 'in_progress') {
+    if (task && task.workflow_status === 'in_progress' && !isOrchestratorManaged(task.id)) {
       const otherRunning = db
         .prepare(
           `SELECT COUNT(*) AS n FROM agents WHERE task_id = ? AND status = 'running' AND id != ?`,
@@ -404,6 +407,11 @@ router.post(
           data: { from: 'in_progress', to: 'human_review', note: 'auto: agent stopped' },
         });
       }
+    } else if (task && task.workflow_status === 'in_progress' && isOrchestratorManaged(task.id)) {
+      logger.info(
+        { task_id: task.id, agent_id: agent.id, operation: 'stop_suppressed_managed' },
+        'Stop hook: suppressed auto-human_review for orchestrator-managed task',
+      );
     }
 
     // C3: fire-and-forget Haiku summarizer (only when builtin is enabled + API key set)
@@ -413,6 +421,61 @@ router.post(
     res.status(200).send();
   },
 );
+
+// POST /api/hooks/phase-complete
+// Worker agents POST this at a phase boundary (§6.5, R2-F2).
+// Body: { task_id, phase, artifacts? }
+// Authenticated by the worker's existing per-agent hook_token.
+// Persists + emits a typed task:phase_complete event and advances
+// managed_tasks.phase. Suppresses the Stop auto-human_review for managed tasks.
+router.post('/phase-complete', requireHookToken, (req, res) => {
+  const { task_id, phase, artifacts } = req.body as {
+    task_id?: string;
+    phase?: string;
+    artifacts?: unknown;
+  };
+
+  if (!task_id || !phase) {
+    logger.warn({ path: req.path }, 'phase-complete: missing task_id or phase');
+    res.status(200).send();
+    return;
+  }
+
+  // Only advance phase if this task is orchestrator-managed.
+  const managed = getManagedTask(task_id);
+  if (managed) {
+    const artifactsJson = artifacts !== undefined ? JSON.stringify(artifacts) : null;
+    upsertManagedTask({
+      conversation_id: managed.conversation_id,
+      task_id,
+      phase,
+      ...(artifactsJson !== null ? { artifacts: artifactsJson } : {}),
+    });
+
+    logger.info(
+      { task_id, phase, operation: 'phase_complete' },
+      'phase-complete: advanced managed_tasks.phase',
+    );
+  } else {
+    logger.info(
+      { task_id, phase },
+      'phase-complete: task not orchestrator-managed, no-op on phase',
+    );
+  }
+
+  // Always emit the typed event and broadcast (so supervisor can observe it
+  // whether or not the task is managed).
+  broadcast({
+    type: 'task:phase_complete',
+    payload: {
+      taskId: task_id,
+      phase,
+      ...(artifacts !== undefined ? { artifacts } : {}),
+    },
+  });
+
+  res.status(200).send();
+});
 
 // POST /api/hooks/session-start
 // Cursor (harness-issued) fires this on chat creation. Used to bind a

@@ -10,6 +10,12 @@ import {
   getAgentActivity,
 } from './test-helpers.js';
 import { createApp } from './app.js';
+import {
+  getManagedTask,
+  upsertManagedTask,
+  eventsSince,
+  createConversation,
+} from './orchestrator/store.js';
 
 describe('Hook endpoints', () => {
   let db: Database.Database;
@@ -484,5 +490,215 @@ describe('POST /api/hooks/session-start', () => {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-from-fallback');
+  });
+});
+
+// ─── Task 2.1: phase-complete hook + Stop reconciliation ───────────────────────
+
+describe('POST /api/hooks/phase-complete', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    // Task + agent with a valid hook_token
+    insertTask(db, { id: 'task-pc', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-pc',
+      task_id: 'task-pc',
+      harness_session_id: 'sess-pc',
+      hook_token: 'tok-pc',
+    } as any);
+  });
+
+  it('returns 401 when hook_token is missing', async () => {
+    await request(app).post('/api/hooks/phase-complete').send({ task_id: 'task-pc' }).expect(401);
+  });
+
+  it('returns 401 when hook_token is not recognized', async () => {
+    await request(app)
+      .post('/api/hooks/phase-complete?token=bad-token')
+      .send({ task_id: 'task-pc' })
+      .expect(401);
+  });
+
+  it('advances managed_tasks.phase and emits task:phase_complete event', async () => {
+    // Register task as orchestrator-managed with initial phase 'planning'
+    const convId = createConversation({ title: 'test-conv-1' });
+    upsertManagedTask({ conversation_id: convId, task_id: 'task-pc', phase: 'planning' });
+
+    const beforeSeq = eventsSince(0).length;
+
+    await request(app)
+      .post('/api/hooks/phase-complete?token=tok-pc')
+      .send({ task_id: 'task-pc', phase: 'awaiting_approval', artifacts: [] })
+      .expect(200);
+
+    // Phase advanced in managed_tasks
+    const mt = getManagedTask('task-pc');
+    expect(mt).toBeDefined();
+    expect(mt!.phase).toBe('awaiting_approval');
+
+    // task:phase_complete event persisted
+    const allEvents = eventsSince(0);
+    const newEvents = allEvents.slice(beforeSeq);
+    const phaseEvent = newEvents.find((e) => e.type === 'task:phase_complete');
+    expect(phaseEvent).toBeDefined();
+    expect(phaseEvent!.task_id).toBe('task-pc');
+    const payload = JSON.parse(phaseEvent!.payload);
+    expect(payload.phase).toBe('awaiting_approval');
+  });
+
+  it('returns 200 for tasks not in managed_tasks (non-managed, no error)', async () => {
+    await request(app)
+      .post('/api/hooks/phase-complete?token=tok-pc')
+      .send({ task_id: 'task-pc', phase: 'done' })
+      .expect(200);
+  });
+
+  it('stores artifacts pointer in managed_tasks', async () => {
+    const convId2 = createConversation({ title: 'test-conv-2' });
+    upsertManagedTask({ conversation_id: convId2, task_id: 'task-pc', phase: 'planning' });
+
+    await request(app)
+      .post('/api/hooks/phase-complete?token=tok-pc')
+      .send({
+        task_id: 'task-pc',
+        phase: 'awaiting_approval',
+        artifacts: [{ path: 'plan.json', kind: 'plan' }],
+      })
+      .expect(200);
+
+    const mt = getManagedTask('task-pc');
+    expect(mt!.phase).toBe('awaiting_approval');
+    // artifacts stored as JSON
+    const arts = JSON.parse(mt!.artifacts ?? '[]');
+    expect(arts).toHaveLength(1);
+    expect(arts[0].path).toBe('plan.json');
+  });
+});
+
+describe('Stop hook suppression for orchestrator-managed tasks', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 'task-m', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-m',
+      task_id: 'task-m',
+      harness_session_id: 'sess-m',
+      hook_token: 'tok-m',
+    } as any);
+  });
+
+  it('auto-transitions in_progress → human_review for UN-managed tasks (existing behavior)', async () => {
+    // task-m is NOT in managed_tasks → existing B4 behavior applies
+    await request(app)
+      .post('/api/hooks/stop?token=tok-m')
+      .send({ session_id: 'sess-m' })
+      .expect(200);
+
+    const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-m') as {
+      workflow_status: string;
+    };
+    expect(row.workflow_status).toBe('human_review');
+  });
+
+  it('SUPPRESSES in_progress → human_review auto-transition for orchestrator-managed tasks', async () => {
+    // Register task as orchestrator-managed
+    const convIdM = createConversation({ title: 'test-conv-m' });
+    upsertManagedTask({ conversation_id: convIdM, task_id: 'task-m', phase: 'planning' });
+
+    await request(app)
+      .post('/api/hooks/stop?token=tok-m')
+      .send({ session_id: 'sess-m' })
+      .expect(200);
+
+    // workflow_status must remain in_progress for managed tasks
+    const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-m') as {
+      workflow_status: string;
+    };
+    expect(row.workflow_status).toBe('in_progress');
+
+    // Agent is still set idle (prompt resolution still happens)
+    expect(getAgentActivity(db, 'agent-m').hook_activity).toBe('idle');
+  });
+});
+
+describe('phase-complete + Stop ordering contract (§6.5, R3-I1)', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 'task-ord', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-ord',
+      task_id: 'task-ord',
+      harness_session_id: 'sess-ord',
+      hook_token: 'tok-ord',
+    } as any);
+    const convIdOrd = createConversation({ title: 'test-conv-ord' });
+    upsertManagedTask({ conversation_id: convIdOrd, task_id: 'task-ord', phase: 'planning' });
+  });
+
+  it('phase-complete then Stop → phase advanced once, workflow_status unchanged', async () => {
+    // Signal phase complete first
+    await request(app)
+      .post('/api/hooks/phase-complete?token=tok-ord')
+      .send({ task_id: 'task-ord', phase: 'awaiting_approval', artifacts: [] })
+      .expect(200);
+
+    // Then agent stops (normal pause at phase boundary)
+    await request(app)
+      .post('/api/hooks/stop?token=tok-ord')
+      .send({ session_id: 'sess-ord' })
+      .expect(200);
+
+    const mt = getManagedTask('task-ord');
+    expect(mt!.phase).toBe('awaiting_approval');
+
+    const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-ord') as {
+      workflow_status: string;
+    };
+    expect(row.workflow_status).toBe('in_progress');
+
+    const allEvents = eventsSince(0);
+    const phaseEvents = allEvents.filter((e) => e.type === 'task:phase_complete');
+    expect(phaseEvents).toHaveLength(1);
+    expect(phaseEvents[0].task_id).toBe('task-ord');
+  });
+
+  it('Stop then phase-complete (race) → phase still advanced once, workflow_status unchanged', async () => {
+    // Stop arrives first (before phase-complete)
+    await request(app)
+      .post('/api/hooks/stop?token=tok-ord')
+      .send({ session_id: 'sess-ord' })
+      .expect(200);
+
+    // Phase-complete arrives after Stop
+    await request(app)
+      .post('/api/hooks/phase-complete?token=tok-ord')
+      .send({ task_id: 'task-ord', phase: 'awaiting_approval', artifacts: [] })
+      .expect(200);
+
+    const mt = getManagedTask('task-ord');
+    expect(mt!.phase).toBe('awaiting_approval');
+
+    const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-ord') as {
+      workflow_status: string;
+    };
+    expect(row.workflow_status).toBe('in_progress');
+
+    const allEvents = eventsSince(0);
+    const phaseEvents = allEvents.filter(
+      (e) => e.type === 'task:phase_complete' && e.task_id === 'task-ord',
+    );
+    expect(phaseEvents).toHaveLength(1);
   });
 });
