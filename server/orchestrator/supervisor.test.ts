@@ -364,15 +364,43 @@ describe('supervisor', () => {
   });
 
   describe('pushToConversation integration', () => {
-    it('calls pushToConversation with the conversation id and serialized note', async () => {
+    it('relays a meaningful event (stuck) to pushToConversation', async () => {
       const convId = createConversation({ title: 'Conv Push' });
       const task = makeTask('task-push-01');
       upsertManagedTask({ conversation_id: convId, task_id: task.id });
 
-      const seq = appendEvent({ task_id: task.id, type: 'task:updated', payload: '{}' });
-      await supervisor.processEvent({ seq, task_id: task.id, type: 'task:updated', payload: '{}' });
+      const seq = appendEvent({
+        task_id: task.id,
+        type: 'task:stuck',
+        payload: '{"reason":"no activity"}',
+      });
+      await supervisor.processEvent({
+        seq,
+        task_id: task.id,
+        type: 'task:stuck',
+        payload: '{"reason":"no activity"}',
+      });
 
       expect(pushToConversation).toHaveBeenCalledWith(convId, expect.any(String));
+    });
+
+    it('does NOT push a chat note for generic task:updated (no spam)', async () => {
+      const convId = createConversation({ title: 'Conv NoSpam' });
+      const task = makeTask('task-nospam-01');
+      upsertManagedTask({ conversation_id: convId, task_id: task.id });
+
+      // Several generic updates (as worker hooks fire) must not each become a note.
+      for (let i = 0; i < 5; i++) {
+        const seq = appendEvent({ task_id: task.id, type: 'task:updated', payload: '{}' });
+        await supervisor.processEvent({
+          seq,
+          task_id: task.id,
+          type: 'task:updated',
+          payload: '{}',
+        });
+      }
+
+      expect(pushToConversation).not.toHaveBeenCalled();
     });
   });
 

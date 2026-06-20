@@ -376,6 +376,24 @@ export function createSupervisor(): Supervisor {
       }
     }
 
+    // Only relay MEANINGFUL, user-facing events to the chat. Generic
+    // `task:updated` (and :created/:deleted) fire repeatedly from worker hook
+    // activity (Stop, PostToolUse, summaries, polling) and are meant for the
+    // dashboard's live UI — relaying each one spams the conversation with
+    // "[supervisor] task X updated" (the user saw 10 in a row). Surface only
+    // `task:stuck` here; phase_complete and errors are handled above. Other
+    // events silently advance the replay cursor without a chat note.
+    const RELAY_TO_CHAT = new Set(['task:stuck']);
+    if (!RELAY_TO_CHAT.has(event.type)) {
+      upsertManagedTask({
+        conversation_id: convId,
+        task_id: event.task_id,
+        last_event_seq: event.seq,
+      });
+      emitter.emit('inject', injection);
+      return;
+    }
+
     // Push to connected ws clients (also persists as a message)
     const wsMessage = JSON.stringify({ type: 'message', role: 'assistant', text: note });
     pushToConversation(convId, wsMessage);
