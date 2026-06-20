@@ -306,6 +306,79 @@ export function eventsSince(sinceSeq: number): StoredEvent[] {
     .all(sinceSeq) as StoredEvent[];
 }
 
+// ─── conversation_usage ───────────────────────────────────────────────────────
+
+export interface ConversationUsage {
+  conversation_id: string;
+  tasks_spawned: number;
+  tool_calls: number;
+  started_at: string;
+  last_activity_at: string;
+}
+
+/**
+ * Insert a conversation_usage row for this conversation.
+ * Idempotent — does nothing if a row already exists (INSERT OR IGNORE).
+ */
+export function initConversationUsage(conversationId: string): void {
+  getDb()
+    .prepare(`INSERT OR IGNORE INTO conversation_usage (conversation_id) VALUES (?)`)
+    .run(conversationId);
+}
+
+/** Return the conversation_usage row, or undefined if none exists. */
+export function getConversationUsage(conversationId: string): ConversationUsage | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM conversation_usage WHERE conversation_id = ?`)
+    .get(conversationId) as ConversationUsage | undefined;
+}
+
+/**
+ * Increment tasks_spawned by 1 and update last_activity_at.
+ * Auto-creates the row if missing (upsert so callers need not call initConversationUsage first).
+ */
+export function incrementTasksSpawned(conversationId: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO conversation_usage (conversation_id, tasks_spawned)
+         VALUES (?, 1)
+         ON CONFLICT(conversation_id) DO UPDATE SET
+           tasks_spawned    = tasks_spawned + 1,
+           last_activity_at = datetime('now')`,
+    )
+    .run(conversationId);
+}
+
+/**
+ * Increment tool_calls by 1 and update last_activity_at.
+ * Auto-creates the row if missing.
+ */
+export function incrementToolCalls(conversationId: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO conversation_usage (conversation_id, tool_calls)
+         VALUES (?, 1)
+         ON CONFLICT(conversation_id) DO UPDATE SET
+           tool_calls       = tool_calls + 1,
+           last_activity_at = datetime('now')`,
+    )
+    .run(conversationId);
+}
+
+// ─── listActiveConversations ──────────────────────────────────────────────────
+
+/**
+ * List all conversations with status='active' (not stopped, deleted, or other
+ * terminal states). Used by rehydrateConversations on boot.
+ */
+export function listActiveConversations(): OrchestratorConversation[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM orchestrator_conversations WHERE status = 'active' ORDER BY updated_at DESC`,
+    )
+    .all() as OrchestratorConversation[];
+}
+
 // ─── global-monitor mode ──────────────────────────────────────────────────────
 
 /**

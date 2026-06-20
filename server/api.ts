@@ -63,6 +63,7 @@ import {
   setGlobalMonitor,
   clearGlobalMonitor,
   getGlobalMonitorConversation,
+  getConversationUsage,
 } from './orchestrator/store.js';
 import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 
@@ -3417,6 +3418,36 @@ export function setupRoutes(app: Express): void {
         'orchestrator: global-monitor toggled',
       );
       res.json({ is_global_monitor: isMonitor });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations/:id/usage — conductor-leanness stats (§6.7)
+  // Returns tasks_spawned, tool_calls, started_at, last_activity_at.
+  // Returns zeros when no usage row exists yet (conversation was created but no
+  // write-actions have been dispatched).
+  app.get('/api/orchestrator/conversations/:id/usage', (req: Request, res: Response) => {
+    try {
+      const convId = (req.params as Record<string, string>).id;
+      const conv = getConversation(convId);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const usage = getConversationUsage(convId);
+      if (!usage) {
+        // No usage row yet — return zeros so the UI always gets a valid shape.
+        res.json({
+          conversation_id: convId,
+          tasks_spawned: 0,
+          tool_calls: 0,
+          started_at: conv.created_at,
+          last_activity_at: conv.updated_at,
+        });
+        return;
+      }
+      res.json(usage);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

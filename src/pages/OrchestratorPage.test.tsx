@@ -112,16 +112,34 @@ const MSG_HISTORY = [
   },
 ];
 
+const ZERO_USAGE = {
+  conversation_id: CONV_1.id,
+  tasks_spawned: 0,
+  tool_calls: 0,
+  started_at: '2026-06-20 00:00:00',
+  last_activity_at: '2026-06-20 00:00:00',
+};
+
+const WARN_USAGE = {
+  conversation_id: CONV_1.id,
+  tasks_spawned: 15,
+  tool_calls: 50,
+  started_at: '2026-06-20 00:00:00',
+  last_activity_at: '2026-06-20 00:05:00',
+};
+
 function makeFetchMock(
   options: {
     conversations?: (typeof CONV_1)[];
     messages?: typeof MSG_HISTORY;
     createConv?: typeof CONV_1;
+    usage?: typeof ZERO_USAGE;
   } = {},
 ) {
   const convs = options.conversations ?? [CONV_1];
   const msgs = options.messages ?? [];
   const newConv = options.createConv ?? CONV_1;
+  const usage = options.usage ?? ZERO_USAGE;
 
   return vi.fn(async (url: string, opts?: RequestInit) => {
     const method = (opts?.method ?? 'GET').toUpperCase();
@@ -134,6 +152,9 @@ function makeFetchMock(
     }
     if (url.match(/^\/api\/orchestrator\/conversations\/[^/]+\/messages$/) && method === 'GET') {
       return { ok: true, status: 200, json: async () => msgs } as Response;
+    }
+    if (url.match(/^\/api\/orchestrator\/conversations\/[^/]+\/usage$/) && method === 'GET') {
+      return { ok: true, status: 200, json: async () => usage } as Response;
     }
     if (url.match(/^\/api\/orchestrator\/conversations\/[^/]+$/) && method === 'GET') {
       const id = url.split('/').at(-1);
@@ -304,6 +325,53 @@ describe('OrchestratorPage', () => {
 
     // Both messages should be in the thread
     expect(screen.getByText('First message')).toBeInTheDocument();
+  });
+});
+
+// ─── Conductor-leanness indicator tests (SHR-137) ────────────────────────────
+
+describe('conductor-leanness indicator', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows zero stats when usage has no activity', async () => {
+    vi.stubGlobal('fetch', makeFetchMock({ conversations: [CONV_1], usage: ZERO_USAGE }));
+
+    renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
+    await waitFor(() => screen.getByText('My orchestrator chat'));
+    fireEvent.click(screen.getByText('My orchestrator chat'));
+
+    // Usage indicator should show "0 tasks" and "0 calls"
+    await waitFor(() => {
+      expect(screen.getByLabelText(/conductor leanness stats/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText('0 tasks')).toBeInTheDocument();
+    expect(screen.getByText('0 calls')).toBeInTheDocument();
+  });
+
+  it('shows warning state when tasks_spawned exceeds the soft threshold', async () => {
+    vi.stubGlobal('fetch', makeFetchMock({ conversations: [CONV_1], usage: WARN_USAGE }));
+
+    renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
+    await waitFor(() => screen.getByText('My orchestrator chat'));
+    fireEvent.click(screen.getByText('My orchestrator chat'));
+
+    await waitFor(() => {
+      // Indicator should be present and show the high counts
+      expect(screen.getByText('15 tasks')).toBeInTheDocument();
+    });
+    expect(screen.getByText('50 calls')).toBeInTheDocument();
+  });
+
+  it('does not render the leanness indicator before a conversation is opened', async () => {
+    vi.stubGlobal('fetch', makeFetchMock({ conversations: [CONV_1] }));
+
+    renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
+    await waitFor(() => screen.getByText('My orchestrator chat'));
+
+    // No conversation selected yet — indicator should not be visible
+    expect(screen.queryByLabelText(/conductor leanness stats/i)).not.toBeInTheDocument();
   });
 });
 

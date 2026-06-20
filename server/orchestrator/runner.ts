@@ -33,7 +33,12 @@ import { execTmux } from '../tmux-bin.js';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { octomuxRoot } from '../octomux-root.js';
 import { childLogger } from '../logger.js';
-import { getConversation, updateConversation } from './store.js';
+import {
+  getConversation,
+  updateConversation,
+  listActiveConversations,
+  listPendingCards,
+} from './store.js';
 import type { OrchestratorConversation } from './store.js';
 
 const logger = childLogger('orchestrator/runner');
@@ -447,4 +452,47 @@ async function waitForPaneContent(target: string, text: string): Promise<boolean
     await new Promise<void>((resolve) => setTimeout(resolve, CAPTURE_PANE_POLL_MS));
   }
   return false;
+}
+
+// ─── Restart hardening ────────────────────────────────────────────────────────
+
+/**
+ * Snapshot of a conversation's restart state. Returned by `rehydrateConversations`
+ * so the caller can decide whether to re-attach a transcript tail, show a
+ * pending-card notice in the UI, or prompt the user to resume a stopped session.
+ */
+export interface RehydratedConversation {
+  conversationId: string;
+  title: string;
+  tmuxWindow: string | null;
+  claudeSessionId: string | null;
+  transcriptPath: string | null;
+  /** How many action cards are still in 'pending' state (need user decision). */
+  pendingCardCount: number;
+}
+
+/**
+ * On backend boot, scan all active conversations and surface:
+ *  - Their current tmux session info (so the stream layer can re-attach).
+ *  - How many pending action cards remain undecided (so the UI can rehydrate them).
+ *
+ * This is a read-only inspection — it does not restart any sessions or re-tail
+ * any transcripts. The caller (typically `server/app.ts` or the stream layer)
+ * decides what to do with the results.
+ *
+ * Spec reference: §10 "durable execution / rehydrate-on-restart".
+ */
+export function rehydrateConversations(): RehydratedConversation[] {
+  const active = listActiveConversations();
+  return active.map((conv) => {
+    const pendingCards = listPendingCards(conv.id);
+    return {
+      conversationId: conv.id,
+      title: conv.title,
+      tmuxWindow: conv.tmux_window,
+      claudeSessionId: conv.claude_session_id,
+      transcriptPath: conv.transcript_path,
+      pendingCardCount: pendingCards.length,
+    };
+  });
 }

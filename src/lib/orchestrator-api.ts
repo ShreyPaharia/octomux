@@ -20,6 +20,15 @@ const BASE = '/api/orchestrator';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Conductor-leanness stats returned by GET /api/orchestrator/conversations/:id/usage (§6.7). */
+export interface ConversationUsage {
+  conversation_id: string;
+  tasks_spawned: number;
+  tool_calls: number;
+  started_at: string;
+  last_activity_at: string;
+}
+
 export interface OrchestratorConversation {
   id: string;
   title: string;
@@ -124,6 +133,14 @@ export const orchestratorApi = {
    */
   toggleGlobalMonitor(conversationId: string): Promise<{ is_global_monitor: boolean }> {
     return post(`/conversations/${conversationId}/global-monitor`, {});
+  },
+
+  /**
+   * Fetch conductor-leanness usage stats for a conversation (§6.7).
+   * Returns tasks_spawned + tool_calls counters and timestamps.
+   */
+  getUsage(conversationId: string): Promise<ConversationUsage> {
+    return get(`/conversations/${conversationId}/usage`);
   },
 };
 
