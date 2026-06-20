@@ -230,8 +230,19 @@ export function assertTranscriptVersion(version: string): void {
 export async function tailTranscript(
   filePath: string,
   onEvent: (event: ChatEvent) => void,
+  opts: { startAtEnd?: boolean } = {},
 ): Promise<StopFn> {
+  // When startAtEnd is set, begin at the current EOF so only NEW appends stream
+  // (history is loaded separately via GET /messages) — avoids re-pushing the
+  // whole transcript on every (re)connect.
   let offset = 0;
+  if (opts.startAtEnd) {
+    try {
+      offset = fs.statSync(filePath).size;
+    } catch {
+      offset = 0; // file not created yet → start at 0 (still before any content)
+    }
+  }
   let buffer = '';
   let watcher: fs.FSWatcher | null = null;
   let stopped = false;

@@ -262,7 +262,7 @@ describe('dispatchUserTurn', () => {
     vi.clearAllMocks();
   });
 
-  it('persists user text to orchestrator_messages and calls sendTurn', async () => {
+  it('forwards the turn to sendTurn WITHOUT persisting (the tail is the single source)', async () => {
     const convId = createConversation({ title: 'Turn test', tmux_window: 'mock-session:1' });
 
     const { sendTurn } = await import('./runner.js');
@@ -272,13 +272,13 @@ describe('dispatchUserTurn', () => {
 
     expect(vi.mocked(sendTurn)).toHaveBeenCalledWith(convId, 'What tasks are running?');
 
-    // The turn should be persisted
-    const msgs = listMessages(convId);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].role).toBe('user');
+    // dispatchUserTurn no longer echoes/persists — the transcript tail surfaces +
+    // persists the user turn (avoids a duplicate user message).
+    expect(listMessages(convId)).toHaveLength(0);
+    expect(pushed).toHaveLength(0);
   });
 
-  it('a second turn also works', async () => {
+  it('a second turn also forwards to sendTurn', async () => {
     const convId = createConversation({ title: 'Two turns', tmux_window: 'mock-session:1' });
     const { sendTurn } = await import('./runner.js');
 
@@ -286,8 +286,7 @@ describe('dispatchUserTurn', () => {
     await dispatchUserTurn(convId, 'Second question', () => {});
 
     expect(vi.mocked(sendTurn)).toHaveBeenCalledTimes(2);
-    const msgs = listMessages(convId);
-    expect(msgs).toHaveLength(2);
+    expect(listMessages(convId)).toHaveLength(0);
   });
 
   it('rejects with 404-like error if conversation not found', async () => {

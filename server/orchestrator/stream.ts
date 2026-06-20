@@ -203,34 +203,38 @@ async function startTranscriptTail(convId: string, transcriptPath: string): Prom
     'stream: starting transcript tail',
   );
 
-  const stop = await tailTranscript(transcriptPath, (chatEvent) => {
-    const wsEvent = chatEventToWsEvent(chatEvent);
-    if (!wsEvent) return;
+  const stop = await tailTranscript(
+    transcriptPath,
+    (chatEvent) => {
+      const wsEvent = chatEventToWsEvent(chatEvent);
+      if (!wsEvent) return;
 
-    // Broadcast to all connected clients
-    const set = convClients.get(convId);
-    if (!set || set.size === 0) return;
+      // Broadcast to all connected clients
+      const set = convClients.get(convId);
+      if (!set || set.size === 0) return;
 
-    const msg = JSON.stringify(wsEvent);
+      const msg = JSON.stringify(wsEvent);
 
-    // Persist message events
-    if (wsEvent.type === 'message') {
-      try {
-        const contentBlocks = [{ type: 'text', text: wsEvent.text }];
-        appendMessage({
-          conversation_id: convId,
-          role: wsEvent.role,
-          content: JSON.stringify(contentBlocks),
-        });
-      } catch (err) {
-        logger.warn({ conversation_id: convId, err }, 'stream: failed to persist message');
+      // Persist message events
+      if (wsEvent.type === 'message') {
+        try {
+          const contentBlocks = [{ type: 'text', text: wsEvent.text }];
+          appendMessage({
+            conversation_id: convId,
+            role: wsEvent.role,
+            content: JSON.stringify(contentBlocks),
+          });
+        } catch (err) {
+          logger.warn({ conversation_id: convId, err }, 'stream: failed to persist message');
+        }
       }
-    }
 
-    for (const push of set) {
-      push(msg);
-    }
-  });
+      for (const push of set) {
+        push(msg);
+      }
+    },
+    { startAtEnd: true },
+  );
 
   convTails.set(convId, stop);
   logger.debug({ conversation_id: convId }, 'stream: transcript tail started');
@@ -257,11 +261,11 @@ export async function dispatchUserTurn(convId: string, text: string, push: PushF
 
   logger.debug({ conversation_id: convId, textLen: text.length }, 'stream: dispatching user turn');
 
-  // Persist the user turn
-  const turnEvent: WsMessageEvent = { type: 'message', role: 'user', text };
-  persistAndPush(convId, turnEvent, push);
-
-  // Forward to the tmux session via send-keys
+  // Forward to the tmux session via send-keys. We do NOT echo/persist the turn
+  // here — the transcript tail is the single source for all messages (the
+  // session writes the user turn to the transcript, which the tail surfaces +
+  // persists). Echoing here would duplicate the user message.
+  void push;
   await sendTurn(convId, text);
 
   logger.debug({ conversation_id: convId }, 'stream: user turn sent to session');
