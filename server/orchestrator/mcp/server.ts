@@ -1,13 +1,14 @@
 /**
  * server/orchestrator/mcp/server.ts
  *
- * Octomux orchestrator MCP server (Task 1.5 / SHR-121).
+ * Octomux orchestrator MCP server (Task 1.5 / SHR-121; seed SHR-135).
  *
  * Exposes typed READ tools to the conductor `claude` session:
- *   list_tasks      — lean task summaries (id/title/statuses only)
- *   get_task        — lean task detail + agent_count
- *   monitor_status  — cross-task rollup + needs_attention list
- *   get_task_output — artifact pointers from managed_tasks (plan/diff_url/tests)
+ *   list_tasks         — lean task summaries (id/title/statuses only)
+ *   get_task           — lean task detail + agent_count
+ *   monitor_status     — cross-task rollup + needs_attention list
+ *   get_task_output    — artifact pointers from managed_tasks (plan/diff_url/tests)
+ *   pull_linear_issue  — lean Linear issue summary (pointer to ticket; seed §12 Phase 4)
  *
  * All tools are **read-only**. Write actions go through the Bash tool +
  * PreToolUse gate (§5 of the spec). The server runs over stdio so it can be
@@ -27,6 +28,7 @@ import {
   handleMonitorStatus,
   handleGetTaskOutput,
 } from './read.js';
+import { handlePullLinearIssue } from './seed.js';
 
 const logger = childLogger('orchestrator/mcp/server');
 
@@ -150,6 +152,38 @@ export function createOctomuxMcpServer(): McpServer {
           {
             type: 'text' as const,
             text: JSON.stringify(pointers, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── pull_linear_issue ───────────────────────────────────────────────────────
+  server.registerTool(
+    'pull_linear_issue',
+    {
+      description:
+        'Fetch a Linear issue and return a lean summary (pointer to the ticket). ' +
+        'Returns {id, identifier, title, url, state?, priority?, estimate?, labels?, team_key?, description_snippet?}. ' +
+        'The url is the authoritative pointer to the full ticket. ' +
+        'description_snippet is ≤256 chars — NEVER the full body. ' +
+        'Use to seed a planning session with issue context (spec §12 Phase 4).',
+      inputSchema: {
+        issue_id: z.string().describe("Linear issue identifier (e.g. 'SHR-123') or UUID"),
+        api_key: z.string().describe('Linear API key (bare, no Bearer prefix)'),
+      },
+    },
+    async (args) => {
+      logger.debug(
+        { operation: 'pull_linear_issue', issue_id: args.issue_id },
+        'MCP pull_linear_issue invoked',
+      );
+      const summary = await handlePullLinearIssue(args);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(summary, null, 2),
           },
         ],
       };
