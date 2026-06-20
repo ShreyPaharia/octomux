@@ -403,6 +403,36 @@ export function getOrchestratorClientCount(convId: string): number {
   return convClients.get(convId)?.size ?? 0;
 }
 
+/**
+ * Push a serialized ws message to all connected clients for a conversation.
+ * Used by the supervisor to inject concise notes without going through the
+ * transcript tail. Also persists message-type events to orchestrator_messages.
+ *
+ * The `message` parameter must be a serialized JSON string (OrchestratorWsEvent).
+ */
+export function pushToConversation(convId: string, message: string): void {
+  // Persist if it's a message-type event
+  try {
+    const event = JSON.parse(message) as OrchestratorWsEvent;
+    if (event.type === 'message') {
+      const contentBlocks = [{ type: 'text', text: event.text }];
+      appendMessage({
+        conversation_id: convId,
+        role: event.role,
+        content: JSON.stringify(contentBlocks),
+      });
+    }
+  } catch {
+    // ignore parse errors — still push to clients
+  }
+
+  const set = convClients.get(convId);
+  if (!set || set.size === 0) return;
+  for (const push of set) {
+    push(message);
+  }
+}
+
 /** Stop all active transcript tails (for graceful shutdown). */
 export function cleanupOrchestratorClients(): void {
   for (const [convId, stop] of convTails) {
