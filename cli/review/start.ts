@@ -126,6 +126,7 @@ export async function runStart(argv: string[]): Promise<void> {
         review_run_id: run.id,
         pr_head_sha: task.pr_head_sha,
         base_sha: task.base_sha ?? null,
+        base_branch: task.base_branch ?? null,
         pr_url: task.pr_url ?? null,
         worktree: task.worktree ?? null,
         previous_review,

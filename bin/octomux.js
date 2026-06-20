@@ -69,6 +69,7 @@ async function runStart(startArgs) {
 
   // Install bundled skills and configs
   installSkills();
+  installWorkflows();
   installLazygitConfig();
 
   // Ensure cli/ dependencies are installed
@@ -266,5 +267,24 @@ function installSkills() {
   }
   if (installed) {
     console.log('Installed octomux skills for Claude Code');
+  }
+}
+
+function installWorkflows() {
+  const src = path.join(__dirname, '..', 'workflows');
+  const target = path.join(os.homedir(), '.claude', 'workflows');
+  if (!existsSync(src)) return;
+
+  mkdirSync(target, { recursive: true });
+  let installed = false;
+  for (const file of readdirSync(src)) {
+    if (!file.endsWith('.js')) continue;
+    // Overwrite so workflow updates actually ship (unlike skills, which only
+    // install when missing). The review-deep skill invokes these by scriptPath.
+    cpSync(path.join(src, file), path.join(target, file));
+    installed = true;
+  }
+  if (installed) {
+    console.log('Installed octomux review workflows for Claude Code');
   }
 }

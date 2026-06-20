@@ -98,7 +98,13 @@ phase('Lenses');
 // IMPORTANT: agents run in their own cwd, NOT the review worktree. Every git/read
 // MUST be scoped to the worktree explicitly, or the lens reviews the wrong repo.
 const wt = a.worktree;
-const diffCtx = `Review worktree: ${wt} — ALL git and file reads MUST target it. Get the diff with \`git -C ${wt} diff ${a.baseSha}..${a.headSha}\` and read changed files at absolute paths under ${wt}/. Do NOT run bare \`git\` (your cwd is a different repo). Use reasoning; read changed functions and follow changed symbols into the files that define/consume them (\`git -C ${wt} ...\`). Walkthrough key points: ${JSON.stringify(a.keyReviewPoints ?? [])}. Project playbook (orientation, not findings): ${a.playbook ?? '(none)'}. Learnings — do NOT flag these intentional patterns: ${JSON.stringify(a.learnings ?? [])}.`;
+// Diff scope: the stored baseSha can predate the whole upstream stack (huge,
+// noisy diff). Diff against the CURRENT base branch's merge-base so the lens
+// sees only this PR's own changes — exactly what GitHub shows the human.
+const diffCmd = a.baseBranch
+  ? `git -C ${wt} fetch origin ${a.baseBranch} --quiet && git -C ${wt} diff $(git -C ${wt} merge-base origin/${a.baseBranch} ${a.headSha})..${a.headSha}`
+  : `git -C ${wt} diff ${a.baseSha}..${a.headSha}`;
+const diffCtx = `Review worktree: ${wt} — ALL git and file reads MUST target it. Get this PR's diff with:\n  ${diffCmd}\nThen read changed files at absolute paths under ${wt}/. Do NOT run bare \`git\` (your cwd is a DIFFERENT repo — always pass \`-C ${wt}\`). Use reasoning; read changed functions and follow changed symbols into the files that define/consume them (\`git -C ${wt} ...\`). Walkthrough key points: ${JSON.stringify(a.keyReviewPoints ?? [])}. Project playbook (orientation, not findings): ${a.playbook ?? '(none)'}. Learnings — do NOT flag these intentional patterns: ${JSON.stringify(a.learnings ?? [])}.`;
 
 const lensResults = await parallel(
   LENSES.map(
