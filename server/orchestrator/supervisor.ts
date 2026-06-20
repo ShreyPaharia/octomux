@@ -1,9 +1,9 @@
 /**
  * server/orchestrator/supervisor.ts
  *
- * Supervisor for the orchestrator chat (Task 2.2 / SHR-125).
+ * Supervisor for the orchestrator chat (Tasks 2.2 / SHR-125, 2.5 / SHR-128).
  *
- * Responsibilities (spec §6, §9.1):
+ * Responsibilities (spec §6, §6.5, §9.1):
  *  - Single subscriber to the durable `events` log (not one-per-conversation).
  *  - Routes each event to the *single* conversation that owns the task via
  *    `managed_tasks(conversation_id, task_id)`. Events for unowned tasks are
@@ -16,6 +16,10 @@
  *  - Replay: on `replay(convId)` call, reads `eventsSince(last_event_seq)` for
  *    all tasks managed by that conversation and processes missed events in order.
  *  - Concise notes only — never the raw event firehose.
+ *  - Relay choreography (Task 2.5): on `task:phase_complete`:
+ *      - phase=plan     → advance to 'awaiting_approval', lock artifact for UI,
+ *                         push a `card` ws event with the plan pointer (not body).
+ *      - phase=implement → advance to 'done', push a diff-view link message.
  *
  * Architecture:
  *  - `createSupervisor()` returns a `Supervisor` instance with:
@@ -31,6 +35,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 import { getDb } from '../db.js';
 import { eventsSince, upsertManagedTask } from './store.js';
@@ -160,6 +165,12 @@ export function createSupervisor(): Supervisor {
   /**
    * Actually perform the injection: format the note, persist + push to ws,
    * update last_event_seq in managed_tasks, and emit the 'inject' event.
+   *
+   * Relay choreography (Task 2.5 / SHR-128):
+   *  - phase_complete(plan)      → advance to 'awaiting_approval', lock artifact
+   *                                for UI, push a `card` ws event with the plan
+   *                                pointer (artifact path — never body contents).
+   *  - phase_complete(implement) → advance to 'done', push a diff-view link message.
    */
   async function inject(convId: string, event: RawEvent): Promise<void> {
     const note = formatNote(event);
@@ -179,6 +190,111 @@ export function createSupervisor(): Supervisor {
       },
       'supervisor: injecting note',
     );
+
+    // ── Relay choreography ────────────────────────────────────────────────────
+    if (event.type === 'task:phase_complete') {
+      const payload = parsePayload(event.payload);
+      const phase = typeof payload.phase === 'string' ? payload.phase : '';
+      const artifacts = Array.isArray(payload.artifacts)
+        ? (payload.artifacts as unknown[]).filter((a) => typeof a === 'string')
+        : [];
+
+      if (phase === 'plan') {
+        // ── Plan phase complete: gate the artifact for user review ──────────
+        // Determine the plan artifact pointer: first artifact or fallback to 'plan.json'
+        const planPath = (artifacts[0] as string | undefined) ?? 'plan.json';
+
+        // Build artifact pointers object (paths only — never file body contents)
+        const artifactPointers: Record<string, string> = { plan: planPath };
+        for (const art of artifacts.slice(1)) {
+          const key = String(art).replace(/[^a-zA-Z0-9_]/g, '_');
+          artifactPointers[key] = String(art);
+        }
+
+        // Advance phase to awaiting_approval and lock artifact for UI edits
+        upsertManagedTask({
+          conversation_id: convId,
+          task_id: event.task_id,
+          phase: 'awaiting_approval',
+          artifacts: JSON.stringify(artifactPointers),
+          artifact_lock_owner: 'ui',
+          last_event_seq: event.seq,
+        });
+
+        logger.info(
+          {
+            conversation_id: convId,
+            task_id: event.task_id,
+            plan_path: planPath,
+            operation: 'relay_plan_complete',
+          },
+          'supervisor: plan phase complete — advancing to awaiting_approval',
+        );
+
+        // Push a relay card (pointer to plan artifact, not body contents)
+        const cardId = nanoid(12);
+        const cardEvent = {
+          type: 'card' as const,
+          id: cardId,
+          command: 'approve-plan',
+          args: {
+            task_id: event.task_id,
+            plan_path: planPath,
+            // artifact_url is the REST endpoint the UI calls to render the plan
+            artifact_url: `/api/orchestrator/artifact?task=${encodeURIComponent(event.task_id)}&path=${encodeURIComponent(planPath)}`,
+          },
+        };
+        pushToConversation(convId, JSON.stringify(cardEvent));
+
+        // Also push a concise text note so the ws history shows what happened
+        pushToConversation(
+          convId,
+          JSON.stringify({
+            type: 'message',
+            role: 'assistant',
+            text: `[supervisor] task \`${event.task_id}\` plan ready — review at \`${planPath}\` and approve to begin implementation.`,
+          }),
+        );
+
+        emitter.emit('inject', injection);
+        return;
+      }
+
+      if (phase === 'implement') {
+        // ── Implement phase complete: surface the diff-view link ────────────
+        // Advance phase to done
+        upsertManagedTask({
+          conversation_id: convId,
+          task_id: event.task_id,
+          phase: 'done',
+          last_event_seq: event.seq,
+        });
+
+        logger.info(
+          {
+            conversation_id: convId,
+            task_id: event.task_id,
+            operation: 'relay_implement_complete',
+          },
+          'supervisor: implement phase complete — advancing to done',
+        );
+
+        // Diff-view URL is a pointer to the diff viewer for this task — not code contents
+        const diffUrl = `/tasks/${event.task_id}?view=diff`;
+        pushToConversation(
+          convId,
+          JSON.stringify({
+            type: 'message',
+            role: 'assistant',
+            text: `[supervisor] task \`${event.task_id}\` implementation complete — diff view: ${diffUrl}`,
+          }),
+        );
+
+        emitter.emit('inject', injection);
+        return;
+      }
+    }
+    // ── End relay choreography ────────────────────────────────────────────────
 
     // Push to connected ws clients (also persists as a message)
     const wsMessage = JSON.stringify({ type: 'message', role: 'assistant', text: note });

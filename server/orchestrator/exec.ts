@@ -1,7 +1,8 @@
 /**
  * server/orchestrator/exec.ts
  *
- * Gated octomux write-command executor for the orchestrator (Task 2.3 / SHR-126).
+ * Gated octomux write-command executor for the orchestrator (Tasks 2.3 / SHR-126,
+ * 2.5 / SHR-128).
  *
  * This module runs approved octomux operations server-side, without going through
  * an external CLI subprocess. It reuses the existing task-runner and DB functions
@@ -16,6 +17,12 @@
  *    artifact.
  *  - The orchestrator receives only the task_id pointer — never plan contents.
  *
+ * Phase 2.5 scope: `send-message` relay.
+ *  - `runSendMessage(taskId, message)` sends a turn to the first running agent of
+ *    a task via `sendMessageToAgent` (tmux send-keys). Used by the supervisor to
+ *    continue a worker at phase boundaries (e.g. "implement the approved plan.json").
+ *  - Returns only success/failure; never relays plan/diff/file body contents.
+ *
  * Pointers-not-contents (spec §1): this module returns task IDs and paths only.
  * It never returns plan/diff/file body contents to the orchestrator.
  *
@@ -27,10 +34,11 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { startTask } from '../task-runner.js';
+import { sendMessageToAgent } from '../tmux-input.js';
 import { upsertManagedTask } from './store.js';
 import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
-import type { Task, RunMode } from '../types.js';
+import type { Task, Agent, RunMode } from '../types.js';
 
 const logger = childLogger('orchestrator/exec');
 
@@ -359,4 +367,80 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
   });
 
   return { task_id: id, title: resolvedTitle };
+}
+
+// ─── runSendMessage ───────────────────────────────────────────────────────────
+
+/**
+ * Send a turn to the first running agent of a task via tmux send-keys.
+ *
+ * Used by the supervisor relay (Task 2.5 / SHR-128) to continue a worker at a
+ * phase boundary — e.g. "implement the approved plan.json" after the user approves.
+ *
+ * The worker must be alive at its interactive tmux prompt (spec §6.5, R3-I2).
+ * If the worker has exited, continuity falls back to `claude --resume` (handled
+ * separately by the runner). This function only handles the alive-at-prompt case.
+ *
+ * Pointers-not-contents: the `message` parameter is a short directive
+ * (e.g. "implement the approved plan.json") — it is a pointer, not file body
+ * contents. Callers must not pass plan/diff file bodies as the message.
+ */
+export async function runSendMessage(taskId: string, message: string): Promise<void> {
+  const db = getDb();
+
+  logger.info(
+    { task_id: taskId, operation: 'runSendMessage', messageLen: message.length },
+    'runSendMessage: start',
+  );
+
+  // Look up the task to find its tmux session.
+  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  if (!task) {
+    logger.warn({ task_id: taskId, operation: 'runSendMessage' }, 'runSendMessage: task not found');
+    throw new Error(`runSendMessage: task ${taskId} not found`);
+  }
+
+  if (!task.tmux_session) {
+    logger.warn(
+      { task_id: taskId, operation: 'runSendMessage' },
+      'runSendMessage: task has no tmux_session — worker may have exited',
+    );
+    throw new Error(`runSendMessage: task ${taskId} has no active tmux session`);
+  }
+
+  // Find the first running agent for this task.
+  const agent = db
+    .prepare(
+      `SELECT * FROM agents
+       WHERE task_id = ? AND status != 'stopped'
+       ORDER BY window_index ASC
+       LIMIT 1`,
+    )
+    .get(taskId) as Agent | undefined;
+
+  if (!agent) {
+    logger.warn(
+      { task_id: taskId, operation: 'runSendMessage' },
+      'runSendMessage: no active agent found for task',
+    );
+    throw new Error(`runSendMessage: no active agent found for task ${taskId}`);
+  }
+
+  logger.info(
+    {
+      task_id: taskId,
+      agent_id: agent.id,
+      operation: 'runSendMessage',
+      tmux_session: task.tmux_session,
+      window_index: agent.window_index,
+    },
+    'runSendMessage: delivering turn to worker',
+  );
+
+  await sendMessageToAgent(task.tmux_session, agent.window_index, message);
+
+  logger.info(
+    { task_id: taskId, agent_id: agent.id, operation: 'runSendMessage' },
+    'runSendMessage: turn delivered',
+  );
 }
