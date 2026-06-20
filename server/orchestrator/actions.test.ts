@@ -64,12 +64,15 @@ describe('runOrchestratorAction', () => {
     expect(pushed.some((m) => /created task/i.test(m) && m.includes('t-new'))).toBe(true);
   });
 
-  it('accepts camelCase aliases (repoPath, initialPrompt)', async () => {
+  it('uses snake_case fields (camelCase aliases are no longer accepted — use repo_path not repoPath)', async () => {
+    // The old s() alias mapper accepted repoPath/initialPrompt as alternatives.
+    // Since SHR-144, the canonical schema enforces snake_case. Unknown camelCase
+    // fields are stripped by zod; the schema fields must be passed directly.
     await runOrchestratorAction('conv-1', 'create-task', {
       title: 'T',
       description: 'd',
-      repoPath: '/tmp/repo2',
-      initialPrompt: 'go',
+      repo_path: '/tmp/repo2',
+      initial_prompt: 'go',
     });
     expect(mockRunCreateTask).toHaveBeenCalledWith(
       expect.objectContaining({ repo_path: '/tmp/repo2', initial_prompt: 'go' }),

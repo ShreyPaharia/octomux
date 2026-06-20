@@ -40,6 +40,10 @@ import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
 import { WORKFLOW_STATUSES } from '../types.js';
 import type { Task, Agent, RunMode, WorkflowStatus } from '../types.js';
+import type {
+  CreateTaskInput as CreateTaskInputFromSchema,
+  AddAgentOpts as AddAgentOptsFromSchema,
+} from './command-schemas.js';
 
 const logger = childLogger('orchestrator/exec');
 
@@ -54,45 +58,14 @@ export const PLAN_KIND = 'plan' as const;
 /** The `kind` value that triggers the full spec→plan→implement workflow. */
 export const WORKFLOW_KIND = 'workflow' as const;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types (re-exported from command-schemas for backward compatibility) ──────
 
-export interface CreateTaskInput {
-  /** Task title. Defaults to the first line of initial_prompt if omitted. */
-  title?: string;
-  /** Task description. Defaults to initial_prompt if omitted. */
-  description?: string;
-  /** Repo path for run_mode='new'|'none'. */
-  repo_path?: string;
-  /** Existing worktree path for run_mode='existing'. */
-  worktree_path?: string;
-  /** Branch name for run_mode='new'. */
-  branch?: string;
-  /** Base branch. */
-  base_branch?: string;
-  /** The user's intent / task instructions sent as the initial agent prompt. */
-  initial_prompt?: string;
-  /** 'new' | 'existing' | 'none' | 'scratch'. Defaults to 'new'. */
-  run_mode?: RunMode;
-  /** When 'plan': injects the planning template into initial_prompt and registers
-   *  the task in managed_tasks with phase='planning'.
-   *  When 'workflow': injects the workflow template and registers with phase='speccing'. */
-  kind?: typeof PLAN_KIND | typeof WORKFLOW_KIND | string;
-  /** Optional model override (e.g. 'claude-sonnet-4-6'). */
-  model?: string | null;
-  /**
-   * Optional effort hint for model right-sizing (§6.7).
-   * Values: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-   * This is an advisory hint from the orchestrator — it controls how the
-   * model is chosen when model is null (e.g. 'xhigh' suggests Opus-class).
-   * When model is explicitly set, effort is informational only.
-   * The hint is logged and available to callers but is not stored in the DB
-   * (no schema column); it guides the orchestrator's model-selection policy.
-   */
-  effort?: string;
-  /** Orchestrator conversation that owns this task. Required to register the task
-   *  in managed_tasks so the supervisor can route events to it. */
-  conversation_id?: string;
-}
+/**
+ * Input to runCreateTask.
+ * Canonical definition lives in server/orchestrator/command-schemas.ts.
+ * Re-exported here so existing imports (gate.ts, actions.ts, etc.) keep working.
+ */
+export type CreateTaskInput = CreateTaskInputFromSchema;
 
 export interface CreateTaskResult {
   /** The newly created task's id. The orchestrator holds only this pointer. */
@@ -431,9 +404,20 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
 
   db.prepare(
     `INSERT INTO tasks
-       (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, harness_id, model)
-     VALUES (?, ?, ?, 'setting_up', 'planned', ?, ?, 'claude-code', ?)`,
-  ).run(id, resolvedTitle, resolvedDescription, resolvedPrompt, worktreeId, input.model ?? null);
+       (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, harness_id, model, notify_task_id)
+     VALUES (?, ?, ?, 'setting_up', 'planned', ?, ?, 'claude-code', ?, ?)`,
+  ).run(
+    id,
+    resolvedTitle,
+    resolvedDescription,
+    resolvedPrompt,
+    worktreeId,
+    input.model ?? null,
+    // notify_task is part of the canonical create_task schema (the MCP tool
+    // advertises it), so persist it like the REST path does — otherwise it's a
+    // false promise (schema↔executor drift).
+    input.notify_task ?? null,
+  );
 
   const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
 
@@ -553,18 +537,12 @@ export async function runSendMessage(taskId: string, message: string): Promise<v
 
 // ─── runAddAgent ──────────────────────────────────────────────────────────────
 
-export interface AddAgentInput {
-  /** Optional initial prompt for the new agent. */
-  prompt?: string;
-  /** Optional agent persona name (matches agents/<name>.md). */
-  agent?: string | null;
-  /** Optional label for the agent window. */
-  label?: string;
-  /** Optional per-agent model override. */
-  model?: string | null;
-  /** Optional skeleton name to use as the agent's template. */
-  skeleton?: string;
-}
+/**
+ * Options for runAddAgent (task_id is passed separately as the first argument).
+ * Canonical definition lives in server/orchestrator/command-schemas.ts as AddAgentOpts.
+ * Re-exported here so existing imports keep working.
+ */
+export type AddAgentInput = AddAgentOptsFromSchema;
 
 export interface AddAgentResult {
   /** The newly added agent's id. */

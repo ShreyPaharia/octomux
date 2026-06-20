@@ -488,7 +488,7 @@ async function runCardCommand(
         base_branch: args['--base-branch'],
         initial_prompt: args['--initial-prompt'] ?? args['--prompt'] ?? args['-p'],
         run_mode: (args['--mode'] as import('./exec.js').CreateTaskInput['run_mode']) ?? 'new',
-        kind: args['--kind'],
+        kind: args['--kind'] as import('./exec.js').CreateTaskInput['kind'],
         model: args['--model'],
         effort: args['--effort'],
         // Attach to the conversation so the supervisor can route events

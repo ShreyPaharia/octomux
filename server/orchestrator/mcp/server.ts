@@ -33,6 +33,14 @@ import {
 } from './read.js';
 import { handlePullLinearIssue } from './seed.js';
 import { callOrchestratorAction, orchestratorWriteEnabled } from './write.js';
+import {
+  createTaskInputSchema,
+  sendMessageInputSchema,
+  setStatusInputSchema,
+  addAgentInputSchema,
+  closeTaskInputSchema,
+  deleteTaskInputSchema,
+} from '../command-schemas.js';
 
 const logger = childLogger('orchestrator/mcp/server');
 
@@ -258,10 +266,14 @@ export function createOctomuxMcpServer(): McpServer {
 }
 
 /**
- * Register the conductor's write tools. Each takes structured args (no Bash
- * string) and RPCs to the main server's orchestrator-action endpoint. The action
- * executes immediately and an activity update is pushed to the conversation —
+ * Register the conductor write tools. Each takes structured args (no Bash
+ * string) and RPCs to the main server orchestrator-action endpoint. The action
+ * executes immediately and an activity update is pushed to the conversation --
  * there is no approval gate.
+ *
+ * inputSchema uses canonical schemas from command-schemas.ts via .shape so the
+ * MCP tool accepted fields are always in sync with the executor and the CLI.
+ * Any drift is caught by the CLI drift test.
  */
 function registerWriteTools(server: McpServer): void {
   const text = (v: unknown) => ({
@@ -274,58 +286,43 @@ function registerWriteTools(server: McpServer): void {
       description:
         'Create an octomux worker task and start it. Pass a GOAL-ORIENTED brief in ' +
         'description (Goal / Why / verifiable Acceptance criteria / Hard constraints / ' +
-        'Non-goals / Pointers) — never a step-by-step plan; the worker explores the code ' +
+        'Non-goals / Pointers) -- never a step-by-step plan; the worker explores the code ' +
         'and owns the implementation. ' +
-        'kind="workflow" → full spec→plan→implement with review gates at spec (read-only ' +
-        'view card) and plan (approval card); use for non-trivial/larger work. ' +
-        'kind="plan" → worker plans first for your review, then implements; use for ' +
+        'kind="workflow" triggers spec->plan->implement with review gates at spec and plan; ' +
+        'use for non-trivial/larger work. ' +
+        'kind="plan" -- worker plans first for your review, then implements; use for ' +
         'plan-only or moderately ambiguous work. ' +
         'Omit kind for small/clear work (implements directly). ' +
+        'initial_prompt overrides the agent first message (defaults to description). ' +
+        'run_mode controls worktree: new|existing|none|scratch (default: new). ' +
         'Returns the task id (a pointer).',
-      inputSchema: {
-        title: z.string().describe('Short task title (< 60 chars)'),
-        description: z
-          .string()
-          .describe('The goal-oriented brief (WHAT/WHY + acceptance criteria)'),
-        repo_path: z.string().describe('Absolute path to the git repository'),
-        base_branch: z.string().optional().describe('Base branch (default: main)'),
-        branch: z.string().optional().describe('Branch name (auto-generated if omitted)'),
-        kind: z
-          .enum(['plan', 'implement', 'workflow'])
-          .optional()
-          .describe(
-            '"workflow" → spec→plan→implement with spec view card + plan approval gate; ' +
-              '"plan" → plan first for review then implement; omit for small/clear work',
-          ),
-        model: z.string().optional().describe('Per-task model override (e.g. claude-sonnet-4-6)'),
-      },
+      // inputSchema is the canonical createTaskInputSchema shape -- the single source of
+      // truth shared with the CLI and the executor (command-schemas.ts).
+      inputSchema: createTaskInputSchema.shape,
     },
-    async (args) => text(await callOrchestratorAction('create-task', args)),
+    async (args) =>
+      text(await callOrchestratorAction('create-task', args as Record<string, unknown>)),
   );
 
   server.registerTool(
     'send_message',
     {
-      description: 'Send a message/instruction to a running task’s agent (e.g. nudge or redirect).',
-      inputSchema: {
-        task_id: z.string().describe('The octomux task id'),
-        message: z.string().describe('The message to deliver'),
-      },
+      description: 'Send a message/instruction to a running task agent (e.g. nudge or redirect).',
+      inputSchema: sendMessageInputSchema.shape,
     },
-    async (args) => text(await callOrchestratorAction('send-message', args)),
+    async (args) =>
+      text(await callOrchestratorAction('send-message', args as Record<string, unknown>)),
   );
 
   server.registerTool(
     'set_task_status',
     {
       description:
-        'Set a task’s workflow status (backlog | planned | in_progress | human_review | pr | done).',
-      inputSchema: {
-        task_id: z.string().describe('The octomux task id'),
-        status: z.string().describe('New workflow status'),
-      },
+        'Set a task workflow status (backlog | planned | in_progress | human_review | pr | done).',
+      inputSchema: setStatusInputSchema.shape,
     },
-    async (args) => text(await callOrchestratorAction('set-status', args)),
+    async (args) =>
+      text(await callOrchestratorAction('set-status', args as Record<string, unknown>)),
   );
 
   server.registerTool(
@@ -333,14 +330,10 @@ function registerWriteTools(server: McpServer): void {
     {
       description:
         'Attach another agent (new tmux window) to a running task, sharing its worktree.',
-      inputSchema: {
-        task_id: z.string().describe('The octomux task id'),
-        prompt: z.string().optional().describe('Initial prompt for the new agent'),
-        label: z.string().optional().describe('Label for the new agent'),
-        model: z.string().optional().describe('Per-agent model override'),
-      },
+      inputSchema: addAgentInputSchema.shape,
     },
-    async (args) => text(await callOrchestratorAction('add-agent', args)),
+    async (args) =>
+      text(await callOrchestratorAction('add-agent', args as Record<string, unknown>)),
   );
 
   server.registerTool(
@@ -349,9 +342,10 @@ function registerWriteTools(server: McpServer): void {
       description:
         'Close a task: stop its agents + kill its tmux session. Preserves the worktree/branch ' +
         'so it can be resumed. Runs immediately (no approval).',
-      inputSchema: { task_id: z.string().describe('The octomux task id') },
+      inputSchema: closeTaskInputSchema.shape,
     },
-    async (args) => text(await callOrchestratorAction('close-task', args)),
+    async (args) =>
+      text(await callOrchestratorAction('close-task', args as Record<string, unknown>)),
   );
 
   server.registerTool(
@@ -359,10 +353,11 @@ function registerWriteTools(server: McpServer): void {
     {
       description:
         'DELETE a task: kill tmux + remove worktree + delete branch + delete DB rows. Destructive ' +
-        'and irreversible. Runs immediately (no approval) — only call when the user clearly intends it.',
-      inputSchema: { task_id: z.string().describe('The octomux task id') },
+        'and irreversible. Runs immediately (no approval) -- only call when the user clearly intends it.',
+      inputSchema: deleteTaskInputSchema.shape,
     },
-    async (args) => text(await callOrchestratorAction('delete-task', args)),
+    async (args) =>
+      text(await callOrchestratorAction('delete-task', args as Record<string, unknown>)),
   );
 }
 
