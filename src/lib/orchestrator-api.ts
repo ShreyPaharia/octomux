@@ -59,8 +59,13 @@ export type WsOutgoingEvent =
   | {
       type: 'card_decision';
       card_id: string;
-      decision: 'approve' | 'reject';
+      decision: 'approve' | 'edit' | 'reject' | 'respond';
+      /** Edited command args (present when decision='edit'). */
       args?: Record<string, unknown>;
+      /** Follow-up message text (present when decision='respond'). */
+      text?: string;
+      /** Whether to persist an always-allow rule for this command. */
+      always_allow?: boolean;
     };
 
 // ─── REST helpers ─────────────────────────────────────────────────────────────

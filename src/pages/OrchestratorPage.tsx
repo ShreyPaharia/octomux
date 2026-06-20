@@ -36,6 +36,7 @@ import {
 } from 'react';
 import { MessageThread, type ThreadMessage } from '../components/orchestrator/MessageThread';
 import { PlanCard } from '../components/orchestrator/PlanCard';
+import { ActionCard, type ActionCardDecision } from '../components/orchestrator/ActionCard';
 import {
   orchestratorApi,
   openOrchestratorWs,
@@ -59,16 +60,23 @@ interface PlanCardItem {
   resolved: boolean;
 }
 
-/** A generic (unknown-command) card displayed as informational text. */
-interface GenericCardItem {
-  kind: 'generic-card';
+/**
+ * An action card for a gated write-command (Task 3.3 / SHR-132).
+ * Rendered by ActionCard; user can Approve/Edit/Reject/Respond.
+ */
+interface ActionCardItem {
+  kind: 'action-card';
   id: string;
   command: string;
   args: Record<string, unknown>;
+  /** true when the command is in the always-ask (destructive) tier */
+  alwaysAsk?: boolean;
+  /** resolved once the user decides; removes the card from the thread */
+  resolved: boolean;
 }
 
 /** A union of everything that can appear in the thread. */
-type ThreadItem = ThreadMessage | PlanCardItem | GenericCardItem;
+type ThreadItem = ThreadMessage | PlanCardItem | ActionCardItem;
 
 const SIDEBAR_WIDTH = 240;
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6]';
@@ -257,12 +265,12 @@ function ChatInput({ onSubmit, disabled = false }: ChatInputProps) {
 // ─── MixedThread ─────────────────────────────────────────────────────────────
 
 /**
- * Renders the thread: a mix of chat messages and inline plan-approval cards.
+ * Renders the thread: a mix of chat messages and inline cards.
  * ThreadMessages are delegated to MessageThread; cards are rendered inline.
  */
 interface MixedThreadProps {
   items: ThreadItem[];
-  onCardDecision: (cardId: string, decision: 'approve' | 'reject') => void;
+  onCardDecision: (d: ActionCardDecision) => void;
 }
 
 function MixedThread({ items, onCardDecision }: MixedThreadProps) {
@@ -309,24 +317,23 @@ function MixedThread({ items, onCardDecision }: MixedThreadProps) {
             taskId={item.taskId}
             planPath={item.planPath}
             artifactUrl={item.artifactUrl}
-            onDecision={({ decision, card_id }) => onCardDecision(card_id, decision)}
+            onDecision={({ decision, card_id }) =>
+              onCardDecision({ card_id, decision: decision as 'approve' | 'reject' })
+            }
           />
         </div>,
       );
-    } else if (item.kind === 'generic-card') {
+    } else if (item.kind === 'action-card' && !item.resolved) {
       flushBatch();
       rendered.push(
-        <div
-          key={item.id}
-          className="mx-4 my-2 rounded-xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.03)] px-4 py-3 text-xs text-[rgba(255,255,255,0.55)]"
-          data-testid={`generic-card-${item.id}`}
-        >
-          <span className="font-semibold">{item.command}</span>
-          {Object.keys(item.args).length > 0 && (
-            <pre className="mt-1 whitespace-pre-wrap text-[rgba(255,255,255,0.4)]">
-              {JSON.stringify(item.args, null, 2)}
-            </pre>
-          )}
+        <div key={item.id} className="px-4 py-2">
+          <ActionCard
+            cardId={item.id}
+            command={item.command}
+            args={item.args}
+            alwaysAsk={item.alwaysAsk}
+            onDecision={onCardDecision}
+          />
         </div>,
       );
     }
@@ -436,12 +443,18 @@ export default function OrchestratorPage() {
               return [...prev, card];
             });
           } else {
-            // Generic card (unknown command) — display as informational
-            const card: GenericCardItem = {
-              kind: 'generic-card',
+            // Gated write-command card (Task 3.3) — render as ActionCard
+            const alwaysAsk = (event.args as { always_ask?: boolean }).always_ask === true;
+            const card: ActionCardItem = {
+              kind: 'action-card',
               id: event.id,
               command: event.command,
-              args: event.args,
+              // Strip the always_ask meta-field from the displayed args
+              args: Object.fromEntries(
+                Object.entries(event.args).filter(([k]) => k !== 'always_ask'),
+              ),
+              alwaysAsk,
+              resolved: false,
             };
             setItems((prev) => {
               if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
@@ -495,16 +508,41 @@ export default function OrchestratorPage() {
 
   // ─── Card decision ───────────────────────────────────────────────────────
 
-  const handleCardDecision = useCallback((cardId: string, decision: 'approve' | 'reject') => {
+  const handleCardDecision = useCallback((d: ActionCardDecision) => {
     if (!wsRef.current) return;
-    wsRef.current.send({ type: 'card_decision', card_id: cardId, decision });
+    const { card_id, decision, args, text, always_allow } = d;
+
+    if (decision === 'respond' && text) {
+      // Respond injects a free-text follow-up as a user turn
+      wsRef.current.send({ type: 'user_turn', text });
+      const msg: ThreadMessage = {
+        id: `local-${Date.now()}`,
+        role: 'user',
+        text,
+      };
+      setItems((prev) => [...prev, msg]);
+      return;
+    }
+
+    // approve / edit / reject → card_decision event
+    const outgoing: WsOutgoingEvent = {
+      type: 'card_decision',
+      card_id,
+      decision,
+      ...(args !== undefined ? { args } : {}),
+      ...(always_allow !== undefined ? { always_allow } : {}),
+    };
+    wsRef.current.send(outgoing);
+
     // Mark the card as resolved so it disappears from the thread
     setItems((prev) =>
-      prev.map((item) =>
-        'kind' in item && item.kind === 'plan-card' && item.id === cardId
-          ? { ...item, resolved: true }
-          : item,
-      ),
+      prev.map((item) => {
+        if (!('kind' in item)) return item;
+        if ((item.kind === 'plan-card' || item.kind === 'action-card') && item.id === card_id) {
+          return { ...item, resolved: true };
+        }
+        return item;
+      }),
     );
   }, []);
 
