@@ -6,7 +6,7 @@
 
 > **Coding got faster. Managing agents didn't.**
 
-A local web app to **dispatch, watch, and review** parallel **Claude Code** and **Cursor** agents from one place. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. No cloud. MIT.
+A local web app to **dispatch, watch, and review** parallel **Claude Code** and **Cursor** agents from one place. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. Run it from npm or the native macOS app. No cloud. MIT.
 
 ```bash
 npm install -g octomux && octomux init && cd your-repo && octomux start
@@ -49,6 +49,8 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 - **Agents that dispatch agents** — `/create-task`, `/list-tasks`, `/send-agent-message` skills work inside any Claude Code window; recursive dispatch from inside an agent.
 - **Agent teams** — reusable crews defined as code in `<repo>/.octomux/team.yaml`: a lead spawns workers from a roster, each with its own model. Run on demand (`octomux team run`) or on a cron schedule.
 - **Per-task model** — pin any task or added agent to a specific model (`--model claude-opus-4-8`); mix models across a fleet so the right one lands on each job.
+- **Completion notifications** — link a worker to an orchestrator with `add-agent --notify-agent`; the lead gets pinged when each worker finishes. Teams wire this up automatically.
+- **Mobile-ready dashboard** — bottom nav, responsive pages, and mobile-friendly terminal scroll buttons; check the fleet and answer prompts from your phone.
 - **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake.
 - **CLI ↔ dashboard parity** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows.
 - **Reboot-proof** — WAL SQLite + preserved worktrees across restarts.
@@ -119,17 +121,17 @@ DISPATCH → BRANCH → CODE → INBOX → REVIEW → MERGE
 
 ## CLI
 
-| Command                                  | Description                                              |
-| ---------------------------------------- | -------------------------------------------------------- |
-| `octomux start`                          | Dashboard at `:7777`                                     |
-| `octomux init`                           | Defaults wizard (Jira, base branch, harness prefs)       |
-| `octomux create-task`                    | New task (`--harness cursor` optional)                   |
-| `octomux list-tasks` / `get-task`        | Inspect tasks                                            |
-| `octomux close-task` / `delete-task`     | Stop or fully remove                                     |
-| `octomux resume-task`                    | Resume a closed task                                     |
-| `octomux add-agent`                      | Another agent window (`--skeleton`, `--model` optional)  |
-| `octomux send-message`                   | Message a running agent — course-correct without restart |
-| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`  |
+| Command                                  | Description                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| `octomux start`                          | Dashboard at `:7777`                                                      |
+| `octomux init`                           | Defaults wizard (Jira, base branch, harness prefs)                        |
+| `octomux create-task`                    | New task (`--harness cursor` optional)                                    |
+| `octomux list-tasks` / `get-task`        | Inspect tasks                                                             |
+| `octomux close-task` / `delete-task`     | Stop or fully remove                                                      |
+| `octomux resume-task`                    | Resume a closed task                                                      |
+| `octomux add-agent`                      | Another agent window (`--skeleton`, `--model`, `--notify-agent` optional) |
+| `octomux send-message`                   | Message a running agent — course-correct without restart                  |
+| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`                   |
 
 ## Architecture
 
