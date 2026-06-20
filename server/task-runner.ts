@@ -13,6 +13,7 @@ import { getOrCreateRepoConfig } from './repo-config.js';
 import { inferRefs } from './ref-inference.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
+import { broadcast } from './events.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
@@ -745,6 +746,10 @@ export async function startTask(task: Task): Promise<void> {
     db.prepare(
       `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run((err as Error).message, id);
+    // Surface the failure: the orchestrator supervisor relays it to the owning
+    // conversation so the conductor (and user) learn the task errored instead of
+    // silently sitting in an error state.
+    broadcast({ type: 'task:updated', payload: { taskId: id } });
   }
 }
 

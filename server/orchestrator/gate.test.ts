@@ -561,6 +561,43 @@ describe('gate.executeCard — new write commands (Task 3.4)', () => {
     );
   });
 
+  it('create-task: parses real CLI flags + quoted/multi-line values (repo_path not lost)', async () => {
+    // Reproduces the live failure: the conductor wrote a correct multi-line
+    // `octomux create-task` with quoted values and the real CLI flag names
+    // (--repo-path, --initial-prompt, --base-branch). The old naive split lost
+    // repo_path (-> null) and kept the branch's quotes, so the task errored.
+    const command = [
+      'octomux create-task \\',
+      "  --title 'Update README for orchestrator features' \\",
+      "  --description 'Docs: surface plan cards, the gate, and the conductor' \\",
+      '  --repo-path /Users/me/Projects/octomux-agents \\',
+      "  --branch 'docs/readme-orchestrator-update' \\",
+      '  --base-branch next \\',
+      "  --initial-prompt 'Update README.md.\n\n## Context\n\nMulti-line prompt with spaces.'",
+    ].join('\n');
+
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-create-real-flags',
+      tool_name: 'Bash',
+      input: JSON.stringify({ command }),
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    expect(mockRunCreateTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Update README for orchestrator features',
+        description: 'Docs: surface plan cards, the gate, and the conductor',
+        repo_path: '/Users/me/Projects/octomux-agents', // NOT null
+        branch: 'docs/readme-orchestrator-update', // no surrounding quotes
+        base_branch: 'next',
+        initial_prompt: expect.stringContaining('## Context'),
+        conversation_id: convId,
+      }),
+    );
+  });
+
   it('set-status: passes taskId and status to runSetStatus', async () => {
     const cardId = createCard({
       conversation_id: convId,

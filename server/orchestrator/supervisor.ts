@@ -157,6 +157,9 @@ export function createSupervisor(): Supervisor {
   const emitter = new EventEmitter();
   const seen = new Set<SeenKey>();
   const convQueues = new Map<string, ConvQueue>();
+  // Task ids whose error we've already surfaced — task:updated fires repeatedly,
+  // so we relay a given failure to the conversation only once.
+  const erroredNotified = new Set<string>();
 
   /** Enqueue work for a conversation's serialized queue. */
   function enqueue(convId: string, work: () => Promise<void>): void {
@@ -344,6 +347,34 @@ export function createSupervisor(): Supervisor {
       }
     }
     // ── End relay choreography ────────────────────────────────────────────────
+
+    // Surface task failures: a managed task that lands in the error state would
+    // otherwise sit silent (the conductor said it created the task and went
+    // quiet). Relay the error once so the conductor/user know it didn't run.
+    if (event.type === 'task:updated' && !erroredNotified.has(event.task_id)) {
+      const t = getDb()
+        .prepare(`SELECT runtime_state, error FROM tasks WHERE id = ?`)
+        .get(event.task_id) as { runtime_state?: string; error?: string } | undefined;
+      if (t?.runtime_state === 'error') {
+        erroredNotified.add(event.task_id);
+        const detail = t.error ? `: ${t.error}` : '';
+        pushToConversation(
+          convId,
+          JSON.stringify({
+            type: 'message',
+            role: 'assistant',
+            text: `⚠️ task \`${event.task_id}\` failed${detail}`,
+          }),
+        );
+        upsertManagedTask({
+          conversation_id: convId,
+          task_id: event.task_id,
+          last_event_seq: event.seq,
+        });
+        emitter.emit('inject', injection);
+        return;
+      }
+    }
 
     // Push to connected ws clients (also persists as a message)
     const wsMessage = JSON.stringify({ type: 'message', role: 'assistant', text: note });

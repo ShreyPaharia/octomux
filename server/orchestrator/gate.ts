@@ -425,7 +425,12 @@ async function runCardCommand(
   effectiveInput: Record<string, unknown>,
 ): Promise<unknown> {
   const command = (effectiveInput['command'] as string | undefined) ?? '';
-  const parts = command.trim().split(/\s+/);
+  // Shell-aware tokenization: the conductor writes real octomux CLI commands with
+  // quoted values, `\`-line-continuations and embedded newlines (e.g.
+  // `--title 'Update README ...' --initial-prompt '...multi-line...'`). A naive
+  // whitespace split mangles these — it produced repo_path=null and a quoted
+  // branch, which made the task error on launch.
+  const parts = tokenizeShellCommand(command);
 
   if (parts[0] !== 'octomux' || parts.length < 2) {
     // Non-octomux command — we don't execute arbitrary shell; reject.
@@ -438,14 +443,22 @@ async function runCardCommand(
 
   switch (subcommand) {
     case 'create-task': {
-      // Parse CLI-style args into CreateTaskInput
+      // Parse CLI-style args into CreateTaskInput. Flag names mirror the real
+      // `octomux create-task` CLI (cli/src/commands/create-task.ts) — the
+      // conductor writes those, so the gate must accept the same names:
+      //   -t/--title, -d/--description, -r/--repo-path, -p/--initial-prompt,
+      //   -b/--branch, --base-branch, --mode, --worktree-path, --model.
+      // (--repo/--prompt kept as legacy fallbacks; --kind is an orchestrator-only
+      // extension that selects the plan workflow.)
       const args = parseCliArgs(parts.slice(2));
       return await runCreateTask({
         title: args['--title'] ?? args['-t'],
         description: args['--description'] ?? args['-d'],
-        repo_path: args['--repo'] ?? args['-r'],
+        repo_path: args['--repo-path'] ?? args['--repo'] ?? args['-r'],
+        worktree_path: args['--worktree-path'],
         branch: args['--branch'] ?? args['-b'],
-        initial_prompt: args['--prompt'] ?? args['-p'],
+        base_branch: args['--base-branch'],
+        initial_prompt: args['--initial-prompt'] ?? args['--prompt'] ?? args['-p'],
         run_mode: (args['--mode'] as import('./exec.js').CreateTaskInput['run_mode']) ?? 'new',
         kind: args['--kind'],
         model: args['--model'],
@@ -528,14 +541,93 @@ async function runCardCommand(
 }
 
 /**
- * Parse a flat array of CLI-style flags into a key→value map.
+ * Tokenize a shell command the way a POSIX shell would split argv, enough for
+ * the octomux CLI commands the conductor writes:
+ *  - single quotes: literal, no escapes, may span newlines
+ *  - double quotes: like single but honor `\"`, `\\`, `` \` ``, `\$`
+ *  - backslash-newline: line continuation (removed)
+ *  - backslash-<char>: escaped literal outside quotes
+ *  - unquoted whitespace separates tokens
+ *
+ * This lets `--title 'Update README ...'` and a multi-line `--initial-prompt`
+ * arrive as single tokens instead of being shredded by a naive whitespace split.
+ */
+function tokenizeShellCommand(raw: string): string[] {
+  const tokens: string[] = [];
+  let cur = '';
+  let started = false;
+  let i = 0;
+  const n = raw.length;
+
+  const push = () => {
+    if (started) tokens.push(cur);
+    cur = '';
+    started = false;
+  };
+
+  while (i < n) {
+    const ch = raw[i]!;
+
+    if (ch === '\\') {
+      const next = raw[i + 1];
+      if (next === '\n') {
+        i += 2; // line continuation
+        continue;
+      }
+      if (next !== undefined) {
+        cur += next;
+        started = true;
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === "'") {
+      started = true;
+      i += 1;
+      while (i < n && raw[i] !== "'") cur += raw[i++];
+      i += 1; // skip closing quote
+      continue;
+    }
+
+    if (ch === '"') {
+      started = true;
+      i += 1;
+      while (i < n && raw[i] !== '"') {
+        if (raw[i] === '\\' && ['"', '\\', '`', '$'].includes(raw[i + 1]!)) {
+          cur += raw[i + 1];
+          i += 2;
+          continue;
+        }
+        cur += raw[i++];
+      }
+      i += 1; // skip closing quote
+      continue;
+    }
+
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      push();
+      i += 1;
+      continue;
+    }
+
+    cur += ch;
+    started = true;
+    i += 1;
+  }
+  push();
+  return tokens;
+}
+
+/**
+ * Parse a flat array of already-tokenized CLI args into a key→value map.
  * Handles:
  *   --key value   (space-separated)
  *   --key=value   (equals-sign)
- *   'quoted value with spaces' is NOT handled here — the command string has
- *   already been split on whitespace. This is intentionally simple because the
- *   orchestrator produces structured tool_input, not arbitrary shell strings;
- *   the Bash command encoding is a transport, not a shell to be parsed fully.
+ * Tokens are produced by tokenizeShellCommand, so quotes/continuations have
+ * already been resolved — values here are clean.
  */
 function parseCliArgs(parts: string[]): Record<string, string> {
   const result: Record<string, string> = {};

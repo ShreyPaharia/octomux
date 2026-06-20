@@ -86,6 +86,46 @@ describe('supervisor', () => {
       expect(injections[0]!.task_id).toBe(task.id);
     });
 
+    it('relays a task error to the conversation once (not silently)', async () => {
+      const convId = createConversation({ title: 'Conv err' });
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-err-01',
+        worktree: null,
+        runtime_state: 'error',
+        error: 'Repository path does not exist: null',
+      });
+      upsertManagedTask({ conversation_id: convId, task_id: 'task-err-01' });
+
+      const seq1 = appendEvent({ task_id: 'task-err-01', type: 'task:updated', payload: '{}' });
+      await supervisor.processEvent({
+        seq: seq1,
+        task_id: 'task-err-01',
+        type: 'task:updated',
+        payload: '{}',
+      });
+
+      // The failure is surfaced with its error message.
+      const errMsg = mockPush.mock.calls.map((c) => String(c[0])).find((m) => /failed/i.test(m));
+      expect(errMsg).toBeDefined();
+      expect(errMsg).toContain('task-err-01');
+      expect(errMsg).toContain('Repository path does not exist');
+
+      // A second task:updated must NOT re-notify the same error.
+      mockPush.mockClear();
+      const seq2 = appendEvent({ task_id: 'task-err-01', type: 'task:updated', payload: '{}' });
+      await supervisor.processEvent({
+        seq: seq2,
+        task_id: 'task-err-01',
+        type: 'task:updated',
+        payload: '{}',
+      });
+      const reNotified = mockPush.mock.calls
+        .map((c) => String(c[0]))
+        .some((m) => /failed/i.test(m));
+      expect(reNotified).toBe(false);
+    });
+
     it('drops events for tasks not in managed_tasks', async () => {
       // task-unowned is NOT registered in managed_tasks
       makeTask('task-unowned-01');
