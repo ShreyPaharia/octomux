@@ -39,6 +39,7 @@ import { PlanCard } from '../components/orchestrator/PlanCard';
 import { SpecCard } from '../components/orchestrator/SpecCard';
 import { ActionCard, type ActionCardDecision } from '../components/orchestrator/ActionCard';
 import { ConversationList } from '../components/orchestrator/ConversationList';
+import { toast } from 'sonner';
 import {
   orchestratorApi,
   openOrchestratorWs,
@@ -47,6 +48,7 @@ import {
   type ConversationUsage,
   type WsIncomingEvent,
   type WsOutgoingEvent,
+  type WsConnectionState,
 } from '../lib/orchestrator-api';
 import { cn } from '@/lib/utils';
 
@@ -320,7 +322,8 @@ export default function OrchestratorPage() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   /** Mixed thread of messages + inline cards. */
   const [items, setItems] = useState<ThreadItem[]>([]);
-  const [wsReady, setWsReady] = useState(false);
+  /** WebSocket connection lifecycle state (drives the status pill, SHR-162). */
+  const [wsState, setWsState] = useState<WsConnectionState>('closed');
   // True from when the user sends a turn until the orchestrator's next output
   // (a message or a card) arrives — drives the "working" indicator.
   const [working, setWorking] = useState(false);
@@ -359,7 +362,7 @@ export default function OrchestratorPage() {
 
     setActiveConvId(convId);
     setItems([]);
-    setWsReady(false);
+    setWsState('connecting');
     setWorking(false);
     setUsage(null);
 
@@ -371,15 +374,36 @@ export default function OrchestratorPage() {
 
     if (historyResult.status === 'fulfilled') {
       setItems(historyResult.value.map(parseMessage));
+    } else {
+      toast.error('Could not load conversation history. Reconnecting may recover it.');
     }
     if (usageResult.status === 'fulfilled') {
       setUsage(usageResult.value);
     }
 
+    // Re-fetch history and merge any messages missed while the socket was down.
+    // Dedupes by id so already-rendered messages aren't duplicated.
+    const replayHistory = async () => {
+      try {
+        const history = await orchestratorApi.listMessages(convId);
+        const fresh = history.map(parseMessage);
+        setItems((prev) => {
+          const seen = new Set(prev.filter((i) => 'id' in i).map((i) => i.id));
+          const additions = fresh.filter((m) => !seen.has(m.id));
+          return additions.length > 0 ? [...prev, ...additions] : prev;
+        });
+      } catch {
+        // best-effort backfill; the live socket will carry new messages anyway
+      }
+    };
+
     // Open ws
     const handle = openOrchestratorWs(convId, {
-      onOpen: () => setWsReady(true),
-      onClose: () => setWsReady(false),
+      onStatusChange: (state) => setWsState(state),
+      onReconnect: () => {
+        toast.success('Reconnected to orchestrator');
+        void replayHistory();
+      },
       onMessage: (event: WsIncomingEvent) => {
         // Any orchestrator output (message or card) ends the "working" state.
         setWorking(false);
@@ -494,8 +518,8 @@ export default function OrchestratorPage() {
       const conv = await orchestratorApi.createConversation('New conversation');
       setConversations((prev) => [conv, ...prev]);
       await openConversation(conv.id);
-    } catch {
-      // silent
+    } catch (err) {
+      toast.error(`Could not create conversation: ${(err as Error).message}`);
     } finally {
       setCreatingConv(false);
     }
@@ -521,16 +545,23 @@ export default function OrchestratorPage() {
           return c;
         }),
       );
-    } catch {
-      // silent — network errors are temporary
+    } catch (err) {
+      toast.error(`Could not toggle global-monitor: ${(err as Error).message}`);
     }
   }, []);
 
   // ─── Send user turn ──────────────────────────────────────────────────────
 
   const handleSend = useCallback((text: string) => {
-    if (!wsRef.current) return;
-    wsRef.current.send({ type: 'user_turn' as const, text });
+    const sent = wsRef.current?.send({ type: 'user_turn' as const, text }) ?? false;
+    if (!sent) {
+      // Not silently dropped — surface it and offer a one-click retry (SHR-162).
+      toast.error('Not connected — message not sent', {
+        description: 'The orchestrator socket is offline. Retry once it reconnects.',
+        action: { label: 'Retry', onClick: () => handleSend(text) },
+      });
+      return;
+    }
     // Optimistically add the user message to the thread
     const msg: ThreadMessage = {
       id: `local-${Date.now()}`,
@@ -639,13 +670,7 @@ export default function OrchestratorPage() {
                 <h2 className="truncate text-sm font-semibold text-foreground">
                   {conversations.find((c) => c.id === activeConvId)?.title ?? 'Conversation'}
                 </h2>
-                {wsReady && (
-                  <span
-                    aria-label="Connected"
-                    title="WebSocket connected"
-                    className="ml-2 h-2 w-2 shrink-0 rounded-full bg-[#22C55E]"
-                  />
-                )}
+                <ConnectionPill state={wsState} />
                 {/* Conductor-leanness indicator (§6.7): surfaces orchestrator activity
                     so the user can see if the conductor is accumulating too much context. */}
                 {usage !== null && <LeanessIndicator usage={usage} />}
@@ -668,6 +693,37 @@ export default function OrchestratorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── ConnectionPill ─────────────────────────────────────────────────────────
+
+/**
+ * WebSocket connection-status pill (SHR-162). Surfaces connecting / live /
+ * reconnecting so a dropped socket is visible instead of silently dead.
+ */
+function ConnectionPill({ state }: { state: WsConnectionState }) {
+  const config: Record<
+    WsConnectionState,
+    { label: string; dot: string; pulse: boolean; aria: string }
+  > = {
+    connecting: { label: 'connecting', dot: 'bg-[#FB923C]', pulse: true, aria: 'Connecting' },
+    open: { label: 'live', dot: 'bg-[#22C55E]', pulse: false, aria: 'Connected' },
+    reconnecting: { label: 'reconnecting', dot: 'bg-[#FB923C]', pulse: true, aria: 'Reconnecting' },
+    closed: { label: 'offline', dot: 'bg-[rgba(255,255,255,0.3)]', pulse: false, aria: 'Offline' },
+  };
+  const { label, dot, pulse, aria } = config[state];
+
+  return (
+    <span
+      role="status"
+      aria-label={aria}
+      title={`WebSocket ${label}`}
+      className="ml-2 flex shrink-0 items-center gap-1.5 text-[11px] text-[rgba(255,255,255,0.45)]"
+    >
+      <span className={cn('h-2 w-2 rounded-full', dot, pulse && 'animate-pulse')} />
+      {label}
+    </span>
   );
 }
 
