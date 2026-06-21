@@ -8,6 +8,7 @@
 
 import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
+import { Markdown } from './Markdown';
 
 export interface ThreadMessage {
   id: string;
@@ -62,7 +63,13 @@ export function MessageThread({ messages, className }: MessageThreadProps) {
               : 'mr-auto bg-[rgba(255,255,255,0.06)] text-foreground',
           )}
         >
-          <span className="whitespace-pre-wrap leading-relaxed">{msg.text}</span>
+          {msg.role === 'assistant' ? (
+            // Assistant output renders as sanitized markdown (SHR-161).
+            <Markdown>{msg.text}</Markdown>
+          ) : (
+            // User text stays verbatim — don't reinterpret their input as markdown.
+            <span className="whitespace-pre-wrap leading-relaxed">{msg.text}</span>
+          )}
         </div>
       ))}
       <div ref={bottomRef} aria-hidden="true" />

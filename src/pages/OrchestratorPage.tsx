@@ -35,6 +35,7 @@ import {
   type ReactNode,
 } from 'react';
 import { MessageThread, type ThreadMessage } from '../components/orchestrator/MessageThread';
+import { ToolCallCard } from '../components/orchestrator/ToolCallCard';
 import { PlanCard } from '../components/orchestrator/PlanCard';
 import { SpecCard } from '../components/orchestrator/SpecCard';
 import { ActionCard, type ActionCardDecision } from '../components/orchestrator/ActionCard';
@@ -94,8 +95,19 @@ interface ActionCardItem {
   resolved: boolean;
 }
 
+/**
+ * A conductor tool-call, rendered as a collapsible card distinct from prose
+ * (SHR-161). Live/ephemeral — pushed from the transcript tail, not persisted.
+ */
+interface ToolCallItem {
+  kind: 'tool-call';
+  id: string;
+  toolName: string;
+  input: unknown;
+}
+
 /** A union of everything that can appear in the thread. */
-type ThreadItem = ThreadMessage | PlanCardItem | SpecCardItem | ActionCardItem;
+type ThreadItem = ThreadMessage | PlanCardItem | SpecCardItem | ActionCardItem | ToolCallItem;
 
 const SIDEBAR_WIDTH = 240;
 const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3B82F6]';
@@ -237,6 +249,13 @@ function MixedThread({
     if ('role' in item) {
       // It's a ThreadMessage
       msgBatch.push(item as ThreadMessage);
+    } else if (item.kind === 'tool-call') {
+      flushBatch();
+      rendered.push(
+        <div key={item.id} className="px-4 py-1">
+          <ToolCallCard toolName={item.toolName} input={item.input} />
+        </div>,
+      );
     } else if (item.kind === 'spec-card' && !item.resolved) {
       flushBatch();
       rendered.push(
@@ -436,6 +455,18 @@ export default function OrchestratorPage() {
               }
             }
             return [...prev, msg];
+          });
+        } else if (event.type === 'tool') {
+          // Conductor tool call → collapsible tool card (SHR-161)
+          const card: ToolCallItem = {
+            kind: 'tool-call',
+            id: event.id,
+            toolName: event.tool_name,
+            input: event.input,
+          };
+          setItems((prev) => {
+            if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
+            return [...prev, card];
           });
         } else if (event.type === 'card') {
           // Dispatch the right card variant based on command

@@ -61,6 +61,7 @@ export interface DisplayMessage {
 export type WsIncomingEvent =
   | { type: 'message'; role: 'user' | 'assistant'; text: string; id?: string }
   | { type: 'card'; id: string; command: string; args: Record<string, unknown> }
+  | { type: 'tool'; id: string; tool_name: string; input: unknown }
   | { type: 'status'; status: string }
   | { type: 'error'; error: string };
 
