@@ -23,9 +23,33 @@
  * Worker writes are only exposed when OCTOMUX_TASK_ID is also set.
  */
 
+import { createHash } from 'crypto';
 import { childLogger } from '../../logger.js';
 
 const logger = childLogger('orchestrator/mcp/write');
+
+/**
+ * Deterministic JSON with sorted object keys, so a given (action, input) always
+ * hashes to the same idempotency key regardless of property order.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
+}
+
+/**
+ * Idempotency key for a write action (SHR-163): a content hash of the action +
+ * its input. A retried RPC after an ambiguous timeout sends the same key, so the
+ * server replays the original result instead of double-executing.
+ */
+export function actionIdempotencyKey(action: string, input: Record<string, unknown>): string {
+  return createHash('sha256')
+    .update(`${action}:${stableStringify(input)}`)
+    .digest('hex');
+}
 
 function actionConfig(): { baseUrl?: string; token?: string; conversationId?: string } {
   return {
@@ -65,12 +89,18 @@ export async function callOrchestratorAction(
     throw new Error('orchestrator write tools are not configured (missing base url / token)');
   }
 
+  const idempotencyKey = actionIdempotencyKey(action, input);
+
   const url =
     `${baseUrl}/api/hooks/orchestrator-action` +
     `?token=${encodeURIComponent(token)}` +
-    (conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : '');
+    (conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : '') +
+    `&idempotency_key=${encodeURIComponent(idempotencyKey)}`;
 
-  logger.debug({ action, conversation_id: conversationId ?? null }, 'mcp write: RPC action');
+  logger.debug(
+    { action, conversation_id: conversationId ?? null, idempotency_key: idempotencyKey },
+    'mcp write: RPC action',
+  );
 
   const res = await fetch(url, {
     method: 'POST',

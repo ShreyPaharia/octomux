@@ -15,6 +15,8 @@ import {
   setGlobalMonitor,
   clearGlobalMonitor,
   getGlobalMonitorConversation,
+  getActionResult,
+  putActionResult,
 } from './store.js';
 
 describe('orchestrator store', () => {
@@ -274,6 +276,38 @@ describe('orchestrator store', () => {
       clearGlobalMonitor();
       const conv2 = getConversation(id);
       expect(conv2!.is_global_monitor).toBe(0);
+    });
+  });
+
+  describe('action-idempotency cache (SHR-163)', () => {
+    it('stores and returns a result within the TTL', () => {
+      putActionResult('k1', 'create-task', JSON.stringify({ task_id: 't1' }));
+      const row = getActionResult('k1', 600);
+      expect(row?.action).toBe('create-task');
+      expect(JSON.parse(row!.result!)).toEqual({ task_id: 't1' });
+    });
+
+    it('returns undefined for an unknown key', () => {
+      expect(getActionResult('missing', 600)).toBeUndefined();
+    });
+
+    it('does not return a row older than the TTL', () => {
+      putActionResult('k2', 'create-task', JSON.stringify({ task_id: 't2' }));
+      getDb()
+        .prepare(
+          `UPDATE orchestrator_action_results SET created_at = datetime('now', '-3600 seconds') WHERE idempotency_key = ?`,
+        )
+        .run('k2');
+      // 30-minute TTL → the 1-hour-old row is stale
+      expect(getActionResult('k2', 1800)).toBeUndefined();
+      // a wide TTL still finds it
+      expect(getActionResult('k2', 7200)).toBeDefined();
+    });
+
+    it('upserts on key conflict (refreshes result + created_at)', () => {
+      putActionResult('k3', 'create-task', JSON.stringify({ v: 1 }));
+      putActionResult('k3', 'create-task', JSON.stringify({ v: 2 }));
+      expect(JSON.parse(getActionResult('k3', 600)!.result!)).toEqual({ v: 2 });
     });
   });
 });

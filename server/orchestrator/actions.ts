@@ -26,6 +26,7 @@
 
 import { childLogger } from '../logger.js';
 import { pushToConversation } from './stream.js';
+import { getActionResult, putActionResult } from './store.js';
 import { COMMANDS, getCommandByAction } from './command-registry.js';
 import type { OrchestratorAction } from './command-registry.js';
 
@@ -35,6 +36,16 @@ import type { OrchestratorAction } from './command-registry.js';
 export type { OrchestratorAction };
 
 const logger = childLogger('orchestrator/actions');
+
+/**
+ * TTL for the action-idempotency cache (SHR-163). A retried RPC with the same
+ * key within this window returns the original result instead of re-executing;
+ * past it, an identical call is treated as a new intent. The window only needs
+ * to cover an ambiguous-timeout retry, which happens within seconds — 10 minutes
+ * is a generous bound. This also makes close-task/delete-task safe to retry
+ * (same task_id → same key → cached result) without changing the executors.
+ */
+export const ACTION_IDEMPOTENCY_TTL_SECONDS = 10 * 60;
 
 /** The full set of supported OrchestratorActions, derived from the registry. */
 export const ORCHESTRATOR_ACTIONS: ReadonlySet<string> = new Set<OrchestratorAction>(
@@ -67,11 +78,31 @@ export async function runOrchestratorAction(
   conversationId: string | undefined,
   action: OrchestratorAction,
   input: Record<string, unknown>,
+  idempotencyKey?: string,
 ): Promise<unknown> {
-  logger.info({ conversation_id: conversationId ?? null, action }, 'orchestrator action: run');
+  logger.info(
+    { conversation_id: conversationId ?? null, action, idempotency_key: idempotencyKey ?? null },
+    'orchestrator action: run',
+  );
 
   const cmd = getCommandByAction(action);
   if (!cmd) throw new Error(`unknown orchestrator action: ${action as string}`);
+
+  // ── Idempotency: replay the original result for a retried RPC (SHR-163) ─────
+  // An ambiguous HTTP timeout on the MCP write RPC could otherwise re-execute a
+  // create-task and double-create a worktree/tmux/DB rows. The key is a content
+  // hash of (action + input) computed by the MCP client, so a retry with the
+  // same args hits the cache instead of re-running the handler.
+  if (idempotencyKey) {
+    const prior = getActionResult(idempotencyKey, ACTION_IDEMPOTENCY_TTL_SECONDS);
+    if (prior) {
+      logger.info(
+        { conversation_id: conversationId ?? null, action, idempotency_key: idempotencyKey },
+        'orchestrator action: idempotent replay — returning cached result (no re-execute)',
+      );
+      return JSON.parse(prior.result ?? 'null');
+    }
+  }
 
   // ── create-task: apply description→initial_prompt default before parse ──────
   // The conductor's MCP create_task tool sends the goal-oriented brief as
@@ -94,6 +125,12 @@ export async function runOrchestratorAction(
   const parsed = cmd.input.parse(resolvedInput);
 
   const { result, activity } = await cmd.handler(parsed, { conversationId });
+
+  // Cache the successful result for idempotent replay (only on success — a
+  // retry after a failure should re-attempt, not replay the error).
+  if (idempotencyKey) {
+    putActionResult(idempotencyKey, action, JSON.stringify(result ?? null));
+  }
 
   if (activity) {
     // create-task: always push (even with no conversationId — use "" fallback).

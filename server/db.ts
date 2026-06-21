@@ -945,6 +945,16 @@ export function initDb(instance: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_events_task_id
       ON events(task_id, seq);
+
+    -- Idempotency cache for orchestrator write actions (SHR-163). Keyed by a
+    -- content hash of (action + input); a retried RPC within the TTL window
+    -- returns the original result instead of re-executing (no double-create).
+    CREATE TABLE IF NOT EXISTS orchestrator_action_results (
+      idempotency_key TEXT PRIMARY KEY,
+      action          TEXT NOT NULL,
+      result          TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // ── Global-monitor mode column (2026-06-20, SHR-136) ────────────────────────

@@ -286,6 +286,18 @@ function registerWriteTools(server: McpServer): void {
     content: [{ type: 'text' as const, text: JSON.stringify(v, null, 2) }],
   });
 
+  // Return tool-execution failures as isError results with actionable text
+  // (Anthropic tool-design guidance, SHR-163) rather than letting a bare throw
+  // surface as an opaque protocol error — the conductor can read and recover.
+  const errorResult = (toolName: string, err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ operation: toolName, err: message }, 'MCP write tool failed — returning isError');
+    return {
+      content: [{ type: 'text' as const, text: `${toolName} failed: ${message}` }],
+      isError: true as const,
+    };
+  };
+
   for (const cmd of COMMANDS.filter((c) => c.mcp)) {
     // cmd.input is a ZodObject at runtime (all MCP commands use ZodObject schemas).
     // Cast through `z.ZodObject<z.ZodRawShape>` to access `.shape` for the MCP SDK.
@@ -296,7 +308,13 @@ function registerWriteTools(server: McpServer): void {
         description: cmd.summary,
         inputSchema: shape,
       },
-      async (args: Record<string, unknown>) => text(await callOrchestratorAction(cmd.action, args)),
+      async (args: Record<string, unknown>) => {
+        try {
+          return text(await callOrchestratorAction(cmd.action, args));
+        } catch (err) {
+          return errorResult(cmd.name, err);
+        }
+      },
     );
   }
 }
