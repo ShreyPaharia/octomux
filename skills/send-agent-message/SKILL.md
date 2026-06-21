@@ -21,9 +21,9 @@ Send a message or instruction to a specific agent within a running task.
    - If the user references a task by title or description, look it up. Prefer the MCP tool when available (you're in the orchestrator); otherwise fall back to the CLI:
      - MCP: `mcp__octomux__list_tasks()`
      - CLI fallback:
-       `bash
-    octomux list-tasks --json
-    `
+       ```bash
+       octomux list-tasks --json
+       ```
        Find the matching task from the list.
 
 2. **Resolve agent number to agent ID:**
