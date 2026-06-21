@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "octomux://orchestrator/plan-schema/1.0.0",
+  "title": "OctomuxPlan",
+  "description": "Schema for plan.json artifacts written by planning sessions (spec §6.5, §5 #4). Single source of truth owned by octomux-mcp. The orchestrator holds only the file path (pointer); contents are fetched browser-side via the artifact endpoint.",
+  "type": "object",
+  "required": ["schema_version", "summary", "files"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Schema version for format-change detection. Must match PLAN_SCHEMA_VERSION in exec.ts."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short human-readable summary of the plan (1–3 sentences). Used as the card title in the UI."
+    },
+    "files": {
+      "type": "array",
+      "description": "List of files to create/modify/delete/rename, forming the editable change list (Copilot Workspace style).",
+      "items": {
+        "$ref": "#/definitions/FileEntry"
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "description": "Questions that need human input before or during implementation. Surfaces in the UI for the user to answer before approving.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "detail": {
+      "type": "string",
+      "description": "Optional prose body — the full plan document. Never sent to the orchestrator; rendered in the UI file viewer only."
+    }
+  },
+  "definitions": {
+    "FileEntry": {
+      "type": "object",
+      "required": ["path", "action"],
+      "additionalProperties": true,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative file path from the repo root."
+        },
+        "action": {
+          "type": "string",
+          "enum": ["create", "modify", "delete", "rename"],
+          "description": "What the worker will do to this file."
+        },
+        "steps": {
+          "type": "array",
+          "description": "Ordered list of concrete implementation steps for this file.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rename_to": {
+          "type": "string",
+          "description": "Target path when action=rename."
+        }
+      }
+    }
+  }
+}

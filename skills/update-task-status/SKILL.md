@@ -22,26 +22,50 @@ Tasks flow through these columns in order (though any transition is allowed):
 
 ## Moving a task to a different column
 
+Prefer the MCP tool when available (you're in the orchestrator); otherwise fall back to the CLI.
+
+**MCP (preferred):**
+
+```
+mcp__octomux__set_task_status({
+  task_id: '<task-id>',
+  status: '<workflow_status>',
+})
+```
+
+**CLI fallback:**
+
 ```bash
 octomux task-move <task-id> <workflow_status>
 ```
 
 **Examples:**
 
+```
+// Move to human review (MCP)
+mcp__octomux__set_task_status({ task_id: 'abc123', status: 'human_review' })
+
+// Mark as planned (MCP)
+mcp__octomux__set_task_status({ task_id: 'abc123', status: 'planned' })
+
+// Mark as done after merge (MCP)
+mcp__octomux__set_task_status({ task_id: 'abc123', status: 'done' })
+```
+
 ```bash
-# Move to human review with a note
+# Move to human review with a note (CLI fallback)
 octomux task-move abc123 human_review --note "PR draft ready, need design sign-off"
 
-# Mark as planned
+# Mark as planned (CLI fallback)
 octomux task-move abc123 planned --note "Scoped in sprint planning"
 
-# Mark as done after merge
+# Mark as done after merge (CLI fallback)
 octomux task-move abc123 done
 ```
 
 **Notes:**
 
-- Moving to `human_review` or `planned` requires `--note` explaining why
+- Moving to `human_review` or `planned` requires a note explaining why — use `--note` with the CLI, or follow up with `octomux task-note` (or a note in your message) when using the MCP tool
 - The move is recorded in the task activity log automatically
 
 ## Posting a progress summary
@@ -116,10 +140,17 @@ octomux task-ref-rm <task-id> <integration>
 octomux task-updates <task-id>
 ```
 
+## Finding a task by title
+
+If you need to look up a task ID by name, prefer the MCP tool when available (you're in the orchestrator); otherwise fall back to the CLI:
+
+- MCP: `mcp__octomux__list_tasks()`
+- CLI fallback: `octomux list-tasks --json`
+
 ## When to use this skill
 
-- **Agent completing a milestone:** post a summary via `task-summary`
-- **Agent blocked on human input:** move to `human_review` with a note explaining what's needed
+- **Agent completing a milestone:** post a summary via `octomux task-summary`
+- **Agent blocked on human input:** move to `human_review` with a note explaining what's needed — use `mcp__octomux__set_task_status` (MCP) or `octomux task-move` (CLI)
 - **Human reviewing work:** add notes, move to `done` after merge
 - **Linking a Jira ticket to a new task:** use `task-ref-add` immediately after creating the task
 - **Tracking decisions or context:** use `task-note` to capture anything that affects how the work is understood later
@@ -128,5 +159,5 @@ octomux task-updates <task-id>
 
 - Keep summaries under 2-3 sentences — they appear in dashboard cards
 - Use notes for longer context or multi-line decisions
-- Always include `--note` when moving to `human_review` so the reviewer knows what to look at
+- Always include a note when moving to `human_review` so the reviewer knows what to look at
 - The `--author` flag on `task-summary` and `task-note` defaults to `cli` but can be set to the agent ID or your name for attribution

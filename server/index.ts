@@ -11,7 +11,20 @@ import {
   handleTerminalUpgrade,
   cleanupAllConnections,
 } from './terminal.js';
-import { setupEventWebSocket, handleEventUpgrade, cleanupEventClients } from './events.js';
+import {
+  setupEventWebSocket,
+  handleEventUpgrade,
+  cleanupEventClients,
+  subscribeServerEvents,
+} from './events.js';
+import {
+  setupOrchestratorWebSocket,
+  handleOrchestratorUpgrade,
+  cleanupOrchestratorClients,
+} from './orchestrator/stream.js';
+import { createSupervisor } from './orchestrator/supervisor.js';
+import { rehydrateConversations } from './orchestrator/runner.js';
+import { rehydratePendingCards } from './orchestrator/gate.js';
 import { startPolling, stopPolling } from './poller.js';
 import { checkTaskStatus } from './poller.js';
 import {
@@ -37,6 +50,7 @@ const PORT = process.env.OCTOMUX_PORT || process.env.PORT || 7777;
 // WebSocket setup
 setupTerminalWebSocket();
 setupEventWebSocket();
+setupOrchestratorWebSocket();
 
 server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
   if (!isUpgradeAuthorized(req)) {
@@ -45,6 +59,7 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
   }
   if (handleTerminalUpgrade(req, socket, head)) return;
   if (handleEventUpgrade(req, socket, head)) return;
+  if (handleOrchestratorUpgrade(req, socket, head)) return;
   socket.destroy();
 });
 
@@ -99,6 +114,41 @@ ensureGithubLogin().catch((err) => {
   logger.warn({ err }, 'ensureGithubLogin failed — reviewer polling disabled');
 });
 
+// ─── Orchestrator supervisor ───────────────────────────────────────────────
+// The supervisor is the single in-process subscriber to the durable events log.
+// It routes each task event to the owning orchestrator conversation and runs the
+// phase-complete relay (plan → approval card → implement). Without this wiring
+// the orchestrator's close-the-loop machinery never runs.
+const supervisor = createSupervisor();
+subscribeServerEvents((event, seq) => {
+  if (seq === undefined) return; // only durable task events carry a seq
+  const taskId = (event.payload as { taskId?: string }).taskId;
+  if (!taskId) return;
+  void supervisor
+    .processEvent({
+      seq,
+      task_id: taskId,
+      type: event.type,
+      payload: JSON.stringify(event.payload),
+    })
+    .catch((err: unknown) => {
+      logger.error({ err, task_id: taskId, type: event.type }, 'supervisor.processEvent failed');
+    });
+});
+
+// Restart recovery: replay missed events for each active conversation and log
+// any pending approval cards that survived the restart (the UI re-renders them
+// from the DB on load).
+for (const conv of rehydrateConversations()) {
+  void supervisor.replay(conv.conversationId).catch((err: unknown) => {
+    logger.error({ err, conversation_id: conv.conversationId }, 'supervisor.replay failed on boot');
+  });
+}
+const pendingCards = rehydratePendingCards();
+if (pendingCards.length > 0) {
+  logger.info({ count: pendingCards.length }, 'orchestrator: pending approval cards rehydrated');
+}
+
 // Background status + PR polling
 startPolling();
 
@@ -146,6 +196,7 @@ function shutdown() {
   logger.info('Shutdown: cleaning up connections');
   cleanupAllConnections();
   cleanupEventClients();
+  cleanupOrchestratorClients();
   logger.info('Shutdown: closing HTTP server');
   server.close(() => {
     logger.info('Shutdown: done');

@@ -154,24 +154,32 @@ describe('tmuxResolution', () => {
 // ─── tmuxBaseArgs ─────────────────────────────────────────────────────────────
 
 describe('tmuxBaseArgs', () => {
-  it('returns ["-S", "<dataDir>/run/tmux.sock"]', () => {
+  it('returns ["-S", <absolute socket path>]', () => {
     const args = tmuxBaseArgs();
     expect(args).toHaveLength(2);
     expect(args[0]).toBe('-S');
-    expect(args[1]).toMatch(/[/\\]run[/\\]tmux\.sock$/);
+    expect(path.isAbsolute(args[1] as string)).toBe(true);
   });
 
-  it('socket path ends with "run/tmux.sock"', () => {
+  it('socket basename is always "tmux.sock"', () => {
     const [, sockPath] = tmuxBaseArgs();
     expect(path.basename(sockPath)).toBe('tmux.sock');
-    expect(path.basename(path.dirname(sockPath))).toBe('run');
   });
 
-  it('socket path is under the data directory (not system-level)', () => {
+  it('socket path fits the OS sun_path limit (<=104 chars)', () => {
+    // A deep worktree pushes the preferred <dataDir>/run/tmux.sock past the
+    // macOS Unix-socket limit; the length guard must keep the returned path short
+    // enough for tmux to bind it.
     const [, sockPath] = tmuxBaseArgs();
-    // In test env (NODE_ENV=test), data dir is ./data/ (not ~/.octomux/)
-    expect(sockPath).not.toMatch(/^\/var\//);
-    expect(sockPath).not.toMatch(/^\/tmp\//);
+    expect((sockPath as string).length).toBeLessThanOrEqual(104);
+  });
+
+  it('uses <dataDir>/run/tmux.sock when short, else a hashed tmpdir fallback', () => {
+    const [, sockPath] = tmuxBaseArgs();
+    const parentDir = path.basename(path.dirname(sockPath));
+    // Preferred layout keeps the socket directly under a "run" dir; the long-path
+    // fallback uses a short, hashed "octomux-<hash>" dir under the system tmpdir.
+    expect(parentDir === 'run' || /^octomux-[0-9a-f]+$/.test(parentDir)).toBe(true);
   });
 });
 

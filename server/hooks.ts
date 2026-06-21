@@ -1,11 +1,25 @@
 import type { Request, Response, NextFunction } from 'express';
 import { Router } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { nanoid } from 'nanoid';
 import { getDb } from './db.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
+import {
+  isOrchestratorManaged,
+  upsertManagedTask,
+  getManagedTask,
+  conversationIdForHookToken,
+} from './orchestrator/store.js';
+import { handlePreToolUse } from './orchestrator/gate.js';
+import {
+  runOrchestratorAction,
+  ORCHESTRATOR_ACTIONS,
+  type OrchestratorAction,
+} from './orchestrator/actions.js';
 
 const logger = childLogger('hooks');
 
@@ -136,8 +150,13 @@ function requireHookToken(req: Request, res: Response, next: NextFunction) {
     .prepare(`SELECT 1 AS ok FROM agents WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
     .get(provided) as { ok: number } | undefined;
   if (!row) {
-    logger.warn({ path: req.path, ip: req.ip }, 'hook token not recognized');
-    return res.status(401).send();
+    // The orchestrator conductor is not an `agents` row — its gate hook token
+    // lives on orchestrator_conversations. Accept it here so the PreToolUse
+    // gate can authenticate the conductor's callbacks.
+    if (!conversationIdForHookToken(provided)) {
+      logger.warn({ path: req.path, ip: req.ip }, 'hook token not recognized');
+      return res.status(401).send();
+    }
   }
   next();
 }
@@ -365,13 +384,15 @@ router.post(
     });
     txn();
 
-    // B4: Auto-transition in_progress → human_review when the last agent stops
+    // B4: Auto-transition in_progress → human_review when the last agent stops.
+    // SUPPRESSED for orchestrator-managed tasks (§6.5, R3-I1): managed_tasks.phase
+    // is authoritative; workflow_status is set only via set_workflow_status tool.
     const db = getDb();
     const task = db
       .prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`)
       .get(agent.task_id) as { id: string; workflow_status: string } | undefined;
 
-    if (task && task.workflow_status === 'in_progress') {
+    if (task && task.workflow_status === 'in_progress' && !isOrchestratorManaged(task.id)) {
       const otherRunning = db
         .prepare(
           `SELECT COUNT(*) AS n FROM agents WHERE task_id = ? AND status = 'running' AND id != ?`,
@@ -404,7 +425,21 @@ router.post(
           data: { from: 'in_progress', to: 'human_review', note: 'auto: agent stopped' },
         });
       }
+    } else if (task && task.workflow_status === 'in_progress' && isOrchestratorManaged(task.id)) {
+      logger.info(
+        { task_id: task.id, agent_id: agent.id, operation: 'stop_suppressed_managed' },
+        'Stop hook: suppressed auto-human_review for orchestrator-managed task',
+      );
     }
+
+    // Orchestrator phase-complete detection (spec §6.5). A managed task signals
+    // phase-complete by writing a marker file and ending its turn — we detect it
+    // here via the worker's already-authenticated Stop hook, so the worker needs
+    // no extra env/command. Dispatches on managed_tasks.phase:
+    //   speccing    + spec.md        → spec phase complete
+    //   planning    + plan.json      → plan phase complete (awaiting_approval)
+    //   implementing + .octomux/implement-done → implement done
+    maybeSignalPhaseComplete(agent.task_id);
 
     // C3: fire-and-forget Haiku summarizer (only when builtin is enabled + API key set)
     void summarizeAgentProgress(agent.task_id, agent.id);
@@ -413,6 +448,243 @@ router.post(
     res.status(200).send();
   },
 );
+
+/**
+ * Backstop: detect phase completion from marker files on the Stop hook.
+ *
+ * When the worker uses the explicit report_complete MCP tool, advancePhaseForLabel
+ * has already run before the Stop hook fires (idempotent). When the tool is not
+ * called (e.g. old workers, failures), this backstop detects the marker files and
+ * calls advancePhaseForLabel — producing identical results to the explicit path.
+ *
+ *   phase 'speccing'     + spec.md present          → advancePhaseForLabel('spec')
+ *   phase 'planning'     + plan.json present         → advancePhaseForLabel('plan')
+ *   phase 'implementing' + .octomux/implement-done   → advancePhaseForLabel('implement')
+ *
+ * NOTE: managed_tasks.phase COLUMN values ('speccing'/'planning'/...) are
+ * DISTINCT from the broadcast payload.phase LABEL ('spec'/'plan'/'implement').
+ * The supervisor switches on the LABEL.
+ */
+function maybeSignalPhaseComplete(taskId: string): void {
+  const managed = getManagedTask(taskId);
+  if (!managed) return;
+
+  const row = getDb()
+    .prepare(
+      `SELECT w.path AS worktree FROM tasks t
+         JOIN worktrees w ON t.worktree_id = w.id
+        WHERE t.id = ?`,
+    )
+    .get(taskId) as { worktree: string | null } | undefined;
+  const worktree = row?.worktree;
+  if (!worktree) return;
+
+  if (managed.phase === 'speccing') {
+    const specPath = path.join(worktree, 'spec.md');
+    if (!fs.existsSync(specPath)) return;
+
+    logger.info(
+      { task_id: taskId, operation: 'spec_complete_detected' },
+      'Stop hook backstop: spec.md present for managed speccing task — advancing via advancePhaseForLabel',
+    );
+    advancePhaseForLabel(taskId, 'spec', ['spec.md']);
+    return;
+  }
+
+  if (managed.phase === 'planning') {
+    const planPath = path.join(worktree, 'plan.json');
+    if (!fs.existsSync(planPath)) return;
+
+    logger.info(
+      { task_id: taskId, operation: 'plan_complete_detected' },
+      'Stop hook backstop: plan.json present for managed planning task — advancing via advancePhaseForLabel',
+    );
+    advancePhaseForLabel(taskId, 'plan', ['plan.json']);
+    return;
+  }
+
+  if (managed.phase === 'implementing') {
+    const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
+    if (!fs.existsSync(sentinelPath)) return;
+
+    logger.info(
+      { task_id: taskId, operation: 'implement_complete_detected' },
+      'Stop hook backstop: implement-done sentinel present for managed implementing task — advancing via advancePhaseForLabel',
+    );
+    advancePhaseForLabel(taskId, 'implement');
+    return;
+  }
+}
+
+/**
+ * Map a phase LABEL (from the MCP tool / broadcast payload) to the managed_tasks
+ * COLUMN value to advance to. This is the single source of truth for the
+ * label → column mapping.
+ *
+ *   label 'spec'      → column 'planning'
+ *   label 'plan'      → column 'awaiting_approval'
+ *   label 'implement' → column 'done'
+ *
+ * Unknown labels are passed through unchanged (forward-compat).
+ */
+function phaseColumnForLabel(label: string): string {
+  switch (label) {
+    case 'spec':
+      return 'planning';
+    case 'plan':
+      return 'awaiting_approval';
+    case 'implement':
+      return 'done';
+    default:
+      return label;
+  }
+}
+
+/**
+ * Advance a managed task's phase column based on a broadcast LABEL and emit the
+ * task:phase_complete event. This is the shared transition used by both:
+ *   - The explicit MCP tool (POST /api/hooks/phase-complete)
+ *   - The marker-file backstop (maybeSignalPhaseComplete)
+ *
+ * Idempotent: if the task is already past the target phase column (or not managed),
+ * this is a no-op and does NOT double-fire the broadcast.
+ *
+ * For 'implement', also deletes <worktree>/.octomux/implement-done if present.
+ */
+export function advancePhaseForLabel(taskId: string, label: string, artifacts?: unknown): void {
+  const managed = getManagedTask(taskId);
+  if (!managed) return;
+
+  const targetColumn = phaseColumnForLabel(label);
+
+  // Idempotency: only advance if we are still in the expected "current" phase
+  // (the phase BEFORE the target). If we are already at or past the target, skip.
+  const alreadyAdvanced = managed.phase === targetColumn;
+  if (alreadyAdvanced) {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: already at target phase — no-op',
+    );
+    return;
+  }
+
+  // Additional idempotency: for implement → done, only fire from 'implementing'.
+  // For other phases the column name is already the guard.
+  if (label === 'implement' && managed.phase !== 'implementing') {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: not in implementing phase — skipping implement advance',
+    );
+    return;
+  }
+
+  // For 'spec', only fire from 'speccing'.
+  if (label === 'spec' && managed.phase !== 'speccing') {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: not in speccing phase — skipping spec advance',
+    );
+    return;
+  }
+
+  // For 'plan', only fire from 'planning'.
+  if (label === 'plan' && managed.phase !== 'planning') {
+    logger.debug(
+      { task_id: taskId, label, phase: managed.phase, operation: 'advancePhaseForLabel' },
+      'advancePhaseForLabel: not in planning phase — skipping plan advance',
+    );
+    return;
+  }
+
+  // Advance synchronously BEFORE broadcast so a rapid second call cannot double-fire.
+  const artifactsJson = artifacts !== undefined ? JSON.stringify(artifacts) : undefined;
+  upsertManagedTask({
+    conversation_id: managed.conversation_id,
+    task_id: taskId,
+    phase: targetColumn,
+    ...(artifactsJson !== undefined ? { artifacts: artifactsJson } : {}),
+  });
+
+  logger.info(
+    { task_id: taskId, label, phase_column: targetColumn, operation: 'advancePhaseForLabel' },
+    'advancePhaseForLabel: phase advanced',
+  );
+
+  // For implement, delete the sentinel so it never appears in the diff.
+  if (label === 'implement') {
+    const row = getDb()
+      .prepare(
+        `SELECT w.path AS worktree FROM tasks t
+           JOIN worktrees w ON t.worktree_id = w.id
+          WHERE t.id = ?`,
+      )
+      .get(taskId) as { worktree: string | null } | undefined;
+    const worktree = row?.worktree;
+    if (worktree) {
+      const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
+      try {
+        fs.rmSync(sentinelPath, { force: true });
+      } catch {
+        // Non-fatal
+      }
+    }
+  }
+
+  broadcast({
+    type: 'task:phase_complete',
+    payload: {
+      taskId,
+      phase: label,
+      ...(artifacts !== undefined ? { artifacts } : {}),
+    },
+  });
+}
+
+// POST /api/hooks/phase-complete
+// Worker agents POST this at a phase boundary (§6.5, R2-F2).
+// Body: { task_id, phase, artifacts? }
+// Authenticated by the worker's existing per-agent hook_token.
+// Persists + emits a typed task:phase_complete event and advances
+// managed_tasks.phase. The phase field here is the BROADCAST LABEL ('spec',
+// 'plan', 'implement') — advancePhaseForLabel maps it to the column value.
+router.post('/phase-complete', requireHookToken, (req, res) => {
+  const { task_id, phase, artifacts } = req.body as {
+    task_id?: string;
+    phase?: string;
+    artifacts?: unknown;
+  };
+
+  if (!task_id || !phase) {
+    logger.warn({ path: req.path }, 'phase-complete: missing task_id or phase');
+    res.status(200).send();
+    return;
+  }
+
+  const managed = getManagedTask(task_id);
+  if (managed) {
+    advancePhaseForLabel(task_id, phase, artifacts);
+    logger.info(
+      { task_id, phase, operation: 'phase_complete' },
+      'phase-complete: advancePhaseForLabel called',
+    );
+  } else {
+    // Not managed — still emit the event so supervisor can observe it.
+    logger.info(
+      { task_id, phase },
+      'phase-complete: task not orchestrator-managed, emitting event only',
+    );
+    broadcast({
+      type: 'task:phase_complete',
+      payload: {
+        taskId: task_id,
+        phase,
+        ...(artifacts !== undefined ? { artifacts } : {}),
+      },
+    });
+  }
+
+  res.status(200).send();
+});
 
 // POST /api/hooks/session-start
 // Cursor (harness-issued) fires this on chat creation. Used to bind a
@@ -442,6 +714,104 @@ router.post('/session-start', (req: Request, res: Response) => {
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).json({});
+});
+
+// POST /api/hooks/pre-tool-use
+// Called by the orchestrator's PreToolUse HTTP hook (matcher: "Bash(octomux *)").
+// Classifies the tool call via the policy engine and returns an allow/deny decision
+// in the hookSpecificOutput format Claude Code expects (Phase-0 finding: §Spike 3).
+//
+// Body: { hook_event_name, tool_name, tool_input, ... }
+// Query: ?token=<hook_token>&conversation_id=<conv_id>
+//
+// Response format (Phase-0 verified):
+//   { hookSpecificOutput: { hookEventName: 'PreToolUse',
+//                           permissionDecision: 'allow' | 'deny',
+//                           permissionDecisionReason?: string } }
+router.post('/pre-tool-use', requireHookToken, (req: Request, res: Response) => {
+  const { tool_name, tool_input } = req.body as {
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+  };
+  const conversationId = (req.query.conversation_id ?? '') as string | undefined;
+  // Generate a synthetic tool_use_id when the hook payload doesn't carry one
+  const toolUseId = (req.body.tool_use_id as string | undefined) ?? nanoid(12);
+
+  if (!tool_name) {
+    // No tool_name → can't classify; fail open
+    res.status(200).json({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+      },
+    });
+    return;
+  }
+
+  handlePreToolUse({
+    conversation_id: conversationId || undefined,
+    tool_name,
+    tool_input: tool_input ?? {},
+    tool_use_id: toolUseId,
+  })
+    .then((result) => {
+      if (result.decision === 'allow') {
+        res.status(200).json({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+          },
+        });
+      } else {
+        res.status(200).json({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason:
+              result.reason ?? `queued for approval — card ${result.card_id ?? 'unknown'}`,
+          },
+        });
+      }
+    })
+    .catch((err: unknown) => {
+      logger.error({ err, path: req.path }, 'pre-tool-use: unexpected error — failing open');
+      // Fail open on unexpected errors so the orchestrator isn't permanently blocked
+      res.status(200).json({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+        },
+      });
+    });
+});
+
+// POST /api/hooks/orchestrator-action
+// The conductor's MCP write tools (mcp__octomux__create_task, …) RPC here to
+// perform a write action with STRUCTURED args (no Bash, no gate) — SHR-142.
+// Query: ?token=<conductor hook_token>&conversation_id=<conv_id>
+// Body:  { action: 'create-task'|'send-message'|…, input: {…structured…} }
+// Runs in the main process so the task lifecycle + supervisor relay stay here.
+router.post('/orchestrator-action', requireHookToken, (req: Request, res: Response) => {
+  const conversationId = ((req.query.conversation_id ?? '') as string) || undefined;
+  const { action, input } = req.body as {
+    action?: string;
+    input?: Record<string, unknown>;
+  };
+
+  if (!action || !ORCHESTRATOR_ACTIONS.has(action)) {
+    res.status(400).json({ error: `unknown or missing action: ${action ?? '(none)'}` });
+    return;
+  }
+
+  runOrchestratorAction(conversationId, action as OrchestratorAction, input ?? {})
+    .then((result) => {
+      res.status(200).json({ ok: true, result });
+    })
+    .catch((err: unknown) => {
+      const message = (err as Error).message ?? String(err);
+      logger.error({ err, action, conversation_id: conversationId }, 'orchestrator-action failed');
+      res.status(200).json({ ok: false, error: message });
+    });
 });
 
 export { router as hookRoutes };
