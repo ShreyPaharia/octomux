@@ -30,7 +30,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { childLogger } from '../logger.js';
-import { getConversation, appendMessage, listMessages } from './store.js';
+import { getConversation, appendMessage, listMessages, listPendingCards } from './store.js';
+import type { ActionCard } from './store.js';
 import { sendTurn } from './runner.js';
 import { tailTranscript } from './transcript.js';
 import type { ChatEvent } from './transcript.js';
@@ -218,6 +219,96 @@ export function chatEventToWsEvent(event: ChatEvent): OrchestratorWsEvent | null
   }
 }
 
+// ─── Card rehydration on (re)connect (SHR-161 follow-up) ───────────────────────
+
+/**
+ * Reconstruct the `card` ws event for a persisted pending action_cards row, so a
+ * client that (re)connects or reloads re-renders the card instead of losing it.
+ *
+ * Cards are otherwise pushed exactly once, live, at phase-complete time — a
+ * page reload or a silent ws auto-reconnect (SHR-162) would drop them, leaving
+ * the run wedged on an invisible approval gate. Returns null only if a row can't
+ * be mapped (never expected for known tool_names).
+ */
+export function cardRowToWsEvent(card: ActionCard): WsCardEvent | null {
+  let input: Record<string, unknown> = {};
+  try {
+    input = JSON.parse(card.input) as Record<string, unknown>;
+  } catch {
+    input = {};
+  }
+  const taskId = typeof input.task_id === 'string' ? input.task_id : '';
+  const artifactUrl = (path: string) =>
+    taskId
+      ? `/api/orchestrator/artifact?task=${encodeURIComponent(taskId)}&path=${encodeURIComponent(path)}`
+      : '';
+
+  if (card.tool_name === 'approve-plan') {
+    const planPath = typeof input.plan_path === 'string' ? input.plan_path : 'plan.json';
+    return {
+      type: 'card',
+      id: card.id,
+      command: 'approve-plan',
+      args: { task_id: taskId, plan_path: planPath, artifact_url: artifactUrl(planPath) },
+    };
+  }
+  if (card.tool_name === 'view-spec') {
+    const specPath = typeof input.spec_path === 'string' ? input.spec_path : 'spec.md';
+    return {
+      type: 'card',
+      id: card.id,
+      command: 'view-spec',
+      args: { task_id: taskId, spec_path: specPath, artifact_url: artifactUrl(specPath) },
+    };
+  }
+  // Gated write-command card → render as a generic ActionCard (command = tool_name).
+  return { type: 'card', id: card.id, command: card.tool_name, args: input };
+}
+
+/**
+ * Send the durable conversation state to a (re)connecting client: persisted
+ * messages first, then any still-pending cards. Idempotent on the client — card
+ * ids are stable, so a live session that already has a card de-dupes the replay.
+ */
+export function replayConnectionState(convId: string, push: PushFn): void {
+  // Persisted messages
+  try {
+    const history = listMessages(convId);
+    for (const msg of history) {
+      const contentBlocks = (() => {
+        try {
+          return JSON.parse(msg.content) as Array<{ type: string; text?: string }>;
+        } catch {
+          return [{ type: 'text', text: msg.content }];
+        }
+      })();
+      const text = contentBlocks
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text ?? '')
+        .join('');
+      const histEvent: WsMessageEvent = {
+        type: 'message',
+        role: msg.role as 'user' | 'assistant',
+        text,
+        id: msg.id,
+      };
+      push(JSON.stringify(histEvent));
+    }
+  } catch (err) {
+    logger.warn({ conversation_id: convId, err }, 'stream: failed to replay history');
+  }
+
+  // Pending cards (so a reload / reconnect re-surfaces the approval gate)
+  try {
+    for (const card of listPendingCards(convId)) {
+      const ev = cardRowToWsEvent(card);
+      if (ev) push(JSON.stringify(ev));
+    }
+  } catch (err) {
+    logger.warn({ conversation_id: convId, err }, 'stream: failed to replay pending cards');
+  }
+}
+
 // ─── startTranscriptTail ──────────────────────────────────────────────────────
 
 /**
@@ -356,32 +447,8 @@ export function handleOrchestratorUpgrade(
       return;
     }
 
-    // Replay persisted messages to the new client
-    try {
-      const history = listMessages(convId);
-      for (const msg of history) {
-        const contentBlocks = (() => {
-          try {
-            return JSON.parse(msg.content) as Array<{ type: string; text?: string }>;
-          } catch {
-            return [{ type: 'text', text: msg.content }];
-          }
-        })();
-        const text = contentBlocks
-          .filter((b) => b.type === 'text')
-          .map((b) => b.text ?? '')
-          .join('');
-        const histEvent: WsMessageEvent = {
-          type: 'message',
-          role: msg.role as 'user' | 'assistant',
-          text,
-          id: msg.id,
-        };
-        push(JSON.stringify(histEvent));
-      }
-    } catch (err) {
-      logger.warn({ conversation_id: convId, err }, 'stream: failed to replay history');
-    }
+    // Replay persisted messages AND pending cards to the (re)connecting client.
+    replayConnectionState(convId, push);
 
     // Start tailing the transcript if we have a path
     if (conv.transcript_path) {

@@ -18,14 +18,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../app.js';
 import { createTestDb } from '../test-helpers.js';
-import { createConversation, getConversation, listMessages, appendMessage } from './store.js';
+import {
+  createConversation,
+  getConversation,
+  listMessages,
+  appendMessage,
+  createCard,
+  resolveCard,
+} from './store.js';
 import {
   dispatchUserTurn,
   persistAndPush,
   setupOrchestratorWebSocket,
   handleOrchestratorUpgrade,
   chatEventToWsEvent,
+  cardRowToWsEvent,
+  replayConnectionState,
 } from './stream.js';
+import type { ActionCard } from './store.js';
 import type { ChatEvent } from './transcript.js';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
@@ -400,5 +410,102 @@ describe('handleOrchestratorUpgrade', () => {
       result = true;
     }
     expect(result).toBe(true);
+  });
+});
+
+// ─── Card rehydration on (re)connect (SHR-161 follow-up) ──────────────────────
+
+describe('cardRowToWsEvent', () => {
+  const base = {
+    id: 'c1',
+    conversation_id: 'conv',
+    status: 'pending',
+    result: null,
+    created_at: '',
+    decided_at: null,
+  };
+
+  it('reconstructs an approve-plan card with an artifact_url pointer', () => {
+    const card: ActionCard = {
+      ...base,
+      tool_use_id: 'relay-1',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: 't1', plan_path: 'plan.json' }),
+    };
+    const ev = cardRowToWsEvent(card);
+    expect(ev).toMatchObject({ type: 'card', id: 'c1', command: 'approve-plan' });
+    expect(ev?.args.task_id).toBe('t1');
+    expect(ev?.args.plan_path).toBe('plan.json');
+    expect(String(ev?.args.artifact_url)).toContain('task=t1');
+    expect(String(ev?.args.artifact_url)).toContain('path=plan.json');
+  });
+
+  it('reconstructs a view-spec card', () => {
+    const card: ActionCard = {
+      ...base,
+      tool_use_id: 'spec-1',
+      tool_name: 'view-spec',
+      input: JSON.stringify({ task_id: 't1', spec_path: 'spec.md' }),
+    };
+    const ev = cardRowToWsEvent(card);
+    expect(ev).toMatchObject({ type: 'card', command: 'view-spec' });
+    expect(ev?.args.spec_path).toBe('spec.md');
+  });
+
+  it('falls back to a generic action card (command = tool_name, args = input)', () => {
+    const card: ActionCard = {
+      ...base,
+      tool_use_id: 'g1',
+      tool_name: 'create-task',
+      input: JSON.stringify({ title: 'X', repo_path: '/r' }),
+    };
+    const ev = cardRowToWsEvent(card);
+    expect(ev).toMatchObject({ type: 'card', command: 'create-task' });
+    expect(ev?.args).toMatchObject({ title: 'X', repo_path: '/r' });
+  });
+});
+
+describe('replayConnectionState', () => {
+  let convId: string;
+  beforeEach(() => {
+    createTestDb();
+    convId = createConversation({ title: 'c' });
+  });
+
+  it('replays persisted messages and pending cards to a connecting client', () => {
+    appendMessage({
+      conversation_id: convId,
+      role: 'assistant',
+      content: JSON.stringify([{ type: 'text', text: 'plan ready' }]),
+    });
+    createCard({
+      conversation_id: convId,
+      tool_use_id: 'relay-1',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: 't1', plan_path: 'plan.json' }),
+    });
+
+    const pushed: string[] = [];
+    replayConnectionState(convId, (m) => pushed.push(m));
+    const events = pushed.map((m) => JSON.parse(m) as { type: string; command?: string });
+
+    expect(events.some((e) => e.type === 'message')).toBe(true);
+    // The pending plan card is re-surfaced so the approval gate isn't lost on reload.
+    expect(events.some((e) => e.type === 'card' && e.command === 'approve-plan')).toBe(true);
+  });
+
+  it('does NOT replay resolved cards', () => {
+    const cardId = createCard({
+      conversation_id: convId,
+      tool_use_id: 'relay-1',
+      tool_name: 'approve-plan',
+      input: JSON.stringify({ task_id: 't1', plan_path: 'plan.json' }),
+    });
+    resolveCard(cardId, 'executed', null);
+
+    const pushed: string[] = [];
+    replayConnectionState(convId, (m) => pushed.push(m));
+    const events = pushed.map((m) => JSON.parse(m) as { type: string });
+    expect(events.some((e) => e.type === 'card')).toBe(false);
   });
 });
