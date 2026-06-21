@@ -1,12 +1,16 @@
 /**
  * src/components/orchestrator/MessageThread.tsx
  *
- * Renders a streamed orchestrator chat message thread.
- * Displays user and assistant messages with distinct visual styles.
- * Pure presentational component — all state is managed by OrchestratorPage.
+ * Renders a run of orchestrator chat messages (user + assistant bubbles).
+ *
+ * Pure presentational, NON-scrolling, inline list. It is composed inside
+ * MixedThread (OrchestratorPage), which owns the single scroll container and
+ * the scroll-to-bottom behaviour. MessageThread must NOT introduce its own
+ * `overflow`/`flex-1`/scroll: when tool-call cards interleave and split the
+ * thread into several MessageThread batches, a per-batch scroll container would
+ * create multiple nested scroll regions that overlap and "stick" (SHR-161 bug).
  */
 
-import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Markdown } from './Markdown';
 
@@ -23,35 +27,10 @@ interface MessageThreadProps {
 }
 
 export function MessageThread({ messages, className }: MessageThreadProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
-
-  if (messages.length === 0) {
-    return (
-      <div
-        className={cn(
-          'flex flex-1 items-center justify-center text-sm text-muted-foreground',
-          className,
-        )}
-        aria-live="polite"
-        aria-label="Message thread"
-      >
-        No messages yet. Start a conversation below.
-      </div>
-    );
-  }
+  if (messages.length === 0) return null;
 
   return (
-    <div
-      className={cn('flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4', className)}
-      role="log"
-      aria-label="Message thread"
-      aria-live="polite"
-    >
+    <div className={cn('flex flex-col gap-3 px-4 py-2', className)}>
       {messages.map((msg) => (
         <div
           key={msg.id}
@@ -72,7 +51,6 @@ export function MessageThread({ messages, className }: MessageThreadProps) {
           )}
         </div>
       ))}
-      <div ref={bottomRef} aria-hidden="true" />
     </div>
   );
 }
