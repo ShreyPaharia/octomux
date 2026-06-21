@@ -96,7 +96,10 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     if (initialPrompt) {
       promptFile = path.join(cwd, `.claude-prompt-${agentId}`);
       fs.writeFileSync(promptFile, initialPrompt, { mode: 0o600, flag: 'wx' });
-      cmd += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
+      // `--` ends option parsing so the positional prompt can never be swallowed
+      // by a preceding variadic flag (e.g. a future --mcp-config). See the same
+      // guard in task-runner.ts buildAgentStartupCommand.
+      cmd += ` -- "$(cat ${shellQuoteSingle(promptFile)})"`;
     }
     await execTmux(['send-keys', '-t', session, cmd, 'Enter']);
     if (promptFile) {
