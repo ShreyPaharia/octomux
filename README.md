@@ -6,7 +6,7 @@
 
 > **Coding got faster. Managing agents didn't.**
 
-A local web app to **dispatch, watch, and review** parallel **Claude Code** and **Cursor** agents from one place. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. No cloud. MIT.
+A local web app to **dispatch, watch, and review** parallel **Claude Code** and **Cursor** agents from one place. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. Run it from npm or the native macOS app. No cloud. MIT.
 
 ```bash
 npm install -g octomux && octomux init && cd your-repo && octomux start
@@ -49,6 +49,8 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 - **Agents that dispatch agents** — `/create-task`, `/list-tasks`, `/send-agent-message` skills work inside any Claude Code window; recursive dispatch from inside an agent.
 - **Agent teams** — reusable crews defined as code in `<repo>/.octomux/team.yaml`: a lead spawns workers from a roster, each with its own model. Run on demand (`octomux team run`) or on a cron schedule.
 - **Per-task model** — pin any task or added agent to a specific model (`--model claude-opus-4-8`); mix models across a fleet so the right one lands on each job.
+- **Completion notifications** — link a worker to an orchestrator with `add-agent --notify-agent`; the lead gets pinged when each worker finishes. Teams wire this up automatically.
+- **Mobile-ready dashboard** — bottom nav, responsive pages, and mobile-friendly terminal scroll buttons; check the fleet and answer prompts from your phone.
 - **Integrations** — Jira wiring plus orchestrator skills for GitHub / auto-review intake.
 - **CLI ↔ dashboard parity** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows.
 - **Reboot-proof** — WAL SQLite + preserved worktrees across restarts.
@@ -77,7 +79,7 @@ Give an agent the orchestrator skills. It plans the work, breaks down the spec, 
 ## Quick start
 
 ```bash
-brew install tmux git
+brew install git
 npm install -g @anthropic-ai/claude-code    # and/or Cursor CLI
 npm install -g octomux
 octomux init
@@ -85,10 +87,19 @@ cd your-project
 octomux start
 ```
 
+`tmux` ships bundled — octomux installs a static `tmux` for your platform (macOS and Linux,
+arm64/x64) and uses it automatically, so there's no separate `brew install tmux` step.
+
 ```bash
 octomux create-task -t "Add OAuth login" -r .
 octomux create-task -t "Spike with Cursor" -r . --harness cursor
 ```
+
+**Prefer a desktop app?** macOS users can download the `.dmg` from
+[GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) instead of the npm CLI.
+It bundles its own `tmux` and runs against an isolated data directory (its own DB, tmux
+socket, and logs), so it never collides with a CLI install on the same machine. The build is
+ad-hoc signed (not notarized) — if macOS warns on first launch, right-click the app → **Open**.
 
 Step-by-step setup, Jira, and orchestrator skills: [ONBOARDING.md](./ONBOARDING.md)
 
@@ -110,17 +121,17 @@ DISPATCH → BRANCH → CODE → INBOX → REVIEW → MERGE
 
 ## CLI
 
-| Command                                  | Description                                              |
-| ---------------------------------------- | -------------------------------------------------------- |
-| `octomux start`                          | Dashboard at `:7777`                                     |
-| `octomux init`                           | Defaults wizard (Jira, base branch, harness prefs)       |
-| `octomux create-task`                    | New task (`--harness cursor` optional)                   |
-| `octomux list-tasks` / `get-task`        | Inspect tasks                                            |
-| `octomux close-task` / `delete-task`     | Stop or fully remove                                     |
-| `octomux resume-task`                    | Resume a closed task                                     |
-| `octomux add-agent`                      | Another agent window (`--skeleton`, `--model` optional)  |
-| `octomux send-message`                   | Message a running agent — course-correct without restart |
-| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`  |
+| Command                                  | Description                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| `octomux start`                          | Dashboard at `:7777`                                                      |
+| `octomux init`                           | Defaults wizard (Jira, base branch, harness prefs)                        |
+| `octomux create-task`                    | New task (`--harness cursor` optional)                                    |
+| `octomux list-tasks` / `get-task`        | Inspect tasks                                                             |
+| `octomux close-task` / `delete-task`     | Stop or fully remove                                                      |
+| `octomux resume-task`                    | Resume a closed task                                                      |
+| `octomux add-agent`                      | Another agent window (`--skeleton`, `--model`, `--notify-agent` optional) |
+| `octomux send-message`                   | Message a running agent — course-correct without restart                  |
+| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`                   |
 
 ## Architecture
 
@@ -156,9 +167,10 @@ flowchart LR
 ## Requirements
 
 - macOS (ARM64 or x64), Node.js 20+ (24 LTS recommended)
-- `tmux`, `git`
+- `git` (`tmux` ships bundled — installed automatically, no manual step)
 - At least one harness: **Claude Code** (`claude`) and/or **Cursor CLI** (`cursor-agent`)
 - Recommended: `lazygit`, `neovim`
+- macOS desktop app (`.dmg`) available on [GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) as an alternative to the npm CLI
 
 > First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira and other integrations are configured later from the in-app **Integrations** page.
 
