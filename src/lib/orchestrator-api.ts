@@ -61,6 +61,7 @@ export interface DisplayMessage {
 export type WsIncomingEvent =
   | { type: 'message'; role: 'user' | 'assistant'; text: string; id?: string }
   | { type: 'card'; id: string; command: string; args: Record<string, unknown> }
+  | { type: 'tool'; id: string; tool_name: string; input: unknown }
   | { type: 'status'; status: string }
   | { type: 'error'; error: string };
 
@@ -170,49 +171,116 @@ export function parseMessage(msg: OrchestratorMessage): DisplayMessage {
 
 // ─── WebSocket connection ─────────────────────────────────────────────────────
 
+/** Connection lifecycle states surfaced to the UI (SHR-162). */
+export type WsConnectionState = 'connecting' | 'open' | 'reconnecting' | 'closed';
+
 export interface OrchestratorWsOptions {
   onMessage: (event: WsIncomingEvent) => void;
-  onOpen?: () => void;
-  onClose?: () => void;
+  /** Called on every connection-state transition (drives the status pill). */
+  onStatusChange?: (state: WsConnectionState) => void;
+  /**
+   * Called after a *reconnect* succeeds (not the first connect). The caller
+   * should re-fetch history to backfill any messages missed while offline.
+   */
+  onReconnect?: () => void;
   onError?: (err: Event) => void;
 }
 
+export interface OrchestratorWsHandle {
+  /** Send an event. Returns false when the socket is not currently open. */
+  send: (event: WsOutgoingEvent) => boolean;
+  /** Close the socket and stop reconnecting. */
+  close: () => void;
+}
+
+/** Exponential backoff schedule for reconnect attempts (ms), capped at 15s. */
+export const WS_RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 15000];
+
+const WS_OPEN = 1; // WebSocket.OPEN — literal so mocks don't need the static property
+
 /**
- * Open a WebSocket connection to `/ws/orchestrator/:convId`.
- * Returns a send function and a cleanup function.
+ * Open a resilient WebSocket connection to `/ws/orchestrator/:convId`.
+ *
+ * Auto-reconnects with exponential backoff on an unexpected drop (a dropped
+ * socket no longer forces a full page refresh — SHR-162). Surfaces every
+ * connection-state transition via onStatusChange and signals onReconnect after
+ * a successful reconnect so the caller can replay history. A user-initiated
+ * close() stops reconnection.
  */
 export function openOrchestratorWs(
   convId: string,
   opts: OrchestratorWsOptions,
-): { send: (event: WsOutgoingEvent) => void; close: () => void } {
+): OrchestratorWsHandle {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}/ws/orchestrator/${convId}`;
 
-  const ws = new WebSocket(url);
+  let ws: WebSocket | null = null;
+  let closedByUser = false;
+  let hasConnected = false; // distinguishes the first connect from a reconnect
+  let attempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  ws.onopen = () => opts.onOpen?.();
-  ws.onclose = () => opts.onClose?.();
-  ws.onerror = (err) => opts.onError?.(err);
+  const setStatus = (s: WsConnectionState) => opts.onStatusChange?.(s);
 
-  ws.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data as string) as WsIncomingEvent;
-      opts.onMessage(data);
-    } catch {
-      // ignore malformed messages
-    }
-  };
+  function scheduleReconnect(): void {
+    if (closedByUser) return;
+    const delay = WS_RECONNECT_DELAYS_MS[Math.min(attempt, WS_RECONNECT_DELAYS_MS.length - 1)];
+    attempt += 1;
+    setStatus('reconnecting');
+    reconnectTimer = setTimeout(connect, delay);
+  }
 
-  const WS_OPEN = 1; // WebSocket.OPEN — using the literal so mocks don't need the static property
+  function connect(): void {
+    setStatus(hasConnected ? 'reconnecting' : 'connecting');
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      attempt = 0;
+      const wasReconnect = hasConnected;
+      hasConnected = true;
+      setStatus('open');
+      if (wasReconnect) opts.onReconnect?.();
+    };
+
+    ws.onclose = () => {
+      if (closedByUser) {
+        setStatus('closed');
+        return;
+      }
+      // Unexpected drop — reconnect with backoff (no page refresh needed).
+      scheduleReconnect();
+    };
+
+    ws.onerror = (err) => opts.onError?.(err);
+
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data as string) as WsIncomingEvent;
+        opts.onMessage(data);
+      } catch {
+        // ignore malformed messages
+      }
+    };
+  }
+
+  connect();
 
   return {
-    send(event: WsOutgoingEvent): void {
-      if (ws.readyState === WS_OPEN) {
+    send(event: WsOutgoingEvent): boolean {
+      if (ws && ws.readyState === WS_OPEN) {
         ws.send(JSON.stringify(event));
+        return true;
       }
+      return false;
     },
     close(): void {
-      ws.close();
+      closedByUser = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      ws?.close();
+      setStatus('closed');
     },
   };
 }

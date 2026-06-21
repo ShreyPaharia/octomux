@@ -69,8 +69,25 @@ export interface WsErrorEvent {
   error: string;
 }
 
+/**
+ * A conductor tool-call event (SHR-161). Forwarded live so the UI can render a
+ * collapsible tool card distinct from prose. Not persisted (ephemeral, like
+ * cards) — the durable record is the assistant prose around it.
+ */
+export interface WsToolEvent {
+  type: 'tool';
+  id: string;
+  tool_name: string;
+  input: unknown;
+}
+
 /** Union of all server → client ws events. */
-export type OrchestratorWsEvent = WsMessageEvent | WsCardEvent | WsStatusEvent | WsErrorEvent;
+export type OrchestratorWsEvent =
+  | WsMessageEvent
+  | WsCardEvent
+  | WsStatusEvent
+  | WsErrorEvent
+  | WsToolEvent;
 
 /** A message received from the ws client. */
 export interface WsClientTurn {
@@ -181,10 +198,17 @@ export function chatEventToWsEvent(event: ChatEvent): OrchestratorWsEvent | null
       if (!event.text.trim()) return null;
       return { type: 'message', role: 'assistant', text: event.text, id: event.uuid };
     case 'tool_use':
-      // Tool use events are not forwarded as messages — they may become cards in Phase 3
-      return null;
+      // Forward conductor tool calls so the UI can render a tool card distinct
+      // from prose (SHR-161). Ephemeral — broadcast live, not persisted.
+      return {
+        type: 'tool',
+        id: event.toolUseId,
+        tool_name: event.toolName,
+        input: event.input,
+      };
     case 'tool_result':
-      // Tool results are not forwarded to the client in Phase 1
+      // Tool results are not forwarded to the client (the assistant prose that
+      // follows summarizes them; pointers-not-contents discipline).
       return null;
     case 'system':
       // Skip compact_boundary and other system lines

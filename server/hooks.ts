@@ -793,6 +793,7 @@ router.post('/pre-tool-use', requireHookToken, (req: Request, res: Response) => 
 // Runs in the main process so the task lifecycle + supervisor relay stay here.
 router.post('/orchestrator-action', requireHookToken, (req: Request, res: Response) => {
   const conversationId = ((req.query.conversation_id ?? '') as string) || undefined;
+  const idempotencyKey = ((req.query.idempotency_key ?? '') as string) || undefined;
   const { action, input } = req.body as {
     action?: string;
     input?: Record<string, unknown>;
@@ -803,7 +804,7 @@ router.post('/orchestrator-action', requireHookToken, (req: Request, res: Respon
     return;
   }
 
-  runOrchestratorAction(conversationId, action as OrchestratorAction, input ?? {})
+  runOrchestratorAction(conversationId, action as OrchestratorAction, input ?? {}, idempotencyKey)
     .then((result) => {
       res.status(200).json({ ok: true, result });
     })

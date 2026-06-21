@@ -237,13 +237,30 @@ export function listPendingCards(conversation_id: string): ActionCard[] {
 }
 
 /**
+ * List pending cards older than `timeoutSeconds` across all conversations
+ * (for the approval-timeout sweep, SHR-164). Compares against datetime('now')
+ * in SQLite so it matches the column's stored format exactly.
+ */
+export function listExpiredPendingCards(timeoutSeconds: number): ActionCard[] {
+  const seconds = Math.max(0, Math.floor(timeoutSeconds));
+  return getDb()
+    .prepare(
+      `SELECT * FROM action_cards
+       WHERE status = 'pending' AND created_at <= datetime('now', ?)
+       ORDER BY created_at ASC`,
+    )
+    .all(`-${seconds} seconds`) as ActionCard[];
+}
+
+/**
  * Resolve a card to a terminal status.
- * @param status - One of: 'approved' | 'edited' | 'rejected' | 'executed'
+ * @param status - One of: 'approved' | 'edited' | 'rejected' | 'executed' | 'auto_rejected'
+ *   ('auto_rejected' is the approval-timeout fallback, SHR-164).
  * @param result - JSON result string, or null.
  */
 export function resolveCard(
   id: string,
-  status: 'approved' | 'edited' | 'rejected' | 'executed',
+  status: 'approved' | 'edited' | 'rejected' | 'executed' | 'auto_rejected',
   result: string | null,
 ): void {
   getDb()
@@ -357,6 +374,49 @@ export function eventsSince(sinceSeq: number): StoredEvent[] {
   return getDb()
     .prepare(`SELECT * FROM events WHERE seq > ? ORDER BY seq ASC`)
     .all(sinceSeq) as StoredEvent[];
+}
+
+// ─── orchestrator_action_results (idempotency cache, SHR-163) ──────────────────
+
+export interface StoredActionResult {
+  idempotency_key: string;
+  action: string;
+  result: string | null;
+  created_at: string;
+}
+
+/**
+ * Look up a previously-stored action result by idempotency key, within the TTL
+ * window. Returns undefined when there is no fresh hit (so the caller executes).
+ * The TTL bounds dedupe to the retry window — a genuinely new call with the same
+ * input after the window re-executes.
+ */
+export function getActionResult(
+  idempotencyKey: string,
+  ttlSeconds: number,
+): StoredActionResult | undefined {
+  const seconds = Math.max(0, Math.floor(ttlSeconds));
+  return getDb()
+    .prepare(
+      `SELECT * FROM orchestrator_action_results
+       WHERE idempotency_key = ? AND created_at >= datetime('now', ?)`,
+    )
+    .get(idempotencyKey, `-${seconds} seconds`) as StoredActionResult | undefined;
+}
+
+/**
+ * Store an action result for idempotent replay. Upserts (a later call with the
+ * same key past the TTL overwrites the stale row and refreshes created_at).
+ */
+export function putActionResult(idempotencyKey: string, action: string, result: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO orchestrator_action_results (idempotency_key, action, result)
+       VALUES (?, ?, ?)
+       ON CONFLICT(idempotency_key)
+       DO UPDATE SET action = excluded.action, result = excluded.result, created_at = datetime('now')`,
+    )
+    .run(idempotencyKey, action, result);
 }
 
 // ─── conversation_usage ───────────────────────────────────────────────────────

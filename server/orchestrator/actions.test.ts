@@ -31,10 +31,14 @@ vi.mock('./stream.js', () => ({
   pushToConversation: (...a: unknown[]) => mockPush(...a),
 }));
 
+import { createTestDb } from '../test-helpers.js';
 import { runOrchestratorAction, ORCHESTRATOR_ACTIONS } from './actions.js';
 
 describe('runOrchestratorAction', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+  });
 
   it('create-task: forwards structured args + conversation_id and pushes an activity receipt', async () => {
     const result = await runOrchestratorAction('conv-1', 'create-task', {
@@ -114,5 +118,41 @@ describe('runOrchestratorAction', () => {
     expect(ORCHESTRATOR_ACTIONS.has('create-task')).toBe(true);
     expect(ORCHESTRATOR_ACTIONS.has('delete-task')).toBe(true);
     expect(ORCHESTRATOR_ACTIONS.has('bogus')).toBe(false);
+  });
+
+  // ── Idempotency (SHR-163) ─────────────────────────────────────────────────
+  describe('idempotency key', () => {
+    const input = { title: 'T', description: 'd', repo_path: '/tmp/r' };
+
+    it('replays the cached result for a repeated key without re-executing', async () => {
+      const first = await runOrchestratorAction('conv-1', 'create-task', { ...input }, 'key-abc');
+      expect(mockRunCreateTask).toHaveBeenCalledTimes(1);
+      const pushesAfterFirst = mockPush.mock.calls.length;
+
+      const second = await runOrchestratorAction('conv-1', 'create-task', { ...input }, 'key-abc');
+      // handler NOT called a second time — the worktree/tmux are not re-created
+      expect(mockRunCreateTask).toHaveBeenCalledTimes(1);
+      expect(second).toEqual(first);
+      // no duplicate activity receipt either
+      expect(mockPush.mock.calls.length).toBe(pushesAfterFirst);
+    });
+
+    it('executes independently for different keys', async () => {
+      await runOrchestratorAction('conv-1', 'create-task', { ...input }, 'k1');
+      await runOrchestratorAction('conv-1', 'create-task', { ...input }, 'k2');
+      expect(mockRunCreateTask).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not dedupe when no key is supplied', async () => {
+      await runOrchestratorAction('conv-1', 'create-task', { ...input });
+      await runOrchestratorAction('conv-1', 'create-task', { ...input });
+      expect(mockRunCreateTask).toHaveBeenCalledTimes(2);
+    });
+
+    it('makes a repeated delete-task safe (same task_id key → cached, no re-run)', async () => {
+      await runOrchestratorAction('conv-1', 'delete-task', { task_id: 't9' }, 'del-t9');
+      await runOrchestratorAction('conv-1', 'delete-task', { task_id: 't9' }, 'del-t9');
+      expect(mockRunDeleteTask).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -282,9 +282,26 @@ describe('chatEventToWsEvent', () => {
     expect(chatEventToWsEvent({ type: 'user', text: '', ...base } as ChatEvent)).toBeNull();
   });
 
-  it('does not forward tool_use / tool_result / system events', () => {
+  it('forwards tool_use as a tool event (SHR-161)', () => {
     expect(
-      chatEventToWsEvent({ type: 'tool_use', toolName: 'Bash', ...base } as unknown as ChatEvent),
+      chatEventToWsEvent({
+        type: 'tool_use',
+        toolUseId: 'tu-1',
+        toolName: 'create_task',
+        input: { title: 'X' },
+        ...base,
+      } as unknown as ChatEvent),
+    ).toEqual({ type: 'tool', id: 'tu-1', tool_name: 'create_task', input: { title: 'X' } });
+  });
+
+  it('does not forward tool_result / system events', () => {
+    expect(
+      chatEventToWsEvent({
+        type: 'tool_result',
+        toolUseId: 'tu-1',
+        content: 'done',
+        ...base,
+      } as unknown as ChatEvent),
     ).toBeNull();
     expect(
       chatEventToWsEvent({ type: 'system', subtype: 'compact_boundary', ...base } as ChatEvent),
