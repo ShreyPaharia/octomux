@@ -30,6 +30,8 @@ const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 const DELETE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60 * 60 * 1000; // 1h
 const TEAM_SCHEDULE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000; // check every minute
 const HANDOFF_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
+// Sweep expired orchestrator approval cards once a minute (SHR-164).
+const APPROVAL_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 let prTimer: ReturnType<typeof setInterval> | null = null;
@@ -37,6 +39,7 @@ let mergedPrTimer: ReturnType<typeof setInterval> | null = null;
 let deleteTimer: ReturnType<typeof setInterval> | null = null;
 let teamScheduleTimer: ReturnType<typeof setInterval> | null = null;
 let handoffTimer: ReturnType<typeof setInterval> | null = null;
+let approvalTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
@@ -1079,6 +1082,19 @@ export function startPolling(): void {
   if (HANDOFF_INTERVAL > 0) {
     handoffTimer = setInterval(pollWalkthroughHandoffs, HANDOFF_INTERVAL);
   }
+  if (APPROVAL_INTERVAL > 0) {
+    approvalTimer = setInterval(async () => {
+      try {
+        const { sweepExpiredApprovalCards } = await import('./orchestrator/approval-timeout.js');
+        sweepExpiredApprovalCards();
+      } catch (err) {
+        logger.error(
+          { err, operation: 'sweepExpiredApprovalCards' },
+          'approval-timeout sweep failed',
+        );
+      }
+    }, APPROVAL_INTERVAL);
+  }
 }
 
 export function stopPolling(): void {
@@ -1105,5 +1121,9 @@ export function stopPolling(): void {
   if (handoffTimer) {
     clearInterval(handoffTimer);
     handoffTimer = null;
+  }
+  if (approvalTimer) {
+    clearInterval(approvalTimer);
+    approvalTimer = null;
   }
 }

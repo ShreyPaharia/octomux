@@ -237,13 +237,30 @@ export function listPendingCards(conversation_id: string): ActionCard[] {
 }
 
 /**
+ * List pending cards older than `timeoutSeconds` across all conversations
+ * (for the approval-timeout sweep, SHR-164). Compares against datetime('now')
+ * in SQLite so it matches the column's stored format exactly.
+ */
+export function listExpiredPendingCards(timeoutSeconds: number): ActionCard[] {
+  const seconds = Math.max(0, Math.floor(timeoutSeconds));
+  return getDb()
+    .prepare(
+      `SELECT * FROM action_cards
+       WHERE status = 'pending' AND created_at <= datetime('now', ?)
+       ORDER BY created_at ASC`,
+    )
+    .all(`-${seconds} seconds`) as ActionCard[];
+}
+
+/**
  * Resolve a card to a terminal status.
- * @param status - One of: 'approved' | 'edited' | 'rejected' | 'executed'
+ * @param status - One of: 'approved' | 'edited' | 'rejected' | 'executed' | 'auto_rejected'
+ *   ('auto_rejected' is the approval-timeout fallback, SHR-164).
  * @param result - JSON result string, or null.
  */
 export function resolveCard(
   id: string,
-  status: 'approved' | 'edited' | 'rejected' | 'executed',
+  status: 'approved' | 'edited' | 'rejected' | 'executed' | 'auto_rejected',
   result: string | null,
 ): void {
   getDb()
