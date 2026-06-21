@@ -525,8 +525,17 @@ export default function OrchestratorPage() {
               return [...prev, card];
             });
           }
+        } else if (event.type === 'error') {
+          // Surface delivery/runtime errors instead of silently dropping them —
+          // otherwise a failed turn just sits in the thread looking unsent.
+          const msg: ThreadMessage = {
+            id: `error-${Date.now()}-${Math.random()}`,
+            role: 'assistant',
+            text: `⚠️ ${event.error}`,
+          };
+          setItems((prev) => [...prev, msg]);
         }
-        // status, error events are handled in Phase 3+
+        // status events are handled in Phase 3+
       },
     });
 

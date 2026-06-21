@@ -20,13 +20,20 @@ import { createTestDb } from '../test-helpers.js';
  */
 let _lastPastedText = '';
 
+/**
+ * The window index the tmux `display-message`/`list-windows` mock reports.
+ * Defaults to '1'; a test sets it to '0' to simulate the common base-index=0
+ * case that the `parseInt(...) || 1` regression used to mis-target.
+ */
+let _windowIndex = '1';
+
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
     const cb = typeof optsOrCb === 'function' ? (optsOrCb as Function) : (maybeCb as Function);
     if (args.includes('display-message')) {
-      cb(null, { stdout: '1', stderr: '' });
+      cb(null, { stdout: _windowIndex, stderr: '' });
     } else if (args.includes('list-windows')) {
-      cb(null, { stdout: '1', stderr: '' });
+      cb(null, { stdout: _windowIndex, stderr: '' });
     } else if (args.includes('send-keys') && args.includes('-l')) {
       // Record what was pasted so capture-pane can confirm it
       const lIdx = args.indexOf('-l');
@@ -92,6 +99,7 @@ describe('orchestrator runner', () => {
     createTestDb();
     mockedExecFile.mockClear();
     _lastPastedText = '';
+    _windowIndex = '1';
     vi.useFakeTimers();
   });
 
@@ -243,6 +251,17 @@ describe('orchestrator runner', () => {
       const conv = getConversation(convId);
       expect(conv!.tmux_window).toBeTruthy();
       expect(conv!.tmux_window).toContain('octomux-orch');
+    });
+
+    it('preserves a window index of 0 (base-index=0) instead of falling back to 1', async () => {
+      _windowIndex = '0';
+      const convId = createConversation({ title: 'Base-index 0 test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const conv = getConversation(convId);
+      // Regression: `parseInt('0', 10) || 1` used to store ':1', a window that
+      // does not exist, so every sent turn was silently dropped.
+      expect(conv!.tmux_window).toBe(`octomux-orch-${convId}:0`);
     });
 
     it('uses the pinned cwd (repo path) as the session working dir', async () => {

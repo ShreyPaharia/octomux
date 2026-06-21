@@ -355,7 +355,10 @@ export async function startConversation(
     '-p',
     '#{window_index}',
   ]);
-  const windowIndex = parseInt(winOut.trim(), 10) || 1;
+  // tmux base-index varies per user (often 0); a plain `|| 1` fallback would
+  // turn a real index of 0 into 1, targeting a window that does not exist.
+  const parsedWindowIndex = parseInt(winOut.trim(), 10);
+  const windowIndex = Number.isNaN(parsedWindowIndex) ? 0 : parsedWindowIndex;
   const tmuxWindow = `${sessionName}:${windowIndex}`;
 
   updateConversation(convId, {
@@ -439,7 +442,10 @@ export async function resumeConversation(
     '-p',
     '#{window_index}',
   ]);
-  const windowIndex = parseInt(winOut.trim(), 10) || 1;
+  // tmux base-index varies per user (often 0); a plain `|| 1` fallback would
+  // turn a real index of 0 into 1, targeting a window that does not exist.
+  const parsedWindowIndex = parseInt(winOut.trim(), 10);
+  const windowIndex = Number.isNaN(parsedWindowIndex) ? 0 : parsedWindowIndex;
   const tmuxWindow = `${sessionName}:${windowIndex}`;
 
   updateConversation(convId, { tmux_window: tmuxWindow, hook_token: hookToken });
