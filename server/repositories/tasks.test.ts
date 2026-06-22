@@ -135,10 +135,14 @@ describe('repositories/tasks', () => {
 
   describe('listTasks', () => {
     beforeEach(() => {
-      db.prepare(`INSERT INTO tasks (id, title, description, runtime_state, workflow_status)
-                  VALUES ('t1', 'A', '', 'idle', 'backlog')`).run();
-      db.prepare(`INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
-                  VALUES ('t2', 'B', '', 'idle', 'backlog', 'auto_review')`).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status)
+                  VALUES ('t1', 'A', '', 'idle', 'backlog')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('t2', 'B', '', 'idle', 'backlog', 'auto_review')`,
+      ).run();
     });
 
     it('excludes auto_review by default', () => {
@@ -153,17 +157,13 @@ describe('repositories/tasks', () => {
     });
 
     it('excludes soft-deleted tasks by default', () => {
-      db.prepare(
-        `UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't1'`,
-      ).run();
+      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't1'`).run();
       const tasks = listTasks();
       expect(tasks.map((t) => t.id)).not.toContain('t1');
     });
 
     it('trash view returns only soft-deleted tasks', () => {
-      db.prepare(
-        `UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't1'`,
-      ).run();
+      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't1'`).run();
       const tasks = listTasks({ trash: true });
       expect(tasks.map((t) => t.id)).toContain('t1');
       expect(tasks.map((t) => t.id)).not.toContain('t2');
@@ -180,9 +180,9 @@ describe('repositories/tasks', () => {
     });
 
     it('updates specified fields and bumps updated_at', () => {
-      const beforeRow = db
-        .prepare('SELECT updated_at FROM tasks WHERE id = ?')
-        .get(taskId) as { updated_at: string };
+      const beforeRow = db.prepare('SELECT updated_at FROM tasks WHERE id = ?').get(taskId) as {
+        updated_at: string;
+      };
 
       // SQLite datetime has 1-second resolution; sleep is not guaranteed in tests.
       // Instead just verify the columns changed.
@@ -200,9 +200,10 @@ describe('repositories/tasks', () => {
 
     it('leaves unspecified fields unchanged', () => {
       updateTaskFields(taskId, { title: 'Changed' });
-      const row = db
-        .prepare('SELECT title, description FROM tasks WHERE id = ?')
-        .get(taskId) as { title: string; description: string };
+      const row = db.prepare('SELECT title, description FROM tasks WHERE id = ?').get(taskId) as {
+        title: string;
+        description: string;
+      };
       expect(row.title).toBe('Changed');
       expect(row.description).toBe('Old desc');
     });
@@ -227,16 +228,17 @@ describe('repositories/tasks', () => {
       const id = insertTask({ title: 'T', description: 'D' });
       if (error !== undefined) {
         setRuntimeState(id, state, error);
-        const row = db
-          .prepare('SELECT runtime_state, error FROM tasks WHERE id = ?')
-          .get(id) as { runtime_state: string; error: string | null };
+        const row = db.prepare('SELECT runtime_state, error FROM tasks WHERE id = ?').get(id) as {
+          runtime_state: string;
+          error: string | null;
+        };
         expect(row.runtime_state).toBe(state);
         expect(row.error).toBe(error);
       } else {
         setRuntimeState(id, state);
-        const row = db
-          .prepare('SELECT runtime_state FROM tasks WHERE id = ?')
-          .get(id) as { runtime_state: string };
+        const row = db.prepare('SELECT runtime_state FROM tasks WHERE id = ?').get(id) as {
+          runtime_state: string;
+        };
         expect(row.runtime_state).toBe(state);
       }
     });
@@ -259,9 +261,9 @@ describe('repositories/tasks', () => {
       const id = insertTask({ title: 'T', description: 'D' });
       softDeleteTask(id);
       restoreTask(id);
-      const row = db
-        .prepare('SELECT deleted_at FROM tasks WHERE id = ?')
-        .get(id) as { deleted_at: string | null };
+      const row = db.prepare('SELECT deleted_at FROM tasks WHERE id = ?').get(id) as {
+        deleted_at: string | null;
+      };
       expect(row.deleted_at).toBeNull();
     });
 
@@ -279,9 +281,9 @@ describe('repositories/tasks', () => {
     it('updates workflow_status', () => {
       const id = insertTask({ title: 'T', description: 'D' });
       setWorkflowStatus(id, 'in_progress');
-      const row = db
-        .prepare('SELECT workflow_status FROM tasks WHERE id = ?')
-        .get(id) as { workflow_status: string };
+      const row = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get(id) as {
+        workflow_status: string;
+      };
       expect(row.workflow_status).toBe('in_progress');
     });
   });
@@ -316,9 +318,9 @@ describe('repositories/tasks', () => {
         runtime_state: 'setting_up',
       });
       markTaskRunning(id);
-      const row = db
-        .prepare('SELECT workflow_status FROM tasks WHERE id = ?')
-        .get(id) as { workflow_status: string };
+      const row = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get(id) as {
+        workflow_status: string;
+      };
       expect(row.workflow_status).toBe('human_review');
     });
   });
@@ -329,9 +331,9 @@ describe('repositories/tasks', () => {
     it('touchLastViewed sets last_viewed_at', () => {
       const id = insertTask({ title: 'T', description: 'D' });
       touchLastViewed(id);
-      const row = db
-        .prepare('SELECT last_viewed_at FROM tasks WHERE id = ?')
-        .get(id) as { last_viewed_at: string | null };
+      const row = db.prepare('SELECT last_viewed_at FROM tasks WHERE id = ?').get(id) as {
+        last_viewed_at: string | null;
+      };
       expect(row.last_viewed_at).not.toBeNull();
     });
 
@@ -354,9 +356,9 @@ describe('repositories/tasks', () => {
     it('setPrHeadSha updates the column', () => {
       const id = insertTask({ title: 'T', description: 'D' });
       setPrHeadSha(id, 'deadbeef');
-      const row = db
-        .prepare('SELECT pr_head_sha FROM tasks WHERE id = ?')
-        .get(id) as { pr_head_sha: string | null };
+      const row = db.prepare('SELECT pr_head_sha FROM tasks WHERE id = ?').get(id) as {
+        pr_head_sha: string | null;
+      };
       expect(row.pr_head_sha).toBe('deadbeef');
     });
 
@@ -376,9 +378,9 @@ describe('repositories/tasks', () => {
       ).run();
       const id = insertTask({ title: 'T', description: 'D', worktree_id: 'wt1' });
       unlinkWorktree(id);
-      const row = db
-        .prepare('SELECT worktree_id FROM tasks WHERE id = ?')
-        .get(id) as { worktree_id: string | null };
+      const row = db.prepare('SELECT worktree_id FROM tasks WHERE id = ?').get(id) as {
+        worktree_id: string | null;
+      };
       expect(row.worktree_id).toBeNull();
     });
   });
@@ -499,9 +501,9 @@ describe('inTransaction', () => {
     inTransaction(() => {
       updateTaskFields(id, { title: 'Updated' });
     });
-    const row = getDb()
-      .prepare('SELECT title FROM tasks WHERE id = ?')
-      .get(id) as { title: string } | undefined;
+    const row = getDb().prepare('SELECT title FROM tasks WHERE id = ?').get(id) as
+      | { title: string }
+      | undefined;
     expect(row?.title).toBe('Updated');
   });
 
