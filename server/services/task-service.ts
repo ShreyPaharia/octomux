@@ -15,7 +15,10 @@ import {
 import { upsertManagedTask } from '../orchestrator/store.js';
 import { startTask } from '../task-runner.js';
 import { broadcast } from '../events.js';
+import { childLogger } from '../logger.js';
 import { ServiceError } from './errors.js';
+
+const logger = childLogger('task-service');
 import type { Task, RunMode, WorktreeStatus } from '../types.js';
 
 // ─── DTO ─────────────────────────────────────────────────────────────────────
@@ -155,7 +158,8 @@ export async function createTask(input: CreateTaskServiceInput): Promise<Task> {
       .then(() => {
         broadcast({ type: 'task:updated', payload: { taskId: id } });
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        logger.error({ task_id: id, operation: 'createTask', err }, 'createTask: startTask failed');
         broadcast({ type: 'task:updated', payload: { taskId: id } });
       });
   }
