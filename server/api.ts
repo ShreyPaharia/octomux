@@ -75,13 +75,6 @@ import {
 import { startConversation } from './orchestrator/runner.js';
 import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 
-import {
-  buildManualReviewPrompt,
-  buildPrReviewPrompt,
-  insertReviewTask,
-  repoShortName,
-} from './review-tasks.js';
-
 import { listSkills, getSkill, createSkill, updateSkill, deleteSkill } from './skills.js';
 import {
   listIntegrations,
@@ -176,7 +169,6 @@ import {
   listUserTerminals,
   listUserTerminalsByTasks,
   getUserTerminalByIdAndTask,
-  findFirstActiveAgent,
   listActiveRepoPaths,
   listTrackedRepoPaths,
   listRecentRepoPaths,
@@ -189,6 +181,11 @@ import {
 
 import { createInlineComment } from './services/comment-service.js';
 import { createTask } from './services/task-service.js';
+import {
+  createReviewTaskFromPr,
+  createManualReview,
+  triggerReviewRun,
+} from './services/review-service.js';
 import { ServiceError } from './services/errors.js';
 
 const execFile = promisify(execFileCb);
@@ -218,11 +215,6 @@ function sendDomainError(res: Response, err: unknown): void {
   } else {
     res.status(500).json({ error: msg });
   }
-}
-
-/** Message sent to a running agent to trigger a manual re-review. */
-function manualReRunNudge(): string {
-  return 'Re-review requested manually. Please re-run the /review-pr flow on the current PR.';
 }
 
 /**
@@ -2941,51 +2933,17 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    // Create the review task
-    const id = nanoid(12);
-    const short = repoShortName(repoPath);
-    const branch = `review/${short}-pr-${number}`;
-
-    const initialPrompt = buildPrReviewPrompt({
-      reviewTaskId: id,
+    // Create the review task (service owns the build+insert+broadcast+startTask tail).
+    const { id } = await createReviewTaskFromPr({
+      repo_path: repoPath,
+      pr_number: number,
+      pr_url: pr.url,
+      pr_head_sha: pr.headRefOid,
+      base_branch: pr.baseRefName,
       title: pr.title,
-      number,
-      url: pr.url,
       author: pr.author?.login ?? null,
-      headRefOid: pr.headRefOid,
-      requestedAt: new Date().toISOString(),
+      requested_at: new Date().toISOString(),
     });
-
-    insertReviewTask({
-      id,
-      repoPath,
-      branch,
-      baseBranch: pr.baseRefName,
-      title: `Review: ${pr.title} (#${number})`,
-      description: `Review task for PR #${number}`,
-      initialPrompt,
-      prUrl: pr.url,
-      prNumber: number,
-      prHeadSha: pr.headRefOid,
-    });
-
-    broadcast({ type: 'task:created', payload: { taskId: id } });
-
-    const fresh = getTaskRepo(id);
-    if (fresh) {
-      fresh.agents = [];
-      fresh.user_terminals = [];
-      // Fire-and-forget: start the task in the background
-      startTask(fresh)
-        .then(() => broadcast({ type: 'task:updated', payload: { taskId: id } }))
-        .catch((err) => {
-          apiLogger.error(
-            { task_id: id, err: (err as Error).message },
-            'failed to auto-start review create task',
-          );
-          broadcast({ type: 'task:updated', payload: { taskId: id } });
-        });
-    }
 
     apiLogger.info(
       { task_id: id, pr_number: number, repo: ownerRepo, repo_path: repoPath },
@@ -3042,17 +3000,7 @@ export function setupRoutes(app: Express): void {
     }
 
     try {
-      if (task.runtime_state !== 'running') {
-        await startTask(task);
-      } else {
-        // Find first non-stopped agent and nudge it
-        const agent = findFirstActiveAgent(task.id);
-
-        if (agent && task.tmux_session) {
-          const nudge = manualReRunNudge();
-          await sendMessageToAgent(task.tmux_session, agent.window_index, nudge);
-        }
-      }
+      await triggerReviewRun(task);
       res.status(202).json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -3126,81 +3074,18 @@ export function setupRoutes(app: Express): void {
       }
     }
 
-    const short = repoShortName(task.repo_path || '');
-    const requestedAt = new Date().toISOString();
-    // Generate the review task id up front so it can be embedded in the prompt;
-    // the orchestrator passes this exact id to every `octomux review` command.
-    const reviewTaskId = nanoid(12);
-
-    let branch: string;
-    let title: string;
-    let description: string;
-    let prompt: string;
-    if (task.pr_url && task.pr_number != null) {
-      branch = `review/${short}-pr-${task.pr_number}`;
-      title = `Review: ${task.title} (#${task.pr_number})`;
-      description = `Manual review for PR #${task.pr_number} in ${short}`;
-      prompt = buildPrReviewPrompt({
-        reviewTaskId,
-        title: task.title,
-        number: task.pr_number,
-        url: task.pr_url,
-        author: null,
-        headRefOid: prHeadSha,
-        requestedAt,
-      });
-    } else {
-      branch = `review/${short}-task-${task.id}`;
-      title = `Review: ${task.title}`;
-      description = `Manual pre-PR review for task ${task.id}`;
-      prompt = buildManualReviewPrompt({
-        reviewTaskId,
-        sourceId: task.id,
-        sourceTitle: task.title,
-        repoShort: short,
-        branch: task.branch,
-        baseBranch: task.base_branch,
-        baseSha: task.base_sha ?? '',
-        prHeadSha,
-        requestedAt,
-      });
-    }
-
-    const newId = insertReviewTask({
-      id: reviewTaskId,
-      repoPath: task.repo_path,
-      branch,
-      baseBranch: task.base_branch ?? '',
-      baseSha: task.base_sha ?? null,
-      title,
-      description,
-      initialPrompt: prompt,
-      prUrl: task.pr_url ?? null,
-      prNumber: task.pr_number ?? null,
-      prHeadSha,
-      reviewOfTaskId: task.id,
+    const { id: newId } = await createManualReview({
+      source_task_id: task.id,
+      source_title: task.title,
+      repo_path: task.repo_path,
+      branch: task.branch,
+      base_branch: task.base_branch,
+      base_sha: task.base_sha ?? null,
+      pr_head_sha: prHeadSha,
+      pr_url: task.pr_url ?? null,
+      pr_number: task.pr_number ?? null,
+      requested_at: new Date().toISOString(),
     });
-
-    broadcast({ type: 'task:created', payload: { taskId: newId } });
-
-    const fresh = getTaskRepo(newId);
-    if (fresh) {
-      // Fire-and-forget: the response shouldn't block on worktree setup.
-      startTask(fresh)
-        .then(() => broadcast({ type: 'task:updated', payload: { taskId: newId } }))
-        .catch((err) => {
-          apiLogger.error(
-            { task_id: newId, err: (err as Error).message },
-            'failed to auto-start manual review task',
-          );
-          broadcast({ type: 'task:updated', payload: { taskId: newId } });
-        });
-    }
-
-    apiLogger.info(
-      { task_id: newId, source_task_id: task.id, pr_number: task.pr_number ?? null },
-      'manual review task created',
-    );
 
     res.status(201).json({ id: newId, action: 'created' });
   });

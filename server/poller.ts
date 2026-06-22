@@ -1,25 +1,19 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
-import { nanoid } from 'nanoid';
 import { getSettings } from './settings.js';
-import { closeTask, deleteTask, startTask, addAgent } from './task-runner.js';
+import { closeTask, deleteTask, addAgent } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
 import { readGithubLogin } from './github-login.js';
 import { fireHook } from './hook-dispatcher.js';
 import { sendMessageToAgent } from './tmux-input.js';
-import {
-  buildDeepReviewPrompt,
-  buildPrReviewPrompt,
-  insertReviewTask,
-  repoShortName,
-} from './review-tasks.js';
+import { buildDeepReviewPrompt, buildPrReviewPrompt } from './review-tasks.js';
+import { createReviewTaskFromPr } from './services/review-service.js';
 import { execTmux } from './tmux-bin.js';
 import type { Task, UserTerminal } from './types.js';
 import {
   listRunningTasks,
-  getTask,
   setRuntimeStateIdle,
   setRuntimeStateSetupInterrupted,
   setTaskPrDetected,
@@ -657,25 +651,17 @@ async function upsertReviewTask(
     return { action: 'skipped' };
   }
 
-  const short = repoShortName(repoPath);
-  const branch = `review/${short}-pr-${pr.number}`;
-  const title = `Review: ${pr.title} (#${pr.number})`;
-  const description = `Auto-created review task for PR #${pr.number} in ${short}`;
-  // Mint the id first so it can be pinned into the orchestrator prompt.
-  const id = nanoid(12);
-  const prompt = buildReviewPrompt(pr, new Date().toISOString(), id);
-
-  insertReviewTask({
-    id,
-    repoPath,
-    branch,
-    baseBranch: pr.baseRefName,
-    title,
-    description,
-    initialPrompt: prompt,
-    prUrl: pr.url,
-    prNumber: pr.number,
-    prHeadSha: pr.headRefOid,
+  // Create-tail (build prompt + insert + broadcast + fire-and-forget startTask)
+  // is owned by the review-service. The caller only logs the 'created' action.
+  const { id } = await createReviewTaskFromPr({
+    repo_path: repoPath,
+    pr_number: pr.number,
+    pr_url: pr.url,
+    pr_head_sha: pr.headRefOid,
+    base_branch: pr.baseRefName,
+    title: pr.title,
+    author: pr.author?.login ?? null,
+    requested_at: new Date().toISOString(),
   });
   return { action: 'created', taskId: id };
 }
@@ -728,22 +714,11 @@ export async function pollReviewerRequests(): Promise<void> {
 
       const result = await upsertReviewTask(repoPath, pr);
       if (result.action === 'created') {
+        // createReviewTaskFromPr already broadcast task:created + kicked startTask.
         logger.info(
           { task_id: result.taskId, pr_number: pr.number, repo_path: repoPath },
           'auto-created review task for reviewer request',
         );
-        broadcast({ type: 'task:created', payload: { taskId: result.taskId! } });
-        const fresh = getTask(result.taskId!);
-        if (fresh) {
-          try {
-            await startTask(fresh);
-          } catch (err) {
-            logger.error(
-              { task_id: result.taskId, err: (err as Error).message },
-              'failed to auto-start review task',
-            );
-          }
-        }
       } else if (result.action === 'updated') {
         logger.info(
           {
