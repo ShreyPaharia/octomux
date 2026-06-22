@@ -35,7 +35,7 @@ import {
   resolveRef,
 } from './diff-base.js';
 import { listBranches, listCommits } from './git-commits.js';
-import { setReviewed, clearReviewed } from './file-review-state.js';
+import { setReviewed, clearReviewed } from './repositories/file-review-state.js';
 import {
   addComment,
   listComments,
@@ -45,15 +45,24 @@ import {
   updateCommentBody,
   deleteComment,
   seedInlineComment,
-} from './inline-comments.js';
+} from './repositories/inline-comments.js';
 import { computeOutdated, splitLines } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { sendMessageToAgent } from './tmux-input.js';
 import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
-import { getReviewRun, getCurrentRun, setWalkthrough, seedReviewRun } from './review-runs.js';
-import { listPublishedReviews } from './published-reviews.js';
-import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
-import { updateCommentFields } from './inline-comments.js';
+import {
+  getReviewRun,
+  getCurrentRun,
+  setWalkthrough,
+  seedReviewRun,
+} from './repositories/review-runs.js';
+import { listPublishedReviews } from './repositories/published-reviews.js';
+import {
+  listLearningsForRepo,
+  deleteLearning,
+  addLearning,
+} from './repositories/review-learnings.js';
+import { updateCommentFields } from './repositories/inline-comments.js';
 import {
   createConversation,
   getConversation,
@@ -99,7 +108,11 @@ import {
 import { validateAgentName } from './harnesses/types.js';
 import { listHarnesses, getHarness } from './harnesses/index.js';
 import { getSettings, updateSettings, type OctomuxSettings } from './settings.js';
-import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
+import {
+  getOrCreateRepoConfig,
+  updateRepoConfig,
+  listRepoConfigs,
+} from './repositories/repo-config.js';
 import { hookRoutes } from './hooks.js';
 import { broadcast } from './events.js';
 import { generateTitleAndDescription } from './title-gen.js';
@@ -1657,7 +1670,7 @@ export function setupRoutes(app: Express): void {
       if (updated) row = updated;
     }
     if (hasStatus || hasExtended) {
-      const fields: import('./inline-comments.js').UpdateCommentFields = {};
+      const fields: import('./repositories/inline-comments.js').UpdateCommentFields = {};
       if (hasStatus) fields.status = body.status as import('./types.js').CommentStatus;
       if (body.bucket !== undefined)
         fields.bucket = body.bucket as import('./types.js').CommentBucket | null;

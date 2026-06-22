@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import { childLogger } from './logger.js';
 import * as diffMod from './diff.js';
 import { gitEnv } from './git-env.js';
-import type { InlineCommentRow } from './inline-comments.js';
+import type { InlineCommentRow } from './repositories/inline-comments.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('inline-comments-outdated');

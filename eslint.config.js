@@ -57,6 +57,40 @@ export default tseslint.config(
       ],
     },
   },
+  // Guard: ban direct DB access (getDb()/.prepare()) outside the repository layer.
+  {
+    files: ['server/**/*.ts'],
+    ignores: [
+      'server/**/*.test.ts',
+      'server/tmux-bin.ts',
+      'server/test-helpers.ts',
+      'server/db.ts',
+      'server/repositories/**',
+      'server/orchestrator/**',
+      'server/integrations/**',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.name=/^(execFile|execFileSync|spawn)$/] Literal[value='tmux']",
+          message:
+            "Do not invoke 'tmux' directly — use execTmux()/tmuxSpawnSpec() from server/tmux-bin.ts.",
+        },
+        {
+          selector: "CallExpression[callee.name='getDb']",
+          message:
+            'Do not call getDb() outside the repository layer (server/repositories/). Add or use a repository function instead.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='prepare']",
+          message:
+            'Do not call .prepare() outside the repository layer (server/repositories/). Add or use a repository function instead.',
+        },
+      ],
+    },
+  },
   {
     ignores: [
       'dist/',

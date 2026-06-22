@@ -50,7 +50,11 @@ import {
   updateUserTerminalStatus,
 } from './repositories/agent-runtime.js';
 import { completeTeamRunByLeadTask } from './repositories/team-schedules.js';
-import { findStuckReviewRuns, failReviewRunById, claimDeepReviewAttach } from './review-runs.js';
+import {
+  findStuckReviewRuns,
+  failReviewRunById,
+  claimDeepReviewAttach,
+} from './repositories/review-runs.js';
 
 const logger = childLogger('poller');
 

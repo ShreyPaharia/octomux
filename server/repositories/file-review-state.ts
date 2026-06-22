@@ -1,4 +1,4 @@
-import { getDb } from './db.js';
+import { getDb } from '../db.js';
 
 export interface FileReviewRow {
   task_id: string;

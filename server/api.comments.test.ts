@@ -316,7 +316,7 @@ describe('inline comments API', () => {
         .send({ status: 'rejected', rejection_why: 'false positive' });
       expect(r.status).toBe(200);
       expect(r.body.status).toBe('rejected');
-      const { listLearningsForRepo } = await import('./review-learnings.js');
+      const { listLearningsForRepo } = await import('./repositories/review-learnings.js');
       const learnings = listLearningsForRepo('/tmp/test-repo');
       expect(learnings).toHaveLength(1);
       expect(learnings[0].why).toBe('false positive');
@@ -325,7 +325,7 @@ describe('inline comments API', () => {
     it('does not capture learning when rejection_why is absent', async () => {
       const id = await seed();
       await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'rejected' });
-      const { listLearningsForRepo } = await import('./review-learnings.js');
+      const { listLearningsForRepo } = await import('./repositories/review-learnings.js');
       const learnings = listLearningsForRepo('/tmp/test-repo');
       expect(learnings).toHaveLength(0);
     });

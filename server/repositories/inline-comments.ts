@@ -1,13 +1,13 @@
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
-import { childLogger } from './logger.js';
+import { getDb } from '../db.js';
+import { childLogger } from '../logger.js';
 import type {
   CommentBucket,
   CommentKind,
   CommentSeverity,
   CommentStatus,
   LastCheckStatus,
-} from './types.js';
+} from '../types.js';
 
 const logger = childLogger('inline-comments');
 
@@ -153,10 +153,10 @@ export function updateCommentBody(id: string, body: string): InlineCommentRow | 
 }
 
 export interface UpdateCommentFields {
-  status?: import('./types.js').CommentStatus;
-  bucket?: import('./types.js').CommentBucket | null;
-  kind?: import('./types.js').CommentKind;
-  severity?: import('./types.js').CommentSeverity | null;
+  status?: import('../types.js').CommentStatus;
+  bucket?: import('../types.js').CommentBucket | null;
+  kind?: import('../types.js').CommentKind;
+  severity?: import('../types.js').CommentSeverity | null;
   existing_code?: string | null;
   suggested_code?: string | null;
 }

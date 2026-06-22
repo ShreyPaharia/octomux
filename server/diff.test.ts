@@ -13,7 +13,7 @@ import {
 } from './diff.js';
 import type { Task } from './types.js';
 import { createTestDb, insertTestTask, DEFAULTS } from './test-helpers.js';
-import { setReviewed } from './file-review-state.js';
+import { setReviewed } from './repositories/file-review-state.js';
 
 const execFileRaw = promisify(execFileCb);
 

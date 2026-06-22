@@ -1,14 +1,14 @@
 import { childLogger } from './logger.js';
 import { isAnchorOutdated } from './inline-comments-outdated.js';
 import { getTask } from './repositories/index.js';
-import { getReviewRunHeadSha } from './review-runs.js';
+import { getReviewRunHeadSha } from './repositories/review-runs.js';
 import {
   listDraftAcceptedByTask,
   listPublishedAutoResolveCandidates,
   listReflagsInRun,
   markCommentStale,
   setCommentAutoResolved,
-} from './inline-comments.js';
+} from './repositories/inline-comments.js';
 
 const logger = childLogger('review-staleness');
 

@@ -1,14 +1,14 @@
 import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
-import { createReviewRun, getCurrentRun } from '../../server/review-runs.js';
-import { getLatestPublishedReview } from '../../server/published-reviews.js';
-import { listLearningsForRepo } from '../../server/review-learnings.js';
+import { createReviewRun, getCurrentRun } from '../../server/repositories/review-runs.js';
+import { getLatestPublishedReview } from '../../server/repositories/published-reviews.js';
+import { listLearningsForRepo } from '../../server/repositories/review-learnings.js';
 import { findInstructionFiles } from '../../server/instruction-files.js';
 import { markStaleDrafts } from '../../server/review-staleness.js';
 import { readPlaybook } from '../../server/review-playbook.js';
 import { SELECT_TASK_SQL } from '../../server/task-select.js';
 import type { Task } from '../../server/types.js';
-import type { InlineCommentRow } from '../../server/inline-comments.js';
+import type { InlineCommentRow } from '../../server/repositories/inline-comments.js';
 
 type PreviousComment = Pick<
   InlineCommentRow,

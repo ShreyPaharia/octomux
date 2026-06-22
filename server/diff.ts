@@ -14,7 +14,7 @@ import {
   rangeNumstatArgs,
   rangeOldRef,
 } from './diff-range.js';
-import { listReviewState } from './file-review-state.js';
+import { listReviewState } from './repositories/file-review-state.js';
 import type { DiffRange, Task } from './types.js';
 
 const execFile = promisify(execFileCb);
