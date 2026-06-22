@@ -37,7 +37,6 @@ import {
 import { listBranches, listCommits } from './git-commits.js';
 import { setReviewed, clearReviewed } from './repositories/file-review-state.js';
 import {
-  addComment,
   listComments,
   getComment,
   resolveComment,
@@ -46,7 +45,7 @@ import {
   deleteComment,
   seedInlineComment,
 } from './repositories/inline-comments.js';
-import { computeOutdated, splitLines } from './inline-comments-outdated.js';
+import { computeOutdated } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { sendMessageToAgent } from './tmux-input.js';
 import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
@@ -188,6 +187,9 @@ import {
   upsertHookSetting,
   inTransaction,
 } from './repositories/index.js';
+
+import { createInlineComment } from './services/comment-service.js';
+import { ServiceError } from './services/errors.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
@@ -1502,68 +1504,30 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    let anchorSha: string;
-    if (anchorRaw && typeof anchorRaw === 'string') {
-      anchorSha = anchorRaw;
-    } else {
-      try {
-        const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
-        anchorSha = stdout.trim();
-      } catch (err) {
-        res.status(500).json({ error: (err as Error).message });
-        return;
-      }
-    }
-
     if (!task.base_sha) {
       res.status(400).json({ error: 'base_sha not available for this task' });
       return;
     }
 
-    let fileDiff: diffMod.FileDiff;
     try {
-      fileDiff = await diffMod.getFileDiff({
-        worktree: cwd,
-        base: task.base_sha,
-        relPath: filePath,
-      });
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
-      return;
-    }
-    if (fileDiff.binary) {
-      res.status(400).json({ error: 'cannot comment on binary file' });
-      return;
-    }
-
-    let anchoredContent: string;
-    try {
-      const { stdout } = await execFile('git', ['-C', cwd, 'show', `${anchorSha}:${filePath}`]);
-      anchoredContent = stdout;
-    } catch {
-      res.status(400).json({ error: 'file not found at anchor commit' });
-      return;
-    }
-
-    const anchoredLineCount = splitLines(anchoredContent).length;
-    if (lineRaw > anchoredLineCount) {
-      res.status(400).json({ error: 'line out of range at anchor commit' });
-      return;
-    }
-
-    try {
-      const row = addComment({
+      const row = await createInlineComment({
+        cwd,
         task_id: task.id,
-        agent_id: agentId,
+        base_sha: task.base_sha,
         file_path: filePath,
-        line: lineRaw,
-        side,
-        original_commit_sha: anchorSha,
+        line: lineRaw as number,
+        side: side as 'old' | 'new',
         body: commentBody,
+        agent_id: agentId,
+        anchor_commit_sha: anchorRaw as string | undefined,
       });
       res.status(201).json(row);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      if (err instanceof ServiceError) {
+        res.status(err.status).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: (err as Error).message });
+      }
     }
   });
 

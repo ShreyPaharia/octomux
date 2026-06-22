@@ -91,6 +91,24 @@ export default tseslint.config(
       ],
     },
   },
+  // Guard: ban express imports in the service layer — services must stay HTTP-agnostic.
+  {
+    files: ['server/services/**/*.ts'],
+    ignores: ['server/services/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'express',
+              message: 'Services must not import express — keep them HTTP-agnostic.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     ignores: [
       'dist/',
