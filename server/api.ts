@@ -138,7 +138,6 @@ import {
   getTask as getTaskRepo,
   listTasks,
   listDoneTasks,
-  insertTask,
   updateTaskFields,
   setRuntimeState,
   setWorkflowStatus,
@@ -189,6 +188,7 @@ import {
 } from './repositories/index.js';
 
 import { createInlineComment } from './services/comment-service.js';
+import { createTask } from './services/task-service.js';
 import { ServiceError } from './services/errors.js';
 
 const execFile = promisify(execFileCb);
@@ -727,80 +727,55 @@ export function setupRoutes(app: Express): void {
       'Untitled task';
     resolvedDescription = resolvedDescription || body.initial_prompt || '';
 
-    const id = nanoid(12);
     const isDraft = !!body.draft;
 
     // Phase 2a: worktrees owns path/branch/base/repo. Always create a
     // worktree row at task creation. For `new` mode the path isn't known
     // until setup runs (derived from slug); stage it as empty string and
     // task-runner updates it when the git worktree is cut.
-    const worktreeId = nanoid(12);
     const stagedPath =
       runMode === 'existing' ? storedWorktree! : runMode === 'none' ? storedRepoPath : '';
+
+    // Determine workflow_status at creation time.
+    let initialWorkflowStatus: string;
+    if (body.workflow_status) {
+      initialWorkflowStatus = body.workflow_status;
+    } else if (isDraft && !body.initial_prompt) {
+      initialWorkflowStatus = 'backlog';
+    } else if (isDraft && body.initial_prompt) {
+      initialWorkflowStatus = 'planned';
+    } else {
+      // starting immediately — will be flipped to in_progress once running
+      initialWorkflowStatus = 'planned';
+    }
+
     try {
-      insertWorktreeRepo({
-        id: worktreeId,
-        path: stagedPath,
-        repo_path: runMode === 'scratch' ? null : storedRepoPath || null,
+      const created = await createTask({
+        resolved_title: resolvedTitle!,
+        resolved_description: resolvedDescription!,
+        initial_prompt: body.initial_prompt ?? null,
+        run_mode: runMode,
+        stored_repo_path: storedRepoPath,
+        staged_path: stagedPath,
         branch: body.branch ?? null,
         base_branch: body.base_branch ?? null,
-        mode: runMode,
-        status: 'available',
-      });
-
-      // Determine workflow_status at creation time.
-      let initialWorkflowStatus: string;
-      if (body.workflow_status) {
-        initialWorkflowStatus = body.workflow_status;
-      } else if (isDraft && !body.initial_prompt) {
-        initialWorkflowStatus = 'backlog';
-      } else if (isDraft && body.initial_prompt) {
-        initialWorkflowStatus = 'planned';
-      } else {
-        // starting immediately — will be flipped to in_progress once running
-        initialWorkflowStatus = 'planned';
-      }
-
-      insertTask({
-        id,
-        title: resolvedTitle!,
-        description: resolvedDescription!,
+        worktree_status: 'available',
         runtime_state: isDraft ? 'idle' : 'setting_up',
         workflow_status: initialWorkflowStatus,
-        initial_prompt: body.initial_prompt ?? null,
-        worktree_id: worktreeId,
         agent: body.agent ?? null,
         harness_id: body.harness_id ?? 'claude-code',
         model: body.model ?? null,
         notify_task_id: body.notify_task_id ?? null,
+        is_draft: isDraft,
       });
+      res.status(201).json(created);
     } catch (err) {
-      const e = err as NodeJS.ErrnoException;
-      if (String(e.message).includes('UNIQUE constraint')) {
-        res.status(409).json({ error: e.message });
-        return;
+      if (err instanceof ServiceError) {
+        res.status(err.status).json({ error: err.message });
+      } else {
+        throw err;
       }
-      throw err;
     }
-
-    const created = getTaskRepo(id) as Task;
-    created.agents = [];
-    created.user_terminals = [];
-    broadcast({ type: 'task:created', payload: { taskId: id } });
-
-    if (!isDraft) {
-      // Fire-and-forget: startTask runs in background, broadcasts task:updated when done
-      startTask(created)
-        .then(() => {
-          broadcast({ type: 'task:updated', payload: { taskId: id } });
-        })
-        .catch(() => {
-          // startTask already sets error status in its own catch block
-          broadcast({ type: 'task:updated', payload: { taskId: id } });
-        });
-    }
-
-    res.status(201).json(created);
   });
 
   // Update task status
