@@ -19,9 +19,9 @@ export function getWorktree(id: string): Worktree | undefined {
 
 /** Fetch a worktree by its filesystem path. */
 export function getWorktreeByPath(path: string): Worktree | undefined {
-  return getDb()
-    .prepare('SELECT * FROM worktrees WHERE path = ?')
-    .get(path) as Worktree | undefined;
+  return getDb().prepare('SELECT * FROM worktrees WHERE path = ?').get(path) as
+    | Worktree
+    | undefined;
 }
 
 /** List all worktrees for a given repo_path. */
@@ -160,7 +160,10 @@ export function insertWorktree(input: InsertWorktreeInput): string {
       input.mode,
       input.status ?? 'available',
     );
-  logger.info({ worktree_id: id, mode: input.mode, operation: 'insertWorktree' }, 'worktree inserted');
+  logger.info(
+    { worktree_id: id, mode: input.mode, operation: 'insertWorktree' },
+    'worktree inserted',
+  );
   return id;
 }
 
@@ -185,21 +188,25 @@ export function insertWorktreeInUse(input: InsertWorktreeInput): string {
       input.base_sha ?? null,
       input.mode,
     );
-  logger.info({ worktree_id: id, mode: input.mode, operation: 'insertWorktreeInUse' }, 'worktree inserted as in_use');
+  logger.info(
+    { worktree_id: id, mode: input.mode, operation: 'insertWorktreeInUse' },
+    'worktree inserted as in_use',
+  );
   return id;
 }
 
 /** Set the status of a worktree. */
 export function setWorktreeStatus(id: string, status: WorktreeStatus): void {
   getDb().prepare('UPDATE worktrees SET status = ? WHERE id = ?').run(status, id);
-  logger.info({ worktree_id: id, status, operation: 'setWorktreeStatus' }, 'worktree status updated');
+  logger.info(
+    { worktree_id: id, status, operation: 'setWorktreeStatus' },
+    'worktree status updated',
+  );
 }
 
 /** Touch last_used_at to now. */
 export function touchWorktreeUsed(id: string): void {
-  getDb()
-    .prepare(`UPDATE worktrees SET last_used_at = datetime('now') WHERE id = ?`)
-    .run(id);
+  getDb().prepare(`UPDATE worktrees SET last_used_at = datetime('now') WHERE id = ?`).run(id);
 }
 
 /**
@@ -250,9 +257,7 @@ export function updateWorktreeFields(
 
   for (const [key, value] of Object.entries(patch)) {
     if (!WORKTREE_WRITABLE_COLUMNS.has(key)) {
-      throw new Error(
-        `updateWorktreeFields: column '${key}' is not in the writable allowlist`,
-      );
+      throw new Error(`updateWorktreeFields: column '${key}' is not in the writable allowlist`);
     }
     fields.push(`${key} = ?`);
     values.push(value);
@@ -301,25 +306,57 @@ export function updateWorktreeOnSetup(
       patch.mode,
       id,
     );
-  logger.info({ worktree_id: id, operation: 'updateWorktreeOnSetup' }, 'worktree updated on task setup');
+  logger.info(
+    { worktree_id: id, operation: 'updateWorktreeOnSetup' },
+    'worktree updated on task setup',
+  );
 }
 
 /**
  * Update base_branch + base_sha only (called from the PATCH /api/tasks/:id/base endpoint).
  */
-export function setWorktreeBase(
-  id: string,
-  baseBranch: string,
-  baseSha: string,
-): void {
+export function setWorktreeBase(id: string, baseBranch: string, baseSha: string): void {
   getDb()
     .prepare(`UPDATE worktrees SET base_branch = ?, base_sha = ? WHERE id = ?`)
     .run(baseBranch, baseSha, id);
-  logger.info({ worktree_id: id, base_branch: baseBranch, operation: 'setWorktreeBase' }, 'worktree base updated');
+  logger.info(
+    { worktree_id: id, base_branch: baseBranch, operation: 'setWorktreeBase' },
+    'worktree base updated',
+  );
 }
 
 /** Hard-delete a worktree row. */
 export function deleteWorktree(id: string): void {
   getDb().prepare('DELETE FROM worktrees WHERE id = ?').run(id);
   logger.info({ worktree_id: id, operation: 'deleteWorktree' }, 'worktree deleted');
+}
+
+/**
+ * Insert a worktree row only when no row with the same id already exists
+ * (INSERT OR IGNORE). Used by the test seed endpoint to make seeding idempotent.
+ */
+export function insertWorktreeIfAbsent(input: {
+  id: string;
+  path: string;
+  repo_path?: string | null;
+  branch?: string | null;
+  base_branch?: string | null;
+  mode: RunMode;
+  status?: WorktreeStatus;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO worktrees
+         (id, path, repo_path, branch, base_branch, mode, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.id,
+      input.path,
+      input.repo_path ?? null,
+      input.branch ?? null,
+      input.base_branch ?? null,
+      input.mode,
+      input.status ?? 'available',
+    );
 }

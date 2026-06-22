@@ -47,10 +47,8 @@ import {
 } from './inline-comments.js';
 import { computeOutdated, splitLines } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
-import { SELECT_TASK_SQL } from './task-select.js';
 import { sendMessageToAgent } from './tmux-input.js';
 import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
-import { SQL_EXCLUDE_AUTO_REVIEW } from './task-query.js';
 import { getReviewRun, getCurrentRun, setWalkthrough } from './review-runs.js';
 import { listPublishedReviews } from './published-reviews.js';
 import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
@@ -115,25 +113,68 @@ import type {
   DerivedTaskStatus,
   UserTerminal,
   RunMode,
-  Worktree,
-  WorktreeSummary,
   CreateChatRequest,
   MoveTaskRequest,
   SummaryRequest,
   NoteRequest,
   AddRefRequest,
-  TaskExternalRef,
-  TaskUpdate,
 } from './types.js';
 import { RUN_MODES, WORKFLOW_STATUSES } from './types.js';
 import { fireHook, getTaskHookExecutions } from './hook-dispatcher.js';
+import {
+  getTask as getTaskRepo,
+  listTasks,
+  listDoneTasks,
+  insertTask,
+  updateTaskFields,
+  setRuntimeState,
+  setWorkflowStatus,
+  softDeleteTask as softDeleteTaskRepo,
+  restoreTask as restoreTaskRepo,
+  hardDeleteTask,
+  touchLastViewed,
+  touchAllLastViewed,
+  touchUpdatedAt,
+  setWorktreeBase,
+  setCurrentSummary,
+  addTaskUpdate,
+  listTaskUpdates,
+  getTaskExternalRefs,
+  getTaskExternalRef,
+  upsertTaskExternalRef,
+  deleteTaskExternalRef,
+  findReviewTaskByPrNumber,
+  findReviewTaskBySource,
+  findExistingReviewTask,
+  countRunningTasks,
+  getWorktree,
+  listWorktrees as listWorktreesRepo,
+  listTasksByWorktree,
+  listTasksForWorktree,
+  deleteWorktree as deleteWorktreeRepo,
+  unlinkWorktreeFromAllTasks,
+  insertWorktree as insertWorktreeRepo,
+  updateWorktreeFields,
+  getAgent as getAgentRepo,
+  getAgentByIdAndTask,
+  listAllAgents,
+  listAgentsByTasks,
+  listPendingPromptsByTask,
+  listPendingPromptsByTasks,
+  listUserTerminals,
+  listUserTerminalsByTasks,
+  getUserTerminalByIdAndTask,
+  findFirstActiveAgent,
+  listActiveRepoPaths,
+  listTrackedRepoPaths,
+  listRecentRepoPaths,
+  insertWorktreeIfAbsent,
+  insertTaskIfAbsent,
+} from './repositories/index.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
 const healthLogger = childLogger('health');
-
-const TERMINALS_BY_TASK_SQL =
-  'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index';
 
 function safeParseJson(s: string): Record<string, unknown> {
   try {
@@ -145,9 +186,7 @@ function safeParseJson(s: string): Record<string, unknown> {
 
 /** Load a task by :id param; respond 404 and return null if missing. */
 function loadTaskOrFail(req: Request, res: Response): Task | null {
-  const task = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(req.params.id) as
-    | Task
-    | undefined;
+  const task = getTaskRepo(req.params.id as string);
   if (!task) {
     res.status(404).json({ error: 'Task not found' });
     return null;
@@ -181,26 +220,11 @@ function manualReRunNudge(): string {
  * Used by both GET /api/tasks/:id and the manual-trigger endpoint.
  */
 function lookupExistingReviewId(task: { id: string; pr_number: number | null }): string | null {
-  const db = getDb();
   if (task.pr_number != null) {
-    const byPr = db
-      .prepare(
-        `SELECT id FROM tasks
-          WHERE pr_number = ? AND source = 'auto_review'
-            AND runtime_state != 'error' AND deleted_at IS NULL
-          ORDER BY created_at DESC LIMIT 1`,
-      )
-      .get(task.pr_number) as { id: string } | undefined;
+    const byPr = findReviewTaskByPrNumber(task.pr_number);
     if (byPr) return byPr.id;
   }
-  const byLink = db
-    .prepare(
-      `SELECT id FROM tasks
-        WHERE review_of_task_id = ? AND source = 'auto_review'
-          AND runtime_state != 'error' AND deleted_at IS NULL
-        ORDER BY created_at DESC LIMIT 1`,
-    )
-    .get(task.id) as { id: string } | undefined;
+  const byLink = findReviewTaskBySource(task.id);
   return byLink?.id ?? null;
 }
 
@@ -232,12 +256,9 @@ function deepMerge(
 
 /** Reload a task with its related agents and user_terminals. */
 function fetchTaskBundle(taskId: string): Task {
-  const db = getDb();
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task;
-  task.agents = db
-    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-    .all(taskId) as Agent[];
-  task.user_terminals = db.prepare(TERMINALS_BY_TASK_SQL).all(taskId) as UserTerminal[];
+  const task = getTaskRepo(taskId) as Task;
+  task.agents = listAllAgents(taskId);
+  task.user_terminals = listUserTerminals(taskId);
   return task;
 }
 
@@ -283,10 +304,7 @@ export function setupRoutes(app: Express): void {
       const dbInstance = getDb();
       dbInstance.prepare('SELECT 1 AS ok').get();
       db = { ok: true };
-      const row = dbInstance
-        .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE runtime_state = 'running'`)
-        .get() as { n: number };
-      running_tasks = row.n;
+      running_tasks = countRunningTasks();
     } catch (err) {
       db = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -467,39 +485,15 @@ export function setupRoutes(app: Express): void {
 
   // Recent repository paths from past tasks
   app.get('/api/recent-repos', (_req: Request, res: Response) => {
-    const db = getDb();
-    const rows = db
-      .prepare(
-        `SELECT w.repo_path AS repo_path, MAX(t.created_at) as last_used
-           FROM tasks t
-           INNER JOIN worktrees w ON t.worktree_id = w.id
-          WHERE w.repo_path IS NOT NULL
-            AND t.deleted_at IS NULL
-          GROUP BY w.repo_path
-          ORDER BY last_used DESC
-          LIMIT 10`,
-      )
-      .all() as Array<{ repo_path: string; last_used: string }>;
-    res.json(rows);
+    res.json(listRecentRepoPaths(10));
   });
 
   // List all tasks with agents
   app.get('/api/tasks', (req: Request, res: Response) => {
-    const db = getDb();
     const repoPath = req.query.repo_path as string | undefined;
     const trash = req.query.trash === 'true';
-    const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
-    const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
-    const listPredicate = `${trashPredicate} AND ${SQL_EXCLUDE_AUTO_REVIEW}`;
 
-    let tasks: Task[];
-    if (repoPath) {
-      tasks = db
-        .prepare(`${SELECT_TASK_SQL} WHERE ${listPredicate} AND w.repo_path = ? ${orderBy}`)
-        .all(repoPath) as Task[];
-    } else {
-      tasks = db.prepare(`${SELECT_TASK_SQL} WHERE ${listPredicate} ${orderBy}`).all() as Task[];
-    }
+    const tasks = listTasks({ trash, repoPath, includeAutoReview: false });
 
     if (tasks.length === 0) {
       res.json([]);
@@ -508,27 +502,10 @@ export function setupRoutes(app: Express): void {
 
     // Bulk-fetch all related data for the matching tasks
     const taskIds = tasks.map((t) => t.id);
-    const placeholders = taskIds.map(() => '?').join(',');
 
-    const allAgents = db
-      .prepare(`SELECT * FROM agents WHERE task_id IN (${placeholders}) ORDER BY window_index`)
-      .all(...taskIds) as Agent[];
-
-    const allPrompts = db
-      .prepare(
-        `SELECT pp.*, a.label as agent_label
-         FROM permission_prompts pp
-         LEFT JOIN agents a ON pp.agent_id = a.id
-         WHERE pp.task_id IN (${placeholders}) AND pp.status = 'pending'
-         ORDER BY pp.created_at ASC`,
-      )
-      .all(...taskIds) as Array<Record<string, unknown>>;
-
-    const allTerminals = db
-      .prepare(
-        `SELECT * FROM user_terminals WHERE task_id IN (${placeholders}) ORDER BY window_index`,
-      )
-      .all(...taskIds) as UserTerminal[];
+    const allAgents = listAgentsByTasks(taskIds);
+    const allPrompts = listPendingPromptsByTasks(taskIds);
+    const allTerminals = listUserTerminalsByTasks(taskIds);
 
     // Group by task_id using Maps
     const agentsByTask = new Map<string, Agent[]>();
@@ -575,23 +552,18 @@ export function setupRoutes(app: Express): void {
 
   // Mark all tasks viewed
   app.post('/api/tasks/viewed-all', (_req: Request, res: Response) => {
-    const db = getDb();
-    const info = db.prepare(`UPDATE tasks SET last_viewed_at = datetime('now')`).run();
-    apiLogger.info(
-      { operation: 'marked_all_viewed', updated: info.changes },
-      'marked all tasks viewed',
-    );
-    res.json({ updated: info.changes });
+    const updated = touchAllLastViewed();
+    apiLogger.info({ operation: 'marked_all_viewed', updated }, 'marked all tasks viewed');
+    res.json({ updated });
   });
 
   // Mark a single task viewed
   app.patch('/api/tasks/:id/viewed', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
-    db.prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`).run(task.id);
+    touchLastViewed(task.id);
     apiLogger.info({ task_id: task.id, operation: 'marked_viewed' }, 'marked task viewed');
-    const updated = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id) as Task;
+    const updated = getTaskRepo(task.id) as Task;
     res.json(updated);
   });
 
@@ -599,10 +571,7 @@ export function setupRoutes(app: Express): void {
   app.get('/api/tasks/:id', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
-    const rawAgents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-      .all(task.id) as Agent[];
+    const rawAgents = listAllAgents(task.id);
     // Backfill hook_token for pre-step-1 agents that have an empty token.
     const agents = await Promise.all(
       rawAgents.map(async (agent) => {
@@ -611,25 +580,13 @@ export function setupRoutes(app: Express): void {
         return { ...agent, hook_token: token };
       }),
     );
-    const pendingPrompts = db
-      .prepare(
-        `SELECT pp.*, a.label as agent_label
-       FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
-       WHERE pp.task_id = ? AND pp.status = 'pending'
-       ORDER BY pp.created_at ASC`,
-      )
-      .all(task.id) as Array<Record<string, unknown>>;
+    const pendingPrompts = listPendingPromptsByTask(task.id);
     const parsedPrompts = pendingPrompts.map((pp) => ({
       ...pp,
       tool_input: safeParseJson(pp.tool_input as string),
     }));
-    const userTerminals = db.prepare(TERMINALS_BY_TASK_SQL).all(task.id) as UserTerminal[];
-    const worktreeRow = task.worktree_id
-      ? ((db.prepare('SELECT * FROM worktrees WHERE id = ?').get(task.worktree_id) as
-          | Worktree
-          | undefined) ?? null)
-      : null;
+    const userTerminals = listUserTerminals(task.id);
+    const worktreeRow = task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
     res.json({
       ...task,
       agents,
@@ -763,7 +720,6 @@ export function setupRoutes(app: Express): void {
       'Untitled task';
     resolvedDescription = resolvedDescription || body.initial_prompt || '';
 
-    const db = getDb();
     const id = nanoid(12);
     const isDraft = !!body.draft;
 
@@ -775,18 +731,15 @@ export function setupRoutes(app: Express): void {
     const stagedPath =
       runMode === 'existing' ? storedWorktree! : runMode === 'none' ? storedRepoPath : '';
     try {
-      db.prepare(
-        `INSERT INTO worktrees
-           (id, path, repo_path, branch, base_branch, mode, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'available')`,
-      ).run(
-        worktreeId,
-        stagedPath,
-        runMode === 'scratch' ? null : storedRepoPath || null,
-        body.branch ?? null,
-        body.base_branch ?? null,
-        runMode,
-      );
+      insertWorktreeRepo({
+        id: worktreeId,
+        path: stagedPath,
+        repo_path: runMode === 'scratch' ? null : storedRepoPath || null,
+        branch: body.branch ?? null,
+        base_branch: body.base_branch ?? null,
+        mode: runMode,
+        status: 'available',
+      });
 
       // Determine workflow_status at creation time.
       let initialWorkflowStatus: string;
@@ -801,23 +754,19 @@ export function setupRoutes(app: Express): void {
         initialWorkflowStatus = 'planned';
       }
 
-      db.prepare(
-        `INSERT INTO tasks
-           (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
+      insertTask({
         id,
-        resolvedTitle,
-        resolvedDescription,
-        isDraft ? 'idle' : 'setting_up',
-        initialWorkflowStatus,
-        body.initial_prompt ?? null,
-        worktreeId,
-        body.agent ?? null,
-        body.harness_id ?? 'claude-code',
-        body.model ?? null,
-        body.notify_task_id ?? null,
-      );
+        title: resolvedTitle!,
+        description: resolvedDescription!,
+        runtime_state: isDraft ? 'idle' : 'setting_up',
+        workflow_status: initialWorkflowStatus,
+        initial_prompt: body.initial_prompt ?? null,
+        worktree_id: worktreeId,
+        agent: body.agent ?? null,
+        harness_id: body.harness_id ?? 'claude-code',
+        model: body.model ?? null,
+        notify_task_id: body.notify_task_id ?? null,
+      });
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
       if (String(e.message).includes('UNIQUE constraint')) {
@@ -827,7 +776,7 @@ export function setupRoutes(app: Express): void {
       throw err;
     }
 
-    const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
+    const created = getTaskRepo(id) as Task;
     created.agents = [];
     created.user_terminals = [];
     broadcast({ type: 'task:created', payload: { taskId: id } });
@@ -852,7 +801,6 @@ export function setupRoutes(app: Express): void {
     const body = req.body as UpdateTaskRequest;
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
 
     // Draft field updates
     const hasDraftFields = [
@@ -898,57 +846,38 @@ export function setupRoutes(app: Express): void {
 
       // Route updates between tasks (title/description/initial_prompt) and
       // worktrees (repo_path/branch/base_branch/path/mode).
-      const taskFields: string[] = [];
-      const taskValues: unknown[] = [];
+      const taskPatch: Partial<Record<string, unknown>> = {};
       for (const key of ['title', 'description', 'initial_prompt'] as const) {
         if (body[key] !== undefined) {
-          taskFields.push(`${key} = ?`);
-          taskValues.push(body[key] ?? null);
+          taskPatch[key] = body[key] ?? null;
         }
       }
-      if (taskFields.length > 0) {
-        taskFields.push(`updated_at = datetime('now')`);
-        taskValues.push(task.id);
-        db.prepare(`UPDATE tasks SET ${taskFields.join(', ')} WHERE id = ?`).run(...taskValues);
+      if (Object.keys(taskPatch).length > 0) {
+        updateTaskFields(task.id, taskPatch);
       }
 
-      const worktreeFields: string[] = [];
-      const worktreeValues: unknown[] = [];
-      if (body.repo_path !== undefined) {
-        worktreeFields.push('repo_path = ?');
-        worktreeValues.push(body.repo_path ?? null);
-      }
-      if (body.branch !== undefined) {
-        worktreeFields.push('branch = ?');
-        worktreeValues.push(body.branch ?? null);
-      }
-      if (body.base_branch !== undefined) {
-        worktreeFields.push('base_branch = ?');
-        worktreeValues.push(body.base_branch ?? null);
-      }
-      if (body.worktree_path !== undefined) {
-        worktreeFields.push('path = ?');
-        worktreeValues.push(body.worktree_path ?? '');
-      }
-      if (body.run_mode !== undefined) {
-        worktreeFields.push('mode = ?');
-        worktreeValues.push(body.run_mode);
-      }
-      if (worktreeFields.length > 0) {
+      const worktreePatch: Partial<Record<string, unknown>> = {};
+      if (body.repo_path !== undefined) worktreePatch['repo_path'] = body.repo_path ?? null;
+      if (body.branch !== undefined) worktreePatch['branch'] = body.branch ?? null;
+      if (body.base_branch !== undefined) worktreePatch['base_branch'] = body.base_branch ?? null;
+      if (body.worktree_path !== undefined) worktreePatch['path'] = body.worktree_path ?? '';
+      if (body.run_mode !== undefined) worktreePatch['mode'] = body.run_mode;
+
+      if (Object.keys(worktreePatch).length > 0) {
         let wtId = task.worktree_id;
         if (!wtId) {
           // Materialise a placeholder worktree row for this draft; fields get
           // refined as the user edits or at setup time.
           wtId = nanoid(12);
-          db.prepare(
-            `INSERT INTO worktrees (id, path, mode, status) VALUES (?, '', ?, 'available')`,
-          ).run(wtId, body.run_mode ?? task.run_mode ?? 'new');
-          db.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(wtId, task.id);
+          insertWorktreeRepo({
+            id: wtId,
+            path: '',
+            mode: body.run_mode ?? task.run_mode ?? 'new',
+            status: 'available',
+          });
+          updateTaskFields(task.id, { worktree_id: wtId });
         }
-        worktreeValues.push(wtId);
-        db.prepare(`UPDATE worktrees SET ${worktreeFields.join(', ')} WHERE id = ?`).run(
-          ...worktreeValues,
-        );
+        updateWorktreeFields(wtId, worktreePatch);
       }
     } else if (body.status === 'running' || body.runtime_state === 'running') {
       // Resume task
@@ -976,9 +905,7 @@ export function setupRoutes(app: Express): void {
         res.status(400).json({ error: `invalid workflow_status: ${body.workflow_status}` });
         return;
       }
-      getDb()
-        .prepare(`UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`)
-        .run(body.workflow_status, task.id);
+      setWorkflowStatus(task.id, body.workflow_status);
     }
 
     const updated = fetchTaskBundle(task.id);
@@ -990,7 +917,6 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/start', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
 
     if (task.runtime_state !== 'idle') {
       res.status(400).json({ error: 'Only draft tasks can be started' });
@@ -998,9 +924,7 @@ export function setupRoutes(app: Express): void {
     }
 
     // Set status immediately so client sees setting_up
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
-    ).run(task.id);
+    setRuntimeState(task.id, 'setting_up');
 
     const updated = fetchTaskBundle(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
@@ -1020,7 +944,6 @@ export function setupRoutes(app: Express): void {
   app.delete('/api/tasks/:id', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
 
     if (req.query.purge === 'true') {
       if (task.deleted_at == null) {
@@ -1030,7 +953,7 @@ export function setupRoutes(app: Express): void {
       const taskId = task.id;
       await deleteTask(task);
       // ON DELETE CASCADE removes agents, permission_prompts, user_terminals
-      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+      hardDeleteTask(taskId);
       broadcast({ type: 'task:deleted', payload: { taskId } });
     } else {
       await softDeleteTask(task);
@@ -1044,17 +967,14 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/restore', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
 
     if (task.deleted_at == null) {
       res.status(409).json({ error: 'task is not in trash' });
       return;
     }
 
-    db.prepare(`UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`).run(
-      task.id,
-    );
-    const refreshed = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id);
+    restoreTaskRepo(task.id);
+    const refreshed = getTaskRepo(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     res.json(refreshed);
   });
@@ -1096,9 +1016,7 @@ export function setupRoutes(app: Express): void {
   app.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const agent = getDb()
-      .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
-      .get(req.params.agentId, req.params.id) as Agent | undefined;
+    const agent = getAgentByIdAndTask(req.params.agentId as string, req.params.id as string);
 
     if (!agent) {
       res.status(404).json({ error: 'Task or agent not found' });
@@ -1162,9 +1080,10 @@ export function setupRoutes(app: Express): void {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
 
-    const terminal = getDb()
-      .prepare('SELECT * FROM user_terminals WHERE id = ? AND task_id = ?')
-      .get(req.params.terminalId, req.params.id) as UserTerminal | undefined;
+    const terminal = getUserTerminalByIdAndTask(
+      req.params.terminalId as string,
+      req.params.id as string,
+    );
 
     if (!terminal) {
       res.status(404).json({ error: 'Terminal not found' });
@@ -1190,9 +1109,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    const agent = getDb()
-      .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
-      .get(req.params.agentId, req.params.id) as Agent | undefined;
+    const agent = getAgentByIdAndTask(req.params.agentId as string, req.params.id as string);
 
     if (!agent) {
       res.status(404).json({ error: 'Agent not found' });
@@ -1438,10 +1355,8 @@ export function setupRoutes(app: Express): void {
 
     // Persist the new base on the joined worktrees row (Phase 2a moved these
     // columns off `tasks`). Bump the task's updated_at separately.
-    getDb()
-      .prepare(`UPDATE worktrees SET base_branch = ?, base_sha = ? WHERE id = ?`)
-      .run(baseBranch, sha, task.worktree_id);
-    getDb().prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`).run(task.id);
+    setWorktreeBase(task.worktree_id, baseBranch, sha);
+    touchUpdatedAt(task.id);
 
     // Invalidate any cached origin tip for old/new branch on this worktree so
     // the next diff fetch resolves fresh.
@@ -1455,9 +1370,7 @@ export function setupRoutes(app: Express): void {
 
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 
-    const reloaded = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(task.id) as
-      | Task
-      | undefined;
+    const reloaded = getTaskRepo(task.id);
     res.json(reloaded);
   });
 
@@ -2037,10 +1950,7 @@ export function setupRoutes(app: Express): void {
    * cwd, and resumes claude so transcript context survives.
    */
   app.patch('/api/agents/:id/task', async (req: Request, res: Response) => {
-    const db = getDb();
-    const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id) as
-      | Agent
-      | undefined;
+    const agent = getAgentRepo(req.params.id as string);
     if (!agent) {
       res.status(404).json({ error: 'Agent not found' });
       return;
@@ -2060,9 +1970,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
     if (targetTaskId !== null) {
-      const targetTask = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(targetTaskId) as
-        | Task
-        | undefined;
+      const targetTask = getTaskRepo(targetTaskId);
       if (!targetTask) {
         res.status(404).json({ error: `Task not found: ${targetTaskId}` });
         return;
@@ -2181,7 +2089,6 @@ export function setupRoutes(app: Express): void {
   // ─── Worktrees (browser) ─────────────────────────────────────────────────
 
   app.get('/api/worktrees', (_req: Request, res: Response) => {
-    const db = getDb();
     // The worktrees table holds one row per task lifecycle, but the same
     // physical workspace (same repo_path / mode / branch / path) may back
     // many tasks over time — most visibly in `none` mode where every task
@@ -2190,93 +2097,16 @@ export function setupRoutes(app: Express): void {
     // the active task), and aggregate task counts and recency. Rows that no
     // task references are leftover state and stay hidden — the workspaces
     // list mirrors actual user activity, not historical bookkeeping.
-    const rows = db
-      .prepare(
-        `WITH grouped AS (
-           SELECT w.id,
-                  w.path,
-                  w.repo_path,
-                  w.branch,
-                  w.base_branch,
-                  w.base_sha,
-                  w.mode,
-                  w.status,
-                  w.created_at,
-                  w.last_used_at,
-                  COALESCE(w.repo_path, '') || '|' ||
-                  COALESCE(w.mode, '')      || '|' ||
-                  COALESCE(w.branch, '')    || '|' ||
-                  COALESCE(w.path, '')      AS group_key,
-                  COALESCE(w.last_used_at, w.created_at) AS recency,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY
-                      COALESCE(w.repo_path, ''),
-                      COALESCE(w.mode, ''),
-                      COALESCE(w.branch, ''),
-                      COALESCE(w.path, '')
-                    ORDER BY COALESCE(w.last_used_at, w.created_at) DESC, w.id DESC
-                  ) AS rn
-             FROM worktrees w
-            WHERE EXISTS (SELECT 1 FROM tasks t WHERE t.worktree_id = w.id AND t.deleted_at IS NULL)
-         ),
-         agg AS (
-           SELECT group_key,
-                  COUNT(*) FILTER (WHERE 1=1) AS row_count,
-                  SUM(
-                    (SELECT COUNT(*) FROM tasks t WHERE t.worktree_id = grouped.id AND t.deleted_at IS NULL)
-                  ) AS task_count,
-                  MAX(CASE WHEN status = 'in_use' THEN 1 ELSE 0 END) AS any_in_use,
-                  MAX(recency) AS recency
-             FROM grouped
-            GROUP BY group_key
-         )
-         SELECT g.id,
-                g.path,
-                g.repo_path,
-                g.branch,
-                g.base_branch,
-                g.base_sha,
-                g.mode,
-                CASE WHEN agg.any_in_use = 1 THEN 'in_use' ELSE 'available' END AS status,
-                g.created_at,
-                agg.recency AS last_used_at,
-                agg.task_count AS task_count,
-                (SELECT t.id FROM tasks t
-                   INNER JOIN worktrees w2 ON w2.id = t.worktree_id
-                  WHERE COALESCE(w2.repo_path,'') || '|' || COALESCE(w2.mode,'') || '|'
-                     || COALESCE(w2.branch,'')   || '|' || COALESCE(w2.path,'')
-                      = g.group_key
-                    AND t.runtime_state IN ('idle','setting_up','running')
-                    AND t.deleted_at IS NULL
-                  ORDER BY CASE t.runtime_state
-                             WHEN 'running'    THEN 0
-                             WHEN 'setting_up' THEN 1
-                             ELSE 2
-                           END, t.updated_at DESC
-                  LIMIT 1) AS active_task_id
-           FROM grouped g
-           INNER JOIN agg ON agg.group_key = g.group_key
-          WHERE g.rn = 1
-          ORDER BY agg.recency DESC`,
-      )
-      .all() as WorktreeSummary[];
-    res.json(rows);
+    res.json(listWorktreesRepo());
   });
 
   app.get('/api/worktrees/:id', (req: Request, res: Response) => {
-    const db = getDb();
-    const worktree = db.prepare('SELECT * FROM worktrees WHERE id = ?').get(req.params.id) as
-      | Worktree
-      | undefined;
+    const worktree = getWorktree(req.params.id as string);
     if (!worktree) {
       res.status(404).json({ error: 'Worktree not found' });
       return;
     }
-    const tasks = db
-      .prepare(
-        `${SELECT_TASK_SQL} WHERE t.worktree_id = ? AND t.deleted_at IS NULL ORDER BY t.updated_at DESC`,
-      )
-      .all(worktree.id) as Task[];
+    const tasks = listTasksByWorktree(worktree.id);
     const active = tasks.find((t) => {
       return (['setting_up', 'running'] as const).includes(t.runtime_state as 'running');
     });
@@ -2289,10 +2119,7 @@ export function setupRoutes(app: Express): void {
   });
 
   app.delete('/api/worktrees/:id', async (req: Request, res: Response) => {
-    const db = getDb();
-    const worktree = db.prepare('SELECT * FROM worktrees WHERE id = ?').get(req.params.id) as
-      | Worktree
-      | undefined;
+    const worktree = getWorktree(req.params.id as string);
     if (!worktree) {
       res.status(404).json({ error: 'Worktree not found' });
       return;
@@ -2301,9 +2128,7 @@ export function setupRoutes(app: Express): void {
       res.status(409).json({ error: 'Worktree is in use' });
       return;
     }
-    const referencingTasks = db
-      .prepare('SELECT id, runtime_state FROM tasks WHERE worktree_id = ?')
-      .all(worktree.id) as Array<{ id: string; runtime_state: string }>;
+    const referencingTasks = listTasksForWorktree(worktree.id);
     const activeRef = referencingTasks.find((t) =>
       (['setting_up', 'running'] as const).includes(t.runtime_state as 'running'),
     );
@@ -2348,8 +2173,8 @@ export function setupRoutes(app: Express): void {
     }
 
     // Unlink referencing (terminal-state) tasks before deleting the row.
-    db.prepare('UPDATE tasks SET worktree_id = NULL WHERE worktree_id = ?').run(worktree.id);
-    db.prepare('DELETE FROM worktrees WHERE id = ?').run(worktree.id);
+    unlinkWorktreeFromAllTasks(worktree.id);
+    deleteWorktreeRepo(worktree.id);
     apiLogger.info(
       { worktree_id: worktree.id, mode: worktree.mode, operation: 'delete_worktree' },
       'worktree deleted',
@@ -2361,10 +2186,7 @@ export function setupRoutes(app: Express): void {
 
   // B3: Bulk-delete all done tasks (soft-delete)
   app.post('/api/tasks/delete-done', async (req: Request, res: Response) => {
-    const db = getDb();
-    const doneTasks = db
-      .prepare(`${SELECT_TASK_SQL} WHERE t.workflow_status = 'done' AND t.deleted_at IS NULL`)
-      .all() as Task[];
+    const doneTasks = listDoneTasks();
 
     let deletedCount = 0;
     for (const task of doneTasks) {
@@ -2373,9 +2195,7 @@ export function setupRoutes(app: Express): void {
         await closeTask(task);
       }
 
-      db.prepare(
-        `UPDATE tasks SET deleted_at = datetime('now'), runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
-      ).run(task.id);
+      softDeleteTaskRepo(task.id);
 
       broadcast({ type: 'task:updated', payload: { taskId: task.id } });
       deletedCount++;
@@ -2389,7 +2209,6 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/move', async (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
     const body = req.body as MoveTaskRequest;
 
     if (!body.workflow_status || !WORKFLOW_STATUSES.includes(body.workflow_status)) {
@@ -2414,14 +2233,15 @@ export function setupRoutes(app: Express): void {
     }
 
     const prevStatus = task.workflow_status;
-    db.prepare(
-      `UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run(body.workflow_status, task.id);
+    setWorkflowStatus(task.id, body.workflow_status);
 
-    const updateId = nanoid(12);
-    db.prepare(
-      `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, ?, ?)`,
-    ).run(updateId, task.id, prevStatus, body.workflow_status, body.note ?? null);
+    addTaskUpdate({
+      task_id: task.id,
+      kind: 'transition',
+      from_status: prevStatus,
+      to_status: body.workflow_status,
+      body: body.note ?? null,
+    });
 
     // Auto-start: moving to in_progress should kick the task into setting_up
     // if it isn't already running. Mirrors POST /api/tasks/:id/start and the
@@ -2434,9 +2254,7 @@ export function setupRoutes(app: Express): void {
       autoStart = task.worktree ? 'resume' : 'start';
     }
     if (autoStart) {
-      db.prepare(
-        `UPDATE tasks SET runtime_state = 'setting_up', error = NULL, updated_at = datetime('now') WHERE id = ?`,
-      ).run(task.id);
+      setRuntimeState(task.id, 'setting_up', null);
     }
 
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
@@ -2470,7 +2288,6 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/summary', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
     const body = req.body as SummaryRequest;
 
     if (!body.summary?.trim()) {
@@ -2478,14 +2295,8 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    db.prepare(
-      `UPDATE tasks SET current_summary = ?, current_summary_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-    ).run(body.summary, task.id);
-
-    const updateId = nanoid(12);
-    db.prepare(
-      `INSERT INTO task_updates (id, task_id, kind, body) VALUES (?, ?, 'summary', ?)`,
-    ).run(updateId, task.id, body.summary);
+    setCurrentSummary(task.id, body.summary);
+    addTaskUpdate({ task_id: task.id, kind: 'summary', body: body.summary });
 
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     fireHook('summary_updated', {
@@ -2502,7 +2313,6 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/note', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
     const body = req.body as NoteRequest;
 
     if (!body.body?.trim()) {
@@ -2510,12 +2320,7 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    const updateId = nanoid(12);
-    db.prepare(`INSERT INTO task_updates (id, task_id, kind, body) VALUES (?, ?, 'note', ?)`).run(
-      updateId,
-      task.id,
-      body.body,
-    );
+    const updateId = addTaskUpdate({ task_id: task.id, kind: 'note', body: body.body });
 
     fireHook('note_added', {
       event: 'note_added',
@@ -2530,7 +2335,6 @@ export function setupRoutes(app: Express): void {
   app.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
     const body = req.body as AddRefRequest & { metadata?: unknown };
 
     if (!body.integration?.trim()) {
@@ -2550,18 +2354,19 @@ export function setupRoutes(app: Express): void {
       return;
     }
 
-    const metadataJson =
-      body.metadata !== null &&
-      body.metadata !== undefined &&
-      typeof body.metadata === 'object' &&
-      !Array.isArray(body.metadata)
-        ? JSON.stringify(body.metadata)
-        : null;
-
-    db.prepare(
-      `INSERT OR REPLACE INTO task_external_refs (task_id, integration, ref, url, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-    ).run(task.id, body.integration, body.ref, body.url ?? null, metadataJson);
+    const result = upsertTaskExternalRef({
+      task_id: task.id,
+      integration: body.integration,
+      ref: body.ref,
+      url: body.url ?? null,
+      metadata:
+        body.metadata !== null &&
+        body.metadata !== undefined &&
+        typeof body.metadata === 'object' &&
+        !Array.isArray(body.metadata)
+          ? (body.metadata as Record<string, unknown>)
+          : null,
+    });
 
     fireHook('ref_added', {
       event: 'ref_added',
@@ -2569,34 +2374,22 @@ export function setupRoutes(app: Express): void {
       data: { integration: body.integration, ref: body.ref, url: body.url },
     });
 
-    const raw = db
-      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
-      .get(task.id, body.integration) as { metadata: string | null } & Record<string, unknown>;
-    res.status(201).json({
-      ...raw,
-      metadata: raw.metadata ? (JSON.parse(raw.metadata) as Record<string, unknown>) : null,
-    });
+    res.status(201).json(result);
   });
 
   // Delete an external ref
   app.delete('/api/tasks/:id/refs/:integration', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
     const integration = (req.params as Record<string, string>).integration;
 
-    const existing = db
-      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
-      .get(task.id, integration) as TaskExternalRef | undefined;
+    const existing = getTaskExternalRef(task.id, integration);
     if (!existing) {
       res.status(404).json({ error: 'Ref not found' });
       return;
     }
 
-    db.prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?').run(
-      task.id,
-      integration,
-    );
+    deleteTaskExternalRef(task.id, integration);
 
     fireHook('ref_removed', {
       event: 'ref_removed',
@@ -2611,13 +2404,10 @@ export function setupRoutes(app: Express): void {
   app.get('/api/tasks/:id/updates', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
     const limitRaw = Number(req.query.limit ?? 100);
     const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 1000);
 
-    const updates = db
-      .prepare(`SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`)
-      .all(task.id, limit) as TaskUpdate[];
+    const updates = listTaskUpdates(task.id, limit);
     res.json(updates);
   });
 
@@ -2625,16 +2415,7 @@ export function setupRoutes(app: Express): void {
   app.get('/api/tasks/:id/refs', (req: Request, res: Response) => {
     const task = loadTaskOrFail(req, res);
     if (!task) return;
-    const db = getDb();
-    const refs = db
-      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? ORDER BY created_at ASC')
-      .all(task.id) as Array<{ metadata: string | null } & Record<string, unknown>>;
-    res.json(
-      refs.map((r) => ({
-        ...r,
-        metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, unknown>) : null,
-      })),
-    );
+    res.json(getTaskExternalRefs(task.id));
   });
 
   // ─── Hook executions for a task ──────────────────────────────────────────────
@@ -3060,15 +2841,7 @@ export function setupRoutes(app: Express): void {
 
     // Repo hooks: collect from every active task's repo_path
     try {
-      const activeTasks = getDb()
-        .prepare(
-          `SELECT DISTINCT w.repo_path
-             FROM tasks t
-             JOIN worktrees w ON w.id = t.worktree_id
-            WHERE t.runtime_state IN ('running', 'setting_up')
-              AND w.repo_path IS NOT NULL`,
-        )
-        .all() as Array<{ repo_path: string }>;
+      const activeTasks = listActiveRepoPaths();
 
       const seen = new Set<string>();
       for (const { repo_path } of activeTasks) {
@@ -3164,10 +2937,7 @@ export function setupRoutes(app: Express): void {
     // Resolve the local repo path
     let repoPath = bodyRepoPath;
     if (!repoPath) {
-      const db = getDb();
-      const rows = db
-        .prepare(`SELECT DISTINCT repo_path FROM worktrees WHERE repo_path IS NOT NULL`)
-        .all() as Array<{ repo_path: string }>;
+      const rows = listTrackedRepoPaths();
 
       for (const row of rows) {
         const candidatePath = row.repo_path;
@@ -3202,15 +2972,7 @@ export function setupRoutes(app: Express): void {
     }
 
     // Dedup: check for an existing live review task for this repo+PR
-    const db = getDb();
-    const existing = db
-      .prepare(
-        `SELECT t.id FROM tasks t JOIN worktrees w ON t.worktree_id = w.id
-          WHERE w.repo_path = ? AND t.pr_number = ? AND t.source = 'auto_review'
-            AND t.deleted_at IS NULL AND t.runtime_state != 'error'
-          ORDER BY t.created_at DESC LIMIT 1`,
-      )
-      .get(repoPath, number) as { id: string } | undefined;
+    const existing = findExistingReviewTask(repoPath, number);
 
     if (existing) {
       res.status(200).json({ id: existing.id, reused: true });
@@ -3281,7 +3043,7 @@ export function setupRoutes(app: Express): void {
 
     broadcast({ type: 'task:created', payload: { taskId: id } });
 
-    const fresh = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
+    const fresh = getTaskRepo(id);
     if (fresh) {
       fresh.agents = [];
       fresh.user_terminals = [];
@@ -3356,14 +3118,7 @@ export function setupRoutes(app: Express): void {
         await startTask(task);
       } else {
         // Find first non-stopped agent and nudge it
-        const db = getDb();
-        const agent = db
-          .prepare(
-            `SELECT id, window_index FROM agents
-             WHERE task_id = ? AND status != 'stopped'
-             ORDER BY window_index ASC LIMIT 1`,
-          )
-          .get(task.id) as { id: string; window_index: number } | undefined;
+        const agent = findFirstActiveAgent(task.id);
 
         if (agent && task.tmux_session) {
           const nudge = manualReRunNudge();
@@ -3412,9 +3167,7 @@ export function setupRoutes(app: Express): void {
   // or returns the existing review when one is already present.
   app.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => {
     const taskId = (req.params as Record<string, string>).taskId;
-    const task = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as
-      | Task
-      | undefined;
+    const task = getTaskRepo(taskId);
     if (!task) {
       res.status(404).json({ error: 'Task not found' });
       return;
@@ -3424,8 +3177,6 @@ export function setupRoutes(app: Express): void {
       res.status(400).json({ error: 'Start the task first' });
       return;
     }
-
-    const db = getDb();
 
     const existingId = lookupExistingReviewId(task);
     if (existingId) {
@@ -3504,7 +3255,7 @@ export function setupRoutes(app: Express): void {
 
     broadcast({ type: 'task:created', payload: { taskId: newId } });
 
-    const fresh = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(newId) as Task | undefined;
+    const fresh = getTaskRepo(newId);
     if (fresh) {
       // Fire-and-forget: the response shouldn't block on worktree setup.
       startTask(fresh)
@@ -3727,24 +3478,28 @@ export function setupRoutes(app: Express): void {
           const wtId = `wt-${body.task.id}`;
           // `path` = server's cwd so git-show works; `repo_path` = non-existent so
           // deleteTask's git-worktree-remove fails gracefully without deleting cwd.
-          db.prepare(
-            `INSERT OR IGNORE INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
-             VALUES (?, ?, '/tmp/e2e-norepo', 'review/e2e', 'main', 'new', 'available')`,
-          ).run(wtId, process.cwd());
+          insertWorktreeIfAbsent({
+            id: wtId,
+            path: process.cwd(),
+            repo_path: '/tmp/e2e-norepo',
+            branch: 'review/e2e',
+            base_branch: 'main',
+            mode: 'new',
+            status: 'available',
+          });
 
-          db.prepare(
-            `INSERT OR IGNORE INTO tasks
-               (id, title, description, runtime_state, workflow_status, source, worktree_id,
-                pr_url, pr_number, pr_head_sha)
-             VALUES (?, ?, '', 'idle', 'backlog', 'auto_review', ?, ?, ?, ?)`,
-          ).run(
-            body.task.id,
-            body.task.title,
-            wtId,
-            body.task.pr_url,
-            body.task.pr_number,
-            body.task.pr_head_sha,
-          );
+          insertTaskIfAbsent({
+            id: body.task.id,
+            title: body.task.title,
+            description: '',
+            runtime_state: 'idle',
+            workflow_status: 'backlog',
+            source: 'auto_review',
+            worktree_id: wtId,
+            pr_url: body.task.pr_url,
+            pr_number: body.task.pr_number,
+            pr_head_sha: body.task.pr_head_sha,
+          });
 
           db.prepare(
             `INSERT OR IGNORE INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, completed_at)

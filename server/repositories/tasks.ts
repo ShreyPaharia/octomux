@@ -193,21 +193,56 @@ export function findExistingReviewTask(
     )
     .get(repoPath, prNumber) as { id: string } | undefined;
 }
+/**
+ * Find a live auto_review task by pr_number only (no repo_path filter).
+ * Used by lookupExistingReviewId in the API layer.
+ */
+export function findReviewTaskByPrNumber(prNumber: number): { id: string } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id FROM tasks
+        WHERE pr_number = ? AND source = 'auto_review'
+          AND runtime_state != 'error' AND deleted_at IS NULL
+        ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(prNumber) as { id: string } | undefined;
+}
+
+/**
+ * Find a live auto_review task that points back at a given source task via
+ * review_of_task_id. Used by lookupExistingReviewId in the API layer.
+ */
+export function findReviewTaskBySource(reviewOfTaskId: string): { id: string } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id FROM tasks
+        WHERE review_of_task_id = ? AND source = 'auto_review'
+          AND runtime_state != 'error' AND deleted_at IS NULL
+        ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(reviewOfTaskId) as { id: string } | undefined;
+}
+
+/** Count tasks currently in 'running' runtime_state (used by health check). */
+export function countRunningTasks(): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE runtime_state = 'running'`)
+    .get() as { n: number };
+  return row.n;
+}
 
 /** Fetch minimal tmux_session for a task (used in agent hopping). */
-export function getTaskTmuxSession(
-  id: string,
-): { tmux_session: string | null } | undefined {
-  return getDb()
-    .prepare(`SELECT tmux_session FROM tasks WHERE id = ?`)
-    .get(id) as { tmux_session: string | null } | undefined;
+export function getTaskTmuxSession(id: string): { tmux_session: string | null } | undefined {
+  return getDb().prepare(`SELECT tmux_session FROM tasks WHERE id = ?`).get(id) as
+    | { tmux_session: string | null }
+    | undefined;
 }
 
 /** Fetch just the model column from a task (for hop inheritance). */
 export function getTaskModel(id: string): { model: string | null } | undefined {
-  return getDb()
-    .prepare(`SELECT model FROM tasks WHERE id = ?`)
-    .get(id) as { model: string | null } | undefined;
+  return getDb().prepare(`SELECT model FROM tasks WHERE id = ?`).get(id) as
+    | { model: string | null }
+    | undefined;
 }
 
 /**
@@ -314,48 +349,44 @@ export function setRuntimeState(id: string, state: string, error?: string | null
       .run(state, error, id);
   } else {
     getDb()
-      .prepare(
-        `UPDATE tasks SET runtime_state = ?, updated_at = datetime('now') WHERE id = ?`,
-      )
+      .prepare(`UPDATE tasks SET runtime_state = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(state, id);
   }
-  logger.info({ task_id: id, runtime_state: state, operation: 'setRuntimeState' }, 'runtime state updated');
+  logger.info(
+    { task_id: id, runtime_state: state, operation: 'setRuntimeState' },
+    'runtime state updated',
+  );
 }
 
 /** Set workflow_status (and always bump updated_at). */
 export function setWorkflowStatus(id: string, status: string): void {
   getDb()
-    .prepare(
-      `UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
+    .prepare(`UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(status, id);
-  logger.info({ task_id: id, workflow_status: status, operation: 'setWorkflowStatus' }, 'workflow status updated');
+  logger.info(
+    { task_id: id, workflow_status: status, operation: 'setWorkflowStatus' },
+    'workflow status updated',
+  );
 }
 
 /** Set the tmux_session column (called after the session is actually created). */
 export function setTmuxSession(id: string, session: string): void {
   getDb()
-    .prepare(
-      `UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
+    .prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(session, id);
-  logger.info({ task_id: id, tmux_session: session, operation: 'setTmuxSession' }, 'tmux_session set');
+  logger.info(
+    { task_id: id, tmux_session: session, operation: 'setTmuxSession' },
+    'tmux_session set',
+  );
 }
 
 /** Set the linked worktree_id. */
 export function setWorktreeId(id: string, worktreeId: string | null): void {
-  getDb()
-    .prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`)
-    .run(worktreeId, id);
+  getDb().prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
 }
 
 /** Set pr_url, pr_number, pr_head_sha (called when a PR is opened). */
-export function setPr(
-  id: string,
-  prUrl: string,
-  prNumber: number,
-  prHeadSha: string,
-): void {
+export function setPr(id: string, prUrl: string, prNumber: number, prHeadSha: string): void {
   getDb()
     .prepare(
       `UPDATE tasks SET pr_url = ?, pr_number = ?, pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -387,16 +418,12 @@ export function setCurrentSummary(id: string, summary: string): void {
 
 /** Touch last_viewed_at for a single task. */
 export function touchLastViewed(id: string): void {
-  getDb()
-    .prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`)
-    .run(id);
+  getDb().prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`).run(id);
 }
 
 /** Touch last_viewed_at for ALL tasks. Returns the number of changed rows. */
 export function touchAllLastViewed(): number {
-  const info = getDb()
-    .prepare(`UPDATE tasks SET last_viewed_at = datetime('now')`)
-    .run();
+  const info = getDb().prepare(`UPDATE tasks SET last_viewed_at = datetime('now')`).run();
   return info.changes;
 }
 
@@ -416,9 +443,7 @@ export function softDeleteTask(id: string): void {
 /** Restore a soft-deleted task (clear deleted_at). */
 export function restoreTask(id: string): void {
   getDb()
-    .prepare(
-      `UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`,
-    )
+    .prepare(`UPDATE tasks SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?`)
     .run(id);
   logger.info({ task_id: id, operation: 'restoreTask' }, 'task restored from trash');
 }
@@ -427,6 +452,43 @@ export function restoreTask(id: string): void {
 export function hardDeleteTask(id: string): void {
   getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id);
   logger.info({ task_id: id, operation: 'hardDeleteTask' }, 'task hard-deleted');
+}
+
+/**
+ * Insert a task row only when no row with the same id already exists
+ * (INSERT OR IGNORE). Used by the test seed endpoint to make seeding idempotent.
+ */
+export function insertTaskIfAbsent(input: {
+  id: string;
+  title: string;
+  description: string;
+  runtime_state: string;
+  workflow_status: string;
+  source?: string | null;
+  worktree_id?: string | null;
+  pr_url?: string | null;
+  pr_number?: number | null;
+  pr_head_sha?: string | null;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO tasks
+         (id, title, description, runtime_state, workflow_status, source, worktree_id,
+          pr_url, pr_number, pr_head_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.id,
+      input.title,
+      input.description,
+      input.runtime_state,
+      input.workflow_status,
+      input.source ?? null,
+      input.worktree_id ?? null,
+      input.pr_url ?? null,
+      input.pr_number ?? null,
+      input.pr_head_sha ?? null,
+    );
 }
 
 /**
@@ -449,9 +511,7 @@ export function markTaskRunning(id: string): void {
 
 /** Bump updated_at without changing any other field. */
 export function touchUpdatedAt(id: string): void {
-  getDb()
-    .prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`)
-    .run(id);
+  getDb().prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`).run(id);
 }
 
 /** Unlink the worktree (set worktree_id = NULL) without deleting the task. */
@@ -461,9 +521,7 @@ export function unlinkWorktree(id: string): void {
 
 /** Unlink all tasks that reference a given worktree_id. */
 export function unlinkWorktreeFromAllTasks(worktreeId: string): void {
-  getDb()
-    .prepare('UPDATE tasks SET worktree_id = NULL WHERE worktree_id = ?')
-    .run(worktreeId);
+  getDb().prepare('UPDATE tasks SET worktree_id = NULL WHERE worktree_id = ?').run(worktreeId);
 }
 
 // ─── task_updates ─────────────────────────────────────────────────────────────
@@ -501,9 +559,7 @@ export function addTaskUpdate(input: AddTaskUpdateInput): string {
 export function listTaskUpdates(taskId: string, limit = 100): TaskUpdate[] {
   const safeLimit = Math.min(Math.max(limit, 1), 1000);
   return getDb()
-    .prepare(
-      `SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
-    )
+    .prepare(`SELECT * FROM task_updates WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`)
     .all(taskId, safeLimit) as TaskUpdate[];
 }
 

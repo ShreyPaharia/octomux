@@ -44,6 +44,110 @@ export function getTaskHookToken(taskId: string): { hook_token: string } | undef
     .get(taskId) as { hook_token: string } | undefined;
 }
 
+/** Fetch a single agent by id and task_id (returns undefined if not found or wrong task). */
+export function getAgentByIdAndTask(agentId: string, taskId: string): Agent | undefined {
+  return getDb()
+    .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
+    .get(agentId, taskId) as Agent | undefined;
+}
+
+/** Fetch the first non-stopped agent for a task, ordered by window_index. */
+export function findFirstActiveAgent(
+  taskId: string,
+): { id: string; window_index: number } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, window_index FROM agents
+       WHERE task_id = ? AND status != 'stopped'
+       ORDER BY window_index ASC LIMIT 1`,
+    )
+    .get(taskId) as { id: string; window_index: number } | undefined;
+}
+
+/**
+ * List all pending permission prompts for a task, joined with agent label.
+ * Used by GET /api/tasks/:id to build the pending_prompts array.
+ */
+export function listPendingPromptsByTask(taskId: string): Array<Record<string, unknown>> {
+  return getDb()
+    .prepare(
+      `SELECT pp.*, a.label as agent_label
+       FROM permission_prompts pp
+       LEFT JOIN agents a ON pp.agent_id = a.id
+       WHERE pp.task_id = ? AND pp.status = 'pending'
+       ORDER BY pp.created_at ASC`,
+    )
+    .all(taskId) as Array<Record<string, unknown>>;
+}
+
+/**
+ * Bulk-fetch pending permission prompts for multiple task ids.
+ * Returns all pending rows joined with agent label, ordered by created_at ASC.
+ */
+export function listPendingPromptsByTasks(taskIds: string[]): Array<Record<string, unknown>> {
+  if (taskIds.length === 0) return [];
+  const placeholders = taskIds.map(() => '?').join(',');
+  return getDb()
+    .prepare(
+      `SELECT pp.*, a.label as agent_label
+       FROM permission_prompts pp
+       LEFT JOIN agents a ON pp.agent_id = a.id
+       WHERE pp.task_id IN (${placeholders}) AND pp.status = 'pending'
+       ORDER BY pp.created_at ASC`,
+    )
+    .all(...taskIds) as Array<Record<string, unknown>>;
+}
+
+/**
+ * Bulk-fetch all agents for a set of task ids, ordered by window_index.
+ * Used by the GET /api/tasks list endpoint.
+ */
+export function listAgentsByTasks(taskIds: string[]): Agent[] {
+  if (taskIds.length === 0) return [];
+  const placeholders = taskIds.map(() => '?').join(',');
+  return getDb()
+    .prepare(`SELECT * FROM agents WHERE task_id IN (${placeholders}) ORDER BY window_index`)
+    .all(...taskIds) as Agent[];
+}
+
+/**
+ * Bulk-fetch all user_terminals for a set of task ids, ordered by window_index.
+ * Used by the GET /api/tasks list endpoint.
+ */
+export function listUserTerminalsByTasks(taskIds: string[]): UserTerminal[] {
+  if (taskIds.length === 0) return [];
+  const placeholders = taskIds.map(() => '?').join(',');
+  return getDb()
+    .prepare(
+      `SELECT * FROM user_terminals WHERE task_id IN (${placeholders}) ORDER BY window_index`,
+    )
+    .all(...taskIds) as UserTerminal[];
+}
+
+/** Fetch a single user_terminal by id and task_id. */
+export function getUserTerminalByIdAndTask(
+  terminalId: string,
+  taskId: string,
+): UserTerminal | undefined {
+  return getDb()
+    .prepare('SELECT * FROM user_terminals WHERE id = ? AND task_id = ?')
+    .get(terminalId, taskId) as UserTerminal | undefined;
+}
+
+/** List all agents for a task (all statuses), ordered by window_index. */
+export function listAllAgents(taskId: string): Agent[] {
+  return getDb()
+    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
+    .all(taskId) as Agent[];
+}
+
+/** List all user_terminals for a task, ordered by window_index. */
+export function listUserTerminals(taskId: string): UserTerminal[] {
+  return getDb()
+    .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
+    .all(taskId) as UserTerminal[];
+}
+
 // ─── Agent writes ─────────────────────────────────────────────────────────────
 
 export interface InsertAgentInput {
@@ -77,10 +181,7 @@ export function insertAgent(input: InsertAgentInput): string {
       input.hook_token,
       input.agent ?? null,
     );
-  logger.info(
-    { agent_id: id, task_id: input.task_id, operation: 'insertAgent' },
-    'agent inserted',
-  );
+  logger.info({ agent_id: id, task_id: input.task_id, operation: 'insertAgent' }, 'agent inserted');
   return id;
 }
 
@@ -113,9 +214,7 @@ export function insertAgentWithNotify(input: InsertAgentInput): string {
 
 /** Update the harness_session_id for an agent (called when a new session id is minted on resume/hop). */
 export function setAgentHarnessSessionId(agentId: string, sessionId: string): void {
-  getDb()
-    .prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`)
-    .run(sessionId, agentId);
+  getDb().prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(sessionId, agentId);
   logger.info(
     { agent_id: agentId, operation: 'setAgentHarnessSessionId' },
     'agent harness_session_id updated',
