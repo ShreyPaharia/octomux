@@ -65,40 +65,6 @@ export function findFirstActiveAgent(
 }
 
 /**
- * List all pending permission prompts for a task, joined with agent label.
- * Used by GET /api/tasks/:id to build the pending_prompts array.
- */
-export function listPendingPromptsByTask(taskId: string): Array<Record<string, unknown>> {
-  return getDb()
-    .prepare(
-      `SELECT pp.*, a.label as agent_label
-       FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
-       WHERE pp.task_id = ? AND pp.status = 'pending'
-       ORDER BY pp.created_at ASC`,
-    )
-    .all(taskId) as Array<Record<string, unknown>>;
-}
-
-/**
- * Bulk-fetch pending permission prompts for multiple task ids.
- * Returns all pending rows joined with agent label, ordered by created_at ASC.
- */
-export function listPendingPromptsByTasks(taskIds: string[]): Array<Record<string, unknown>> {
-  if (taskIds.length === 0) return [];
-  const placeholders = taskIds.map(() => '?').join(',');
-  return getDb()
-    .prepare(
-      `SELECT pp.*, a.label as agent_label
-       FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
-       WHERE pp.task_id IN (${placeholders}) AND pp.status = 'pending'
-       ORDER BY pp.created_at ASC`,
-    )
-    .all(...taskIds) as Array<Record<string, unknown>>;
-}
-
-/**
  * Bulk-fetch all agents for a set of task ids, ordered by window_index.
  * Used by the GET /api/tasks list endpoint.
  */
@@ -369,37 +335,4 @@ export function deleteUserTerminal(id: string): void {
   logger.info({ terminal_id: id, operation: 'deleteUserTerminal' }, 'user terminal deleted');
 }
 
-// ─── permission_prompts agent-lifecycle helpers ───────────────────────────────
-
-/**
- * Resolve all pending permission prompts for a task (called on closeTask).
- * Stored here because it's part of agent lifecycle teardown.
- */
-export function resolveTaskPermissionPrompts(taskId: string): void {
-  getDb()
-    .prepare(
-      `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-       WHERE task_id = ? AND status = 'pending'`,
-    )
-    .run(taskId);
-  logger.info(
-    { task_id: taskId, operation: 'resolveTaskPermissionPrompts' },
-    'task permission prompts resolved',
-  );
-}
-
-/**
- * Resolve all pending permission prompts for a single agent (called on stopAgent).
- */
-export function resolveAgentPermissionPrompts(agentId: string): void {
-  getDb()
-    .prepare(
-      `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-       WHERE agent_id = ? AND status = 'pending'`,
-    )
-    .run(agentId);
-  logger.info(
-    { agent_id: agentId, operation: 'resolveAgentPermissionPrompts' },
-    'agent permission prompts resolved',
-  );
-}
+// permission_prompts functions have moved to ./permission-prompts.ts

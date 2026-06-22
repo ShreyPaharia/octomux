@@ -176,14 +176,6 @@ const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
 const healthLogger = childLogger('health');
 
-function safeParseJson(s: string): Record<string, unknown> {
-  try {
-    return JSON.parse(s || '{}');
-  } catch {
-    return {};
-  }
-}
-
 /** Load a task by :id param; respond 404 and return null if missing. */
 function loadTaskOrFail(req: Request, res: Response): Task | null {
   const task = getTaskRepo(req.params.id as string);
@@ -520,7 +512,7 @@ export function setupRoutes(app: Express): void {
     for (const pp of allPrompts) {
       const taskId = pp.task_id as string;
       const list = promptsByTask.get(taskId) || [];
-      list.push({ ...pp, tool_input: safeParseJson(pp.tool_input as string) });
+      list.push({ ...pp });
       promptsByTask.set(taskId, list);
     }
 
@@ -581,10 +573,7 @@ export function setupRoutes(app: Express): void {
       }),
     );
     const pendingPrompts = listPendingPromptsByTask(task.id);
-    const parsedPrompts = pendingPrompts.map((pp) => ({
-      ...pp,
-      tool_input: safeParseJson(pp.tool_input as string),
-    }));
+    const parsedPrompts = pendingPrompts;
     const userTerminals = listUserTerminals(task.id);
     const worktreeRow = task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
     res.json({

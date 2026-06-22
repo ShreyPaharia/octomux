@@ -56,9 +56,11 @@ import {
   deleteUserTerminalsByTask,
   deleteUserTerminal,
   countUserTerminals,
+} from './repositories/index.js';
+import {
   resolveTaskPermissionPrompts,
   resolveAgentPermissionPrompts,
-} from './repositories/index.js';
+} from './repositories/permission-prompts.js';
 
 const logger = childLogger('task-runner');
 
@@ -1316,7 +1318,11 @@ export async function resumeTask(task: Task): Promise<void> {
       }
     }
 
-    updateTaskFields(task.id, { runtime_state: 'setting_up', error: null, user_window_index: null });
+    updateTaskFields(task.id, {
+      runtime_state: 'setting_up',
+      error: null,
+      user_window_index: null,
+    });
 
     deleteUserTerminalsByTask(task.id);
 

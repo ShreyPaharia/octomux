@@ -15,14 +15,11 @@ import {
   stopAgent,
   hopAgentToTask,
   listAgentsByTasks,
-  listPendingPromptsByTasks,
   listUserTerminalsByTasks,
   countUserTerminals,
   insertUserTerminal,
   deleteUserTerminalsByTask,
   deleteUserTerminal,
-  resolveTaskPermissionPrompts,
-  resolveAgentPermissionPrompts,
 } from './agent-runtime.js';
 import type Database from 'better-sqlite3';
 
@@ -364,7 +361,7 @@ describe('repositories/agent-runtime', () => {
 
   // ─── bulk IN-clause readers ───────────────────────────────────────────────────
 
-  describe('bulk readers (listAgentsByTasks / listPendingPromptsByTasks / listUserTerminalsByTasks)', () => {
+  describe('bulk readers (listAgentsByTasks / listUserTerminalsByTasks)', () => {
     it('returns rows across multiple tasks', () => {
       insertAgent({
         task_id: 'task-01',
@@ -392,7 +389,6 @@ describe('repositories/agent-runtime', () => {
 
     it('returns [] for an empty id list (no invalid IN () SQL)', () => {
       expect(listAgentsByTasks([])).toEqual([]);
-      expect(listPendingPromptsByTasks([])).toEqual([]);
       expect(listUserTerminalsByTasks([])).toEqual([]);
     });
   });
@@ -507,90 +503,6 @@ describe('repositories/agent-runtime', () => {
         .prepare('SELECT id FROM user_terminals WHERE task_id = ?')
         .all('task-01') as Array<{ id: string }>;
       expect(remaining.map((r) => r.id)).toContain(ut2.id);
-    });
-  });
-
-  // ─── permission_prompts helpers ───────────────────────────────────────────────
-
-  describe('resolveTaskPermissionPrompts', () => {
-    it('resolves pending prompts for a task', () => {
-      const agentId = insertAgent({
-        task_id: 'task-01',
-        window_index: 0,
-        label: 'A',
-        harness_id: 'claude-code',
-        hook_token: '',
-      });
-      db.prepare(
-        `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
-         VALUES ('pp1', 'task-01', ?, 'sess', 'Bash', '{}', 'pending', datetime('now'))`,
-      ).run(agentId);
-      resolveTaskPermissionPrompts('task-01');
-      const pp = db.prepare('SELECT status FROM permission_prompts WHERE id = ?').get('pp1') as {
-        status: string;
-      };
-      expect(pp.status).toBe('resolved');
-    });
-
-    it('does not affect already-resolved prompts', () => {
-      db.prepare(
-        `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
-         VALUES ('pp2', 'task-01', NULL, 'sess', 'Bash', '{}', 'resolved', datetime('now'))`,
-      ).run();
-      resolveTaskPermissionPrompts('task-01');
-      const pp = db.prepare('SELECT status FROM permission_prompts WHERE id = ?').get('pp2') as {
-        status: string;
-      };
-      expect(pp.status).toBe('resolved');
-    });
-  });
-
-  describe('resolveAgentPermissionPrompts', () => {
-    it('resolves pending prompts for a specific agent', () => {
-      const agentId = insertAgent({
-        task_id: 'task-01',
-        window_index: 0,
-        label: 'A',
-        harness_id: 'claude-code',
-        hook_token: '',
-      });
-      db.prepare(
-        `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
-         VALUES ('pp3', 'task-01', ?, 'sess', 'Bash', '{}', 'pending', datetime('now'))`,
-      ).run(agentId);
-      resolveAgentPermissionPrompts(agentId);
-      const pp = db.prepare('SELECT status FROM permission_prompts WHERE id = ?').get('pp3') as {
-        status: string;
-      };
-      expect(pp.status).toBe('resolved');
-    });
-
-    it('does not resolve prompts belonging to a different agent', () => {
-      const agent1 = insertAgent({
-        id: 'ag1',
-        task_id: 'task-01',
-        window_index: 0,
-        label: 'A1',
-        harness_id: 'claude-code',
-        hook_token: '',
-      });
-      const agent2 = insertAgent({
-        id: 'ag2',
-        task_id: 'task-01',
-        window_index: 1,
-        label: 'A2',
-        harness_id: 'claude-code',
-        hook_token: '',
-      });
-      db.prepare(
-        `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
-         VALUES ('pp4', 'task-01', ?, 'sess', 'Bash', '{}', 'pending', datetime('now'))`,
-      ).run(agent2);
-      resolveAgentPermissionPrompts(agent1);
-      const pp = db.prepare('SELECT status FROM permission_prompts WHERE id = ?').get('pp4') as {
-        status: string;
-      };
-      expect(pp.status).toBe('pending');
     });
   });
 });

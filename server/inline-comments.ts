@@ -216,3 +216,82 @@ export function deleteComment(id: string): boolean {
   }
   return false;
 }
+
+// ─── Staleness helpers ────────────────────────────────────────────────────────
+
+export interface StalenessCandidate {
+  id: string;
+  file_path: string;
+  line: number;
+  side: 'old' | 'new';
+  original_commit_sha: string;
+}
+
+/**
+ * List draft or accepted comments for a task whose original_commit_sha differs
+ * from newHeadSha. Used by markStaleDrafts in review-staleness.ts.
+ */
+export function listDraftAcceptedByTask(taskId: string, newHeadSha: string): StalenessCandidate[] {
+  return getDb()
+    .prepare(
+      `SELECT id, file_path, line, side, original_commit_sha
+         FROM inline_comments
+        WHERE task_id = ?
+          AND status IN ('draft', 'accepted')
+          AND original_commit_sha != ?`,
+    )
+    .all(taskId, newHeadSha) as StalenessCandidate[];
+}
+
+/**
+ * List published comments for a task where auto_resolved_at is still NULL.
+ * Used by autoResolvePublished in review-staleness.ts.
+ */
+export function listPublishedAutoResolveCandidates(taskId: string): StalenessCandidate[] {
+  return getDb()
+    .prepare(
+      `SELECT id, file_path, line, side, original_commit_sha
+         FROM inline_comments
+        WHERE task_id = ?
+          AND status = 'published'
+          AND auto_resolved_at IS NULL`,
+    )
+    .all(taskId) as StalenessCandidate[];
+}
+
+/**
+ * Return the set of re_flag_of comment ids for comments in a specific run.
+ * Used by autoResolvePublished to skip already-re-flagged published comments.
+ */
+export function listReflagsInRun(taskId: string, runId: string): Set<string> {
+  const rows = getDb()
+    .prepare(
+      `SELECT re_flag_of FROM inline_comments
+        WHERE task_id = ? AND review_run_id = ? AND re_flag_of IS NOT NULL`,
+    )
+    .all(taskId, runId) as Array<{ re_flag_of: string }>;
+  return new Set(rows.map((r) => r.re_flag_of));
+}
+
+/**
+ * Mark a single comment as stale (status = 'stale').
+ * Only transitions draft or accepted; no-ops if already stale/published/resolved.
+ */
+export function markCommentStale(id: string): void {
+  getDb().prepare(`UPDATE inline_comments SET status = 'stale' WHERE id = ?`).run(id);
+}
+
+/**
+ * Set auto_resolved_at + auto_resolved_reason on a published comment.
+ * Used by autoResolvePublished when the line range has been modified.
+ */
+export function setCommentAutoResolved(id: string, reason: string): void {
+  getDb()
+    .prepare(
+      `UPDATE inline_comments
+          SET auto_resolved_at = datetime('now'),
+              auto_resolved_reason = ?
+        WHERE id = ?`,
+    )
+    .run(reason, id);
+}

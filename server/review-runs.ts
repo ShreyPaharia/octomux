@@ -79,3 +79,71 @@ export function failRun(id: string, error: string): void {
 export function setWalkthrough(id: string, walkthroughJson: string): void {
   getDb().prepare(`UPDATE review_runs SET walkthrough = ? WHERE id = ?`).run(walkthroughJson, id);
 }
+
+/**
+ * Fetch the pr_head_sha for a review_run (used by staleness checks).
+ */
+export function getReviewRunHeadSha(id: string): string | undefined {
+  const row = getDb().prepare(`SELECT pr_head_sha FROM review_runs WHERE id = ?`).get(id) as
+    | { pr_head_sha: string }
+    | undefined;
+  return row?.pr_head_sha;
+}
+
+export interface StuckReviewRun {
+  id: string;
+  task_id: string;
+}
+
+/**
+ * Find review_runs that have been 'running' longer than timeoutMinutes without
+ * producing a walkthrough or any inline comments since they started.
+ * Used by poller.sweepStuckReviewRuns.
+ */
+export function findStuckReviewRuns(timeoutMinutes: number): StuckReviewRun[] {
+  return getDb()
+    .prepare(
+      `SELECT rr.id, rr.task_id FROM review_runs rr
+        WHERE rr.status = 'running'
+          AND rr.started_at < datetime('now', ?)
+          AND rr.walkthrough IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM inline_comments ic
+             WHERE ic.review_run_id = rr.id
+               AND ic.created_at > rr.started_at
+          )`,
+    )
+    .all(`-${timeoutMinutes} minutes`) as StuckReviewRun[];
+}
+
+/**
+ * Fail a review_run — set status='failed', error, completed_at.
+ */
+export function failReviewRunById(id: string, error: string): void {
+  getDb()
+    .prepare(
+      `UPDATE review_runs
+          SET status = 'failed',
+              error = ?,
+              completed_at = datetime('now')
+        WHERE id = ?`,
+    )
+    .run(error, id);
+}
+
+/**
+ * Atomically claim the deep-review handoff for a task:
+ * flip deep_review_attached 0→1 only when a walkthrough exists and it's still
+ * running and not yet claimed.
+ * Returns the number of rows changed (1 = claimed, 0 = already claimed or not eligible).
+ */
+export function claimDeepReviewAttach(taskId: string): number {
+  const info = getDb()
+    .prepare(
+      `UPDATE review_runs SET deep_review_attached = 1
+         WHERE task_id = ? AND walkthrough IS NOT NULL AND status = 'running'
+               AND deep_review_attached = 0`,
+    )
+    .run(taskId);
+  return info.changes;
+}
