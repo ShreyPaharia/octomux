@@ -6,7 +6,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { octomuxRoot } from './octomux-root.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { getDb } from './db.js';
+import { getDb, getDataDir } from './db.js';
 import { childLogger } from './logger.js';
 import { getNeedsYou, getActivity } from './inbox.js';
 import { execFile as execFileCb } from 'child_process';
@@ -130,6 +130,7 @@ import { fireHook, getTaskHookExecutions } from './hook-dispatcher.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
+const healthLogger = childLogger('health');
 
 const TERMINALS_BY_TASK_SQL =
   'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index';
@@ -270,6 +271,38 @@ function augmentDashboardSettings(settings: OctomuxSettings): OctomuxSettings & 
 export function setupRoutes(app: Express): void {
   app.use('/api/hooks', hookRoutes);
   mountArtifactEndpoint(app);
+
+  // GET /api/health — readiness probe: DB reachability, uptime, running tasks
+  app.get('/api/health', (_req: Request, res: Response) => {
+    const uptime = process.uptime();
+    const data_dir = getDataDir();
+
+    let db: { ok: true } | { ok: false; error: string };
+    let running_tasks = 0;
+    try {
+      const dbInstance = getDb();
+      dbInstance.prepare('SELECT 1 AS ok').get();
+      db = { ok: true };
+      const row = dbInstance
+        .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE runtime_state = 'running'`)
+        .get() as { n: number };
+      running_tasks = row.n;
+    } catch (err) {
+      db = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const status = db.ok ? 'ok' : 'degraded';
+    if (db.ok) {
+      healthLogger.info({ operation: 'health', status, db_ok: true, running_tasks }, 'health check');
+    } else {
+      healthLogger.warn(
+        { operation: 'health', status, db_ok: false, error: db.error },
+        'health check degraded',
+      );
+    }
+
+    res.status(db.ok ? 200 : 503).json({ status, uptime, db, running_tasks, data_dir });
+  });
 
   // GET /api/harnesses — list registered harness implementations
   app.get('/api/harnesses', (_req: Request, res: Response) => {

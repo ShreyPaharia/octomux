@@ -19,6 +19,16 @@ const DB_PATH = process.env.OCTOMUX_DB_PATH ?? path.join(DB_DIR, 'tasks.db');
 /** Path to the old package-relative database (for migration detection). */
 const OLD_DB_PATH = path.join(__dirname, '..', 'data', 'tasks.db');
 
+/**
+ * Absolute path to the octomux data directory (the directory holding the SQLite
+ * file). Resolved from the same logic as the DB path so prod (`~/.octomux/data`),
+ * dev (`./data`), and `OCTOMUX_DB_PATH` overrides all agree. Single source of
+ * truth for consumers that need to report or locate the data dir.
+ */
+export function getDataDir(): string {
+  return path.dirname(DB_PATH);
+}
+
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS worktrees (
     id            TEXT PRIMARY KEY,
