@@ -293,7 +293,10 @@ export function setupRoutes(app: Express): void {
 
     const status = db.ok ? 'ok' : 'degraded';
     if (db.ok) {
-      healthLogger.info({ operation: 'health', status, db_ok: true, running_tasks }, 'health check');
+      healthLogger.info(
+        { operation: 'health', status, db_ok: true, running_tasks },
+        'health check',
+      );
     } else {
       healthLogger.warn(
         { operation: 'health', status, db_ok: false, error: db.error },
