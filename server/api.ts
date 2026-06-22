@@ -20,6 +20,7 @@ import { router as reviewRunsRouter } from './routes/review-runs.js';
 import { router as commentsRouter } from './routes/comments.js';
 import { router as diffsRouter } from './routes/diffs.js';
 import { router as tasksRouter } from './routes/tasks.js';
+import { router as taskWorkflowRouter } from './routes/task-workflow.js';
 import { router as taskAgentsRouter } from './routes/task-agents.js';
 import { router as worktreesRouter } from './routes/worktrees.js';
 
@@ -46,6 +47,7 @@ export function setupRoutes(app: Express): void {
   app.use(commentsRouter);
   app.use(diffsRouter);
   app.use(tasksRouter);
+  app.use(taskWorkflowRouter);
   app.use(taskAgentsRouter);
   app.use(worktreesRouter);
 

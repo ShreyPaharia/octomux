@@ -5,8 +5,25 @@
 import type { Request, Response } from 'express';
 import { getTask as getTaskRepo, listAllAgents, listUserTerminals } from '../repositories/index.js';
 import { findReviewTaskByPrNumber, findReviewTaskBySource } from '../repositories/index.js';
-import type { Task, DerivedTaskStatus } from '../types.js';
+import { nanoid } from 'nanoid';
+import fs from 'fs';
+import type {
+  Task,
+  DerivedTaskStatus,
+  CreateTaskRequest,
+  UpdateTaskRequest,
+  RunMode,
+} from '../types.js';
+import { RUN_MODES } from '../types.js';
 import type { OctomuxSettings } from '../settings.js';
+import { generateTitleAndDescription } from '../title-gen.js';
+import { validateAgentName } from '../harnesses/types.js';
+import { getHarness } from '../harnesses/index.js';
+import {
+  updateTaskFields,
+  insertWorktree as insertWorktreeRepo,
+  updateWorktreeFields,
+} from '../repositories/index.js';
 
 /** Load a task by :id param; respond 404 and return null if missing. */
 export function loadTaskOrFail(req: Request, res: Response): Task | null {
@@ -109,4 +126,182 @@ export function augmentDashboardSettings(settings: OctomuxSettings): OctomuxSett
     dangerouslySkipPermissions: typeof dsp === 'boolean' ? dsp : Boolean(dsp),
     claudeFlags: typeof flagsRaw === 'string' ? flagsRaw : '',
   };
+}
+
+/**
+ * Validate the body of POST /api/tasks (create task).
+ * Returns `{ status, message }` if validation fails, or `null` if valid.
+ * Also derives and returns `storedRepoPath` and `storedWorktree` on success.
+ */
+export function validateCreateTaskBody(
+  body: CreateTaskRequest,
+  runMode: RunMode,
+): { status: number; message: string } | null {
+  if ((!body.title || !body.description) && !body.initial_prompt) {
+    return { status: 400, message: 'title and description are required' };
+  }
+  if (!RUN_MODES.includes(runMode)) {
+    return { status: 400, message: `invalid run_mode: ${String(runMode)}` };
+  }
+
+  // Per-mode field requirements
+  if (runMode === 'new' || runMode === 'none') {
+    if (!body.repo_path) {
+      return { status: 400, message: `repo_path is required for run_mode=${runMode}` };
+    }
+  }
+  if (runMode === 'existing') {
+    if (!body.worktree_path) {
+      return { status: 400, message: 'worktree_path is required for run_mode=existing' };
+    }
+    if (body.base_branch) {
+      return { status: 400, message: 'base_branch is not allowed for run_mode=existing' };
+    }
+  }
+  if (runMode === 'none') {
+    if (body.branch || body.worktree_path) {
+      return { status: 400, message: 'branch and worktree_path are not allowed for run_mode=none' };
+    }
+    // base_branch is allowed for none mode (triggers branch switch at setup)
+  }
+  if (runMode === 'scratch') {
+    if (body.repo_path || body.base_branch || body.branch || body.worktree_path) {
+      return {
+        status: 400,
+        message:
+          'repo_path, base_branch, branch, worktree_path are not allowed for run_mode=scratch',
+      };
+    }
+  }
+
+  if (body.agent != null) {
+    try {
+      validateAgentName(body.agent);
+    } catch (err) {
+      return { status: 400, message: (err as Error).message };
+    }
+  }
+
+  if (body.harness_id != null) {
+    try {
+      getHarness(body.harness_id);
+    } catch (err) {
+      return { status: 400, message: (err as Error).message };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Apply draft field updates from PATCH /api/tasks/:id body.
+ * Validates fields and writes to DB. Returns `{ status, message }` on error, `null` on success.
+ */
+export function applyDraftUpdates(
+  task: Task,
+  body: UpdateTaskRequest,
+): { status: number; message: string } | null {
+  const isDraft = task.runtime_state === 'idle';
+  if (!isDraft) {
+    return { status: 400, message: 'Can only edit fields on draft tasks' };
+  }
+  if (body.title !== undefined && !body.title.trim()) {
+    return { status: 400, message: 'title is required' };
+  }
+  if (body.description !== undefined && !body.description.trim()) {
+    return { status: 400, message: 'description is required' };
+  }
+  if (body.repo_path !== undefined) {
+    if (!body.repo_path.trim()) {
+      return { status: 400, message: 'repo_path is required' };
+    }
+    if (!fs.existsSync(body.repo_path)) {
+      return { status: 400, message: 'repo_path does not exist' };
+    }
+  }
+  if (body.run_mode !== undefined && !RUN_MODES.includes(body.run_mode)) {
+    return { status: 400, message: `invalid run_mode: ${String(body.run_mode)}` };
+  }
+
+  // Route updates between tasks (title/description/initial_prompt) and
+  // worktrees (repo_path/branch/base_branch/path/mode).
+  const taskPatch: Partial<Record<string, unknown>> = {};
+  for (const key of ['title', 'description', 'initial_prompt'] as const) {
+    if (body[key] !== undefined) {
+      taskPatch[key] = body[key] ?? null;
+    }
+  }
+  if (Object.keys(taskPatch).length > 0) {
+    updateTaskFields(task.id, taskPatch);
+  }
+
+  const worktreePatch: Partial<Record<string, unknown>> = {};
+  if (body.repo_path !== undefined) worktreePatch['repo_path'] = body.repo_path ?? null;
+  if (body.branch !== undefined) worktreePatch['branch'] = body.branch ?? null;
+  if (body.base_branch !== undefined) worktreePatch['base_branch'] = body.base_branch ?? null;
+  if (body.worktree_path !== undefined) worktreePatch['path'] = body.worktree_path ?? '';
+  if (body.run_mode !== undefined) worktreePatch['mode'] = body.run_mode;
+
+  if (Object.keys(worktreePatch).length > 0) {
+    let wtId = task.worktree_id;
+    if (!wtId) {
+      // Materialise a placeholder worktree row for this draft; fields get
+      // refined as the user edits or at setup time.
+      wtId = nanoid(12);
+      insertWorktreeRepo({
+        id: wtId,
+        path: '',
+        mode: body.run_mode ?? task.run_mode ?? 'new',
+        status: 'available',
+      });
+      updateTaskFields(task.id, { worktree_id: wtId });
+    }
+    updateWorktreeFields(wtId, worktreePatch);
+  }
+
+  return null;
+}
+
+/**
+ * Resolve the task title and description from the request body.
+ * Fast path: derives from initial_prompt locally.
+ * Optional: if OCTOMUX_AI_TASK_NAMING=1, calls Claude CLI for polish.
+ */
+export async function resolveTaskTitleAndDescription(body: {
+  title?: string;
+  description?: string;
+  initial_prompt?: string;
+}): Promise<{ resolvedTitle: string; resolvedDescription: string }> {
+  const hadExplicitTitle = Boolean(body.title?.trim());
+  const hadExplicitDescription = Boolean(body.description?.trim());
+  let resolvedTitle = body.title?.trim();
+  let resolvedDescription = body.description?.trim();
+
+  const initialPromptTrimmed = body.initial_prompt?.trim() ?? '';
+  if (initialPromptTrimmed) {
+    const firstLine = initialPromptTrimmed.split('\n')[0] ?? '';
+    if (!resolvedTitle) resolvedTitle = firstLine.slice(0, 80) || 'Untitled task';
+    if (!resolvedDescription) resolvedDescription = initialPromptTrimmed;
+  }
+
+  const aiNamingEnv = process.env.OCTOMUX_AI_TASK_NAMING ?? '';
+  const aiTaskNamingEnabled = aiNamingEnv === '1' || aiNamingEnv.toLowerCase() === 'true';
+  if (
+    initialPromptTrimmed &&
+    aiTaskNamingEnabled &&
+    (!hadExplicitTitle || !hadExplicitDescription)
+  ) {
+    const generated = await generateTitleAndDescription(body.initial_prompt!);
+    if (!hadExplicitTitle) resolvedTitle = generated.title;
+    if (!hadExplicitDescription) resolvedDescription = generated.description;
+  }
+
+  resolvedTitle =
+    resolvedTitle ||
+    initialPromptTrimmed.split('\n')[0]?.slice(0, 80) ||
+    body.initial_prompt?.split('\n')[0]?.slice(0, 80) ||
+    'Untitled task';
+  resolvedDescription = resolvedDescription || body.initial_prompt || '';
+
+  return { resolvedTitle, resolvedDescription };
 }
