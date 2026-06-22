@@ -3,9 +3,7 @@ import { spawn, type IPty } from 'node-pty';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
-import type { Task } from './types.js';
-import { SELECT_TASK_SQL } from './task-select.js';
+import { getTask, getChatAgentTmuxSession } from './repositories/index.js';
 import { execTmux, tmuxSpawnSpec } from './tmux-bin.js';
 
 interface TerminalConnection {
@@ -168,8 +166,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
     pendingMessages.push(data);
   });
 
-  const db = getDb();
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
 
   if (!task || !task.tmux_session) {
     ws.close(4004, 'Task not found or no tmux session');
@@ -202,10 +199,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
 }
 
 function handleChatConnection(ws: WebSocket, chatId: string): void {
-  const db = getDb();
-  const row = db
-    .prepare(`SELECT tmux_session FROM agents WHERE id = ? AND task_id IS NULL`)
-    .get(chatId) as { tmux_session: string | null } | undefined;
+  const row = getChatAgentTmuxSession(chatId);
   if (!row || !row.tmux_session) {
     ws.close(4004, 'Chat not found');
     return;

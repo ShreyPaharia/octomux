@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
-import { getDb } from './db.js';
+import { getDb } from '../db.js';
 
 const execFile = promisify(execFileCb);
 

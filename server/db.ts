@@ -319,6 +319,11 @@ export function setDb(instance: Database.Database): void {
   db = instance;
 }
 
+/** Lightweight DB reachability probe used by the health endpoint. */
+export function pingDb(): void {
+  getDb().prepare('SELECT 1 AS ok').get();
+}
+
 /** Initialize a database with schema and pragmas. */
 export function initDb(instance: Database.Database): void {
   instance.pragma('journal_mode = WAL');

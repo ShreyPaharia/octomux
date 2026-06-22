@@ -1,6 +1,9 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
-import { getDb } from './db.js';
+import {
+  readGithubLogin as readGithubLoginRepo,
+  writeGithubLogin as writeGithubLoginRepo,
+} from './repositories/index.js';
 import { childLogger } from './logger.js';
 
 const logger = childLogger('github-login');
@@ -12,10 +15,7 @@ let cachedLogin: string | null | undefined;
 export function readGithubLogin(): string | null {
   if (process.env.OCTOMUX_GITHUB_LOGIN) return process.env.OCTOMUX_GITHUB_LOGIN;
   if (cachedLogin !== undefined) return cachedLogin;
-  const row = getDb().prepare('SELECT github_login FROM config WHERE id = 1').get() as
-    | { github_login: string | null }
-    | undefined;
-  cachedLogin = row?.github_login ?? null;
+  cachedLogin = readGithubLoginRepo();
   return cachedLogin;
 }
 
@@ -25,12 +25,7 @@ export function resetGithubLoginCache(): void {
 }
 
 function writeLogin(login: string): void {
-  getDb()
-    .prepare(
-      `INSERT INTO config (id, github_login, updated_at) VALUES (1, ?, datetime('now'))
-       ON CONFLICT(id) DO UPDATE SET github_login = excluded.github_login, updated_at = datetime('now')`,
-    )
-    .run(login);
+  writeGithubLoginRepo(login);
   cachedLogin = login;
 }
 

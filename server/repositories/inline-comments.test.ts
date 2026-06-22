@@ -8,8 +8,8 @@ import {
   updateCommentBody,
   deleteComment,
 } from './inline-comments.js';
-import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
-import { getDb } from './db.js';
+import { createTestDb, insertTask, insertAgent } from '../test-helpers.js';
+import { getDb } from '../db.js';
 
 describe('inline_comments DAO', () => {
   beforeEach(() => {

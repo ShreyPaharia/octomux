@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTestDb, execFileOk, execFileFail } from './test-helpers.js';
+import { createTestDb, execFileOk, execFileFail } from '../test-helpers.js';
 import type Database from 'better-sqlite3';
 
 // Mock child_process before importing the module under test

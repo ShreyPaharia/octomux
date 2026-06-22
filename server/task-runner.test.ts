@@ -54,7 +54,7 @@ vi.mock('./settings.js', async () => {
   };
 });
 
-vi.mock('./repo-config.js', () => ({
+vi.mock('./repositories/repo-config.js', () => ({
   getOrCreateRepoConfig: vi.fn().mockResolvedValue({
     repo_path: '/repo',
     base_branch: null,

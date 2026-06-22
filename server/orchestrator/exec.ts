@@ -31,14 +31,13 @@
  * the artifact endpoint (§6.5); on failure the UI picks prose-fallback rendering.
  */
 
-import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
-import { startTask, closeTask, deleteTask, resumeTask, addAgent } from '../task-runner.js';
+import { closeTask, deleteTask, resumeTask, addAgent } from '../task-runner.js';
 import { sendMessageToAgent } from '../tmux-input.js';
-import { upsertManagedTask } from './store.js';
 import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
 import { WORKFLOW_STATUSES } from '../types.js';
+import { createTask } from '../services/task-service.js';
 import type { Task, Agent, RunMode, WorkflowStatus } from '../types.js';
 import type {
   CreateTaskInput as CreateTaskInputFromSchema,
@@ -385,24 +384,9 @@ Then end your turn.
  * Returns only the task_id pointer — never plan/diff/file body contents.
  */
 export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskResult> {
-  const db = getDb();
-  const id = nanoid(12);
   const runMode: RunMode = input.run_mode ?? 'new';
   const isPlanning = input.kind === PLAN_KIND;
   const isWorkflow = input.kind === WORKFLOW_KIND;
-
-  logger.info(
-    {
-      task_id: id,
-      operation: 'runCreateTask',
-      kind: input.kind ?? 'default',
-      run_mode: runMode,
-      model: input.model ?? null,
-      effort: input.effort ?? null,
-      conversation_id: input.conversation_id ?? null,
-    },
-    'runCreateTask: start',
-  );
 
   // Resolve title and description from input, falling back to initial_prompt.
   const initialPromptTrimmed = input.initial_prompt?.trim() ?? '';
@@ -440,57 +424,55 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
     storedWorktree = null;
   }
 
-  const worktreeId = nanoid(12);
-  db.prepare(
-    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use')`,
-  ).run(
-    worktreeId,
-    storedWorktree ?? storedRepoPath,
-    storedRepoPath || null,
-    input.branch ?? null,
-    input.base_branch ?? null,
-    null,
-    runMode,
-  );
-
-  db.prepare(
-    `INSERT INTO tasks
-       (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, harness_id, model, notify_task_id)
-     VALUES (?, ?, ?, 'setting_up', 'planned', ?, ?, 'claude-code', ?, ?)`,
-  ).run(
-    id,
-    resolvedTitle,
-    resolvedDescription,
-    resolvedPrompt,
-    worktreeId,
-    input.model ?? null,
-    // notify_task is part of the canonical create_task schema (the MCP tool
-    // advertises it), so persist it like the REST path does — otherwise it's a
-    // false promise (schema↔executor drift).
-    input.notify_task ?? null,
-  );
-
-  const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
-
   // Register in managed_tasks so the supervisor can route events to the
   // owning conversation (spec §6, §9). Only when a conversation is provided.
   // Phase column:
   //   kind:'workflow'  → 'speccing'    (spec → plan → implement in one session)
   //   kind:'plan'      → 'planning'    (plan → await approval → implement)
   //   default          → 'implementing' (implements directly)
-  if (input.conversation_id) {
-    const initialPhase = isWorkflow ? 'speccing' : isPlanning ? 'planning' : 'implementing';
-    upsertManagedTask({
-      conversation_id: input.conversation_id,
-      task_id: id,
-      phase: initialPhase,
-    });
-  }
+  const managedInput = input.conversation_id
+    ? {
+        conversation_id: input.conversation_id,
+        phase: isWorkflow ? 'speccing' : isPlanning ? 'planning' : 'implementing',
+      }
+    : undefined;
 
   logger.info(
     {
-      task_id: id,
+      operation: 'runCreateTask',
+      kind: input.kind ?? 'default',
+      run_mode: runMode,
+      model: input.model ?? null,
+      effort: input.effort ?? null,
+      conversation_id: input.conversation_id ?? null,
+    },
+    'runCreateTask: start',
+  );
+
+  const created = await createTask({
+    resolved_title: resolvedTitle,
+    resolved_description: resolvedDescription,
+    initial_prompt: input.initial_prompt ?? null,
+    resolved_prompt: resolvedPrompt,
+    run_mode: runMode,
+    stored_repo_path: storedRepoPath,
+    staged_path: storedWorktree ?? storedRepoPath,
+    branch: input.branch ?? null,
+    base_branch: input.base_branch ?? null,
+    worktree_status: 'in_use',
+    runtime_state: 'setting_up',
+    workflow_status: 'planned',
+    agent: null,
+    harness_id: 'claude-code',
+    model: input.model ?? null,
+    notify_task_id: input.notify_task ?? null,
+    is_draft: false,
+    managed: managedInput,
+  });
+
+  logger.info(
+    {
+      task_id: created.id,
       operation: 'runCreateTask',
       title: resolvedTitle,
       kind: input.kind ?? 'default',
@@ -500,15 +482,7 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
     'runCreateTask: task created, starting',
   );
 
-  // Fire-and-forget: startTask handles the rest (worktree, tmux, agent).
-  void startTask(created).catch((err: unknown) => {
-    logger.error(
-      { task_id: id, operation: 'runCreateTask', err },
-      'runCreateTask: startTask failed',
-    );
-  });
-
-  return { task_id: id, title: resolvedTitle };
+  return { task_id: created.id, title: resolvedTitle };
 }
 
 // ─── runSendMessage ───────────────────────────────────────────────────────────

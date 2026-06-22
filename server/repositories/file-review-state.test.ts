@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setReviewed, clearReviewed, listReviewState } from './file-review-state.js';
-import { createTestDb, insertTask } from './test-helpers.js';
+import { createTestDb, insertTask } from '../test-helpers.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
 import { execFile } from 'child_process';

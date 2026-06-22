@@ -1,20 +1,16 @@
-import { getDb } from './db.js';
 import { childLogger } from './logger.js';
 import { isAnchorOutdated } from './inline-comments-outdated.js';
-import { SELECT_TASK_SQL } from './task-select.js';
-import type { Task } from './types.js';
+import { getTask } from './repositories/index.js';
+import { getReviewRunHeadSha } from './repositories/review-runs.js';
+import {
+  listDraftAcceptedByTask,
+  listPublishedAutoResolveCandidates,
+  listReflagsInRun,
+  markCommentStale,
+  setCommentAutoResolved,
+} from './repositories/inline-comments.js';
 
 const logger = childLogger('review-staleness');
-
-interface DraftRow {
-  id: string;
-  file_path: string;
-  line: number;
-  side: 'old' | 'new';
-  original_commit_sha: string;
-}
-
-type PublishedRow = DraftRow;
 
 /**
  * Mark drafts/accepted comments stale when the file/line they anchor on has
@@ -23,19 +19,10 @@ type PublishedRow = DraftRow;
  * Idempotent: only flips draft|accepted → stale, never the other way.
  */
 export async function markStaleDrafts(taskId: string, newHeadSha: string): Promise<void> {
-  const db = getDb();
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task || !task.worktree) return;
 
-  const candidates = db
-    .prepare(
-      `SELECT id, file_path, line, side, original_commit_sha
-         FROM inline_comments
-        WHERE task_id = ?
-          AND status IN ('draft', 'accepted')
-          AND original_commit_sha != ?`,
-    )
-    .all(taskId, newHeadSha) as DraftRow[];
+  const candidates = listDraftAcceptedByTask(taskId, newHeadSha);
 
   for (const c of candidates) {
     let outdated: boolean;
@@ -57,7 +44,7 @@ export async function markStaleDrafts(taskId: string, newHeadSha: string): Promi
     }
 
     if (outdated) {
-      db.prepare(`UPDATE inline_comments SET status = 'stale' WHERE id = ?`).run(c.id);
+      markCommentStale(c.id);
       logger.info(
         { task_id: taskId, comment_id: c.id, file: c.file_path, line: c.line },
         'comment marked stale',
@@ -75,35 +62,15 @@ export async function markStaleDrafts(taskId: string, newHeadSha: string): Promi
  * resolved fields. Never un-resolves.
  */
 export async function autoResolvePublished(taskId: string, runId: string): Promise<void> {
-  const db = getDb();
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task || !task.worktree) return;
 
-  const run = db.prepare(`SELECT pr_head_sha FROM review_runs WHERE id = ?`).get(runId) as
-    | { pr_head_sha: string }
-    | undefined;
-  if (!run) return;
+  const prHeadSha = getReviewRunHeadSha(runId);
+  if (prHeadSha === undefined) return;
 
-  const published = db
-    .prepare(
-      `SELECT id, file_path, line, side, original_commit_sha
-         FROM inline_comments
-        WHERE task_id = ?
-          AND status = 'published'
-          AND auto_resolved_at IS NULL`,
-    )
-    .all(taskId) as PublishedRow[];
+  const published = listPublishedAutoResolveCandidates(taskId);
 
-  const reflagSet = new Set(
-    (
-      db
-        .prepare(
-          `SELECT re_flag_of FROM inline_comments
-          WHERE task_id = ? AND review_run_id = ? AND re_flag_of IS NOT NULL`,
-        )
-        .all(taskId, runId) as { re_flag_of: string }[]
-    ).map((r) => r.re_flag_of),
-  );
+  const reflagSet = listReflagsInRun(taskId, runId);
 
   for (const p of published) {
     if (reflagSet.has(p.id)) continue;
@@ -113,7 +80,7 @@ export async function autoResolvePublished(taskId: string, runId: string): Promi
       outdated = await isAnchorOutdated({
         worktree: task.worktree,
         oldSha: p.original_commit_sha,
-        newSha: run.pr_head_sha,
+        newSha: prHeadSha,
         file: p.file_path,
         line: p.line,
         side: p.side,
@@ -128,12 +95,7 @@ export async function autoResolvePublished(taskId: string, runId: string): Promi
 
     if (!outdated) continue;
 
-    db.prepare(
-      `UPDATE inline_comments
-          SET auto_resolved_at = datetime('now'),
-              auto_resolved_reason = ?
-        WHERE id = ?`,
-    ).run(`line range modified in ${run.pr_head_sha}; no re-flag in run ${runId}`, p.id);
+    setCommentAutoResolved(p.id, `line range modified in ${prHeadSha}; no re-flag in run ${runId}`);
     logger.info(
       { task_id: taskId, comment_id: p.id, run_id: runId },
       'published comment auto-resolved',

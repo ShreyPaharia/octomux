@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { addLearning, touchLearning } from '../../server/review-learnings.js';
+import { addLearning, touchLearning } from '../../server/repositories/review-learnings.js';
 
 export async function runLearning(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;

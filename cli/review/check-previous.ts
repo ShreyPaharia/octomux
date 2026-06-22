@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
-import { addComment } from '../../server/inline-comments.js';
-import type { InlineCommentRow } from '../../server/inline-comments.js';
+import { addComment } from '../../server/repositories/inline-comments.js';
+import type { InlineCommentRow } from '../../server/repositories/inline-comments.js';
 import type { CommentSeverity } from '../../server/types.js';
 
 const VALID = ['resolved', 'still_applies', 'partial', 'unclear'] as const;

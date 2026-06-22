@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { createTestDb } from '../../server/test-helpers.js';
 import { runWalkthrough } from './walkthrough.js';
-import { getReviewRun } from '../../server/review-runs.js';
+import { getReviewRun } from '../../server/repositories/review-runs.js';
 
 vi.mock('../../server/diff.js', async (importOriginal) => {
   const actual = (await importOriginal()) as object;

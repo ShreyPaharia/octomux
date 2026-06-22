@@ -5,22 +5,62 @@ import path from 'path';
 import fs from 'fs';
 import { octomuxRoot } from './octomux-root.js';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
 import { getSettings } from './settings.js';
 import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
-import { getOrCreateRepoConfig } from './repo-config.js';
+import { getOrCreateRepoConfig } from './repositories/repo-config.js';
 import { inferRefs } from './ref-inference.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
 import { broadcast } from './events.js';
 import { isOrchestratorManaged } from './orchestrator/store.js';
 import { mcpServerInvocation } from './orchestrator/runner.js';
-import type { RepoConfig } from './repo-config.js';
+import type { RepoConfig } from './repositories/repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
 import { shellQuoteSingle } from './shell-quote.js';
 import { computeMergeBase } from './git-commits.js';
+import {
+  listSettingUpTasks,
+  setRuntimeState,
+  updateTaskFields,
+  setWorktreeId,
+  setTmuxSession,
+  markTaskRunning,
+  softDeleteTask as softDeleteTaskRepo,
+  unlinkWorktree,
+  insertTaskExternalRefIfAbsent,
+  getTask as getTaskRepo,
+  getTaskTmuxSession,
+  getTaskModel,
+  listActiveScratchTaskIds,
+  updateWorktreeOnSetup,
+  insertWorktreeInUse,
+  releaseWorktree,
+  deleteWorktree,
+  getWorktree,
+  insertAgent as insertAgentRepo,
+  insertAgentWithNotify,
+  listActiveAgents,
+  listStoppedAgents,
+  getTaskHookToken,
+  setAgentHarnessSessionId,
+  setAgentWindowRunning,
+  stopAllAgents,
+  stopRunningAgents,
+  stopRunningAgentsForTask,
+  stopAgent as stopAgentRepo,
+  hopAgentToTask,
+  getAgent,
+  insertUserTerminal as insertUserTerminalRepo,
+  deleteUserTerminalsByTask,
+  deleteUserTerminal,
+  countUserTerminals,
+} from './repositories/index.js';
+import {
+  resolveTaskPermissionPrompts,
+  resolveAgentPermissionPrompts,
+} from './repositories/permission-prompts.js';
 
 const logger = childLogger('task-runner');
 
@@ -224,10 +264,7 @@ export function slugifyTitle(title: string, id: string): string {
  * to status='error' with a clear error message. Intended to run once at boot.
  */
 export async function reconcileOrphanSettingUp(): Promise<void> {
-  const db = getDb();
-  const rows = db
-    .prepare(`SELECT id, tmux_session FROM tasks WHERE runtime_state = 'setting_up'`)
-    .all() as Array<{ id: string; tmux_session: string | null }>;
+  const rows = listSettingUpTasks();
 
   for (const row of rows) {
     let alive = false;
@@ -240,9 +277,7 @@ export async function reconcileOrphanSettingUp(): Promise<void> {
       }
     }
     if (!alive) {
-      db.prepare(
-        `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
-      ).run('orphan setting_up on boot', row.id);
+      setRuntimeState(row.id, 'error', 'orphan setting_up on boot');
       logger.warn(
         { task_id: row.id, operation: 'reconcileOrphanSettingUp' },
         'transitioned orphan setting_up task to error',
@@ -260,19 +295,7 @@ export async function gcScratchDirs(): Promise<void> {
   const root = scratchRoot();
   if (!fs.existsSync(root)) return;
 
-  const db = getDb();
-  const alive = new Set(
-    (
-      db
-        .prepare(
-          `SELECT t.id AS id FROM tasks t
-             LEFT JOIN worktrees w ON t.worktree_id = w.id
-            WHERE w.mode = 'scratch' AND t.runtime_state IN ('idle','setting_up','running')
-              AND t.deleted_at IS NULL`,
-        )
-        .all() as Array<{ id: string }>
-    ).map((r) => r.id),
-  );
+  const alive = new Set(listActiveScratchTaskIds().map((r) => r.id));
 
   const entries = fs.readdirSync(root, { withFileTypes: true });
   for (const entry of entries) {
@@ -665,7 +688,6 @@ function writeWorkerMcpConfig(
 // ─── Task lifecycle ──────────────────────────────────────────────────────────
 
 export async function startTask(task: Task): Promise<void> {
-  const db = getDb();
   const id = task.id;
   const session = `octomux-agent-${id}`;
   const runMode: RunMode = task.run_mode;
@@ -703,42 +725,28 @@ export async function startTask(task: Task): Promise<void> {
     // Phase 2a: worktrees is the source of truth. If the task already has a
     // linked worktree row (existing/none/draft-edited), update it. Otherwise
     // create a fresh one.
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'setting_up', updated_at = datetime('now') WHERE id = ?`,
-    ).run(id);
+    setRuntimeState(id, 'setting_up');
 
     const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
     if (task.worktree_id) {
-      db.prepare(
-        `UPDATE worktrees
-            SET path = ?, repo_path = ?, branch = ?, base_branch = ?, base_sha = ?,
-                mode = ?, status = 'in_use', last_used_at = datetime('now')
-          WHERE id = ?`,
-      ).run(
-        setup.worktreePath,
-        worktreeRepoPath,
-        setup.branch,
-        setup.baseBranch,
-        setup.baseSha,
-        runMode,
-        task.worktree_id,
-      );
+      updateWorktreeOnSetup(task.worktree_id, {
+        path: setup.worktreePath,
+        repo_path: worktreeRepoPath,
+        branch: setup.branch,
+        base_branch: setup.baseBranch,
+        base_sha: setup.baseSha,
+        mode: runMode,
+      });
     } else {
-      const worktreeId = nanoid(12);
-      db.prepare(
-        `INSERT INTO worktrees
-           (id, path, repo_path, branch, base_branch, base_sha, mode, status, last_used_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use', datetime('now'))`,
-      ).run(
-        worktreeId,
-        setup.worktreePath,
-        worktreeRepoPath,
-        setup.branch,
-        setup.baseBranch,
-        setup.baseSha,
-        runMode,
-      );
-      db.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
+      const worktreeId = insertWorktreeInUse({
+        path: setup.worktreePath,
+        repo_path: worktreeRepoPath,
+        branch: setup.branch,
+        base_branch: setup.baseBranch,
+        base_sha: setup.baseSha,
+        mode: runMode,
+      });
+      setWorktreeId(id, worktreeId);
     }
 
     logger.info(
@@ -759,18 +767,17 @@ export async function startTask(task: Task): Promise<void> {
       try {
         const repoConfigForInference = await getOrCreateRepoConfig(task.repo_path);
         const inferred = inferRefs(setup.branch, repoConfigForInference, id);
-        if (inferred.length > 0) {
-          const insertRef = db.prepare(
-            `INSERT OR IGNORE INTO task_external_refs (task_id, integration, ref, url, created_at)
-             VALUES (?, ?, ?, ?, datetime('now'))`,
+        for (const ref of inferred) {
+          insertTaskExternalRefIfAbsent({
+            task_id: id,
+            integration: ref.integration,
+            ref: ref.ref,
+            url: ref.url,
+          });
+          logger.info(
+            { task_id: id, integration: ref.integration, ref: ref.ref },
+            'ref-inference: inferred ref from branch name',
           );
-          for (const ref of inferred) {
-            insertRef.run(id, ref.integration, ref.ref, ref.url);
-            logger.info(
-              { task_id: id, integration: ref.integration, ref: ref.ref },
-              'ref-inference: inferred ref from branch name',
-            );
-          }
         }
       } catch (err) {
         // Never block task startup for ref-inference failures
@@ -839,21 +846,23 @@ export async function startTask(task: Task): Promise<void> {
     await execTmux(['new-session', '-d', '-s', session, '-c', setup.worktreePath, startupCmd]);
     await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
     // Session exists now — persist the column. See race-avoidance comment above.
-    db.prepare(`UPDATE tasks SET tmux_session = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      session,
-      id,
-    );
+    setTmuxSession(id, session);
     logger.info(
       { task_id: id, operation: 'createTask', tmux_session: session },
       'createTask: tmux session created',
     );
 
     const windowIndex = await getActiveWindowIndex(session);
-    db.prepare(
-      `INSERT INTO agents
-         (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(agentId, id, windowIndex, 'Agent 1', harness.id, sessionIdForDb, hookToken, agentName);
+    insertAgentRepo({
+      id: agentId,
+      task_id: id,
+      window_index: windowIndex,
+      label: 'Agent 1',
+      harness_id: harness.id,
+      harness_session_id: sessionIdForDb,
+      hook_token: hookToken,
+      agent: agentName,
+    });
 
     // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
     void harness.postLaunch?.(`${session}:${windowIndex}`);
@@ -873,23 +882,14 @@ export async function startTask(task: Task): Promise<void> {
     // stamped by the poller during a pre-fix race, or a prior failed setup
     // attempt) would otherwise linger on a successfully running task.
     // Also flip workflow_status to in_progress when starting from backlog/planned.
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'running', error = NULL,
-       workflow_status = CASE
-         WHEN workflow_status IN ('backlog', 'planned') THEN 'in_progress'
-         ELSE workflow_status
-       END,
-       updated_at = datetime('now') WHERE id = ?`,
-    ).run(id);
+    markTaskRunning(id);
     logger.info({ task_id: id, operation: 'createTask' }, 'createTask: complete');
   } catch (err) {
     logger.error(
       { task_id: id, operation: 'createTask', stage, run_mode: runMode, err },
       'createTask: failed during setup stage',
     );
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run((err as Error).message, id);
+    setRuntimeState(id, 'error', (err as Error).message);
     // Surface the failure: the orchestrator supervisor relays it to the owning
     // conversation so the conductor (and user) learn the task errored instead of
     // silently sitting in an error state.
@@ -907,15 +907,11 @@ export interface AddAgentOpts {
 }
 
 export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Agent> {
-  const db = getDb();
-
   const resolvedAgent = opts.agent ?? null;
 
   logger.info({ task_id: task.id, operation: 'addAgent', agent: resolvedAgent }, 'addAgent: start');
 
-  const activeAgents = db
-    .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
-    .all(task.id) as Agent[];
+  const activeAgents = listActiveAgents(task.id);
   const label = opts.label ?? `Agent ${activeAgents.length + 1}`;
 
   const harness = getHarness(task.harness_id);
@@ -924,9 +920,7 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
   // they must share one hook_token. Reuse the existing token from any agent
   // in the task; only mint a new one if none exist (shouldn't happen since
   // createTask always seeds Agent 1).
-  const existingTokenRow = db
-    .prepare(`SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`)
-    .get(task.id) as { hook_token: string } | undefined;
+  const existingTokenRow = getTaskHookToken(task.id);
   const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
   const flags = harness.resolveFlags(await getSettings());
 
@@ -976,21 +970,17 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
   const addTarget = `${task.tmux_session}:${windowIndex}`;
 
-  db.prepare(
-    `INSERT INTO agents
-       (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent, notify_agent_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    agentId,
-    task.id,
-    windowIndex,
+  insertAgentWithNotify({
+    id: agentId,
+    task_id: task.id,
+    window_index: windowIndex,
     label,
-    harness.id,
-    sessionIdForDb,
-    hookToken,
-    resolvedAgent,
-    opts.notify_agent_id ?? null,
-  );
+    harness_id: harness.id,
+    harness_session_id: sessionIdForDb,
+    hook_token: hookToken,
+    agent: resolvedAgent,
+    notify_agent_id: opts.notify_agent_id ?? null,
+  });
 
   void harness.postLaunch?.(addTarget);
   logger.info(
@@ -1024,31 +1014,19 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
 }
 
 export async function closeTask(task: Task): Promise<void> {
-  const db = getDb();
-
   logger.info(
     { task_id: task.id, operation: 'closeTask', run_mode: task.run_mode },
     'closeTask: start',
   );
 
-  db.prepare(
-    `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-     WHERE task_id = ? AND status = 'pending'`,
-  ).run(task.id);
-
-  db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
-
-  db.prepare(
-    `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
-  ).run(task.id);
-  db.prepare(
-    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
-  ).run(task.id);
+  resolveTaskPermissionPrompts(task.id);
+  deleteUserTerminalsByTask(task.id);
+  setRuntimeState(task.id, 'idle');
+  stopAllAgents(task.id);
   // Release the worktree so Phase 2b Workspaces can show it as available.
-  db.prepare(
-    `UPDATE worktrees SET status = 'available', last_used_at = datetime('now')
-      WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
-  ).run(task.id);
+  if (task.worktree_id) {
+    releaseWorktree(task.worktree_id);
+  }
   logger.info(
     { task_id: task.id, operation: 'closeTask' },
     'closeTask: DB marked task closed + agents stopped',
@@ -1087,7 +1065,6 @@ export async function closeTask(task: Task): Promise<void> {
  * grace.
  */
 export async function softDeleteTask(task: Task): Promise<void> {
-  const db = getDb();
   logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: start');
 
   if (task.tmux_session) {
@@ -1104,26 +1081,13 @@ export async function softDeleteTask(task: Task): Promise<void> {
     }
   }
 
-  db.prepare(
-    `UPDATE tasks SET deleted_at = datetime('now'),
-                      runtime_state = 'idle',
-                      updated_at = datetime('now')
-       WHERE id = ?`,
-  ).run(task.id);
-
-  db.prepare(
-    `UPDATE agents
-        SET status = 'stopped',
-            hook_activity = 'idle',
-            hook_activity_updated_at = datetime('now')
-      WHERE task_id = ? AND status = 'running'`,
-  ).run(task.id);
+  softDeleteTaskRepo(task.id);
+  stopRunningAgentsForTask(task.id);
 
   logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: complete');
 }
 
 export async function deleteTask(task: Task): Promise<void> {
-  const db = getDb();
   logger.info(
     { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
     'deleteTask: start',
@@ -1226,13 +1190,11 @@ export async function deleteTask(task: Task): Promise<void> {
   // from the worktree row before deleting the row, else the FK check fires.
   const wtId = task.worktree_id;
   if (wtId) {
-    db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(task.id);
+    unlinkWorktree(task.id);
     if (task.run_mode === 'new' || task.run_mode === 'scratch') {
-      db.prepare(`DELETE FROM worktrees WHERE id = ?`).run(wtId);
+      deleteWorktree(wtId);
     } else {
-      db.prepare(
-        `UPDATE worktrees SET status = 'available', last_used_at = datetime('now') WHERE id = ?`,
-      ).run(wtId);
+      releaseWorktree(wtId);
     }
   }
 
@@ -1240,8 +1202,6 @@ export async function deleteTask(task: Task): Promise<void> {
 }
 
 export async function stopAgent(task: Task, agent: Agent): Promise<void> {
-  const db = getDb();
-
   logger.info(
     {
       task_id: task.id,
@@ -1252,10 +1212,7 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
     'stopAgent: start',
   );
 
-  db.prepare(
-    `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-     WHERE agent_id = ? AND status = 'pending'`,
-  ).run(agent.id);
+  resolveAgentPermissionPrompts(agent.id);
 
   await execTmux(['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
     (err) => {
@@ -1273,9 +1230,7 @@ export async function stopAgent(task: Task, agent: Agent): Promise<void> {
     },
   );
 
-  db.prepare(
-    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE id = ?`,
-  ).run(agent.id);
+  stopAgentRepo(agent.id);
 
   logger.info(
     { task_id: task.id, agent_id: agent.id, operation: 'stopAgent' },
@@ -1297,55 +1252,34 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
     return { editor, windowIndex: task.user_window_index };
   }
 
-  const db = getDb();
-
   await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
   await execTmux(['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'nvim .', 'Enter']);
 
-  db.prepare(
-    `UPDATE tasks SET user_window_index = ?, updated_at = datetime('now') WHERE id = ?`,
-  ).run(windowIndex, task.id);
+  updateTaskFields(task.id, { user_window_index: windowIndex });
 
   return { editor: 'nvim', windowIndex };
 }
 
 export async function createShellTerminal(task: Task): Promise<UserTerminal> {
-  const db = getDb();
   await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
   const windowIndex = await getLastWindowIndex(task.tmux_session!);
 
-  const { count } = db
-    .prepare('SELECT COUNT(*) as count FROM user_terminals WHERE task_id = ?')
-    .get(task.id) as { count: number };
+  const count = countUserTerminals(task.id);
   const label = `Terminal ${count + 1}`;
 
-  const id = nanoid(12);
-  db.prepare(
-    `INSERT INTO user_terminals (id, task_id, window_index, label) VALUES (?, ?, ?, ?)`,
-  ).run(id, task.id, windowIndex, label);
-
-  return {
-    id,
-    task_id: task.id,
-    window_index: windowIndex,
-    label,
-    status: 'idle',
-    created_at: new Date().toISOString(),
-  };
+  return insertUserTerminalRepo({ task_id: task.id, window_index: windowIndex, label });
 }
 
 export async function closeShellTerminal(task: Task, terminal: UserTerminal): Promise<void> {
-  const db = getDb();
   await execTmux(['kill-window', '-t', `${task.tmux_session}:${terminal.window_index}`]).catch(
     () => {},
   );
-  db.prepare('DELETE FROM user_terminals WHERE id = ?').run(terminal.id);
+  deleteUserTerminal(terminal.id);
 }
 
 export async function resumeTask(task: Task): Promise<void> {
-  const db = getDb();
   const session = task.tmux_session!;
   const runMode: RunMode = task.run_mode;
 
@@ -1384,11 +1318,13 @@ export async function resumeTask(task: Task): Promise<void> {
       }
     }
 
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'setting_up', error = NULL, user_window_index = NULL, updated_at = datetime('now') WHERE id = ?`,
-    ).run(task.id);
+    updateTaskFields(task.id, {
+      runtime_state: 'setting_up',
+      error: null,
+      user_window_index: null,
+    });
 
-    db.prepare('DELETE FROM user_terminals WHERE task_id = ?').run(task.id);
+    deleteUserTerminalsByTask(task.id);
 
     await cleanupLinkedSessions(session);
     await execTmux(['kill-session', '-t', session]).catch(() => {});
@@ -1398,17 +1334,11 @@ export async function resumeTask(task: Task): Promise<void> {
     // on the Mac-restart recovery path the poller hasn't yet flipped agents
     // from 'running' to 'stopped', so without this they'd be filtered out
     // below and we'd create the new tmux session with no claude in it.
-    db.prepare(
-      `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status != 'stopped'`,
-    ).run(task.id);
+    stopRunningAgents(task.id);
 
     const cwd = task.worktree!;
 
-    const agents = db
-      .prepare(
-        `SELECT * FROM agents WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`,
-      )
-      .all(task.id) as Agent[];
+    const agents = listStoppedAgents(task.id);
 
     // Install hooks once, before any window launches its harness — each window
     // starts its harness the instant the pane is created (launch-as-startup),
@@ -1463,7 +1393,7 @@ export async function resumeTask(task: Task): Promise<void> {
           );
         }
         if (harness.sessionIdMode === 'orchestrator-assigned') {
-          db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
+          setAgentHarnessSessionId(agent.id, newId);
         }
       }
 
@@ -1482,10 +1412,7 @@ export async function resumeTask(task: Task): Promise<void> {
       }
       void harness.postLaunch?.(`${session}:${windowIndex}`);
 
-      db.prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`).run(
-        windowIndex,
-        agent.id,
-      );
+      setAgentWindowRunning(agent.id, windowIndex);
       logger.info(
         {
           task_id: task.id,
@@ -1499,9 +1426,7 @@ export async function resumeTask(task: Task): Promise<void> {
       );
     }
 
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
-    ).run(task.id);
+    setRuntimeState(task.id, 'running');
 
     logger.info(
       { task_id: task.id, operation: 'resumeTask', recovered_agents: agents.length },
@@ -1509,9 +1434,7 @@ export async function resumeTask(task: Task): Promise<void> {
     );
   } catch (err) {
     logger.error({ task_id: task.id, operation: 'resumeTask', err }, 'resumeTask: failed');
-    db.prepare(
-      `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run((err as Error).message, task.id);
+    setRuntimeState(task.id, 'error', (err as Error).message);
   }
 }
 
@@ -1523,7 +1446,6 @@ export async function resumeTask(task: Task): Promise<void> {
  * new cwd, and resumes with `claude --resume` so transcript context survives.
  */
 export async function hopAgent(agent: Agent, targetTaskId: string | null): Promise<Agent> {
-  const db = getDb();
   const fromTaskId = agent.task_id;
   logger.info(
     {
@@ -1538,9 +1460,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   // Resolve old tmux target for the kill step.
   let oldTarget: { session: string; window: number } | null = null;
   if (agent.task_id) {
-    const prevTask = db
-      .prepare(`SELECT tmux_session FROM tasks WHERE id = ?`)
-      .get(agent.task_id) as { tmux_session: string | null } | undefined;
+    const prevTask = getTaskTmuxSession(agent.task_id);
     if (prevTask?.tmux_session) {
       oldTarget = { session: prevTask.tmux_session, window: agent.window_index };
     }
@@ -1561,14 +1481,10 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     fs.mkdirSync(cwd, { recursive: true });
   } else {
     isStandalone = false;
-    const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(targetTaskId) as
-      | { id: string; tmux_session: string | null; worktree_id: string | null; status: string }
-      | undefined;
+    const task = getTaskRepo(targetTaskId!);
     if (!task) throw new Error(`Task not found: ${targetTaskId}`);
     if (!task.worktree_id) throw new Error(`Task ${targetTaskId} has no worktree`);
-    const worktree = db.prepare(`SELECT * FROM worktrees WHERE id = ?`).get(task.worktree_id) as
-      | Worktree
-      | undefined;
+    const worktree = getWorktree(task.worktree_id) as Worktree | undefined;
     if (!worktree) throw new Error(`Worktree not found for task ${targetTaskId}`);
     if (!worktree.path || !fs.existsSync(worktree.path)) {
       throw new Error(`Worktree path does not exist: ${worktree.path}`);
@@ -1605,9 +1521,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   // Inherit model from the target task (if hopping to a task).
   let hopModel: string | null = null;
   if (targetTaskId) {
-    const hopTask = db.prepare(`SELECT model FROM tasks WHERE id = ?`).get(targetTaskId) as
-      | { model: string | null }
-      | undefined;
+    const hopTask = getTaskModel(targetTaskId);
     hopModel = hopTask?.model ?? null;
   }
 
@@ -1647,7 +1561,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
       );
     }
     if (harness.sessionIdMode === 'orchestrator-assigned') {
-      db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(newId, agent.id);
+      setAgentHarnessSessionId(agent.id, newId);
     }
   }
 
@@ -1668,12 +1582,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
 
   // Update DB row. For standalone agents we persist tmux_session; for
   // task-scoped ones we read the session via the task join.
-  db.prepare(
-    `UPDATE agents
-        SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running',
-            hook_activity = 'active', hook_activity_updated_at = datetime('now')
-      WHERE id = ?`,
-  ).run(targetTaskId, newWindowIndex, isStandalone ? newSession : null, agent.id);
+  hopAgentToTask(agent.id, targetTaskId, newWindowIndex, isStandalone ? newSession : null);
 
   logger.info(
     {
@@ -1687,5 +1596,5 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     'task_hop: complete',
   );
 
-  return db.prepare(`SELECT * FROM agents WHERE id = ?`).get(agent.id) as Agent;
+  return getAgent(agent.id) as Agent;
 }

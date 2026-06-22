@@ -1,11 +1,10 @@
-import { getDb } from './db.js';
-import { listPublishedReviews } from './published-reviews.js';
-import { getCurrentRun, listRunsForTask } from './review-runs.js';
-import { listComments } from './inline-comments.js';
+import { listPublishedReviews } from './repositories/published-reviews.js';
+import { getCurrentRun, listRunsForTask } from './repositories/review-runs.js';
+import { listComments, countCommentsByStatus } from './repositories/inline-comments.js';
+import { listReviewTasks, getReviewTask } from './repositories/index.js';
 import { childLogger } from './logger.js';
 import type { Task, ReviewRun, PublishedReview } from './types.js';
-import type { InlineCommentRow } from './inline-comments.js';
-import { SELECT_TASK_SQL } from './task-select.js';
+import type { InlineCommentRow } from './repositories/inline-comments.js';
 
 const logger = childLogger('reviews-inbox');
 
@@ -59,31 +58,12 @@ function deriveStatus(
 }
 
 export function listReviewsInbox(): ReviewInboxRow[] {
-  const db = getDb();
-  const tasks = db
-    .prepare(
-      `${SELECT_TASK_SQL} WHERE t.source = 'auto_review' AND t.deleted_at IS NULL ORDER BY t.updated_at DESC`,
-    )
-    .all() as Task[];
+  const tasks = listReviewTasks();
 
   return tasks.map((task) => {
     const latestRun = getCurrentRun(task.id);
 
-    const counts = db
-      .prepare(
-        `SELECT
-           SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_count,
-           SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
-           SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
-           SUM(CASE WHEN status = 'stale' THEN 1 ELSE 0 END) AS stale_count
-         FROM inline_comments WHERE task_id = ?`,
-      )
-      .get(task.id) as {
-      draft_count: number | null;
-      accepted_count: number | null;
-      rejected_count: number | null;
-      stale_count: number | null;
-    };
+    const counts = countCommentsByStatus(task.id);
 
     const draftCount = counts.draft_count ?? 0;
     const acceptedCount = counts.accepted_count ?? 0;
@@ -116,11 +96,7 @@ export function listReviewsInbox(): ReviewInboxRow[] {
 }
 
 export function getReviewDetail(taskId: string): ReviewDetail | null {
-  const db = getDb();
-
-  const task = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.id = ? AND t.source = 'auto_review'`)
-    .get(taskId) as Task | undefined;
+  const task = getReviewTask(taskId);
 
   if (!task) return null;
 

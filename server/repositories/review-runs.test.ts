@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createTestDb } from './test-helpers.js';
+import { createTestDb } from '../test-helpers.js';
 import {
   createReviewRun,
   getReviewRun,

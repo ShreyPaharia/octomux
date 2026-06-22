@@ -1,24 +1,54 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
-import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
 import { getSettings } from './settings.js';
-import { closeTask, deleteTask, startTask, addAgent } from './task-runner.js';
+import { closeTask, deleteTask, addAgent } from './task-runner.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
 import { readGithubLogin } from './github-login.js';
-import { SELECT_TASK_SQL } from './task-select.js';
 import { fireHook } from './hook-dispatcher.js';
 import { sendMessageToAgent } from './tmux-input.js';
-import {
-  buildDeepReviewPrompt,
-  buildPrReviewPrompt,
-  insertReviewTask,
-  repoShortName,
-} from './review-tasks.js';
+import { buildDeepReviewPrompt, buildPrReviewPrompt } from './review-tasks.js';
+import { createReviewTaskFromPr } from './services/review-service.js';
 import { execTmux } from './tmux-bin.js';
 import type { Task, UserTerminal } from './types.js';
+import {
+  listRunningTasks,
+  setRuntimeStateIdle,
+  setRuntimeStateSetupInterrupted,
+  setTaskPrDetected,
+  updateTaskPromptAndSha,
+  setPrHeadSha,
+  setWorkflowStatusDone,
+  addTaskUpdate,
+  listTasksNeedingPrDetection,
+  listRunningTasksWithPr,
+  findExistingPrTask,
+  listAutoReviewDrafts,
+  hardDeleteTask,
+  listExpiredSoftDeletes,
+  listWalkthroughHandoffTasks,
+  listActiveTasksForHooks,
+  listTaskRepoPaths,
+  getParentTaskTmuxSession,
+} from './repositories/tasks.js';
+import { deleteWorktree } from './repositories/worktrees.js';
+import {
+  stopRunningAgentsForTask,
+  findFirstActiveAgent,
+  listWatchedAgents,
+  getNotifyAgentTarget,
+  stopAgent,
+  getTaskHookToken,
+  listRunningTerminals,
+  updateUserTerminalStatus,
+} from './repositories/agent-runtime.js';
+import { completeTeamRunByLeadTask } from './repositories/team-schedules.js';
+import {
+  findStuckReviewRuns,
+  failReviewRunById,
+  claimDeepReviewAttach,
+} from './repositories/review-runs.js';
 
 const logger = childLogger('poller');
 
@@ -43,23 +73,11 @@ let approvalTimer: ReturnType<typeof setInterval> | null = null;
 
 // ─── Session Status Polling ──────────────────────────────────────────────────
 
-async function notifyParentTask(
-  db: ReturnType<typeof getDb>,
-  parentTaskId: string,
-  finishedTask: Task,
-): Promise<void> {
-  const parent = db
-    .prepare(
-      `SELECT tmux_session FROM tasks WHERE id = ? AND runtime_state IN ('running', 'setting_up')`,
-    )
-    .get(parentTaskId) as { tmux_session: string | null } | undefined;
+async function notifyParentTask(parentTaskId: string, finishedTask: Task): Promise<void> {
+  const parent = getParentTaskTmuxSession(parentTaskId);
   if (!parent?.tmux_session) return;
 
-  const agent = db
-    .prepare(
-      `SELECT window_index FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index ASC LIMIT 1`,
-    )
-    .get(parentTaskId) as { window_index: number } | undefined;
+  const agent = findFirstActiveAgent(parentTaskId);
   if (!agent) return;
 
   const msg = `[octomux] Worker task ${finishedTask.id} ("${finishedTask.title}") finished. Check results: octomux get-task --json ${finishedTask.id}`;
@@ -77,15 +95,10 @@ export async function checkTaskStatus(task: Task): Promise<'alive' | 'dead'> {
 }
 
 export async function pollStatuses(): Promise<void> {
-  const db = getDb();
   // tmux_session IS NOT NULL: a task in 'setting_up' with no session yet is
   // still mid-createTask — skip it so we don't race the setup writing the
   // session column and mark the task 'Setup interrupted' prematurely.
-  const runningTasks = db
-    .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up') AND t.tmux_session IS NOT NULL`,
-    )
-    .all() as Task[];
+  const runningTasks = listRunningTasks();
 
   const results = await Promise.allSettled(
     runningTasks.map(async (task) => {
@@ -94,9 +107,6 @@ export async function pollStatuses(): Promise<void> {
     }),
   );
 
-  const stopAgentsSql = db.prepare(
-    `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status = 'running'`,
-  );
   for (const result of results) {
     if (result.status !== 'fulfilled') continue;
     const { task, status } = result.value;
@@ -104,24 +114,18 @@ export async function pollStatuses(): Promise<void> {
 
     const rs = task.runtime_state;
     if (rs === 'running') {
-      db.prepare(
-        `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
-      ).run(task.id);
+      setRuntimeStateIdle(task.id);
     } else if (rs === 'setting_up') {
-      db.prepare(
-        `UPDATE tasks SET runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
-      ).run(task.id);
+      setRuntimeStateSetupInterrupted(task.id);
     } else {
       continue;
     }
-    db.prepare(
-      `UPDATE team_runs SET status = 'done' WHERE lead_task_id = ? AND status = 'running'`,
-    ).run(task.id);
-    stopAgentsSql.run(task.id);
+    completeTeamRunByLeadTask(task.id);
+    stopRunningAgentsForTask(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 
     if (task.notify_task_id) {
-      notifyParentTask(db, task.notify_task_id, task).catch(() => {});
+      notifyParentTask(task.notify_task_id, task).catch(() => {});
     }
   }
 
@@ -141,26 +145,7 @@ async function checkWindowStatus(session: string, windowIndex: number): Promise<
 }
 
 async function pollAgentWindows(): Promise<void> {
-  const db = getDb();
-  const watchedAgents = db
-    .prepare(
-      `SELECT a.id, a.task_id, a.window_index, a.label,
-              t.tmux_session, a.notify_agent_id
-       FROM agents a
-       INNER JOIN tasks t ON a.task_id = t.id
-       WHERE a.status = 'running'
-         AND a.notify_agent_id IS NOT NULL
-         AND t.runtime_state = 'running'
-         AND t.tmux_session IS NOT NULL`,
-    )
-    .all() as Array<{
-    id: string;
-    task_id: string;
-    window_index: number;
-    label: string;
-    tmux_session: string;
-    notify_agent_id: string;
-  }>;
+  const watchedAgents = listWatchedAgents();
 
   const results = await Promise.allSettled(
     watchedAgents.map(async (agent) => {
@@ -174,19 +159,9 @@ async function pollAgentWindows(): Promise<void> {
     const { agent, status } = result.value;
     if (status !== 'dead') continue;
 
-    db.prepare(
-      `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
-        hook_activity_updated_at = datetime('now') WHERE id = ?`,
-    ).run(agent.id);
+    stopAgent(agent.id);
 
-    const target = db
-      .prepare(
-        `SELECT a.window_index, t.tmux_session
-         FROM agents a
-         INNER JOIN tasks t ON a.task_id = t.id
-         WHERE a.id = ? AND a.status != 'stopped' AND t.runtime_state = 'running'`,
-      )
-      .get(agent.notify_agent_id) as { window_index: number; tmux_session: string } | undefined;
+    const target = getNotifyAgentTarget(agent.notify_agent_id);
 
     if (!target) continue;
 
@@ -202,12 +177,7 @@ async function pollAgentWindows(): Promise<void> {
  * Handles tasks created before the hook feature existed.
  */
 export async function ensureHooksInstalled(): Promise<void> {
-  const db = getDb();
-  const runningTasks = db
-    .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up') AND w.path IS NOT NULL`,
-    )
-    .all() as Task[];
+  const runningTasks = listActiveTasksForHooks();
 
   for (const task of runningTasks) {
     try {
@@ -215,9 +185,7 @@ export async function ensureHooksInstalled(): Promise<void> {
       // Pick any agent's hook_token (createTask + addAgent ensure they're all
       // equal). Skip the task if no agent has a token yet — the next agent's
       // creation will install hooks correctly.
-      const row = db
-        .prepare(`SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`)
-        .get(task.id) as { hook_token: string } | undefined;
+      const row = getTaskHookToken(task.id);
       if (!row) continue;
       await installHookSettings(task.worktree!, task.harness_id, row.hook_token);
     } catch {
@@ -249,12 +217,7 @@ export async function detectPR(task: Task): Promise<{ url: string; number: numbe
 }
 
 export async function pollPRs(): Promise<void> {
-  const db = getDb();
-  const tasks = db
-    .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
-    )
-    .all() as Task[];
+  const tasks = listTasksNeedingPrDetection();
 
   if (tasks.length === 0) return;
 
@@ -305,17 +268,16 @@ export async function pollPRs(): Promise<void> {
       // Flip workflow_status to 'pr' if currently in_progress or human_review
       const prevWorkflow = task.workflow_status;
       const shouldFlipToPr = prevWorkflow === 'in_progress' || prevWorkflow === 'human_review';
-      db.prepare(
-        `UPDATE tasks SET pr_url = ?, pr_number = ?,
-         workflow_status = CASE WHEN workflow_status IN ('in_progress','human_review') THEN 'pr' ELSE workflow_status END,
-         updated_at = datetime('now') WHERE id = ?`,
-      ).run(pr.url, pr.number, task.id);
+      setTaskPrDetected(task.id, pr.url, pr.number);
 
       if (shouldFlipToPr) {
-        const updateId = nanoid(12);
-        db.prepare(
-          `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, 'pr', ?)`,
-        ).run(updateId, task.id, prevWorkflow, 'auto: PR opened');
+        addTaskUpdate({
+          task_id: task.id,
+          kind: 'transition',
+          from_status: prevWorkflow,
+          to_status: 'pr',
+          body: 'auto: PR opened',
+        });
         fireHook('workflow_status_changed', {
           event: 'workflow_status_changed',
           task: {
@@ -335,10 +297,7 @@ export async function pollPRs(): Promise<void> {
 // ─── Merged PR Detection ────────────────────────────────────────────────────
 
 export async function checkMergedPRs(): Promise<void> {
-  const db = getDb();
-  const tasks = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
-    .all() as Task[];
+  const tasks = listRunningTasksWithPr();
 
   if (tasks.length === 0) return;
 
@@ -386,13 +345,14 @@ export async function checkMergedPRs(): Promise<void> {
         const prevWorkflow = task.workflow_status;
         await closeTask(task);
         // Flip workflow_status to 'done' after merge
-        db.prepare(
-          `UPDATE tasks SET workflow_status = 'done', updated_at = datetime('now') WHERE id = ?`,
-        ).run(task.id);
-        const updateId = nanoid(12);
-        db.prepare(
-          `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', ?, 'done', ?)`,
-        ).run(updateId, task.id, prevWorkflow, 'auto: PR merged');
+        setWorkflowStatusDone(task.id);
+        addTaskUpdate({
+          task_id: task.id,
+          kind: 'transition',
+          from_status: prevWorkflow,
+          to_status: 'done',
+          body: 'auto: PR merged',
+        });
         fireHook('workflow_status_changed', {
           event: 'workflow_status_changed',
           task: { ...task, workflow_status: 'done' as import('./types.js').WorkflowStatus },
@@ -433,17 +393,7 @@ interface OpenReviewPR {
 
 /** List tracked repos — same derivation as GET /api/recent-repos. */
 function listTrackedRepos(): string[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT w.repo_path AS repo_path
-         FROM tasks t
-         INNER JOIN worktrees w ON t.worktree_id = w.id
-        WHERE w.repo_path IS NOT NULL
-          AND t.deleted_at IS NULL
-        GROUP BY w.repo_path
-        ORDER BY MAX(t.created_at) DESC`,
-    )
-    .all() as Array<{ repo_path: string }>;
+  const rows = listTaskRepoPaths();
   return rows.map((r) => r.repo_path);
 }
 
@@ -599,13 +549,7 @@ function buildReReviewNudge(pr: OpenReviewPR, previousHeadReachable = true): str
 
 /** Pick the first non-stopped agent in a running task, lowest window_index. */
 function firstActiveAgent(taskId: string): { id: string; window_index: number } | undefined {
-  return getDb()
-    .prepare(
-      `SELECT id, window_index FROM agents
-       WHERE task_id = ? AND status != 'stopped'
-       ORDER BY window_index ASC LIMIT 1`,
-    )
-    .get(taskId) as { id: string; window_index: number } | undefined;
+  return findFirstActiveAgent(taskId);
 }
 
 /**
@@ -641,31 +585,7 @@ async function upsertReviewTask(
   repoPath: string,
   pr: OpenReviewPR,
 ): Promise<{ action: 'created' | 'updated' | 'nudged' | 'skipped'; taskId?: string }> {
-  const db = getDb();
-  const existing = db
-    .prepare(
-      `SELECT t.id AS id, t.runtime_state AS runtime_state,
-              t.source AS source,
-              t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
-              t.tmux_session AS tmux_session,
-              w.path AS worktree_path
-         FROM tasks t
-         INNER JOIN worktrees w ON t.worktree_id = w.id
-        WHERE w.repo_path = ? AND t.pr_number = ?
-          AND t.deleted_at IS NULL
-        ORDER BY t.created_at DESC LIMIT 1`,
-    )
-    .get(repoPath, pr.number) as
-    | {
-        id: string;
-        runtime_state: string;
-        source: string | null;
-        pr_head_sha: string | null;
-        initial_prompt: string | null;
-        tmux_session: string | null;
-        worktree_path: string | null;
-      }
-    | undefined;
+  const existing = findExistingPrTask(repoPath, pr.number);
 
   if (existing) {
     // Only update rows we created; never touch owner's manual tasks.
@@ -678,10 +598,7 @@ async function upsertReviewTask(
         pr.headRefOid,
         new Date().toISOString(),
       );
-      db.prepare(
-        `UPDATE tasks SET pr_head_sha = ?, initial_prompt = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-      ).run(pr.headRefOid, updatedPrompt, existing.id);
+      updateTaskPromptAndSha(existing.id, pr.headRefOid, updatedPrompt);
       return { action: 'updated', taskId: existing.id };
     }
 
@@ -727,61 +644,42 @@ async function upsertReviewTask(
         previousHeadReachable,
       );
       if (!delivered) return { action: 'skipped' };
-      db.prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`).run(
-        pr.headRefOid,
-        existing.id,
-      );
+      setPrHeadSha(existing.id, pr.headRefOid);
       return { action: 'nudged', taskId: existing.id };
     }
 
     return { action: 'skipped' };
   }
 
-  const short = repoShortName(repoPath);
-  const branch = `review/${short}-pr-${pr.number}`;
-  const title = `Review: ${pr.title} (#${pr.number})`;
-  const description = `Auto-created review task for PR #${pr.number} in ${short}`;
-  // Mint the id first so it can be pinned into the orchestrator prompt.
-  const id = nanoid(12);
-  const prompt = buildReviewPrompt(pr, new Date().toISOString(), id);
-
-  insertReviewTask({
-    id,
-    repoPath,
-    branch,
-    baseBranch: pr.baseRefName,
-    title,
-    description,
-    initialPrompt: prompt,
-    prUrl: pr.url,
-    prNumber: pr.number,
-    prHeadSha: pr.headRefOid,
+  // Create-tail (build prompt + insert + broadcast + fire-and-forget startTask)
+  // is owned by the review-service. The caller only logs the 'created' action.
+  const { id } = await createReviewTaskFromPr({
+    repo_path: repoPath,
+    pr_number: pr.number,
+    pr_url: pr.url,
+    pr_head_sha: pr.headRefOid,
+    base_branch: pr.baseRefName,
+    title: pr.title,
+    author: pr.author?.login ?? null,
+    requested_at: new Date().toISOString(),
   });
   return { action: 'created', taskId: id };
 }
 
 /** Delete auto-review drafts whose triggering PR is no longer awaiting the owner. */
 function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<number>): string[] {
-  const db = getDb();
-  const drafts = db
-    .prepare(
-      `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
-         LEFT JOIN worktrees w ON t.worktree_id = w.id
-        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
-          AND t.deleted_at IS NULL`,
-    )
-    .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
+  const drafts = listAutoReviewDrafts(repoPath);
 
   const deletedIds: string[] = [];
   for (const draft of drafts) {
     if (draft.pr_number === null) continue;
     if (activePrNumbers.has(draft.pr_number)) continue;
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(draft.id);
+    hardDeleteTask(draft.id);
     // The worktree row was minted alongside the draft (upsertReviewTask) and
     // is unique to it — drop it too so the workspaces list doesn't accumulate
     // an orphan row per resolved PR.
     if (draft.worktree_id) {
-      db.prepare('DELETE FROM worktrees WHERE id = ?').run(draft.worktree_id);
+      deleteWorktree(draft.worktree_id);
     }
     deletedIds.push(draft.id);
   }
@@ -816,24 +714,11 @@ export async function pollReviewerRequests(): Promise<void> {
 
       const result = await upsertReviewTask(repoPath, pr);
       if (result.action === 'created') {
+        // createReviewTaskFromPr already broadcast task:created + kicked startTask.
         logger.info(
           { task_id: result.taskId, pr_number: pr.number, repo_path: repoPath },
           'auto-created review task for reviewer request',
         );
-        broadcast({ type: 'task:created', payload: { taskId: result.taskId! } });
-        const fresh = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(result.taskId) as
-          | Task
-          | undefined;
-        if (fresh) {
-          try {
-            await startTask(fresh);
-          } catch (err) {
-            logger.error(
-              { task_id: result.taskId, err: (err as Error).message },
-              'failed to auto-start review task',
-            );
-          }
-        }
       } else if (result.action === 'updated') {
         logger.info(
           {
@@ -876,15 +761,7 @@ interface TerminalRow extends UserTerminal {
 }
 
 export async function pollTerminalActivity(): Promise<void> {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT ut.*, t.tmux_session
-       FROM user_terminals ut
-       JOIN tasks t ON t.id = ut.task_id
-       WHERE t.runtime_state = 'running' AND t.tmux_session IS NOT NULL`,
-    )
-    .all() as TerminalRow[];
+  const rows = listRunningTerminals() as TerminalRow[];
 
   const changedTasks = new Set<string>();
   for (const row of rows) {
@@ -899,7 +776,7 @@ export async function pollTerminalActivity(): Promise<void> {
       const command = stdout.trim().split('\n')[0];
       const newStatus = SHELL_COMMANDS.has(command) ? 'idle' : 'working';
       if (newStatus !== row.status) {
-        db.prepare('UPDATE user_terminals SET status = ? WHERE id = ?').run(newStatus, row.id);
+        updateUserTerminalStatus(row.id, newStatus);
         changedTasks.add(row.task_id);
       }
     } catch {
@@ -920,29 +797,10 @@ const REVIEW_RUN_TIMEOUT_MIN = 15;
  * without producing a walkthrough or any inline comments. Idempotent.
  */
 export async function sweepStuckReviewRuns(): Promise<void> {
-  const db = getDb();
-  const stuck = db
-    .prepare(
-      `SELECT rr.id, rr.task_id FROM review_runs rr
-        WHERE rr.status = 'running'
-          AND rr.started_at < datetime('now', ?)
-          AND rr.walkthrough IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM inline_comments ic
-             WHERE ic.review_run_id = rr.id
-               AND ic.created_at > rr.started_at
-          )`,
-    )
-    .all(`-${REVIEW_RUN_TIMEOUT_MIN} minutes`) as Array<{ id: string; task_id: string }>;
+  const stuck = findStuckReviewRuns(REVIEW_RUN_TIMEOUT_MIN);
 
   for (const row of stuck) {
-    db.prepare(
-      `UPDATE review_runs
-          SET status = 'failed',
-              error = 'timeout: no progress for ${REVIEW_RUN_TIMEOUT_MIN} minutes',
-              completed_at = datetime('now')
-        WHERE id = ?`,
-    ).run(row.id);
+    failReviewRunById(row.id, `timeout: no progress for ${REVIEW_RUN_TIMEOUT_MIN} minutes`);
     logger.warn({ task_id: row.task_id, review_run_id: row.id }, 'review_run timed out');
     broadcast({ type: 'review:run-failed', payload: { taskId: row.task_id, reviewRunId: row.id } });
   }
@@ -981,18 +839,12 @@ export async function pollSoftDeletes(): Promise<void> {
     hours = 6;
   }
 
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `${SELECT_TASK_SQL} WHERE t.deleted_at IS NOT NULL
-                            AND t.deleted_at <= datetime('now', ?)`,
-    )
-    .all(`-${hours} hours`) as Task[];
+  const rows = listExpiredSoftDeletes(hours);
 
   for (const task of rows) {
     try {
       await deleteTask(task);
-      db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+      hardDeleteTask(task.id);
       broadcast({ type: 'task:deleted', payload: { taskId: task.id } });
       logger.info({ task_id: task.id, operation: 'pollSoftDeletes' }, 'purged soft-deleted task');
     } catch (err) {
@@ -1012,14 +864,8 @@ export async function attachDeepReviewAgent(task: Task): Promise<void> {
   // overlapping tick — or a crash/retry — would re-select the row (flag still 0)
   // and attach a SECOND deep-review agent. The conditional UPDATE wins the race:
   // only the tick that flips 0→1 proceeds.
-  const claim = getDb()
-    .prepare(
-      `UPDATE review_runs SET deep_review_attached = 1
-         WHERE task_id = ? AND walkthrough IS NOT NULL AND status = 'running'
-               AND deep_review_attached = 0`,
-    )
-    .run(task.id);
-  if (claim.changes !== 1) {
+  const changes = claimDeepReviewAttach(task.id);
+  if (changes !== 1) {
     // Another tick already claimed (or there is no eligible run) — do nothing.
     return;
   }
@@ -1032,15 +878,7 @@ export async function attachDeepReviewAgent(task: Task): Promise<void> {
 }
 
 export async function pollWalkthroughHandoffs(): Promise<void> {
-  const rows = getDb()
-    .prepare(
-      `${SELECT_TASK_SQL}
-         WHERE t.id IN (
-           SELECT task_id FROM review_runs
-            WHERE walkthrough IS NOT NULL AND deep_review_attached = 0 AND status = 'running'
-         ) AND t.source = 'auto_review'`,
-    )
-    .all() as Task[];
+  const rows = listWalkthroughHandoffTasks();
   for (const task of rows) {
     try {
       await attachDeepReviewAgent(task);

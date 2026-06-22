@@ -5,7 +5,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
 import { octomuxRoot } from './octomux-root.js';
-import { getDb } from './db.js';
+import { getHookEnabled, getTaskExternalRefs } from './repositories/index.js';
 import type { HookEventName, HookEnvelope } from './hook-types.js';
 
 export type { HookEventName, HookEnvelope };
@@ -29,18 +29,7 @@ export function isHookEnabled(scope: string, key: string): boolean {
   if (hookEnabledCache.has(cacheKey)) {
     return hookEnabledCache.get(cacheKey)!;
   }
-  let result = true;
-  try {
-    const row = getDb()
-      .prepare(`SELECT enabled FROM hook_settings WHERE scope = ? AND key = ?`)
-      .get(scope, key) as { enabled: number } | undefined;
-    if (row !== undefined) {
-      result = row.enabled !== 0;
-    }
-  } catch {
-    // DB may not be ready (test env without DB) — treat as enabled.
-    result = true;
-  }
+  const result = getHookEnabled(scope, key, true);
   hookEnabledCache.set(cacheKey, result);
   return result;
 }
@@ -269,14 +258,7 @@ async function runScript(
  */
 function loadTaskExternalRefs(taskId: string): import('./types.js').TaskExternalRef[] {
   try {
-    const db = getDb();
-    const rows = db
-      .prepare('SELECT * FROM task_external_refs WHERE task_id = ? ORDER BY created_at ASC')
-      .all(taskId) as Array<import('./types.js').TaskExternalRef & { metadata: string | null }>;
-    return rows.map((r) => ({
-      ...r,
-      metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, unknown>) : null,
-    }));
+    return getTaskExternalRefs(taskId);
   } catch {
     return [];
   }

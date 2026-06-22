@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
-import { childLogger } from './logger.js';
-import type { ReviewLearning } from './types.js';
+import { getDb } from '../db.js';
+import { childLogger } from '../logger.js';
+import type { ReviewLearning } from '../types.js';
 
 const logger = childLogger('review-learnings');
 

@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { completeRun, getCurrentRun } from '../../server/review-runs.js';
+import { completeRun, getCurrentRun } from '../../server/repositories/review-runs.js';
 import { autoResolvePublished } from '../../server/review-staleness.js';
 import { broadcast } from '../../server/events.js';
 
