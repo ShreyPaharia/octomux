@@ -3,7 +3,13 @@ import fs from 'fs';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { childLogger } from '../logger.js';
 import { mcpServerInvocation } from '../orchestrator/runner.js';
+import { isOrchestratorManaged } from '../orchestrator/store.js';
 import { shellQuoteSingle } from '../shell-quote.js';
+import { execTmux } from '../tmux-bin.js';
+import { getActiveWindowIndex, getLastWindowIndex } from './sessions.js';
+import { setAgentHarnessSessionId } from '../repositories/index.js';
+import type { Harness } from '../harnesses/index.js';
+import type { Agent } from '../types.js';
 
 const logger = childLogger('task-engine/launch');
 
@@ -131,4 +137,131 @@ export function writeWorkerMcpConfig(
   );
 
   return cfgPath;
+}
+
+// ─── Extracted helpers ────────────────────────────────────────────────────────
+
+/**
+ * Create a tmux window for a new agent and return its window index.
+ *
+ * fresh=true  → new-session + set-option aggressive-resize + getActiveWindowIndex
+ * fresh=false → new-window + getLastWindowIndex
+ *
+ * Argv is byte-identical to the original inline calls in each launch site.
+ */
+export async function launchAgentWindow(opts: {
+  session: string;
+  cwd: string;
+  startupCmd: string;
+  fresh: boolean;
+}): Promise<number> {
+  const { session, cwd, startupCmd, fresh } = opts;
+  if (fresh) {
+    await execTmux(['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
+    await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
+    return getActiveWindowIndex(session);
+  } else {
+    await execTmux(['new-window', '-t', session, '-c', cwd, startupCmd]);
+    return getLastWindowIndex(session);
+  }
+}
+
+/**
+ * Compute fresh (db + launch) session IDs for a new agent launch.
+ *
+ * When sessionIdMode === 'orchestrator-assigned', both DB and launch IDs are
+ * the same freshly-minted value. Otherwise the DB ID is null and a fresh ID is
+ * still generated for the launch call (harness self-assigns it).
+ */
+export function computeFreshSessionIds(harness: Harness): {
+  sessionIdForDb: string | null;
+  sessionIdForLaunch: string;
+} {
+  if (harness.sessionIdMode === 'orchestrator-assigned') {
+    const sid = harness.newSessionId();
+    return { sessionIdForDb: sid, sessionIdForLaunch: sid };
+  }
+  return { sessionIdForDb: null, sessionIdForLaunch: harness.newSessionId() };
+}
+
+/**
+ * Apply orchestrator MCP config to flags for a worker task.
+ *
+ * For orchestrator-managed tasks, writes worker-mcp-config.json and appends
+ * --mcp-config to flags so the worker gets the report_complete tool. Returns
+ * the (possibly augmented) flags string. The `isOrchestratorManaged` check is
+ * encapsulated here so Modular 05 can later invert the dependency.
+ */
+export function applyOrchestratorMcpConfig(
+  flags: string,
+  worktreePath: string,
+  taskId: string,
+  hookToken: string,
+): string {
+  if (isOrchestratorManaged(taskId)) {
+    const workerMcpConfigPath = writeWorkerMcpConfig(worktreePath, taskId, hookToken);
+    if (workerMcpConfigPath) {
+      flags += ` --mcp-config ${shellQuoteSingle(workerMcpConfigPath)}`;
+    }
+  }
+  return flags;
+}
+
+/**
+ * Build the resume/continue/launch command for an agent being resumed or hopped.
+ *
+ * Encapsulates the identical three-branch ladder in resumeTask and hopAgent:
+ *   1. resume by harness_session_id
+ *   2. continue (new session ID, buildContinueCommand)
+ *   3. fresh launch (buildContinueCommand returned null)
+ *
+ * Includes the setAgentHarnessSessionId side-effect and the logger.warn for the
+ * continue-unsupported fallback — both are byte-identical across both callers.
+ * Returns the baseCmd string. The caller is responsible for any post-launch DB
+ * writes (setAgentWindowRunning / hopAgentToTask).
+ */
+export function prepareResumeLaunch(opts: {
+  agent: Agent;
+  harness: Harness;
+  flags: string;
+  model: string | null;
+  cwd: string;
+}): string {
+  const { agent, harness, flags, model, cwd } = opts;
+  let baseCmd: string;
+  if (agent.harness_session_id) {
+    baseCmd = harness.buildResumeCommand({
+      sessionId: agent.harness_session_id,
+      flags,
+      model,
+      workspacePath: cwd,
+    });
+  } else {
+    const newId = harness.newSessionId();
+    const continueCmd = harness.buildContinueCommand({
+      sessionId: newId,
+      flags,
+      model,
+      workspacePath: cwd,
+    });
+    if (continueCmd !== null) {
+      baseCmd = continueCmd;
+    } else {
+      baseCmd = harness.buildLaunchCommand({
+        sessionId: newId,
+        agent: agent.agent,
+        flags,
+        model,
+        workspacePath: cwd,
+      });
+      logger.warn(
+        { agent_id: agent.id, harness: harness.id },
+        'continue unsupported, launching fresh',
+      );
+    }
+    if (harness.sessionIdMode === 'orchestrator-assigned') {
+      setAgentHarnessSessionId(agent.id, newId);
+    }
+  }
+  return baseCmd;
 }

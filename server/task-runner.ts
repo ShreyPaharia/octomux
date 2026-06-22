@@ -12,8 +12,6 @@ import { inferRefs } from './ref-inference.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
 import { broadcast } from './events.js';
-import { isOrchestratorManaged } from './orchestrator/store.js';
-import { shellQuoteSingle } from './shell-quote.js';
 import type { RepoConfig } from './repositories/repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
@@ -39,7 +37,6 @@ import {
   listActiveAgents,
   listStoppedAgents,
   getTaskHookToken,
-  setAgentHarnessSessionId,
   setAgentWindowRunning,
   stopAllAgents,
   stopRunningAgents,
@@ -83,6 +80,10 @@ import {
   buildAgentStartupCommand,
   writeAgentLocalSettings,
   writeWorkerMcpConfig,
+  launchAgentWindow,
+  computeFreshSessionIds,
+  applyOrchestratorMcpConfig,
+  prepareResumeLaunch,
 } from './task-engine/launch.js';
 import { runSetup } from './task-engine/setup/index.js';
 
@@ -107,6 +108,10 @@ export {
   buildAgentStartupCommand,
   writeAgentLocalSettings,
   writeWorkerMcpConfig,
+  launchAgentWindow,
+  computeFreshSessionIds,
+  applyOrchestratorMcpConfig,
+  prepareResumeLaunch,
 };
 
 const logger = childLogger('task-runner');
@@ -240,16 +245,7 @@ export async function startTask(task: Task): Promise<void> {
     const hookToken = crypto.randomBytes(32).toString('hex');
     let flags = harness.resolveFlags(await getSettings());
 
-    let sessionIdForDb: string | null;
-    let sessionIdForLaunch: string;
-    if (harness.sessionIdMode === 'orchestrator-assigned') {
-      const sid = harness.newSessionId();
-      sessionIdForDb = sid;
-      sessionIdForLaunch = sid;
-    } else {
-      sessionIdForDb = null;
-      sessionIdForLaunch = harness.newSessionId();
-    }
+    const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
     // Hooks must be on disk BEFORE the window launches the harness — with the
     // launch-as-startup-command model the harness starts the instant the pane
@@ -261,12 +257,7 @@ export async function startTask(task: Task): Promise<void> {
     // --mcp-config to the launch flags so the worker gets the report_complete tool.
     // Do NOT use --strict-mcp-config (worker keeps its normal tools + user MCP servers).
     // managed_tasks is registered before startTask runs (runCreateTask → upsertManagedTask).
-    if (isOrchestratorManaged(id)) {
-      const workerMcpConfigPath = writeWorkerMcpConfig(setup.worktreePath, id, hookToken);
-      if (workerMcpConfigPath) {
-        flags += ` --mcp-config ${shellQuoteSingle(workerMcpConfigPath)}`;
-      }
-    }
+    flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
 
     const baseCmd = harness.buildLaunchCommand({
       sessionId: sessionIdForLaunch,
@@ -285,16 +276,18 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'tmux_session';
     // Launch the harness as the session's first window's startup process: tmux
     // starts it when it creates the pane, so there is no shell-readiness race.
-    await execTmux(['new-session', '-d', '-s', session, '-c', setup.worktreePath, startupCmd]);
-    await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
+    const windowIndex = await launchAgentWindow({
+      session,
+      cwd: setup.worktreePath,
+      startupCmd,
+      fresh: true,
+    });
     // Session exists now — persist the column. See race-avoidance comment above.
     setTmuxSession(id, session);
     logger.info(
       { task_id: id, operation: 'createTask', tmux_session: session },
       'createTask: tmux session created',
     );
-
-    const windowIndex = await getActiveWindowIndex(session);
     insertAgentRepo({
       id: agentId,
       task_id: id,
@@ -378,16 +371,7 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
       : skeletonContent;
   }
 
-  let sessionIdForDb: string | null;
-  let sessionIdForLaunch: string;
-  if (harness.sessionIdMode === 'orchestrator-assigned') {
-    const sid = harness.newSessionId();
-    sessionIdForDb = sid;
-    sessionIdForLaunch = sid;
-  } else {
-    sessionIdForDb = null;
-    sessionIdForLaunch = harness.newSessionId();
-  }
+  const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   // Hooks on disk before the window launches the harness (starts on pane create).
   await harness.syncAgents(task.worktree!);
@@ -408,8 +392,12 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
   });
 
   // Launch as the new window's startup process — no shell-readiness race.
-  await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!, startupCmd]);
-  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+  const windowIndex = await launchAgentWindow({
+    session: task.tmux_session!,
+    cwd: task.worktree!,
+    startupCmd,
+    fresh: false,
+  });
   const addTarget = `${task.tmux_session}:${windowIndex}`;
 
   insertAgentWithNotify({
@@ -803,55 +791,18 @@ export async function resumeTask(task: Task): Promise<void> {
       const flags = harness.resolveFlags(await getSettings());
 
       const taskModel = (task as any).model ?? null;
-      let baseCmd: string;
-      if (agent.harness_session_id) {
-        baseCmd = harness.buildResumeCommand({
-          sessionId: agent.harness_session_id,
-          flags,
-          model: taskModel,
-          workspacePath: cwd,
-        });
-      } else {
-        const newId = harness.newSessionId();
-        const continueCmd = harness.buildContinueCommand({
-          sessionId: newId,
-          flags,
-          model: taskModel,
-          workspacePath: cwd,
-        });
-        if (continueCmd !== null) {
-          baseCmd = continueCmd;
-        } else {
-          baseCmd = harness.buildLaunchCommand({
-            sessionId: newId,
-            agent: agent.agent,
-            flags,
-            model: taskModel,
-            workspacePath: cwd,
-          });
-          logger.warn(
-            { agent_id: agent.id, harness: harness.id },
-            'continue unsupported, launching fresh',
-          );
-        }
-        if (harness.sessionIdMode === 'orchestrator-assigned') {
-          setAgentHarnessSessionId(agent.id, newId);
-        }
-      }
+      const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: taskModel, cwd });
 
       // Resume/continue carries no initial prompt; launch as the window's
       // startup process so there is no shell-readiness race.
       const startupCmd = buildAgentStartupCommand({ baseCmd });
-      let windowIndex: number;
-      if (!sessionCreated) {
-        await execTmux(['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
-        await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
-        sessionCreated = true;
-        windowIndex = await getActiveWindowIndex(session);
-      } else {
-        await execTmux(['new-window', '-t', session, '-c', cwd, startupCmd]);
-        windowIndex = await getLastWindowIndex(session);
-      }
+      const windowIndex = await launchAgentWindow({
+        session,
+        cwd,
+        startupCmd,
+        fresh: !sessionCreated,
+      });
+      sessionCreated = true;
       void harness.postLaunch?.(`${session}:${windowIndex}`);
 
       setAgentWindowRunning(agent.id, windowIndex);
@@ -971,54 +922,17 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   await harness.syncAgents(cwd);
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
-  let baseCmd: string;
-  if (agent.harness_session_id) {
-    baseCmd = harness.buildResumeCommand({
-      sessionId: agent.harness_session_id,
-      flags,
-      model: hopModel,
-      workspacePath: cwd,
-    });
-  } else {
-    const newId = harness.newSessionId();
-    const continueCmd = harness.buildContinueCommand({
-      sessionId: newId,
-      flags,
-      model: hopModel,
-      workspacePath: cwd,
-    });
-    if (continueCmd !== null) {
-      baseCmd = continueCmd;
-    } else {
-      baseCmd = harness.buildLaunchCommand({
-        sessionId: newId,
-        agent: agent.agent,
-        flags,
-        model: hopModel,
-        workspacePath: cwd,
-      });
-      logger.warn(
-        { agent_id: agent.id, harness: harness.id },
-        'continue unsupported, launching fresh',
-      );
-    }
-    if (harness.sessionIdMode === 'orchestrator-assigned') {
-      setAgentHarnessSessionId(agent.id, newId);
-    }
-  }
+  const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });
 
   // Create the new tmux destination, launching the harness as the window's
   // startup process so there is no shell-readiness race.
   const startupCmd = buildAgentStartupCommand({ baseCmd });
-  let newWindowIndex: number;
-  if (isStandalone) {
-    await execTmux(['new-session', '-d', '-s', newSession, '-c', cwd, startupCmd]);
-    await execTmux(['set-option', '-t', newSession, 'aggressive-resize', 'on']);
-    newWindowIndex = await getActiveWindowIndex(newSession);
-  } else {
-    await execTmux(['new-window', '-t', newSession, '-c', cwd, startupCmd]);
-    newWindowIndex = await getLastWindowIndex(newSession);
-  }
+  const newWindowIndex = await launchAgentWindow({
+    session: newSession,
+    cwd,
+    startupCmd,
+    fresh: isStandalone,
+  });
   const target = `${newSession}:${newWindowIndex}`;
   void harness.postLaunch?.(target);
 
