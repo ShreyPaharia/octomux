@@ -3,7 +3,6 @@ import { promisify } from 'util';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import { octomuxRoot } from './octomux-root.js';
 import { nanoid } from 'nanoid';
 import { getSettings } from './settings.js';
 import { getHarness } from './harnesses/index.js';
@@ -14,14 +13,12 @@ import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
 import { broadcast } from './events.js';
 import { isOrchestratorManaged } from './orchestrator/store.js';
-import { mcpServerInvocation } from './orchestrator/runner.js';
+import { shellQuoteSingle } from './shell-quote.js';
+import { computeMergeBase } from './git-commits.js';
 import type { RepoConfig } from './repositories/repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
-import { shellQuoteSingle } from './shell-quote.js';
-import { computeMergeBase } from './git-commits.js';
 import {
-  listSettingUpTasks,
   setRuntimeState,
   updateTaskFields,
   setWorktreeId,
@@ -33,7 +30,6 @@ import {
   getTask as getTaskRepo,
   getTaskTmuxSession,
   getTaskModel,
-  listActiveScratchTaskIds,
   updateWorktreeOnSetup,
   insertWorktreeInUse,
   releaseWorktree,
@@ -62,6 +58,58 @@ import {
   resolveAgentPermissionPrompts,
 } from './repositories/permission-prompts.js';
 
+// ─── task-engine leaf modules ────────────────────────────────────────────────
+import {
+  isTmuxTargetMissing,
+  getActiveWindowIndex,
+  getLastWindowIndex,
+  cleanupLinkedSessions,
+  cleanupOrphanedViewerSessions,
+} from './task-engine/sessions.js';
+import {
+  scratchRoot,
+  scratchDirFor,
+  reconcileOrphanSettingUp,
+  gcScratchDirs,
+} from './task-engine/reconcile.js';
+import {
+  validateRepo,
+  revParseHead,
+  checkDirty,
+  gitBranchExists,
+  addWorktreeWithBranch,
+  slugifyTitle,
+} from './task-engine/git.js';
+import {
+  buildAgentStartupCommand,
+  writeAgentLocalSettings,
+  writeWorkerMcpConfig,
+  DISABLED_PLUGINS_IN_WORKTREES,
+} from './task-engine/launch.js';
+
+// Re-export leaf symbols so all existing callers (server/index.ts, routes, etc.)
+// keep working with zero changes.
+export {
+  isTmuxTargetMissing,
+  getActiveWindowIndex,
+  getLastWindowIndex,
+  cleanupLinkedSessions,
+  cleanupOrphanedViewerSessions,
+  scratchRoot,
+  scratchDirFor,
+  reconcileOrphanSettingUp,
+  gcScratchDirs,
+  validateRepo,
+  revParseHead,
+  checkDirty,
+  gitBranchExists,
+  addWorktreeWithBranch,
+  slugifyTitle,
+  buildAgentStartupCommand,
+  writeAgentLocalSettings,
+  writeWorkerMcpConfig,
+};
+
 const logger = childLogger('task-runner');
 
 export interface UserTerminalResult {
@@ -70,106 +118,6 @@ export interface UserTerminalResult {
 }
 
 const execFile = promisify(execFileCb);
-
-/** Root directory for scratch-mode task working dirs. */
-export function scratchRoot(): string {
-  return path.join(octomuxRoot(), 'scratch');
-}
-
-export function scratchDirFor(taskId: string): string {
-  return path.join(scratchRoot(), taskId);
-}
-
-/**
- * True when an execFile error stems from tmux reporting that a target
- * session/window/pane does not exist — which happens routinely during cleanup
- * (session already killed, window already closed) and is not worth a warn.
- */
-function isTmuxTargetMissing(err: unknown): boolean {
-  const stderr = (err as { stderr?: string } | null)?.stderr ?? '';
-  return /can't find (?:session|window|pane):/i.test(stderr);
-}
-
-/** Get the active window index of a tmux session. */
-async function getActiveWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execTmux(['display-message', '-t', session, '-p', '#{window_index}']);
-  return parseInt(stdout.trim(), 10);
-}
-
-/** Get the index of the last window in a tmux session. */
-async function getLastWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execTmux(['list-windows', '-t', session, '-F', '#{window_index}']);
-  const indices = stdout.trim().split('\n').map(Number);
-  return Math.max(...indices);
-}
-
-/** Delay before removing the on-disk prompt file after launch. Must outlast the
- *  worst-case interactive-shell init: the prompt is read by `cat` as part of the
- *  window's startup command, which only runs after the shell sources its rc
- *  files (can be ~10s on a heavy zsh). 5s was safe when the command was typed
- *  in after a readiness wait; as a startup process the read happens later. */
-const PROMPT_FILE_CLEANUP_MS = 60000;
-
-const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
-
-function writeAgentLocalSettings(worktreePath: string): void {
-  const claudeDir = path.join(worktreePath, '.claude');
-  fs.mkdirSync(claudeDir, { recursive: true });
-  const settingsPath = path.join(claudeDir, 'settings.local.json');
-  if (fs.existsSync(settingsPath)) return;
-  const plugins: Record<string, boolean> = {};
-  for (const p of DISABLED_PLUGINS_IN_WORKTREES) plugins[p] = false;
-  fs.writeFileSync(settingsPath, JSON.stringify({ plugins }, null, 2));
-}
-
-/**
- * Build the command that launches an agent AS a tmux window's startup process.
- *
- * Running the harness command as the pane's initial process (rather than
- * spawning an interactive shell and typing the command into it with send-keys)
- * removes the shell-readiness race entirely: tmux starts the process when it
- * creates the pane, so there is no prompt to detect, no sentinel handshake, and
- * no possibility of a half-typed or interleaved command. This is the documented
- * fix for the `send-keys`-races-shell-init bug class.
- *
- * The command runs under an interactive shell (`$SHELL -ic`) so it inherits the
- * user's full environment (PATH, nvm, etc.) — exactly what the typed-in command
- * got from the window's default interactive shell before. When the harness
- * exits we `exec $SHELL -i` so the window persists as a usable shell (matching
- * the prior UX). The initial prompt is passed via `"$(cat <file>)"` to keep
- * arbitrary prompt text out of the command line; the file is removed after a
- * delay (see PROMPT_FILE_CLEANUP_MS).
- */
-export function buildAgentStartupCommand(args: {
-  baseCmd: string;
-  prompt?: string | null;
-  worktreePath?: string;
-  agentId?: string;
-}): string {
-  let inner = args.baseCmd;
-  if (args.prompt && args.worktreePath && args.agentId) {
-    const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
-    fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
-    // `--` ends option parsing so the positional prompt can't be swallowed by a
-    // preceding variadic flag. `--mcp-config` (appended for orchestrator-managed
-    // tasks) is variadic in Claude Code: without the separator it consumes the
-    // prompt as a second config path and the worker dies with
-    // "Invalid MCP configuration". POSIX `--` is honoured by both harnesses.
-    inner += ` -- "$(cat ${shellQuoteSingle(promptFile)})"`;
-    setTimeout(() => {
-      try {
-        fs.unlinkSync(promptFile);
-      } catch {
-        // already removed or never existed
-      }
-    }, PROMPT_FILE_CLEANUP_MS);
-  }
-  const shell = process.env.SHELL || '/bin/sh';
-  // Keep the window alive as an interactive shell once the harness exits, so
-  // the pane stays usable (matches the prior typed-command behaviour).
-  const script = `${inner}; exec ${shell} -i`;
-  return `${shell} -ic ${shellQuoteSingle(script)}`;
-}
 
 export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
   // Auto-fix formatting drift
@@ -196,145 +144,7 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
   }
 }
 
-/**
- * Kill all linked viewer sessions (`<tmuxSession>-v-*`) for a specific task.
- */
-export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execTmux(['list-sessions', '-F', '#{session_name}']));
-  } catch {
-    return;
-  }
-
-  const prefix = `${tmuxSession}-v-`;
-  const linked = stdout
-    .trim()
-    .split('\n')
-    .filter((name) => name.startsWith(prefix));
-
-  for (const session of linked) {
-    await execTmux(['kill-session', '-t', session]).catch(() => {});
-  }
-}
-
-/**
- * Clean up orphaned `-v-` viewer sessions from previous runs.
- */
-export async function cleanupOrphanedViewerSessions(): Promise<void> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execTmux(['list-sessions', '-F', '#{session_name}']));
-  } catch {
-    return;
-  }
-
-  const sessions = new Set(stdout.trim().split('\n').filter(Boolean));
-  const viewerPattern = /^(octomux-agent-.+)-v-/;
-
-  for (const name of sessions) {
-    const match = name.match(viewerPattern);
-    if (match) {
-      const parentSession = match[1];
-      if (!sessions.has(parentSession)) {
-        await execTmux(['kill-session', '-t', name]).catch(() => {});
-      }
-    }
-  }
-}
-
-/** Generate a git-safe branch slug from a title + task ID suffix. */
-export function slugifyTitle(title: string, id: string): string {
-  const slug = title
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 50);
-  const suffix = id.slice(0, 6);
-  return `${slug}-${suffix}`;
-}
-
-// ─── Boot-time reconciliation ────────────────────────────────────────────────
-
-/**
- * Sweep setting_up tasks whose tmux session no longer exists. Transition each
- * to status='error' with a clear error message. Intended to run once at boot.
- */
-export async function reconcileOrphanSettingUp(): Promise<void> {
-  const rows = listSettingUpTasks();
-
-  for (const row of rows) {
-    let alive = false;
-    if (row.tmux_session) {
-      try {
-        await execTmux(['has-session', '-t', row.tmux_session]);
-        alive = true;
-      } catch {
-        alive = false;
-      }
-    }
-    if (!alive) {
-      setRuntimeState(row.id, 'error', 'orphan setting_up on boot');
-      logger.warn(
-        { task_id: row.id, operation: 'reconcileOrphanSettingUp' },
-        'transitioned orphan setting_up task to error',
-      );
-    }
-  }
-}
-
-/**
- * GC scratch dirs that have no matching active task row. A scratch dir is
- * preserved only when a task row with run_mode='scratch' and status in
- * ('draft','setting_up','running') references it.
- */
-export async function gcScratchDirs(): Promise<void> {
-  const root = scratchRoot();
-  if (!fs.existsSync(root)) return;
-
-  const alive = new Set(listActiveScratchTaskIds().map((r) => r.id));
-
-  const entries = fs.readdirSync(root, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (alive.has(entry.name)) continue;
-    const dir = path.join(root, entry.name);
-    try {
-      fs.rmSync(dir, { recursive: true, force: true });
-      logger.info({ scratch_dir: dir, operation: 'scratch_gc_removed' }, 'scratch_gc_removed');
-    } catch (err) {
-      logger.warn(
-        { scratch_dir: dir, operation: 'scratch_gc_removed', err },
-        'scratch_gc_remove_failed',
-      );
-    }
-  }
-}
-
 // ─── Per-mode setup helpers ──────────────────────────────────────────────────
-
-async function validateRepo(repoPath: string): Promise<void> {
-  if (!fs.existsSync(repoPath)) {
-    throw new Error(`Repository path does not exist: ${repoPath}`);
-  }
-  await execFile('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree']);
-}
-
-async function revParseHead(cwd: string, ref = 'HEAD'): Promise<string> {
-  const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', `${ref}^{commit}`]);
-  return stdout.trim();
-}
-
-async function checkDirty(repoPath: string): Promise<string[]> {
-  const { stdout } = await execFile('git', ['-C', repoPath, 'status', '--porcelain=v1']);
-  return stdout
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-}
 
 interface SetupResult {
   worktreePath: string;
@@ -343,64 +153,6 @@ interface SetupResult {
   baseSha: string | null;
   installHooksAt: string;
   runPreflight: boolean;
-}
-
-/** True if `refs/heads/<branch>` exists in the repo. */
-async function gitBranchExists(repoPath: string, branch: string): Promise<boolean> {
-  try {
-    await execFile('git', [
-      '-C',
-      repoPath,
-      'rev-parse',
-      '--verify',
-      '--quiet',
-      `refs/heads/${branch}`,
-    ]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Add a git worktree, tolerating an already-existing branch so task creation
- * never dies on a name collision (the reported failure: a prior closed task left
- * the branch behind — octomux preserves branches on close).
- *  - branch doesn't exist → create it (`-b <branch> [base]`).
- *  - branch exists, free → check it out into the new worktree (no `-b`; base is
- *    ignored, the branch already has a tip).
- *  - branch exists but is checked out elsewhere (or any other add failure) →
- *    retry with a unique `<branch>-<id>`.
- * Returns the branch name actually used.
- */
-async function addWorktreeWithBranch(
-  repoPath: string,
-  worktreePath: string,
-  branch: string,
-  baseBranch: string | null | undefined,
-): Promise<string> {
-  if (!(await gitBranchExists(repoPath, branch))) {
-    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branch];
-    if (baseBranch) args.push(baseBranch);
-    await execFile('git', args);
-    return branch;
-  }
-
-  try {
-    await execFile('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branch]);
-    logger.info({ operation: 'addWorktree', branch }, 'addWorktree: reused existing branch');
-    return branch;
-  } catch (err) {
-    const unique = `${branch}-${nanoid(6)}`;
-    logger.warn(
-      { operation: 'addWorktree', branch, unique, err },
-      'addWorktree: existing branch unusable (checked out elsewhere?); using unique branch',
-    );
-    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', unique];
-    if (baseBranch) args.push(baseBranch);
-    await execFile('git', args);
-    return unique;
-  }
 }
 
 async function setupNew(task: Task): Promise<SetupResult> {
@@ -623,66 +375,6 @@ async function setupScratch(task: Task): Promise<SetupResult> {
     installHooksAt: dir,
     runPreflight: false,
   };
-}
-
-// ─── Worker MCP config ────────────────────────────────────────────────────────
-
-/**
- * Write a worker mcp-config.json into the worktree's .claude directory so the
- * worker's `claude` session gets the octomux MCP server with the report_complete
- * tool. Only written for orchestrator-managed tasks.
- *
- * The worker's MCP subprocess receives OCTOMUX_TASK_ID + OCTOMUX_ACTION_TOKEN +
- * OCTOMUX_ACTION_BASE_URL, which enables workerReportEnabled() in the server and
- * registers the report_complete tool. Does NOT use --strict-mcp-config so the
- * worker keeps its existing tools + the user's project MCP servers.
- *
- * Returns the absolute path to the written mcp-config.json, or null if the MCP
- * server entry can't be resolved (worker still launches, but without the tool).
- */
-function writeWorkerMcpConfig(
-  worktreePath: string,
-  taskId: string,
-  hookToken: string,
-): string | null {
-  const inv = mcpServerInvocation();
-  if (!inv) {
-    logger.warn(
-      { task_id: taskId, operation: 'writeWorkerMcpConfig' },
-      'worker MCP: server entry not found — worker will not have report_complete tool',
-    );
-    return null;
-  }
-
-  const claudeDir = path.join(worktreePath, '.claude');
-  fs.mkdirSync(claudeDir, { recursive: true });
-  const cfgPath = path.join(claudeDir, 'worker-mcp-config.json');
-
-  const env: Record<string, string> = {
-    OCTOMUX_TASK_ID: taskId,
-    OCTOMUX_ACTION_TOKEN: hookToken,
-    OCTOMUX_ACTION_BASE_URL: hookBaseUrl(),
-  };
-  if (process.env.NODE_ENV) env.NODE_ENV = process.env.NODE_ENV;
-  if (process.env.OCTOMUX_DATA_DIR) env.OCTOMUX_DATA_DIR = process.env.OCTOMUX_DATA_DIR;
-
-  const cfg = {
-    mcpServers: {
-      octomux: {
-        command: inv.command,
-        args: inv.args,
-        env,
-      },
-    },
-  };
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
-
-  logger.info(
-    { task_id: taskId, operation: 'writeWorkerMcpConfig', config_path: cfgPath },
-    'worker MCP: wrote worker mcp-config.json',
-  );
-
-  return cfgPath;
 }
 
 // ─── Task lifecycle ──────────────────────────────────────────────────────────
