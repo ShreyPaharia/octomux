@@ -5,6 +5,7 @@ import { getLatestPublishedReview } from '../../server/published-reviews.js';
 import { listLearningsForRepo } from '../../server/review-learnings.js';
 import { findInstructionFiles } from '../../server/instruction-files.js';
 import { markStaleDrafts } from '../../server/review-staleness.js';
+import { readPlaybook } from '../../server/review-playbook.js';
 import { SELECT_TASK_SQL } from '../../server/task-select.js';
 import type { Task } from '../../server/types.js';
 import type { InlineCommentRow } from '../../server/inline-comments.js';
@@ -59,6 +60,21 @@ export async function runStart(argv: string[]): Promise<void> {
   let run = getCurrentRun(taskId);
   if (!run || run.pr_head_sha !== task.pr_head_sha) {
     run = createReviewRun({ task_id: taskId, pr_head_sha: task.pr_head_sha });
+  } else if (run.status !== 'running') {
+    // Re-review of the same head. review_runs is UNIQUE(task_id, pr_head_sha) so
+    // we can't create a second run — reset this one in place: clear the ingested
+    // walkthrough and the handoff flag so the walkthrough re-ingests and the
+    // poller re-attaches the deep-review agent (otherwise deep_review_attached
+    // stays 1 and the deep phase never re-runs).
+    getDb()
+      .prepare(
+        `UPDATE review_runs
+            SET status = 'running', deep_review_attached = 0,
+                walkthrough = NULL, completed_at = NULL, error = NULL
+          WHERE id = ?`,
+      )
+      .run(run.id);
+    run = getCurrentRun(taskId) as typeof run;
   }
 
   const prev = getLatestPublishedReview(taskId);
@@ -92,6 +108,8 @@ export async function runStart(argv: string[]): Promise<void> {
   const repoPath = task.repo_path ?? '';
   const learnings = repoPath ? listLearningsForRepo(repoPath) : [];
   const instruction_files = task.worktree ? findInstructionFiles(task.worktree) : [];
+  const playbook = repoPath ? readPlaybook(repoPath) : { index: null, files: [] };
+  const walkthrough = run.walkthrough ? safeParse(run.walkthrough) : null;
 
   const carry_forward = db
     .prepare(
@@ -108,12 +126,15 @@ export async function runStart(argv: string[]): Promise<void> {
         review_run_id: run.id,
         pr_head_sha: task.pr_head_sha,
         base_sha: task.base_sha ?? null,
+        base_branch: task.base_branch ?? null,
         pr_url: task.pr_url ?? null,
         worktree: task.worktree ?? null,
         previous_review,
         learnings: learnings.map((l) => ({ id: l.id, why: l.why })),
         instruction_files,
         carry_forward,
+        playbook,
+        walkthrough,
       },
       null,
       2,

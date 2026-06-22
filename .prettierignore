@@ -1,6 +1,7 @@
 node_modules
 dist
 dist-server
+dist-electron
 data
 coverage
 bun.lock

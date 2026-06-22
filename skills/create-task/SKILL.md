@@ -7,6 +7,16 @@ description: Use when creating an octomux task to dispatch autonomous Claude Cod
 
 Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code change via octomux.
 
+> **Delegate the exploration — do NOT do it yourself.** Do not read the repo's
+> code, README, or git diffs to figure out _how_ the work should be done — that is
+> the worker's job. The worker explores the real code and owns the implementation.
+> Your task description is a **goal-oriented brief**: the WHAT and WHY plus
+> verifiable acceptance criteria, hard constraints, non-goals, and orientation
+> pointers — never a step-by-step procedure ("edit file X, then Y"). Gather only the
+> minimum needed to dispatch: the repo path, base branch, and (if given) ticket
+> details. A step plan you write without reading the code is stale and constrains a
+> capable worker. (See the goal-oriented brief shape in Step 5.)
+
 ## Steps
 
 1. **Understand the goal:**
@@ -103,13 +113,21 @@ Dispatch an autonomous Claude Code agent to work on a feature, bugfix, or code c
    --branch 'fix/tmux-session-leak'
    ```
 
-5. **Craft the initial prompt:**
-   Build a well-structured prompt that includes:
-   - Clear description of the goal
-   - Acceptance criteria (if available from a ticket)
+5. **Craft the initial prompt (a goal-oriented brief — WHAT/WHY, not HOW):**
+   Write the brief about outcomes and boundaries, not procedure. Use this shape:
+   - **Goal** — 1–2 sentences: the outcome/capability that should exist when done.
+   - **Why / Context** — intent and how it fits, so the worker makes sound tradeoffs.
+   - **Acceptance criteria** — VERIFIABLE: passing tests / build+lint green / concrete
+     example cases / an end-to-end check that proves it works; state the evidence to show.
+   - **Hard constraints** — non-negotiables (don't break API X, no new deps, follow CLAUDE.md).
+   - **Non-goals** — explicitly what NOT to touch (prevents scope-creep).
+   - **Pointers** — orientation only ("follow the pattern in `src/auth/`") — NEVER a step list.
    - Standard instructions: `Run tests before finishing. Follow conventional commits. Keep changes minimal and focused.`
 
-   The prompt should be specific and actionable — vague prompts lead to agents going in circles.
+   Put your precision into the acceptance criteria, not into steps. Do NOT enumerate
+   implementation steps or files-to-edit — the worker reads the code and decides that.
+   A vague brief is bad, but so is a prescriptive one; be specific about the goal and
+   boundaries, silent about the procedure.
 
    **Always append this to the end of the prompt:**
 

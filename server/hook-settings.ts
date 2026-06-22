@@ -97,6 +97,11 @@ export const ALLOWED_TOOLS = [
   'ExitPlanMode',
   'AskUserQuestion',
 
+  // --- Octomux MCP tools (worker report_complete — whole-server allow so the
+  //     report_complete tool never triggers an interactive permission prompt
+  //     that would hang the worker session). SHR-160.
+  'mcp__octomux',
+
   // --- Atlassian MCP tools (read-only) ---
   'mcp__plugin_atlassian_atlassian__getJiraIssue',
   'mcp__plugin_atlassian_atlassian__searchJiraIssuesUsingJql',

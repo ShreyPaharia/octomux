@@ -6,7 +6,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { octomuxRoot } from './octomux-root.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { getDb } from './db.js';
+import { getDb, getDataDir } from './db.js';
 import { childLogger } from './logger.js';
 import { getNeedsYou, getActivity } from './inbox.js';
 import { execFile as execFileCb } from 'child_process';
@@ -55,6 +55,18 @@ import { getReviewRun, getCurrentRun, setWalkthrough } from './review-runs.js';
 import { listPublishedReviews } from './published-reviews.js';
 import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
 import { updateCommentFields } from './inline-comments.js';
+import {
+  createConversation,
+  getConversation,
+  listConversations,
+  listMessages as listOrchestratorMessages,
+  setGlobalMonitor,
+  clearGlobalMonitor,
+  getGlobalMonitorConversation,
+  getConversationUsage,
+} from './orchestrator/store.js';
+import { startConversation } from './orchestrator/runner.js';
+import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 
 import {
   buildManualReviewPrompt,
@@ -118,6 +130,7 @@ import { fireHook, getTaskHookExecutions } from './hook-dispatcher.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
+const healthLogger = childLogger('health');
 
 const TERMINALS_BY_TASK_SQL =
   'SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index';
@@ -257,6 +270,39 @@ function augmentDashboardSettings(settings: OctomuxSettings): OctomuxSettings & 
 
 export function setupRoutes(app: Express): void {
   app.use('/api/hooks', hookRoutes);
+  mountArtifactEndpoint(app);
+
+  // GET /api/health — readiness probe: DB reachability, uptime, running tasks
+  app.get('/api/health', (_req: Request, res: Response) => {
+    const uptime = process.uptime();
+    const data_dir = getDataDir();
+
+    let db: { ok: true } | { ok: false; error: string };
+    let running_tasks = 0;
+    try {
+      const dbInstance = getDb();
+      dbInstance.prepare('SELECT 1 AS ok').get();
+      db = { ok: true };
+      const row = dbInstance
+        .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE runtime_state = 'running'`)
+        .get() as { n: number };
+      running_tasks = row.n;
+    } catch (err) {
+      db = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const status = db.ok ? 'ok' : 'degraded';
+    if (db.ok) {
+      healthLogger.info({ operation: 'health', status, db_ok: true, running_tasks }, 'health check');
+    } else {
+      healthLogger.warn(
+        { operation: 'health', status, db_ok: false, error: db.error },
+        'health check degraded',
+      );
+    }
+
+    res.status(db.ok ? 200 : 503).json({ status, uptime, db, running_tasks, data_dir });
+  });
 
   // GET /api/harnesses — list registered harness implementations
   app.get('/api/harnesses', (_req: Request, res: Response) => {
@@ -3094,6 +3140,168 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // POST /api/reviews — create an auto_review task for a GitHub PR URL.
+  // Idempotent: if a live (non-deleted, non-error) review task already exists
+  // for the same repo+PR, returns that instead of creating a duplicate.
+  app.post('/api/reviews', async (req: Request, res: Response) => {
+    const body = req.body as { pr_url?: unknown; repo_path?: unknown };
+    const prUrl = typeof body.pr_url === 'string' ? body.pr_url.trim() : '';
+    const bodyRepoPath = typeof body.repo_path === 'string' ? body.repo_path.trim() : '';
+
+    // Parse GitHub PR URL
+    const prMatch = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+    if (!prMatch) {
+      res.status(400).json({ error: 'invalid pr_url' });
+      return;
+    }
+    const [, owner, repo, numberStr] = prMatch;
+    const number = parseInt(numberStr, 10);
+    const ownerRepo = `${owner}/${repo}`;
+
+    // Resolve the local repo path
+    let repoPath = bodyRepoPath;
+    if (!repoPath) {
+      const db = getDb();
+      const rows = db
+        .prepare(`SELECT DISTINCT repo_path FROM worktrees WHERE repo_path IS NOT NULL`)
+        .all() as Array<{ repo_path: string }>;
+
+      for (const row of rows) {
+        const candidatePath = row.repo_path;
+        try {
+          const { stdout } = await execFile('git', [
+            '-C',
+            candidatePath,
+            'remote',
+            'get-url',
+            'origin',
+          ]);
+          const remoteUrl = stdout.trim();
+          // Handle both ssh (git@github.com:owner/repo.git) and https
+          const sshMatch = remoteUrl.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
+          const httpsMatch = remoteUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
+          const remoteOwnerRepo = (sshMatch?.[1] ?? httpsMatch?.[1] ?? '').toLowerCase();
+          if (remoteOwnerRepo === ownerRepo.toLowerCase()) {
+            repoPath = candidatePath;
+            break;
+          }
+        } catch {
+          // skip this candidate
+        }
+      }
+    }
+
+    if (!repoPath) {
+      res.status(400).json({
+        error: `could not resolve a local repo for ${ownerRepo}; pass repo_path`,
+      });
+      return;
+    }
+
+    // Dedup: check for an existing live review task for this repo+PR
+    const db = getDb();
+    const existing = db
+      .prepare(
+        `SELECT t.id FROM tasks t JOIN worktrees w ON t.worktree_id = w.id
+          WHERE w.repo_path = ? AND t.pr_number = ? AND t.source = 'auto_review'
+            AND t.deleted_at IS NULL AND t.runtime_state != 'error'
+          ORDER BY t.created_at DESC LIMIT 1`,
+      )
+      .get(repoPath, number) as { id: string } | undefined;
+
+    if (existing) {
+      res.status(200).json({ id: existing.id, reused: true });
+      return;
+    }
+
+    // Fetch PR metadata via gh CLI
+    let pr: {
+      title: string;
+      headRefOid: string;
+      baseRefName: string;
+      author: { login: string } | null;
+      state: string;
+      url: string;
+    };
+    try {
+      const { stdout } = await execFile(
+        'gh',
+        [
+          'pr',
+          'view',
+          String(number),
+          '--repo',
+          ownerRepo,
+          '--json',
+          'title,headRefOid,baseRefName,author,state,url',
+        ],
+        { cwd: repoPath },
+      );
+      pr = JSON.parse(stdout) as typeof pr;
+    } catch (err) {
+      res.status(400).json({ error: `failed to fetch PR metadata: ${(err as Error).message}` });
+      return;
+    }
+
+    if (pr.state !== 'OPEN') {
+      res.status(400).json({ error: `PR #${number} is ${pr.state}` });
+      return;
+    }
+
+    // Create the review task
+    const id = nanoid(12);
+    const short = repoShortName(repoPath);
+    const branch = `review/${short}-pr-${number}`;
+
+    const initialPrompt = buildPrReviewPrompt({
+      reviewTaskId: id,
+      title: pr.title,
+      number,
+      url: pr.url,
+      author: pr.author?.login ?? null,
+      headRefOid: pr.headRefOid,
+      requestedAt: new Date().toISOString(),
+    });
+
+    insertReviewTask({
+      id,
+      repoPath,
+      branch,
+      baseBranch: pr.baseRefName,
+      title: `Review: ${pr.title} (#${number})`,
+      description: `Review task for PR #${number}`,
+      initialPrompt,
+      prUrl: pr.url,
+      prNumber: number,
+      prHeadSha: pr.headRefOid,
+    });
+
+    broadcast({ type: 'task:created', payload: { taskId: id } });
+
+    const fresh = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
+    if (fresh) {
+      fresh.agents = [];
+      fresh.user_terminals = [];
+      // Fire-and-forget: start the task in the background
+      startTask(fresh)
+        .then(() => broadcast({ type: 'task:updated', payload: { taskId: id } }))
+        .catch((err) => {
+          apiLogger.error(
+            { task_id: id, err: (err as Error).message },
+            'failed to auto-start review create task',
+          );
+          broadcast({ type: 'task:updated', payload: { taskId: id } });
+        });
+    }
+
+    apiLogger.info(
+      { task_id: id, pr_number: number, repo: ownerRepo, repo_path: repoPath },
+      'review create task created',
+    );
+
+    res.status(201).json({ id, reused: false });
+  });
+
   // ─── Review runs ─────────────────────────────────────────────────────────────
 
   // PATCH /api/tasks/:id/review-runs/:rid/walkthrough — deep-merge walkthrough
@@ -3313,6 +3521,136 @@ export function setupRoutes(app: Express): void {
     );
 
     res.status(201).json({ id: newId, action: 'created' });
+  });
+
+  // ─── Orchestrator chat ───────────────────────────────────────────────────────
+
+  // POST /api/orchestrator/conversations — create a new orchestrator conversation
+  app.post('/api/orchestrator/conversations', async (req: Request, res: Response) => {
+    const { title, cwd } = req.body as { title?: string; cwd?: string };
+    if (!title?.trim()) {
+      res.status(400).json({ error: 'title is required' });
+      return;
+    }
+    try {
+      const id = createConversation({ title: title.trim() });
+      // The conductor runs in a trusted cwd (default: the server's repo root).
+      const convCwd = cwd?.trim() || process.cwd();
+      // Launch the interactive claude session for this conversation (tmux + transcript).
+      await startConversation(id, convCwd);
+      apiLogger.info(
+        { conversation_id: id, operation: 'createConversation', cwd: convCwd },
+        'orchestrator conversation created + session launched',
+      );
+      const conv = getConversation(id);
+      res.status(201).json(conv);
+    } catch (err) {
+      apiLogger.error(
+        { err, operation: 'createConversation' },
+        'failed to create orchestrator conversation',
+      );
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations — list all conversations
+  app.get('/api/orchestrator/conversations', (_req: Request, res: Response) => {
+    try {
+      res.json(listConversations());
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations/:id — get a single conversation
+  app.get('/api/orchestrator/conversations/:id', (req: Request, res: Response) => {
+    try {
+      const conv = getConversation((req.params as Record<string, string>).id);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      res.json(conv);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations/:id/messages — list messages for a conversation
+  app.get('/api/orchestrator/conversations/:id/messages', (req: Request, res: Response) => {
+    try {
+      const convId = (req.params as Record<string, string>).id;
+      const conv = getConversation(convId);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      res.json(listOrchestratorMessages(convId));
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // POST /api/orchestrator/conversations/:id/global-monitor — toggle global-monitor mode
+  // Exactly one conversation may be in global-monitor mode at a time.
+  // If the conversation is already the global monitor, clears it.
+  // Otherwise, designates it as the global monitor (clearing the previous one).
+  app.post('/api/orchestrator/conversations/:id/global-monitor', (req: Request, res: Response) => {
+    try {
+      const convId = (req.params as Record<string, string>).id;
+      const conv = getConversation(convId);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      // Toggle: if already global-monitor, clear; otherwise set
+      const currentMonitor = getGlobalMonitorConversation();
+      let isMonitor: boolean;
+      if (currentMonitor === convId) {
+        clearGlobalMonitor();
+        isMonitor = false;
+      } else {
+        setGlobalMonitor(convId);
+        isMonitor = true;
+      }
+      apiLogger.info(
+        { conversation_id: convId, is_global_monitor: isMonitor },
+        'orchestrator: global-monitor toggled',
+      );
+      res.json({ is_global_monitor: isMonitor });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // GET /api/orchestrator/conversations/:id/usage — conductor-leanness stats (§6.7)
+  // Returns tasks_spawned, tool_calls, started_at, last_activity_at.
+  // Returns zeros when no usage row exists yet (conversation was created but no
+  // write-actions have been dispatched).
+  app.get('/api/orchestrator/conversations/:id/usage', (req: Request, res: Response) => {
+    try {
+      const convId = (req.params as Record<string, string>).id;
+      const conv = getConversation(convId);
+      if (!conv) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const usage = getConversationUsage(convId);
+      if (!usage) {
+        // No usage row yet — return zeros so the UI always gets a valid shape.
+        res.json({
+          conversation_id: convId,
+          tasks_spawned: 0,
+          tool_calls: 0,
+          started_at: conv.created_at,
+          last_activity_at: conv.updated_at,
+        });
+        return;
+      }
+      res.json(usage);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
   });
 
   // ─── Review learnings ────────────────────────────────────────────────────────

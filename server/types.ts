@@ -328,6 +328,7 @@ export interface ReviewRun {
   started_at: string;
   completed_at: string | null;
   error: string | null;
+  deep_review_attached: number;
 }
 
 export type PublishedReviewVerdict = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';

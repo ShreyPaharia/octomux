@@ -19,6 +19,16 @@ const DB_PATH = process.env.OCTOMUX_DB_PATH ?? path.join(DB_DIR, 'tasks.db');
 /** Path to the old package-relative database (for migration detection). */
 const OLD_DB_PATH = path.join(__dirname, '..', 'data', 'tasks.db');
 
+/**
+ * Absolute path to the octomux data directory (the directory holding the SQLite
+ * file). Resolved from the same logic as the DB path so prod (`~/.octomux/data`),
+ * dev (`./data`), and `OCTOMUX_DB_PATH` overrides all agree. Single source of
+ * truth for consumers that need to report or locate the data dir.
+ */
+export function getDataDir(): string {
+  return path.dirname(DB_PATH);
+}
+
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS worktrees (
     id            TEXT PRIMARY KEY,
@@ -763,7 +773,8 @@ export function initDb(instance: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'running',
       started_at TIMESTAMP NOT NULL DEFAULT (datetime('now')),
       completed_at TIMESTAMP,
-      error TEXT
+      error TEXT,
+      deep_review_attached INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_review_runs_task ON review_runs(task_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_review_runs_task_sha_status
@@ -793,6 +804,14 @@ export function initDb(instance: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_review_learnings_repo ON review_learnings(repo_path);
   `);
+
+  const reviewRunCols = columnsOf('review_runs');
+  addColumn(
+    'review_runs',
+    'deep_review_attached',
+    'deep_review_attached INTEGER NOT NULL DEFAULT 0',
+    reviewRunCols,
+  );
 
   const inlineCommentCols = columnsOf('inline_comments');
   addColumn('inline_comments', 'status', `status TEXT NOT NULL DEFAULT 'draft'`, inlineCommentCols);
@@ -855,4 +874,120 @@ export function initDb(instance: Database.Database): void {
   // When a sub-agent completes, its parent agent is notified via this link.
   const agentCols3 = columnsOf('agents');
   addColumn('agents', 'notify_agent_id', 'notify_agent_id TEXT', agentCols3);
+
+  // ── Orchestrator chat tables (2026-06-20, SHR-117) ───────────────────────
+  // Forward-only; all created via CREATE TABLE IF NOT EXISTS for idempotency.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS orchestrator_conversations (
+      id                TEXT PRIMARY KEY,
+      title             TEXT NOT NULL,
+      tmux_window       TEXT,
+      claude_session_id TEXT,
+      transcript_path   TEXT,
+      status            TEXT NOT NULL DEFAULT 'active',
+      created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_orch_conversations_status
+      ON orchestrator_conversations(status);
+
+    CREATE TABLE IF NOT EXISTS orchestrator_messages (
+      id              TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES orchestrator_conversations(id) ON DELETE CASCADE,
+      role            TEXT NOT NULL,
+      content         TEXT NOT NULL,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_orch_messages_conversation
+      ON orchestrator_messages(conversation_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS action_cards (
+      id              TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES orchestrator_conversations(id) ON DELETE CASCADE,
+      tool_use_id     TEXT NOT NULL,
+      tool_name       TEXT NOT NULL,
+      input           TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'pending',
+      result          TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      decided_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_action_cards_conversation
+      ON action_cards(conversation_id, status);
+
+    CREATE TABLE IF NOT EXISTS permission_rules (
+      id         TEXT PRIMARY KEY,
+      tool_name  TEXT NOT NULL,
+      match      TEXT,
+      effect     TEXT NOT NULL DEFAULT 'allow',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS conversation_usage (
+      conversation_id  TEXT PRIMARY KEY REFERENCES orchestrator_conversations(id) ON DELETE CASCADE,
+      tasks_spawned    INTEGER NOT NULL DEFAULT 0,
+      tool_calls       INTEGER NOT NULL DEFAULT 0,
+      started_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      last_activity_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS managed_tasks (
+      conversation_id     TEXT NOT NULL REFERENCES orchestrator_conversations(id) ON DELETE CASCADE,
+      task_id             TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      phase               TEXT NOT NULL DEFAULT 'planning',
+      artifacts           TEXT,
+      depends_on          TEXT,
+      attempts            INTEGER NOT NULL DEFAULT 0,
+      last_event_seq      INTEGER NOT NULL DEFAULT 0,
+      artifact_lock_owner TEXT,
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (conversation_id, task_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_managed_tasks_task_id
+      ON managed_tasks(task_id);
+
+    CREATE TABLE IF NOT EXISTS events (
+      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id    TEXT NOT NULL,
+      type       TEXT NOT NULL,
+      payload    TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_task_id
+      ON events(task_id, seq);
+
+    -- Idempotency cache for orchestrator write actions (SHR-163). Keyed by a
+    -- content hash of (action + input); a retried RPC within the TTL window
+    -- returns the original result instead of re-executing (no double-create).
+    CREATE TABLE IF NOT EXISTS orchestrator_action_results (
+      idempotency_key TEXT PRIMARY KEY,
+      action          TEXT NOT NULL,
+      result          TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // ── Global-monitor mode column (2026-06-20, SHR-136) ────────────────────────
+  // Exactly one conversation may be designated as global-monitor (receives
+  // read-only notices for unowned tasks). Forward-only, addColumn-guarded.
+  const orchConvCols = columnsOf('orchestrator_conversations');
+  addColumn(
+    'orchestrator_conversations',
+    'is_global_monitor',
+    'is_global_monitor INTEGER NOT NULL DEFAULT 0',
+    orchConvCols,
+  );
+  // ── Conductor hook token (orchestrator gate auth) ───────────────────────────
+  // The conductor session is not an `agents` row, so its PreToolUse gate hook
+  // token has nowhere to live in the agents table. Persist it here so
+  // requireHookToken can authenticate the conductor's gate callbacks. Forward-only.
+  addColumn('orchestrator_conversations', 'hook_token', 'hook_token TEXT', orchConvCols);
+  // ── Conductor cwd (for resume) ──────────────────────────────────────────────
+  // The working dir the conductor session was launched from. Needed to RESUME a
+  // conversation whose tmux/claude session died (server restart, crash, stop) —
+  // resumeConversation relaunches `claude --resume <id>` from this cwd. Forward-only.
+  addColumn('orchestrator_conversations', 'cwd', 'cwd TEXT', orchConvCols);
+  // Ensure at most one row has is_global_monitor=1 (partial unique index — SQLite
+  // WHERE clause filters NULLs but since we use 0/1 we need a different approach;
+  // enforce uniqueness in application logic via setGlobalMonitor clearing old value).
 }

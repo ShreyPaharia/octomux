@@ -13,6 +13,9 @@ import { getOrCreateRepoConfig } from './repo-config.js';
 import { inferRefs } from './ref-inference.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
+import { broadcast } from './events.js';
+import { isOrchestratorManaged } from './orchestrator/store.js';
+import { mcpServerInvocation } from './orchestrator/runner.js';
 import type { RepoConfig } from './repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
@@ -107,7 +110,12 @@ export function buildAgentStartupCommand(args: {
   if (args.prompt && args.worktreePath && args.agentId) {
     const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
     fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
-    inner += ` "$(cat ${shellQuoteSingle(promptFile)})"`;
+    // `--` ends option parsing so the positional prompt can't be swallowed by a
+    // preceding variadic flag. `--mcp-config` (appended for orchestrator-managed
+    // tasks) is variadic in Claude Code: without the separator it consumes the
+    // prompt as a second config path and the worker dies with
+    // "Invalid MCP configuration". POSIX `--` is honoured by both harnesses.
+    inner += ` -- "$(cat ${shellQuoteSingle(promptFile)})"`;
     setTimeout(() => {
       try {
         fs.unlinkSync(promptFile);
@@ -314,6 +322,64 @@ interface SetupResult {
   runPreflight: boolean;
 }
 
+/** True if `refs/heads/<branch>` exists in the repo. */
+async function gitBranchExists(repoPath: string, branch: string): Promise<boolean> {
+  try {
+    await execFile('git', [
+      '-C',
+      repoPath,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `refs/heads/${branch}`,
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Add a git worktree, tolerating an already-existing branch so task creation
+ * never dies on a name collision (the reported failure: a prior closed task left
+ * the branch behind — octomux preserves branches on close).
+ *  - branch doesn't exist → create it (`-b <branch> [base]`).
+ *  - branch exists, free → check it out into the new worktree (no `-b`; base is
+ *    ignored, the branch already has a tip).
+ *  - branch exists but is checked out elsewhere (or any other add failure) →
+ *    retry with a unique `<branch>-<id>`.
+ * Returns the branch name actually used.
+ */
+async function addWorktreeWithBranch(
+  repoPath: string,
+  worktreePath: string,
+  branch: string,
+  baseBranch: string | null | undefined,
+): Promise<string> {
+  if (!(await gitBranchExists(repoPath, branch))) {
+    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branch];
+    if (baseBranch) args.push(baseBranch);
+    await execFile('git', args);
+    return branch;
+  }
+
+  try {
+    await execFile('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branch]);
+    logger.info({ operation: 'addWorktree', branch }, 'addWorktree: reused existing branch');
+    return branch;
+  } catch (err) {
+    const unique = `${branch}-${nanoid(6)}`;
+    logger.warn(
+      { operation: 'addWorktree', branch, unique, err },
+      'addWorktree: existing branch unusable (checked out elsewhere?); using unique branch',
+    );
+    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', unique];
+    if (baseBranch) args.push(baseBranch);
+    await execFile('git', args);
+    return unique;
+  }
+}
+
 async function setupNew(task: Task): Promise<SetupResult> {
   await validateRepo(task.repo_path);
 
@@ -325,9 +391,17 @@ async function setupNew(task: Task): Promise<SetupResult> {
   const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
   fs.mkdirSync(worktreeBaseDir, { recursive: true });
 
-  const worktreeArgs = ['-C', task.repo_path, 'worktree', 'add', worktreePath, '-b', branch];
-  if (task.base_branch) worktreeArgs.push(task.base_branch);
-  await execFile('git', worktreeArgs);
+  // `worktree add -b <branch>` creates a NEW branch and fails if it already
+  // exists (e.g. left over from a prior task — octomux preserves branches on
+  // close). If the branch exists and isn't checked out elsewhere, check it out
+  // into the new worktree instead; otherwise fall back to a unique branch name
+  // so task creation never dies on a name collision.
+  const finalBranch = await addWorktreeWithBranch(
+    task.repo_path,
+    worktreePath,
+    branch,
+    task.base_branch,
+  );
 
   // For review tasks, move HEAD to pr_head_sha so the diff UI and merge-base
   // see the PR's actual commit. Auto-review tasks need a fetch first (the SHA
@@ -398,7 +472,7 @@ async function setupNew(task: Task): Promise<SetupResult> {
 
   return {
     worktreePath,
-    branch,
+    branch: finalBranch,
     baseBranch: task.base_branch,
     baseSha,
     installHooksAt: worktreePath,
@@ -528,6 +602,66 @@ async function setupScratch(task: Task): Promise<SetupResult> {
   };
 }
 
+// ─── Worker MCP config ────────────────────────────────────────────────────────
+
+/**
+ * Write a worker mcp-config.json into the worktree's .claude directory so the
+ * worker's `claude` session gets the octomux MCP server with the report_complete
+ * tool. Only written for orchestrator-managed tasks.
+ *
+ * The worker's MCP subprocess receives OCTOMUX_TASK_ID + OCTOMUX_ACTION_TOKEN +
+ * OCTOMUX_ACTION_BASE_URL, which enables workerReportEnabled() in the server and
+ * registers the report_complete tool. Does NOT use --strict-mcp-config so the
+ * worker keeps its existing tools + the user's project MCP servers.
+ *
+ * Returns the absolute path to the written mcp-config.json, or null if the MCP
+ * server entry can't be resolved (worker still launches, but without the tool).
+ */
+function writeWorkerMcpConfig(
+  worktreePath: string,
+  taskId: string,
+  hookToken: string,
+): string | null {
+  const inv = mcpServerInvocation();
+  if (!inv) {
+    logger.warn(
+      { task_id: taskId, operation: 'writeWorkerMcpConfig' },
+      'worker MCP: server entry not found — worker will not have report_complete tool',
+    );
+    return null;
+  }
+
+  const claudeDir = path.join(worktreePath, '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const cfgPath = path.join(claudeDir, 'worker-mcp-config.json');
+
+  const env: Record<string, string> = {
+    OCTOMUX_TASK_ID: taskId,
+    OCTOMUX_ACTION_TOKEN: hookToken,
+    OCTOMUX_ACTION_BASE_URL: hookBaseUrl(),
+  };
+  if (process.env.NODE_ENV) env.NODE_ENV = process.env.NODE_ENV;
+  if (process.env.OCTOMUX_DATA_DIR) env.OCTOMUX_DATA_DIR = process.env.OCTOMUX_DATA_DIR;
+
+  const cfg = {
+    mcpServers: {
+      octomux: {
+        command: inv.command,
+        args: inv.args,
+        env,
+      },
+    },
+  };
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+
+  logger.info(
+    { task_id: taskId, operation: 'writeWorkerMcpConfig', config_path: cfgPath },
+    'worker MCP: wrote worker mcp-config.json',
+  );
+
+  return cfgPath;
+}
+
 // ─── Task lifecycle ──────────────────────────────────────────────────────────
 
 export async function startTask(task: Task): Promise<void> {
@@ -655,7 +789,7 @@ export async function startTask(task: Task): Promise<void> {
     const agentId = nanoid(12);
     const agentName = task.agent ?? null;
     const hookToken = crypto.randomBytes(32).toString('hex');
-    const flags = harness.resolveFlags(await getSettings());
+    let flags = harness.resolveFlags(await getSettings());
 
     let sessionIdForDb: string | null;
     let sessionIdForLaunch: string;
@@ -673,6 +807,17 @@ export async function startTask(task: Task): Promise<void> {
     // is created, so there is no readiness wait to install them during.
     await harness.syncAgents(setup.worktreePath);
     await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
+
+    // For orchestrator-managed tasks, write a worker mcp-config.json and append
+    // --mcp-config to the launch flags so the worker gets the report_complete tool.
+    // Do NOT use --strict-mcp-config (worker keeps its normal tools + user MCP servers).
+    // managed_tasks is registered before startTask runs (runCreateTask → upsertManagedTask).
+    if (isOrchestratorManaged(id)) {
+      const workerMcpConfigPath = writeWorkerMcpConfig(setup.worktreePath, id, hookToken);
+      if (workerMcpConfigPath) {
+        flags += ` --mcp-config ${shellQuoteSingle(workerMcpConfigPath)}`;
+      }
+    }
 
     const baseCmd = harness.buildLaunchCommand({
       sessionId: sessionIdForLaunch,
@@ -745,6 +890,10 @@ export async function startTask(task: Task): Promise<void> {
     db.prepare(
       `UPDATE tasks SET runtime_state = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run((err as Error).message, id);
+    // Surface the failure: the orchestrator supervisor relays it to the owning
+    // conversation so the conductor (and user) learn the task errored instead of
+    // silently sitting in an error state.
+    broadcast({ type: 'task:updated', payload: { taskId: id } });
   }
 }
 

@@ -33,6 +33,7 @@ vi.mock('./task-runner.js', () => ({
   closeTask: vi.fn(),
   deleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
+  addAgent: vi.fn().mockResolvedValue({ id: 'a2', label: 'Agent 2', window_index: 1 }),
 }));
 
 vi.mock('./settings.js', () => ({
@@ -65,12 +66,13 @@ const {
   checkMergedPRs,
   pollReviewerRequests,
   pollSoftDeletes,
+  pollWalkthroughHandoffs,
   startPolling,
   stopPolling,
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
 const { sendMessageToAgent } = await import('./tmux-input.js');
-const { closeTask, deleteTask, startTask } = await import('./task-runner.js');
+const { closeTask, deleteTask, startTask, addAgent } = await import('./task-runner.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
@@ -776,7 +778,7 @@ describe('pollReviewerRequests', () => {
     expect((created!.branch as string).startsWith('review/')).toBe(true);
     expect(created!.branch).toContain('pr-42');
     expect(created!.title).toContain('#42');
-    expect((created!.initial_prompt as string).startsWith('/review-orchestrator')).toBe(true);
+    expect((created!.initial_prompt as string).startsWith('/review-walkthrough')).toBe(true);
     expect(created!.initial_prompt).toContain('https://github.com');
     // Prompt pins the new review task's own id for the review CLI.
     expect(created!.initial_prompt).toContain(`Review task id: ${created!.id}`);
@@ -1363,5 +1365,36 @@ describe('pollAgentWindows', () => {
       .prepare('SELECT status FROM agents WHERE id = ?')
       .get('worker-agent-01') as { status: string };
     expect(agentRow.status).toBe('stopped');
+  });
+});
+
+// ─── pollWalkthroughHandoffs ──────────────────────────────────────────────────
+
+describe('pollWalkthroughHandoffs', () => {
+  it('attaches a deep agent once and flips the flag', async () => {
+    db.prepare(
+      `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status)
+       VALUES ('wt1','/tmp/wt','/repos/foo','review/x','main','b','new','available')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source, worktree_id,
+         pr_head_sha, tmux_session) VALUES
+         ('t1','r','','running','backlog','auto_review','wt1','h','octomux-agent-t1')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status)
+       VALUES ('rr1','t1','h','{"global":{}}','running')`,
+    ).run();
+
+    await pollWalkthroughHandoffs();
+    await pollWalkthroughHandoffs(); // second tick must be a no-op
+
+    expect(addAgent).toHaveBeenCalledTimes(1);
+    const flag = db
+      .prepare(`SELECT deep_review_attached FROM review_runs WHERE id='rr1'`)
+      .get() as {
+      deep_review_attached: number;
+    };
+    expect(flag.deep_review_attached).toBe(1);
   });
 });

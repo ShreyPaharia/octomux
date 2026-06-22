@@ -69,4 +69,14 @@ describe('review-runs', () => {
     expect(b.id).not.toBe(a.id);
     expect(b.status).toBe('running');
   });
+
+  it('new review_run defaults deep_review_attached to 0', () => {
+    const db = createTestDb();
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t1', 'r', '', 'running', 'backlog', 'auto_review')`,
+    ).run();
+    const run = createReviewRun({ task_id: 't1', pr_head_sha: 'sha1' });
+    expect(run.deep_review_attached).toBe(0);
+  });
 });
