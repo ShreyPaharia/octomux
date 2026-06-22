@@ -217,6 +217,31 @@ export function deleteComment(id: string): boolean {
   return false;
 }
 
+export interface CommentStatusCounts {
+  draft_count: number | null;
+  accepted_count: number | null;
+  rejected_count: number | null;
+  stale_count: number | null;
+}
+
+/**
+ * Aggregate draft/accepted/rejected/stale counts for a task's inline comments.
+ * Used by the reviews inbox to derive review status. SUM returns NULL when there
+ * are no matching rows (caller coalesces to 0).
+ */
+export function countCommentsByStatus(taskId: string): CommentStatusCounts {
+  return getDb()
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_count,
+         SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
+         SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+         SUM(CASE WHEN status = 'stale' THEN 1 ELSE 0 END) AS stale_count
+       FROM inline_comments WHERE task_id = ?`,
+    )
+    .get(taskId) as CommentStatusCounts;
+}
+
 // ─── Staleness helpers ────────────────────────────────────────────────────────
 
 export interface StalenessCandidate {
@@ -294,4 +319,77 @@ export function setCommentAutoResolved(id: string, reason: string): void {
         WHERE id = ?`,
     )
     .run(reason, id);
+}
+
+/**
+ * Mark a set of comments stale (status = 'stale') in one statement.
+ * Used by publishReview within its persist transaction.
+ */
+export function markCommentsStaleByIds(ids: string[]): void {
+  if (ids.length === 0) return;
+  const placeholders = ids.map(() => '?').join(', ');
+  getDb()
+    .prepare(`UPDATE inline_comments SET status = 'stale' WHERE id IN (${placeholders})`)
+    .run(...ids);
+}
+
+/**
+ * Flip a set of comments to published and stamp the published_review_id.
+ * Used by publishReview within its persist transaction.
+ */
+export function markCommentsPublishedByIds(ids: string[], publishedReviewId: string): void {
+  if (ids.length === 0) return;
+  const placeholders = ids.map(() => '?').join(', ');
+  getDb()
+    .prepare(
+      `UPDATE inline_comments
+           SET status = 'published', published_review_id = ?
+         WHERE id IN (${placeholders})`,
+    )
+    .run(publishedReviewId, ...ids);
+}
+
+export interface SeedInlineCommentInput {
+  id: string;
+  task_id: string;
+  review_run_id: string;
+  file_path: string;
+  line: number;
+  side: 'old' | 'new';
+  original_commit_sha: string;
+  body: string;
+  kind: CommentKind;
+  severity?: string | null;
+  bucket?: string | null;
+  existing_code?: string | null;
+  suggested_code?: string | null;
+}
+
+/**
+ * Idempotent (INSERT OR IGNORE) seed of an inline comment with status='draft'.
+ * Used only by the NODE_ENV=test seed endpoint.
+ */
+export function seedInlineComment(input: SeedInlineCommentInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO inline_comments
+         (id, task_id, review_run_id, file_path, line, side, original_commit_sha,
+          body, status, kind, severity, bucket, existing_code, suggested_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.id,
+      input.task_id,
+      input.review_run_id,
+      input.file_path,
+      input.line,
+      input.side,
+      input.original_commit_sha,
+      input.body,
+      input.kind,
+      input.severity ?? null,
+      input.bucket ?? null,
+      input.existing_code ?? null,
+      input.suggested_code ?? null,
+    );
 }

@@ -110,6 +110,16 @@ export function listWalkthroughHandoffTasks(): Task[] {
     .all() as Task[];
 }
 
+/**
+ * List all running/setting_up tasks regardless of tmux_session.
+ * Used by startup recovery (recoverTasks).
+ */
+export function listRecoverableTasks(): Task[] {
+  return getDb()
+    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up')`)
+    .all() as Task[];
+}
+
 /** List running/setting_up tasks that have a tmux session (for status polling). */
 export function listRunningTasks(): Task[] {
   return getDb()
@@ -124,6 +134,22 @@ export function listSettingUpTasks(): Array<{ id: string; tmux_session: string |
   return getDb()
     .prepare(`SELECT id, tmux_session FROM tasks WHERE runtime_state = 'setting_up'`)
     .all() as Array<{ id: string; tmux_session: string | null }>;
+}
+
+/** List all non-deleted auto_review tasks, newest-updated first (reviews inbox). */
+export function listReviewTasks(): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.source = 'auto_review' AND t.deleted_at IS NULL ORDER BY t.updated_at DESC`,
+    )
+    .all() as Task[];
+}
+
+/** Fetch a single auto_review task by id (returns undefined if not found or not a review). */
+export function getReviewTask(id: string): Task | undefined {
+  return getDb()
+    .prepare(`${SELECT_TASK_SQL} WHERE t.id = ? AND t.source = 'auto_review'`)
+    .get(id) as Task | undefined;
 }
 
 /** List done (workflow_status='done') tasks that are not soft-deleted. */
@@ -235,6 +261,13 @@ export function countRunningTasks(): number {
 export function getTaskTmuxSession(id: string): { tmux_session: string | null } | undefined {
   return getDb().prepare(`SELECT tmux_session FROM tasks WHERE id = ?`).get(id) as
     | { tmux_session: string | null }
+    | undefined;
+}
+
+/** Fetch just the runtime_state column from a task (used by ensureHookToken). */
+export function getTaskRuntimeState(id: string): { runtime_state: string } | undefined {
+  return getDb().prepare(`SELECT runtime_state FROM tasks WHERE id = ?`).get(id) as
+    | { runtime_state: string }
     | undefined;
 }
 
@@ -739,6 +772,100 @@ export function listTasksNeedingPrDetection(): Task[] {
     .all() as Task[];
 }
 
+/**
+ * List active (running/setting_up) none-mode tasks sharing a root worktree at
+ * repoPath, with their branch. Optionally excludes a single task id. Used by
+ * preflightNoneMode to detect checkout conflicts.
+ */
+export function listNoneModeActiveTasks(
+  repoPath: string,
+  excludeTaskId?: string,
+): Array<{ task_id: string; title: string; runtime_state: string; branch: string | null }> {
+  if (excludeTaskId) {
+    return getDb()
+      .prepare(
+        `SELECT t.id AS task_id, t.title, t.runtime_state, w.branch
+             FROM tasks t
+             INNER JOIN worktrees w ON t.worktree_id = w.id
+            WHERE t.runtime_state IN ('running', 'setting_up')
+              AND w.repo_path = ?
+              AND w.mode = 'none'
+              AND t.id != ?`,
+      )
+      .all(repoPath, excludeTaskId) as Array<{
+      task_id: string;
+      title: string;
+      runtime_state: string;
+      branch: string | null;
+    }>;
+  }
+  return getDb()
+    .prepare(
+      `SELECT t.id AS task_id, t.title, t.runtime_state, w.branch
+             FROM tasks t
+             INNER JOIN worktrees w ON t.worktree_id = w.id
+            WHERE t.runtime_state IN ('running', 'setting_up')
+              AND w.repo_path = ?
+              AND w.mode = 'none'`,
+    )
+    .all(repoPath) as Array<{
+    task_id: string;
+    title: string;
+    runtime_state: string;
+    branch: string | null;
+  }>;
+}
+
+/**
+ * Tasks that need the user's attention right now: pending permission prompts,
+ * or errored tasks whose error hasn't been viewed. Used by the inbox.
+ */
+export function listNeedsYouTasks(): Task[] {
+  return getDb()
+    .prepare(
+      `SELECT DISTINCT t.*
+       FROM tasks t
+       WHERE t.deleted_at IS NULL
+         AND (t.source IS NULL OR t.source <> 'auto_review')
+         AND (
+           EXISTS (
+             SELECT 1 FROM permission_prompts pp
+             WHERE pp.task_id = t.id AND pp.status = 'pending'
+           )
+         OR (
+           t.runtime_state = 'error'
+           AND (t.last_viewed_at IS NULL OR t.last_viewed_at < t.updated_at)
+         )
+       )
+       ORDER BY t.updated_at DESC`,
+    )
+    .all() as Task[];
+}
+
+/**
+ * Closed tasks from the last 7 days that the user hasn't seen since they were
+ * updated. Excludes anything already in the needs-you bucket. Used by the inbox.
+ */
+export function listActivityTasks(): Task[] {
+  return getDb()
+    .prepare(
+      `SELECT t.*
+       FROM tasks t
+       WHERE t.deleted_at IS NULL
+         AND (t.source IS NULL OR t.source <> 'auto_review')
+         AND t.runtime_state = 'idle'
+         AND (t.last_viewed_at IS NULL OR t.last_viewed_at < t.updated_at)
+         AND t.updated_at > datetime('now', '-7 days')
+         AND NOT EXISTS (
+           SELECT 1 FROM permission_prompts pp
+           WHERE pp.task_id = t.id AND pp.status = 'pending'
+         )
+       ORDER BY t.updated_at DESC
+       LIMIT 50`,
+    )
+    .all() as Task[];
+}
+
 // ─── task_updates ─────────────────────────────────────────────────────────────
 
 export interface AddTaskUpdateInput {
@@ -768,6 +895,37 @@ export function addTaskUpdate(input: AddTaskUpdateInput): string {
       input.body ?? null,
     );
   return id;
+}
+
+/**
+ * List recent task_updates of kind summary/transition/note for a task, newest
+ * first, capped at `limit`. Used by summarize.ts to build the agent transcript.
+ */
+export function listTaskUpdatesForTranscript(
+  taskId: string,
+  limit = 30,
+): Array<{
+  kind: string;
+  from_status: string | null;
+  to_status: string | null;
+  body: string | null;
+  created_at: string;
+}> {
+  return getDb()
+    .prepare(
+      `SELECT kind, from_status, to_status, body, created_at
+         FROM task_updates
+        WHERE task_id = ? AND kind IN ('summary', 'transition', 'note')
+        ORDER BY created_at DESC
+        LIMIT ?`,
+    )
+    .all(taskId, limit) as Array<{
+    kind: string;
+    from_status: string | null;
+    to_status: string | null;
+    body: string | null;
+    created_at: string;
+  }>;
 }
 
 /** List task_updates for a task, newest first, with optional limit. */

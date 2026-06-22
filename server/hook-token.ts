@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { getDb } from './db.js';
+import { getTaskRuntimeState, setAgentHookToken } from './repositories/index.js';
 import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
 import type { Agent } from './types.js';
@@ -23,14 +23,12 @@ export async function ensureHookToken(agent: Agent, worktreePath: string | null)
   if (agent.hook_token && agent.hook_token !== '') return agent.hook_token;
 
   if (agent.task_id) {
-    const task = getDb()
-      .prepare(`SELECT runtime_state FROM tasks WHERE id = ?`)
-      .get(agent.task_id) as { runtime_state: string } | undefined;
+    const task = getTaskRuntimeState(agent.task_id);
     if (!task || task.runtime_state === 'idle') return '';
   }
 
   const token = crypto.randomBytes(32).toString('hex');
-  getDb().prepare(`UPDATE agents SET hook_token = ? WHERE id = ?`).run(token, agent.id);
+  setAgentHookToken(agent.id, token);
 
   if (worktreePath) {
     try {

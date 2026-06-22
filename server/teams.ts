@@ -2,11 +2,19 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
 import { startTask } from './task-runner.js';
-import { SELECT_TASK_SQL } from './task-select.js';
 import { childLogger } from './logger.js';
-import type { Task } from './types.js';
+import {
+  getTask,
+  insertTask,
+  insertWorktree,
+  upsertTeamSchedule as upsertTeamScheduleRepo,
+  listTeamSchedules as listTeamSchedulesRepo,
+  listEnabledTeamSchedules,
+  findActiveTeamRun,
+  insertTeamRun,
+  touchTeamScheduleLastRun,
+} from './repositories/index.js';
 
 const logger = childLogger('teams');
 
@@ -108,7 +116,6 @@ export async function runTeam(opts: RunTeamOpts): Promise<string> {
     }
   }
 
-  const db = getDb();
   const id = nanoid(12);
 
   // Build kick-off prompt for the Lead
@@ -147,25 +154,30 @@ export async function runTeam(opts: RunTeamOpts): Promise<string> {
     .join('\n');
   const worktreeId = nanoid(12);
 
-  db.prepare(
-    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, mode, status)
-     VALUES (?, '', ?, NULL, ?, 'new', 'available')`,
-  ).run(worktreeId, repoPath, config.base_branch ?? 'main');
+  insertWorktree({
+    id: worktreeId,
+    path: '',
+    repo_path: repoPath,
+    branch: null,
+    base_branch: config.base_branch ?? 'main',
+    mode: 'new',
+    status: 'available',
+  });
 
-  db.prepare(
-    `INSERT INTO tasks
-       (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, harness_id, model, source)
-     VALUES (?, ?, ?, 'setting_up', 'planned', ?, ?, 'claude-code', ?, 'team_run')`,
-  ).run(
+  insertTask({
     id,
-    `Team run: ${name}`,
-    `Automated desk crew run for team ${name}`,
-    prompt,
-    worktreeId,
-    lead.model ?? null,
-  );
+    title: `Team run: ${name}`,
+    description: `Automated desk crew run for team ${name}`,
+    runtime_state: 'setting_up',
+    workflow_status: 'planned',
+    initial_prompt: prompt,
+    worktree_id: worktreeId,
+    harness_id: 'claude-code',
+    model: lead.model ?? null,
+    source: 'team_run',
+  });
 
-  const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
+  const created = getTask(id)!;
   await startTask(created);
 
   logger.info({ task_id: id, team: name }, 'team run started');
@@ -194,23 +206,17 @@ export interface TeamRunRow {
 }
 
 export function upsertTeamSchedule(opts: { name: string; repoPath: string; cron: string }): void {
-  const db = getDb();
   const configPath = path.join(opts.repoPath, '.octomux', 'team.yaml');
-  db.prepare(
-    `INSERT INTO team_schedules (name, repo_path, config_path, cron, enabled, updated_at)
-     VALUES (?, ?, ?, ?, 1, datetime('now'))
-     ON CONFLICT(name) DO UPDATE SET
-       repo_path   = excluded.repo_path,
-       config_path = excluded.config_path,
-       cron        = excluded.cron,
-       enabled     = 1,
-       updated_at  = datetime('now')`,
-  ).run(opts.name, opts.repoPath, configPath, opts.cron);
+  upsertTeamScheduleRepo({
+    name: opts.name,
+    repoPath: opts.repoPath,
+    configPath,
+    cron: opts.cron,
+  });
 }
 
 export function listTeamSchedules(): TeamScheduleRow[] {
-  const db = getDb();
-  return db.prepare(`SELECT * FROM team_schedules ORDER BY name`).all() as TeamScheduleRow[];
+  return listTeamSchedulesRepo();
 }
 
 // ─── Cron evaluation ─────────────────────────────────────────────────────────
@@ -245,10 +251,7 @@ export function cronMatches(expr: string, now: Date): boolean {
  * the current minute AND no active team_run exists, fire a team run.
  */
 export async function pollTeamSchedules(now: Date = new Date()): Promise<void> {
-  const db = getDb();
-  const schedules = db
-    .prepare(`SELECT * FROM team_schedules WHERE enabled = 1`)
-    .all() as TeamScheduleRow[];
+  const schedules = listEnabledTeamSchedules();
 
   for (const schedule of schedules) {
     if (!cronMatches(schedule.cron, now)) continue;
@@ -256,16 +259,7 @@ export async function pollTeamSchedules(now: Date = new Date()): Promise<void> {
     // Idempotency: skip only if the linked Lead task is still actually running.
     // Joining tasks avoids the stuck-forever bug where team_runs.status never
     // transitions off 'running' — self-correcting even without an explicit status update.
-    const activeRun = db
-      .prepare(
-        `SELECT tr.id FROM team_runs tr
-         INNER JOIN tasks t ON tr.lead_task_id = t.id
-         WHERE tr.team = ?
-           AND tr.status = 'running'
-           AND t.runtime_state IN ('running', 'setting_up')
-         LIMIT 1`,
-      )
-      .get(schedule.name);
+    const activeRun = findActiveTeamRun(schedule.name);
     if (activeRun) {
       logger.info({ team: schedule.name }, 'team run already active, skipping');
       continue;
@@ -273,14 +267,8 @@ export async function pollTeamSchedules(now: Date = new Date()): Promise<void> {
 
     try {
       const leadTaskId = await runTeam({ name: schedule.name, repoPath: schedule.repo_path });
-      const runId = nanoid(12);
-      db.prepare(
-        `INSERT INTO team_runs (id, team, lead_task_id, started_at, status)
-         VALUES (?, ?, ?, datetime('now'), 'running')`,
-      ).run(runId, schedule.name, leadTaskId);
-      db.prepare(`UPDATE team_schedules SET last_run_at = datetime('now') WHERE name = ?`).run(
-        schedule.name,
-      );
+      insertTeamRun({ team: schedule.name, lead_task_id: leadTaskId });
+      touchTeamScheduleLastRun(schedule.name);
       logger.info({ team: schedule.name, task_id: leadTaskId }, 'team schedule fired');
     } catch (err) {
       logger.error({ team: schedule.name, err }, 'team schedule run failed');

@@ -6,7 +6,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { octomuxRoot } from './octomux-root.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import { getDb, getDataDir } from './db.js';
+import { getDataDir, pingDb } from './db.js';
 import { childLogger } from './logger.js';
 import { getNeedsYou, getActivity } from './inbox.js';
 import { execFile as execFileCb } from 'child_process';
@@ -44,12 +44,13 @@ import {
   unresolveComment,
   updateCommentBody,
   deleteComment,
+  seedInlineComment,
 } from './inline-comments.js';
 import { computeOutdated, splitLines } from './inline-comments-outdated.js';
 import { createChat, listChats, getChat, closeChat, deleteChat } from './chats.js';
 import { sendMessageToAgent } from './tmux-input.js';
 import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
-import { getReviewRun, getCurrentRun, setWalkthrough } from './review-runs.js';
+import { getReviewRun, getCurrentRun, setWalkthrough, seedReviewRun } from './review-runs.js';
 import { listPublishedReviews } from './published-reviews.js';
 import { listLearningsForRepo, deleteLearning, addLearning } from './review-learnings.js';
 import { updateCommentFields } from './inline-comments.js';
@@ -170,6 +171,9 @@ import {
   listRecentRepoPaths,
   insertWorktreeIfAbsent,
   insertTaskIfAbsent,
+  getHookEnabled as getHookEnabledRepo,
+  upsertHookSetting,
+  inTransaction,
 } from './repositories/index.js';
 
 const execFile = promisify(execFileCb);
@@ -293,8 +297,7 @@ export function setupRoutes(app: Express): void {
     let db: { ok: true } | { ok: false; error: string };
     let running_tasks = 0;
     try {
-      const dbInstance = getDb();
-      dbInstance.prepare('SELECT 1 AS ok').get();
+      pingDb();
       db = { ok: true };
       running_tasks = countRunningTasks();
     } catch (err) {
@@ -2752,15 +2755,7 @@ export function setupRoutes(app: Express): void {
 
   /** Read enabled state from hook_settings; missing row = defaultEnabled. */
   function getHookEnabled(scope: string, key: string, defaultEnabled: boolean): boolean {
-    try {
-      const row = getDb()
-        .prepare(`SELECT enabled FROM hook_settings WHERE scope = ? AND key = ?`)
-        .get(scope, key) as { enabled: number } | undefined;
-      if (row === undefined) return defaultEnabled;
-      return row.enabled !== 0;
-    } catch {
-      return defaultEnabled;
-    }
+    return getHookEnabledRepo(scope, key, defaultEnabled);
   }
 
   /** Discover scripts for all events under a hooks base directory. */
@@ -2860,15 +2855,7 @@ export function setupRoutes(app: Express): void {
     }
 
     try {
-      getDb()
-        .prepare(
-          `INSERT INTO hook_settings (scope, key, enabled, updated_at)
-           VALUES (?, ?, ?, datetime('now'))
-           ON CONFLICT(scope, key) DO UPDATE SET
-             enabled = excluded.enabled,
-             updated_at = datetime('now')`,
-        )
-        .run(scope, key, enabled ? 1 : 0);
+      upsertHookSetting(scope, key, enabled);
 
       // Invalidate dispatcher cache for this entry
       invalidateHookEnabledCache(scope, key);
@@ -3435,7 +3422,6 @@ export function setupRoutes(app: Express): void {
      * deleteTask from accidentally removing the server's working directory.
      */
     app.post('/api/__test__/seed-review', (req: Request, res: Response) => {
-      const db = getDb();
       try {
         const body = req.body as {
           task: {
@@ -3463,7 +3449,7 @@ export function setupRoutes(app: Express): void {
           }>;
         };
 
-        db.transaction(() => {
+        inTransaction(() => {
           const wtId = `wt-${body.task.id}`;
           // `path` = server's cwd so git-show works; `repo_path` = non-existent so
           // deleteTask's git-worktree-remove fails gracefully without deleting cwd.
@@ -3490,39 +3476,31 @@ export function setupRoutes(app: Express): void {
             pr_head_sha: body.task.pr_head_sha,
           });
 
-          db.prepare(
-            `INSERT OR IGNORE INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, completed_at)
-             VALUES (?, ?, ?, ?, 'completed', datetime('now'))`,
-          ).run(
-            body.review_run.id,
-            body.task.id,
-            body.task.pr_head_sha,
-            body.review_run.walkthrough,
-          );
+          seedReviewRun({
+            id: body.review_run.id,
+            task_id: body.task.id,
+            pr_head_sha: body.task.pr_head_sha,
+            walkthrough: body.review_run.walkthrough,
+          });
 
           for (const c of body.comments) {
-            db.prepare(
-              `INSERT OR IGNORE INTO inline_comments
-                 (id, task_id, review_run_id, file_path, line, side, original_commit_sha,
-                  body, status, kind, severity, bucket, existing_code, suggested_code)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)`,
-            ).run(
-              c.id,
-              body.task.id,
-              body.review_run.id,
-              c.file_path,
-              c.line,
-              c.side,
-              body.task.pr_head_sha,
-              c.body,
-              c.kind,
-              c.severity ?? null,
-              c.bucket ?? null,
-              c.existing_code ?? null,
-              c.suggested_code ?? null,
-            );
+            seedInlineComment({
+              id: c.id,
+              task_id: body.task.id,
+              review_run_id: body.review_run.id,
+              file_path: c.file_path,
+              line: c.line,
+              side: c.side,
+              original_commit_sha: body.task.pr_head_sha,
+              body: c.body,
+              kind: c.kind,
+              severity: c.severity ?? null,
+              bucket: c.bucket ?? null,
+              existing_code: c.existing_code ?? null,
+              suggested_code: c.suggested_code ?? null,
+            });
           }
-        })();
+        });
 
         res.json({ task_id: body.task.id });
       } catch (err) {

@@ -24,6 +24,26 @@ export function createReviewRun(input: CreateReviewRunInput): ReviewRun {
   return row;
 }
 
+export interface SeedReviewRunInput {
+  id: string;
+  task_id: string;
+  pr_head_sha: string;
+  walkthrough: string;
+}
+
+/**
+ * Idempotent (INSERT OR IGNORE) seed of a completed review_run.
+ * Used only by the NODE_ENV=test seed endpoint.
+ */
+export function seedReviewRun(input: SeedReviewRunInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, completed_at)
+       VALUES (?, ?, ?, ?, 'completed', datetime('now'))`,
+    )
+    .run(input.id, input.task_id, input.pr_head_sha, input.walkthrough);
+}
+
 export function getReviewRun(id: string): ReviewRun | null {
   return (
     (getDb().prepare(`SELECT * FROM review_runs WHERE id = ?`).get(id) as ReviewRun | undefined) ??

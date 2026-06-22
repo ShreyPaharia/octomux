@@ -3,7 +3,15 @@ import path from 'path';
 import fs from 'fs';
 import { octomuxRoot } from './octomux-root.js';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
+import {
+  getAgent,
+  insertChatAgent,
+  listChatAgents,
+  getChatAgent,
+  setAgentStopped,
+  stopChatAgent,
+  deleteAgentRow,
+} from './repositories/index.js';
 import { getSettings } from './settings.js';
 import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
@@ -45,7 +53,6 @@ export interface CreateChatOptions {
  * Create a standalone agent row + tmux session + launch claude in it.
  */
 export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
-  const db = getDb();
   const id = nanoid(12);
   const label = opts.label ?? 'Chat';
   const cwd = opts.cwd ?? chatDirFor(id);
@@ -70,12 +77,15 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     sessionIdForLaunch = harness.newSessionId();
   }
 
-  db.prepare(
-    `INSERT INTO agents
-       (id, task_id, window_index, label, status, harness_id, harness_session_id,
-        hook_token, hook_activity, tmux_session, agent, created_at)
-     VALUES (?, NULL, 0, ?, 'running', ?, ?, ?, 'active', ?, ?, datetime('now'))`,
-  ).run(id, label, harness.id, sessionIdForDb, hookToken, session, agent);
+  insertChatAgent({
+    id,
+    label,
+    harness_id: harness.id,
+    harness_session_id: sessionIdForDb,
+    hook_token: hookToken,
+    tmux_session: session,
+    agent,
+  });
 
   try {
     await harness.syncAgents(cwd);
@@ -127,31 +137,20 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     );
   } catch (err) {
     logger.error({ chat_id: id, operation: 'createChat', err }, 'createChat: failed');
-    db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(id);
+    setAgentStopped(id);
     throw err;
   }
 
-  return db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as Agent;
+  return getAgent(id) as Agent;
 }
 
 /** List all standalone agents (task_id IS NULL), oldest first. */
 export function listChats(): Agent[] {
-  const db = getDb();
-  return db
-    .prepare(
-      `SELECT * FROM agents
-         WHERE task_id IS NULL
-         ORDER BY created_at ASC`,
-    )
-    .all() as Agent[];
+  return listChatAgents();
 }
 
 export function getChat(id: string): Agent | null {
-  const db = getDb();
-  const row = db.prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) as
-    | Agent
-    | undefined;
-  return row ?? null;
+  return getChatAgent(id) ?? null;
 }
 
 function isTmuxTargetMissing(err: unknown): boolean {
@@ -186,14 +185,9 @@ async function killChatSession(id: string, session: string, op: string): Promise
  * Preserves the DB row + scratch dir so history remains visible.
  */
 export async function closeChat(chat: Agent): Promise<void> {
-  const db = getDb();
   logger.info({ chat_id: chat.id, operation: 'closeChat' }, 'closeChat: start');
 
-  db.prepare(
-    `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
-       hook_activity_updated_at = datetime('now')
-     WHERE id = ?`,
-  ).run(chat.id);
+  stopChatAgent(chat.id);
 
   if (chat.tmux_session) {
     await killChatSession(chat.id, chat.tmux_session, 'closeChat');
@@ -206,7 +200,6 @@ export async function closeChat(chat: Agent): Promise<void> {
  * Delete a chat: kill tmux, remove scratch dir, delete DB row.
  */
 export async function deleteChat(chat: Agent): Promise<void> {
-  const db = getDb();
   logger.info({ chat_id: chat.id, operation: 'deleteChat' }, 'deleteChat: start');
 
   if (chat.tmux_session) {
@@ -227,7 +220,7 @@ export async function deleteChat(chat: Agent): Promise<void> {
     );
   }
 
-  db.prepare('DELETE FROM agents WHERE id = ?').run(chat.id);
+  deleteAgentRow(chat.id);
 
   logger.info({ chat_id: chat.id, operation: 'deleteChat' }, 'deleteChat: complete');
 }

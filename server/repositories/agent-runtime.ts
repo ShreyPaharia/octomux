@@ -114,6 +114,18 @@ export function listUserTerminals(taskId: string): UserTerminal[] {
     .all(taskId) as UserTerminal[];
 }
 
+/**
+ * Fetch the tmux_session for a standalone chat agent (task_id IS NULL).
+ * Used by the chat terminal WebSocket handler.
+ */
+export function getChatAgentTmuxSession(
+  chatId: string,
+): { tmux_session: string | null } | undefined {
+  return getDb()
+    .prepare(`SELECT tmux_session FROM agents WHERE id = ? AND task_id IS NULL`)
+    .get(chatId) as { tmux_session: string | null } | undefined;
+}
+
 // ─── Agent writes ─────────────────────────────────────────────────────────────
 
 export interface InsertAgentInput {
@@ -178,6 +190,11 @@ export function insertAgentWithNotify(input: InsertAgentInput): string {
   return id;
 }
 
+/** Set the hook_token for an agent (used by ensureHookToken backfill). */
+export function setAgentHookToken(agentId: string, token: string): void {
+  getDb().prepare(`UPDATE agents SET hook_token = ? WHERE id = ?`).run(token, agentId);
+}
+
 /** Update the harness_session_id for an agent (called when a new session id is minted on resume/hop). */
 export function setAgentHarnessSessionId(agentId: string, sessionId: string): void {
   getDb().prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(sessionId, agentId);
@@ -185,6 +202,80 @@ export function setAgentHarnessSessionId(agentId: string, sessionId: string): vo
     { agent_id: agentId, operation: 'setAgentHarnessSessionId' },
     'agent harness_session_id updated',
   );
+}
+
+export interface InsertChatAgentInput {
+  id: string;
+  label: string;
+  harness_id: string;
+  harness_session_id: string | null;
+  hook_token: string;
+  tmux_session: string;
+  agent: string | null;
+}
+
+/**
+ * Insert a standalone chat agent row (task_id NULL, window_index 0,
+ * status='running', hook_activity='active'). Used by createChat.
+ */
+export function insertChatAgent(input: InsertChatAgentInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO agents
+         (id, task_id, window_index, label, status, harness_id, harness_session_id,
+          hook_token, hook_activity, tmux_session, agent, created_at)
+       VALUES (?, NULL, 0, ?, 'running', ?, ?, ?, 'active', ?, ?, datetime('now'))`,
+    )
+    .run(
+      input.id,
+      input.label,
+      input.harness_id,
+      input.harness_session_id,
+      input.hook_token,
+      input.tmux_session,
+      input.agent,
+    );
+}
+
+/** List all standalone chat agents (task_id IS NULL), oldest first. */
+export function listChatAgents(): Agent[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM agents
+         WHERE task_id IS NULL
+         ORDER BY created_at ASC`,
+    )
+    .all() as Agent[];
+}
+
+/** Fetch a single standalone chat agent by id (task_id IS NULL). */
+export function getChatAgent(id: string): Agent | undefined {
+  return getDb().prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) as
+    | Agent
+    | undefined;
+}
+
+/** Mark a single agent's status='stopped' (used by createChat failure path). */
+export function setAgentStopped(agentId: string): void {
+  getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
+}
+
+/**
+ * Mark a chat agent stopped + idle (used by closeChat).
+ */
+export function stopChatAgent(agentId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+         hook_activity_updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(agentId);
+}
+
+/** Hard-delete a single agent row (used by deleteChat). */
+export function deleteAgentRow(agentId: string): void {
+  getDb().prepare('DELETE FROM agents WHERE id = ?').run(agentId);
 }
 
 /** Update window_index and status='running' for an agent (called per agent on resumeTask). */
