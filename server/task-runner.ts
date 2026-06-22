@@ -14,7 +14,6 @@ import { execTmux } from './tmux-bin.js';
 import { broadcast } from './events.js';
 import { isOrchestratorManaged } from './orchestrator/store.js';
 import { shellQuoteSingle } from './shell-quote.js';
-import { computeMergeBase } from './git-commits.js';
 import type { RepoConfig } from './repositories/repo-config.js';
 import type { Task, Agent, UserTerminal, RunMode, Worktree } from './types.js';
 import { chatDirFor, chatSessionName } from './chats.js';
@@ -84,8 +83,8 @@ import {
   buildAgentStartupCommand,
   writeAgentLocalSettings,
   writeWorkerMcpConfig,
-  DISABLED_PLUGINS_IN_WORKTREES,
 } from './task-engine/launch.js';
+import { runSetup } from './task-engine/setup/index.js';
 
 // Re-export leaf symbols so all existing callers (server/index.ts, routes, etc.)
 // keep working with zero changes.
@@ -144,239 +143,6 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
   }
 }
 
-// ─── Per-mode setup helpers ──────────────────────────────────────────────────
-
-interface SetupResult {
-  worktreePath: string;
-  branch: string | null;
-  baseBranch: string | null;
-  baseSha: string | null;
-  installHooksAt: string;
-  runPreflight: boolean;
-}
-
-async function setupNew(task: Task): Promise<SetupResult> {
-  await validateRepo(task.repo_path);
-
-  const slug = slugifyTitle(task.title, task.id);
-  const branch = task.branch || `agents/${slug}`;
-  const worktreeDir = task.branch || slug;
-  const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
-
-  const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
-  fs.mkdirSync(worktreeBaseDir, { recursive: true });
-
-  // `worktree add -b <branch>` creates a NEW branch and fails if it already
-  // exists (e.g. left over from a prior task — octomux preserves branches on
-  // close). If the branch exists and isn't checked out elsewhere, check it out
-  // into the new worktree instead; otherwise fall back to a unique branch name
-  // so task creation never dies on a name collision.
-  const finalBranch = await addWorktreeWithBranch(
-    task.repo_path,
-    worktreePath,
-    branch,
-    task.base_branch,
-  );
-
-  // For review tasks, move HEAD to pr_head_sha so the diff UI and merge-base
-  // see the PR's actual commit. Auto-review tasks need a fetch first (the SHA
-  // may not be a local object yet); manual-review tasks reuse the source
-  // task's local HEAD and skip the fetch. Failures here are logged but never
-  // abort setup — the agent can recover even with an empty diff.
-  if (task.source === 'auto_review' && task.pr_head_sha) {
-    if (task.pr_number) {
-      try {
-        await execFile('git', [
-          '-C',
-          task.repo_path,
-          'fetch',
-          'origin',
-          `pull/${task.pr_number}/head`,
-        ]);
-      } catch (err) {
-        logger.warn(
-          { task_id: task.id, operation: 'createTask', err },
-          'createTask: failed to fetch PR head; review may show no files',
-        );
-      }
-    }
-    try {
-      await execFile('git', ['-C', worktreePath, 'reset', '--hard', task.pr_head_sha]);
-    } catch (err) {
-      logger.warn(
-        { task_id: task.id, operation: 'createTask', err },
-        'createTask: failed to reset worktree to pr_head_sha; leaving at base-branch tip',
-      );
-    }
-  }
-
-  const baseRef = task.base_branch || 'HEAD';
-  let baseSha: string;
-  if (task.source === 'auto_review' && task.pr_head_sha && task.base_branch) {
-    try {
-      baseSha = await computeMergeBase(task.repo_path, task.base_branch, task.pr_head_sha);
-    } catch (err) {
-      logger.warn(
-        { task_id: task.id, operation: 'createTask', err },
-        'createTask: git merge-base failed, falling back to rev-parse',
-      );
-      baseSha = await revParseHead(task.repo_path, baseRef);
-    }
-  } else {
-    baseSha = await revParseHead(task.repo_path, baseRef);
-  }
-
-  // Copy .claude/settings.local.json if it exists
-  const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
-  const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
-  if (fs.existsSync(settingsSrc)) {
-    fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
-    fs.copyFileSync(settingsSrc, settingsDst);
-  }
-
-  writeAgentLocalSettings(worktreePath);
-  logger.info(
-    {
-      task_id: task.id,
-      operation: 'createTask',
-      settings_path: settingsDst,
-      disabled_plugins: DISABLED_PLUGINS_IN_WORKTREES.length,
-    },
-    'createTask: wrote agent-local settings',
-  );
-
-  return {
-    worktreePath,
-    branch: finalBranch,
-    baseBranch: task.base_branch,
-    baseSha,
-    installHooksAt: worktreePath,
-    runPreflight: true,
-  };
-}
-
-async function setupExisting(task: Task): Promise<SetupResult> {
-  const worktreePath = task.worktree;
-  if (!worktreePath) {
-    throw new Error('existing mode requires a worktree path');
-  }
-  if (!fs.existsSync(worktreePath)) {
-    throw new Error(`existing worktree does not exist: ${worktreePath}`);
-  }
-  await execFile('git', ['-C', worktreePath, 'rev-parse', '--is-inside-work-tree']);
-
-  const baseSha = await revParseHead(worktreePath);
-
-  let branch: string | null = null;
-  try {
-    const { stdout } = await execFile('git', [
-      '-C',
-      worktreePath,
-      'rev-parse',
-      '--abbrev-ref',
-      'HEAD',
-    ]);
-    const name = stdout.trim();
-    branch = name === 'HEAD' ? null : name;
-  } catch {
-    branch = null;
-  }
-
-  let baseBranch: string | null = null;
-  try {
-    const { stdout } = await execFile('git', [
-      '-C',
-      worktreePath,
-      'rev-parse',
-      '--abbrev-ref',
-      '--symbolic-full-name',
-      '@{upstream}',
-    ]);
-    const upstream = stdout.trim();
-    if (upstream) baseBranch = upstream.replace(/^origin\//, '');
-  } catch {
-    baseBranch = branch;
-  }
-
-  return {
-    worktreePath,
-    branch,
-    baseBranch,
-    baseSha,
-    installHooksAt: worktreePath,
-    runPreflight: false,
-  };
-}
-
-async function setupNone(task: Task): Promise<SetupResult> {
-  await validateRepo(task.repo_path);
-
-  const { stdout: headOut } = await execFile('git', [
-    '-C',
-    task.repo_path,
-    'rev-parse',
-    '--abbrev-ref',
-    'HEAD',
-  ]);
-  const currentBranch = headOut.trim();
-  const targetBranch = task.base_branch?.trim() || null;
-
-  if (targetBranch) {
-    // Defense in depth: re-run preflight inside setup, in case state changed
-    // between the API preflight and now. Exclude self — our own worktree row
-    // is already 'setting_up' with w.branch=null (it's only set to targetBranch
-    // after setup returns), and the row would otherwise self-conflict.
-    const { preflightNoneMode } = await import('./preflight.js');
-    const pre = await preflightNoneMode(task.repo_path, targetBranch, task.id);
-    if (!pre.ok) {
-      const reason = pre.conflicts.length
-        ? `another chat is active on a different branch at ${task.repo_path}: ${pre.conflicts
-            .map((c) => `${c.task_id} (${c.branch ?? 'unknown'})`)
-            .join(', ')}`
-        : `working tree at ${task.repo_path} has ${pre.dirty!.count} uncommitted changes`;
-      throw new Error(`none mode preflight failed: ${reason}`);
-    }
-    if (targetBranch !== currentBranch) {
-      await execFile('git', ['-C', task.repo_path, 'checkout', targetBranch]);
-    }
-  } else {
-    // Legacy path: no target branch provided, but the tree must still be clean
-    // for none mode (preserves existing behavior).
-    const dirty = await checkDirty(task.repo_path);
-    if (dirty.length > 0) {
-      const preview = dirty.slice(0, 5).join(', ');
-      const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
-      throw new Error(`none mode refuses dirty checkout at ${task.repo_path}: ${preview}${extra}`);
-    }
-  }
-
-  const finalBranch = targetBranch ?? currentBranch;
-  const baseSha = await revParseHead(task.repo_path);
-
-  return {
-    worktreePath: task.repo_path,
-    branch: finalBranch,
-    baseBranch: targetBranch,
-    baseSha,
-    installHooksAt: task.repo_path,
-    runPreflight: false,
-  };
-}
-
-async function setupScratch(task: Task): Promise<SetupResult> {
-  const dir = scratchDirFor(task.id);
-  fs.mkdirSync(dir, { recursive: true });
-
-  return {
-    worktreePath: dir,
-    branch: null,
-    baseBranch: null,
-    baseSha: null,
-    installHooksAt: dir,
-    runPreflight: false,
-  };
-}
-
 // ─── Task lifecycle ──────────────────────────────────────────────────────────
 
 export async function startTask(task: Task): Promise<void> {
@@ -392,23 +158,7 @@ export async function startTask(task: Task): Promise<void> {
   let stage = 'validate';
   try {
     stage = 'mode_setup';
-    let setup: SetupResult;
-    switch (runMode) {
-      case 'new':
-        setup = await setupNew(task);
-        break;
-      case 'existing':
-        setup = await setupExisting(task);
-        break;
-      case 'none':
-        setup = await setupNone(task);
-        break;
-      case 'scratch':
-        setup = await setupScratch(task);
-        break;
-      default:
-        throw new Error(`unknown run_mode: ${String(runMode)}`);
-    }
+    const setup = await runSetup(task);
 
     // Persist status + setup results, but NOT tmux_session — that column is
     // written after tmux new-session succeeds below. Otherwise pollStatuses
