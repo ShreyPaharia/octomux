@@ -3,7 +3,6 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
@@ -20,19 +19,38 @@ import {
   ORCHESTRATOR_ACTIONS,
   type OrchestratorAction,
 } from './orchestrator/actions.js';
+import {
+  findAgentByHarnessSession,
+  checkAgentTokenExists,
+  findAgentByTokenAndExactSession,
+  findAgentByTokenWithNullSession,
+  findActiveAgentsByToken,
+  setAgentHarnessSessionId,
+  setAgentHookActivity,
+  setAgentHookActivityIfNotIdle,
+  countRunningAgentsExcept,
+} from './repositories/agent-runtime.js';
+import {
+  getTaskWorkflowStatus,
+  getWorktreePathForTask,
+  setWorkflowStatus,
+  addTaskUpdate,
+  setCurrentSummary,
+} from './repositories/tasks.js';
+import {
+  insertPermissionPrompt,
+  resolveAgentPermissionPrompts,
+  resolveOldestPendingByAgent,
+  countPendingByTask,
+} from './repositories/permission-prompts.js';
+import { inTransaction } from './repositories/tx.js';
 
 const logger = childLogger('hooks');
 
 const router = Router();
 
 function findAgentBySessionId(sessionId: string) {
-  return getDb()
-    .prepare(
-      `SELECT a.id, a.task_id FROM agents a
-       WHERE a.harness_session_id = ? AND a.status != 'stopped'
-       LIMIT 1`,
-    )
-    .get(sessionId) as { id: string; task_id: string } | undefined;
+  return findAgentByHarnessSession(sessionId);
 }
 
 /**
@@ -53,35 +71,18 @@ export function findAgentByTokenAndSession(
   conversationId?: string | null,
 ): { id: string; task_id: string } | null {
   if (!token) return null;
-  const db = getDb();
 
   if (conversationId) {
-    const exact = db
-      .prepare(
-        `SELECT id, task_id FROM agents
-         WHERE hook_token = ? AND harness_session_id = ?
-         LIMIT 1`,
-      )
-      .get(token, conversationId) as { id: string; task_id: string } | undefined;
+    const exact = findAgentByTokenAndExactSession(token, conversationId);
     if (exact) return exact;
   }
 
-  const nullSessionRow = db
-    .prepare(
-      `SELECT id, task_id FROM agents
-       WHERE hook_token = ? AND harness_session_id IS NULL
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    )
-    .get(token) as { id: string; task_id: string } | undefined;
+  const nullSessionRow = findAgentByTokenWithNullSession(token);
 
   if (!nullSessionRow) return null;
 
   if (conversationId) {
-    db.prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(
-      conversationId,
-      nullSessionRow.id,
-    );
+    setAgentHarnessSessionId(nullSessionRow.id, conversationId);
   }
 
   return nullSessionRow;
@@ -146,10 +147,7 @@ function requireHookToken(req: Request, res: Response, next: NextFunction) {
     logger.warn({ path: req.path, ip: req.ip }, 'hook request missing token');
     return res.status(401).send();
   }
-  const row = getDb()
-    .prepare(`SELECT 1 AS ok FROM agents WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
-    .get(provided) as { ok: number } | undefined;
-  if (!row) {
+  if (!checkAgentTokenExists(provided)) {
     // The orchestrator conductor is not an `agents` row — its gate hook token
     // lives on orchestrator_conversations. Accept it here so the PreToolUse
     // gate can authenticate the conductor's callbacks.
@@ -181,16 +179,11 @@ export function resolveHookAgent(
   if (exact) return exact;
   if (!token) return undefined;
 
-  const live = getDb()
-    .prepare(
-      `SELECT id, task_id FROM agents
-       WHERE hook_token = ? AND hook_token != '' AND status != 'stopped'`,
-    )
-    .all(token) as { id: string; task_id: string }[];
+  const live = findActiveAgentsByToken(token);
   if (live.length !== 1) return undefined;
 
   const only = live[0];
-  getDb().prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(sessionId, only.id);
+  setAgentHarnessSessionId(only.id, sessionId);
   logger.info(
     { agent_id: only.id, task_id: only.task_id, session_id: sessionId },
     'hook session-id drift: rebound sole agent to live session',
@@ -214,26 +207,20 @@ router.post('/user-prompt-submit', requireHookToken, (req, res) => {
     return;
   }
 
-  const db = getDb();
-
-  db.prepare(
-    `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
-       WHERE id = ?`,
-  ).run(agent.id);
+  setAgentHookActivity(agent.id, 'active');
 
   // Inverse of B4: auto-transition human_review → in_progress when the user resumes the agent
-  const task = db
-    .prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`)
-    .get(agent.task_id) as { id: string; workflow_status: string } | undefined;
+  const task = getTaskWorkflowStatus(agent.task_id);
 
   if (task && task.workflow_status === 'human_review') {
-    const updateId = nanoid(12);
-    db.prepare(
-      `UPDATE tasks SET workflow_status = 'in_progress', updated_at = datetime('now') WHERE id = ?`,
-    ).run(task.id);
-    db.prepare(
-      `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', 'human_review', 'in_progress', ?)`,
-    ).run(updateId, task.id, 'auto: user replied');
+    setWorkflowStatus(task.id, 'in_progress');
+    addTaskUpdate({
+      task_id: task.id,
+      kind: 'transition',
+      from_status: 'human_review',
+      to_status: 'in_progress',
+      body: 'auto: user replied',
+    });
 
     logger.info(
       { task_id: task.id, agent_id: agent.id, operation: 'auto_in_progress' },
@@ -266,22 +253,16 @@ router.post('/permission-request', requireHookToken, (req, res) => {
     return;
   }
 
-  const txn = getDb().transaction(() => {
-    getDb()
-      .prepare(
-        `INSERT INTO permission_prompts (id, task_id, agent_id, session_id, tool_name, tool_input, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`,
-      )
-      .run(nanoid(12), agent.task_id, agent.id, sid, tool_name, JSON.stringify(tool_input || {}));
-
-    getDb()
-      .prepare(
-        `UPDATE agents SET hook_activity = 'waiting', hook_activity_updated_at = datetime('now')
-           WHERE id = ?`,
-      )
-      .run(agent.id);
+  inTransaction(() => {
+    insertPermissionPrompt({
+      task_id: agent.task_id,
+      agent_id: agent.id,
+      session_id: sid,
+      tool_name,
+      tool_input: tool_input || {},
+    });
+    setAgentHookActivity(agent.id, 'waiting');
   });
-  txn();
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
@@ -304,37 +285,17 @@ router.post('/post-tool-use', requireHookToken, (req, res) => {
 
   const summary = deriveSummaryFromToolUse(tool_name, tool_input);
 
-  const txn = getDb().transaction(() => {
+  inTransaction(() => {
     // Resolve oldest pending prompt (FIFO)
-    getDb()
-      .prepare(
-        `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-           WHERE id = (
-             SELECT id FROM permission_prompts
-             WHERE agent_id = ? AND status = 'pending'
-             ORDER BY created_at ASC LIMIT 1
-           )`,
-      )
-      .run(agent.id);
+    resolveOldestPendingByAgent(agent.id);
 
     // Only set active if not already idle (Stop hook may have fired first)
-    getDb()
-      .prepare(
-        `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
-           WHERE id = ? AND hook_activity != 'idle'`,
-      )
-      .run(agent.id);
+    setAgentHookActivityIfNotIdle(agent.id);
 
     if (summary) {
-      getDb()
-        .prepare(
-          `UPDATE tasks SET current_summary = ?, current_summary_updated_at = datetime('now'), updated_at = datetime('now')
-             WHERE id = ?`,
-        )
-        .run(summary, agent.task_id);
+      setCurrentSummary(agent.task_id, summary);
     }
   });
-  txn();
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();
@@ -366,53 +327,31 @@ router.post(
       return;
     }
 
-    const txn = getDb().transaction(() => {
+    inTransaction(() => {
       // Resolve ALL pending prompts for this agent
-      getDb()
-        .prepare(
-          `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now')
-           WHERE agent_id = ? AND status = 'pending'`,
-        )
-        .run(agent.id);
+      resolveAgentPermissionPrompts(agent.id);
 
-      getDb()
-        .prepare(
-          `UPDATE agents SET hook_activity = 'idle', hook_activity_updated_at = datetime('now')
-           WHERE id = ?`,
-        )
-        .run(agent.id);
+      setAgentHookActivity(agent.id, 'idle');
     });
-    txn();
 
     // B4: Auto-transition in_progress → human_review when the last agent stops.
     // SUPPRESSED for orchestrator-managed tasks (§6.5, R3-I1): managed_tasks.phase
     // is authoritative; workflow_status is set only via set_workflow_status tool.
-    const db = getDb();
-    const task = db
-      .prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`)
-      .get(agent.task_id) as { id: string; workflow_status: string } | undefined;
+    const task = getTaskWorkflowStatus(agent.task_id);
 
     if (task && task.workflow_status === 'in_progress' && !isOrchestratorManaged(task.id)) {
-      const otherRunning = db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM agents WHERE task_id = ? AND status = 'running' AND id != ?`,
-        )
-        .get(agent.task_id, agent.id) as { n: number };
+      const otherRunning = countRunningAgentsExcept(agent.task_id, agent.id);
+      const pendingPrompts = countPendingByTask(agent.task_id);
 
-      const pendingPrompts = db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM permission_prompts WHERE task_id = ? AND status = 'pending'`,
-        )
-        .get(agent.task_id) as { n: number };
-
-      if (otherRunning.n === 0 && pendingPrompts.n === 0) {
-        const updateId = nanoid(12);
-        db.prepare(
-          `UPDATE tasks SET workflow_status = 'human_review', updated_at = datetime('now') WHERE id = ?`,
-        ).run(task.id);
-        db.prepare(
-          `INSERT INTO task_updates (id, task_id, kind, from_status, to_status, body) VALUES (?, ?, 'transition', 'in_progress', 'human_review', ?)`,
-        ).run(updateId, task.id, 'auto: agent stopped');
+      if (otherRunning === 0 && pendingPrompts === 0) {
+        setWorkflowStatus(task.id, 'human_review');
+        addTaskUpdate({
+          task_id: task.id,
+          kind: 'transition',
+          from_status: 'in_progress',
+          to_status: 'human_review',
+          body: 'auto: agent stopped',
+        });
 
         logger.info(
           { task_id: task.id, agent_id: agent.id, operation: 'auto_human_review' },
@@ -469,13 +408,7 @@ function maybeSignalPhaseComplete(taskId: string): void {
   const managed = getManagedTask(taskId);
   if (!managed) return;
 
-  const row = getDb()
-    .prepare(
-      `SELECT w.path AS worktree FROM tasks t
-         JOIN worktrees w ON t.worktree_id = w.id
-        WHERE t.id = ?`,
-    )
-    .get(taskId) as { worktree: string | null } | undefined;
+  const row = getWorktreePathForTask(taskId);
   const worktree = row?.worktree;
   if (!worktree) return;
 
@@ -612,13 +545,7 @@ export function advancePhaseForLabel(taskId: string, label: string, artifacts?: 
 
   // For implement, delete the sentinel so it never appears in the diff.
   if (label === 'implement') {
-    const row = getDb()
-      .prepare(
-        `SELECT w.path AS worktree FROM tasks t
-           JOIN worktrees w ON t.worktree_id = w.id
-          WHERE t.id = ?`,
-      )
-      .get(taskId) as { worktree: string | null } | undefined;
+    const row = getWorktreePathForTask(taskId);
     const worktree = row?.worktree;
     if (worktree) {
       const sentinelPath = path.join(worktree, '.octomux', 'implement-done');

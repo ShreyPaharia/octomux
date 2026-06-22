@@ -524,6 +524,221 @@ export function unlinkWorktreeFromAllTasks(worktreeId: string): void {
   getDb().prepare('UPDATE tasks SET worktree_id = NULL WHERE worktree_id = ?').run(worktreeId);
 }
 
+/**
+ * Fetch id + workflow_status for a task. Used by hook handlers to check
+ * the current workflow status before emitting auto-transitions.
+ */
+export function getTaskWorkflowStatus(
+  id: string,
+): { id: string; workflow_status: string } | undefined {
+  return getDb().prepare(`SELECT id, workflow_status FROM tasks WHERE id = ?`).get(id) as
+    | { id: string; workflow_status: string }
+    | undefined;
+}
+
+/**
+ * Fetch the worktree filesystem path for a task via its linked worktree row.
+ * Returns undefined when the task has no worktree or the worktree has no path.
+ */
+export function getWorktreePathForTask(taskId: string): { worktree: string | null } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT w.path AS worktree FROM tasks t
+         JOIN worktrees w ON t.worktree_id = w.id
+        WHERE t.id = ?`,
+    )
+    .get(taskId) as { worktree: string | null } | undefined;
+}
+
+/**
+ * Distinct repo_paths from tasks+worktrees for all non-deleted tasks, ordered by
+ * most recently created task. Used by pollReviewerRequests.
+ */
+export function listTrackedRepoPaths2(): Array<{ repo_path: string }> {
+  return getDb()
+    .prepare(
+      `SELECT w.repo_path AS repo_path
+         FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path IS NOT NULL
+          AND t.deleted_at IS NULL
+        GROUP BY w.repo_path
+        ORDER BY MAX(t.created_at) DESC`,
+    )
+    .all() as Array<{ repo_path: string }>;
+}
+
+/**
+ * List tasks that are running or setting_up with a non-null worktree path.
+ * Used by ensureHooksInstalled.
+ */
+export function listActiveTasksForHooks(): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up') AND w.path IS NOT NULL`,
+    )
+    .all() as Task[];
+}
+
+/**
+ * Fetch tmux_session for a parent task only when it is running or setting_up.
+ * Used by notifyParentTask before sending a completion message.
+ */
+export function getParentTaskTmuxSession(
+  taskId: string,
+): { tmux_session: string | null } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT tmux_session FROM tasks WHERE id = ? AND runtime_state IN ('running', 'setting_up')`,
+    )
+    .get(taskId) as { tmux_session: string | null } | undefined;
+}
+
+/**
+ * Transition a task from running to idle (tmux session disappeared).
+ * Bumps updated_at. Used by pollStatuses.
+ */
+export function setRuntimeStateIdle(id: string): void {
+  getDb()
+    .prepare(`UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`)
+    .run(id);
+}
+
+/**
+ * Transition a task from setting_up to error with a fixed message
+ * (Setup interrupted). Bumps updated_at. Used by pollStatuses.
+ */
+export function setRuntimeStateSetupInterrupted(id: string): void {
+  getDb()
+    .prepare(
+      `UPDATE tasks SET runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(id);
+}
+
+/**
+ * Update pr_url + pr_number and conditionally flip workflow_status from
+ * in_progress/human_review to 'pr'. Bumps updated_at. Used by pollPRs.
+ */
+export function setTaskPrDetected(id: string, prUrl: string, prNumber: number): void {
+  getDb()
+    .prepare(
+      `UPDATE tasks SET pr_url = ?, pr_number = ?,
+       workflow_status = CASE WHEN workflow_status IN ('in_progress','human_review') THEN 'pr' ELSE workflow_status END,
+       updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(prUrl, prNumber, id);
+}
+
+/**
+ * Update pr_head_sha + initial_prompt together (idle review task SHA update).
+ * Used by upsertReviewTask when the task is idle and the PR head has advanced.
+ */
+export function updateTaskPromptAndSha(id: string, prHeadSha: string, initialPrompt: string): void {
+  getDb()
+    .prepare(
+      `UPDATE tasks SET pr_head_sha = ?, initial_prompt = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(prHeadSha, initialPrompt, id);
+}
+
+/**
+ * Set workflow_status to 'done' (after PR merge). Bumps updated_at.
+ * Used by checkMergedPRs.
+ */
+export function setWorkflowStatusDone(id: string): void {
+  getDb()
+    .prepare(`UPDATE tasks SET workflow_status = 'done', updated_at = datetime('now') WHERE id = ?`)
+    .run(id);
+}
+
+/**
+ * Find an existing review task for a repo + PR number (any runtime_state).
+ * Returns minimal fields needed by upsertReviewTask.
+ * Unlike findExistingReviewTask (which filters source/deleted), this returns the
+ * first non-deleted task for the pr_number across any source.
+ */
+export function findExistingPrTask(
+  repoPath: string,
+  prNumber: number,
+):
+  | {
+      id: string;
+      runtime_state: string;
+      source: string | null;
+      pr_head_sha: string | null;
+      initial_prompt: string | null;
+      tmux_session: string | null;
+      worktree_path: string | null;
+    }
+  | undefined {
+  return getDb()
+    .prepare(
+      `SELECT t.id AS id, t.runtime_state AS runtime_state,
+              t.source AS source,
+              t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
+              t.tmux_session AS tmux_session,
+              w.path AS worktree_path
+         FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.pr_number = ?
+          AND t.deleted_at IS NULL
+        ORDER BY t.created_at DESC LIMIT 1`,
+    )
+    .get(repoPath, prNumber) as
+    | {
+        id: string;
+        runtime_state: string;
+        source: string | null;
+        pr_head_sha: string | null;
+        initial_prompt: string | null;
+        tmux_session: string | null;
+        worktree_path: string | null;
+      }
+    | undefined;
+}
+
+/**
+ * List idle auto-review draft tasks for a given repo_path.
+ * Used by cleanupResolvedReviewDrafts to find and purge drafts whose PR is no
+ * longer awaiting review.
+ */
+export function listAutoReviewDrafts(
+  repoPath: string,
+): Array<{ id: string; pr_number: number | null; worktree_id: string | null }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
+         LEFT JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
+          AND t.deleted_at IS NULL`,
+    )
+    .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
+}
+
+/**
+ * List tasks whose runtime_state = 'running' and pr_number IS NOT NULL.
+ * Used by checkMergedPRs to find tasks that might have had their PR merged.
+ */
+export function listRunningTasksWithPr(): Task[] {
+  return getDb()
+    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
+    .all() as Task[];
+}
+
+/**
+ * List tasks that are running or idle with no PR url yet and a branch set.
+ * Used by pollPRs to find tasks that need PR detection.
+ */
+export function listTasksNeedingPrDetection(): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
+    )
+    .all() as Task[];
+}
+
 // ─── task_updates ─────────────────────────────────────────────────────────────
 
 export interface AddTaskUpdateInput {

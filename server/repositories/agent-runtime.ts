@@ -335,4 +335,186 @@ export function deleteUserTerminal(id: string): void {
   logger.info({ terminal_id: id, operation: 'deleteUserTerminal' }, 'user terminal deleted');
 }
 
+/** Update user_terminal status by id. */
+export function updateUserTerminalStatus(id: string, status: 'idle' | 'working'): void {
+  getDb().prepare('UPDATE user_terminals SET status = ? WHERE id = ?').run(status, id);
+}
+
+/**
+ * List all user_terminals joined with their task's tmux_session,
+ * for tasks that are currently running with a live tmux session.
+ * Used by pollTerminalActivity.
+ */
+export function listRunningTerminals(): Array<UserTerminal & { tmux_session: string }> {
+  return getDb()
+    .prepare(
+      `SELECT ut.*, t.tmux_session
+       FROM user_terminals ut
+       JOIN tasks t ON t.id = ut.task_id
+       WHERE t.runtime_state = 'running' AND t.tmux_session IS NOT NULL`,
+    )
+    .all() as Array<UserTerminal & { tmux_session: string }>;
+}
+
+/**
+ * Find a single agent by harness_session_id (non-stopped).
+ * Used by resolveHookAgent / findAgentBySessionId.
+ */
+export function findAgentByHarnessSession(
+  sessionId: string,
+): { id: string; task_id: string } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT a.id, a.task_id FROM agents a
+       WHERE a.harness_session_id = ? AND a.status != 'stopped'
+       LIMIT 1`,
+    )
+    .get(sessionId) as { id: string; task_id: string } | undefined;
+}
+
+/**
+ * Verify that at least one agent row exists with the given hook_token.
+ * Used by requireHookToken middleware.
+ */
+export function checkAgentTokenExists(token: string): boolean {
+  const row = getDb()
+    .prepare(`SELECT 1 AS ok FROM agents WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
+    .get(token) as { ok: number } | undefined;
+  return row !== undefined;
+}
+
+/**
+ * Find an exact agent match for a (hook_token, harness_session_id) pair.
+ * Used by findAgentByTokenAndSession step 1.
+ */
+export function findAgentByTokenAndExactSession(
+  token: string,
+  sessionId: string,
+): { id: string; task_id: string } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, task_id FROM agents
+       WHERE hook_token = ? AND harness_session_id = ?
+       LIMIT 1`,
+    )
+    .get(token, sessionId) as { id: string; task_id: string } | undefined;
+}
+
+/**
+ * Find the most-recent agent with a given hook_token whose harness_session_id is NULL.
+ * Used by findAgentByTokenAndSession step 2 (harness-issued session binding).
+ */
+export function findAgentByTokenWithNullSession(
+  token: string,
+): { id: string; task_id: string } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, task_id FROM agents
+       WHERE hook_token = ? AND harness_session_id IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .get(token) as { id: string; task_id: string } | undefined;
+}
+
+/**
+ * List all non-stopped agents for a hook_token.
+ * Used by resolveHookAgent to detect single-agent ambiguity.
+ */
+export function findActiveAgentsByToken(token: string): Array<{ id: string; task_id: string }> {
+  return getDb()
+    .prepare(
+      `SELECT id, task_id FROM agents
+       WHERE hook_token = ? AND hook_token != '' AND status != 'stopped'`,
+    )
+    .all(token) as Array<{ id: string; task_id: string }>;
+}
+
+/** Set hook_activity and update hook_activity_updated_at for an agent. */
+export function setAgentHookActivity(
+  agentId: string,
+  activity: 'active' | 'waiting' | 'idle',
+): void {
+  getDb()
+    .prepare(
+      `UPDATE agents SET hook_activity = ?, hook_activity_updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(activity, agentId);
+}
+
+/**
+ * Set hook_activity to 'active' only when it is not already 'idle'.
+ * Used by post-tool-use: a Stop hook may have fired first.
+ */
+export function setAgentHookActivityIfNotIdle(agentId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+       WHERE id = ? AND hook_activity != 'idle'`,
+    )
+    .run(agentId);
+}
+
+/** Count non-stopped running agents for a task, excluding a specific agent id. */
+export function countRunningAgentsExcept(taskId: string, excludeAgentId: string): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM agents WHERE task_id = ? AND status = 'running' AND id != ?`,
+    )
+    .get(taskId, excludeAgentId) as { n: number };
+  return row.n;
+}
+
+/**
+ * List agents being watched for sub-agent completion notification:
+ * running agents with a notify_agent_id, in running tasks with a live tmux session.
+ * Used by pollAgentWindows.
+ */
+export function listWatchedAgents(): Array<{
+  id: string;
+  task_id: string;
+  window_index: number;
+  label: string;
+  tmux_session: string;
+  notify_agent_id: string;
+}> {
+  return getDb()
+    .prepare(
+      `SELECT a.id, a.task_id, a.window_index, a.label,
+              t.tmux_session, a.notify_agent_id
+       FROM agents a
+       INNER JOIN tasks t ON a.task_id = t.id
+       WHERE a.status = 'running'
+         AND a.notify_agent_id IS NOT NULL
+         AND t.runtime_state = 'running'
+         AND t.tmux_session IS NOT NULL`,
+    )
+    .all() as Array<{
+    id: string;
+    task_id: string;
+    window_index: number;
+    label: string;
+    tmux_session: string;
+    notify_agent_id: string;
+  }>;
+}
+
+/**
+ * Find the notify target agent+session for a given notify_agent_id.
+ * Returns window_index + tmux_session only when the target is non-stopped and its
+ * task is running. Used by pollAgentWindows to deliver completion messages.
+ */
+export function getNotifyAgentTarget(
+  notifyAgentId: string,
+): { window_index: number; tmux_session: string } | undefined {
+  return getDb()
+    .prepare(
+      `SELECT a.window_index, t.tmux_session
+       FROM agents a
+       INNER JOIN tasks t ON a.task_id = t.id
+       WHERE a.id = ? AND a.status != 'stopped' AND t.runtime_state = 'running'`,
+    )
+    .get(notifyAgentId) as { window_index: number; tmux_session: string } | undefined;
+}
+
 // permission_prompts functions have moved to ./permission-prompts.ts
