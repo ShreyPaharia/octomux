@@ -587,7 +587,7 @@ export function getWorktreePathForTask(taskId: string): { worktree: string | nul
  * Distinct repo_paths from tasks+worktrees for all non-deleted tasks, ordered by
  * most recently created task. Used by pollReviewerRequests.
  */
-export function listTrackedRepoPaths2(): Array<{ repo_path: string }> {
+export function listTaskRepoPaths(): Array<{ repo_path: string }> {
   return getDb()
     .prepare(
       `SELECT w.repo_path AS repo_path

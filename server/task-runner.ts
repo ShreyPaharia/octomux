@@ -48,7 +48,7 @@ import {
   setAgentWindowRunning,
   stopAllAgents,
   stopRunningAgents,
-  stopRunningAgentsOnDelete,
+  stopRunningAgentsForTask,
   stopAgent as stopAgentRepo,
   hopAgentToTask,
   getAgent,
@@ -1082,7 +1082,7 @@ export async function softDeleteTask(task: Task): Promise<void> {
   }
 
   softDeleteTaskRepo(task.id);
-  stopRunningAgentsOnDelete(task.id);
+  stopRunningAgentsForTask(task.id);
 
   logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: complete');
 }

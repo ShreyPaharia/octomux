@@ -35,12 +35,12 @@ import {
   listExpiredSoftDeletes,
   listWalkthroughHandoffTasks,
   listActiveTasksForHooks,
-  listTrackedRepoPaths2,
+  listTaskRepoPaths,
   getParentTaskTmuxSession,
 } from './repositories/tasks.js';
 import { deleteWorktree } from './repositories/worktrees.js';
 import {
-  stopRunningAgents,
+  stopRunningAgentsForTask,
   findFirstActiveAgent,
   listWatchedAgents,
   getNotifyAgentTarget,
@@ -127,7 +127,7 @@ export async function pollStatuses(): Promise<void> {
       continue;
     }
     completeTeamRunByLeadTask(task.id);
-    stopRunningAgents(task.id);
+    stopRunningAgentsForTask(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 
     if (task.notify_task_id) {
@@ -399,7 +399,7 @@ interface OpenReviewPR {
 
 /** List tracked repos — same derivation as GET /api/recent-repos. */
 function listTrackedRepos(): string[] {
-  const rows = listTrackedRepoPaths2();
+  const rows = listTaskRepoPaths();
   return rows.map((r) => r.repo_path);
 }
 

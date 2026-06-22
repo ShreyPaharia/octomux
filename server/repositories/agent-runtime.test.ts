@@ -11,7 +11,7 @@ import {
   setAgentWindowRunning,
   stopAllAgents,
   stopRunningAgents,
-  stopRunningAgentsOnDelete,
+  stopRunningAgentsForTask,
   stopAgent,
   hopAgentToTask,
   listAgentsByTasks,
@@ -326,9 +326,9 @@ describe('repositories/agent-runtime', () => {
     });
   });
 
-  // ─── stopRunningAgentsOnDelete ────────────────────────────────────────────────
+  // ─── stopRunningAgentsForTask ────────────────────────────────────────────────
 
-  describe('stopRunningAgentsOnDelete', () => {
+  describe('stopRunningAgentsForTask', () => {
     it('only stops running agents, leaving idle/stopped untouched', () => {
       const runId = insertAgent({
         task_id: 'task-01',
@@ -351,7 +351,7 @@ describe('repositories/agent-runtime', () => {
         label: 'S',
         status: 'stopped',
       }).id;
-      stopRunningAgentsOnDelete('task-01');
+      stopRunningAgentsForTask('task-01');
       expect(getAgent(runId)!.status).toBe('stopped');
       // The discriminating case: a non-running, non-stopped agent must be left as-is.
       expect(getAgent(idleId)!.status).toBe('idle');

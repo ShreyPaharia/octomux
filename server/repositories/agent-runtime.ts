@@ -314,10 +314,11 @@ export function stopRunningAgents(taskId: string): void {
 }
 
 /**
- * Mark running agents as stopped for a soft-deleted task.
- * Only transitions agents currently in 'running' status.
+ * Mark agents currently in 'running' status as stopped for a task.
+ * Narrower than stopRunningAgents (which also transitions idle/waiting) — only
+ * touches 'running' rows. Used by soft-delete and dead-session reconciliation.
  */
-export function stopRunningAgentsOnDelete(taskId: string): void {
+export function stopRunningAgentsForTask(taskId: string): void {
   getDb()
     .prepare(
       `UPDATE agents
@@ -327,10 +328,7 @@ export function stopRunningAgentsOnDelete(taskId: string): void {
         WHERE task_id = ? AND status = 'running'`,
     )
     .run(taskId);
-  logger.info(
-    { task_id: taskId, operation: 'stopRunningAgentsOnDelete' },
-    'running agents stopped on soft-delete',
-  );
+  logger.info({ task_id: taskId, operation: 'stopRunningAgentsForTask' }, 'running agents stopped');
 }
 
 /** Mark a single agent as stopped + idle (used by stopAgent). */
