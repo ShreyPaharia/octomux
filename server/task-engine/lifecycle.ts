@@ -79,6 +79,229 @@ export async function preflightWorktree(worktreePath: string, config: RepoConfig
   }
 }
 
+// ─── startTask step functions (module-private) ───────────────────────────────
+
+/**
+ * Flip the task to setting_up and persist the worktree row.
+ *
+ * Writes runtime_state='setting_up' first (so the UI reflects progress), then
+ * either updates the existing worktree row (existing/none/draft-edited modes) or
+ * inserts a fresh one and links it to the task. Does NOT touch tmux_session —
+ * that column is written only after the tmux session is confirmed to exist (see
+ * launchFirstWindow) to prevent the poller from racing a has-session check on a
+ * not-yet-created session and stamping 'Setup interrupted'.
+ */
+function persistWorktreeRow(
+  id: string,
+  task: Task,
+  setup: import('./setup/types.js').SetupResult,
+  runMode: RunMode,
+): void {
+  setRuntimeState(id, 'setting_up');
+
+  const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
+  if (task.worktree_id) {
+    updateWorktreeOnSetup(task.worktree_id, {
+      path: setup.worktreePath,
+      repo_path: worktreeRepoPath,
+      branch: setup.branch,
+      base_branch: setup.baseBranch,
+      base_sha: setup.baseSha,
+      mode: runMode,
+    });
+  } else {
+    const worktreeId = insertWorktreeInUse({
+      path: setup.worktreePath,
+      repo_path: worktreeRepoPath,
+      branch: setup.branch,
+      base_branch: setup.baseBranch,
+      base_sha: setup.baseSha,
+      mode: runMode,
+    });
+    setWorktreeId(id, worktreeId);
+  }
+
+  logger.info(
+    {
+      task_id: id,
+      operation: 'createTask',
+      run_mode: runMode,
+      branch: setup.branch,
+      worktree: setup.worktreePath,
+      base_sha: setup.baseSha,
+    },
+    'createTask: setup complete',
+  );
+}
+
+/**
+ * Infer external refs from the branch name and persist any new ones.
+ *
+ * Runs before preflight so refs are available when hooks fire. Failures are
+ * swallowed — ref inference must never block task startup.
+ */
+async function inferAndPersistRefs(
+  id: string,
+  setup: import('./setup/types.js').SetupResult,
+  task: Task,
+): Promise<void> {
+  if (!setup.branch || !task.repo_path) return;
+  try {
+    const repoConfigForInference = await getOrCreateRepoConfig(task.repo_path);
+    const inferred = inferRefs(setup.branch, repoConfigForInference, id);
+    for (const ref of inferred) {
+      insertTaskExternalRefIfAbsent({
+        task_id: id,
+        integration: ref.integration,
+        ref: ref.ref,
+        url: ref.url,
+      });
+      logger.info(
+        { task_id: id, integration: ref.integration, ref: ref.ref },
+        'ref-inference: inferred ref from branch name',
+      );
+    }
+  } catch (err) {
+    // Never block task startup for ref-inference failures
+    logger.warn({ task_id: id, err }, 'ref-inference: error during inference');
+  }
+}
+
+/**
+ * Run preflight formatting/lint auto-fix in the worktree (gated by setup flag).
+ */
+async function runPreflight(
+  setup: import('./setup/types.js').SetupResult,
+  task: Task,
+): Promise<void> {
+  if (!setup.runPreflight) return;
+  const repoConfig = await getOrCreateRepoConfig(task.repo_path);
+  await preflightWorktree(setup.worktreePath, repoConfig);
+}
+
+interface FirstAgentLaunchParams {
+  agentId: string;
+  hookToken: string;
+  sessionIdForDb: string | null;
+  startupCmd: string;
+}
+
+/**
+ * Compute session IDs, install hooks, apply orchestrator MCP config, and build
+ * the harness startup command for the first agent of a new task.
+ *
+ * Hooks must be on disk BEFORE the window launches the harness — with the
+ * launch-as-startup-command model the harness starts the instant the pane is
+ * created, so there is no readiness wait during which to install them.
+ */
+async function prepareFirstAgentLaunch(
+  id: string,
+  task: Task,
+  setup: import('./setup/types.js').SetupResult,
+  harness: import('../harnesses/index.js').Harness,
+): Promise<FirstAgentLaunchParams> {
+  const agentId = nanoid(12);
+  const agentName = task.agent ?? null;
+  const hookToken = crypto.randomBytes(32).toString('hex');
+  let flags = harness.resolveFlags(await getSettings());
+
+  const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
+
+  await harness.syncAgents(setup.worktreePath);
+  await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
+
+  // For orchestrator-managed tasks, write a worker mcp-config.json and append
+  // --mcp-config to the launch flags so the worker gets the report_complete tool.
+  // Do NOT use --strict-mcp-config (worker keeps its normal tools + user MCP servers).
+  // managed_tasks is registered before startTask runs (runCreateTask → upsertManagedTask).
+  flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
+
+  const baseCmd = harness.buildLaunchCommand({
+    sessionId: sessionIdForLaunch,
+    agent: agentName,
+    flags,
+    model: (task as any).model ?? null,
+    workspacePath: setup.worktreePath,
+  });
+  const startupCmd = buildAgentStartupCommand({
+    baseCmd,
+    prompt: task.initial_prompt,
+    worktreePath: setup.worktreePath,
+    agentId,
+  });
+
+  return { agentId, hookToken, sessionIdForDb, startupCmd };
+}
+
+/**
+ * Create the tmux session with the harness as the first window's startup
+ * process, then persist tmux_session to the DB.
+ *
+ * setTmuxSession is called AFTER launchAgentWindow returns so the column is
+ * only written once the session is confirmed to exist (race-avoidance invariant).
+ */
+async function launchFirstWindow(
+  id: string,
+  session: string,
+  setup: import('./setup/types.js').SetupResult,
+  startupCmd: string,
+): Promise<number> {
+  // Launch the harness as the session's first window's startup process: tmux
+  // starts it when it creates the pane, so there is no shell-readiness race.
+  const windowIndex = await launchAgentWindow({
+    session,
+    cwd: setup.worktreePath,
+    startupCmd,
+    fresh: true,
+  });
+  // Session exists now — persist the column. See race-avoidance comment above.
+  setTmuxSession(id, session);
+  logger.info(
+    { task_id: id, operation: 'createTask', tmux_session: session },
+    'createTask: tmux session created',
+  );
+  return windowIndex;
+}
+
+/**
+ * Insert the agent DB row, fire the harness post-launch hook, and log completion.
+ */
+function persistFirstAgentRow(
+  id: string,
+  agentId: string,
+  task: Task,
+  harness: import('../harnesses/index.js').Harness,
+  windowIndex: number,
+  sessionIdForDb: string | null,
+  hookToken: string,
+  session: string,
+): void {
+  insertAgentRepo({
+    id: agentId,
+    task_id: id,
+    window_index: windowIndex,
+    label: 'Agent 1',
+    harness_id: harness.id,
+    harness_session_id: sessionIdForDb,
+    hook_token: hookToken,
+    agent: task.agent ?? null,
+  });
+
+  // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
+  void harness.postLaunch?.(`${session}:${windowIndex}`);
+  logger.info(
+    {
+      task_id: id,
+      agent_id: agentId,
+      operation: 'createTask',
+      window_index: windowIndex,
+      harness: harness.id,
+      harness_session_id: sessionIdForDb,
+    },
+    'createTask: first agent launched',
+  );
+}
+
 // ─── Task lifecycle ──────────────────────────────────────────────────────────
 
 export async function startTask(task: Task): Promise<void> {
@@ -96,152 +319,38 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'mode_setup';
     const setup = await runSetup(task);
 
-    // Persist status + setup results, but NOT tmux_session — that column is
-    // written after tmux new-session succeeds below. Otherwise pollStatuses
-    // can run a has-session check on the not-yet-created session, mark it
-    // dead, and stamp error='Setup interrupted' before the session exists.
-    // Phase 2a: worktrees is the source of truth. If the task already has a
-    // linked worktree row (existing/none/draft-edited), update it. Otherwise
-    // create a fresh one.
-    setRuntimeState(id, 'setting_up');
-
-    const worktreeRepoPath = runMode === 'scratch' ? null : task.repo_path;
-    if (task.worktree_id) {
-      updateWorktreeOnSetup(task.worktree_id, {
-        path: setup.worktreePath,
-        repo_path: worktreeRepoPath,
-        branch: setup.branch,
-        base_branch: setup.baseBranch,
-        base_sha: setup.baseSha,
-        mode: runMode,
-      });
-    } else {
-      const worktreeId = insertWorktreeInUse({
-        path: setup.worktreePath,
-        repo_path: worktreeRepoPath,
-        branch: setup.branch,
-        base_branch: setup.baseBranch,
-        base_sha: setup.baseSha,
-        mode: runMode,
-      });
-      setWorktreeId(id, worktreeId);
-    }
-
-    logger.info(
-      {
-        task_id: id,
-        operation: 'createTask',
-        run_mode: runMode,
-        branch: setup.branch,
-        worktree: setup.worktreePath,
-        base_sha: setup.baseSha,
-      },
-      'createTask: setup complete',
-    );
+    persistWorktreeRow(id, task, setup, runMode);
 
     // ─── Branch-name ref inference ────────────────────────────────────────
     // Run inference before preflight so refs are available when hooks fire.
-    if (setup.branch && task.repo_path) {
-      try {
-        const repoConfigForInference = await getOrCreateRepoConfig(task.repo_path);
-        const inferred = inferRefs(setup.branch, repoConfigForInference, id);
-        for (const ref of inferred) {
-          insertTaskExternalRefIfAbsent({
-            task_id: id,
-            integration: ref.integration,
-            ref: ref.ref,
-            url: ref.url,
-          });
-          logger.info(
-            { task_id: id, integration: ref.integration, ref: ref.ref },
-            'ref-inference: inferred ref from branch name',
-          );
-        }
-      } catch (err) {
-        // Never block task startup for ref-inference failures
-        logger.warn({ task_id: id, err }, 'ref-inference: error during inference');
-      }
-    }
+    await inferAndPersistRefs(id, setup, task);
 
     if (setup.runPreflight) {
       stage = 'preflight';
-      const repoConfig = await getOrCreateRepoConfig(task.repo_path);
-      await preflightWorktree(setup.worktreePath, repoConfig);
     }
+    await runPreflight(setup, task);
 
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
-    const agentId = nanoid(12);
-    const agentName = task.agent ?? null;
-    const hookToken = crypto.randomBytes(32).toString('hex');
-    let flags = harness.resolveFlags(await getSettings());
-
-    const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
-
-    // Hooks must be on disk BEFORE the window launches the harness — with the
-    // launch-as-startup-command model the harness starts the instant the pane
-    // is created, so there is no readiness wait to install them during.
-    await harness.syncAgents(setup.worktreePath);
-    await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
-
-    // For orchestrator-managed tasks, write a worker mcp-config.json and append
-    // --mcp-config to the launch flags so the worker gets the report_complete tool.
-    // Do NOT use --strict-mcp-config (worker keeps its normal tools + user MCP servers).
-    // managed_tasks is registered before startTask runs (runCreateTask → upsertManagedTask).
-    flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
-
-    const baseCmd = harness.buildLaunchCommand({
-      sessionId: sessionIdForLaunch,
-      agent: agentName,
-      flags,
-      model: (task as any).model ?? null,
-      workspacePath: setup.worktreePath,
-    });
-    const startupCmd = buildAgentStartupCommand({
-      baseCmd,
-      prompt: task.initial_prompt,
-      worktreePath: setup.worktreePath,
-      agentId,
-    });
+    const { agentId, hookToken, sessionIdForDb, startupCmd } = await prepareFirstAgentLaunch(
+      id,
+      task,
+      setup,
+      harness,
+    );
 
     stage = 'tmux_session';
-    // Launch the harness as the session's first window's startup process: tmux
-    // starts it when it creates the pane, so there is no shell-readiness race.
-    const windowIndex = await launchAgentWindow({
-      session,
-      cwd: setup.worktreePath,
-      startupCmd,
-      fresh: true,
-    });
-    // Session exists now — persist the column. See race-avoidance comment above.
-    setTmuxSession(id, session);
-    logger.info(
-      { task_id: id, operation: 'createTask', tmux_session: session },
-      'createTask: tmux session created',
-    );
-    insertAgentRepo({
-      id: agentId,
-      task_id: id,
-      window_index: windowIndex,
-      label: 'Agent 1',
-      harness_id: harness.id,
-      harness_session_id: sessionIdForDb,
-      hook_token: hookToken,
-      agent: agentName,
-    });
+    const windowIndex = await launchFirstWindow(id, session, setup, startupCmd);
 
-    // Fire-and-forget: harness-specific post-launch (e.g. Cursor trust prompt).
-    void harness.postLaunch?.(`${session}:${windowIndex}`);
-    logger.info(
-      {
-        task_id: id,
-        agent_id: agentId,
-        operation: 'createTask',
-        window_index: windowIndex,
-        harness: harness.id,
-        harness_session_id: sessionIdForDb,
-      },
-      'createTask: first agent launched',
+    persistFirstAgentRow(
+      id,
+      agentId,
+      task,
+      harness,
+      windowIndex,
+      sessionIdForDb,
+      hookToken,
+      session,
     );
 
     // Mark as running. Clear error too — a transient error value (e.g.
