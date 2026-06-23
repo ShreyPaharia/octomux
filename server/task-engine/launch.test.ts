@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  DEFAULTS,
-  findExecCall,
-} from '../test-helpers.js';
+import { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } from '../test-helpers.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 

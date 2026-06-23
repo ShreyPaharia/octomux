@@ -4,16 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import { childLogger } from '../../logger.js';
 import { computeMergeBase } from '../../git-commits.js';
-import {
-  validateRepo,
-  revParseHead,
-  addWorktreeWithBranch,
-  slugifyTitle,
-} from '../git.js';
-import {
-  writeAgentLocalSettings,
-  DISABLED_PLUGINS_IN_WORKTREES,
-} from '../launch.js';
+import { validateRepo, revParseHead, addWorktreeWithBranch, slugifyTitle } from '../git.js';
+import { writeAgentLocalSettings, DISABLED_PLUGINS_IN_WORKTREES } from '../launch.js';
 import type { Task } from '../../types.js';
 import type { SetupResult } from './types.js';
 

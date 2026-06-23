@@ -346,7 +346,9 @@ describe('setupNone', () => {
       ok: false,
       currentBranch: 'main',
       targetBranch: 'feature',
-      conflicts: [{ task_id: 'other-task', title: 'Other', runtime_state: 'running', branch: 'main' }],
+      conflicts: [
+        { task_id: 'other-task', title: 'Other', runtime_state: 'running', branch: 'main' },
+      ],
       warnings: [],
       dirty: null,
     });

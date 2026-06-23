@@ -95,7 +95,12 @@ describe('gitBranchExists', () => {
   });
 
   it('returns true when branch exists (execFile succeeds)', async () => {
-    vi.mocked(execFile).mockImplementationOnce(((_cmd: any, _args: any, optsOrCb: any, maybeCb?: any) => {
+    vi.mocked(execFile).mockImplementationOnce(((
+      _cmd: any,
+      _args: any,
+      optsOrCb: any,
+      maybeCb?: any,
+    ) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       cb(null, { stdout: 'abc1234\n', stderr: '' });
       return undefined as any;
@@ -145,7 +150,12 @@ describe('revParseHead', () => {
 
 describe('checkDirty', () => {
   it('returns empty array when working tree is clean', async () => {
-    vi.mocked(execFile).mockImplementationOnce(((_cmd: any, _args: any, optsOrCb: any, maybeCb?: any) => {
+    vi.mocked(execFile).mockImplementationOnce(((
+      _cmd: any,
+      _args: any,
+      optsOrCb: any,
+      maybeCb?: any,
+    ) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       cb(null, { stdout: '', stderr: '' });
       return undefined as any;
@@ -164,7 +174,12 @@ describe('checkDirty', () => {
   });
 
   it('returns dirty files when working tree has changes', async () => {
-    vi.mocked(execFile).mockImplementationOnce(((_cmd: any, _args: any, optsOrCb: any, maybeCb?: any) => {
+    vi.mocked(execFile).mockImplementationOnce(((
+      _cmd: any,
+      _args: any,
+      optsOrCb: any,
+      maybeCb?: any,
+    ) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       cb(null, { stdout: ' M src/foo.ts\n?? bar.ts\n', stderr: '' });
       return undefined as any;
@@ -174,7 +189,12 @@ describe('checkDirty', () => {
   });
 
   it('filters blank lines from porcelain output', async () => {
-    vi.mocked(execFile).mockImplementationOnce(((_cmd: any, _args: any, optsOrCb: any, maybeCb?: any) => {
+    vi.mocked(execFile).mockImplementationOnce(((
+      _cmd: any,
+      _args: any,
+      optsOrCb: any,
+      maybeCb?: any,
+    ) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
       cb(null, { stdout: ' M a.ts\n\n M b.ts\n', stderr: '' });
       return undefined as any;
