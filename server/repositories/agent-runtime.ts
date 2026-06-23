@@ -100,6 +100,19 @@ export function getUserTerminalByIdAndTask(
     .get(terminalId, taskId) as UserTerminal | undefined;
 }
 
+/**
+ * Count all agents for a task (any status).
+ *
+ * Verbatim SQL from mcp/read.ts:handleGetTask so Pass 2 can swap that inline
+ * getDb() call to this helper.
+ */
+export function countAgentsForTask(taskId: string): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM agents WHERE task_id = ?`).get(taskId) as {
+    n: number;
+  };
+  return row.n;
+}
+
 /** List all agents for a task (all statuses), ordered by window_index. */
 export function listAllAgents(taskId: string): Agent[] {
   return getDb()

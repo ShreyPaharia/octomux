@@ -17,7 +17,7 @@ vi.mock('./hook-dispatcher.js', () => ({
   invalidateHookEnabledCache: vi.fn(),
 }));
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),

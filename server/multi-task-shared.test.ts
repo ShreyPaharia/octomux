@@ -103,7 +103,7 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-const { startTask } = await import('./task-runner.js');
+const { startTask } = await import('./task-engine/index.js');
 
 let db: Database.Database;
 

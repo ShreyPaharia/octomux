@@ -24,6 +24,7 @@ demo-fixtures/
 .husky/prepare-commit-msg
 .config/nvim/.luarc.json
 docs/superpowers
+.superpowers/
 designs/
 octomux.pen
 .DS_Store

@@ -7,7 +7,7 @@ import { getDb } from './db.js';
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
 import { execFile } from 'child_process';
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn().mockResolvedValue(undefined),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock('./task-runner.js', () => ({
   hopAgent: vi.fn(),
 }));
 
-const { startTask } = await import('./task-runner.js');
+const { startTask } = await import('./task-engine/index.js');
 
 describe('POST /api/tasks/:taskId/review', () => {
   let app: ReturnType<typeof createApp>;

@@ -20,6 +20,7 @@ import {
   insertUserTerminal,
   deleteUserTerminalsByTask,
   deleteUserTerminal,
+  countAgentsForTask,
 } from './agent-runtime.js';
 import type Database from 'better-sqlite3';
 
@@ -503,6 +504,50 @@ describe('repositories/agent-runtime', () => {
         .prepare('SELECT id FROM user_terminals WHERE task_id = ?')
         .all('task-01') as Array<{ id: string }>;
       expect(remaining.map((r) => r.id)).toContain(ut2.id);
+    });
+  });
+
+  describe('countAgentsForTask — mcp/read.ts:handleGetTask', () => {
+    it('returns 0 when task has no agents', () => {
+      expect(countAgentsForTask('task-01')).toBe(0);
+    });
+
+    it('counts all agents regardless of status', () => {
+      insertAgent({
+        task_id: 'task-01',
+        window_index: 0,
+        label: 'Agent A',
+        harness_id: 'claude-code',
+        hook_token: 'tok-a',
+      });
+      insertAgent({
+        task_id: 'task-01',
+        window_index: 1,
+        label: 'Agent B',
+        harness_id: 'claude-code',
+        hook_token: 'tok-b',
+      });
+      // Stop one agent; countAgentsForTask should still count it
+      const stoppedId = insertAgent({
+        task_id: 'task-01',
+        window_index: 2,
+        label: 'Agent C',
+        harness_id: 'claude-code',
+        hook_token: 'tok-c',
+      });
+      stopAgent(stoppedId);
+      expect(countAgentsForTask('task-01')).toBe(3);
+    });
+
+    it('does not count agents from other tasks', () => {
+      insertAgent({
+        task_id: 'task-02',
+        window_index: 0,
+        label: 'Other Agent',
+        harness_id: 'claude-code',
+        hook_token: 'tok-other',
+      });
+      expect(countAgentsForTask('task-01')).toBe(0);
     });
   });
 });

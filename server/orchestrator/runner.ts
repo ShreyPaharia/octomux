@@ -213,8 +213,8 @@ function writeOrchestratorsettings(convId: string): string {
  * claude launches it from. Returns null if no runnable server file is found
  * (caller then launches the conductor without MCP reads rather than failing).
  *
- * Exported so task-runner.ts can reuse this resolution when writing the worker
- * mcp-config.json (SHR-160 — do NOT duplicate the logic there).
+ * Exported so the task-engine (launch.ts) can reuse this resolution when writing
+ * the worker mcp-config.json (SHR-160 — do NOT duplicate the logic there).
  */
 export function mcpServerInvocation(): { command: string; args: string[] } | null {
   const here = fileURLToPath(import.meta.url);

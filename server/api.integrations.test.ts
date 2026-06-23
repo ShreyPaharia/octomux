@@ -4,7 +4,7 @@ import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
 
 // Mock the task-runner so app creation doesn't fail on server-level setup
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),

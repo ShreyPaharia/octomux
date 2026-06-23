@@ -26,7 +26,7 @@ vi.mock('./hooks-install.js', () => ({
   isHookTemplateInstalled: vi.fn(() => false),
 }));
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),

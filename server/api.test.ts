@@ -14,7 +14,7 @@ import type { Task, Agent } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-runner.js', async () => {
+vi.mock('./task-engine/index.js', async () => {
   const { getDb } = await import('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
@@ -211,7 +211,7 @@ const {
   createUserTerminal,
   createShellTerminal,
   closeShellTerminal,
-} = await import('./task-runner.js');
+} = await import('./task-engine/index.js');
 const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
 const { updateSettings } = await import('./settings.js');
 

@@ -25,7 +25,7 @@ import { createConversation, upsertManagedTask } from './store.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('../task-runner.js', async () => {
+vi.mock('../task-engine/index.js', async () => {
   const { getDb } = await import('../db.js');
   return {
     startTask: vi.fn(async (task: any) => {

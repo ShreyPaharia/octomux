@@ -249,6 +249,19 @@ export function findReviewTaskBySource(reviewOfTaskId: string): { id: string } |
     .get(reviewOfTaskId) as { id: string } | undefined;
 }
 
+/**
+ * Count all non-deleted tasks.
+ *
+ * Verbatim SQL from mcp/read.ts:handleMonitorStatus so Pass 2 can swap that
+ * inline getDb() call to this helper.
+ */
+export function countTasks(): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM tasks WHERE deleted_at IS NULL`).get() as {
+    n: number;
+  };
+  return row.n;
+}
+
 /** Count tasks currently in 'running' runtime_state (used by health check). */
 export function countRunningTasks(): number {
   const row = getDb()

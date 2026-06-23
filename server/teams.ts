@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
-import { startTask } from './task-runner.js';
+import { startTask } from './task-engine/index.js';
 import { childLogger } from './logger.js';
 import {
   getTask,
