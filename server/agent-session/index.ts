@@ -12,3 +12,9 @@ export type {
 } from './mcp/submit-result-server.js';
 export { submitResultServerInvocation, writeSubmitResultMcpConfig } from './mcp/config.js';
 export type { WriteSubmitResultMcpConfigOpts } from './mcp/config.js';
+export { runAgentSession, mcpSubmitResultCapture } from './session.js';
+export type {
+  CaptureStrategy,
+  RunAgentSessionOptions,
+  McpSubmitResultCaptureOpts,
+} from './session.js';
