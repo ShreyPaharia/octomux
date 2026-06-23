@@ -231,7 +231,9 @@ export const configApi = {
     }>;
     status_map_by_team: Record<
       string,
-      Partial<Record<'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done', string>>
+      Partial<
+        Record<'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done', string>
+      >
     >;
     default_team_suggestion: string | null;
   }> {

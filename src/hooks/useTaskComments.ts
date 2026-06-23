@@ -3,9 +3,11 @@ import {
   api,
   type InlineCommentRow,
   type InlineCommentWithOutdated,
+  type ListCommentsResponse,
   type PostCommentInput,
   type UpdateCommentInput,
 } from '@/lib/api';
+import { useResource } from '@/lib/use-resource';
 
 export interface OpenComposer {
   filePath: string;
@@ -56,7 +58,6 @@ export function useTaskComments(
 ): TaskCommentsState {
   const [byId, setById] = useState<Map<string, InlineCommentWithOutdated>>(() => new Map());
   const [outdatedUnavailable, setOutdatedUnavailable] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openComposer, setOpenComposer] = useState<OpenComposer | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -79,29 +80,33 @@ export function useTaskComments(
     onErrorRef.current?.(msg);
   }, []);
 
-  const refetch = useCallback(async () => {
-    if (!taskId) return;
-    setLoading(true);
+  // The server-data load lifecycle (mount + taskId-change + loading flag) runs
+  // through the shared useResource primitive. The fetcher writes into the
+  // optimistic `byId` Map (the source of truth for post/update/remove) and
+  // reports errors via the onError hook, so it never rejects to useResource.
+  const fetcher = useCallback(async (): Promise<ListCommentsResponse | null> => {
+    if (!taskId) return null;
     try {
       const res = await api.listComments(taskId);
       setById(indexBy(res.comments));
       setOutdatedUnavailable(!!res.outdated_unavailable);
       setError(null);
+      return res;
     } catch (err) {
       reportError((err as Error).message);
-    } finally {
-      setLoading(false);
+      return null;
     }
   }, [taskId, reportError]);
 
+  const { loading, refresh: refetch } = useResource(taskId ? `comments:${taskId}` : null, fetcher);
+
+  // Clear the Map when there is no task (useResource doesn't fetch on a null key).
   useEffect(() => {
     if (!taskId) {
       setById(new Map());
       setOutdatedUnavailable(false);
-      return;
     }
-    refetch();
-  }, [taskId, refetch]);
+  }, [taskId]);
 
   const byFile = useCallback(
     (path: string) => {

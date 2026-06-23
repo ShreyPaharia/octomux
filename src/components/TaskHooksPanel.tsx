@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { api } from '@/lib/api';
-import { subscribe } from '@/lib/event-source';
+import { useResource } from '@/lib/use-resource';
 import { timeAgo } from '@/lib/time';
 import type { HookExecution } from '@/lib/api';
 
@@ -9,30 +9,17 @@ interface TaskHooksPanelProps {
 }
 
 export function TaskHooksPanel({ taskId }: TaskHooksPanelProps) {
-  const [executions, setExecutions] = useState<HookExecution[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data,
+    loading,
+    refresh: load,
+  } = useResource<HookExecution[]>(
+    `task-hooks:${taskId}`,
+    () => api.getTaskHookExecutions(taskId),
+    { events: (event) => event.payload.taskId === taskId },
+  );
+  const executions = data ?? [];
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.getTaskHookExecutions(taskId);
-      setExecutions(data);
-    } catch {
-      // swallow
-    } finally {
-      setLoading(false);
-    }
-  }, [taskId]);
-
-  useEffect(() => {
-    load();
-    return subscribe((event) => {
-      const affectedId = (event.payload as { taskId?: string }).taskId;
-      if (affectedId === taskId) {
-        load();
-      }
-    });
-  }, [load, taskId]);
 
   const toggleExpanded = (key: string) => {
     setExpanded((prev) => {

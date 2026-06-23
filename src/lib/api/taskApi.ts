@@ -311,7 +311,8 @@ export const taskApi = {
       method: 'PATCH',
       body: JSON.stringify({ status: 'stopped' }),
     }),
-  deleteChat: (id: string) => request<void>(`/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteChat: (id: string) =>
+    request<void>(`/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Worktrees
   listWorktrees: () => request<WorktreeSummary[]>('/worktrees'),

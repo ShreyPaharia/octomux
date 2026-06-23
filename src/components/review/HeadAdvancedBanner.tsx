@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { api } from '../../lib/api';
-import { subscribe } from '../../lib/event-source';
+import { useServerEvents } from '../../lib/use-server-events';
 
 interface HeadAdvancedBannerProps {
   taskId: string;
@@ -14,22 +14,17 @@ export function HeadAdvancedBanner({ taskId, currentSha, onRefresh }: HeadAdvanc
   const [newSha, setNewSha] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
 
-  useEffect(() => {
-    return subscribe((event) => {
-      const e = event as {
-        type: string;
-        payload: { taskId?: string; newHeadSha?: string; reviewRunId?: string };
-      };
-      if (!e.payload.taskId || e.payload.taskId !== taskId) return;
-      if (e.type === 'review:head-advanced' && e.payload.newHeadSha) {
-        setNewSha(e.payload.newHeadSha);
-      }
-      if (e.type === 'review:drafts-ready') {
+  useServerEvents(
+    (event) => {
+      if (event.type === 'review:head-advanced' && event.payload.newHeadSha) {
+        setNewSha(event.payload.newHeadSha);
+      } else if (event.type === 'review:drafts-ready') {
         setNewSha(null);
         onRefresh();
       }
-    });
-  }, [taskId, onRefresh]);
+    },
+    (event) => event.payload.taskId === taskId,
+  );
 
   // Dismiss if current SHA matches new SHA (refreshed externally)
   useEffect(() => {

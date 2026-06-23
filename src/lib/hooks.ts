@@ -3,6 +3,7 @@ import type { Task } from '../../server/types';
 import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api';
 import { api } from './api';
 import { subscribe } from './event-source';
+import { useResource } from './use-resource';
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -58,134 +59,37 @@ export function useTasks() {
 }
 
 export function useTask(id: string) {
-  const [task, setTask] = useState<Task | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const lastJsonRef = useRef<string>('');
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.getTask(id);
-      // Only trigger a re-render when the task data actually changed.
-      // Without this, every event creates a new object reference and causes
-      // the entire TaskDetail tree to re-render, risking terminal remounts.
-      const json = JSON.stringify(data);
-      if (json !== lastJsonRef.current) {
-        lastJsonRef.current = json;
-        setTask(data);
-      }
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    refresh();
-    return subscribe((event) => {
-      if (event.payload.taskId === id) {
-        refresh();
-      }
-    });
-  }, [refresh, id]);
-
-  return { task, loading, error, refresh };
+  // Content-dedup (inside useResource) keeps the task object reference stable
+  // unless the data actually changed, so an unrelated event can't re-render the
+  // TaskDetail tree and remount its terminals.
+  const { data, loading, error, refresh } = useResource<Task>(`task:${id}`, () => api.getTask(id), {
+    events: (event) => event.payload.taskId === id,
+  });
+  return { task: data, loading, error, refresh };
 }
 
 export function useSkills() {
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listSkills();
-      setSkills(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { skills, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () => api.listSkills());
+  return { skills: data ?? [], loading, error, refresh };
 }
 
 export function useRepoConfigs() {
-  const [configs, setConfigs] = useState<RepoConfig[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listRepoConfigs();
-      setConfigs(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { configs, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<RepoConfig[]>('repo-configs', () =>
+    api.listRepoConfigs(),
+  );
+  return { configs: data ?? [], loading, error, refresh };
 }
 
 export function useAgents() {
-  const [agents, setAgents] = useState<AgentDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listAgents();
-      setAgents(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { agents, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<AgentDefinition[]>('agents', () =>
+    api.listAgents(),
+  );
+  return { agents: data ?? [], loading, error, refresh };
 }
 
 export function useHarnesses() {
-  const [harnesses, setHarnesses] = useState<HarnessSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listHarnesses();
-      setHarnesses(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { harnesses, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<HarnessSummary[]>('harnesses', () =>
+    api.listHarnesses(),
+  );
+  return { harnesses: data ?? [], loading, error, refresh };
 }
