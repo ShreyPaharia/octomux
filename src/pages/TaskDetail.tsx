@@ -19,7 +19,7 @@ import { CommentQueueDrawer } from '@/components/CommentQueueDrawer';
 import { CommentsSidePanel } from '@/components/CommentsSidePanel';
 import type { DiffFileListHandle } from '@/components/DiffFileList';
 import { useReviewQueue } from '@/hooks/useReviewQueue';
-import { useTaskComments, TaskCommentsContext } from '@/hooks/useTaskComments';
+import { useTaskComments, CommentsContext } from '@/hooks/useTaskComments';
 import { DIFF_KEYBINDS, useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -869,7 +869,7 @@ export default function TaskDetail() {
 
       {/* Diff view — review cockpit */}
       {mode === 'diff' && canShowDiff && (
-        <TaskCommentsContext.Provider value={taskComments}>
+        <CommentsContext.Provider value={taskComments}>
           <div className="relative flex min-h-0 flex-1 flex-col">
             {diffSummary && diffSummary.base_ref ? (
               <ReviewBaseRefBanner
@@ -940,7 +940,7 @@ export default function TaskDetail() {
             </div>
             <DiffKeybindCheatSheet />
           </div>
-        </TaskCommentsContext.Provider>
+        </CommentsContext.Provider>
       )}
 
       {/* Editor view — only shown for nvim (external editors stay on agents view) */}

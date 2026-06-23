@@ -10,7 +10,7 @@ import { ClampedExplainer } from '@/components/review/ClampedExplainer';
 import { useDiffEditorHostSize } from '@/hooks/useDiffEditorHostSize';
 import { useDiffEditorLayout } from '@/hooks/useDiffEditorLayout';
 import { useInlineCommentZones } from '@/hooks/useInlineCommentZones';
-import { useTaskCommentsContext } from '@/hooks/useTaskComments';
+import { useCommentsContext } from '@/hooks/useTaskComments';
 
 const MonacoDiff = lazy(() =>
   import('@monaco-editor/react').then((mod) => ({ default: mod.DiffEditor })),
@@ -302,7 +302,7 @@ function CommentZonePortals({
   agents: Agent[];
   rangeIsBase: boolean;
 }) {
-  const ctx = useTaskCommentsContext();
+  const ctx = useCommentsContext();
   const fileComments = useMemo(() => ctx.byFile(filePath), [ctx, filePath]);
 
   const portals = useInlineCommentZones({

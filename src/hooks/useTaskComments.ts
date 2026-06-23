@@ -23,7 +23,7 @@ export interface QueueDraftInput {
   lineText: string;
 }
 
-export interface TaskCommentsState {
+export interface CommentsState {
   byId: Map<string, InlineCommentWithOutdated>;
   byFile: (path: string) => InlineCommentWithOutdated[];
   byFileLineSide: (path: string, line: number, side: 'old' | 'new') => InlineCommentWithOutdated[];
@@ -55,7 +55,7 @@ function indexBy(rows: InlineCommentWithOutdated[]): Map<string, InlineCommentWi
 export function useTaskComments(
   taskId: string | undefined,
   opts?: { onError?: (msg: string) => void; onQueueDraft?: (draft: QueueDraftInput) => void },
-): TaskCommentsState {
+): CommentsState {
   const [byId, setById] = useState<Map<string, InlineCommentWithOutdated>>(() => new Map());
   const [outdatedUnavailable, setOutdatedUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -263,12 +263,12 @@ export function useTaskComments(
   };
 }
 
-export const TaskCommentsContext = createContext<TaskCommentsState | null>(null);
+export const CommentsContext = createContext<CommentsState | null>(null);
 
-export function useTaskCommentsContext(): TaskCommentsState {
-  const ctx = useContext(TaskCommentsContext);
+export function useCommentsContext(): CommentsState {
+  const ctx = useContext(CommentsContext);
   if (!ctx) {
-    throw new Error('useTaskCommentsContext must be used inside <TaskCommentsContext.Provider>');
+    throw new Error('useCommentsContext must be used inside <CommentsContext.Provider>');
   }
   return ctx;
 }
