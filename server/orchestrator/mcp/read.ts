@@ -19,9 +19,16 @@
 
 import { promisify } from 'util';
 import { execFile as execFileCb } from 'child_process';
-import { getDb } from '../../db.js';
-import { SELECT_TASK_SQL } from '../../task-select.js';
-import { getManagedTask } from '../store.js';
+import {
+  getTask,
+  listTasks,
+  countTasks,
+  countAgentsForTask,
+  listAgentsByTasks,
+  listPendingPromptsByTasks,
+  listRecentRepoPaths,
+} from '../../repositories/index.js';
+import { getManagedTask, countManagedTasksByPhase, eventsSince } from '../store.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';
 
@@ -99,20 +106,20 @@ export function handleListTasks(input: ListTasksInput): TaskSummary[] {
 
   logger.debug({ operation: 'list_tasks', workflow_status, limit }, 'list_tasks called');
 
-  let sql = `${SELECT_TASK_SQL} WHERE t.deleted_at IS NULL`;
-  const params: unknown[] = [];
+  // Fetch all non-deleted tasks (including auto_review), ordered newest-updated first.
+  // listTasks orders by created_at; we replicate the original updated_at ordering in JS.
+  let rows = listTasks({ includeAutoReview: true });
 
+  // Apply workflow_status filter if provided
   if (workflow_status) {
-    sql += ' AND t.workflow_status = ?';
-    params.push(workflow_status);
+    rows = rows.filter((t) => t.workflow_status === workflow_status);
   }
 
-  sql += ' ORDER BY t.updated_at DESC LIMIT ?';
-  params.push(limit);
-
-  const rows = getDb()
-    .prepare(sql)
-    .all(...params) as Task[];
+  // Sort by updated_at DESC (listTasks uses created_at ordering) then apply limit
+  rows = rows.sort((a, b) =>
+    a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
+  );
+  rows = rows.slice(0, limit);
 
   // Return lean summaries only — no description, no initial_prompt, no error
   return rows.map((t) => ({
@@ -136,17 +143,14 @@ export function handleGetTask(input: GetTaskInput): TaskDetail | null {
 
   logger.debug({ operation: 'get_task', task_id }, 'get_task called');
 
-  const task = getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.id = ? AND t.deleted_at IS NULL`)
-    .get(task_id) as Task | undefined;
+  const task = getTask(task_id);
 
-  if (!task) {
+  // Exclude soft-deleted tasks (getTask does not filter deleted_at)
+  if (!task || task.deleted_at) {
     return null;
   }
 
-  const agentCountRow = getDb()
-    .prepare(`SELECT COUNT(*) AS n FROM agents WHERE task_id = ?`)
-    .get(task_id) as { n: number };
+  const agent_count = countAgentsForTask(task_id);
 
   return {
     id: task.id,
@@ -155,7 +159,7 @@ export function handleGetTask(input: GetTaskInput): TaskDetail | null {
     workflow_status: task.workflow_status,
     created_at: task.created_at,
     updated_at: task.updated_at,
-    agent_count: agentCountRow.n,
+    agent_count,
   };
 }
 
@@ -171,89 +175,73 @@ export function handleGetTask(input: GetTaskInput): TaskDetail | null {
 export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusResult {
   logger.debug({ operation: 'monitor_status' }, 'monitor_status called');
 
-  const db = getDb();
+  // Total active (non-deleted) tasks
+  const total = countTasks();
 
-  // Total active tasks
-  const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM tasks WHERE deleted_at IS NULL`).get() as {
-    n: number;
-  };
+  // All non-deleted tasks (including auto_review) for rollup computation
+  const allTasks = listTasks({ includeAutoReview: true });
+  const taskIds = allTasks.map((t) => t.id);
+  const taskMap = new Map<string, Task>(allTasks.map((t) => [t.id, t]));
 
-  // Counts by runtime_state
-  const runtimeRows = db
-    .prepare(
-      `SELECT runtime_state, COUNT(*) AS n FROM tasks WHERE deleted_at IS NULL GROUP BY runtime_state`,
-    )
-    .all() as Array<{ runtime_state: string; n: number }>;
+  // Counts by runtime_state (JS groupBy)
   const by_runtime_state: Record<string, number> = {};
-  for (const r of runtimeRows) {
-    by_runtime_state[r.runtime_state] = r.n;
+  for (const t of allTasks) {
+    by_runtime_state[t.runtime_state] = (by_runtime_state[t.runtime_state] ?? 0) + 1;
   }
 
-  // Counts by workflow_status
-  const workflowRows = db
-    .prepare(
-      `SELECT workflow_status, COUNT(*) AS n FROM tasks WHERE deleted_at IS NULL GROUP BY workflow_status`,
-    )
-    .all() as Array<{ workflow_status: string; n: number }>;
+  // Counts by workflow_status (JS groupBy)
   const by_workflow_status: Record<string, number> = {};
-  for (const r of workflowRows) {
-    by_workflow_status[r.workflow_status] = r.n;
+  for (const t of allTasks) {
+    by_workflow_status[t.workflow_status] = (by_workflow_status[t.workflow_status] ?? 0) + 1;
   }
 
-  // Counts by managed phase (Task 5.3: monitor summaries)
-  const phaseRows = db
-    .prepare(`SELECT phase, COUNT(*) AS n FROM managed_tasks GROUP BY phase`)
-    .all() as Array<{ phase: string; n: number }>;
-  const by_phase: Record<string, number> = {};
-  for (const r of phaseRows) {
-    by_phase[r.phase] = r.n;
+  // Counts by managed phase across ALL managed_tasks rows (incl. soft-deleted
+  // tasks), matching the original ungated GROUP BY.
+  const by_phase = countManagedTasksByPhase();
+
+  // Awaiting-approval set: only live (non-deleted) tasks, with their titles.
+  const awaitingApprovalTasks: Array<{ id: string; title: string }> = [];
+  for (const t of allTasks) {
+    const mt = getManagedTask(t.id);
+    if (mt && mt.phase === 'awaiting_approval') {
+      awaitingApprovalTasks.push({ id: t.id, title: t.title });
+    }
   }
 
-  // Needs-attention: error tasks + tasks with pending permission prompts
-  const errorTasks = db
-    .prepare(
-      `SELECT t.id, t.title FROM tasks t WHERE t.runtime_state = 'error' AND t.deleted_at IS NULL`,
-    )
-    .all() as Array<{ id: string; title: string }>;
+  // Needs-attention: error tasks (filter from allTasks)
+  const errorTasks = allTasks
+    .filter((t) => t.runtime_state === 'error')
+    .map((t) => ({ id: t.id, title: t.title }));
 
-  const pendingPromptTasks = db
-    .prepare(
-      `SELECT DISTINCT t.id, t.title
-         FROM tasks t
-         INNER JOIN permission_prompts pp ON pp.task_id = t.id AND pp.status = 'pending'
-         WHERE t.deleted_at IS NULL`,
-    )
-    .all() as Array<{ id: string; title: string }>;
-
-  // Needs-attention: tasks in awaiting_approval phase (waiting for human to approve)
-  const awaitingApprovalTasks = db
-    .prepare(
-      `SELECT DISTINCT t.id, t.title
-         FROM tasks t
-         INNER JOIN managed_tasks mt ON mt.task_id = t.id AND mt.phase = 'awaiting_approval'
-         WHERE t.deleted_at IS NULL`,
-    )
-    .all() as Array<{ id: string; title: string }>;
+  // Needs-attention: tasks with pending permission prompts
+  const pendingPrompts = listPendingPromptsByTasks(taskIds);
+  const pendingPromptTaskIdSet = new Set(pendingPrompts.map((p) => p.task_id));
+  const pendingPromptTasks = [...pendingPromptTaskIdSet]
+    .map((id) => taskMap.get(id))
+    .filter((t): t is Task => t !== undefined)
+    .map((t) => ({ id: t.id, title: t.title }));
 
   // Needs-attention: tasks whose agents have hook_activity='waiting'
-  const hookWaitingTasks = db
-    .prepare(
-      `SELECT DISTINCT t.id, t.title
-         FROM tasks t
-         INNER JOIN agents a ON a.task_id = t.id AND a.hook_activity = 'waiting'
-         WHERE t.deleted_at IS NULL`,
-    )
-    .all() as Array<{ id: string; title: string }>;
+  const allAgents = listAgentsByTasks(taskIds);
+  const hookWaitingTaskIdSet = new Set(
+    allAgents
+      .filter((a) => a.hook_activity === 'waiting' && a.task_id !== null)
+      .map((a) => a.task_id as string),
+  );
+  const hookWaitingTasks = [...hookWaitingTaskIdSet]
+    .map((id) => taskMap.get(id))
+    .filter((t): t is Task => t !== undefined)
+    .map((t) => ({ id: t.id, title: t.title }));
 
-  // Needs-attention: tasks with recent task:stuck events (most recent per task)
-  const stuckTasks = db
-    .prepare(
-      `SELECT DISTINCT t.id, t.title
-         FROM tasks t
-         INNER JOIN events e ON e.task_id = t.id AND e.type = 'task:stuck'
-         WHERE t.deleted_at IS NULL`,
-    )
-    .all() as Array<{ id: string; title: string }>;
+  // Needs-attention: tasks with task:stuck events (eventsSince(0) = all events)
+  const allEvents = eventsSince(0);
+  const stuckTaskIdSet = new Set(
+    allEvents.filter((e) => e.type === 'task:stuck').map((e) => e.task_id),
+  );
+  const stuckTasks = [...stuckTaskIdSet]
+    .filter((id) => taskMap.has(id))
+    .map((id) => taskMap.get(id)!)
+    .map((t) => ({ id: t.id, title: t.title }));
 
   const needs_attention: MonitorStatusResult['needs_attention'] = [
     ...errorTasks.map((t) => ({ id: t.id, title: t.title, reason: 'error' })),
@@ -276,7 +264,7 @@ export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusRe
   });
 
   return {
-    total: totalRow.n,
+    total,
     by_runtime_state,
     by_workflow_status,
     by_phase,
@@ -342,20 +330,7 @@ export interface RecentRepoRow {
 export function handleRecentRepos(): RecentRepoRow[] {
   logger.debug({ operation: 'recent_repos' }, 'recent_repos called');
 
-  const rows = getDb()
-    .prepare(
-      `SELECT w.repo_path AS repo_path, MAX(t.created_at) AS last_used
-         FROM tasks t
-         INNER JOIN worktrees w ON t.worktree_id = w.id
-        WHERE w.repo_path IS NOT NULL
-          AND t.deleted_at IS NULL
-        GROUP BY w.repo_path
-        ORDER BY last_used DESC
-        LIMIT 10`,
-    )
-    .all() as RecentRepoRow[];
-
-  return rows;
+  return listRecentRepoPaths(10) as RecentRepoRow[];
 }
 
 // ─── default_branch ───────────────────────────────────────────────────────────

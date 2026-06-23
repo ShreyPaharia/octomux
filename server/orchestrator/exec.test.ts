@@ -30,7 +30,7 @@ const mockDeleteTask = vi.fn().mockResolvedValue(undefined);
 const mockAddAgent = vi.fn().mockResolvedValue({ id: 'agent-new', window_index: 1 });
 const mockResumeTask = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('../task-runner.js', () => ({
+vi.mock('../task-engine/index.js', () => ({
   startTask: vi.fn((...args: unknown[]) => mockStartTask(...args)),
   closeTask: vi.fn((...args: unknown[]) => mockCloseTask(...args)),
   deleteTask: vi.fn((...args: unknown[]) => mockDeleteTask(...args)),

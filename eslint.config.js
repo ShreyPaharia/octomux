@@ -66,7 +66,10 @@ export default tseslint.config(
       'server/test-helpers.ts',
       'server/db.ts',
       'server/repositories/**',
-      'server/orchestrator/**',
+      // The orchestrator's OWN repository for its owned tables (orchestrator_*,
+      // action_cards, managed_tasks, conversation_usage, permission_rules, events).
+      // All other orchestrator modules go through repositories/ + store.ts (SHR-179).
+      'server/orchestrator/store.ts',
       'server/integrations/**',
     ],
     rules: {

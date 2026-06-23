@@ -37,15 +37,17 @@
 import { EventEmitter } from 'events';
 import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
-import { getDb } from '../db.js';
 import {
   eventsSince,
   upsertManagedTask,
   getGlobalMonitorConversation,
   createCard,
+  findConversationForTask,
+  listManagedTasksForConversation,
 } from './store.js';
 import { pushToConversation } from './stream.js';
 import { runSendMessage } from './exec.js';
+import { getTask } from '../repositories/index.js';
 
 const logger = childLogger('orchestrator/supervisor');
 
@@ -136,19 +138,6 @@ function formatNote(event: RawEvent): string {
       return `[supervisor] task \`${event.task_id}\` event: ${event.type}`;
     }
   }
-}
-
-// ─── findConversationForTask ───────────────────────────────────────────────────
-
-/**
- * Look up the conversation that owns a task via managed_tasks.
- * Returns the conversation_id, or null if the task is unowned.
- */
-function findConversationForTask(taskId: string): string | null {
-  const row = getDb()
-    .prepare(`SELECT conversation_id FROM managed_tasks WHERE task_id = ? LIMIT 1`)
-    .get(taskId) as { conversation_id: string } | undefined;
-  return row?.conversation_id ?? null;
 }
 
 // ─── createSupervisor ─────────────────────────────────────────────────────────
@@ -417,9 +406,7 @@ export function createSupervisor(): Supervisor {
     // otherwise sit silent (the conductor said it created the task and went
     // quiet). Relay the error once so the conductor/user know it didn't run.
     if (event.type === 'task:updated' && !erroredNotified.has(event.task_id)) {
-      const t = getDb()
-        .prepare(`SELECT runtime_state, error FROM tasks WHERE id = ?`)
-        .get(event.task_id) as { runtime_state?: string; error?: string } | undefined;
+      const t = getTask(event.task_id);
       if (t?.runtime_state === 'error') {
         erroredNotified.add(event.task_id);
         const detail = t.error ? `: ${t.error}` : '';
@@ -532,9 +519,7 @@ export function createSupervisor(): Supervisor {
    */
   async function replay(convId: string): Promise<void> {
     // Find all tasks managed by this conversation and their last_event_seq values
-    const rows = getDb()
-      .prepare(`SELECT task_id, last_event_seq FROM managed_tasks WHERE conversation_id = ?`)
-      .all(convId) as Array<{ task_id: string; last_event_seq: number }>;
+    const rows = listManagedTasksForConversation(convId);
 
     if (rows.length === 0) {
       logger.debug({ conversation_id: convId }, 'supervisor: no managed tasks to replay');

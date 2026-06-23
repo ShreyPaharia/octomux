@@ -26,6 +26,7 @@ import {
   setCurrentSummary,
   unlinkWorktree,
   markTaskRunning,
+  countTasks,
 } from './tasks.js';
 import { inTransaction } from './tx.js';
 
@@ -523,5 +524,25 @@ describe('inTransaction', () => {
     const r2 = getDb().prepare('SELECT id FROM tasks WHERE id = ?').get('tx-row-2');
     expect(r1).toBeUndefined();
     expect(r2).toBeUndefined();
+  });
+
+  describe('countTasks — mcp/read.ts:handleMonitorStatus', () => {
+    it('returns 0 when no tasks exist', () => {
+      expect(countTasks()).toBe(0);
+    });
+
+    it('counts only non-deleted tasks', () => {
+      insertTask({ title: 'Active 1', description: 'D' });
+      insertTask({ title: 'Active 2', description: 'D' });
+      const deletedId = insertTask({ title: 'Deleted', description: 'D' });
+      softDeleteTask(deletedId);
+      expect(countTasks()).toBe(2);
+    });
+
+    it('increments when a new task is inserted', () => {
+      const before = countTasks();
+      insertTask({ title: 'New', description: 'D' });
+      expect(countTasks()).toBe(before + 1);
+    });
   });
 });

@@ -237,6 +237,19 @@ export function listPendingCards(conversation_id: string): ActionCard[] {
 }
 
 /**
+ * Return all pending action_cards rows across ALL conversations.
+ *
+ * Used on backend boot to surface cards that were created before a restart but
+ * not yet decided by the user. Verbatim SQL from gate.ts:rehydratePendingCards
+ * so Pass 2 can swap that getDb() call to this helper.
+ */
+export function listAllPendingCards(): ActionCard[] {
+  return getDb()
+    .prepare(`SELECT * FROM action_cards WHERE status = 'pending' ORDER BY created_at ASC`)
+    .all() as ActionCard[];
+}
+
+/**
  * List pending cards older than `timeoutSeconds` across all conversations
  * (for the approval-timeout sweep, SHR-164). Compares against datetime('now')
  * in SQLite so it matches the column's stored format exactly.
@@ -332,6 +345,20 @@ export function upsertManagedTask(input: UpsertManagedTaskInput): void {
       input.artifact_lock_owner ?? null,
       ...setValues,
     );
+}
+
+/**
+ * Count managed tasks grouped by phase, across ALL conversations.
+ * Counts every managed_tasks row (including those whose task is soft-deleted) —
+ * used by the orchestrator monitor_status rollup.
+ */
+export function countManagedTasksByPhase(): Record<string, number> {
+  const rows = getDb()
+    .prepare(`SELECT phase, COUNT(*) AS n FROM managed_tasks GROUP BY phase`)
+    .all() as Array<{ phase: string; n: number }>;
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.phase] = r.n;
+  return out;
 }
 
 /** Get the managed_tasks row for a task_id. Returns undefined if not found. */
@@ -478,6 +505,36 @@ export function incrementToolCalls(conversationId: string): void {
     .run(conversationId);
 }
 
+/**
+ * Increment per-conversation usage counters by a delta.
+ *
+ * Uses INSERT ... ON CONFLICT DO UPDATE to create the row on first access and
+ * atomically increment the counters on subsequent calls.
+ *
+ * Mirrors verify.ts's incrementConversationUsage so Pass 2 can swap the call
+ * site without a behavioral change.
+ */
+export interface UsageDelta {
+  tasks_spawned?: number;
+  tool_calls?: number;
+}
+
+export function incrementConversationUsage(conversationId: string, delta: UsageDelta): void {
+  const tasksSpawned = delta.tasks_spawned ?? 0;
+  const toolCalls = delta.tool_calls ?? 0;
+
+  getDb()
+    .prepare(
+      `INSERT INTO conversation_usage (conversation_id, tasks_spawned, tool_calls)
+       VALUES (?, ?, ?)
+       ON CONFLICT(conversation_id) DO UPDATE SET
+         tasks_spawned    = tasks_spawned + excluded.tasks_spawned,
+         tool_calls       = tool_calls + excluded.tool_calls,
+         last_activity_at = datetime('now')`,
+    )
+    .run(conversationId, tasksSpawned, toolCalls);
+}
+
 // ─── listActiveConversations ──────────────────────────────────────────────────
 
 /**
@@ -490,6 +547,109 @@ export function listActiveConversations(): OrchestratorConversation[] {
       `SELECT * FROM orchestrator_conversations WHERE status = 'active' ORDER BY updated_at DESC`,
     )
     .all() as OrchestratorConversation[];
+}
+
+// ─── permission_rules ─────────────────────────────────────────────────────────
+
+export interface PermissionRule {
+  id: string;
+  tool_name: string;
+  /** JSON-encoded match object, or null for a blanket rule. */
+  match: string | null;
+  effect: 'allow' | 'deny';
+  created_at: string;
+}
+
+export interface InsertPermissionRuleInput {
+  tool_name: string;
+  match: string | null;
+  effect: 'allow' | 'deny';
+}
+
+/**
+ * Return all allow-rules for a specific tool_name.
+ *
+ * Verbatim SQL from policy.ts:applyRules so Pass 2 can swap that getDb() call.
+ */
+export function listPermissionRulesByToolName(toolName: string): PermissionRule[] {
+  return getDb()
+    .prepare(`SELECT * FROM permission_rules WHERE tool_name = ? AND effect = 'allow'`)
+    .all(toolName) as PermissionRule[];
+}
+
+/**
+ * Return all stored permission rules, ordered by creation time.
+ *
+ * Verbatim SQL from policy.ts:listRules so Pass 2 can swap that getDb() call.
+ */
+export function listPermissionRules(): PermissionRule[] {
+  return getDb()
+    .prepare(`SELECT * FROM permission_rules ORDER BY created_at ASC`)
+    .all() as PermissionRule[];
+}
+
+/**
+ * Persist a new permission rule. Returns the generated rule id.
+ *
+ * Verbatim SQL from policy.ts:addRule so Pass 2 can swap that getDb() call.
+ */
+export function insertPermissionRule(input: InsertPermissionRuleInput): string {
+  const id = nanoid(12);
+  getDb()
+    .prepare(
+      `INSERT INTO permission_rules (id, tool_name, match, effect)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(id, input.tool_name, input.match, input.effect);
+  return id;
+}
+
+/**
+ * Remove a permission rule by id. No-op if the id does not exist.
+ *
+ * Verbatim SQL from policy.ts:deleteRule so Pass 2 can swap that getDb() call.
+ */
+export function deletePermissionRule(id: string): void {
+  getDb().prepare(`DELETE FROM permission_rules WHERE id = ?`).run(id);
+}
+
+// ─── managed_tasks helpers (supervisor + verify) ──────────────────────────────
+
+/**
+ * Look up the conversation that owns a task via managed_tasks.
+ * Returns the conversation_id string, or null if the task is unowned.
+ *
+ * Verbatim SQL from supervisor.ts:findConversationForTask so Pass 2 can swap.
+ */
+export function findConversationForTask(taskId: string): string | null {
+  const row = getDb()
+    .prepare(`SELECT conversation_id FROM managed_tasks WHERE task_id = ? LIMIT 1`)
+    .get(taskId) as { conversation_id: string } | undefined;
+  return row?.conversation_id ?? null;
+}
+
+/**
+ * Return task_id + last_event_seq for all tasks managed by a conversation.
+ *
+ * Verbatim SQL from supervisor.ts:replay so Pass 2 can swap that getDb() call.
+ */
+export function listManagedTasksForConversation(
+  conversationId: string,
+): Array<{ task_id: string; last_event_seq: number }> {
+  return getDb()
+    .prepare(`SELECT task_id, last_event_seq FROM managed_tasks WHERE conversation_id = ?`)
+    .all(conversationId) as Array<{ task_id: string; last_event_seq: number }>;
+}
+
+/**
+ * Return all managed_tasks rows for a conversation that have a non-null depends_on.
+ *
+ * Verbatim SQL from verify.ts:scheduleDagStep so Pass 2 can swap that getDb() call.
+ */
+export function listManagedTasksWithDependsOn(conversationId: string): ManagedTask[] {
+  return getDb()
+    .prepare(`SELECT * FROM managed_tasks WHERE conversation_id = ? AND depends_on IS NOT NULL`)
+    .all(conversationId) as ManagedTask[];
 }
 
 // ─── global-monitor mode ──────────────────────────────────────────────────────

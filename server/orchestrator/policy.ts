@@ -15,8 +15,12 @@
  * because deny is the implicit default — rules only promote, never demote.
  */
 
-import { nanoid } from 'nanoid';
-import { getDb } from '../db.js';
+import {
+  listPermissionRulesByToolName,
+  listPermissionRules,
+  insertPermissionRule,
+  deletePermissionRule,
+} from './store.js';
 
 // ─── Tier constants ───────────────────────────────────────────────────────────
 
@@ -142,9 +146,7 @@ function applyRules(
   subcommand: string,
   baseDecision: PolicyDecision,
 ): PolicyDecision {
-  const rules = getDb()
-    .prepare(`SELECT * FROM permission_rules WHERE tool_name = ? AND effect = 'allow'`)
-    .all(toolName) as PermissionRule[];
+  const rules = listPermissionRulesByToolName(toolName) as PermissionRule[];
 
   for (const rule of rules) {
     const match = rule.match ? (JSON.parse(rule.match) as { subcommand?: string }) : null;
@@ -174,28 +176,23 @@ function applyRules(
  * still returns 'always-ask' for those commands regardless.
  */
 export function addRule(input: AddRuleInput): string {
-  const id = nanoid(12);
-  getDb()
-    .prepare(
-      `INSERT INTO permission_rules (id, tool_name, match, effect)
-       VALUES (?, ?, ?, ?)`,
-    )
-    .run(id, input.tool_name, input.match ? JSON.stringify(input.match) : null, input.effect);
-  return id;
+  return insertPermissionRule({
+    tool_name: input.tool_name,
+    match: input.match ? JSON.stringify(input.match) : null,
+    effect: input.effect,
+  });
 }
 
 // ─── listRules ────────────────────────────────────────────────────────────────
 
 /** Return all stored permission rules, ordered by creation time. */
 export function listRules(): PermissionRule[] {
-  return getDb()
-    .prepare(`SELECT * FROM permission_rules ORDER BY created_at ASC`)
-    .all() as PermissionRule[];
+  return listPermissionRules() as PermissionRule[];
 }
 
 // ─── deleteRule ───────────────────────────────────────────────────────────────
 
 /** Remove a permission rule by id. No-op if the id does not exist. */
 export function deleteRule(id: string): void {
-  getDb().prepare(`DELETE FROM permission_rules WHERE id = ?`).run(id);
+  deletePermissionRule(id);
 }

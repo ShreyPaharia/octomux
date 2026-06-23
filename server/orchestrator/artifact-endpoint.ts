@@ -30,10 +30,9 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { getDb } from '../db.js';
 import { getManagedTask } from './store.js';
 import { childLogger } from '../logger.js';
-import { SELECT_TASK_SQL } from '../task-select.js';
+import { getTask } from '../repositories/index.js';
 import type { Task } from '../types.js';
 
 const logger = childLogger('orchestrator/artifact-endpoint');
@@ -59,7 +58,7 @@ function computeEtag(content: string): string {
  * Returns null if the task doesn't exist or has no worktree.
  */
 function getWorktreePath(taskId: string): { task: Task; worktreePath: string } | null {
-  const task = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task) return null;
   if (!task.worktree) return null;
   return { task, worktreePath: task.worktree };
