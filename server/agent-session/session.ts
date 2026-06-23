@@ -86,6 +86,7 @@ export function mcpSubmitResultCapture<T = unknown>(
   const { resultDir } = opts;
   let resultPath: string | null = null;
   let watcher: fs.FSWatcher | null = null;
+  let poll: ReturnType<typeof setInterval> | null = null;
   let disposed = false;
 
   return {
@@ -115,54 +116,74 @@ export function mcpSubmitResultCapture<T = unknown>(
       const rPath = resultPath;
 
       return new Promise<T>((resolve, reject) => {
+        let settled = false;
+
+        const cleanup = () => {
+          if (poll) {
+            clearInterval(poll);
+            poll = null;
+          }
+          if (watcher) {
+            try {
+              watcher.close();
+            } catch {
+              // ignore
+            }
+            watcher = null;
+          }
+        };
+
+        // Resolve/reject exactly once, tearing down both the watcher and poll.
+        const settleResolve = (value: T) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value);
+        };
+        const settleReject = (err: Error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err);
+        };
+
+        // Read + parse the result file; returns true once handled (resolved or
+        // rejected). Returns false if the file isn't there yet.
+        const tryRead = (): boolean => {
+          if (disposed) {
+            settleReject(new Error('capture disposed before result'));
+            return true;
+          }
+          if (!fs.existsSync(rPath)) return false;
+          try {
+            settleResolve(JSON.parse(fs.readFileSync(rPath, 'utf8')) as T);
+          } catch (err) {
+            settleReject(new Error(`Failed to parse result file: ${err}`));
+          }
+          return true;
+        };
+
         if (disposed) {
-          reject(new Error('capture disposed before result'));
+          settleReject(new Error('capture disposed before result'));
           return;
         }
 
-        // Check if result already exists (race-free check before setting up watcher)
-        if (fs.existsSync(rPath)) {
-          try {
-            const parsed = JSON.parse(fs.readFileSync(rPath, 'utf8')) as T;
-            resolve(parsed);
-            return;
-          } catch (err) {
-            reject(new Error(`Failed to parse result file: ${err}`));
-            return;
-          }
-        }
+        // Race-free immediate check (covers the file already existing).
+        if (tryRead()) return;
 
-        // Watch the directory for the result file to appear
+        // Belt-and-suspenders: a watcher AND a poll run concurrently. fs.watch
+        // event delivery is best-effort and can be missed/delayed under load, so
+        // the 100ms poll guarantees the result is picked up regardless. Whichever
+        // fires first settles; cleanup() tears down both.
+        poll = setInterval(tryRead, 100);
         try {
           watcher = fs.watch(path.dirname(rPath), (_event, filename) => {
-            if (filename !== path.basename(rPath)) return;
-            if (!fs.existsSync(rPath)) return;
-            try {
-              const parsed = JSON.parse(fs.readFileSync(rPath, 'utf8')) as T;
-              resolve(parsed);
-            } catch (err) {
-              reject(new Error(`Failed to parse result file: ${err}`));
-            }
+            if (filename && filename !== path.basename(rPath)) return;
+            tryRead();
           });
         } catch (err) {
-          // Fallback to polling if watch fails (e.g. in certain test environments)
-          logger.debug({ err }, 'fs.watch failed, falling back to poll');
-          const poll = setInterval(() => {
-            if (disposed) {
-              clearInterval(poll);
-              reject(new Error('capture disposed before result'));
-              return;
-            }
-            if (fs.existsSync(rPath)) {
-              clearInterval(poll);
-              try {
-                const parsed = JSON.parse(fs.readFileSync(rPath, 'utf8')) as T;
-                resolve(parsed);
-              } catch (parseErr) {
-                reject(new Error(`Failed to parse result file: ${parseErr}`));
-              }
-            }
-          }, 100);
+          // Watch unavailable in some environments — the poll still covers us.
+          logger.debug({ err }, 'fs.watch unavailable; relying on poll');
         }
       });
     },
@@ -170,6 +191,10 @@ export function mcpSubmitResultCapture<T = unknown>(
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      if (poll) {
+        clearInterval(poll);
+        poll = null;
+      }
       try {
         watcher?.close();
       } catch {
