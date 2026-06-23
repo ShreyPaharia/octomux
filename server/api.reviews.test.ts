@@ -5,7 +5,7 @@ import { createTestDb, insertTestTask } from './test-helpers.js';
 import { getDb } from './db.js';
 
 // Minimal mocks so createApp doesn't fail on missing native deps
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn().mockResolvedValue(undefined),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock('./publish-review.js', () => ({
   publishReview: vi.fn().mockResolvedValue({ github_review_url: 'https://github.com/test' }),
 }));
 
-const { startTask } = await import('./task-runner.js');
+const { startTask } = await import('./task-engine/index.js');
 const { sendMessageToAgent } = await import('./tmux-input.js');
 
 // Seed a review task with a run and comments

@@ -32,7 +32,7 @@ import {
   cleanupOrphanedViewerSessions,
   reconcileOrphanSettingUp,
   gcScratchDirs,
-} from './task-runner.js';
+} from './task-engine/index.js';
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';

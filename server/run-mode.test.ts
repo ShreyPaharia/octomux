@@ -110,7 +110,7 @@ const {
   gcScratchDirs,
   scratchDirFor,
   scratchRoot,
-} = await import('./task-runner.js');
+} = await import('./task-engine/index.js');
 const { execFile } = await import('child_process');
 const fsMod = await import('fs');
 

@@ -118,7 +118,7 @@ const {
   preflightWorktree,
   hopAgent,
   buildAgentStartupCommand,
-} = await import('./task-runner.js');
+} = await import('./task-engine/index.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
 const { setLogger, getLogger } = await import('./logger.js');
@@ -2727,7 +2727,7 @@ describe('softDeleteTask', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db, { hook_activity: 'active' });
 
-    const { softDeleteTask } = await import('./task-runner.js');
+    const { softDeleteTask } = await import('./task-engine/index.js');
     const task = { ...DEFAULTS.runningTask } as unknown as Task;
 
     await softDeleteTask(task);

@@ -1,6 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { startTask, closeTask, resumeTask } from '../task-runner.js';
+import { startTask, closeTask, resumeTask } from '../task-engine/index.js';
 import { broadcast } from '../events.js';
 import type { MoveTaskRequest, SummaryRequest, NoteRequest, AddRefRequest } from '../types.js';
 import { WORKFLOW_STATUSES } from '../types.js';

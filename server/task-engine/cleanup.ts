@@ -23,7 +23,7 @@ import { isTmuxTargetMissing } from './sessions.js';
 import { scratchDirFor } from './reconcile.js';
 import { cleanupLinkedSessions } from './sessions.js';
 
-const logger = childLogger('task-runner');
+const logger = childLogger('task-engine/cleanup');
 
 const execFile = promisify(execFileCb);
 

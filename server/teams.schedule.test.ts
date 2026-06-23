@@ -7,7 +7,7 @@ import { createTestDb } from './test-helpers.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-runner.js', async () => ({
+vi.mock('./task-engine/index.js', async () => ({
   startTask: vi.fn(async (task: any) => {
     const { getDb } = await import('./db.js');
     const db = getDb();

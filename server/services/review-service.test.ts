@@ -15,7 +15,7 @@ import type { Task } from '../types.js';
 // ─── Mock side-effecting deps ───────────────────────────────────────────────
 
 const mockStartTask = vi.fn().mockResolvedValue(undefined);
-vi.mock('../task-runner.js', () => ({
+vi.mock('../task-engine/index.js', () => ({
   startTask: vi.fn((...args: unknown[]) => mockStartTask(...args)),
 }));
 

@@ -14,7 +14,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb, insertTask } from '../../test-helpers.js';
 import { getDb } from '../../db.js';
-import { createConversation, upsertManagedTask, getManagedTask } from '../store.js';
+import {
+  createConversation,
+  upsertManagedTask,
+  getManagedTask,
+  incrementConversationUsage,
+} from '../store.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -38,8 +43,6 @@ vi.mock('../runner.js', () => ({
 import {
   handleRequestReview,
   scheduleDagStep,
-  incrementConversationUsage,
-  getConversationUsage,
   checkUsageGuardrail,
   MAX_RESUME_ATTEMPTS,
   MAX_BATCH_SIZE,
@@ -398,29 +401,9 @@ describe('usage guardrail', () => {
     expect(USAGE_TOOL_CALLS_SOFT_LIMIT).toBeGreaterThan(0);
   });
 
-  it('incrementConversationUsage creates a row and increments tasks_spawned', () => {
-    const convId = createConversation({ title: 'Usage Conv' });
-    incrementConversationUsage(convId, { tasks_spawned: 1 });
-    const usage = getConversationUsage(convId);
-    expect(usage).toBeDefined();
-    expect(usage!.tasks_spawned).toBe(1);
-  });
-
-  it('incrementConversationUsage increments tool_calls', () => {
-    const convId = createConversation({ title: 'Usage Tool Conv' });
-    incrementConversationUsage(convId, { tool_calls: 5 });
-    const usage = getConversationUsage(convId);
-    expect(usage!.tool_calls).toBe(5);
-  });
-
-  it('incrementConversationUsage accumulates across multiple calls', () => {
-    const convId = createConversation({ title: 'Usage Accum Conv' });
-    incrementConversationUsage(convId, { tasks_spawned: 3 });
-    incrementConversationUsage(convId, { tasks_spawned: 2, tool_calls: 10 });
-    const usage = getConversationUsage(convId);
-    expect(usage!.tasks_spawned).toBe(5);
-    expect(usage!.tool_calls).toBe(10);
-  });
+  // Note: incrementConversationUsage / getConversationUsage behavior is covered
+  // directly in store.test.ts (they are store helpers). Here we only exercise
+  // checkUsageGuardrail, using the store helper to set up usage state.
 
   it('checkUsageGuardrail returns {halted: false} below soft limits', () => {
     const convId = createConversation({ title: 'Usage Under Conv' });

@@ -5,7 +5,7 @@ import { childLogger } from '../logger.js';
 import { broadcast } from '../events.js';
 import { validateAgentName } from '../harnesses/types.js';
 import { getHarness } from '../harnesses/index.js';
-import { hopAgent } from '../task-runner.js';
+import { hopAgent } from '../task-engine/index.js';
 import { getAgent as getAgentRepo, getTask as getTaskRepo } from '../repositories/index.js';
 import type { CreateChatRequest, Task } from '../types.js';
 

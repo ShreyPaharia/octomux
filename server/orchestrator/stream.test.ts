@@ -61,7 +61,7 @@ vi.mock('./transcript.js', async (importOriginal) => {
 });
 
 // Mock task-runner so app creation doesn't fail
-vi.mock('../task-runner.js', () => ({
+vi.mock('../task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),

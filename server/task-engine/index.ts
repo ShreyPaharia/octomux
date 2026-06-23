@@ -1,5 +1,6 @@
 // ─── task-engine public facade ───────────────────────────────────────────────
-// All external callers import from ../task-runner.js which re-exports this file.
+// The single public entry point for the task engine. All external callers
+// (routes, poller, teams, services, orchestrator, index.ts) import from here.
 
 export { runSetup } from './setup/index.js';
 export {

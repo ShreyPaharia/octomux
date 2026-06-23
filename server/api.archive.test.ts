@@ -10,7 +10,7 @@ import { createApp } from './app.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-runner.js', async () => {
+vi.mock('./task-engine/index.js', async () => {
   const { getDb } = await import('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
@@ -118,7 +118,7 @@ describe('POST /api/tasks/delete-done', () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
 
-    const { closeTask } = await import('./task-runner.js');
+    const { closeTask } = await import('./task-engine/index.js');
 
     const res = await request(app).post('/api/tasks/delete-done').expect(200);
     expect(res.body).toEqual({ deleted: 1 });
@@ -129,7 +129,7 @@ describe('POST /api/tasks/delete-done', () => {
   it('does not call closeTask for done tasks that are idle', async () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
 
-    const { closeTask } = await import('./task-runner.js');
+    const { closeTask } = await import('./task-engine/index.js');
 
     await request(app).post('/api/tasks/delete-done').expect(200);
     expect(closeTask).not.toHaveBeenCalled();
@@ -150,7 +150,7 @@ describe('POST /api/tasks/:id/move to done', () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
 
-    const { closeTask } = await import('./task-runner.js');
+    const { closeTask } = await import('./task-engine/index.js');
 
     const res = await request(app)
       .post('/api/tasks/t1/move')
@@ -164,7 +164,7 @@ describe('POST /api/tasks/:id/move to done', () => {
   it('calls closeTask when moving a setting_up task to done', async () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'setting_up' });
 
-    const { closeTask } = await import('./task-runner.js');
+    const { closeTask } = await import('./task-engine/index.js');
 
     await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
 
@@ -174,7 +174,7 @@ describe('POST /api/tasks/:id/move to done', () => {
   it('does not call closeTask when moving an idle task to done', async () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'idle' });
 
-    const { closeTask } = await import('./task-runner.js');
+    const { closeTask } = await import('./task-engine/index.js');
 
     await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
 

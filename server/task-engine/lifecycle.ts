@@ -50,7 +50,7 @@ import { runSetup } from './setup/index.js';
 import { cleanupLinkedSessions, isTmuxTargetMissing } from './sessions.js';
 import { checkDirty } from './git.js';
 
-const logger = childLogger('task-runner');
+const logger = childLogger('task-engine/lifecycle');
 
 const execFile = promisify(execFileCb);
 

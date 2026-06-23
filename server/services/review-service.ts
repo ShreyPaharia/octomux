@@ -16,7 +16,7 @@ import {
   repoShortName,
 } from '../review-tasks.js';
 import { getTask } from '../repositories/index.js';
-import { startTask } from '../task-runner.js';
+import { startTask } from '../task-engine/index.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import { findFirstActiveAgent } from '../repositories/agent-runtime.js';
 import { broadcast } from '../events.js';

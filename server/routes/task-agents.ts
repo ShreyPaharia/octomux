@@ -7,7 +7,7 @@ import {
   createUserTerminal,
   createShellTerminal,
   closeShellTerminal,
-} from '../task-runner.js';
+} from '../task-engine/index.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import { broadcast } from '../events.js';
 import { getAgentByIdAndTask, getUserTerminalByIdAndTask } from '../repositories/index.js';

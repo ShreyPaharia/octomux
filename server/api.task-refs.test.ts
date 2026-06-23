@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createTestDb, insertTask } from './test-helpers.js';
 import { getDb } from './db.js';
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),

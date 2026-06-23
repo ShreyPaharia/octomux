@@ -37,7 +37,6 @@ import {
   getManagedTask,
   upsertManagedTask,
   listManagedTasksWithDependsOn,
-  incrementConversationUsage as storeIncrementConversationUsage,
   getConversationUsage as storeGetConversationUsage,
 } from '../store.js';
 import { pushToConversation } from '../stream.js';
@@ -342,22 +341,6 @@ export async function scheduleDagStep(
 // ─── Usage guardrail helpers ──────────────────────────────────────────────────
 
 /**
- * Increment per-conversation usage counters.
- * Delegates to the store helper (orchestrator-owned table).
- */
-export function incrementConversationUsage(conversationId: string, delta: UsageDelta): void {
-  storeIncrementConversationUsage(conversationId, delta);
-}
-
-/**
- * Return the current usage row for a conversation, or undefined if not yet created.
- * Delegates to the store helper (orchestrator-owned table).
- */
-export function getConversationUsage(conversationId: string): ConversationUsage | undefined {
-  return storeGetConversationUsage(conversationId) as ConversationUsage | undefined;
-}
-
-/**
  * Check whether the conversation has reached a soft usage limit.
  *
  * Returns {halted: true, reason} if either tasks_spawned >= USAGE_TASKS_SOFT_LIMIT
@@ -367,7 +350,7 @@ export function getConversationUsage(conversationId: string): ConversationUsage 
  * before allowing further write-actions when halted=true.
  */
 export function checkUsageGuardrail(conversationId: string): GuardrailResult {
-  const usage = getConversationUsage(conversationId);
+  const usage = storeGetConversationUsage(conversationId) as ConversationUsage | undefined;
   if (!usage) {
     return { halted: false };
   }

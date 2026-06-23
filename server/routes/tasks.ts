@@ -3,7 +3,13 @@ import type { Request, Response } from 'express';
 import fs from 'fs';
 import { childLogger } from '../logger.js';
 import { getNeedsYou, getActivity } from '../inbox.js';
-import { startTask, closeTask, softDeleteTask, deleteTask, resumeTask } from '../task-runner.js';
+import {
+  startTask,
+  closeTask,
+  softDeleteTask,
+  deleteTask,
+  resumeTask,
+} from '../task-engine/index.js';
 import { broadcast } from '../events.js';
 import { ensureHookToken } from '../hook-token.js';
 import type {

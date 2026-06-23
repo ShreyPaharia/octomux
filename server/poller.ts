@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { getSettings } from './settings.js';
-import { closeTask, deleteTask, addAgent } from './task-runner.js';
+import { closeTask, deleteTask, addAgent } from './task-engine/index.js';
 import { installHookSettings } from './hook-settings.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';

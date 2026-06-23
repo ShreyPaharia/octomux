@@ -11,7 +11,7 @@ import request from 'supertest';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, DEFAULTS } from './test-helpers.js';
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),
