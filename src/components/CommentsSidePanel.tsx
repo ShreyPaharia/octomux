@@ -5,7 +5,7 @@ import { DIFF_FILTER_ACTIVE } from '@/lib/design-tokens';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { timeAgo } from '@/lib/time';
 import { authorLabel } from '@/lib/comment-format';
-import { useTaskCommentsContext } from '@/hooks/useTaskComments';
+import { useCommentsContext } from '@/hooks/useTaskComments';
 import type { InlineCommentWithOutdated } from '@/lib/api';
 import type { Agent } from '../../server/types';
 
@@ -33,7 +33,7 @@ export function CommentsSidePanel({
   onClose,
   className,
 }: CommentsSidePanelProps) {
-  const ctx = useTaskCommentsContext();
+  const ctx = useCommentsContext();
   const [filter, setFilter] = useState<FilterMode>('all');
 
   const all = useMemo(() => Array.from(ctx.byId.values()), [ctx.byId]);

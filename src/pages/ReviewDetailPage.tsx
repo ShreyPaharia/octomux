@@ -11,7 +11,7 @@ import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
 import { DiffViewer } from '../components/DiffViewer';
 import { CommentsSidePanel } from '../components/CommentsSidePanel';
-import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
+import { CommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -162,7 +162,7 @@ export default function ReviewDetailPage() {
   );
 
   return (
-    <TaskCommentsContext.Provider value={taskComments}>
+    <CommentsContext.Provider value={taskComments}>
       <div className="flex h-full min-h-0 flex-col">
         <HeadAdvancedBanner taskId={id!} currentSha={detail.task.pr_head_sha} onRefresh={refresh} />
 
@@ -263,6 +263,6 @@ export default function ReviewDetailPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </TaskCommentsContext.Provider>
+    </CommentsContext.Provider>
   );
 }

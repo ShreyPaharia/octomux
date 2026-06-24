@@ -8,26 +8,9 @@ import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
 
 const POLL_INTERVAL_MS = 2000;
 
-export interface QueuedReviewComment {
-  id: string;
-  filePath: string;
-  line: number;
-  lineText: string;
-  body: string;
-}
-
 interface Props {
-  taskId?: string;
+  taskId: string;
   isRunning?: boolean;
-  // Controlled / standalone-content mode (used by the review composer).
-  // When `oldContent`/`newContent`/`path` are passed directly, the component
-  // renders a simple line-by-line view of the new content with an inline
-  // comment composer per line, instead of fetching diff data via the API.
-  oldContent?: string;
-  newContent?: string;
-  path?: string;
-  onAddComment?: (c: { filePath: string; line: number; lineText: string; body: string }) => void;
-  queuedComments?: QueuedReviewComment[];
   // Optional notifier so a parent (e.g. TaskDetail's review cockpit) can mirror
   // the currently-active file path for keyboard nav and the review banner.
   onSelectionChange?: (path: string | null) => void;
@@ -42,8 +25,8 @@ interface Props {
   /** Forward an imperative handle for programmatic scroll/reveal — used by the
    *  comments side panel. */
   listRef?: RefObject<DiffFileListHandle | null>;
-  /** Opt-in to inline comment threads (uses TaskCommentsContext). When true,
-   *  callers must wrap with <TaskCommentsContext.Provider>. */
+  /** Opt-in to inline comment threads (uses CommentsContext). When true,
+   *  callers must wrap with <CommentsContext.Provider>. */
   enableComments?: boolean;
   agents?: Agent[];
   /** Notifier fired whenever the list of files in the diff changes. The host
@@ -61,147 +44,9 @@ interface Props {
   groups?: import('@/lib/review-file-groups').RenderGroup[];
 }
 
-export function DiffViewer(props: Props) {
-  const {
-    taskId,
-    isRunning,
-    oldContent: standaloneOld,
-    newContent: standaloneNew,
-    path: standalonePath,
-    onAddComment,
-    queuedComments,
-    onSelectionChange,
-    onSummaryLoaded,
-    onToggleReviewed,
-    range,
-    listRef,
-    enableComments,
-    agents,
-    onFilesChange,
-    hideFileTree,
-    fileOrder,
-    groups,
-  } = props;
-
-  // Standalone / composer mode — renders the new-content lines as clickable
-  // buttons with an inline comment composer. No taskId needed.
-  if (standaloneNew !== undefined && standalonePath !== undefined && standaloneOld !== undefined) {
-    return (
-      <InlineComposerDiff
-        path={standalonePath}
-        newContent={standaloneNew}
-        onAddComment={onAddComment}
-        queuedComments={queuedComments ?? []}
-      />
-    );
-  }
-
-  if (taskId === undefined) {
-    return null;
-  }
-
-  return (
-    <ApiDiffViewer
-      taskId={taskId}
-      isRunning={isRunning ?? false}
-      onSelectionChange={onSelectionChange}
-      onSummaryLoaded={onSummaryLoaded}
-      onToggleReviewed={onToggleReviewed}
-      range={range}
-      listRef={listRef}
-      enableComments={enableComments}
-      agents={agents}
-      onFilesChange={onFilesChange}
-      hideFileTree={hideFileTree}
-      fileOrder={fileOrder}
-      groups={groups}
-    />
-  );
-}
-
-interface InlineComposerDiffProps {
-  path: string;
-  newContent: string;
-  onAddComment?: (c: { filePath: string; line: number; lineText: string; body: string }) => void;
-  queuedComments: QueuedReviewComment[];
-}
-
-function InlineComposerDiff({
-  path,
-  newContent,
-  onAddComment,
-  queuedComments,
-}: InlineComposerDiffProps) {
-  const [activeLine, setActiveLine] = useState<number | null>(null);
-  const [draft, setDraft] = useState('');
-  const lines = newContent.split('\n');
-
-  const openComposer = (line: number) => {
-    setActiveLine(line);
-    setDraft('');
-  };
-
-  const close = () => {
-    setActiveLine(null);
-    setDraft('');
-  };
-
-  const save = (line: number, lineText: string) => {
-    if (!onAddComment) {
-      close();
-      return;
-    }
-    onAddComment({ filePath: path, line, lineText, body: draft });
-    close();
-  };
-
-  return (
-    <div className="font-mono text-sm">
-      {lines.map((lineText, idx) => {
-        const lineNum = idx + 1; // 1-indexed
-        const pills = queuedComments.filter((c) => c.filePath === path && c.line === lineNum);
-        return (
-          <div key={lineNum} data-line={lineNum}>
-            <button
-              type="button"
-              className="block w-full text-left hover:bg-accent/30"
-              onClick={() => openComposer(lineNum)}
-            >
-              {lineText}
-            </button>
-            {pills.map((c) => (
-              <div key={c.id} className="text-xs italic">
-                {c.body}
-              </div>
-            ))}
-            {activeLine === lineNum ? (
-              <input
-                autoFocus
-                placeholder="Leave a comment"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    save(lineNum, lineText);
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    close();
-                  }
-                }}
-                className="block w-full border border-glass-edge bg-glass-l1 px-2 py-1 text-sm"
-              />
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ApiDiffViewer({
+export function DiffViewer({
   taskId,
-  isRunning,
+  isRunning = false,
   onSelectionChange,
   onSummaryLoaded,
   onToggleReviewed: onToggleReviewedProp,
@@ -213,21 +58,7 @@ function ApiDiffViewer({
   hideFileTree = false,
   fileOrder,
   groups,
-}: {
-  taskId: string;
-  isRunning: boolean;
-  onSelectionChange?: (path: string | null) => void;
-  onSummaryLoaded?: (summary: import('@/lib/api').DiffSummaryResponse) => void;
-  onToggleReviewed?: (path: string, currentlyReviewed: boolean) => void;
-  range?: DiffRange;
-  listRef?: RefObject<DiffFileListHandle | null>;
-  enableComments?: boolean;
-  agents?: Agent[];
-  onFilesChange?: (paths: string[]) => void;
-  hideFileTree?: boolean;
-  fileOrder?: string[];
-  groups?: import('@/lib/review-file-groups').RenderGroup[];
-}) {
+}: Props) {
   const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
   const [ignoredTruncated, setIgnoredTruncated] = useState(false);
