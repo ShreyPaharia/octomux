@@ -7,7 +7,7 @@ import { AgentTabs } from '@/components/AgentTabs';
 import { AgentGridCell } from '@/components/AgentGridCell';
 import { gridColumns } from '@/pages/GridMonitor';
 import { DiffViewer } from '@/components/DiffViewer';
-import { clearDiffTreeExpandedState } from '@/components/DiffFileTree';
+import { clearDiffTreeExpandedState } from '@/lib/diff-tree-storage';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
 import { MoveAgentDialog } from '@/components/MoveAgentDialog';
