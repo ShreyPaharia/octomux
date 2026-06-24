@@ -8,7 +8,7 @@ import { formatDuration } from '@/lib/format-duration';
 import { cn, repoName } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { TrashCountdown } from './TrashCountdown';
-import { clearDiffTreeExpandedState } from './DiffFileTree';
+import { clearDiffTreeExpandedState } from '@/lib/diff-tree-storage';
 
 // ─── Runtime indicator glyphs ─────────────────────────────────────────────
 
