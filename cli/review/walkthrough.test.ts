@@ -6,7 +6,7 @@ import { createTestDb } from '../../server/test-helpers.js';
 import { runWalkthrough } from './walkthrough.js';
 import { getReviewRun } from '../../server/repositories/review-runs.js';
 
-vi.mock('../../server/diff.js', async (importOriginal) => {
+vi.mock('@octomux/diff-engine', async (importOriginal) => {
   const actual = (await importOriginal()) as object;
   return {
     ...actual,

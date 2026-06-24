@@ -8,7 +8,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { addComment } from '../repositories/inline-comments.js';
 import type { InlineCommentRow } from '../repositories/inline-comments.js';
-import * as diffMod from '../diff.js';
+import { getFileDiff, type FileDiff } from '@octomux/diff-engine';
 import { splitLines } from '../inline-comments-outdated.js';
 import { ServiceError } from './errors.js';
 
@@ -56,9 +56,9 @@ export async function createInlineComment(
   }
 
   // Get the diff to verify the file is diffed (not binary, etc.)
-  let fileDiff: diffMod.FileDiff;
+  let fileDiff: FileDiff;
   try {
-    fileDiff = await diffMod.getFileDiff({
+    fileDiff = await getFileDiff({
       worktree: cwd,
       base: base_sha,
       relPath: file_path,

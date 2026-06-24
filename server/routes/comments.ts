@@ -4,7 +4,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import { childLogger } from '../logger.js';
-import * as diffMod from '../diff.js';
+import { safeResolvePath } from '@octomux/diff-engine';
 import { taskWorkingDir } from '../task-paths.js';
 import { setReviewed, clearReviewed } from '../repositories/file-review-state.js';
 import {
@@ -40,7 +40,7 @@ router.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Res
   const rawPath = params.path ?? params['0'] ?? '';
   const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
   try {
-    diffMod.safeResolvePath(cwd, relPath);
+    safeResolvePath(cwd, relPath);
   } catch {
     res.status(400).json({ error: 'Invalid path' });
     return;
@@ -78,7 +78,7 @@ router.delete('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: R
   const rawPath = params.path ?? params['0'] ?? '';
   const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
   try {
-    diffMod.safeResolvePath(cwd, relPath);
+    safeResolvePath(cwd, relPath);
   } catch {
     res.status(400).json({ error: 'Invalid path' });
     return;
@@ -143,7 +143,7 @@ router.post('/api/tasks/:id/comments', async (req: Request, res: Response) => {
   }
 
   try {
-    diffMod.safeResolvePath(cwd, filePath);
+    safeResolvePath(cwd, filePath);
   } catch {
     res.status(400).json({ error: 'Invalid path' });
     return;

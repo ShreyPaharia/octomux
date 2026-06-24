@@ -16,7 +16,7 @@ vi.mock('child_process', () => ({
 }));
 
 const mockGetFileDiff = vi.fn();
-vi.mock('../diff.js', () => ({
+vi.mock('@octomux/diff-engine', () => ({
   getFileDiff: (...args: unknown[]) => mockGetFileDiff(...args),
 }));
 

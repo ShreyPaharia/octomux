@@ -187,18 +187,39 @@ vi.mock('./settings.js', () => ({
   })),
 }));
 
-vi.mock('./diff.js', () => ({
-  getDiffSummary: vi.fn(),
-  getFileDiff: vi.fn(),
-  safeResolvePath: (wt: string, p: string) => {
-    if (!p || p.includes('..') || p.startsWith('/')) throw new Error('Invalid path');
-    return `${wt}/${p}`;
-  },
-  MAX_FILE_BYTES: 1_048_576,
+vi.mock('./diff-review-state.js', () => ({
+  decorateDiffSummaryWithReviewState: vi.fn(async (_taskId, _wt, summary) => ({
+    ...summary,
+    reviewed_count: 0,
+    files: summary.files.map(
+      (f: {
+        reviewed?: boolean;
+        reviewed_at?: string | null;
+        reviewed_at_commit?: string | null;
+        changed_since_review?: boolean;
+      }) => ({
+        ...f,
+        reviewed: f.reviewed ?? false,
+        reviewed_at: f.reviewed_at ?? null,
+        reviewed_at_commit: f.reviewed_at_commit ?? null,
+        changed_since_review: f.changed_since_review ?? false,
+      }),
+    ),
+  })),
 }));
 
+vi.mock('@octomux/diff-engine', async () => {
+  const actual =
+    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+  return {
+    ...actual,
+    getDiffSummary: vi.fn(),
+    getFileDiff: vi.fn(),
+  };
+});
+
 const fs = (await import('fs')).default;
-const diffModule = await import('./diff.js');
+const diffModule = await import('@octomux/diff-engine');
 
 const { createApp } = await import('./app.js');
 const {
@@ -1022,7 +1043,18 @@ describe('GET /api/tasks/:id/diff', () => {
     });
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(200);
-    expect(res.body.files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+    expect(res.body.files).toEqual([
+      {
+        path: 'a.txt',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+        reviewed: false,
+        reviewed_at: null,
+        reviewed_at_commit: null,
+        changed_since_review: false,
+      },
+    ]);
   });
 });
 

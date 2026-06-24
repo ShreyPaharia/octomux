@@ -26,11 +26,15 @@
     "agents/",
     "templates/"
   ],
+  "workspaces": [
+    "packages/diff-engine"
+  ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
-    "build": "vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
+    "build": "bun run build:diff-engine && vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
+    "build:diff-engine": "tsc -b packages/diff-engine",
     "build:server": "tsup --entry.index=server/index.ts --entry.startup=server/startup.ts --entry.cli-review=cli/review/index.ts --entry.orchestrator/mcp/server=server/orchestrator/mcp/server.ts --entry.agent-session/mcp/submit-result-server=server/agent-session/mcp/submit-result-server.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
     "start": "NODE_ENV=production node dist-server/index.js",
     "test": "vitest run",
@@ -45,7 +49,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "cli:build": "cd cli && tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "prepublishOnly": "bun run build",
     "postinstall": "bash scripts/postinstall.sh",
     "prepare": "husky",
@@ -67,6 +71,7 @@
     "husky"
   ],
   "dependencies": {
+    "@octomux/diff-engine": "workspace:*",
     "@base-ui/react": "^1.2.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { childLogger } from './logger.js';
-import * as diffMod from './diff.js';
+import { getFileDiff, type FileDiff } from '@octomux/diff-engine';
 import { gitEnv } from './git-env.js';
 import type { InlineCommentRow } from './repositories/inline-comments.js';
 
@@ -46,7 +46,7 @@ export async function computeOutdated(
   const anchorKey = (sha: string, p: string) => `${sha}::${p}`;
   const anchorPromises = new Map<string, Promise<string | null>>();
   // Dedupe current-view fetches.
-  const currentPromises = new Map<string, Promise<diffMod.FileDiff | null>>();
+  const currentPromises = new Map<string, Promise<FileDiff | null>>();
 
   for (const c of comments) {
     const ak = anchorKey(c.original_commit_sha, c.file_path);
@@ -56,7 +56,7 @@ export async function computeOutdated(
     if (!currentPromises.has(c.file_path)) {
       currentPromises.set(
         c.file_path,
-        diffMod.getFileDiff({ worktree, base: baseSha, relPath: c.file_path }).catch((err) => {
+        getFileDiff({ worktree, base: baseSha, relPath: c.file_path }).catch((err) => {
           logger.debug(
             { worktree, baseSha, relPath: c.file_path, err: (err as Error).message },
             'getFileDiff failed; treating current view as missing',

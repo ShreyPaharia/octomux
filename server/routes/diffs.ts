@@ -1,17 +1,20 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import fs from 'fs';
-import { childLogger } from '../logger.js';
-import * as diffMod from '../diff.js';
-import { taskWorkingDir } from '../task-paths.js';
-import { parseDiffRange } from '../diff-range.js';
 import {
   BaseBranchMissingError,
   BaseUnavailableError,
   clearDiffBaseCache,
+  getDiffSummary,
+  getFileDiff,
+  parseDiffRange,
   resolveDiffBase,
   resolveRef,
-} from '../diff-base.js';
+  safeResolvePath,
+} from '@octomux/diff-engine';
+import { childLogger } from '../logger.js';
+import { taskWorkingDir } from '../task-paths.js';
+import { decorateDiffSummaryWithReviewState } from '../diff-review-state.js';
 import { listBranches, listCommits } from '../git-commits.js';
 import { setWorktreeBase } from '../repositories/index.js';
 import { touchUpdatedAt, getTask as getTaskRepo } from '../repositories/index.js';
@@ -19,6 +22,7 @@ import { broadcast } from '../events.js';
 import { loadTaskOrFail } from './_shared.js';
 
 const logger = childLogger('api:diffs');
+const diffLogger = childLogger('diff');
 
 export const router = express.Router();
 
@@ -51,8 +55,9 @@ router.get('/api/tasks/:id/diff', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const summary = await diffMod.getDiffSummary({ task, range });
-    res.json(summary);
+    const summary = await getDiffSummary({ target: task, range, logger: diffLogger });
+    const decorated = await decorateDiffSummaryWithReviewState(task.id, cwd, summary);
+    res.json(decorated);
   } catch (err) {
     if (err instanceof BaseBranchMissingError) {
       res.status(422).json({ error: 'base_branch_missing', message: err.message });
@@ -91,7 +96,7 @@ router.get('/api/tasks/:id/diff/*path', async (req: Request, res: Response) => {
   const rawPath = params.path ?? params['0'] ?? '';
   const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
   try {
-    diffMod.safeResolvePath(cwd, relPath);
+    safeResolvePath(cwd, relPath);
   } catch {
     res.status(400).json({ error: 'Invalid path' });
     return;
@@ -107,7 +112,7 @@ router.get('/api/tasks/:id/diff/*path', async (req: Request, res: Response) => {
     // Resolve the live base so the per-file diff agrees with the summary
     // (both go through resolveDiffBase, which shares an in-process cache).
     const resolved = await resolveDiffBase(task);
-    const diff = await diffMod.getFileDiff({
+    const diff = await getFileDiff({
       worktree: cwd,
       range,
       taskBaseSha: resolved.sha,

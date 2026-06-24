@@ -11,17 +11,19 @@ import {
   clearDiffBaseCache,
   resolveDiffBase,
 } from './diff-base.js';
-import type { Task } from './types.js';
+import type { DiffTarget } from './types.js';
 
-const baseTask: Task = {
+const baseTarget: DiffTarget = {
   id: 't1',
   worktree: '/tmp/wt',
+  repo_path: '/tmp/repo',
+  run_mode: 'worktree',
   base_branch: null,
   base_sha: 'abc1234567890abcdef1234567890abcdef1234',
-} as unknown as Task;
+};
 
-function task(overrides: Partial<Task>): Task {
-  return Object.assign({}, baseTask, overrides);
+function target(overrides: Partial<DiffTarget>): DiffTarget {
+  return Object.assign({}, baseTarget, overrides);
 }
 
 const mockedExec = execFile as unknown as ReturnType<typeof vi.fn>;
@@ -64,7 +66,7 @@ describe('resolveDiffBase', () => {
   });
 
   it('returns snapshot SHA when base_branch is null (no live lookup)', async () => {
-    const t = task({ base_branch: null, base_sha: 'aaaaaaa1234567890aaaaaaa1234567890aaaaaa' });
+    const t = target({ base_branch: null, base_sha: 'aaaaaaa1234567890aaaaaaa1234567890aaaaaa' });
     const res = await resolveDiffBase(t);
     expect(res).toEqual({
       sha: 'aaaaaaa1234567890aaaaaaa1234567890aaaaaa',
@@ -76,7 +78,7 @@ describe('resolveDiffBase', () => {
 
   it('fetches origin/<base_branch> tip on success', async () => {
     programExec({ fetch: ['ok'], revParse: ['ok'] });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     const res = await resolveDiffBase(t);
     expect(res).toEqual({
       sha: 'deadbeef00112233445566778899aabbccddeeff',
@@ -87,7 +89,7 @@ describe('resolveDiffBase', () => {
 
   it('coalesces concurrent fetches for the same (cwd, base_branch)', async () => {
     programExec({ fetch: ['ok'], revParse: ['ok'] });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     const [a, b, c] = await Promise.all([
       resolveDiffBase(t),
       resolveDiffBase(t),
@@ -108,7 +110,7 @@ describe('resolveDiffBase', () => {
 
   it('serves from cache within 30s without re-fetching', async () => {
     programExec({ fetch: ['ok'], revParse: ['ok'] });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     await resolveDiffBase(t);
     mockedExec.mockClear();
     const res = await resolveDiffBase(t);
@@ -119,7 +121,7 @@ describe('resolveDiffBase', () => {
 
   it('retries fetch once on transient failure', async () => {
     programExec({ fetch: ['err', 'ok'], revParse: ['ok'] });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     const res = await resolveDiffBase(t);
     expect(res.is_stale).toBe(false);
     expect(res.sha).toBe('deadbeef00112233445566778899aabbccddeeff');
@@ -132,7 +134,7 @@ describe('resolveDiffBase', () => {
       revParse: ['ok'],
       sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     const first = await resolveDiffBase(t);
     expect(first.sha).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 
@@ -154,7 +156,7 @@ describe('resolveDiffBase', () => {
 
   it('throws BaseUnavailableError when no cache + all fetch attempts fail', async () => {
     programExec({ fetch: ['err', 'err'], revParse: [] });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     vi.useFakeTimers();
     const promise = resolveDiffBase(t).catch((e) => e);
     await vi.advanceTimersByTimeAsync(500);
@@ -183,7 +185,7 @@ describe('resolveDiffBase', () => {
       },
     );
 
-    const t = task({
+    const t = target({
       base_branch: 'main',
       base_sha: 'cafebabe1234567890cafebabe1234567890cafe',
     });
@@ -209,7 +211,7 @@ describe('resolveDiffBase', () => {
         // Don't call cb — simulate hang. withTimeout fires internal timeout.
         return undefined;
       });
-      const t = task({ base_branch: 'main' });
+      const t = target({ base_branch: 'main' });
       const promise = resolveDiffBase(t).catch((e) => e);
       // Internal per-attempt timeout = ATTEMPT_TIMEOUT_MS (5000) - 250 = 4750ms.
       // Two attempts + 200ms backoff ⇒ advance ~10s to drain.
@@ -247,7 +249,7 @@ describe('resolveDiffBase', () => {
         },
       );
 
-      const t = task({ base_branch: 'featureX' });
+      const t = target({ base_branch: 'featureX' });
       const res = await resolveDiffBase(t);
       expect(res).toEqual({ sha: localSha, ref: 'featureX', is_stale: false });
 
@@ -275,7 +277,7 @@ describe('resolveDiffBase', () => {
         },
       );
 
-      const t = task({ base_branch: 'featureX' });
+      const t = target({ base_branch: 'featureX' });
       const err = (await resolveDiffBase(t).catch((e) => e)) as Error & { code?: string };
       expect(err).toBeInstanceOf(BaseBranchMissingError);
       expect(err.code).toBe('base_branch_missing');
@@ -285,7 +287,7 @@ describe('resolveDiffBase', () => {
 
   it('clearDiffBaseCache invalidates the cache for that key', async () => {
     programExec({ fetch: ['ok', 'ok'], revParse: ['ok', 'ok'], sha: 'a'.repeat(40) });
-    const t = task({ base_branch: 'main' });
+    const t = target({ base_branch: 'main' });
     const first = await resolveDiffBase(t);
     expect(first.sha).toBe('a'.repeat(40));
 

@@ -18,7 +18,7 @@ vi.mock('../../server/inline-comments-outdated.js', async (importOriginal) => {
   };
 });
 
-vi.mock('../../server/diff.js', async (importOriginal) => {
+vi.mock('@octomux/diff-engine', async (importOriginal) => {
   const actual = (await importOriginal()) as object;
   return {
     ...actual,

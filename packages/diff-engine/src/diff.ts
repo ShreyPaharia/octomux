@@ -2,10 +2,9 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { childLogger } from './logger.js';
 import { resolveDiffBase } from './diff-base.js';
 import { gitEnv } from './git-env.js';
-import { taskWorkingDir } from './task-paths.js';
+import { targetWorkingDir } from './target-paths.js';
 import {
   WORKDIR,
   rangeIncludesWorkingTree,
@@ -14,17 +13,14 @@ import {
   rangeNumstatArgs,
   rangeOldRef,
 } from './diff-range.js';
-import { listReviewState } from './repositories/file-review-state.js';
-import type { DiffRange, Task } from './types.js';
+import type { DiffLogger, DiffRange, DiffTarget } from './types.js';
+import { noopLogger } from './types.js';
 
 const execFile = promisify(execFileCb);
-const logger = childLogger('diff');
 
 export const MAX_FILE_BYTES = 1_048_576; // 1 MiB
 export const MAX_IGNORED_FILES = 200;
 
-// Paths starting with any of these are filtered out of the ignored-files list
-// entirely — they're always-huge caches/builds that provide no useful review signal.
 export const IGNORED_DENY_PREFIXES = [
   'node_modules/',
   '.git/',
@@ -57,10 +53,6 @@ export interface DiffFileEntry {
   tooLarge?: boolean;
   binary?: boolean;
   post_blob_sha?: string | null;
-  reviewed?: boolean;
-  reviewed_at?: string | null;
-  reviewed_at_commit?: string | null;
-  changed_since_review?: boolean;
 }
 
 export interface DiffSummary {
@@ -69,7 +61,6 @@ export interface DiffSummary {
   base_sha: string;
   base_ref: string;
   base_is_stale: boolean;
-  reviewed_count: number;
   total_count: number;
 }
 
@@ -82,6 +73,12 @@ export interface FileDiff {
   isDirectory: boolean;
 }
 
+export interface GetDiffSummaryOptions {
+  target: DiffTarget;
+  range?: DiffRange;
+  logger?: DiffLogger;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFile('git', ['-C', cwd, ...args], {
     maxBuffer: 64 * 1024 * 1024,
@@ -90,12 +87,6 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-/**
- * `git hash-object <relPath>` — the blob sha the working-tree file content
- * would have if committed. Matches `git show <commit>:<path>`'s blob sha when
- * the content is identical, so it's directly comparable to committed blobs.
- * Null when the file is missing or git errors.
- */
 export async function hashObject(worktree: string, relPath: string): Promise<string | null> {
   try {
     const sha = (await git(worktree, ['hash-object', '--', relPath])).trim();
@@ -115,7 +106,6 @@ export async function blobAt(opts: {
     const stdout = await git(worktree, ['ls-tree', commit, '--', relPath]);
     const line = stdout.trim();
     if (!line) return null;
-    // format: "<mode> blob <sha>\t<path>"
     const parts = line.split(/\s+/);
     if (parts.length < 3 || parts[1] !== 'blob') return null;
     return parts[2];
@@ -155,18 +145,14 @@ async function countLines(filePath: string): Promise<number> {
   return n;
 }
 
-export async function getDiffSummary(opts: {
-  task: Task;
-  range?: DiffRange;
-}): Promise<DiffSummary> {
-  const { task, range = { kind: 'base' as const } } = opts;
-  const worktree = taskWorkingDir(task);
+export async function getDiffSummary(opts: GetDiffSummaryOptions): Promise<DiffSummary> {
+  const { target, range = { kind: 'base' as const }, logger = noopLogger } = opts;
+  const worktree = targetWorkingDir(target);
   if (!worktree) throw new Error('Task has no worktree');
 
-  const resolved = await resolveDiffBase(task);
+  const resolved = await resolveDiffBase(target, { logger });
   const base = resolved.sha;
 
-  // Committed numstat — null when range is `working` (only working-tree changes).
   const numstatArgs = rangeNumstatArgs(range, base);
   const committed = new Map<string, { additions: number; deletions: number; binary: boolean }>();
   const committedStatus = new Map<string, 'A' | 'M' | 'D'>();
@@ -175,8 +161,6 @@ export async function getDiffSummary(opts: {
     try {
       committedNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', ...numstatArgs]);
     } catch (err) {
-      // For `base`, fall back from three-dot to two-dot (existing behaviour).
-      // For commit/range, the args don't use `...`, so this branch is moot.
       if (range.kind === 'base') {
         logger.warn(
           { worktree, base, err: (err as Error).message },
@@ -214,8 +198,6 @@ export async function getDiffSummary(opts: {
     }
   }
 
-  // Working tree + untracked are only merged in for `base` (today's behavior)
-  // and `working` (uncommitted-only). Historical commit/range views skip them.
   const includeWorking = rangeIncludesWorkingTree(range);
   const working = new Map<string, { additions: number; deletions: number; binary: boolean }>();
   const untrackedPaths: string[] = [];
@@ -224,18 +206,11 @@ export async function getDiffSummary(opts: {
     const workingNumstat = await git(worktree, ['diff', '--numstat', '--no-renames', 'HEAD']);
     for (const [p, v] of parseNumstat(workingNumstat)) working.set(p, v);
 
-    // -uall expands untracked directories into individual file entries. Without it,
-    // git collapses a partially-untracked directory (e.g. `docs/superpowers/` when
-    // `docs/` has tracked files but most of `docs/superpowers/` is gitignored) into
-    // a single trailing-slash entry, which produces an empty-basename node and an
-    // EISDIR when the viewer tries to read it.
     const porcelain = await git(worktree, ['status', '--porcelain=v1', '--no-renames', '-uall']);
     for (const line of porcelain.split('\n')) {
       if (!line) continue;
       const code = line.slice(0, 2);
       const p = line.slice(3);
-      // Belt-and-suspenders: skip any directory entries that slip through (e.g.
-      // submodule roots), so they never reach the tree builder as empty leaves.
       if (!p || p.endsWith('/')) continue;
       if (code === '??') untrackedPaths.push(p);
       if (code.includes('D')) deleted.add(p);
@@ -244,8 +219,6 @@ export async function getDiffSummary(opts: {
 
   const paths = new Set<string>([...committed.keys(), ...working.keys(), ...untrackedPaths]);
 
-  // For post-image blob SHAs we read the range's "new" ref. For `working` the
-  // new side is the working tree (no committed blob), so we leave it null.
   const newRef = rangeNewRef(range);
   const newRefForBlob = newRef === WORKDIR ? null : newRef;
 
@@ -289,9 +262,6 @@ export async function getDiffSummary(opts: {
     if (status === 'D') {
       post_blob_sha = null;
     } else if (includeWorking) {
-      // base/working: the displayed "new" side is the working tree, so hash the
-      // on-disk content. post_blob_sha then changes on any uncommitted edit,
-      // driving both the file-tree refetch and "changed since review".
       post_blob_sha = existsOnDisk ? await hashObject(worktree, p) : null;
     } else {
       post_blob_sha =
@@ -302,60 +272,16 @@ export async function getDiffSummary(opts: {
     files.push({ path: p, status, additions, deletions, post_blob_sha });
   }
 
-  // Decorate with review state from the DB. Only non-ignored files
-  // (i.e. paths the agent actually changed) participate in the reviewed
-  // counter — ignored files are noise and shouldn't gate completion.
-  const reviewRows = listReviewState(task.id);
-  const reviewByPath = new Map(reviewRows.map((r) => [r.file_path, r]));
-  let reviewed_count = 0;
-
-  for (const entry of files) {
-    const row = reviewByPath.get(entry.path);
-    if (!row) {
-      entry.reviewed = false;
-      entry.reviewed_at = null;
-      entry.reviewed_at_commit = null;
-      entry.changed_since_review = false;
-      continue;
-    }
-    let same: boolean;
-    if (row.reviewed_blob_sha != null) {
-      // Content-hash comparison: the reviewer approved this exact content. For
-      // base/working `post_blob_sha` is the current working-tree hash, so any
-      // change — committed or not — since review flips this to false.
-      same = entry.post_blob_sha != null && row.reviewed_blob_sha === entry.post_blob_sha;
-    } else {
-      // Legacy row (recorded before reviewed_blob_sha existed): fall back to
-      // comparing the blob at the reviewed commit against the current post-image.
-      const blobAtReviewedCommit = await blobAt({
-        worktree,
-        commit: row.reviewed_at_commit,
-        relPath: entry.path,
-      });
-      same =
-        blobAtReviewedCommit !== null &&
-        entry.post_blob_sha != null &&
-        blobAtReviewedCommit === entry.post_blob_sha;
-    }
-    entry.reviewed = same;
-    entry.reviewed_at = row.reviewed_at;
-    entry.reviewed_at_commit = row.reviewed_at_commit;
-    entry.changed_since_review = !same;
-    if (same) reviewed_count++;
-  }
-
   const summary: DiffSummary = {
     files,
     base_sha: resolved.sha,
     base_ref: resolved.ref,
     base_is_stale: resolved.is_stale,
-    reviewed_count,
     total_count: files.filter((f) => !f.ignored).length,
   };
-  // Ignored files are only meaningful when viewing the working tree (`base`
-  // includes worktree+untracked; historical commit/range views don't).
+
   if (range.kind === 'base') {
-    await appendIgnoredFiles(summary, { worktree, knownPaths: paths });
+    await appendIgnoredFiles(summary, { worktree, knownPaths: paths, logger });
   }
 
   summary.files.sort((a, b) => a.path.localeCompare(b.path));
@@ -370,9 +296,9 @@ function isDeniedIgnoredPath(p: string): boolean {
 
 async function appendIgnoredFiles(
   summary: DiffSummary,
-  opts: { worktree: string; knownPaths: Set<string> },
+  opts: { worktree: string; knownPaths: Set<string>; logger: DiffLogger },
 ): Promise<void> {
-  const { worktree, knownPaths } = opts;
+  const { worktree, knownPaths, logger } = opts;
 
   let stdout = '';
   try {
@@ -385,7 +311,6 @@ async function appendIgnoredFiles(
     return;
   }
 
-  // -z separates entries with NUL (filenames may contain newlines).
   const candidates = stdout.split('\0').filter(Boolean);
   const filtered: string[] = [];
   for (const p of candidates) {
@@ -434,26 +359,18 @@ async function appendIgnoredFiles(
 
 export async function getFileDiff(opts: {
   worktree: string;
-  /** Range-aware mode. When provided alongside `taskBaseSha`, computes both sides per range. */
   range?: DiffRange;
-  /** Resolved task base SHA (used when range.kind === 'base'). */
   taskBaseSha?: string;
-  /** Legacy single-ref mode (used by callers that haven't migrated to ranges). */
   base?: string;
   relPath: string;
 }): Promise<FileDiff> {
   const { worktree, relPath } = opts;
   const abs = safeResolvePath(worktree, relPath);
 
-  // Resolve old/new refs from either the range form or the legacy `base` form.
   let oldRef: string;
   let newRef: string | typeof WORKDIR;
   if (opts.range) {
     oldRef = rangeOldRef(opts.range, opts.taskBaseSha ?? '');
-    // Ranges that fold in uncommitted work (`base`, `working`) diff against the
-    // working tree on disk, so the per-file view matches what the summary counts
-    // (base → working tree). Historical commit/range views use the committed
-    // post-image ref.
     newRef = rangeIncludesWorkingTree(opts.range) ? WORKDIR : rangeNewRef(opts.range);
   } else {
     if (!opts.base) throw new Error('getFileDiff requires either `range` or `base`');
@@ -500,7 +417,6 @@ export async function getFileDiff(opts: {
       if (code !== 128 && !String((err as Error).message).includes('exists on disk')) {
         throw err;
       }
-      // exit 128 from `git show` means the path doesn't exist at that ref.
     }
   }
 
@@ -513,10 +429,6 @@ export async function getFileDiff(opts: {
   return { oldContent, newContent, status, tooLarge, binary, isDirectory };
 }
 
-/**
- * `git diff --name-only base..head` — returns the unique list of files changed
- * between two SHAs in PR-head terms.
- */
 export async function listChangedFiles(opts: {
   worktree: string;
   base: string;
@@ -534,7 +446,6 @@ export async function listChangedFiles(opts: {
     .filter(Boolean);
 }
 
-/** `git show <sha>:<relPath>` — returns the file contents at a SHA, throws if missing. */
 export async function showFileAtSha(opts: {
   worktree: string;
   sha: string;
