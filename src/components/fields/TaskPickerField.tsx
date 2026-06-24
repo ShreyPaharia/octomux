@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { isRegularTask } from '@/lib/task-filters';
 import type { Task } from '../../../server/types';
 import { ChevronDownIcon } from '@/components/icons';
@@ -21,7 +21,7 @@ export function TaskPickerField({ value, onChange }: TaskPickerFieldProps) {
 
   const fetchTasks = useCallback(() => {
     setLoading(true);
-    api
+    taskApi
       .listTasks()
       .then((all) =>
         setTasks(all.filter((t) => isRegularTask(t) && ALLOWED_STATUSES.has(t.runtime_state))),

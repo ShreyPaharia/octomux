@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { api, type DiffFileEntry, type DiffRange } from '@/lib/api';
+import { taskApi, type DiffFileEntry, type DiffRange } from '@/lib/api/taskApi';
 import type { Agent } from '../../server/types';
 import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
 import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
@@ -161,7 +161,7 @@ export function DiffViewer({
 
   const loadSummary = useCallback(async () => {
     try {
-      const s = await api.getTaskDiffSummary(taskId, range);
+      const s = await taskApi.getTaskDiffSummary(taskId, range);
       setFiles(s.files);
       setIgnoredTruncated(s.ignoredTruncated ?? false);
       onSummaryLoaded?.(s);

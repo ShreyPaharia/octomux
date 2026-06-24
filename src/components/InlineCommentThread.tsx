@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { InlineCommentWithOutdated } from '@/lib/api';
+import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
 import type { Agent } from '../../server/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';

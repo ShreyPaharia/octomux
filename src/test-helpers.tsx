@@ -88,19 +88,6 @@ export function renderWithRouter(
 // ─── API Mock Helpers ────────────────────────────────────────────────────────
 
 /**
- * Builds an `apiMock` (vi.fn stubs with sensible defaults) and an `apiProxy` that
- * forwards property reads to it. Intended to be called from inside `vi.hoisted()`:
- *
- *   const { apiMock, apiProxy } = await vi.hoisted(
- *     async () => (await import('../test-helpers')).setupApiMock(),
- *   );
- *   vi.mock('@/lib/api', () => ({ api: apiProxy }));
- *
- * `vi.hoisted()` runs before any imports or `vi.mock` factories, so both `apiMock`
- * and `apiProxy` are initialized by the time the `vi.mock` factory is invoked —
- * avoiding the TDZ that a plain top-level `const apiMock = mockApi()` hits.
- */
-/**
  * Builds a `mockNavigate` vi.fn() and returns a `react-router-dom` factory suitable
  * for passing directly to `vi.mock`. Use inside `vi.hoisted()`:
  *
@@ -118,26 +105,97 @@ export function setupRouterNavigateMock() {
   return { mockNavigate, routerMockFactory };
 }
 
+/**
+ * Builds namespaced API mocks for vitest. Intended to be called from inside
+ * `vi.hoisted()`:
+ *
+ *   const { taskApiMock, taskApiProxy, reviewApiMock, reviewApiProxy,
+ *           configApiMock, configApiProxy, apiMock } = await vi.hoisted(
+ *     async () => (await import('../test-helpers')).setupApiMock(),
+ *   );
+ *   vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+ *   vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+ *   vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+ */
+type ApiMock = ReturnType<typeof mockTaskApi> &
+  ReturnType<typeof mockReviewApi> &
+  ReturnType<typeof mockConfigApi> &
+  Record<string, unknown>;
+
 export function setupApiMock(overrides: Record<string, unknown> = {}) {
-  const apiMock = mockApi(overrides);
+  const taskApiMock = mockTaskApi(overrides);
+  const reviewApiMock = mockReviewApi(overrides);
+  const configApiMock = mockConfigApi(overrides);
+  const taskApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => taskApiMock[prop as keyof typeof taskApiMock] },
+  );
+  const reviewApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => reviewApiMock[prop as keyof typeof reviewApiMock] },
+  );
+  const configApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => configApiMock[prop as keyof typeof configApiMock] },
+  );
+  const apiMock = new Proxy(
+    {},
+    {
+      get: (_target, prop: string) => {
+        if (prop in taskApiMock) return taskApiMock[prop as keyof typeof taskApiMock];
+        if (prop in reviewApiMock) return reviewApiMock[prop as keyof typeof reviewApiMock];
+        if (prop in configApiMock) return configApiMock[prop as keyof typeof configApiMock];
+        return overrides[prop];
+      },
+      set: (_target, prop: string, value) => {
+        if (prop in taskApiMock) {
+          (taskApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in reviewApiMock) {
+          (reviewApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in configApiMock) {
+          (configApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        overrides[prop] = value;
+        return true;
+      },
+    },
+  ) as ApiMock;
   const apiProxy = new Proxy(
     {},
     { get: (_target, prop: string) => apiMock[prop as keyof typeof apiMock] },
   );
-  return { apiMock, apiProxy };
+  return {
+    taskApiMock,
+    reviewApiMock,
+    configApiMock,
+    taskApiProxy,
+    reviewApiProxy,
+    configApiProxy,
+    apiMock,
+    apiProxy,
+  };
 }
 
-export function mockApi(overrides: Record<string, unknown> = {}) {
+export function mockTaskApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
-    listTasks: vi.fn().mockResolvedValue([]),
-    getTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
+    browse: vi.fn().mockResolvedValue({ current: '/tmp', parent: '/', entries: [] }),
+    recentRepos: vi.fn().mockResolvedValue([]),
     getInbox: vi.fn().mockResolvedValue({ needs_you: [], activity: [] }),
     markTaskViewed: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     markAllTasksViewed: vi.fn().mockResolvedValue({ updated: 0 }),
+    listBranches: vi.fn().mockResolvedValue([]),
+    getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
+    listTasks: vi.fn().mockResolvedValue([]),
+    getTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     createTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     updateTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
     startTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    deleteTask: vi.fn().mockResolvedValue(undefined), // accepts optional opts: { purge?: boolean }
+    deleteTask: vi.fn().mockResolvedValue(undefined),
     getTaskDiffSummary: vi.fn().mockResolvedValue({ files: [] }),
     createPr: vi.fn().mockResolvedValue({ ok: true }),
     getTaskDiffFile: vi.fn().mockResolvedValue({
@@ -169,10 +227,6 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     markReviewed: vi.fn().mockResolvedValue(undefined),
     unmarkReviewed: vi.fn().mockResolvedValue(undefined),
     sendAgentMessage: vi.fn().mockResolvedValue({ ok: true }),
-    browse: vi.fn().mockResolvedValue({ current: '/tmp', parent: '/', entries: [] }),
-    recentRepos: vi.fn().mockResolvedValue([]),
-    listBranches: vi.fn().mockResolvedValue([]),
-    getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
     preflightNoneMode: vi.fn().mockResolvedValue({
       ok: true,
       currentBranch: 'main',
@@ -182,11 +236,6 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       dirty: null,
     }),
     stashRepo: vi.fn().mockResolvedValue(undefined),
-    listSkills: vi.fn().mockResolvedValue([]),
-    getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
-    createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
-    updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
-    deleteSkill: vi.fn().mockResolvedValue(undefined),
     listChats: vi.fn().mockResolvedValue([]),
     closeChat: vi.fn().mockResolvedValue(undefined),
     deleteChat: vi.fn().mockResolvedValue(undefined),
@@ -219,7 +268,6 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       resolved_at: null,
     }),
     deleteComment: vi.fn().mockResolvedValue(undefined),
-    listIntegrations: vi.fn().mockResolvedValue([]),
     deleteDone: vi.fn().mockResolvedValue({ deleted: 0 }),
     restoreTask: vi.fn().mockResolvedValue(undefined),
     moveTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
@@ -245,10 +293,16 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     getTaskUpdates: vi.fn().mockResolvedValue([]),
     getTaskRefs: vi.fn().mockResolvedValue([]),
     getTaskHookExecutions: vi.fn().mockResolvedValue([]),
-    getHooksRegistry: vi.fn().mockResolvedValue({ hooks: [] }),
-    updateHookEnabled: vi
-      .fn()
-      .mockResolvedValue({ scope: 'builtin', key: 'summarize-progress', enabled: true }),
+    moveAgentToTask: vi.fn().mockResolvedValue(makeAgent()),
+    listWorktrees: vi.fn().mockResolvedValue([]),
+    getWorktree: vi.fn().mockResolvedValue(null),
+    deleteWorktree: vi.fn().mockResolvedValue(undefined),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockReviewApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
     listReviewsInbox: vi.fn().mockResolvedValue([]),
     getReviewDetail: vi.fn().mockResolvedValue(null),
     patchComment: vi.fn().mockResolvedValue({ id: 'c1', status: 'accepted' }),
@@ -256,6 +310,14 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     publishReview: vi.fn().mockResolvedValue({ publishedReviewId: 'pr1', commentCount: 0 }),
     requestReReview: vi.fn().mockResolvedValue({ ok: true }),
     triggerManualReview: vi.fn().mockResolvedValue({ id: 'rev1', action: 'created' as const }),
+    listLearnings: vi.fn().mockResolvedValue([]),
+    deleteLearning: vi.fn().mockResolvedValue(undefined),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockConfigApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
     getSettings: vi.fn().mockResolvedValue({
       editor: 'nvim',
       dangerouslySkipPermissions: false,
@@ -274,10 +336,88 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
       envOverrides: { claudeFlags: null },
       deleteGraceHours: 6,
     }),
+    getSetupStatus: vi.fn().mockResolvedValue({
+      items: [],
+      summary: { ready: true, blockerCount: 0, attentionCount: 0 },
+      platform: 'darwin',
+      hasBrew: true,
+    }),
+    setupInstall: vi.fn().mockResolvedValue({ ok: true, message: 'ok' }),
+    applyRecommendedDefaults: vi.fn().mockResolvedValue({
+      editor: 'nvim',
+      dangerouslySkipPermissions: false,
+      claudeFlags: '',
+    }),
+    listHookTemplates: vi.fn().mockResolvedValue([]),
+    installHookTemplate: vi.fn().mockResolvedValue({ ok: true, files: [] }),
     listHarnesses: vi.fn().mockResolvedValue([
       { id: 'claude-code', displayName: 'Claude Code', sessionIdMode: 'orchestrator-assigned' },
       { id: 'cursor', displayName: 'Cursor', sessionIdMode: 'harness-issued' },
     ]),
+    listSkills: vi.fn().mockResolvedValue([]),
+    getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
+    createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
+    updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
+    deleteSkill: vi.fn().mockResolvedValue(undefined),
+    listAgents: vi.fn().mockResolvedValue([]),
+    getAgent: vi.fn().mockResolvedValue({
+      name: 'test-agent',
+      content: '# Test',
+      defaultContent: '# Test',
+      isCustom: false,
+    }),
+    saveAgent: vi.fn().mockResolvedValue({
+      name: 'test-agent',
+      content: '# Test',
+      defaultContent: '# Test',
+      isCustom: true,
+    }),
+    resetAgent: vi.fn().mockResolvedValue({ ok: true }),
+    createAgent: vi.fn().mockResolvedValue({
+      name: 'test-agent',
+      content: '# Test',
+      defaultContent: '# Test',
+      isCustom: true,
+    }),
+    deleteAgent: vi.fn().mockResolvedValue({ ok: true }),
+    listRepoConfigs: vi.fn().mockResolvedValue([]),
+    getRepoConfig: vi.fn().mockResolvedValue(null),
+    updateRepoConfig: vi.fn().mockResolvedValue(null),
+    listProviders: vi.fn().mockResolvedValue([]),
+    listIntegrations: vi.fn().mockResolvedValue([]),
+    createIntegration: vi.fn().mockResolvedValue({
+      id: 'int-1',
+      kind: 'jira',
+      name: 'Jira',
+      config: {},
+      enabled: true,
+      created_at: '',
+      updated_at: '',
+    }),
+    updateIntegration: vi.fn().mockResolvedValue({
+      id: 'int-1',
+      kind: 'jira',
+      name: 'Jira',
+      config: {},
+      enabled: true,
+      created_at: '',
+      updated_at: '',
+    }),
+    deleteIntegration: vi.fn().mockResolvedValue(undefined),
+    testIntegration: vi.fn().mockResolvedValue({ ok: true, message: 'ok' }),
+    prefillLinear: vi.fn().mockResolvedValue({
+      teams: [],
+      status_map_by_team: {},
+      default_team_suggestion: null,
+    }),
+    getHooksRegistry: vi.fn().mockResolvedValue({ hooks: [] }),
+    updateHookEnabled: vi
+      .fn()
+      .mockResolvedValue({ scope: 'builtin', key: 'summarize-progress', enabled: true }),
   };
   return { ...defaults, ...overrides };
+}
+
+export function mockApi(overrides: Record<string, unknown> = {}) {
+  return { ...mockTaskApi(), ...mockReviewApi(), ...mockConfigApi(), ...overrides };
 }

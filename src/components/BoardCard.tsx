@@ -6,7 +6,7 @@ import type { Task, WorkflowStatus } from '../../server/types';
 import { timeAgo } from '@/lib/time';
 import { formatDuration } from '@/lib/format-duration';
 import { cn, repoName } from '@/lib/utils';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { TrashCountdown } from './TrashCountdown';
 import { clearDiffTreeExpandedState } from '@/lib/diff-tree-storage';
 
@@ -92,7 +92,7 @@ export const BoardCard = memo(function BoardCard({
 
   const handleRestore = (e: React.MouseEvent) => {
     e.stopPropagation();
-    api.restoreTask(task.id).catch(() => {
+    taskApi.restoreTask(task.id).catch(() => {
       // WS refresh will re-render; swallow error silently
     });
   };
@@ -100,7 +100,7 @@ export const BoardCard = memo(function BoardCard({
   const handlePurge = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm(`Permanently delete "${task.title}"? This cannot be undone.`)) return;
-    api.deleteTask(task.id, { purge: true }).catch(() => {
+    taskApi.deleteTask(task.id, { purge: true }).catch(() => {
       // swallow
     });
     clearDiffTreeExpandedState(task.id);

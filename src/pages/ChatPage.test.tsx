@@ -3,8 +3,12 @@ import { screen, waitFor } from '@testing-library/react';
 import ChatPage from './ChatPage';
 import { renderWithRouter } from '../test-helpers';
 
-const { apiProxy } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 vi.mock('@/components/TerminalView', () => ({
   TerminalView: ({ wsUrl }: { wsUrl: string }) => (

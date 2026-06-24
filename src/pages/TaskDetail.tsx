@@ -25,7 +25,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 import { useTask } from '@/lib/hooks';
 import { useTerminalCacheSize } from '@/lib/terminal-cache-settings';
-import { api, diffRangeToParam, type DiffRange, type DiffSummaryResponse } from '@/lib/api';
+import { diffRangeToParam, taskApi, type DiffRange, type DiffSummaryResponse } from '@/lib/api/taskApi';
+import { reviewApi } from '@/lib/api/reviewApi';
 import { TaskDetailHeader } from '@/components/layout/task-detail-header';
 import { TaskDetailMeta } from '@/components/layout/task-detail-meta';
 import { TaskInfoPanel } from '@/components/layout/task-info-panel';
@@ -222,7 +223,7 @@ export default function TaskDetail() {
   // Fire-and-forget — no loading state, no error toast.
   useEffect(() => {
     if (!taskId) return;
-    api.markTaskViewed(taskId).catch((err) => {
+    taskApi.markTaskViewed(taskId).catch((err) => {
       console.warn('Failed to mark task viewed:', err);
     });
   }, [taskId]);
@@ -307,7 +308,7 @@ export default function TaskDetail() {
   const refetchDiff = useCallback(async () => {
     if (!taskId) return;
     try {
-      const s = await api.getTaskDiffSummary(taskId, range);
+      const s = await taskApi.getTaskDiffSummary(taskId, range);
       setDiffSummary(s);
     } catch {
       // swallow — banner is best-effort, DiffViewer surfaces its own errors
@@ -317,7 +318,7 @@ export default function TaskDetail() {
   const handleBaseChange = useCallback(
     async (newBaseBranch: string) => {
       if (!taskId) return;
-      await api.updateTaskBase(taskId, newBaseBranch);
+      await taskApi.updateTaskBase(taskId, newBaseBranch);
       // Reset range to full diff and refetch summary under the new base.
       setRange({ kind: 'base' });
       await refetchDiff();
@@ -343,8 +344,8 @@ export default function TaskDetail() {
     async (filePath: string, currentlyReviewed: boolean) => {
       if (!taskId) return;
       try {
-        if (currentlyReviewed) await api.unmarkReviewed(taskId, filePath);
-        else await api.markReviewed(taskId, filePath);
+        if (currentlyReviewed) await taskApi.unmarkReviewed(taskId, filePath);
+        else await taskApi.markReviewed(taskId, filePath);
         await refetchDiff();
       } catch (err) {
         console.error('Failed to toggle reviewed:', err);
@@ -404,7 +405,7 @@ export default function TaskDetail() {
     }
 
     try {
-      await api.sendAgentMessage(taskId, activeAgentId, body);
+      await taskApi.sendAgentMessage(taskId, activeAgentId, body);
     } catch (err) {
       console.error('Failed to send review batch:', err);
       toast.error((err as Error).message);
@@ -465,7 +466,7 @@ export default function TaskDetail() {
     }
     setReviewBusy(true);
     try {
-      const result = await api.triggerManualReview(taskId);
+      const result = await reviewApi.triggerManualReview(taskId);
       navigate(`/reviews/${result.id}`);
     } catch (err) {
       console.error('Failed to trigger review:', err);
@@ -479,7 +480,7 @@ export default function TaskDetail() {
     async (prompt?: string) => {
       if (!taskId) return;
       try {
-        const agent = await api.addAgent(taskId, prompt ? { prompt } : undefined);
+        const agent = await taskApi.addAgent(taskId, prompt ? { prompt } : undefined);
         setActiveWindow(agent.window_index);
         refresh();
       } catch (err) {
@@ -495,7 +496,7 @@ export default function TaskDetail() {
       try {
         const taskAgents = task?.agents || [];
         const stoppedAgent = taskAgents.find((a) => a.id === agentId);
-        await api.stopAgent(taskId, agentId);
+        await taskApi.stopAgent(taskId, agentId);
         // If we stopped the active tab, switch to the first remaining running agent
         if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
           const nextAgent = taskAgents.find((a) => a.id !== agentId && a.status !== 'stopped');
@@ -512,7 +513,7 @@ export default function TaskDetail() {
   const handleClose = useCallback(async () => {
     if (!taskId) return;
     try {
-      await api.moveTask(taskId, { workflow_status: 'done' });
+      await taskApi.moveTask(taskId, { workflow_status: 'done' });
       setCloseConfirm(false);
       refresh();
     } catch (err) {
@@ -523,7 +524,7 @@ export default function TaskDetail() {
   const handleStart = useCallback(async () => {
     if (!taskId) return;
     try {
-      await api.startTask(taskId);
+      await taskApi.startTask(taskId);
       refresh();
     } catch (err) {
       console.error('Failed to start task:', err);
@@ -533,7 +534,7 @@ export default function TaskDetail() {
   const handleDelete = useCallback(async () => {
     if (!taskId) return;
     try {
-      await api.deleteTask(taskId);
+      await taskApi.deleteTask(taskId);
       clearDiffTreeExpandedState(taskId);
       navigate('/tasks');
     } catch (err) {
@@ -545,7 +546,7 @@ export default function TaskDetail() {
     if (!taskId) return;
     setResuming(true);
     try {
-      await api.updateTask(taskId, { status: 'running' });
+      await taskApi.updateTask(taskId, { status: 'running' });
       refresh();
     } catch (err) {
       console.error('Failed to resume task:', err);
@@ -557,7 +558,7 @@ export default function TaskDetail() {
   const handleAddTerminal = useCallback(async () => {
     if (!taskId) return;
     try {
-      const terminal = await api.createTerminal(taskId);
+      const terminal = await taskApi.createTerminal(taskId);
       setActiveWindow(terminal.window_index);
       refresh();
     } catch (err) {
@@ -571,7 +572,7 @@ export default function TaskDetail() {
       try {
         const terminals = task?.user_terminals || [];
         const closedTerminal = terminals.find((t) => t.id === terminalId);
-        await api.closeTerminal(taskId, terminalId);
+        await taskApi.closeTerminal(taskId, terminalId);
         // If we closed the active tab, switch to first agent or next terminal
         if (closedTerminal && closedTerminal.window_index === activeWindow) {
           const agents = task?.agents || [];
@@ -595,7 +596,7 @@ export default function TaskDetail() {
     if (creatingEditor) return;
     setCreatingEditor(true);
     try {
-      const result = await api.createUserTerminal(taskId);
+      const result = await taskApi.createUserTerminal(taskId);
       if (result.editor === 'vscode' || result.editor === 'cursor') {
         // External editor opened — stay on agents view
         setLocalUserWindowIndex(null);
@@ -722,7 +723,7 @@ export default function TaskDetail() {
                   isRunning
                     ? async (id) => {
                         try {
-                          await api.moveAgentToTask(id, null);
+                          await taskApi.moveAgentToTask(id, null);
                           navigate(`/chats/${id}`);
                         } catch (err) {
                           console.error('Failed to detach agent:', err);

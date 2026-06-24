@@ -20,8 +20,8 @@ import { ComposerChipRow } from './ComposerChipRow';
 import { ComposerInputPanel } from './ComposerInputPanel';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
-import { api } from '@/lib/api';
-import type { PreflightResult } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
+import type { PreflightResult } from '@/lib/api/taskApi';
 import { useTasksContext } from '@/lib/tasks-context';
 import type { Task, Agent } from '../../server/types';
 import { NoneModeConflictDialog } from './NoneModeConflictDialog';
@@ -74,7 +74,7 @@ export function Composer({ onSubmitted }: Props = {}) {
   const [submitting, setSubmitting] = useState(false);
   const [preflightBlock, setPreflightBlock] = useState<{
     result: PreflightResult;
-    payload: Parameters<typeof api.createTask>[0];
+    payload: Parameters<typeof taskApi.createTask>[0];
   } | null>(null);
   const [errorBanner, setErrorBanner] = useState<{
     message: string;
@@ -127,7 +127,7 @@ export function Composer({ onSubmitted }: Props = {}) {
     }
     let defaultBranch: string | null = null;
     try {
-      const res = await api.getDefaultBranch(repoPath);
+      const res = await taskApi.getDefaultBranch(repoPath);
       defaultBranch = res.branch;
     } catch {
       defaultBranch = null;
@@ -182,7 +182,7 @@ export function Composer({ onSubmitted }: Props = {}) {
         const trimmed = prompt.trim();
         const pickedAgent = 'agent' in state ? (state.agent ?? null) : null;
         if (state.mode === 'add-agent') {
-          await api.addAgent(state.sessionId, {
+          await taskApi.addAgent(state.sessionId, {
             prompt: trimmed,
             ...(pickedAgent ? { agent: pickedAgent } : {}),
           });
@@ -204,7 +204,7 @@ export function Composer({ onSubmitted }: Props = {}) {
         } else if (state.mode !== 'empty') {
           // Title pre-filled from prompt for fast CREATE (no Claude CLI round-trip).
           // Description omitted so the API stores the full initial_prompt body.
-          const payload: Parameters<typeof api.createTask>[0] = {
+          const payload: Parameters<typeof taskApi.createTask>[0] = {
             title: deriveTitleFromPrompt(trimmed),
             initial_prompt: trimmed,
           };
@@ -227,7 +227,7 @@ export function Composer({ onSubmitted }: Props = {}) {
 
           // Preflight only for none-mode + base_branch
           if (state.mode === 'none' && state.branch) {
-            const pre = await api.preflightNoneMode(state.repo, state.branch);
+            const pre = await taskApi.preflightNoneMode(state.repo, state.branch);
             // Conflicts (different-branch active task) and dirty both block
             // creation. Same-branch warnings don't block but require an
             // explicit confirmation.
@@ -237,7 +237,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             }
           }
 
-          const created = await api.createTask(payload);
+          const created = await taskApi.createTask(payload);
           localStorage.removeItem(DRAFT_KEY);
           setPrompt('');
           addOptimistic(created);
@@ -357,10 +357,10 @@ export function Composer({ onSubmitted }: Props = {}) {
           targetBranch={preflightBlock.result.targetBranch}
           onClose={() => setPreflightBlock(null)}
           onCloseTask={async (taskId) => {
-            await api.updateTask(taskId, { status: 'closed' });
+            await taskApi.updateTask(taskId, { status: 'closed' });
             const repoForPreflight = preflightBlock.payload.repo_path!;
             const branchForPreflight = preflightBlock.payload.base_branch!;
-            const next = await api.preflightNoneMode(repoForPreflight, branchForPreflight);
+            const next = await taskApi.preflightNoneMode(repoForPreflight, branchForPreflight);
             setPreflightBlock({ result: next, payload: preflightBlock.payload });
           }}
           onResolved={async () => {
@@ -368,7 +368,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             // now apply — their conditional renders will pick up the flow.
             if (preflightBlock.result.dirty) return;
             if (preflightBlock.result.warnings.length > 0) return;
-            const created = await api.createTask(preflightBlock.payload);
+            const created = await taskApi.createTask(preflightBlock.payload);
             setPreflightBlock(null);
             addOptimistic(created);
             onSubmitted?.(created);
@@ -386,11 +386,11 @@ export function Composer({ onSubmitted }: Props = {}) {
             targetBranch={preflightBlock.result.targetBranch}
             onClose={() => setPreflightBlock(null)}
             onStash={async () => {
-              await api.stashRepo(
+              await taskApi.stashRepo(
                 preflightBlock.payload.repo_path!,
                 preflightBlock.payload.base_branch!,
               );
-              const created = await api.createTask(preflightBlock.payload);
+              const created = await taskApi.createTask(preflightBlock.payload);
               setPreflightBlock(null);
               addOptimistic(created);
               onSubmitted?.(created);
@@ -408,7 +408,7 @@ export function Composer({ onSubmitted }: Props = {}) {
             targetBranch={preflightBlock.result.targetBranch}
             onClose={() => setPreflightBlock(null)}
             onConfirm={async () => {
-              const created = await api.createTask(preflightBlock.payload);
+              const created = await taskApi.createTask(preflightBlock.payload);
               setPreflightBlock(null);
               addOptimistic(created);
               onSubmitted?.(created);

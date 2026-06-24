@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { api } from '@/lib/api';
-import type { BrowseResult, RecentRepo } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
+import type { BrowseResult, RecentRepo } from '@/lib/api/taskApi';
 import { ChevronLeftIcon, CloseIcon } from '@/components/icons';
 import { repoBasename } from '@/lib/utils';
 import { timeAgo } from '@/lib/time';
@@ -30,7 +30,7 @@ export function RepoPickerField({ value, onChange, onValidationChange }: RepoPic
 
   // Fetch recent repos on mount
   useEffect(() => {
-    api
+    taskApi
       .recentRepos()
       .then(setRecentRepos)
       .catch(() => setRecentRepos([]));
@@ -50,7 +50,7 @@ export function RepoPickerField({ value, onChange, onValidationChange }: RepoPic
     onValidationChange?.('loading');
     const timer = setTimeout(async () => {
       try {
-        await Promise.all([api.listBranches(trimmed), api.getDefaultBranch(trimmed)]);
+        await Promise.all([taskApi.listBranches(trimmed), taskApi.getDefaultBranch(trimmed)]);
         if (!cancelled) {
           setRepoValidation('valid');
           onValidationChange?.('valid');
@@ -72,7 +72,7 @@ export function RepoPickerField({ value, onChange, onValidationChange }: RepoPic
   const browseTo = useCallback(async (dirPath?: string) => {
     setBrowseLoading(true);
     try {
-      const data = await api.browse(dirPath);
+      const data = await taskApi.browse(dirPath);
       setBrowseData(data);
     } catch {
       // If browse fails, keep current data

@@ -6,10 +6,10 @@ import { SessionsInbox } from './SessionsInbox';
 import { _resetInboxStore } from '@/lib/inbox';
 import { makeTask } from '../test-helpers';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock(),
-);
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 const eventCallbacks: Set<(event: any) => void> = new Set();
 const unsubscribe = vi.fn();

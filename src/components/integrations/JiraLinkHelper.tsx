@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { api } from '@/lib/api';
-import type { IntegrationRow } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
+import { configApi } from '@/lib/api/configApi';
+import type { IntegrationRow } from '@/lib/api/configApi';
 
 interface JiraLinkHelperProps {
   taskId: string;
@@ -22,7 +23,7 @@ export function JiraLinkHelper({ taskId, onLinked }: JiraLinkHelperProps) {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    api
+    configApi
       .listIntegrations()
       .then((rows) => {
         const jiras = rows.filter((r) => r.kind === 'jira' && r.enabled);
@@ -53,7 +54,7 @@ export function JiraLinkHelper({ taskId, onLinked }: JiraLinkHelperProps) {
     setLinking(true);
     try {
       const baseUrl = (selected.config as Record<string, unknown>).base_url as string;
-      await api.addTaskRef(taskId, {
+      await taskApi.addTaskRef(taskId, {
         integration: 'jira',
         ref: key,
         url: baseUrl ? `${baseUrl.replace(/\/$/, '')}/browse/${key}` : undefined,

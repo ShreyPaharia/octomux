@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type DiffSummaryResponse } from '@/lib/api';
+import { taskApi, type DiffSummaryResponse } from '@/lib/api/taskApi';
 import { PullRequestIcon } from '@/components/icons';
 import { showToast } from '@/components/CustomToast';
 import type { Task } from '../../server/types';
@@ -52,7 +52,7 @@ export function PrSheet({ open, task, onClose, onShipped }: Props) {
     setTitle(deriveTitle(task));
     setDiff(null);
     let cancelled = false;
-    api
+    taskApi
       .getTaskDiffSummary(task.id)
       .then((d) => {
         if (!cancelled) {
@@ -80,7 +80,7 @@ export function PrSheet({ open, task, onClose, onShipped }: Props) {
     setSubmitting(true);
     showToast('info', 'SHIPPING', 'Creating PR…');
     try {
-      const result = await api.createPr(task.id, { title: title.trim(), body, draft });
+      const result = await taskApi.createPr(task.id, { title: title.trim(), body, draft });
       if (result.url) {
         showToast('success', 'PR OPENED', `PR #${result.number ?? ''} created`);
       } else {

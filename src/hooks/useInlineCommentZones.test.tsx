@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useInlineCommentZones } from './useInlineCommentZones';
-import type { InlineCommentWithOutdated } from '@/lib/api';
+import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
 
 interface FakeAccessor {
   addZone: (zone: {

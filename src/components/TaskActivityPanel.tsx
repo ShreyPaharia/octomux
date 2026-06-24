@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { useResource } from '@/lib/use-resource';
 import { timeAgo } from '@/lib/time';
 import type { TaskUpdate } from '../../server/types';
@@ -22,7 +22,7 @@ interface TaskActivityPanelProps {
 export function TaskActivityPanel({ taskId }: TaskActivityPanelProps) {
   const { data, loading } = useResource<TaskUpdate[]>(
     `task-updates:${taskId}`,
-    () => api.getTaskUpdates(taskId, 50),
+    () => taskApi.getTaskUpdates(taskId, 50),
     { events: (event) => event.payload.taskId === taskId },
   );
   const updates = data ?? [];

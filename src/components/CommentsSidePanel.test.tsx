@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { CommentsSidePanel } from './CommentsSidePanel';
 import { CommentsContext, type CommentsState } from '@/hooks/useTaskComments';
-import type { InlineCommentWithOutdated } from '@/lib/api';
+import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
 
 function comment(o: Partial<InlineCommentWithOutdated> = {}): InlineCommentWithOutdated {
   return {

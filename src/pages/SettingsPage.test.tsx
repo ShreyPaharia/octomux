@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import SettingsPage from './SettingsPage';
 import { renderWithRouter } from '../test-helpers';
 
-const { apiProxy } = await vi.hoisted(async () => {
+const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () => {
   const { vi } = await import('vitest');
   const helpers = await import('../test-helpers');
   return helpers.setupApiMock({
@@ -24,7 +24,9 @@ const { apiProxy } = await vi.hoisted(async () => {
     deleteLearning: vi.fn().mockResolvedValue(undefined),
   });
 });
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 vi.mock('../lib/hooks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskPickerField } from './TaskPickerField';
 import { renderWithRouter } from '../../test-helpers';
 
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api/taskApi', async () => {
   const { makeTask: mt } = await import('../../test-helpers');
   const tasks = [
     mt({ id: 'abc123456789', title: 'Fix login bug', runtime_state: 'running' }),
@@ -12,7 +12,7 @@ vi.mock('@/lib/api', async () => {
     mt({ id: 'ghi111222333', title: 'Draft task', runtime_state: 'error' }),
   ];
   return {
-    api: {
+    taskApi: {
       listTasks: vi.fn().mockResolvedValue(tasks),
     },
   };

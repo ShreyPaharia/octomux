@@ -4,13 +4,13 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock(),
-);
-vi.mock('@/lib/api', async () => {
-  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
-  return { ...actual, api: apiProxy };
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+vi.mock('@/lib/api/taskApi', async () => {
+  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+  return { ...actual, taskApi: taskApiProxy };
 });
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 // Monaco's DiffEditor does real DOM work; replace with a stub that exposes
 // the original/modified content, options, and a per-mount id so tests can

@@ -1,17 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { UniversalSidebar, forkDisabledReason } from './UniversalSidebar';
+import { UniversalSidebar } from './sidebar/universal-sidebar';
+import { forkDisabledReason } from './sidebar/nav-items';
 import { renderWithRouter, makeTask } from '../test-helpers';
 import { TasksProvider } from '../lib/tasks-context';
 import type { RunMode } from '../../server/types';
 import type { SidebarItem } from '@/lib/sidebar-utils';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock(),
-);
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
 
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
+import { taskApi, type DiffSummaryResponse } from '../lib/api/taskApi';
+import { reviewApi, type ReviewDetail } from '../lib/api/reviewApi';
 import { useResource } from '../lib/use-resource';
 import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
 import type { Walkthrough } from '../components/review/walkthrough-types';
@@ -35,7 +36,7 @@ export default function ReviewDetailPage() {
     data: detail,
     error,
     refresh,
-  } = useResource<ReviewDetail>(id ? `review:${id}` : null, () => api.getReviewDetail(id!), {
+  } = useResource<ReviewDetail>(id ? `review:${id}` : null, () => reviewApi.getReviewDetail(id!), {
     events: (e) =>
       e.payload.taskId === id &&
       (e.type === 'review:drafts-ready' || e.type === 'review:published'),
@@ -67,8 +68,8 @@ export default function ReviewDetailPage() {
         return next;
       });
       try {
-        if (currentlyReviewed) await api.unmarkReviewed(id!, path);
-        else await api.markReviewed(id!, path);
+        if (currentlyReviewed) await taskApi.unmarkReviewed(id!, path);
+        else await taskApi.markReviewed(id!, path);
       } catch {
         setReviewedFiles((prev) => {
           const next = new Set(prev);

@@ -7,7 +7,7 @@ import TasksPage from './pages/TasksPage';
 import ReviewsPage from './pages/ReviewsPage';
 import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
-import { UniversalSidebar } from './components/UniversalSidebar';
+import { UniversalSidebar } from './components/sidebar/universal-sidebar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { ResponsiveToaster } from './components/ResponsiveToaster';
 import { PrSheet } from './components/PrSheet';

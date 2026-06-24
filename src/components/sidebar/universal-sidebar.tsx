@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useTasks } from '@/lib/hooks';
 import { clearDiffTreeExpandedState } from '@/lib/diff-tree-storage';
 import { groupTasksForSidebar, OTHER_GROUP_KEY } from '@/lib/sidebar-utils';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_EXPANDED_WIDTH, FOCUS_RING } from './constants';
 import { StatusIcon } from './glyphs';
 import {
@@ -60,7 +60,7 @@ function SidebarShell() {
   const handleClose = useCallback(
     async (id: string) => {
       try {
-        await api.moveTask(id, { workflow_status: 'done' });
+        await taskApi.moveTask(id, { workflow_status: 'done' });
         refresh();
       } catch (err) {
         console.error('Failed to mark task done:', err);
@@ -72,7 +72,7 @@ function SidebarShell() {
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        await api.deleteTask(id);
+        await taskApi.deleteTask(id);
         clearDiffTreeExpandedState(id);
         refresh();
       } catch (err) {
@@ -88,7 +88,7 @@ function SidebarShell() {
       setRenamingId(null);
       if (!trimmed) return;
       try {
-        await api.updateTask(id, { title: trimmed });
+        await taskApi.updateTask(id, { title: trimmed });
         refresh();
       } catch (err) {
         console.error('Failed to rename task:', err);

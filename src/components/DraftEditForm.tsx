@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { GlassPanel } from '@/components/ui/glass-panel';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import type { Task } from '../../server/types';
 import { RepoPickerField } from './fields/RepoPickerField';
 import { BranchPickerField } from './fields/BranchPickerField';
@@ -37,7 +37,7 @@ export function DraftEditForm({ task, onSaved, onStart }: DraftEditFormProps) {
     setError(null);
     setSaved(false);
     try {
-      await api.updateTask(task.id, {
+      await taskApi.updateTask(task.id, {
         title: title.trim(),
         description: description.trim(),
         repo_path: isScratch ? undefined : repoPath.trim(),

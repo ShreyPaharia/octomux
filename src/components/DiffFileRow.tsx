@@ -2,7 +2,7 @@ import '@/lib/monaco-env';
 import { Suspense, forwardRef, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import type { DiffFileEntry, FileDiffResponse } from '@/lib/api';
+import type { DiffFileEntry, FileDiffResponse } from '@/lib/api/taskApi';
 import type { Agent } from '../../server/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';

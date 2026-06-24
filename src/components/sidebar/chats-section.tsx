@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import type { Agent } from '../../../server/types';
 import {
   ACTIVE_ACCENT,
@@ -49,7 +49,7 @@ export function ChatsSection({
   const handleClose = useCallback(
     async (id: string) => {
       try {
-        await api.closeChat(id);
+        await taskApi.closeChat(id);
         await loadChats();
       } catch (err) {
         console.error('Failed to close chat:', err);
@@ -61,7 +61,7 @@ export function ChatsSection({
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        await api.deleteChat(id);
+        await taskApi.deleteChat(id);
         setDeleteTargetId(null);
         await loadChats();
         if (activePath === `/chats/${id}`) navigate('/');

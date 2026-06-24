@@ -4,14 +4,11 @@ import userEvent from '@testing-library/user-event';
 import SkillEditor from './SkillEditor';
 import { renderWithRouter } from '../test-helpers';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock({
-    getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test Skill' }),
-    updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: 'Updated' }),
-  }),
-);
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
 
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

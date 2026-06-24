@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { BranchPickerField } from './BranchPickerField';
 import { renderWithRouter } from '../../test-helpers';
 
-vi.mock('@/lib/api', () => ({
-  api: {
+vi.mock('@/lib/api/taskApi', () => ({
+  taskApi: {
     listBranches: vi.fn().mockResolvedValue([]),
     getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
   },

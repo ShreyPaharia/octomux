@@ -12,9 +12,9 @@ const apiMock = vi.hoisted(() => ({
   applyRecommendedDefaults: vi.fn(),
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: apiMock,
-}));
+vi.mock('@/lib/api/configApi', () => ({ configApi: apiMock }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: {} }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: {} }));
 
 describe('SetupPage', () => {
   beforeEach(() => {

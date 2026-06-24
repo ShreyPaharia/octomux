@@ -8,13 +8,7 @@ import {
   useState,
 } from 'react';
 import type { editor } from 'monaco-editor';
-import {
-  api,
-  diffRangeToParam,
-  type DiffFileEntry,
-  type DiffRange,
-  type FileDiffResponse,
-} from '@/lib/api';
+import { diffRangeToParam, taskApi, type DiffFileEntry, type DiffRange, type FileDiffResponse } from '@/lib/api/taskApi';
 import type { Agent } from '../../server/types';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
@@ -225,7 +219,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
         return next;
       });
 
-      api
+      taskApi
         .getTaskDiffFile(taskId, path, range)
         .then((d) => {
           setLoaded((prev) => {

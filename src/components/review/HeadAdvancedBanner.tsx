@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
-import { api } from '../../lib/api';
+import { reviewApi } from '@/lib/api/reviewApi';
 import { useServerEvents } from '../../lib/use-server-events';
 
 interface HeadAdvancedBannerProps {
@@ -38,7 +38,7 @@ export function HeadAdvancedBanner({ taskId, currentSha, onRefresh }: HeadAdvanc
   async function handleReRun() {
     setReRunning(true);
     try {
-      await api.requestReReview(taskId);
+      await reviewApi.requestReReview(taskId);
       toast.success('Incremental re-review started');
     } catch (e) {
       toast.error(`Re-run failed: ${(e as Error).message}`);

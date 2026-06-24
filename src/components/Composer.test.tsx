@@ -10,10 +10,10 @@ import type { Task } from '../../server/types';
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock(),
-);
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 // Keep websocket-backed hooks quiet.
 vi.mock('@/lib/hooks', () => ({

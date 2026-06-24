@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { configApi } from '../lib/api/configApi';
 import { showToast } from '@/components/CustomToast';
 
 export default function AgentEditor() {
@@ -18,7 +18,7 @@ export default function AgentEditor() {
   useEffect(() => {
     if (!name) return;
     let cancelled = false;
-    api
+    configApi
       .getAgent(name)
       .then((agent) => {
         if (!cancelled) {
@@ -43,7 +43,7 @@ export default function AgentEditor() {
     if (!name || !isDirty || saving) return;
     setSaving(true);
     try {
-      await api.saveAgent(name, content);
+      await configApi.saveAgent(name, content);
       savedContentRef.current = content;
       setIsCustom(true);
       showToast('success', 'SAVED', `Agent "${name}" saved`);
@@ -58,7 +58,7 @@ export default function AgentEditor() {
     if (!name) return;
     if (!window.confirm(`Reset "${name}" to default? Your customizations will be lost.`)) return;
     try {
-      await api.resetAgent(name);
+      await configApi.resetAgent(name);
       setContent(defaultContent);
       savedContentRef.current = defaultContent;
       setIsCustom(false);

@@ -1,12 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import {
-  api,
-  type InlineCommentRow,
-  type InlineCommentWithOutdated,
-  type ListCommentsResponse,
-  type PostCommentInput,
-  type UpdateCommentInput,
-} from '@/lib/api';
+import { taskApi, type InlineCommentRow, type InlineCommentWithOutdated, type ListCommentsResponse, type PostCommentInput, type UpdateCommentInput } from '@/lib/api/taskApi';
 import { useResource } from '@/lib/use-resource';
 
 export interface OpenComposer {
@@ -87,7 +80,7 @@ export function useTaskComments(
   const fetcher = useCallback(async (): Promise<ListCommentsResponse | null> => {
     if (!taskId) return null;
     try {
-      const res = await api.listComments(taskId);
+      const res = await taskApi.listComments(taskId);
       setById(indexBy(res.comments));
       setOutdatedUnavailable(!!res.outdated_unavailable);
       setError(null);
@@ -154,7 +147,7 @@ export function useTaskComments(
         return next;
       });
       try {
-        const row = await api.postComment(taskId, input);
+        const row = await taskApi.postComment(taskId, input);
         setById((prev) => {
           const next = new Map(prev);
           next.delete(tmp.id);
@@ -195,7 +188,7 @@ export function useTaskComments(
         return next;
       });
       try {
-        const row = await api.updateComment(taskId, commentId, patch);
+        const row = await taskApi.updateComment(taskId, commentId, patch);
         setById((prev) => {
           const cur = prev.get(commentId);
           if (!cur) return prev;
@@ -229,7 +222,7 @@ export function useTaskComments(
         return next;
       });
       try {
-        await api.deleteComment(taskId, commentId);
+        await taskApi.deleteComment(taskId, commentId);
         return true;
       } catch (err) {
         setById((prev) => {

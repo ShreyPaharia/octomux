@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { isRegularTask } from '@/lib/task-filters';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -39,7 +39,7 @@ export function MoveAgentDialog({
     setError(null);
     (async () => {
       try {
-        const all = await api.listTasks();
+        const all = await taskApi.listTasks();
         if (cancelled) return;
         const active = all.filter(
           (t) =>
@@ -67,7 +67,7 @@ export function MoveAgentDialog({
     setError(null);
     const target = selected === STANDALONE_OPTION ? null : selected;
     try {
-      await api.moveAgentToTask(agentId, target);
+      await taskApi.moveAgentToTask(agentId, target);
       onMoved?.(target);
       onOpenChange(false);
       if (target === null) {
