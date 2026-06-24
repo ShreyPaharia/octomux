@@ -28,6 +28,14 @@ vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
 }));
 
+vi.mock('./skills.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./skills.js')>();
+  return {
+    ...actual,
+    syncSkills: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 vi.mock('./harnesses/claude-code.js', async () => {
   const actual = await vi.importActual<typeof import('./harnesses/claude-code.js')>(
     './harnesses/claude-code.js',

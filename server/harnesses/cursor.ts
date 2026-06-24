@@ -207,10 +207,10 @@ export const cursorHarness: Harness = {
     fs.mkdirSync(rulesDir, { recursive: true });
     pruneOctomuxCursorRules(rulesDir);
 
-    const defs = await listAgents();
+    const defs = await listAgents(worktreePath);
     for (const def of defs) {
       try {
-        const detail = await getAgent(def.name);
+        const detail = await getAgent(def.name, worktreePath);
         const raw = `${OCTOMUX_CURSOR_RULE_PREFIX}${def.name}.mdc`;
         const dest = path.join(rulesDir, raw);
         const next = agentMarkdownToCursorRule(def.name, detail.content);

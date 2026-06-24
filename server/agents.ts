@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { octomuxRoot } from './octomux-root.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import {
+  builtInAgentsDir,
+  homeAgentsDir,
+  repoAgentsDir,
+} from './octomux-paths.js';
 
 export interface AgentDefinition {
   name: string;
@@ -19,11 +20,11 @@ export interface AgentDetail {
 }
 
 function builtInDir(): string {
-  return path.resolve(__dirname, '..', 'agents');
+  return builtInAgentsDir();
 }
 
 function customDir(): string {
-  return process.env.OCTOMUX_AGENTS_DIR || path.join(octomuxRoot(), 'agents');
+  return homeAgentsDir();
 }
 
 function parseFrontmatter(content: string): { name: string; description: string } {
@@ -51,71 +52,77 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-export async function listAgents(): Promise<AgentDefinition[]> {
-  const builtIn = builtInDir();
-  const custom = customDir();
+async function loadAgentsFromDir(
+  dir: string,
+  isCustom: boolean,
+  into: Map<string, AgentDefinition>,
+): Promise<void> {
+  if (!(await exists(dir))) return;
+  const entries = await fs.promises.readdir(dir);
+  for (const entry of entries) {
+    if (!entry.endsWith('.md')) continue;
+    const name = entry.replace('.md', '');
+    const content = await fs.promises.readFile(path.join(dir, entry), 'utf-8');
+    const fm = parseFrontmatter(content);
+    const existing = into.get(name);
+    into.set(name, {
+      name,
+      description: fm.description || existing?.description || '',
+      isCustom: isCustom || existing?.isCustom || false,
+    });
+  }
+}
+
+/** Loader precedence: repo → home → built-in (later sources override earlier). */
+export async function listAgents(repoPath?: string): Promise<AgentDefinition[]> {
   const agents = new Map<string, AgentDefinition>();
 
-  if (await exists(builtIn)) {
-    const entries = await fs.promises.readdir(builtIn);
-    for (const entry of entries) {
-      if (!entry.endsWith('.md')) continue;
-      const name = entry.replace('.md', '');
-      const content = await fs.promises.readFile(path.join(builtIn, entry), 'utf-8');
-      const fm = parseFrontmatter(content);
-      agents.set(name, { name, description: fm.description, isCustom: false });
-    }
-  }
-
-  if (await exists(custom)) {
-    const entries = await fs.promises.readdir(custom);
-    for (const entry of entries) {
-      if (!entry.endsWith('.md')) continue;
-      const name = entry.replace('.md', '');
-      const content = await fs.promises.readFile(path.join(custom, entry), 'utf-8');
-      const fm = parseFrontmatter(content);
-      const existing = agents.get(name);
-      agents.set(name, {
-        name,
-        description: fm.description || existing?.description || '',
-        isCustom: true,
-      });
-    }
+  await loadAgentsFromDir(builtInDir(), false, agents);
+  await loadAgentsFromDir(customDir(), true, agents);
+  if (repoPath) {
+    await loadAgentsFromDir(repoAgentsDir(repoPath), true, agents);
   }
 
   return Array.from(agents.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getAgent(name: string): Promise<AgentDetail> {
+export async function getAgent(name: string, repoPath?: string): Promise<AgentDetail> {
   const builtInPath = path.join(builtInDir(), `${name}.md`);
-  const customPath = path.join(customDir(), `${name}.md`);
+  const homePath = path.join(customDir(), `${name}.md`);
+  const repoPath_ = repoPath ? path.join(repoAgentsDir(repoPath), `${name}.md`) : null;
 
   const hasBuiltIn = await exists(builtInPath);
-  const hasCustom = await exists(customPath);
+  const hasHome = await exists(homePath);
+  const hasRepo = repoPath_ ? await exists(repoPath_) : false;
 
-  if (!hasBuiltIn && !hasCustom) {
+  if (!hasBuiltIn && !hasHome && !hasRepo) {
     throw new Error(`Agent not found: ${name}`);
   }
 
   const defaultContent = hasBuiltIn ? await fs.promises.readFile(builtInPath, 'utf-8') : '';
-  const customContent = hasCustom ? await fs.promises.readFile(customPath, 'utf-8') : null;
+  const homeContent = hasHome ? await fs.promises.readFile(homePath, 'utf-8') : null;
+  const repoContent = hasRepo && repoPath_ ? await fs.promises.readFile(repoPath_, 'utf-8') : null;
 
   return {
     name,
-    content: customContent ?? defaultContent,
+    content: repoContent ?? homeContent ?? defaultContent,
     defaultContent,
-    isCustom: hasCustom,
+    isCustom: hasRepo || hasHome,
   };
 }
 
-export async function saveAgent(name: string, content: string): Promise<void> {
-  const dir = customDir();
+function writeAgentsDir(repoPath?: string): string {
+  return repoPath ? repoAgentsDir(repoPath) : customDir();
+}
+
+export async function saveAgent(name: string, content: string, repoPath?: string): Promise<void> {
+  const dir = writeAgentsDir(repoPath);
   await fs.promises.mkdir(dir, { recursive: true });
   await fs.promises.writeFile(path.join(dir, `${name}.md`), content, 'utf-8');
 }
 
-export async function resetAgent(name: string): Promise<void> {
-  const customPath = path.join(customDir(), `${name}.md`);
+export async function resetAgent(name: string, repoPath?: string): Promise<void> {
+  const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
   try {
     await fs.promises.unlink(customPath);
   } catch (err) {
@@ -124,16 +131,20 @@ export async function resetAgent(name: string): Promise<void> {
   }
 }
 
-export async function createAgent(name: string, content: string): Promise<void> {
-  const customPath = path.join(customDir(), `${name}.md`);
+export async function createAgent(
+  name: string,
+  content: string,
+  repoPath?: string,
+): Promise<void> {
+  const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
   if (await exists(customPath)) {
     throw new Error(`Agent already exists: ${name}`);
   }
-  await saveAgent(name, content);
+  await saveAgent(name, content, repoPath);
 }
 
 /**
- * Sync effective agent files (custom override or built-in default) to
+ * Sync effective agent files (repo → home → built-in) to
  * `.claude/agents/` in `cwd` (defaults to process.cwd) so `claude --agent <name>`
  * resolves them when launched in that directory.
  */
@@ -142,12 +153,11 @@ export async function syncAgents(cwd?: string): Promise<void> {
   await claudeCodeHarness.syncAgents(cwd ?? process.cwd());
 }
 
-export async function deleteAgent(name: string): Promise<void> {
-  const builtInPath = path.join(builtInDir(), `${name}.md`);
-  if (await exists(builtInPath)) {
+export async function deleteAgent(name: string, repoPath?: string): Promise<void> {
+  if (!repoPath && (await exists(path.join(builtInDir(), `${name}.md`)))) {
     throw new Error(`Cannot delete built-in agent: ${name}. Use reset to restore defaults.`);
   }
-  const customPath = path.join(customDir(), `${name}.md`);
+  const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
   if (!(await exists(customPath))) {
     throw new Error(`Agent not found: ${name}`);
   }
