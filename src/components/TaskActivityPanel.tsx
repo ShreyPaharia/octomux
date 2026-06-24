@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
-import { subscribe } from '@/lib/event-source';
+import { useResource } from '@/lib/use-resource';
 import { timeAgo } from '@/lib/time';
 import type { TaskUpdate } from '../../server/types';
 
@@ -21,29 +20,12 @@ interface TaskActivityPanelProps {
 }
 
 export function TaskActivityPanel({ taskId }: TaskActivityPanelProps) {
-  const [updates, setUpdates] = useState<TaskUpdate[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.getTaskUpdates(taskId, 50);
-      setUpdates(data);
-    } catch {
-      // swallow
-    } finally {
-      setLoading(false);
-    }
-  }, [taskId]);
-
-  useEffect(() => {
-    load();
-    return subscribe((event) => {
-      const affectedId = event.payload.taskId ?? (event.payload as { taskId?: string }).taskId;
-      if (affectedId === taskId) {
-        load();
-      }
-    });
-  }, [load, taskId]);
+  const { data, loading } = useResource<TaskUpdate[]>(
+    `task-updates:${taskId}`,
+    () => api.getTaskUpdates(taskId, 50),
+    { events: (event) => event.payload.taskId === taskId },
+  );
+  const updates = data ?? [];
 
   return (
     <div className="flex flex-col gap-2">

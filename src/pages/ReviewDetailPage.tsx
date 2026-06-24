@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
-import { subscribe } from '../lib/event-source';
+import { useResource } from '../lib/use-resource';
 import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
 import type { Walkthrough } from '../components/review/walkthrough-types';
 import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
@@ -31,8 +31,15 @@ function defaultCommentsPanelOpen(): boolean {
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [detail, setDetail] = useState<ReviewDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: detail,
+    error,
+    refresh,
+  } = useResource<ReviewDetail>(id ? `review:${id}` : null, () => api.getReviewDetail(id!), {
+    events: (e) =>
+      e.payload.taskId === id &&
+      (e.type === 'review:drafts-ready' || e.type === 'review:published'),
+  });
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
@@ -46,29 +53,6 @@ export default function ReviewDetailPage() {
       // ignore
     }
   }, [showCommentsPanel]);
-
-  const refresh = useCallback(() => {
-    if (!id) return;
-    api
-      .getReviewDetail(id)
-      .then(setDetail)
-      .catch((e: Error) => setError(e.message));
-  }, [id]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!id) return;
-    return subscribe((event) => {
-      const e = event as { type: string; payload: { taskId?: string } };
-      if (!('taskId' in e.payload) || e.payload.taskId !== id) return;
-      if (e.type === 'review:drafts-ready' || e.type === 'review:published') {
-        refresh();
-      }
-    });
-  }, [id, refresh]);
 
   const taskComments = useTaskComments(id);
 
