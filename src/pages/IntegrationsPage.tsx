@@ -6,8 +6,8 @@ import { Switch } from '@/components/ui/switch';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import { showToast } from '@/components/CustomToast';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
-import { api } from '@/lib/api';
-import type { IntegrationProvider, IntegrationRow, HookTemplate } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
+import type { IntegrationProvider, IntegrationRow, HookTemplate } from '@/lib/api/configApi';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
 import { LinearConfigForm, toLinearConfig } from '@/components/integrations/LinearConfigForm';
@@ -165,10 +165,10 @@ export default function IntegrationsPage() {
   const refresh = useCallback(async () => {
     try {
       const [p, i, hooks, settings] = await Promise.all([
-        api.listProviders(),
-        api.listIntegrations(),
-        api.listHookTemplates().catch(() => [] as HookTemplate[]),
-        api.getSettings().catch(() => null),
+        configApi.listProviders(),
+        configApi.listIntegrations(),
+        configApi.listHookTemplates().catch(() => [] as HookTemplate[]),
+        configApi.getSettings().catch(() => null),
       ]);
       setProviders(p);
       setIntegrations(i);
@@ -184,7 +184,7 @@ export default function IntegrationsPage() {
   async function handleInstallHook(id: string) {
     setInstallingHook(id);
     try {
-      await api.installHookTemplate(id);
+      await configApi.installHookTemplate(id);
       showToast('success', 'HOOKS', `Installed ${hookTemplateLabel(id)}`);
       void refresh();
     } catch (err) {
@@ -198,7 +198,7 @@ export default function IntegrationsPage() {
     setTracker(next);
     setSavingTracker(true);
     try {
-      await api.updateSettings({ defaultTracker: next || undefined });
+      await configApi.updateSettings({ defaultTracker: next || undefined });
       showToast('success', 'INTEGRATIONS', 'Primary tracker saved');
     } catch (err) {
       showToast('error', 'INTEGRATIONS', err instanceof Error ? err.message : 'Save failed');
@@ -212,13 +212,13 @@ export default function IntegrationsPage() {
   }, [refresh]);
 
   async function handleCreateJira(config: JiraConfig, name: string) {
-    await api.createIntegration('jira', name, config as unknown as Record<string, unknown>);
+    await configApi.createIntegration('jira', name, config as unknown as Record<string, unknown>);
     setModal(null);
     void refresh();
   }
 
   async function handleEditJira(id: string, config: JiraConfig, name: string) {
-    await api.updateIntegration(id, {
+    await configApi.updateIntegration(id, {
       name,
       config: config as unknown as Record<string, unknown>,
     });
@@ -227,13 +227,13 @@ export default function IntegrationsPage() {
   }
 
   async function handleCreateLinear(config: LinearConfig, name: string) {
-    await api.createIntegration('linear', name, config as unknown as Record<string, unknown>);
+    await configApi.createIntegration('linear', name, config as unknown as Record<string, unknown>);
     setModal(null);
     void refresh();
   }
 
   async function handleEditLinear(id: string, config: LinearConfig, name: string) {
-    await api.updateIntegration(id, {
+    await configApi.updateIntegration(id, {
       name,
       config: config as unknown as Record<string, unknown>,
     });
@@ -242,20 +242,20 @@ export default function IntegrationsPage() {
   }
 
   async function handleDelete(id: string) {
-    await api.deleteIntegration(id);
+    await configApi.deleteIntegration(id);
     setDeleteConfirmId(null);
     void refresh();
   }
 
   async function handleToggle(id: string, enabled: boolean) {
-    await api.updateIntegration(id, { enabled });
+    await configApi.updateIntegration(id, { enabled });
     void refresh();
   }
 
   async function handleTest(id: string) {
     setTesting((t) => ({ ...t, [id]: true }));
     try {
-      const result = await api.testIntegration(id);
+      const result = await configApi.testIntegration(id);
       setTestResults((r) => ({ ...r, [id]: result }));
     } catch (err) {
       setTestResults((r) => ({

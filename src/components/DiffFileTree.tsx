@@ -1,20 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { DiffFileEntry } from '@/lib/api';
+import type { DiffFileEntry } from '@/lib/api/taskApi';
 import { cn } from '@/lib/utils';
 import { DIFF_TREE_ACTIVE, DIFF_TREE_ROW } from '@/lib/design-tokens';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { ignoredGroupKey, loadExpandedState, saveExpandedState } from '@/lib/diff-tree-storage';
-
-// Re-export the diff-tree storage helpers for back-compat with existing
-// importers. The implementations now live in `@/lib/diff-tree-storage`.
-export {
-  ignoredGroupKey,
-  diffTreeExpandedKey,
-  loadExpandedState,
-  saveExpandedState,
-  clearDiffTreeExpandedState,
-} from '@/lib/diff-tree-storage';
 
 interface Props {
   files: DiffFileEntry[];

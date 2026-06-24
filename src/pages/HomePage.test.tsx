@@ -7,10 +7,10 @@ import HomePage from './HomePage';
 import { makeTask } from '../test-helpers';
 import type { Task } from '../../server/types';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock(),
-);
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 const mockTasksRef = { current: [] as Task[] };
 vi.mock('@/lib/hooks', () => ({

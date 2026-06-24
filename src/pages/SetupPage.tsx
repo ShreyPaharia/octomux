@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type SetupItem, type SetupStatusResponse } from '@/lib/api';
+import { configApi, type SetupItem, type SetupStatusResponse } from '@/lib/api/configApi';
 import { showToast } from '@/components/CustomToast';
 import { PageHeader } from '@/components/layout/page-header';
 import { SectionCard } from '@/components/layout/section-card';
@@ -127,7 +127,7 @@ function DefaultsForm({
   const save = async () => {
     setSaving(true);
     try {
-      await api.updateSettings({
+      await configApi.updateSettings({
         defaultBaseBranch: baseBranch.trim() || undefined,
         deleteGraceHours,
       });
@@ -190,7 +190,7 @@ function DefaultsForm({
 
 export default function SetupPage() {
   const [status, setStatus] = useState<SetupStatusResponse | null>(null);
-  const [settings, setSettings] = useState<Awaited<ReturnType<typeof api.getSettings>> | null>(
+  const [settings, setSettings] = useState<Awaited<ReturnType<typeof configApi.getSettings>> | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
@@ -202,7 +202,7 @@ export default function SetupPage() {
     setLoading(true);
     setError(null);
     try {
-      const [s, st] = await Promise.all([api.getSettings(), api.getSetupStatus()]);
+      const [s, st] = await Promise.all([configApi.getSettings(), configApi.getSetupStatus()]);
       setSettings(s);
       setStatus(st);
     } catch (err) {
@@ -219,7 +219,7 @@ export default function SetupPage() {
   const handleInstall = async (id: string) => {
     setInstalling(id);
     try {
-      const result = await api.setupInstall(id);
+      const result = await configApi.setupInstall(id);
       showToast(result.ok ? 'success' : 'error', 'SETUP', result.message);
       await load();
     } catch (err) {
@@ -232,7 +232,7 @@ export default function SetupPage() {
   const handleApplyRecommended = async () => {
     setApplyingDefaults(true);
     try {
-      const next = await api.applyRecommendedDefaults();
+      const next = await configApi.applyRecommendedDefaults();
       setSettings(next);
       showToast('success', 'DEFAULTS', 'Applied recommended defaults');
       await load();
@@ -245,7 +245,7 @@ export default function SetupPage() {
 
   const dismissOnboarding = async () => {
     try {
-      await api.updateSettings({ onboardingCompletedAt: new Date().toISOString() });
+      await configApi.updateSettings({ onboardingCompletedAt: new Date().toISOString() });
       showToast('success', 'SETUP', 'Setup reminder dismissed');
       await load();
     } catch (err) {

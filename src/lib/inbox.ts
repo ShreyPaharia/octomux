@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { Task } from '../../server/types';
-import { api } from './api';
+import { taskApi } from './api/taskApi';
 import { subscribe as subscribeEvents } from './event-source';
 
 /**
@@ -67,7 +67,7 @@ export function _resetInboxStore(): void {
 /** Fetch inbox data from the server and update the shared store. */
 export async function refreshInbox(): Promise<void> {
   try {
-    const data = await api.getInbox();
+    const data = await taskApi.getInbox();
     setState({
       needsYou: data.needs_you,
       activity: data.activity,
@@ -81,7 +81,7 @@ export async function refreshInbox(): Promise<void> {
 
 /** Mark all tasks as viewed and refresh. */
 export async function markAllInboxRead(): Promise<void> {
-  await api.markAllTasksViewed();
+  await taskApi.markAllTasksViewed();
   await refreshInbox();
 }
 

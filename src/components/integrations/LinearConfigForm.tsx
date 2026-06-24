@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { api } from '@/lib/api';
-import type { IntegrationRow } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
+import type { IntegrationRow } from '@/lib/api/configApi';
 
 const WORKFLOW_STATUSES = [
   { key: 'backlog', label: 'Backlog' },
@@ -60,7 +60,7 @@ export function LinearConfigForm({
     setError(null);
     setPrefilling(true);
     try {
-      const result = await api.prefillLinear(apiKey);
+      const result = await configApi.prefillLinear(apiKey);
       setTeams(result.teams);
       setStatusMapByTeam(result.status_map_by_team);
       if (!defaultTeamKey && result.default_team_suggestion) {

@@ -8,10 +8,10 @@ import { renderWithRouter, makeTask } from '../test-helpers';
 import { TaskBoard } from './TaskBoard';
 import type { Task } from '../../server/types';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
-  (await import('../test-helpers')).setupApiMock(),
-);
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 vi.mock('./CustomToast', () => ({ showToast: vi.fn(), CustomToast: vi.fn() }));
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
@@ -122,7 +122,7 @@ describe('Delete all done button', () => {
     expect(btn).toBeDisabled();
   });
 
-  it('calls api.deleteDone when clicked', async () => {
+  it('calls taskApi.deleteDone when clicked', async () => {
     const user = userEvent.setup();
     const tasks = makeTasks([{ id: 't1', workflow_status: 'done' }]);
     renderBoard(tasks);

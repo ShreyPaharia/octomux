@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { InlineCommentThread } from './InlineCommentThread';
-import type { InlineCommentWithOutdated } from '@/lib/api';
+import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
 import { makeAgent } from '../test-helpers';
 
 function comment(o: Partial<InlineCommentWithOutdated> = {}): InlineCommentWithOutdated {

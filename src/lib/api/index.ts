@@ -1,12 +1,10 @@
 /**
  * src/lib/api/index.ts
  *
- * Reassembles the per-domain namespaces (`taskApi`, `reviewApi`, `configApi`)
- * into the single flat `api` object that the SPA has always consumed, and
- * re-exports every namespace type plus the orchestrator client. Each feature
- * surface can import only the namespace it needs (`taskApi` / `reviewApi` /
- * `configApi`), while legacy consumers keep using the flat `api` via the
- * `src/lib/api.ts` shim.
+ * Re-exports per-domain API namespaces (`taskApi`, `reviewApi`, `configApi`),
+ * shared server types, and the orchestrator REST + WebSocket client. Each
+ * feature surface should import only the namespace it needs from the concrete
+ * module paths under `src/lib/api/`.
  */
 
 export type {
@@ -25,13 +23,3 @@ export * from './configApi';
 // incompatibly-shaped surface (its `/ws/orchestrator/:id` socket is not folded
 // into `/ws/events`), but lives under the same `@/lib/api` umbrella.
 export * from '../orchestrator-api';
-
-import { taskApi } from './taskApi';
-import { reviewApi } from './reviewApi';
-import { configApi } from './configApi';
-
-export const api = {
-  ...taskApi,
-  ...reviewApi,
-  ...configApi,
-};

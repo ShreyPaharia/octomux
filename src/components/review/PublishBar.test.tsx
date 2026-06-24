@@ -9,10 +9,14 @@ const { mockPublishReview, mockRequestReReview, mockDeleteTask } = await vi.hois
   mockDeleteTask: vi.fn(),
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: {
+vi.mock('@/lib/api/reviewApi', () => ({
+  reviewApi: {
     publishReview: mockPublishReview,
     requestReReview: mockRequestReReview,
+  },
+}));
+vi.mock('@/lib/api/taskApi', () => ({
+  taskApi: {
     deleteTask: mockDeleteTask,
   },
 }));

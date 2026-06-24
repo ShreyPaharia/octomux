@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import type { PreflightConflict } from '@/lib/api';
+import type { PreflightConflict } from '@/lib/api/taskApi';
 
 interface Props {
   open: boolean;

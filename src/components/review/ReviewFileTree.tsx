@@ -2,7 +2,7 @@ import { useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Badge } from '../ui/badge';
 import { ChevronDownIcon } from '../icons';
-import type { InlineCommentDTO } from '@/lib/api';
+import type { InlineCommentDTO } from '@/lib/api/reviewApi';
 import { DIFF_TREE_ACTIVE, DIFF_TREE_ROW } from '@/lib/design-tokens';
 import type { Walkthrough, WalkthroughFile } from './walkthrough-types';
 import { buildGroups } from '@/lib/review-file-groups';

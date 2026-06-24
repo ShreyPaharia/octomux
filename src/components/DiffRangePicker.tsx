@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { api, type DiffRange, type TaskCommit } from '@/lib/api';
+import { taskApi, type DiffRange, type TaskCommit } from '@/lib/api/taskApi';
 import { cn } from '@/lib/utils';
 
 export interface DiffRangePickerProps {
@@ -67,7 +67,7 @@ export function DiffRangePicker({
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    api
+    taskApi
       .listTaskBranches(taskId)
       .then((res) => {
         if (cancelled) return;
@@ -85,7 +85,7 @@ export function DiffRangePicker({
     if (radio !== 'commit' && radio !== 'range') return;
     let cancelled = false;
     setCommitsLoading(true);
-    api
+    taskApi
       .listTaskCommits(taskId, { limit: 200 })
       .then((res) => {
         if (cancelled) return;

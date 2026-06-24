@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { ChevronDownIcon } from '@/components/icons';
 
 interface BranchPickerFieldProps {
@@ -37,8 +37,8 @@ export function BranchPickerField({
     const timer = setTimeout(async () => {
       try {
         const [branchList, defaultBranch] = await Promise.all([
-          api.listBranches(trimmed),
-          api.getDefaultBranch(trimmed),
+          taskApi.listBranches(trimmed),
+          taskApi.getDefaultBranch(trimmed),
         ]);
         if (!cancelled) {
           setBranches(branchList);

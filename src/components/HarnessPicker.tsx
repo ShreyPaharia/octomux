@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChevronDownIcon } from '@/components/icons';
 import { useHarnesses } from '@/lib/hooks';
-import { api } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
 
 interface HarnessPickerProps {
   value: string | null;
@@ -29,7 +29,7 @@ export function HarnessPicker({ value, onChange, triggerClassName }: HarnessPick
   // — the picker is a transient creation-time control.
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (!cancelled) setDefaultId(s.defaultHarnessId ?? 'claude-code');

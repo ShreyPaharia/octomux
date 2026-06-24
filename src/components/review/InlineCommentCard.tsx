@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
-import { api, type InlineCommentDTO } from '../../lib/api';
+import { reviewApi, type InlineCommentDTO } from '@/lib/api/reviewApi';
 import { RejectDialog } from './RejectDialog';
 
 interface InlineCommentCardProps {
@@ -43,10 +43,10 @@ export function InlineCommentCard({
   const [saving, setSaving] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
-  async function patch(data: Parameters<typeof api.patchComment>[2]) {
+  async function patch(data: Parameters<typeof reviewApi.patchComment>[2]) {
     setSaving(true);
     try {
-      const updated = await api.patchComment(taskId, comment.id, data);
+      const updated = await reviewApi.patchComment(taskId, comment.id, data);
       setComment(updated);
       onUpdated();
     } catch {
@@ -61,7 +61,7 @@ export function InlineCommentCard({
   }
 
   async function handleSaveEdit() {
-    const data: Parameters<typeof api.patchComment>[2] = { body: editBody };
+    const data: Parameters<typeof reviewApi.patchComment>[2] = { body: editBody };
     if (comment.kind === 'suggestion') {
       data.existing_code = editExisting;
       data.suggested_code = editSuggested;

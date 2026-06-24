@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
-import { api } from '@/lib/api';
-import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
+import type { RepoConfig, HookRegistryEntry } from '@/lib/api/configApi';
 import {
   TERMINAL_CACHE_DEFAULT,
   TERMINAL_CACHE_MAX,
@@ -40,7 +40,7 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
     setCreating(true);
     try {
       const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
-      await api.createAgent({ name: newName.trim(), content });
+      await configApi.createAgent({ name: newName.trim(), content });
       showToast('success', 'AGENT CREATED', `Agent "${newName.trim()}" created`);
       setShowCreate(false);
       setNewName('');
@@ -154,7 +154,7 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
     setCreating(true);
     try {
       const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
-      await api.createSkill({ name: newName.trim(), content });
+      await configApi.createSkill({ name: newName.trim(), content });
       showToast('success', 'SKILL CREATED', `Skill "${newName.trim()}" created`);
       setShowCreate(false);
       setNewName('');
@@ -170,7 +170,7 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await api.deleteSkill(deleteTarget);
+      await configApi.deleteSkill(deleteTarget);
       showToast('success', 'SKILL DELETED', `Skill "${deleteTarget}" deleted`);
       setDeleteTarget(null);
       refresh();
@@ -399,7 +399,7 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     if (!editingPath || saving) return;
     setSaving(true);
     try {
-      await api.updateRepoConfig(editingPath, editForm);
+      await configApi.updateRepoConfig(editingPath, editForm);
       showToast('success', 'SAVED', 'Repository config updated');
       setEditingPath(null);
       refresh();
@@ -521,7 +521,7 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
 
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (!cancelled) setEditor(s.editor);
@@ -541,7 +541,7 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
     const prev = editor;
     setEditor(value);
     try {
-      await api.updateSettings({ editor: value as 'nvim' | 'vscode' | 'cursor' });
+      await configApi.updateSettings({ editor: value as 'nvim' | 'vscode' | 'cursor' });
       showToast('success', 'EDITOR', `Editor set to ${value}`);
     } catch (err) {
       setEditor(prev);
@@ -582,7 +582,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
 
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (cancelled) return;
@@ -606,7 +606,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
     const prev = dangerouslySkip;
     setDangerouslySkip(value);
     try {
-      await api.updateSettings({ dangerouslySkipPermissions: value });
+      await configApi.updateSettings({ dangerouslySkipPermissions: value });
       showToast(
         'success',
         'LAUNCH FLAGS',
@@ -625,7 +625,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
     if (!isDirty || saving) return;
     setSaving(true);
     try {
-      const result = await api.updateSettings({ claudeFlags: flagsBuffer });
+      const result = await configApi.updateSettings({ claudeFlags: flagsBuffer });
       setSavedFlags(result.claudeFlags);
       setFlagsBuffer(result.claudeFlags);
       showToast('success', 'LAUNCH FLAGS', 'Advanced flags saved');
@@ -724,7 +724,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
 
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (cancelled) return;
@@ -757,7 +757,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     const prev = defaultHarnessId;
     setDefaultHarnessIdState(value);
     try {
-      await api.updateSettings({ defaultHarnessId: value });
+      await configApi.updateSettings({ defaultHarnessId: value });
       showToast('success', 'CODING AGENT', `Default set to ${value}`);
     } catch (err) {
       setDefaultHarnessIdState(prev);
@@ -776,7 +776,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     const prev = cursorModelSaved;
     setCursorModelSaved(next);
     try {
-      await api.updateSettings({
+      await configApi.updateSettings({
         harnesses: {
           cursor: buildCursorHarnessBlob({
             force: cursorForce,
@@ -799,7 +799,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     const prev = cursorForce;
     setCursorForce(next);
     try {
-      await api.updateSettings({
+      await configApi.updateSettings({
         harnesses: {
           cursor: buildCursorHarnessBlob({
             force: next,
@@ -824,7 +824,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     if (!cursorFlagsDirty || savingFlags) return;
     setSavingFlags(true);
     try {
-      const result = await api.updateSettings({
+      const result = await configApi.updateSettings({
         harnesses: {
           cursor: buildCursorHarnessBlob({
             force: cursorForce,
@@ -974,7 +974,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    api
+    configApi
       .getHooksRegistry()
       .then((r) => setHooks(r.hooks))
       .catch((err: Error) => setError(err.message))
@@ -993,7 +993,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
       ),
     );
     try {
-      await api.updateHookEnabled(entry.scope, entry.key, next);
+      await configApi.updateHookEnabled(entry.scope, entry.key, next);
     } catch (err) {
       // Revert
       setHooks((prev) =>

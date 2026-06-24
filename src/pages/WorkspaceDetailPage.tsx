@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, type WorktreeDetail } from '@/lib/api';
+import { taskApi, type WorktreeDetail } from '@/lib/api/taskApi';
 import { Button } from '@/components/ui/button';
 import type { RunMode, Task } from '../../server/types';
 
@@ -35,7 +35,7 @@ export default function WorkspaceDetailPage() {
     if (!id) return;
     setError(null);
     try {
-      const data = await api.getWorktree(id);
+      const data = await taskApi.getWorktree(id);
       setDetail(data);
     } catch (err) {
       setError((err as Error).message);
@@ -64,7 +64,7 @@ export default function WorkspaceDetailPage() {
     if (!window.confirm(confirmMessage)) return;
     setRemoving(true);
     try {
-      await api.deleteWorktree(detail.worktree.id);
+      await taskApi.deleteWorktree(detail.worktree.id);
       navigate('/workspaces');
     } catch (err) {
       setError((err as Error).message);

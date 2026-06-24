@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { ReviewFileTree } from './ReviewFileTree';
 import type { Walkthrough } from './walkthrough-types';
-import type { InlineCommentDTO } from '@/lib/api';
+import type { InlineCommentDTO } from '@/lib/api/reviewApi';
 
 function comment(overrides: Partial<InlineCommentDTO> = {}): InlineCommentDTO {
   return {

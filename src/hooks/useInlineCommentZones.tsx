@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { editor as MonacoEditor } from 'monaco-editor';
-import type { InlineCommentWithOutdated, PostCommentInput } from '@/lib/api';
+import type { InlineCommentWithOutdated, PostCommentInput } from '@/lib/api/taskApi';
 import type { Agent } from '../../server/types';
 import { Button } from '@/components/ui/button';
 import { InlineCommentThread } from '@/components/InlineCommentThread';

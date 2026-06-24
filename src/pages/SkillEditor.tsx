@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { api } from '../lib/api';
+import { configApi } from '../lib/api/configApi';
 
 export default function SkillEditor() {
   const { name } = useParams<{ name: string }>();
@@ -15,7 +15,7 @@ export default function SkillEditor() {
 
   useEffect(() => {
     if (!name) return;
-    api
+    configApi
       .getSkill(name)
       .then((skill) => {
         setContent(skill.content);
@@ -29,7 +29,7 @@ export default function SkillEditor() {
     if (!name || !isDirty || saving) return;
     setSaving(true);
     try {
-      await api.updateSkill(name, { content });
+      await configApi.updateSkill(name, { content });
       savedContentRef.current = content;
       toast.success('Skill saved');
     } catch (err) {

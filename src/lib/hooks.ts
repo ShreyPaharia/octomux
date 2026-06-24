@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '../../server/types';
-import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api';
-import { api } from './api';
+import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api/configApi';
+import { taskApi } from './api/taskApi';
+import { configApi } from './api/configApi';
 import { subscribe } from './event-source';
 import { useResource } from './use-resource';
 
@@ -16,8 +17,8 @@ export function useTasks() {
       // Fetch active tasks and trash tasks in parallel so the board can
       // populate the trash column with soft-deleted tasks.
       const [active, trashed] = await Promise.all([
-        api.listTasks(),
-        api.listTasks({ trash: true }),
+        taskApi.listTasks(),
+        taskApi.listTasks({ trash: true }),
       ]);
       // Deduplicate by id (active wins) in case mock returns overlapping data in tests
       const seen = new Set(active.map((t) => t.id));
@@ -62,34 +63,34 @@ export function useTask(id: string) {
   // Content-dedup (inside useResource) keeps the task object reference stable
   // unless the data actually changed, so an unrelated event can't re-render the
   // TaskDetail tree and remount its terminals.
-  const { data, loading, error, refresh } = useResource<Task>(`task:${id}`, () => api.getTask(id), {
+  const { data, loading, error, refresh } = useResource<Task>(`task:${id}`, () => taskApi.getTask(id), {
     events: (event) => event.payload.taskId === id,
   });
   return { task: data, loading, error, refresh };
 }
 
 export function useSkills() {
-  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () => api.listSkills());
+  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () => configApi.listSkills());
   return { skills: data ?? [], loading, error, refresh };
 }
 
 export function useRepoConfigs() {
   const { data, loading, error, refresh } = useResource<RepoConfig[]>('repo-configs', () =>
-    api.listRepoConfigs(),
+    configApi.listRepoConfigs(),
   );
   return { configs: data ?? [], loading, error, refresh };
 }
 
 export function useAgents() {
   const { data, loading, error, refresh } = useResource<AgentDefinition[]>('agents', () =>
-    api.listAgents(),
+    configApi.listAgents(),
   );
   return { agents: data ?? [], loading, error, refresh };
 }
 
 export function useHarnesses() {
   const { data, loading, error, refresh } = useResource<HarnessSummary[]>('harnesses', () =>
-    api.listHarnesses(),
+    configApi.listHarnesses(),
   );
   return { harnesses: data ?? [], loading, error, refresh };
 }

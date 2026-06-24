@@ -14,7 +14,7 @@ import { repoName } from '@/lib/utils';
 import { ChevronDownIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { Task } from '../../server/types';
-import { api } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
 import { BulkCreateDialog } from '@/components/BulkCreateDialog';
 
 function TaskCreateActions({
@@ -191,7 +191,7 @@ export default function TasksPage() {
   // Fetch grace hours for the trash countdown
   const [graceHours, setGraceHours] = useState(6);
   useEffect(() => {
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (s.deleteGraceHours != null) setGraceHours(s.deleteGraceHours);

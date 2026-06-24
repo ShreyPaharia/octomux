@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { useResource } from '@/lib/use-resource';
 import { timeAgo } from '@/lib/time';
-import type { HookExecution } from '@/lib/api';
+import type { HookExecution } from '@/lib/api/taskApi';
 
 interface TaskHooksPanelProps {
   taskId: string;
@@ -15,7 +15,7 @@ export function TaskHooksPanel({ taskId }: TaskHooksPanelProps) {
     refresh: load,
   } = useResource<HookExecution[]>(
     `task-hooks:${taskId}`,
-    () => api.getTaskHookExecutions(taskId),
+    () => taskApi.getTaskHookExecutions(taskId),
     { events: (event) => event.payload.taskId === taskId },
   );
   const executions = data ?? [];

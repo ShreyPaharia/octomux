@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { IntegrationRow } from '@/lib/api';
+import type { IntegrationRow } from '@/lib/api/configApi';
 
 export interface JiraConfig {
   base_url: string;

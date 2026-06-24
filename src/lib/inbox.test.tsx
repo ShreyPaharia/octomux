@@ -4,10 +4,10 @@ import { useInbox, _resetInboxStore } from './inbox';
 import { TasksProvider } from './tasks-context';
 import { makeTask } from '../test-helpers';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('./api', () => ({ api: apiProxy }));
+vi.mock('./api/taskApi', () => ({ taskApi: taskApiProxy }));
 
 const eventCallbacks: Set<(event: any) => void> = new Set();
 const unsubscribe = vi.fn();
