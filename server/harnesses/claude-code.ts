@@ -96,9 +96,9 @@ export const claudeCodeHarness: Harness = {
     const targetDir = path.join(worktreePath, '.claude', 'agents');
     await fs.promises.mkdir(targetDir, { recursive: true });
 
-    const agents = await listAgents();
+    const agents = await listAgents(worktreePath);
     for (const def of agents) {
-      const agent = await getAgent(def.name);
+      const agent = await getAgent(def.name, worktreePath);
       await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
     }
   },

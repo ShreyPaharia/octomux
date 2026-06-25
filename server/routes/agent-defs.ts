@@ -14,11 +14,16 @@ import { sendDomainError } from './_shared.js';
 
 export const router = express.Router();
 
+function repoPathFromQuery(req: Request): string | undefined {
+  const repoPath = req.query.repo_path as string | undefined;
+  return repoPath || undefined;
+}
+
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
-router.get('/api/agents', async (_req: Request, res: Response) => {
+router.get('/api/agents', async (req: Request, res: Response) => {
   try {
-    const agents = await listAgents();
+    const agents = await listAgents(repoPathFromQuery(req));
     res.json(agents);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -27,7 +32,7 @@ router.get('/api/agents', async (_req: Request, res: Response) => {
 
 router.get('/api/agents/:name', async (req: Request, res: Response) => {
   try {
-    const agent = await getAgent(req.params.name as string);
+    const agent = await getAgent(req.params.name as string, repoPathFromQuery(req));
     res.json(agent);
   } catch (err) {
     sendDomainError(res, err);
@@ -40,10 +45,11 @@ router.put('/api/agents/:name', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'content is required' });
     return;
   }
+  const repoPath = repoPathFromQuery(req);
   try {
-    await saveAgent(req.params.name as string, content);
-    await syncAgents();
-    const agent = await getAgent(req.params.name as string);
+    await saveAgent(req.params.name as string, content, repoPath);
+    await syncAgents(repoPath);
+    const agent = await getAgent(req.params.name as string, repoPath);
     res.json(agent);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -51,14 +57,15 @@ router.put('/api/agents/:name', async (req: Request, res: Response) => {
 });
 
 router.delete('/api/agents/:name', async (req: Request, res: Response) => {
+  const name = req.params.name as string;
+  const repoPath = repoPathFromQuery(req);
   try {
-    const name = req.params.name as string;
     if (isBuiltInAgent(name)) {
-      await resetAgent(name);
+      await resetAgent(name, repoPath);
     } else {
-      await deleteAgent(name);
+      await deleteAgent(name, repoPath);
     }
-    await syncAgents();
+    await syncAgents(repoPath);
     res.json({ ok: true });
   } catch (err) {
     sendDomainError(res, err);
@@ -71,10 +78,11 @@ router.post('/api/agents', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'name and content are required' });
     return;
   }
+  const repoPath = repoPathFromQuery(req);
   try {
-    await createAgent(name, content);
-    await syncAgents();
-    const agent = await getAgent(name);
+    await createAgent(name, content, repoPath);
+    await syncAgents(repoPath);
+    const agent = await getAgent(name, repoPath);
     res.status(201).json(agent);
   } catch (err) {
     sendDomainError(res, err);

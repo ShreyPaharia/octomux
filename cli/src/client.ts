@@ -175,6 +175,14 @@ export interface OctomuxClient {
   listTeams(): Promise<
     Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
   >;
+
+  listSavedFiles(repoPath: string): Promise<Array<{ path: string; size: number }>>;
+  getSavedFile(repoPath: string, relPath: string): Promise<{ path: string; content: string }>;
+  putSavedFile(
+    repoPath: string,
+    relPath: string,
+    content: string,
+  ): Promise<{ path: string; content: string }>;
 }
 
 function qs(params: Record<string, string | undefined>): string {
@@ -366,6 +374,25 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<
         Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
       >(baseUrl, '/teams');
+    },
+    listSavedFiles(repoPath) {
+      return request<{ path: string; size: number }[]>(
+        baseUrl,
+        `/repos/${encodeURIComponent(repoPath)}/files`,
+      );
+    },
+    getSavedFile(repoPath, relPath) {
+      return request<{ path: string; content: string }>(
+        baseUrl,
+        `/repos/${encodeURIComponent(repoPath)}/files/content${qs({ path: relPath })}`,
+      );
+    },
+    putSavedFile(repoPath, relPath, content) {
+      return request<{ path: string; content: string }>(
+        baseUrl,
+        `/repos/${encodeURIComponent(repoPath)}/files/content${qs({ path: relPath })}`,
+        { method: 'PUT', body: JSON.stringify({ content }) },
+      );
     },
   };
 }

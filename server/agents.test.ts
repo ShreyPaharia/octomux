@@ -67,6 +67,22 @@ describe('agents', () => {
       expect(agent.isCustom).toBe(true);
     });
 
+    it('repo .octomux/agents overrides home and built-in', async () => {
+      const repoDir = path.join(os.tmpdir(), `octomux-agents-repo-${Date.now()}`);
+      fs.mkdirSync(path.join(repoDir, '.octomux', 'agents'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'orchestrator.md'), 'Home prompt');
+      fs.writeFileSync(
+        path.join(repoDir, '.octomux', 'agents', 'orchestrator.md'),
+        'Repo prompt',
+      );
+
+      const agent = await getAgent('orchestrator', repoDir);
+      expect(agent.content).toBe('Repo prompt');
+      expect(agent.isCustom).toBe(true);
+
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    });
+
     it('throws for non-existent agent', async () => {
       await expect(getAgent('nonexistent')).rejects.toThrow();
     });

@@ -15,6 +15,7 @@ import { broadcast } from '../events.js';
 import type { RepoConfig } from '../repositories/repo-config.js';
 import type { Task, Agent, RunMode, Worktree } from '../types.js';
 import { chatDirFor, chatSessionName } from '../chats.js';
+import { syncSkills } from '../skills.js';
 import {
   setRuntimeState,
   updateTaskFields,
@@ -208,6 +209,7 @@ async function prepareFirstAgentLaunch(
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   await harness.syncAgents(setup.worktreePath);
+  await syncSkills(setup.worktreePath);
   await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
   // For orchestrator-managed tasks, write a worker mcp-config.json and append
@@ -415,6 +417,7 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Age
 
   // Hooks on disk before the window launches the harness (starts on pane create).
   await harness.syncAgents(task.worktree!);
+  await syncSkills(task.worktree!);
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const baseCmd = harness.buildLaunchCommand({
@@ -550,6 +553,7 @@ export async function resumeTask(task: Task): Promise<void> {
     if (agents.length > 0) {
       const bootstrapHarness = getHarness(agents[0]!.harness_id);
       await bootstrapHarness.syncAgents(cwd);
+      await syncSkills(cwd);
       await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agents[0]!.hook_token);
     } else {
       // No agents to recover, but recreate the session so callers that expect
@@ -694,6 +698,7 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
 
   // Hooks on disk before the window launches the harness (starts on pane create).
   await harness.syncAgents(cwd);
+  await syncSkills(cwd);
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });
