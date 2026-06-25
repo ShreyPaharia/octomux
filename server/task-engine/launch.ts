@@ -5,8 +5,7 @@ import { childLogger } from '../logger.js';
 import { mcpServerInvocation } from '../orchestrator/runner.js';
 import { isOrchestratorManaged } from '../orchestrator/store.js';
 import { shellQuoteSingle } from '../shell-quote.js';
-import { execTmux } from '../tmux-bin.js';
-import { getActiveWindowIndex, getLastWindowIndex } from './sessions.js';
+import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { setAgentHarnessSessionId } from '../repositories/index.js';
 import type { Harness } from '../harnesses/index.js';
 import type { Agent } from '../types.js';
@@ -155,15 +154,7 @@ export async function launchAgentWindow(opts: {
   startupCmd: string;
   fresh: boolean;
 }): Promise<number> {
-  const { session, cwd, startupCmd, fresh } = opts;
-  if (fresh) {
-    await execTmux(['new-session', '-d', '-s', session, '-c', cwd, startupCmd]);
-    await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
-    return getActiveWindowIndex(session);
-  } else {
-    await execTmux(['new-window', '-t', session, '-c', cwd, startupCmd]);
-    return getLastWindowIndex(session);
-  }
+  return tmuxWindowSubstrate.launchWindow(opts);
 }
 
 /**

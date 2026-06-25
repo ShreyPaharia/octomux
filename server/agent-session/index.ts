@@ -1,6 +1,17 @@
-export type { SpawnOptions, ProcessHandle, ProcessSubstrate } from './substrate.js';
+export type {
+  SpawnOptions,
+  ProcessHandle,
+  ProcessSubstrate,
+  TmuxWindowLaunchOptions,
+  TmuxWindowSubstrate,
+} from './substrate.js';
 export { ptySubstrate } from './substrate-pty.js';
 export { tmuxSubstrate } from './substrate-tmux.js';
+export {
+  tmuxWindowSubstrate,
+  getActiveWindowIndex,
+  getLastWindowIndex,
+} from './substrate-tmux-windowed.js';
 export {
   buildToolDefinition,
   handleSubmitResultCall,

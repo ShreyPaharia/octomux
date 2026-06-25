@@ -1,5 +1,6 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
+import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { execTmux } from '../tmux-bin.js';
 import { getSettings } from '../settings.js';
 import type { Task, UserTerminal } from '../types.js';
@@ -9,7 +10,6 @@ import {
   deleteUserTerminal,
   countUserTerminals,
 } from '../repositories/index.js';
-import { getLastWindowIndex } from './sessions.js';
 
 const execFile = promisify(execFileCb);
 
@@ -32,8 +32,11 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
     return { editor, windowIndex: task.user_window_index };
   }
 
-  await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
-  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+  const windowIndex = await tmuxWindowSubstrate.launchWindow({
+    session: task.tmux_session!,
+    cwd: task.worktree!,
+    fresh: false,
+  });
 
   await execTmux(['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'nvim .', 'Enter']);
 
@@ -43,8 +46,11 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
 }
 
 export async function createShellTerminal(task: Task): Promise<UserTerminal> {
-  await execTmux(['new-window', '-t', task.tmux_session!, '-c', task.worktree!]);
-  const windowIndex = await getLastWindowIndex(task.tmux_session!);
+  const windowIndex = await tmuxWindowSubstrate.launchWindow({
+    session: task.tmux_session!,
+    cwd: task.worktree!,
+    fresh: false,
+  });
 
   const count = countUserTerminals(task.id);
   const label = `Terminal ${count + 1}`;
