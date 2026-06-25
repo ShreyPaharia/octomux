@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
+import { registerHarness } from './registry.js';
 import type { OctomuxSettings } from '../settings.js';
 import { childLogger } from '../logger.js';
 import { execTmux } from '../tmux-bin.js';
@@ -335,3 +336,5 @@ export const cursorHarness: Harness = {
     return validateAgentName(name);
   },
 };
+
+registerHarness(cursorHarness);
