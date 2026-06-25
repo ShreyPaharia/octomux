@@ -19,18 +19,18 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
-vi.mock('./diff.js', () => ({
-  getDiffSummary: vi.fn(),
-  getFileDiff: vi.fn(),
-  safeResolvePath: (wt: string, p: string) => {
-    if (!p || p.includes('..') || p.startsWith('/')) throw new Error('Invalid path');
-    return `${wt}/${p}`;
-  },
-  MAX_FILE_BYTES: 1_048_576,
-}));
+vi.mock('@octomux/diff-engine', async () => {
+  const actual =
+    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+  return {
+    ...actual,
+    getDiffSummary: vi.fn(),
+    getFileDiff: vi.fn(),
+  };
+});
 
 const { execFile } = await import('child_process');
-const diffMod = await import('./diff.js');
+const diffMod = await import('@octomux/diff-engine');
 const { createApp } = await import('./app.js');
 
 type ExecResult = { stdout: string; stderr?: string };

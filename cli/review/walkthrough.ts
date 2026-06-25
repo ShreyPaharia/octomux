@@ -2,7 +2,7 @@ import fs from 'fs';
 import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
 import { getCurrentRun, setWalkthrough } from '../../server/repositories/review-runs.js';
-import { listChangedFiles } from '../../server/diff.js';
+import { listChangedFiles } from '@octomux/diff-engine';
 import { validateWalkthrough, appendOrphansGroup } from '../../server/walkthrough.js';
 import { SELECT_TASK_SQL } from '../../server/task-select.js';
 import type { Task, Walkthrough } from '../../server/types.js';

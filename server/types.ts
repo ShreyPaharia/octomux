@@ -245,18 +245,7 @@ export interface UpdateTaskBaseRequest {
   base_branch: string;
 }
 
-/**
- * Diff range selector — what slice of history a diff query targets.
- * - `base`: full task diff (base..HEAD + working tree + untracked) — current default behavior
- * - `commit`: a single commit (sha^..sha)
- * - `range`: an arbitrary range (from..to)
- * - `working`: uncommitted changes vs HEAD only (no committed diff)
- */
-export type DiffRange =
-  | { kind: 'base' }
-  | { kind: 'commit'; sha: string }
-  | { kind: 'range'; from: string; to: string }
-  | { kind: 'working' };
+export type { DiffRange } from '@octomux/diff-engine';
 
 export interface TaskCommit {
   sha: string;

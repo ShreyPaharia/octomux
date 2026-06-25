@@ -5,8 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { getDiffSummary } from './diff.js';
-import type { Task } from './types.js';
-import { createTestDb, DEFAULTS } from './test-helpers.js';
+import type { DiffTarget } from './types.js';
 
 const execFileRaw = promisify(execFileCb);
 
@@ -43,17 +42,19 @@ describe('diff module with captured base_sha', () => {
   let repo: string;
   let baseSha: string;
 
-  function makeTask(): Task {
+  function makeTarget(): DiffTarget {
     return {
-      ...DEFAULTS.runningTask,
+      id: 't1',
+      title: 'test',
       worktree: repo,
+      repo_path: repo,
+      run_mode: 'worktree',
       base_branch: null,
       base_sha: baseSha,
-    } as Task;
+    };
   }
 
   beforeEach(async () => {
-    createTestDb();
     repo = await makeRepo();
     baseSha = await headSha(repo);
   });
@@ -64,7 +65,7 @@ describe('diff module with captured base_sha', () => {
 
   it('computes diff against a captured SHA (new mode simulation)', async () => {
     await fs.promises.writeFile(path.join(repo, 'a.txt'), 'hello world\n');
-    const summary = await getDiffSummary({ task: makeTask() });
+    const summary = await getDiffSummary({ target: makeTarget() });
     expect(summary.files).toHaveLength(1);
     expect(summary.files[0]).toMatchObject({
       path: 'a.txt',
@@ -76,7 +77,7 @@ describe('diff module with captured base_sha', () => {
 
   it('computes diff against a captured SHA (existing mode simulation)', async () => {
     await fs.promises.writeFile(path.join(repo, 'b.txt'), 'new file\n');
-    const summary = await getDiffSummary({ task: makeTask() });
+    const summary = await getDiffSummary({ target: makeTarget() });
     expect(summary.files).toHaveLength(1);
     expect(summary.files[0]).toMatchObject({
       path: 'b.txt',
@@ -88,7 +89,7 @@ describe('diff module with captured base_sha', () => {
 
   it('computes diff against a captured SHA (none mode simulation)', async () => {
     await fs.promises.writeFile(path.join(repo, 'a.txt'), 'changed\n');
-    const summary = await getDiffSummary({ task: makeTask() });
+    const summary = await getDiffSummary({ target: makeTarget() });
     expect(summary.files).toHaveLength(1);
     expect(summary.files[0]).toMatchObject({
       path: 'a.txt',

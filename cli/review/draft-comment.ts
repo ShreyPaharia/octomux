@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
 import { getCurrentRun } from '../../server/repositories/review-runs.js';
 import { addComment } from '../../server/repositories/inline-comments.js';
-import { showFileAtSha } from '../../server/diff.js';
+import { showFileAtSha } from '@octomux/diff-engine';
 import { SELECT_TASK_SQL } from '../../server/task-select.js';
 import type { CommentBucket, CommentSeverity, Task } from '../../server/types.js';
 
