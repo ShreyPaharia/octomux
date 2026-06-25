@@ -63,14 +63,20 @@ export function useTask(id: string) {
   // Content-dedup (inside useResource) keeps the task object reference stable
   // unless the data actually changed, so an unrelated event can't re-render the
   // TaskDetail tree and remount its terminals.
-  const { data, loading, error, refresh } = useResource<Task>(`task:${id}`, () => taskApi.getTask(id), {
-    events: (event) => event.payload.taskId === id,
-  });
+  const { data, loading, error, refresh } = useResource<Task>(
+    `task:${id}`,
+    () => taskApi.getTask(id),
+    {
+      events: (event) => event.payload.taskId === id,
+    },
+  );
   return { task: data, loading, error, refresh };
 }
 
 export function useSkills() {
-  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () => configApi.listSkills());
+  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () =>
+    configApi.listSkills(),
+  );
   return { skills: data ?? [], loading, error, refresh };
 }
 

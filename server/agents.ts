@@ -1,10 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {
-  builtInAgentsDir,
-  homeAgentsDir,
-  repoAgentsDir,
-} from './octomux-paths.js';
+import { builtInAgentsDir, homeAgentsDir, repoAgentsDir } from './octomux-paths.js';
 
 export interface AgentDefinition {
   name: string;
@@ -131,11 +127,7 @@ export async function resetAgent(name: string, repoPath?: string): Promise<void>
   }
 }
 
-export async function createAgent(
-  name: string,
-  content: string,
-  repoPath?: string,
-): Promise<void> {
+export async function createAgent(name: string, content: string, repoPath?: string): Promise<void> {
   const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
   if (await exists(customPath)) {
     throw new Error(`Agent already exists: ${name}`);

@@ -8,7 +8,9 @@ import { TasksProvider } from '../lib/tasks-context';
 import type { RunMode } from '../../server/types';
 import type { SidebarItem } from '@/lib/sidebar-utils';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));

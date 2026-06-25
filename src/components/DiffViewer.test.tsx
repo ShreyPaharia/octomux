@@ -4,7 +4,9 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 vi.mock('@/lib/api/taskApi', async () => {
   const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };

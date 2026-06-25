@@ -1,11 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
-import {
-  builtInSkillsDir,
-  homeSkillsDir,
-  repoSkillsDir,
-} from './octomux-paths.js';
+import { builtInSkillsDir, homeSkillsDir, repoSkillsDir } from './octomux-paths.js';
 
 const logger = childLogger('skills');
 
@@ -71,7 +67,10 @@ async function readSkillContent(skillsRoot: string, name: string): Promise<strin
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'EISDIR') {
-      logger.warn({ skill: name, code, skills_root: skillsRoot }, 'skipping dir without readable SKILL.md');
+      logger.warn(
+        { skill: name, code, skills_root: skillsRoot },
+        'skipping dir without readable SKILL.md',
+      );
       return null;
     }
     throw err;

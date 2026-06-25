@@ -71,10 +71,7 @@ describe('agents', () => {
       const repoDir = path.join(os.tmpdir(), `octomux-agents-repo-${Date.now()}`);
       fs.mkdirSync(path.join(repoDir, '.octomux', 'agents'), { recursive: true });
       fs.writeFileSync(path.join(tmpDir, 'orchestrator.md'), 'Home prompt');
-      fs.writeFileSync(
-        path.join(repoDir, '.octomux', 'agents', 'orchestrator.md'),
-        'Repo prompt',
-      );
+      fs.writeFileSync(path.join(repoDir, '.octomux', 'agents', 'orchestrator.md'), 'Repo prompt');
 
       const agent = await getAgent('orchestrator', repoDir);
       expect(agent.content).toBe('Repo prompt');

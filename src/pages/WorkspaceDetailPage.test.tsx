@@ -7,7 +7,9 @@ import type { WorktreeDetail } from '@/lib/api/taskApi';
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 
 vi.mock('react-router-dom', routerMockFactory);
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));

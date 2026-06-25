@@ -190,9 +190,9 @@ function DefaultsForm({
 
 export default function SetupPage() {
   const [status, setStatus] = useState<SetupStatusResponse | null>(null);
-  const [settings, setSettings] = useState<Awaited<ReturnType<typeof configApi.getSettings>> | null>(
-    null,
-  );
+  const [settings, setSettings] = useState<Awaited<
+    ReturnType<typeof configApi.getSettings>
+  > | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
