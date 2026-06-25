@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
+import { registerHarness } from './registry.js';
 import type { OctomuxSettings } from '../settings.js';
 
 /** Strip any existing --model <value> from a flags string, then append --model <model>. */
@@ -144,3 +145,5 @@ export const claudeCodeHarness: Harness = {
     return validateAgentName(name);
   },
 };
+
+registerHarness(claudeCodeHarness);

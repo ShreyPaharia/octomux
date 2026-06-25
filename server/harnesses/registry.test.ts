@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getHarness, listHarnesses, DEFAULT_HARNESS_ID } from './registry.js';
+import { getHarness, listHarnesses, DEFAULT_HARNESS_ID } from './index.js';
 
 describe('registry', () => {
   it('returns claude-code by id', () => {
