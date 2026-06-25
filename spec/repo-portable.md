@@ -6,20 +6,20 @@ and CLI access.
 
 ## Layout
 
-| Path | Purpose |
-|------|---------|
-| `<repo>/.octomux/skills/<name>/SKILL.md` | Repo-portable skills (version-controlled) |
-| `<repo>/.octomux/agents/<name>.md` | Repo-portable agent definitions |
-| `<repo>/.octomux/files/**` | Saved files / lightweight memory (plain text) |
+| Path                                     | Purpose                                       |
+| ---------------------------------------- | --------------------------------------------- |
+| `<repo>/.octomux/skills/<name>/SKILL.md` | Repo-portable skills (version-controlled)     |
+| `<repo>/.octomux/agents/<name>.md`       | Repo-portable agent definitions               |
+| `<repo>/.octomux/files/**`               | Saved files / lightweight memory (plain text) |
 
 Home and package defaults still apply:
 
-| Path | Purpose |
-|------|---------|
-| `~/.claude/skills/<name>/SKILL.md` | User-global skills |
-| `$OCTOMUX_AGENTS_DIR` or `~/.octomux/agents/<name>.md` | User-global agent overrides |
-| `<octomux-package>/skills/` | Built-in skills shipped with octomux |
-| `<octomux-package>/agents/` | Built-in agent definitions |
+| Path                                                   | Purpose                              |
+| ------------------------------------------------------ | ------------------------------------ |
+| `~/.claude/skills/<name>/SKILL.md`                     | User-global skills                   |
+| `$OCTOMUX_AGENTS_DIR` or `~/.octomux/agents/<name>.md` | User-global agent overrides          |
+| `<octomux-package>/skills/`                            | Built-in skills shipped with octomux |
+| `<octomux-package>/agents/`                            | Built-in agent definitions           |
 
 ## Loader precedence
 

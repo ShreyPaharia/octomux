@@ -2,12 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import {
-  listSavedFiles,
-  getSavedFile,
-  putSavedFile,
-  resolveSavedFilePath,
-} from './saved-files.js';
+import { listSavedFiles, getSavedFile, putSavedFile, resolveSavedFilePath } from './saved-files.js';
 import { repoFilesDir } from './octomux-paths.js';
 
 describe('saved-files', () => {
@@ -47,7 +42,8 @@ describe('saved-files', () => {
 
   it('rejects disallowed extension', () => {
     expect(resolveSavedFilePath(tmpDir, 'evil.exe')).toEqual({
-      rejected: 'extension ".exe" is not allowed; allowed: .md, .txt, .json, .yaml, .yml, .csv, .html',
+      rejected:
+        'extension ".exe" is not allowed; allowed: .md, .txt, .json, .yaml, .yml, .csv, .html',
     });
   });
 

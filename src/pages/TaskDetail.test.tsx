@@ -21,7 +21,9 @@ function simulateEvent(taskId = 'test-task-01') {
   for (const cb of eventCallbacks) cb(event);
 }
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 
 vi.mock('@/lib/api/taskApi', async () => {
   const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;

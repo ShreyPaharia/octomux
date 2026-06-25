@@ -25,7 +25,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 import { useTask } from '@/lib/hooks';
 import { useTerminalCacheSize } from '@/lib/terminal-cache-settings';
-import { diffRangeToParam, taskApi, type DiffRange, type DiffSummaryResponse } from '@/lib/api/taskApi';
+import {
+  diffRangeToParam,
+  taskApi,
+  type DiffRange,
+  type DiffSummaryResponse,
+} from '@/lib/api/taskApi';
 import { reviewApi } from '@/lib/api/reviewApi';
 import { TaskDetailHeader } from '@/components/layout/task-detail-header';
 import { TaskDetailMeta } from '@/components/layout/task-detail-meta';
