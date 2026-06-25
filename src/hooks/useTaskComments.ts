@@ -1,5 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { taskApi, type InlineCommentRow, type InlineCommentWithOutdated, type ListCommentsResponse, type PostCommentInput, type UpdateCommentInput } from '@/lib/api/taskApi';
+import {
+  taskApi,
+  type InlineCommentRow,
+  type InlineCommentWithOutdated,
+  type ListCommentsResponse,
+  type PostCommentInput,
+  type UpdateCommentInput,
+} from '@/lib/api/taskApi';
 import { useResource } from '@/lib/use-resource';
 
 export interface OpenComposer {

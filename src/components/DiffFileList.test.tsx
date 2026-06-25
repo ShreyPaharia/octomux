@@ -3,7 +3,9 @@ import { useRef } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 vi.mock('@/lib/api/taskApi', async () => {
   const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };

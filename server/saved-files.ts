@@ -7,15 +7,7 @@ const logger = childLogger('saved-files');
 
 const MAX_FILE_BYTES = 1024 * 1024;
 
-const ALLOWED_EXTENSIONS = new Set([
-  '.md',
-  '.txt',
-  '.json',
-  '.yaml',
-  '.yml',
-  '.csv',
-  '.html',
-]);
+const ALLOWED_EXTENSIONS = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.html']);
 
 export interface SavedFileEntry {
   path: string;

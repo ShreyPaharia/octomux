@@ -5,7 +5,9 @@ import { renderWithRouter } from '../test-helpers';
 import { TaskRefsPanel } from './TaskRefsPanel';
 import type { TaskExternalRef } from '../../server/types';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));

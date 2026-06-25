@@ -4,7 +4,9 @@ import ReviewDetailPage from './ReviewDetailPage';
 import { renderWithRouter } from '../test-helpers';
 import type { ReviewDetail, InlineCommentDTO } from '@/lib/api/reviewApi';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+  (await import('../test-helpers')).setupApiMock(),
+);
 
 const scrollToFileSpy = vi.hoisted(() => vi.fn());
 

@@ -10,7 +10,10 @@ export function SetupBanner() {
     let cancelled = false;
     (async () => {
       try {
-        const [settings, setup] = await Promise.all([configApi.getSettings(), configApi.getSetupStatus()]);
+        const [settings, setup] = await Promise.all([
+          configApi.getSettings(),
+          configApi.getSetupStatus(),
+        ]);
         if (cancelled) return;
         if (settings.onboardingCompletedAt) {
           setShow(false);
