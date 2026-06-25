@@ -1,5 +1,10 @@
 import { execTmux } from '../tmux-bin.js';
 
+export {
+  getActiveWindowIndex,
+  getLastWindowIndex,
+} from '../agent-session/substrate-tmux-windowed.js';
+
 /**
  * True when an execFile error stems from tmux reporting that a target
  * session/window/pane does not exist — which happens routinely during cleanup
@@ -8,19 +13,6 @@ import { execTmux } from '../tmux-bin.js';
 export function isTmuxTargetMissing(err: unknown): boolean {
   const stderr = (err as { stderr?: string } | null)?.stderr ?? '';
   return /can't find (?:session|window|pane):/i.test(stderr);
-}
-
-/** Get the active window index of a tmux session. */
-export async function getActiveWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execTmux(['display-message', '-t', session, '-p', '#{window_index}']);
-  return parseInt(stdout.trim(), 10);
-}
-
-/** Get the index of the last window in a tmux session. */
-export async function getLastWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execTmux(['list-windows', '-t', session, '-F', '#{window_index}']);
-  const indices = stdout.trim().split('\n').map(Number);
-  return Math.max(...indices);
 }
 
 /**

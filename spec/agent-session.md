@@ -62,6 +62,12 @@ ptySubstrate  — spawn a shell + command under a local pty.
 tmuxSubstrate — create a named tmux session; attach via a pty.
                 Session survives parent exit; dispose() kills the tmux session.
                 Suitable for reattachable, long-running agents.
+
+tmuxWindowSubstrate — create-or-reuse a named detached tmux session and add
+                      windows without a parent-held pty. Returns a window
+                      index for external attach (dashboard grouped viewers).
+                      Used by the live task-engine path; distinct from the
+                      spawn-and-hold-a-pty model above.
 ```
 
 ### Capture seam (`CaptureStrategy<T>`)
@@ -95,15 +101,16 @@ and batch pipelines without any octomux infrastructure.
 
 ---
 
-## Deferred: live task-path swap
+## Live task-path tmux orchestration
 
-The interactive task dashboard path (`server/task-engine/launch.ts →
-launchAgentWindow`) is intentionally **not** routed through
-`runAgentSession` / the spawn-and-hold-a-pty substrate model.
+The interactive task dashboard path (`server/task-engine/launch.ts` →
+`launchAgentWindow`, `terminals.ts`, and empty-session recovery in
+`lifecycle.ts`) routes `new-session` / `new-window` orchestration through
+`tmuxWindowSubstrate` in `server/agent-session/substrate-tmux-windowed.ts`.
 
-**Why**: The live task path uses a fundamentally different model:
+**Model** (unchanged from before consolidation):
 
-| Dimension         | `runAgentSession` (pty/tmux substrates)   | Live task path                                                |
+| Dimension         | `runAgentSession` (pty/tmux substrates)   | Live task path (`tmuxWindowSubstrate`)                        |
 | ----------------- | ----------------------------------------- | ------------------------------------------------------------- |
 | Session ownership | Parent process holds the handle           | Named `octomux-agent-<id>` tmux session created independently |
 | Windows           | Single process / single session           | Multiple tmux windows (one per agent)                         |
@@ -111,15 +118,16 @@ launchAgentWindow`) is intentionally **not** routed through
 | Lifecycle         | dispose() kills everything                | `closeTask` / `deleteTask` with DB + git cleanup              |
 | Structured result | MCP submit_result capture                 | Not applicable (interactive streaming output)                 |
 
-Forcing the live path onto the spawn-and-attach tmux substrate would change
-dashboard behavior and violate the "no behavior change, suites stay green" rule.
+The live path is intentionally **not** routed through `runAgentSession` or the
+spawn-and-hold-a-pty `tmuxSubstrate`. Both paths share `execTmux` /
+`tmux-bin.ts` as a leaf utility.
 
-Both paths share `execTmux` / `tmux-bin.ts` as a leaf utility. A future ticket
-could introduce a windowed-substrate variant (multi-window, external-attach
-semantics) if unification is justified.
+**Files using `tmuxWindowSubstrate`:**
 
-**Files not modified by this ticket:**
+- `server/task-engine/launch.ts` — `launchAgentWindow`
+- `server/task-engine/terminals.ts` — user nvim/shell terminals
+- `server/task-engine/lifecycle.ts` — empty-session recovery on resume
 
-- `server/task-engine/*`
-- `server/task-runner.ts`
+**Files not modified (viewer attach model unchanged):**
+
 - `server/terminal.ts`

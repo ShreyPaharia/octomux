@@ -17,3 +17,5 @@ export interface ProcessSubstrate {
   readonly kind: 'pty' | 'tmux';
   spawn(opts: SpawnOptions): Promise<ProcessHandle>;
 }
+
+export type { TmuxWindowLaunchOptions, TmuxWindowSubstrate } from './substrate-tmux-windowed.js';

@@ -10,6 +10,7 @@ import { hookBaseUrl } from '../hook-base-url.js';
 import { getOrCreateRepoConfig } from '../repositories/repo-config.js';
 import { inferRefs } from '../ref-inference.js';
 import { childLogger } from '../logger.js';
+import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { execTmux } from '../tmux-bin.js';
 import { broadcast } from '../events.js';
 import type { RepoConfig } from '../repositories/repo-config.js';
@@ -558,8 +559,7 @@ export async function resumeTask(task: Task): Promise<void> {
     } else {
       // No agents to recover, but recreate the session so callers that expect
       // the task's tmux session to exist after resume still find it.
-      await execTmux(['new-session', '-d', '-s', session, '-c', cwd]);
-      await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
+      await tmuxWindowSubstrate.createEmptySession({ session, cwd });
     }
 
     let sessionCreated = false;
