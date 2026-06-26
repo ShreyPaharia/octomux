@@ -68,7 +68,7 @@ export function registerFiles(program: Command): void {
           errorMessage('Provide --content or pipe content on stdin');
           process.exit(1);
         }
-        content = await fs.promises.readFile(0, 'utf-8');
+        content = fs.readFileSync(0, 'utf-8');
       }
       const file = await client.putSavedFile(repoPath(opts), filePath, content);
       if (json) {
