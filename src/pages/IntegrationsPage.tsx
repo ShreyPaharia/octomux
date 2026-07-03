@@ -8,7 +8,8 @@ import { FormSelect } from '@/components/ui/form-select';
 import { showToast } from '@/components/CustomToast';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
 import { configApi } from '@/lib/api/configApi';
-import type { IntegrationProvider, IntegrationRow, HookTemplate } from '@/lib/api/configApi';
+import type { IntegrationRow } from '@/lib/api/configApi';
+import { useProviders, useIntegrations, useHookTemplates, useSettings } from '@/lib/hooks';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
 import { LinearConfigForm, toLinearConfig } from '@/components/integrations/LinearConfigForm';
@@ -144,9 +145,20 @@ function Modal({
 }
 
 export default function IntegrationsPage() {
-  const [providers, setProviders] = useState<IntegrationProvider[]>([]);
-  const [integrations, setIntegrations] = useState<IntegrationRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { providers, loading: providersLoading, refresh: refreshProviders } = useProviders();
+  const {
+    integrations,
+    loading: integrationsLoading,
+    refresh: refreshIntegrations,
+  } = useIntegrations();
+  const {
+    hookTemplates,
+    loading: hookTemplatesLoading,
+    refresh: refreshHookTemplates,
+  } = useHookTemplates();
+  const { settings, loading: settingsLoading, refresh: refreshSettings } = useSettings();
+  const loading =
+    providersLoading || integrationsLoading || hookTemplatesLoading || settingsLoading;
   const [modal, setModal] = useState<
     | { kind: 'create-jira' }
     | { kind: 'edit-jira'; integration: IntegrationRow }
@@ -164,29 +176,21 @@ export default function IntegrationsPage() {
     {},
   );
   const [testing, setTesting] = useState<Record<string, boolean>>({});
-  const [hookTemplates, setHookTemplates] = useState<HookTemplate[]>([]);
   const [installingHook, setInstallingHook] = useState<string | null>(null);
-  const [tracker, setTracker] = useState<'jira' | 'linear' | ''>('');
+  const [trackerOverride, setTrackerOverride] = useState<'jira' | 'linear' | '' | null>(null);
   const [savingTracker, setSavingTracker] = useState(false);
+  const tracker = trackerOverride ?? settings?.defaultTracker ?? '';
 
-  const refresh = useCallback(async () => {
-    try {
-      const [p, i, hooks, settings] = await Promise.all([
-        configApi.listProviders(),
-        configApi.listIntegrations(),
-        configApi.listHookTemplates().catch(() => [] as HookTemplate[]),
-        configApi.getSettings().catch(() => null),
-      ]);
-      setProviders(p);
-      setIntegrations(i);
-      setHookTemplates(hooks);
-      if (settings) setTracker(settings.defaultTracker ?? '');
-    } catch {
-      // silently ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const refresh = useCallback(() => {
+    void refreshProviders();
+    void refreshIntegrations();
+    void refreshHookTemplates();
+    void refreshSettings();
+  }, [refreshProviders, refreshIntegrations, refreshHookTemplates, refreshSettings]);
+
+  useEffect(() => {
+    setTrackerOverride(null);
+  }, [settings]);
 
   async function handleInstallHook(id: string) {
     setInstallingHook(id);
@@ -202,7 +206,7 @@ export default function IntegrationsPage() {
   }
 
   async function handleTrackerChange(next: 'jira' | 'linear' | '') {
-    setTracker(next);
+    setTrackerOverride(next);
     setSavingTracker(true);
     try {
       await configApi.updateSettings({ defaultTracker: next || undefined });
@@ -213,10 +217,6 @@ export default function IntegrationsPage() {
       setSavingTracker(false);
     }
   }
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   async function handleCreateJira(config: JiraConfig, name: string) {
     await configApi.createIntegration('jira', name, config as unknown as Record<string, unknown>);

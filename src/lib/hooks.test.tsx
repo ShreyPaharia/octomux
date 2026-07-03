@@ -1,15 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useTasks, useTask } from './hooks';
+import {
+  useTasks,
+  useTask,
+  useGraceHours,
+  useProviders,
+  useIntegrations,
+  useHookTemplates,
+  useSettings,
+  useReviewDetail,
+} from './hooks';
 
 // ─── Mock API ────────────────────────────────────────────────────────────────
 
-const { taskApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
+const { taskApiProxy, configApiProxy, reviewApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('./api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('./api/configApi', () => ({ configApi: configApiProxy }));
+vi.mock('./api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 
 // ─── Mock event-source ──────────────────────────────────────────────────────
 
@@ -172,5 +182,100 @@ describe('useTask', () => {
     await waitFor(() => {
       expect(apiMock.getTask).toHaveBeenCalledWith('my-task');
     });
+  });
+});
+
+// ─── useResource-based config/review hooks ───────────────────────────────────
+
+const resourceHookCases = [
+  {
+    name: 'useGraceHours',
+    renderFn: () => renderHook(() => useGraceHours()),
+    mockFn: () => apiMock.getSettings,
+    successValue: { deleteGraceHours: 12 },
+    resultKey: 'graceHours' as const,
+    expectedValue: 12,
+    fallbackValue: 6,
+  },
+  {
+    name: 'useProviders',
+    renderFn: () => renderHook(() => useProviders()),
+    mockFn: () => apiMock.listProviders,
+    successValue: [{ kind: 'jira', displayName: 'Jira', configSchema: {}, events: [] }],
+    resultKey: 'providers' as const,
+    expectedValue: [{ kind: 'jira', displayName: 'Jira', configSchema: {}, events: [] }],
+    fallbackValue: [],
+  },
+  {
+    name: 'useIntegrations',
+    renderFn: () => renderHook(() => useIntegrations()),
+    mockFn: () => apiMock.listIntegrations,
+    successValue: [{ id: 'i1', kind: 'jira', name: 'Jira', config: {}, enabled: true }],
+    resultKey: 'integrations' as const,
+    expectedValue: [{ id: 'i1', kind: 'jira', name: 'Jira', config: {}, enabled: true }],
+    fallbackValue: [],
+  },
+  {
+    name: 'useHookTemplates',
+    renderFn: () => renderHook(() => useHookTemplates()),
+    mockFn: () => apiMock.listHookTemplates,
+    successValue: [{ id: 'jira-status', installed: false }],
+    resultKey: 'hookTemplates' as const,
+    expectedValue: [{ id: 'jira-status', installed: false }],
+    fallbackValue: [],
+  },
+  {
+    name: 'useSettings',
+    renderFn: () => renderHook(() => useSettings()),
+    mockFn: () => apiMock.getSettings,
+    successValue: { defaultTracker: 'linear' },
+    resultKey: 'settings' as const,
+    expectedValue: { defaultTracker: 'linear' },
+    fallbackValue: null,
+  },
+];
+
+describe.each(resourceHookCases)(
+  '$name',
+  ({ renderFn, mockFn, successValue, resultKey, expectedValue, fallbackValue }) => {
+    it('returns data after fetch', async () => {
+      mockFn().mockResolvedValue(successValue);
+
+      const { result } = renderFn();
+
+      await waitFor(() => {
+        expect((result.current as any)[resultKey]).toEqual(expectedValue);
+      });
+    });
+
+    it('falls back safely on fetch failure when applicable', async () => {
+      mockFn().mockRejectedValue(new Error('fail'));
+
+      const { result } = renderFn();
+
+      await waitFor(() => {
+        expect((result.current as any)[resultKey]).toEqual(fallbackValue);
+      });
+    });
+  },
+);
+
+describe('useReviewDetail', () => {
+  it('fetches review detail for the given id', async () => {
+    const detail = { task: { id: 't1', title: 'Review me' }, comments: [], all_runs: [] };
+    apiMock.getReviewDetail.mockResolvedValue(detail);
+
+    const { result } = renderHook(() => useReviewDetail('t1'));
+
+    await waitFor(() => {
+      expect(result.current.detail).toEqual(detail);
+    });
+    expect(apiMock.getReviewDetail).toHaveBeenCalledWith('t1');
+  });
+
+  it('does not fetch when id is undefined', async () => {
+    renderHook(() => useReviewDetail(undefined));
+    await Promise.resolve();
+    expect(apiMock.getReviewDetail).not.toHaveBeenCalled();
   });
 });

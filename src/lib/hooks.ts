@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '@octomux/types';
-import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api/configApi';
+import type {
+  Skill,
+  RepoConfig,
+  AgentDefinition,
+  HarnessSummary,
+  IntegrationProvider,
+  IntegrationRow,
+  HookTemplate,
+  OctomuxSettings,
+} from './api/configApi';
 import { taskApi } from './api/taskApi';
 import { configApi } from './api/configApi';
+import { reviewApi, type ReviewDetail } from './api/reviewApi';
 import { subscribe } from './event-source';
 import { useResource } from './use-resource';
+
+const DEFAULT_GRACE_HOURS = 6;
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -99,4 +111,71 @@ export function useHarnesses() {
     configApi.listHarnesses(),
   );
   return { harnesses: data ?? [], loading, error, refresh };
+}
+
+export function useGraceHours() {
+  const { data } = useResource('settings:grace-hours', async () => {
+    try {
+      const settings = await configApi.getSettings();
+      return settings.deleteGraceHours ?? DEFAULT_GRACE_HOURS;
+    } catch {
+      return DEFAULT_GRACE_HOURS;
+    }
+  });
+  return { graceHours: data ?? DEFAULT_GRACE_HOURS };
+}
+
+export function useProviders() {
+  const { data, loading, error, refresh } = useResource<IntegrationProvider[]>('providers', () =>
+    configApi.listProviders(),
+  );
+  return { providers: data ?? [], loading, error, refresh };
+}
+
+export function useIntegrations() {
+  const { data, loading, error, refresh } = useResource<IntegrationRow[]>('integrations', () =>
+    configApi.listIntegrations(),
+  );
+  return { integrations: data ?? [], loading, error, refresh };
+}
+
+export function useHookTemplates() {
+  const { data, loading, error, refresh } = useResource<HookTemplate[]>(
+    'hook-templates',
+    async () => {
+      try {
+        return await configApi.listHookTemplates();
+      } catch {
+        return [];
+      }
+    },
+  );
+  return { hookTemplates: data ?? [], loading, error, refresh };
+}
+
+export function useSettings() {
+  const { data, loading, error, refresh } = useResource<OctomuxSettings | null>(
+    'settings',
+    async () => {
+      try {
+        return await configApi.getSettings();
+      } catch {
+        return null;
+      }
+    },
+  );
+  return { settings: data, loading, error, refresh };
+}
+
+export function useReviewDetail(id: string | undefined) {
+  const { data, loading, error, refresh } = useResource<ReviewDetail>(
+    id ? `review:${id}` : null,
+    () => reviewApi.getReviewDetail(id!),
+    {
+      events: (e) =>
+        e.payload.taskId === id &&
+        (e.type === 'review:drafts-ready' || e.type === 'review:published'),
+    },
+  );
+  return { detail: data, loading, error, refresh };
 }

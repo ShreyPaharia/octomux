@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { taskApi, type DiffSummaryResponse } from '../lib/api/taskApi';
-import { reviewApi, type ReviewDetail } from '../lib/api/reviewApi';
-import { useResource } from '../lib/use-resource';
+import { useReviewDetail } from '../lib/hooks';
 import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
 import type { Walkthrough } from '../components/review/walkthrough-types';
 import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
@@ -32,15 +31,7 @@ function defaultCommentsPanelOpen(): boolean {
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const {
-    data: detail,
-    error,
-    refresh,
-  } = useResource<ReviewDetail>(id ? `review:${id}` : null, () => reviewApi.getReviewDetail(id!), {
-    events: (e) =>
-      e.payload.taskId === id &&
-      (e.type === 'review:drafts-ready' || e.type === 'review:published'),
-  });
+  const { detail, error, refresh } = useReviewDetail(id);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
