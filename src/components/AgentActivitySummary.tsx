@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { Agent, PermissionPrompt } from '../../server/types';
+import type { Agent, PermissionPrompt } from '@octomux/types';
 import { timeAgo, timeSince } from '@/lib/time';
 
 interface AgentActivitySummaryProps {

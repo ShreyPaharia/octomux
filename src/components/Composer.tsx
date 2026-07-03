@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { taskApi } from '@/lib/api/taskApi';
 import type { PreflightResult } from '@/lib/api/taskApi';
 import { useTasksContext } from '@/lib/tasks-context';
-import type { Task, Agent } from '../../server/types';
+import type { Task, Agent } from '@octomux/types';
 import { NoneModeConflictDialog } from './NoneModeConflictDialog';
 import { NoneModeDirtyDialog } from './NoneModeDirtyDialog';
 import { NoneModeSharedBranchDialog } from './NoneModeSharedBranchDialog';

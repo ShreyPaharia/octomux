@@ -1,5 +1,5 @@
 import { CheckIcon } from '@/components/icons';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 interface Props {
   task: Task;

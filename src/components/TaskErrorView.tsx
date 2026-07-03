@@ -1,6 +1,6 @@
 import { TriangleAlertIcon } from '@/components/icons';
 import { timeAgo } from '@/lib/time';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 interface Props {
   task: Task;

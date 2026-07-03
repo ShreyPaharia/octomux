@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { taskApi } from '@/lib/api/taskApi';
 import { repoName } from '@/lib/utils';
-import type { RunMode, WorktreeSummary } from '../../server/types';
+import type { RunMode, WorktreeSummary } from '@octomux/types';
 
 function truncate(s: string, n = 48): string {
   if (!s) return '—';

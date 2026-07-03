@@ -1,4 +1,4 @@
-import type { Task, DerivedTaskStatus, RunMode, RuntimeState } from '../../server/types';
+import type { Task, DerivedTaskStatus, RunMode, RuntimeState } from '@octomux/types';
 import { isRegularTask } from './task-filters';
 import { repoName } from './utils';
 

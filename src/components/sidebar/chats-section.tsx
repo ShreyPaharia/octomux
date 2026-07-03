@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { taskApi } from '@/lib/api/taskApi';
-import type { Agent } from '../../../server/types';
+import type { Agent } from '@octomux/types';
 import {
   ACTIVE_ACCENT,
   ACTIVE_FILL,

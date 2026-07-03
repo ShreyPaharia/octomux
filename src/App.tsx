@@ -14,7 +14,7 @@ import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SHIP_EVENT } from './pages/TaskDetail';
 import { SetupBanner } from './components/SetupBanner';
-import type { Task } from '../server/types';
+import type { Task } from '@octomux/types';
 
 // The four most-clicked nav targets stay eager so navigating to them never
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.

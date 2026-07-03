@@ -151,9 +151,9 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
       fresh: false,
     });
 
-    expect(
-      countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] }),
-    ).toBe(1);
+    expect(countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['new-window'] })).toBe(
+      1,
+    );
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'tmux',
       argsInclude: ['new-window', '-t', 'my-session', '-c', '/my/worktree'],

@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/diff-engine" }, { "path": "./tsconfig.app.json" }]
+  "references": [
+    { "path": "./packages/diff-engine" },
+    { "path": "./packages/types" },
+    { "path": "./tsconfig.app.json" }
+  ]
 }

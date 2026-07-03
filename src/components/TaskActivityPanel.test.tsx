@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithRouter } from '../test-helpers';
 import { TaskActivityPanel } from './TaskActivityPanel';
-import type { TaskUpdate } from '../../server/types';
+import type { TaskUpdate } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),

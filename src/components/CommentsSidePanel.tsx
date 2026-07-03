@@ -7,7 +7,7 @@ import { timeAgo } from '@/lib/time';
 import { authorLabel } from '@/lib/comment-format';
 import { useCommentsContext } from '@/hooks/useTaskComments';
 import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
-import type { Agent } from '../../server/types';
+import type { Agent } from '@octomux/types';
 
 const ROW_CAP = 500;
 

@@ -18,7 +18,7 @@ import { BranchPickerField } from '@/components/fields/BranchPickerField';
 import { HarnessPicker } from '@/components/HarnessPicker';
 import { useTasksContext } from '@/lib/tasks-context';
 import { taskApi } from '@/lib/api/taskApi';
-import type { CreateTaskRequest } from '../../server/types';
+import type { CreateTaskRequest } from '@octomux/types';
 
 type Mode = 'paste' | 'github';
 

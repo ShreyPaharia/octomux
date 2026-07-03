@@ -1,28 +1,20 @@
 import { Command } from 'commander';
 import { getContext } from '../action.js';
+import { WORKFLOW_STATUSES } from '@octomux/types';
+import type { WorkflowStatus } from '@octomux/types';
 import { outputJson, success, label } from '../format.js';
-import type { WorkflowStatus } from '../client.js';
-
-const VALID_STATUSES: WorkflowStatus[] = [
-  'backlog',
-  'planned',
-  'in_progress',
-  'human_review',
-  'pr',
-  'done',
-];
 
 export function registerTaskMove(program: Command): void {
   program
     .command('task-move <id> <workflow_status>')
-    .description(`Move a task to a workflow column (${VALID_STATUSES.join(' | ')})`)
+    .description(`Move a task to a workflow column (${WORKFLOW_STATUSES.join(' | ')})`)
     .option('-n, --note <note>', 'optional note to attach to the move')
     .action(async (id: string, workflowStatus: string, opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      if (!VALID_STATUSES.includes(workflowStatus as WorkflowStatus)) {
+      if (!WORKFLOW_STATUSES.includes(workflowStatus as WorkflowStatus)) {
         console.error(`Invalid workflow_status: ${workflowStatus}`);
-        console.error(`Valid values: ${VALID_STATUSES.join(', ')}`);
+        console.error(`Valid values: ${WORKFLOW_STATUSES.join(', ')}`);
         process.exit(1);
       }
 

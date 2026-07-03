@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { Task, Agent } from '../../server/types';
+import type { Task, Agent } from '@octomux/types';
 import { showToast } from '../components/CustomToast';
 import { getNotificationsEnabled } from './notification-settings';
 

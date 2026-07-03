@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { taskApi } from './api/taskApi';
 import { subscribe as subscribeEvents } from './event-source';
 

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { StatusGlyph } from '@/components/ui/status-glyph';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { StatusBadge } from './StatusBadge';
 import { AgentActivitySummary } from './AgentActivitySummary';
 import { PermissionPromptRow } from './PermissionPromptRow';

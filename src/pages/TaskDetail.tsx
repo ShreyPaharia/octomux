@@ -40,7 +40,7 @@ import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
 import { TaskHooksPanel } from '@/components/TaskHooksPanel';
 import { JiraLinkHelper } from '@/components/integrations/JiraLinkHelper';
-import type { RunMode } from '../../server/types';
+import type { RunMode } from '@octomux/types';
 
 export const SHIP_EVENT = 'octomux:open-pr-sheet';
 

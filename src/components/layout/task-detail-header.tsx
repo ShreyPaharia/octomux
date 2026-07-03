@@ -5,7 +5,7 @@ import { ClipboardCheckIcon, PullRequestIcon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
-import type { RunMode, Task } from '../../../server/types';
+import type { RunMode, Task } from '@octomux/types';
 
 const MODE_LABEL: Record<RunMode, string> = {
   new: 'N',

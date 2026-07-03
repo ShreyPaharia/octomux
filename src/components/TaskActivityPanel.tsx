@@ -1,7 +1,7 @@
 import { taskApi } from '@/lib/api/taskApi';
 import { useResource } from '@/lib/use-resource';
 import { timeAgo } from '@/lib/time';
-import type { TaskUpdate } from '../../server/types';
+import type { TaskUpdate } from '@octomux/types';
 
 const KIND_ICON: Record<TaskUpdate['kind'], string> = {
   transition: '→',

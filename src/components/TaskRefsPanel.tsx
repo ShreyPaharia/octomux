@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { taskApi } from '@/lib/api/taskApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { TaskExternalRef } from '../../server/types';
+import type { TaskExternalRef } from '@octomux/types';
 
 interface TaskRefsPanelProps {
   taskId: string;

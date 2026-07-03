@@ -7,13 +7,9 @@
  * module paths under `src/lib/api/`.
  */
 
-export type {
-  WorkflowStatus,
-  RuntimeState,
-  TaskExternalRef,
-  TaskUpdate,
-  ReviewLearning,
-} from '../../../server/types';
+export type { WorkflowStatus, RuntimeState, TaskExternalRef, TaskUpdate } from '@octomux/types';
+
+export type { ReviewLearning } from '../../../server/types';
 
 export * from './taskApi';
 export * from './reviewApi';

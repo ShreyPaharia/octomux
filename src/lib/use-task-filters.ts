@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { repoName } from './utils';
 
 const REPO_FILTER_KEY = 'octomux-repo-filter';

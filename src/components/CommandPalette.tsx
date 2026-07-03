@@ -4,8 +4,8 @@ import { useTasksContext } from '@/lib/tasks-context';
 import { repoName } from '@/lib/utils';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 import { taskApi } from '@/lib/api/taskApi';
-import type { Task } from '../../server/types';
-import type { WorkflowStatus } from '../../server/types';
+import type { Task } from '@octomux/types';
+import type { WorkflowStatus } from '@octomux/types';
 
 const WORKFLOW_STATUS_LABELS: Record<WorkflowStatus, string> = {
   backlog: 'Backlog',

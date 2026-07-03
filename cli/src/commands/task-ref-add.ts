@@ -27,13 +27,14 @@ export function registerTaskRefAdd(program: Command): void {
       const { client, json } = getContext(cmd);
 
       const metadata = parseMetadata(opts.metadata as string | undefined);
+      const mergedMetadata =
+        opts.title !== undefined ? { ...metadata, title: opts.title } : metadata;
 
       const ref = await client.addTaskRef(id, {
         integration,
-        external_id: externalId,
+        ref: externalId,
         url: opts.url,
-        title: opts.title,
-        ...(metadata !== undefined ? { metadata } : {}),
+        ...(mergedMetadata !== undefined ? { metadata: mergedMetadata } : {}),
       });
 
       if (json) {
@@ -43,6 +44,6 @@ export function registerTaskRefAdd(program: Command): void {
 
       success(`Linked ${integration}:${externalId} to task ${id}`);
       if (ref.url) console.log(label('URL', ref.url));
-      if (ref.title) console.log(label('Title', ref.title));
+      console.log(label('Ref', ref.ref));
     });
 }

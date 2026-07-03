@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { taskApi, type DiffFileEntry, type DiffRange } from '@/lib/api/taskApi';
-import type { Agent } from '../../server/types';
+import type { Agent } from '@octomux/types';
 import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
 import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { DiffFileTree } from './DiffFileTree';

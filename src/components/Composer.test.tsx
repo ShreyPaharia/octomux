@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { TasksProvider } from '@/lib/tasks-context';
 import { Composer } from './Composer';
 import { makeTask } from '../test-helpers';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────
 

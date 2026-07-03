@@ -1,63 +1,15 @@
-export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
+import type {
+  AddRefRequest,
+  Agent,
+  CreateTaskRequest,
+  RunMode,
+  Task,
+  TaskExternalRef,
+  TaskUpdate,
+  WorkflowStatus,
+} from '@octomux/types';
 
-export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
-
-export interface TaskUpdate {
-  id: string;
-  task_id: string;
-  kind: string;
-  payload: string | null;
-  author: string | null;
-  created_at: string;
-}
-
-export interface TaskExternalRef {
-  task_id: string;
-  integration: string;
-  external_id: string;
-  url: string | null;
-  title: string | null;
-  created_at: string;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  runtime_state: string;
-  workflow_status: WorkflowStatus;
-  repo_path: string;
-  branch: string | null;
-  base_branch: string | null;
-  worktree: string | null;
-  pr_url: string | null;
-  pr_number: number | null;
-  initial_prompt: string | null;
-  run_mode: RunMode;
-  base_sha: string | null;
-  last_viewed_at: string | null;
-  current_summary: string | null;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-  agents?: Agent[];
-  pending_prompts?: unknown[];
-  derived_status?: string | null;
-}
-
-export interface Agent {
-  id: string;
-  task_id: string;
-  window_index: number;
-  label: string;
-  status: string;
-  harness_id: string;
-  harness_session_id: string | null;
-  hook_token: string;
-  hook_activity: string;
-  created_at: string;
-}
+export type { Agent, RunMode, Task, TaskExternalRef, TaskUpdate, WorkflowStatus };
 
 export interface InlineCommentRow {
   id: string;
@@ -98,20 +50,7 @@ export interface IntegrationRow {
 
 export interface OctomuxClient {
   listIntegrations(): Promise<IntegrationRow[]>;
-  createTask(data: {
-    title: string;
-    description: string;
-    repo_path?: string;
-    initial_prompt?: string;
-    branch?: string;
-    base_branch?: string;
-    draft?: boolean;
-    run_mode?: RunMode;
-    worktree_path?: string;
-    harness_id?: string;
-    model?: string | null;
-    notify_task_id?: string | null;
-  }): Promise<Task>;
+  createTask(data: CreateTaskRequest & { title: string; description: string }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
   updateTask(id: string, data: { status: string }): Promise<Task>;
@@ -156,16 +95,7 @@ export interface OctomuxClient {
   moveTask(taskId: string, data: { workflow_status: WorkflowStatus; note?: string }): Promise<Task>;
   postTaskSummary(taskId: string, data: { summary: string; author?: string }): Promise<Task>;
   postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
-  addTaskRef(
-    taskId: string,
-    data: {
-      integration: string;
-      external_id: string;
-      url?: string;
-      title?: string;
-      metadata?: Record<string, unknown>;
-    },
-  ): Promise<TaskExternalRef>;
+  addTaskRef(taskId: string, data: AddRefRequest): Promise<TaskExternalRef>;
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
   getTaskRefs(taskId: string): Promise<{ refs: TaskExternalRef[] }>;
