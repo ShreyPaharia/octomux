@@ -13,17 +13,15 @@ import { broadcast } from '../events.js';
 import { getAgentByIdAndTask, getUserTerminalByIdAndTask } from '../repositories/index.js';
 import type { AddAgentRequest } from '../types.js';
 import { loadTaskOrFail } from './_shared.js';
+import { badRequest, notFound } from '../services/errors.js';
 
 export const router = express.Router();
 
-// Add agent to task
 router.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'running') {
-    res.status(400).json({ error: 'Can only add agents to running tasks' });
-    return;
+    throw badRequest('Can only add agents to running tasks');
   }
 
   const body = req.body as AddAgentRequest;
@@ -32,8 +30,7 @@ router.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
     try {
       validateAgentName(body.agent);
     } catch (err) {
-      res.status(400).json({ error: (err as Error).message });
-      return;
+      throw badRequest((err as Error).message);
     }
   }
 
@@ -49,15 +46,12 @@ router.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
   res.status(201).json(agent);
 });
 
-// Stop agent
 router.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
   const agent = getAgentByIdAndTask(req.params.agentId as string, req.params.id as string);
 
   if (!agent) {
-    res.status(404).json({ error: 'Task or agent not found' });
-    return;
+    throw notFound('Task or agent not found');
   }
 
   await stopAgent(task, agent);
@@ -65,27 +59,22 @@ router.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Respon
   res.json({ success: true });
 });
 
-// Send message to agent via tmux send-keys
 router.post('/api/tasks/:id/agents/:agentId/message', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'running') {
-    res.status(400).json({ error: 'Task is not running' });
-    return;
+    throw badRequest('Task is not running');
   }
 
   const agent = getAgentByIdAndTask(req.params.agentId as string, req.params.id as string);
 
   if (!agent) {
-    res.status(404).json({ error: 'Agent not found' });
-    return;
+    throw notFound('Agent not found');
   }
 
   const { message } = req.body as { message?: string };
   if (!message) {
-    res.status(400).json({ error: 'message is required' });
-    return;
+    throw badRequest('message is required');
   }
 
   await sendMessageToAgent(task.tmux_session!, agent.window_index, message);
@@ -93,57 +82,39 @@ router.post('/api/tasks/:id/agents/:agentId/message', async (req: Request, res: 
   res.json({ success: true });
 });
 
-// Create user terminal (lazily creates tmux window with nvim)
 router.post('/api/tasks/:id/user-terminal', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'running') {
-    res.status(400).json({ error: 'Can only create user terminal for running tasks' });
-    return;
+    throw badRequest('Can only create user terminal for running tasks');
   }
 
   if (!task.tmux_session) {
-    res.status(400).json({ error: 'Task has no tmux session' });
-    return;
+    throw badRequest('Task has no tmux session');
   }
 
-  try {
-    const result = await createUserTerminal(task);
-    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  const result = await createUserTerminal(task);
+  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+  res.json(result);
 });
 
-// Create shell terminal
 router.post('/api/tasks/:id/terminals', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'running') {
-    res.status(400).json({ error: 'Can only create terminals for running tasks' });
-    return;
+    throw badRequest('Can only create terminals for running tasks');
   }
   if (!task.tmux_session) {
-    res.status(400).json({ error: 'Task has no tmux session' });
-    return;
+    throw badRequest('Task has no tmux session');
   }
 
-  try {
-    const terminal = await createShellTerminal(task);
-    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-    res.status(201).json(terminal);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  const terminal = await createShellTerminal(task);
+  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+  res.status(201).json(terminal);
 });
 
-// Close shell terminal
 router.delete('/api/tasks/:id/terminals/:terminalId', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   const terminal = getUserTerminalByIdAndTask(
     req.params.terminalId as string,
@@ -151,15 +122,10 @@ router.delete('/api/tasks/:id/terminals/:terminalId', async (req: Request, res: 
   );
 
   if (!terminal) {
-    res.status(404).json({ error: 'Terminal not found' });
-    return;
+    throw notFound('Terminal not found');
   }
 
-  try {
-    await closeShellTerminal(task, terminal);
-    broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  await closeShellTerminal(task, terminal);
+  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+  res.status(204).send();
 });

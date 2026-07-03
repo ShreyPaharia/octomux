@@ -12,54 +12,38 @@ import {
 } from '../repositories/index.js';
 import { createReviewTaskFromPr, createManualReview } from '../services/review-service.js';
 import { lookupExistingReviewId } from './_shared.js';
+import { badRequest, notFound, ServiceError } from '../services/errors.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('api:reviews');
 
 export const router = express.Router();
 
-// GET /api/reviews — list all auto_review tasks with aggregated counts
 router.get('/api/reviews', (_req: Request, res: Response) => {
-  try {
-    res.json(listReviewsInbox());
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  res.json(listReviewsInbox());
 });
 
-// GET /api/reviews/:id — full detail for a single review task
 router.get('/api/reviews/:id', (req: Request, res: Response) => {
-  try {
-    const detail = getReviewDetail((req.params as Record<string, string>).id);
-    if (!detail) {
-      res.status(404).json({ error: 'Review not found' });
-      return;
-    }
-    res.json(detail);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+  const detail = getReviewDetail((req.params as Record<string, string>).id);
+  if (!detail) {
+    throw notFound('Review not found');
   }
+  res.json(detail);
 });
 
-// POST /api/reviews — create an auto_review task for a GitHub PR URL.
-// Idempotent: if a live (non-deleted, non-error) review task already exists
-// for the same repo+PR, returns that instead of creating a duplicate.
 router.post('/api/reviews', async (req: Request, res: Response) => {
   const body = req.body as { pr_url?: unknown; repo_path?: unknown };
   const prUrl = typeof body.pr_url === 'string' ? body.pr_url.trim() : '';
   const bodyRepoPath = typeof body.repo_path === 'string' ? body.repo_path.trim() : '';
 
-  // Parse GitHub PR URL
   const prMatch = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
   if (!prMatch) {
-    res.status(400).json({ error: 'invalid pr_url' });
-    return;
+    throw badRequest('invalid pr_url');
   }
   const [, owner, repo, numberStr] = prMatch;
   const number = parseInt(numberStr, 10);
   const ownerRepo = `${owner}/${repo}`;
 
-  // Resolve the local repo path
   let repoPath = bodyRepoPath;
   if (!repoPath) {
     const rows = listTrackedRepoPaths();
@@ -75,7 +59,6 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
           'origin',
         ]);
         const remoteUrl = stdout.trim();
-        // Handle both ssh (git@github.com:owner/repo.git) and https
         const sshMatch = remoteUrl.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
         const httpsMatch = remoteUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
         const remoteOwnerRepo = (sshMatch?.[1] ?? httpsMatch?.[1] ?? '').toLowerCase();
@@ -90,13 +73,9 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
   }
 
   if (!repoPath) {
-    res.status(400).json({
-      error: `could not resolve a local repo for ${ownerRepo}; pass repo_path`,
-    });
-    return;
+    throw badRequest(`could not resolve a local repo for ${ownerRepo}; pass repo_path`);
   }
 
-  // Dedup: check for an existing live review task for this repo+PR
   const existing = findExistingReviewTask(repoPath, number);
 
   if (existing) {
@@ -104,7 +83,6 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
     return;
   }
 
-  // Fetch PR metadata via gh CLI
   let pr: {
     title: string;
     headRefOid: string;
@@ -129,16 +107,13 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
     );
     pr = JSON.parse(stdout) as typeof pr;
   } catch (err) {
-    res.status(400).json({ error: `failed to fetch PR metadata: ${(err as Error).message}` });
-    return;
+    throw badRequest(`failed to fetch PR metadata: ${(err as Error).message}`);
   }
 
   if (pr.state !== 'OPEN') {
-    res.status(400).json({ error: `PR #${number} is ${pr.state}` });
-    return;
+    throw badRequest(`PR #${number} is ${pr.state}`);
   }
 
-  // Create the review task (service owns the build+insert+broadcast+startTask tail).
   const { id } = await createReviewTaskFromPr({
     repo_path: repoPath,
     pr_number: number,
@@ -158,20 +133,15 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
   res.status(201).json({ id, reused: false });
 });
 
-// POST /api/tasks/:taskId/review — manually trigger a review for this task.
-// Creates an auto_review task pointing back at the source via review_of_task_id,
-// or returns the existing review when one is already present.
 router.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => {
   const taskId = (req.params as Record<string, string>).taskId;
   const task = getTaskRepo(taskId);
   if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
+    throw notFound('Task not found');
   }
 
   if (!task.branch || !task.worktree) {
-    res.status(400).json({ error: 'Start the task first' });
-    return;
+    throw badRequest('Start the task first');
   }
 
   const existingId = lookupExistingReviewId(task);
@@ -180,8 +150,6 @@ router.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => 
     return;
   }
 
-  // PR-less source: capture the current HEAD of the source worktree so the
-  // review agent has a concrete sha to diff base..head against.
   let prHeadSha = task.pr_head_sha;
   if (!prHeadSha) {
     const cwd = taskWorkingDir(task);
@@ -189,8 +157,7 @@ router.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => 
       const { stdout } = await execFile('git', ['-C', cwd!, 'rev-parse', 'HEAD']);
       prHeadSha = stdout.trim();
     } catch (err) {
-      res.status(500).json({ error: `failed to resolve HEAD: ${(err as Error).message}` });
-      return;
+      throw new ServiceError(`failed to resolve HEAD: ${(err as Error).message}`, 500);
     }
   }
 

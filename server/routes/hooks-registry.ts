@@ -11,6 +11,7 @@ import {
   getHookEnabled as getHookEnabledRepo,
   upsertHookSetting,
 } from '../repositories/index.js';
+import { badRequest, ServiceError } from '../services/errors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiLogger = childLogger('api');
@@ -140,30 +141,25 @@ function discoverHookScripts(
 }
 
 router.get('/api/hooks/templates', async (_req: Request, res: Response) => {
-  try {
-    const { listHookTemplates, isHookTemplateInstalled } = await import('../hooks-install.js');
-    const templates = listHookTemplates().map((id) => ({
-      id,
-      installed: isHookTemplateInstalled(id),
-    }));
-    res.json(templates);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  const { listHookTemplates, isHookTemplateInstalled } = await import('../hooks-install.js');
+  const templates = listHookTemplates().map((id) => ({
+    id,
+    installed: isHookTemplateInstalled(id),
+  }));
+  res.json(templates);
 });
 
 router.post('/api/hooks/install', async (req: Request, res: Response) => {
   const { template } = req.body as { template?: string };
   if (!template || typeof template !== 'string') {
-    res.status(400).json({ error: 'body must contain { template: string }' });
-    return;
+    throw badRequest('body must contain { template: string }');
   }
   try {
     const { installHookTemplate } = await import('../hooks-install.js');
     const files = installHookTemplate(template);
     res.json({ ok: true, files });
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    throw badRequest((err as Error).message);
   }
 });
 
@@ -171,7 +167,6 @@ router.post('/api/hooks/install', async (req: Request, res: Response) => {
 router.get('/api/hooks/registry', (_req: Request, res: Response) => {
   const entries: HookRegistryEntry[] = [];
 
-  // Built-in: summarize-progress (defaults disabled)
   const builtinEnabled = getHookEnabled('builtin', 'summarize-progress', false);
   entries.push({
     scope: 'builtin',
@@ -186,11 +181,9 @@ router.get('/api/hooks/registry', (_req: Request, res: Response) => {
     last_exit_code: null,
   });
 
-  // Global hooks: ~/.octomux/hooks/
   const globalHooksBase = path.join(octomuxRoot(), 'hooks');
   entries.push(...discoverHookScripts(globalHooksBase, 'global'));
 
-  // Repo hooks: collect from every active task's repo_path
   try {
     const activeTasks = listActiveRepoPaths();
 
@@ -217,19 +210,15 @@ router.patch('/api/hooks/registry/:scope/:key', (req: Request, res: Response) =>
   const { enabled } = req.body as { enabled?: unknown };
 
   if (typeof enabled !== 'boolean') {
-    res.status(400).json({ error: 'body must contain { enabled: boolean }' });
-    return;
+    throw badRequest('body must contain { enabled: boolean }');
   }
 
   try {
     upsertHookSetting(scope, key, enabled);
-
-    // Invalidate dispatcher cache for this entry
     invalidateHookEnabledCache(scope, key);
-
     res.json({ scope, key, enabled });
   } catch (err) {
     apiLogger.warn({ scope, key, err }, 'failed to update hook_settings');
-    res.status(500).json({ error: 'failed to update hook setting' });
+    throw new ServiceError('failed to update hook setting', 500);
   }
 });

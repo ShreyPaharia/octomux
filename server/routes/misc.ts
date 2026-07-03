@@ -9,13 +9,13 @@ import { getDataDir, pingDb } from '../db.js';
 import { childLogger } from '../logger.js';
 import { countRunningTasks, listRecentRepoPaths } from '../repositories/index.js';
 import { listHarnesses } from '../harnesses/index.js';
+import { badRequest, ServiceError } from '../services/errors.js';
 
 const execFile = promisify(execFileCb);
 const healthLogger = childLogger('health');
 
 export const router = express.Router();
 
-// GET /api/health — readiness probe: DB reachability, uptime, running tasks
 router.get('/api/health', (_req: Request, res: Response) => {
   const uptime = process.uptime();
   const data_dir = getDataDir();
@@ -43,7 +43,6 @@ router.get('/api/health', (_req: Request, res: Response) => {
   res.status(db.ok ? 200 : 503).json({ status, uptime, db, running_tasks, data_dir });
 });
 
-// GET /api/harnesses — list registered harness implementations
 router.get('/api/harnesses', (_req: Request, res: Response) => {
   res.json(
     listHarnesses().map(({ id, displayName, sessionIdMode }) => ({
@@ -54,19 +53,17 @@ router.get('/api/harnesses', (_req: Request, res: Response) => {
   );
 });
 
-// Browse directories for folder picker
 router.get('/api/browse', async (req: Request, res: Response) => {
   const dirPath = (req.query.path as string) || os.homedir();
 
   try {
     const stat = await fs.promises.stat(dirPath);
     if (!stat.isDirectory()) {
-      res.status(400).json({ error: 'Path is not a directory' });
-      return;
+      throw badRequest('Path is not a directory');
     }
-  } catch {
-    res.status(400).json({ error: 'Path does not exist' });
-    return;
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    throw badRequest('Path does not exist');
   }
 
   const dirEntries = await fs.promises.readdir(dirPath);
@@ -106,12 +103,10 @@ router.get('/api/browse', async (req: Request, res: Response) => {
   });
 });
 
-// List branches for a git repo
 router.get('/api/branches', async (req: Request, res: Response) => {
   const repoPath = req.query.repo_path as string;
   if (!repoPath) {
-    res.status(400).json({ error: 'repo_path is required' });
-    return;
+    throw badRequest('repo_path is required');
   }
 
   try {
@@ -127,38 +122,33 @@ router.get('/api/branches', async (req: Request, res: Response) => {
       .split('\n')
       .filter(Boolean)
       .map((b) => b.replace(/^origin\//, ''));
-    // Deduplicate (local + remote may overlap)
     const unique = [...new Set(branches)].filter((b) => b !== 'HEAD');
     res.json(unique);
   } catch {
-    res.status(400).json({ error: 'Failed to list branches' });
+    throw badRequest('Failed to list branches');
   }
 });
 
-// Preflight check for none-mode task creation
 router.get('/api/preflight/none-mode', async (req: Request, res: Response) => {
   const repoPath = String(req.query.repo_path ?? '');
   const baseBranch = String(req.query.base_branch ?? '');
   if (!repoPath || !baseBranch) {
-    res.status(400).json({ error: 'repo_path and base_branch are required' });
-    return;
+    throw badRequest('repo_path and base_branch are required');
   }
   try {
     const { preflightNoneMode } = await import('../preflight.js');
     const result = await preflightNoneMode(repoPath, baseBranch);
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    throw badRequest((err as Error).message);
   }
 });
 
-// Stash uncommitted changes before switching branch
 router.post('/api/preflight/stash', async (req: Request, res: Response) => {
   const repoPath = String(req.body?.repo_path ?? '');
   const targetBranch = String(req.body?.target_branch ?? '');
   if (!repoPath || !targetBranch) {
-    res.status(400).json({ error: 'repo_path and target_branch are required' });
-    return;
+    throw badRequest('repo_path and target_branch are required');
   }
   try {
     await execFile('git', [
@@ -172,16 +162,14 @@ router.post('/api/preflight/stash', async (req: Request, res: Response) => {
     ]);
     res.json({ ok: true });
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    throw badRequest((err as Error).message);
   }
 });
 
-// Get default branch for a git repo
 router.get('/api/default-branch', async (req: Request, res: Response) => {
   const repoPath = req.query.repo_path as string;
   if (!repoPath) {
-    res.status(400).json({ error: 'repo_path is required' });
-    return;
+    throw badRequest('repo_path is required');
   }
 
   try {
@@ -194,12 +182,10 @@ router.get('/api/default-branch', async (req: Request, res: Response) => {
     const branch = stdout.trim().replace('refs/remotes/origin/', '');
     res.json({ branch });
   } catch {
-    // Fallback to 'main'
     res.json({ branch: 'main' });
   }
 });
 
-// Recent repository paths from past tasks
 router.get('/api/recent-repos', (_req: Request, res: Response) => {
   res.json(listRecentRepoPaths(10));
 });
