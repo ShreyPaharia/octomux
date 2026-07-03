@@ -9,6 +9,7 @@ import {
 } from '../integrations/store.js';
 import { listProviders, getProvider } from '../integrations/registry.js';
 import { maskIntegration, mergeMaskedConfig } from '../integrations/mask.js';
+import { badRequest, notFound, ServiceError } from '../services/errors.js';
 // Side-effect: ensure all providers are registered when the API is loaded.
 import '../integrations/index.js';
 
@@ -40,22 +41,21 @@ router.get('/api/integrations', (_req: Request, res: Response) => {
 router.post('/api/integrations', (req: Request, res: Response) => {
   const body = req.body as { kind?: string; name?: string; config?: unknown };
   if (!body.kind?.trim()) {
-    res.status(400).json({ error: 'kind is required' });
-    return;
+    throw badRequest('kind is required');
   }
   if (!body.name?.trim()) {
-    res.status(400).json({ error: 'name is required' });
-    return;
+    throw badRequest('name is required');
   }
   const provider = getProvider(body.kind);
   if (!provider) {
-    res.status(400).json({ error: `unknown integration kind: ${body.kind}` });
-    return;
+    throw badRequest(`unknown integration kind: ${body.kind}`);
   }
   const validation = provider.validate(body.config ?? {});
   if (!validation.ok) {
-    res.status(400).json({ error: 'config validation failed', details: validation.errors });
-    return;
+    throw new ServiceError('config validation failed', 400, {
+      error: 'config validation failed',
+      details: validation.errors,
+    });
   }
   const integration = createIntegration(body.kind, body.name, body.config ?? {});
   res.status(201).json(maskIntegration(integration, provider.configSchema));
@@ -66,8 +66,7 @@ router.patch('/api/integrations/:id', (req: Request, res: Response) => {
   const id = (req.params as Record<string, string>).id;
   const existing = getIntegration(id);
   if (!existing) {
-    res.status(404).json({ error: 'Integration not found' });
-    return;
+    throw notFound('Integration not found');
   }
   const provider = getProvider(existing.kind);
   const body = req.body as { name?: string; config?: unknown; enabled?: boolean };
@@ -82,19 +81,17 @@ router.patch('/api/integrations/:id', (req: Request, res: Response) => {
       : (body.config as Record<string, unknown>);
     const validation = provider ? provider.validate(mergedConfig) : { ok: true };
     if (!validation.ok) {
-      res.status(400).json({
+      throw new ServiceError('config validation failed', 400, {
         error: 'config validation failed',
         details: (validation as { errors?: string[] }).errors,
       });
-      return;
     }
     patch.config = mergedConfig;
   }
 
   const updated = updateIntegration(id, patch);
   if (!updated) {
-    res.status(404).json({ error: 'Integration not found' });
-    return;
+    throw notFound('Integration not found');
   }
   res.json(provider ? maskIntegration(updated, provider.configSchema) : updated);
 });
@@ -104,8 +101,7 @@ router.delete('/api/integrations/:id', (req: Request, res: Response) => {
   const id = (req.params as Record<string, string>).id;
   const existing = getIntegration(id);
   if (!existing) {
-    res.status(404).json({ error: 'Integration not found' });
-    return;
+    throw notFound('Integration not found');
   }
   deleteIntegration(id);
   res.status(204).send();
@@ -116,16 +112,14 @@ router.post('/api/integrations/linear/prefill', async (req: Request, res: Respon
   const body = req.body as { api_key?: string };
   const apiKey = body.api_key?.trim();
   if (!apiKey) {
-    res.status(400).json({ error: 'api_key is required' });
-    return;
+    throw badRequest('api_key is required');
   }
   try {
     const { prefillFromLinear } = await import('../integrations/linear/prefill.js');
     const result = await prefillFromLinear(apiKey);
     res.json(result);
   } catch (err) {
-    const message = (err as Error).message;
-    res.status(502).json({ error: message });
+    throw new ServiceError((err as Error).message, 502);
   }
 });
 
@@ -134,13 +128,11 @@ router.post('/api/integrations/:id/test', async (req: Request, res: Response) =>
   const id = (req.params as Record<string, string>).id;
   const existing = getIntegration(id);
   if (!existing) {
-    res.status(404).json({ error: 'Integration not found' });
-    return;
+    throw notFound('Integration not found');
   }
   const provider = getProvider(existing.kind);
   if (!provider) {
-    res.status(400).json({ error: `no provider for kind: ${existing.kind}` });
-    return;
+    throw badRequest(`no provider for kind: ${existing.kind}`);
   }
   if (!provider.test) {
     res.json({ ok: true, message: 'Provider does not support connection testing' });
@@ -150,6 +142,9 @@ router.post('/api/integrations/:id/test', async (req: Request, res: Response) =>
     const result = await provider.test(existing.config);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ ok: false, message: (err as Error).message });
+    throw new ServiceError((err as Error).message, 500, {
+      ok: false,
+      message: (err as Error).message,
+    });
   }
 });

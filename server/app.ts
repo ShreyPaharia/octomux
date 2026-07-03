@@ -1,6 +1,6 @@
 import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
 import { setupRoutes } from './api.js';
+import { errorMiddleware } from './error-middleware.js';
 import { childLogger } from './logger.js';
 import { registerAuthRoutes, remoteAuthMiddleware, isRemoteMode } from './remote-auth.js';
 
@@ -67,11 +67,7 @@ export function createApp(): express.Express {
 
   setupRoutes(app);
 
-  // Error handler
-  app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
-    logger.error({ err, method: req.method, path: req.path }, `Unhandled error: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  });
+  app.use(errorMiddleware);
 
   return app;
 }
