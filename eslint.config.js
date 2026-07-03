@@ -65,6 +65,7 @@ export default tseslint.config(
       'server/tmux-bin.ts',
       'server/test-helpers.ts',
       'server/db.ts',
+      'server/db/**',
       'server/repositories/**',
       // The orchestrator's OWN repository for its owned tables (orchestrator_*,
       // action_cards, managed_tasks, conversation_usage, permission_rules, events).
