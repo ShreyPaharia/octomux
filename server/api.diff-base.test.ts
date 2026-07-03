@@ -3,7 +3,7 @@
 // must surface BaseUnavailableError as a 503 with the `base_unavailable` code.
 //
 // Lives in a dedicated file rather than api.test.ts because we mock
-// `./diff-base.js`, which the shared test would have to thread through every
+// `./@octomux/diff-engine`, which the shared test would have to thread through every
 // existing test.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -11,7 +11,7 @@ import request from 'supertest';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, DEFAULTS } from './test-helpers.js';
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
   closeTask: vi.fn(),
   deleteTask: vi.fn(),
@@ -37,30 +37,40 @@ vi.mock('fs', () => ({
   },
 }));
 
-vi.mock('./diff.js', () => ({
-  getDiffSummary: vi.fn(),
-  getFileDiff: vi.fn(),
-  safeResolvePath: (wt: string, p: string) => {
-    if (!p || p.includes('..') || p.startsWith('/')) throw new Error('Invalid path');
-    return `${wt}/${p}`;
-  },
-  MAX_FILE_BYTES: 1_048_576,
+vi.mock('./diff-review-state.js', () => ({
+  decorateDiffSummaryWithReviewState: vi.fn(async (_taskId, _wt, summary) => ({
+    ...summary,
+    reviewed_count: 0,
+    files: summary.files.map((f: (typeof summary.files)[number]) => ({
+      ...f,
+      reviewed: false,
+      reviewed_at: null,
+      reviewed_at_commit: null,
+      changed_since_review: false,
+    })),
+  })),
 }));
 
-// Mock diff-base while preserving the real BaseUnavailableError class so the
-// `instanceof` check in api.ts still works.
-vi.mock('./diff-base.js', async () => {
-  const actual = await vi.importActual<typeof import('./diff-base.js')>('./diff-base.js');
+vi.mock('@octomux/diff-engine', async () => {
+  const actual =
+    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
+    getDiffSummary: vi.fn(),
+    getFileDiff: vi.fn(),
     resolveDiffBase: vi.fn(),
     resolveRef: vi.fn(async () => 'resolved-sha'),
     clearDiffBaseCache: vi.fn(),
+    safeResolvePath: (wt: string, p: string) => {
+      if (!p || p.includes('..') || p.startsWith('/')) throw new Error('Invalid path');
+      return `${wt}/${p}`;
+    },
+    MAX_FILE_BYTES: 1_048_576,
   };
 });
 
-const diffMod = await import('./diff.js');
-const diffBaseMod = await import('./diff-base.js');
+const diffMod = await import('@octomux/diff-engine');
+const diffBaseMod = diffMod;
 const { createApp } = await import('./app.js');
 
 let db: Database.Database;

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
 import { StatusBadge } from './StatusBadge';
 import { renderWithRouter, TASK_STATUSES } from '../test-helpers';
-import type { RuntimeState } from '../../server/types';
+import type { RuntimeState } from '@octomux/types';
 
 describe('StatusBadge', () => {
   // ─── Renders all statuses with glyph + label ──────────────────────────────
@@ -23,7 +23,7 @@ describe('StatusBadge', () => {
     },
   );
 
-  it('covers every TaskStatus value', () => {
+  it('covers every RuntimeState value', () => {
     const testedStatuses = statusLabels.map(([s]) => s);
     expect(testedStatuses).toEqual(TASK_STATUSES);
   });

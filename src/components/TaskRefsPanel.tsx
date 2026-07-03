@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { TaskExternalRef } from '../../server/types';
+import type { TaskExternalRef } from '@octomux/types';
 
 interface TaskRefsPanelProps {
   taskId: string;
@@ -20,7 +20,7 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
 
   const load = useCallback(async () => {
     try {
-      const data = await api.getTaskRefs(taskId);
+      const data = await taskApi.getTaskRefs(taskId);
       setRefs(data);
     } catch {
       // swallow
@@ -40,7 +40,7 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
     setError(null);
     setAdding(true);
     try {
-      const newRef = await api.addTaskRef(taskId, {
+      const newRef = await taskApi.addTaskRef(taskId, {
         integration: trimmedIntegration,
         ref: trimmedRef,
         url: url.trim() || undefined,
@@ -59,7 +59,7 @@ export function TaskRefsPanel({ taskId, initialRefs }: TaskRefsPanelProps) {
   const handleRemove = useCallback(
     async (integrationKey: string) => {
       try {
-        await api.deleteTaskRef(taskId, integrationKey);
+        await taskApi.deleteTaskRef(taskId, integrationKey);
         setRefs((prev) => prev.filter((r) => r.integration !== integrationKey));
       } catch (err) {
         setError((err as Error).message);

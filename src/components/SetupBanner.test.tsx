@@ -8,7 +8,9 @@ const apiMock = vi.hoisted(() => ({
   getSetupStatus: vi.fn(),
 }));
 
-vi.mock('@/lib/api', () => ({ api: apiMock }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: apiMock }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: {} }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: {} }));
 
 function setupStatus(blockerCount: number, attentionCount: number) {
   return {

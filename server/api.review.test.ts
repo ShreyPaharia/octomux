@@ -19,7 +19,7 @@ describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
   it('POST inserts a review-state row with current HEAD as commit', async () => {
     const res = await request(app).post('/api/tasks/t1/files/src/foo.ts/reviewed').send();
     expect(res.status).toBe(204);
-    const { listReviewState } = await import('./file-review-state.js');
+    const { listReviewState } = await import('./repositories/file-review-state.js');
     const rows = listReviewState('t1');
     expect(rows[0]).toMatchObject({ file_path: 'src/foo.ts', reviewed_at_commit: 'headSha' });
   });
@@ -38,7 +38,7 @@ describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
 
     const res = await request(app).post('/api/tasks/t1/files/src/foo.ts/reviewed').send();
     expect(res.status).toBe(204);
-    const { listReviewState } = await import('./file-review-state.js');
+    const { listReviewState } = await import('./repositories/file-review-state.js');
     expect(listReviewState('t1')[0]).toMatchObject({
       reviewed_at_commit: 'headSha',
       reviewed_blob_sha: 'blobSha',
@@ -49,7 +49,7 @@ describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
     await request(app).post('/api/tasks/t1/files/src/foo.ts/reviewed').send();
     const res = await request(app).delete('/api/tasks/t1/files/src/foo.ts/reviewed').send();
     expect(res.status).toBe(204);
-    const { listReviewState } = await import('./file-review-state.js');
+    const { listReviewState } = await import('./repositories/file-review-state.js');
     expect(listReviewState('t1')).toEqual([]);
   });
 

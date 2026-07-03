@@ -190,7 +190,7 @@ describe('getSkill', () => {
   });
 
   it('throws on missing skill', async () => {
-    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
+    vi.mocked(fs.promises.readFile).mockRejectedValue(enoent());
 
     await expect(getSkill('nonexistent')).rejects.toThrow('Skill not found: nonexistent');
   });

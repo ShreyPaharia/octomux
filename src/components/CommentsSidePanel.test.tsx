@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { CommentsSidePanel } from './CommentsSidePanel';
-import { TaskCommentsContext, type TaskCommentsState } from '@/hooks/useTaskComments';
-import type { InlineCommentWithOutdated } from '@/lib/api';
+import { CommentsContext, type CommentsState } from '@/hooks/useTaskComments';
+import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
 
 function comment(o: Partial<InlineCommentWithOutdated> = {}): InlineCommentWithOutdated {
   return {
@@ -21,7 +21,7 @@ function comment(o: Partial<InlineCommentWithOutdated> = {}): InlineCommentWithO
   };
 }
 
-function makeContext(initial: InlineCommentWithOutdated[]): TaskCommentsState {
+function makeContext(initial: InlineCommentWithOutdated[]): CommentsState {
   const byId = new Map(initial.map((c) => [c.id, c]));
   return {
     byId,
@@ -52,14 +52,14 @@ function renderPanel(opts: {
   const ctx = makeContext(opts.comments);
   const onJumpTo = opts.onJumpTo ?? vi.fn();
   render(
-    <TaskCommentsContext.Provider value={ctx}>
+    <CommentsContext.Provider value={ctx}>
       <CommentsSidePanel
         agents={[]}
         filesInDiff={opts.filesInDiff ?? new Set(opts.comments.map((c) => c.file_path))}
         rangeIsBase={opts.rangeIsBase ?? true}
         onJumpTo={onJumpTo}
       />
-    </TaskCommentsContext.Provider>,
+    </CommentsContext.Provider>,
   );
   return { ctx, onJumpTo };
 }
@@ -141,14 +141,14 @@ describe('CommentsSidePanel', () => {
 
   it('renders Outdated chip on base range only', () => {
     const { unmount } = render(
-      <TaskCommentsContext.Provider value={makeContext([comment({ id: 'c1', outdated: true })])}>
+      <CommentsContext.Provider value={makeContext([comment({ id: 'c1', outdated: true })])}>
         <CommentsSidePanel
           agents={[]}
           filesInDiff={new Set(['src/foo.ts'])}
           rangeIsBase={false}
           onJumpTo={vi.fn()}
         />
-      </TaskCommentsContext.Provider>,
+      </CommentsContext.Provider>,
     );
     // Pill button still says "Outdated" but no chip should appear inside the row.
     const row = screen.getByTestId('side-panel-comment-c1');
@@ -156,14 +156,14 @@ describe('CommentsSidePanel', () => {
     unmount();
 
     render(
-      <TaskCommentsContext.Provider value={makeContext([comment({ id: 'c1', outdated: true })])}>
+      <CommentsContext.Provider value={makeContext([comment({ id: 'c1', outdated: true })])}>
         <CommentsSidePanel
           agents={[]}
           filesInDiff={new Set(['src/foo.ts'])}
           rangeIsBase={true}
           onJumpTo={vi.fn()}
         />
-      </TaskCommentsContext.Provider>,
+      </CommentsContext.Provider>,
     );
     const row2 = screen.getByTestId('side-panel-comment-c1');
     expect(within(row2).getByText('Outdated')).toBeInTheDocument();

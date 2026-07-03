@@ -1,75 +1,105 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+const { LinearClientMock, MockLinearError } = vi.hoisted(() => {
+  class MockLinearError extends Error {
+    type?: string;
+    errors?: Array<{ type?: string; message: string }>;
+    status?: number;
+    constructor(_raw?: unknown, errors?: Array<{ type?: string; message: string }>, type?: string) {
+      super(errors?.[0]?.message ?? 'Linear error');
+      this.name = 'LinearError';
+      this.errors = errors;
+      this.type = type;
+    }
+  }
+  return {
+    LinearClientMock: vi.fn(),
+    MockLinearError,
+  };
+});
 
-import { linearGraphql, LinearApiError } from './graphql.js';
+vi.mock('@linear/sdk', () => ({
+  LinearClient: LinearClientMock,
+  LinearError: MockLinearError,
+  LinearErrorType: {
+    AuthenticationError: 'AuthenticationError',
+    Unknown: 'Unknown',
+  },
+}));
 
-describe('linearGraphql', () => {
+import { createLinearClient, invokeLinear, LinearApiError, toLinearApiError } from './graphql.js';
+
+describe('createLinearClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('POSTs to api.linear.app with the bare api key as Authorization', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { viewer: { id: 'u1', name: 'Test' } } }),
-    });
-
-    const result = await linearGraphql('lin_api_xyz', 'query { viewer { id name } }');
-    expect(result).toEqual({ viewer: { id: 'u1', name: 'Test' } });
-
-    const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.linear.app/graphql');
-    expect(opts.method).toBe('POST');
-    const headers = opts.headers as Record<string, string>;
-    expect(headers['Authorization']).toBe('lin_api_xyz');
-    expect(headers['Content-Type']).toBe('application/json');
-  });
-
-  it('passes variables in the body', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { issue: { id: 'iss-1' } } }),
-    });
-
-    await linearGraphql('k', 'query I($id: String!) { issue(id: $id) { id } }', { id: 'BAC-1' });
-
-    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(opts.body as string);
-    expect(body).toEqual({
-      query: 'query I($id: String!) { issue(id: $id) { id } }',
-      variables: { id: 'BAC-1' },
+    LinearClientMock.mockImplementation(function (this: unknown, opts: { apiKey?: string }) {
+      return { apiKey: opts.apiKey };
     });
   });
 
-  it('throws LinearApiError when response contains errors[]', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        errors: [
-          { message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } },
-        ],
-      }),
-    });
+  it('instantiates LinearClient with the bare api key', () => {
+    const client = createLinearClient('lin_api_xyz');
+    expect(LinearClientMock).toHaveBeenCalledWith({ apiKey: 'lin_api_xyz' });
+    expect(client).toEqual({ apiKey: 'lin_api_xyz' });
+  });
+});
 
-    await expect(linearGraphql('bad', 'query { viewer { id } }')).rejects.toThrow(LinearApiError);
-    await expect(linearGraphql('bad', 'query { viewer { id } }')).rejects.toThrow(
-      /Authentication failed/,
+describe('toLinearApiError', () => {
+  it('passes through LinearApiError', () => {
+    const err = new LinearApiError('already wrapped', 'CODE');
+    expect(toLinearApiError(err)).toBe(err);
+  });
+
+  it('wraps SDK LinearError with message and code', () => {
+    const sdkErr = new MockLinearError(
+      undefined,
+      [{ message: 'Authentication failed', type: 'AuthenticationError' }],
+      'AuthenticationError',
     );
+    const wrapped = toLinearApiError(sdkErr);
+    expect(wrapped).toBeInstanceOf(LinearApiError);
+    expect(wrapped.message).toMatch(/Authentication failed/);
+    expect(wrapped.code).toBe('AuthenticationError');
   });
 
-  it('throws on HTTP non-2xx', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      text: vi.fn().mockResolvedValue('upstream broke'),
-    });
+  it('appends HTTP status when missing from SDK error message', () => {
+    const sdkErr = new MockLinearError(undefined, [{ message: 'Server error', type: 'Unknown' }]);
+    sdkErr.status = 500;
+    const wrapped = toLinearApiError(sdkErr);
+    expect(wrapped.message).toMatch(/500/);
+  });
+});
 
-    await expect(linearGraphql('k', 'query {}')).rejects.toThrow(/500/);
+describe('invokeLinear', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    LinearClientMock.mockImplementation(function (this: unknown, opts: { apiKey?: string }) {
+      return { apiKey: opts.apiKey };
+    });
+  });
+
+  it('returns the callback result on success', async () => {
+    const result = await invokeLinear('key', async (client) => {
+      expect(client).toEqual({ apiKey: 'key' });
+      return { ok: true };
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('throws LinearApiError when the SDK raises LinearError', async () => {
+    LinearClientMock.mockImplementation(() => ({
+      get viewer() {
+        return Promise.reject(
+          new MockLinearError(
+            undefined,
+            [{ message: 'Authentication failed', type: 'AuthenticationError' }],
+            'AuthenticationError',
+          ),
+        );
+      },
+    }));
+
+    await expect(invokeLinear('bad', (c) => c.viewer)).rejects.toThrow(LinearApiError);
+    await expect(invokeLinear('bad', (c) => c.viewer)).rejects.toThrow(/Authentication failed/);
   });
 });

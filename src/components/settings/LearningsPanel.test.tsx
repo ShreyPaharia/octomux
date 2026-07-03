@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LearningsPanel } from './LearningsPanel';
 import { renderWithRouter } from '../../test-helpers';
-import type { ReviewLearning } from '@/lib/api';
+import type { ReviewLearning } from '@/lib/api/index';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -32,19 +32,19 @@ const LEARNING_2: ReviewLearning = {
 const listLearningsMock = vi.fn();
 const deleteLearningMock = vi.fn();
 
-const { apiProxy } = await vi.hoisted(async () => {
+const { reviewApiProxy } = await vi.hoisted(async () => {
   const helpers = await import('../../test-helpers');
   return helpers.setupApiMock();
 });
 
-vi.mock('@/lib/api', () => ({
-  api: new Proxy(
+vi.mock('@/lib/api/reviewApi', () => ({
+  reviewApi: new Proxy(
     {},
     {
       get: (_t, prop: string) => {
         if (prop === 'listLearnings') return listLearningsMock;
         if (prop === 'deleteLearning') return deleteLearningMock;
-        return (apiProxy as Record<string, unknown>)[prop];
+        return (reviewApiProxy as Record<string, unknown>)[prop];
       },
     },
   ),

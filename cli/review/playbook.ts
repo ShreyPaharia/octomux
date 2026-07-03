@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
 import { readPlaybook, appendPlaybookNote } from '../../server/review-playbook.js';
 import { SELECT_TASK_SQL } from '../../server/task-select.js';
-import type { Task } from '../../server/types.js';
+import type { Task } from '@octomux/types';
 
 function resolveRepoPath(taskId: string): string {
   const task = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;

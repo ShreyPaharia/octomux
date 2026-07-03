@@ -1,4 +1,4 @@
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { TaskCard } from './TaskCard';
 import { EmptyState } from './EmptyState';
 import { TerminalRectIcon } from './icons';

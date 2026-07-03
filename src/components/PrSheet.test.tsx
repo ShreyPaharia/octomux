@@ -4,10 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { PrSheet } from './PrSheet';
 import { makeTask } from '../test-helpers';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -37,7 +39,7 @@ describe('PrSheet', () => {
     });
   });
 
-  it('calls api.createPr when Create PR is clicked', async () => {
+  it('calls taskApi.createPr when Create PR is clicked', async () => {
     const user = userEvent.setup();
     const task = makeTask({ id: 't-2', title: 'ship it', branch: 'agents/x' });
     render(<PrSheet open task={task} onClose={() => {}} />);

@@ -14,7 +14,7 @@ import type { Task, Agent } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-runner.js', async () => {
+vi.mock('./task-engine/index.js', async () => {
   const { getDb } = await import('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
@@ -187,18 +187,39 @@ vi.mock('./settings.js', () => ({
   })),
 }));
 
-vi.mock('./diff.js', () => ({
-  getDiffSummary: vi.fn(),
-  getFileDiff: vi.fn(),
-  safeResolvePath: (wt: string, p: string) => {
-    if (!p || p.includes('..') || p.startsWith('/')) throw new Error('Invalid path');
-    return `${wt}/${p}`;
-  },
-  MAX_FILE_BYTES: 1_048_576,
+vi.mock('./diff-review-state.js', () => ({
+  decorateDiffSummaryWithReviewState: vi.fn(async (_taskId, _wt, summary) => ({
+    ...summary,
+    reviewed_count: 0,
+    files: summary.files.map(
+      (f: {
+        reviewed?: boolean;
+        reviewed_at?: string | null;
+        reviewed_at_commit?: string | null;
+        changed_since_review?: boolean;
+      }) => ({
+        ...f,
+        reviewed: f.reviewed ?? false,
+        reviewed_at: f.reviewed_at ?? null,
+        reviewed_at_commit: f.reviewed_at_commit ?? null,
+        changed_since_review: f.changed_since_review ?? false,
+      }),
+    ),
+  })),
 }));
 
+vi.mock('@octomux/diff-engine', async () => {
+  const actual =
+    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+  return {
+    ...actual,
+    getDiffSummary: vi.fn(),
+    getFileDiff: vi.fn(),
+  };
+});
+
 const fs = (await import('fs')).default;
-const diffModule = await import('./diff.js');
+const diffModule = await import('@octomux/diff-engine');
 
 const { createApp } = await import('./app.js');
 const {
@@ -211,7 +232,7 @@ const {
   createUserTerminal,
   createShellTerminal,
   closeShellTerminal,
-} = await import('./task-runner.js');
+} = await import('./task-engine/index.js');
 const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
 const { updateSettings } = await import('./settings.js');
 
@@ -238,7 +259,7 @@ const notFoundCases = [
     name: 'PATCH /api/tasks/:id',
     method: 'patch' as const,
     url: '/api/tasks/nonexistent',
-    body: { status: 'closed' },
+    body: { runtime_state: 'idle' },
   },
   { name: 'DELETE /api/tasks/:id', method: 'delete' as const, url: '/api/tasks/nonexistent' },
   {
@@ -658,13 +679,13 @@ describe('POST /api/tasks/:id/start', () => {
 // ─── PATCH /api/tasks/:id ────────────────────────────────────────────────────
 
 describe('PATCH /api/tasks/:id', () => {
-  it('updates status and returns updated task with agents', async () => {
+  it('updates runtime_state and returns updated task with agents', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'closed' });
+      .send({ runtime_state: 'idle' });
 
     expect(res.status).toBe(200);
     expect(res.body.runtime_state).toBe('idle');
@@ -676,16 +697,16 @@ describe('PATCH /api/tasks/:id', () => {
 
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'closed' });
+      .send({ runtime_state: 'idle' });
 
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
   });
 
   // ─── closeTask trigger ─────────────────────────────────────────────────
 
-  it('calls closeTask when status=closed', async () => {
+  it('calls closeTask when runtime_state=idle', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'closed' });
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ runtime_state: 'idle' });
     expect(closeTask).toHaveBeenCalledOnce();
   });
 
@@ -693,7 +714,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db);
     await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' } as any);
+      .send({ runtime_state: 'running' } as any);
     expect(closeTask).not.toHaveBeenCalled();
   });
 
@@ -705,13 +726,13 @@ describe('PATCH /api/tasks/:id', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
-  // ─── Resume flow (status=running) ─────────────────────────────────────
+  // ─── Resume flow (runtime_state=running) ─────────────────────────────────
 
   it('returns 400 when resuming a non-closed/non-error task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('resume');
   });
@@ -723,7 +744,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Worktree');
   });
@@ -733,7 +754,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(200);
     expect(resumeTask).toHaveBeenCalledOnce();
   });
@@ -748,7 +769,7 @@ describe('PATCH /api/tasks/:id', () => {
     });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(200);
     expect(resumeTask).toHaveBeenCalledOnce();
   });
@@ -765,7 +786,7 @@ describe('PATCH /api/tasks/:id', () => {
       });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
-        .send({ status: 'running' });
+        .send({ runtime_state: 'running' });
       expect(res.status).toBe(400);
     },
   );
@@ -1022,7 +1043,18 @@ describe('GET /api/tasks/:id/diff', () => {
     });
     const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(200);
-    expect(res.body.files).toEqual([{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }]);
+    expect(res.body.files).toEqual([
+      {
+        path: 'a.txt',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+        reviewed: false,
+        reviewed_at: null,
+        reviewed_at_commit: null,
+        changed_since_review: false,
+      },
+    ]);
   });
 });
 
@@ -2052,7 +2084,7 @@ describe('Chats API (standalone agents)', () => {
     const created = await request(app).post('/api/chats').send({ label: 'Bad patch' });
     const res = await request(app)
       .patch(`/api/chats/${created.body.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
   });
 

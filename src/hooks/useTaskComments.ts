@@ -1,11 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
-  api,
+  taskApi,
   type InlineCommentRow,
   type InlineCommentWithOutdated,
+  type ListCommentsResponse,
   type PostCommentInput,
   type UpdateCommentInput,
-} from '@/lib/api';
+} from '@/lib/api/taskApi';
+import { useResource } from '@/lib/use-resource';
 
 export interface OpenComposer {
   filePath: string;
@@ -21,7 +23,7 @@ export interface QueueDraftInput {
   lineText: string;
 }
 
-export interface TaskCommentsState {
+export interface CommentsState {
   byId: Map<string, InlineCommentWithOutdated>;
   byFile: (path: string) => InlineCommentWithOutdated[];
   byFileLineSide: (path: string, line: number, side: 'old' | 'new') => InlineCommentWithOutdated[];
@@ -53,10 +55,9 @@ function indexBy(rows: InlineCommentWithOutdated[]): Map<string, InlineCommentWi
 export function useTaskComments(
   taskId: string | undefined,
   opts?: { onError?: (msg: string) => void; onQueueDraft?: (draft: QueueDraftInput) => void },
-): TaskCommentsState {
+): CommentsState {
   const [byId, setById] = useState<Map<string, InlineCommentWithOutdated>>(() => new Map());
   const [outdatedUnavailable, setOutdatedUnavailable] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openComposer, setOpenComposer] = useState<OpenComposer | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -79,29 +80,33 @@ export function useTaskComments(
     onErrorRef.current?.(msg);
   }, []);
 
-  const refetch = useCallback(async () => {
-    if (!taskId) return;
-    setLoading(true);
+  // The server-data load lifecycle (mount + taskId-change + loading flag) runs
+  // through the shared useResource primitive. The fetcher writes into the
+  // optimistic `byId` Map (the source of truth for post/update/remove) and
+  // reports errors via the onError hook, so it never rejects to useResource.
+  const fetcher = useCallback(async (): Promise<ListCommentsResponse | null> => {
+    if (!taskId) return null;
     try {
-      const res = await api.listComments(taskId);
+      const res = await taskApi.listComments(taskId);
       setById(indexBy(res.comments));
       setOutdatedUnavailable(!!res.outdated_unavailable);
       setError(null);
+      return res;
     } catch (err) {
       reportError((err as Error).message);
-    } finally {
-      setLoading(false);
+      return null;
     }
   }, [taskId, reportError]);
 
+  const { loading, refresh: refetch } = useResource(taskId ? `comments:${taskId}` : null, fetcher);
+
+  // Clear the Map when there is no task (useResource doesn't fetch on a null key).
   useEffect(() => {
     if (!taskId) {
       setById(new Map());
       setOutdatedUnavailable(false);
-      return;
     }
-    refetch();
-  }, [taskId, refetch]);
+  }, [taskId]);
 
   const byFile = useCallback(
     (path: string) => {
@@ -149,7 +154,7 @@ export function useTaskComments(
         return next;
       });
       try {
-        const row = await api.postComment(taskId, input);
+        const row = await taskApi.postComment(taskId, input);
         setById((prev) => {
           const next = new Map(prev);
           next.delete(tmp.id);
@@ -190,7 +195,7 @@ export function useTaskComments(
         return next;
       });
       try {
-        const row = await api.updateComment(taskId, commentId, patch);
+        const row = await taskApi.updateComment(taskId, commentId, patch);
         setById((prev) => {
           const cur = prev.get(commentId);
           if (!cur) return prev;
@@ -224,7 +229,7 @@ export function useTaskComments(
         return next;
       });
       try {
-        await api.deleteComment(taskId, commentId);
+        await taskApi.deleteComment(taskId, commentId);
         return true;
       } catch (err) {
         setById((prev) => {
@@ -258,12 +263,12 @@ export function useTaskComments(
   };
 }
 
-export const TaskCommentsContext = createContext<TaskCommentsState | null>(null);
+export const CommentsContext = createContext<CommentsState | null>(null);
 
-export function useTaskCommentsContext(): TaskCommentsState {
-  const ctx = useContext(TaskCommentsContext);
+export function useCommentsContext(): CommentsState {
+  const ctx = useContext(CommentsContext);
   if (!ctx) {
-    throw new Error('useTaskCommentsContext must be used inside <TaskCommentsContext.Provider>');
+    throw new Error('useCommentsContext must be used inside <CommentsContext.Provider>');
   }
   return ctx;
 }

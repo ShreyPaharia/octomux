@@ -46,7 +46,7 @@ vi.mock('./settings.js', async () => {
   };
 });
 
-vi.mock('./repo-config.js', () => ({
+vi.mock('./repositories/repo-config.js', () => ({
   getOrCreateRepoConfig: vi.fn().mockResolvedValue({
     repo_path: '/repo',
     base_branch: null,
@@ -110,7 +110,7 @@ const {
   gcScratchDirs,
   scratchDirFor,
   scratchRoot,
-} = await import('./task-runner.js');
+} = await import('./task-engine/index.js');
 const { execFile } = await import('child_process');
 const fsMod = await import('fs');
 

@@ -7,8 +7,8 @@ const { mockRequestReReview } = await vi.hoisted(async () => ({
   mockRequestReReview: vi.fn(),
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { requestReReview: mockRequestReReview },
+vi.mock('@/lib/api/reviewApi', () => ({
+  reviewApi: { requestReReview: mockRequestReReview },
 }));
 
 vi.mock('sonner', () => ({

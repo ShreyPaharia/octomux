@@ -41,7 +41,7 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
     `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
   - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
   - `teams.ts` — team feature: `parseTeamConfig`, `validateTeamConfig`, `runTeam`, `upsertTeamSchedule`,
-    `listTeamSchedules`, `cronMatches`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
+    `listTeamSchedules`, `isCronDue`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
 - `src/` — React SPA (pages, components, lib/api.ts)
 - `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
 - `e2e/` — Playwright E2E tests
@@ -140,11 +140,11 @@ team_runs      (id PK, team, lead_task_id → tasks.id, started_at, status)
 
 `startPolling()` sets a 60 s interval calling `pollTeamSchedules()`. For each enabled schedule:
 
-1. evaluate 5-field cron (`* * * * *`) against current UTC minute
+1. evaluate 5-field cron (`* * * * *`) against current UTC minute via `croner` (`isCronDue`)
 2. skip if a `team_runs` row with `status='running'` already exists (idempotent)
 3. call `runTeam()`, insert `team_runs` row, update `last_run_at`
 
-Cron parser supports exact values and `*` only — no ranges, steps, or lists.
+Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/15`, `1-5`, `mon-fri`). Schedules are evaluated in UTC.
 
 ## Testing Patterns
 
@@ -189,10 +189,9 @@ Cron parser supports exact values and `*` only — no ranges, steps, or lists.
   `JSON.parse(row.metadata ?? 'null')` server-side, never expose the raw string. The
   hook dispatcher's `loadTaskExternalRefs(taskId)` helper already does this for
   provider envelopes; route handlers must parse on read too.
-- Linear API uses the bare API key in the `Authorization` header (no `Bearer` prefix)
-  — see `server/integrations/linear/graphql.ts`.
-- Linear errors come back as HTTP 200 with an `errors[]` array. `linearGraphql`
-  throws `LinearApiError` for those; callers must catch.
+- Linear integration uses `@linear/sdk` via `server/integrations/linear/graphql.ts`
+  (`createLinearClient` / `invokeLinear`). Pass the bare API key — the SDK sends it
+  without a `Bearer` prefix. SDK errors are wrapped as `LinearApiError`.
 
 ## Dispatching parallel Claude Code sub-agents in this repo
 

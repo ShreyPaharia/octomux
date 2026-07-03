@@ -3,13 +3,15 @@ import { useRef } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', async () => {
-  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
-  return { ...actual, api: apiProxy };
+vi.mock('@/lib/api/taskApi', async () => {
+  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+  return { ...actual, taskApi: taskApiProxy };
 });
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 vi.mock('@monaco-editor/react', () => ({
   DiffEditor: ({ original, modified }: { original: string; modified: string }) => {
@@ -25,7 +27,7 @@ vi.mock('@monaco-editor/react', () => ({
 }));
 
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
-import type { DiffFileEntry } from '@/lib/api';
+import type { DiffFileEntry } from '@/lib/api/taskApi';
 
 // ─── Controllable IntersectionObserver stub ──────────────────────────────────
 type IOEntry = Partial<IntersectionObserverEntry> & { isIntersecting: boolean };

@@ -1,13 +1,16 @@
-import { getDb } from './db.js';
-import { listComments } from './inline-comments.js';
+import {
+  listComments,
+  markCommentsStaleByIds,
+  markCommentsPublishedByIds,
+} from './repositories/inline-comments.js';
 import { isAnchorOutdated } from './inline-comments-outdated.js';
-import { recordPublishedReview } from './published-reviews.js';
+import { recordPublishedReview } from './repositories/published-reviews.js';
 import { postPullRequestReview } from './github-client.js';
 import { broadcast } from './events.js';
 import { childLogger } from './logger.js';
-import { SELECT_TASK_SQL } from './task-select.js';
-import type { Task, PublishedReviewVerdict } from './types.js';
-import type { InlineCommentRow } from './inline-comments.js';
+import { getTask, inTransaction } from './repositories/index.js';
+import type { PublishedReviewVerdict } from './types.js';
+import type { InlineCommentRow } from './repositories/inline-comments.js';
 import type { PullRequestReviewComment } from './github-client.js';
 
 const logger = childLogger('publish-review');
@@ -37,9 +40,7 @@ export async function publishReview(
   verdict: PublishedReviewVerdict,
   reviewBody: string,
 ): Promise<PublishReviewResult> {
-  const db = getDb();
-
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
 
   if (!task) throw new Error(`Task not found: ${taskId}`);
 
@@ -106,7 +107,7 @@ export async function publishReview(
   });
 
   // Persist in a single transaction
-  const publishedReview = db.transaction(() => {
+  const publishedReview = inTransaction(() => {
     // Record the published review
     const pr = recordPublishedReview({
       task_id: taskId,
@@ -119,10 +120,7 @@ export async function publishReview(
 
     // Flip stale comments
     if (staleIds.length > 0) {
-      const placeholders = staleIds.map(() => '?').join(', ');
-      db.prepare(`UPDATE inline_comments SET status = 'stale' WHERE id IN (${placeholders})`).run(
-        ...staleIds,
-      );
+      markCommentsStaleByIds(staleIds);
     }
 
     // Flip accepted → published and set published_review_id
@@ -130,16 +128,11 @@ export async function publishReview(
     // so github_comment_id stays null for now
     if (freshComments.length > 0) {
       const freshIds = freshComments.map((c) => c.id);
-      const freshPlaceholders = freshIds.map(() => '?').join(', ');
-      db.prepare(
-        `UPDATE inline_comments
-           SET status = 'published', published_review_id = ?
-         WHERE id IN (${freshPlaceholders})`,
-      ).run(pr.id, ...freshIds);
+      markCommentsPublishedByIds(freshIds, pr.id);
     }
 
     return pr;
-  })();
+  });
 
   broadcast({
     type: 'review:published',

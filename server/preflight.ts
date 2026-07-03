@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getDb } from './db.js';
+import { listNoneModeActiveTasks } from './repositories/index.js';
 import { childLogger } from './logger.js';
 import type { RuntimeState } from './types.js';
 
@@ -52,31 +52,7 @@ export async function preflightNoneMode(
   // `excludeTaskId` lets the caller skip its own row — needed when this is
   // called as defense-in-depth from inside startTask, where the caller's row
   // is already 'setting_up' but its w.branch is still null pending setup.
-  const db = getDb();
-  const rows = (
-    excludeTaskId
-      ? db
-          .prepare(
-            `SELECT t.id AS task_id, t.title, t.runtime_state, w.branch
-             FROM tasks t
-             INNER JOIN worktrees w ON t.worktree_id = w.id
-            WHERE t.runtime_state IN ('running', 'setting_up')
-              AND w.repo_path = ?
-              AND w.mode = 'none'
-              AND t.id != ?`,
-          )
-          .all(repoPath, excludeTaskId)
-      : db
-          .prepare(
-            `SELECT t.id AS task_id, t.title, t.runtime_state, w.branch
-             FROM tasks t
-             INNER JOIN worktrees w ON t.worktree_id = w.id
-            WHERE t.runtime_state IN ('running', 'setting_up')
-              AND w.repo_path = ?
-              AND w.mode = 'none'`,
-          )
-          .all(repoPath)
-  ) as PreflightConflict[];
+  const rows = listNoneModeActiveTasks(repoPath, excludeTaskId) as PreflightConflict[];
 
   const conflicts: PreflightConflict[] = [];
   const warnings: PreflightConflict[] = [];

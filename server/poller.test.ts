@@ -29,7 +29,7 @@ vi.mock('child_process', () => ({
 // Note: the vi.mock factory above runs during import hoisting, so it can't use
 // imported helpers. Everything below (after imports resolve) can use execFileOk.
 
-vi.mock('./task-runner.js', () => ({
+vi.mock('./task-engine/index.js', () => ({
   closeTask: vi.fn(),
   deleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
@@ -72,7 +72,7 @@ const {
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
 const { sendMessageToAgent } = await import('./tmux-input.js');
-const { closeTask, deleteTask, startTask, addAgent } = await import('./task-runner.js');
+const { closeTask, deleteTask, startTask, addAgent } = await import('./task-engine/index.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');

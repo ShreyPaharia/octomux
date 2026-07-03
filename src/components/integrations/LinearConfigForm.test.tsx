@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LinearConfigForm } from './LinearConfigForm.js';
-import { api } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
 
-vi.mock('@/lib/api', () => ({
-  api: {
+vi.mock('@/lib/api/configApi', () => ({
+  configApi: {
     prefillLinear: vi.fn(),
   },
 }));
@@ -20,7 +20,7 @@ describe('LinearConfigForm', () => {
   });
 
   it('calls prefillLinear when Connect & auto-detect is clicked, then shows team rows', async () => {
-    (api.prefillLinear as any).mockResolvedValue({
+    (configApi.prefillLinear as any).mockResolvedValue({
       teams: [
         {
           id: 'team-bac',
@@ -42,13 +42,13 @@ describe('LinearConfigForm', () => {
     await user.type(screen.getByLabelText(/api key/i), 'lin_xyz');
     await user.click(screen.getByRole('button', { name: /connect.*auto-detect/i }));
 
-    expect(api.prefillLinear).toHaveBeenCalledWith('lin_xyz');
+    expect(configApi.prefillLinear).toHaveBeenCalledWith('lin_xyz');
     const matches = await screen.findAllByText(/Backend \(BAC\)/i);
     expect(matches.length).toBeGreaterThan(0);
   });
 
   it('submits the full config including status_map_by_team and default_team_key', async () => {
-    (api.prefillLinear as any).mockResolvedValue({
+    (configApi.prefillLinear as any).mockResolvedValue({
       teams: [
         {
           id: 'team-bac',

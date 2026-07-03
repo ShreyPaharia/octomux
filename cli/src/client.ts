@@ -1,63 +1,17 @@
-export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
+import { createRequestCore, qs } from '@octomux/api-client';
+import type {
+  AddRefRequest,
+  Agent,
+  CreateTaskRequest,
+  RunMode,
+  Task,
+  TaskExternalRef,
+  TaskUpdate,
+  UpdateTaskRequest,
+  WorkflowStatus,
+} from '@octomux/types';
 
-export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
-
-export interface TaskUpdate {
-  id: string;
-  task_id: string;
-  kind: string;
-  payload: string | null;
-  author: string | null;
-  created_at: string;
-}
-
-export interface TaskExternalRef {
-  task_id: string;
-  integration: string;
-  external_id: string;
-  url: string | null;
-  title: string | null;
-  created_at: string;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  runtime_state: string;
-  workflow_status: WorkflowStatus;
-  repo_path: string;
-  branch: string | null;
-  base_branch: string | null;
-  worktree: string | null;
-  pr_url: string | null;
-  pr_number: number | null;
-  initial_prompt: string | null;
-  run_mode: RunMode;
-  base_sha: string | null;
-  last_viewed_at: string | null;
-  current_summary: string | null;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-  agents?: Agent[];
-  pending_prompts?: unknown[];
-  derived_status?: string | null;
-}
-
-export interface Agent {
-  id: string;
-  task_id: string;
-  window_index: number;
-  label: string;
-  status: string;
-  harness_id: string;
-  harness_session_id: string | null;
-  hook_token: string;
-  hook_activity: string;
-  created_at: string;
-}
+export type { Agent, RunMode, Task, TaskExternalRef, TaskUpdate, WorkflowStatus };
 
 export interface InlineCommentRow {
   id: string;
@@ -98,23 +52,10 @@ export interface IntegrationRow {
 
 export interface OctomuxClient {
   listIntegrations(): Promise<IntegrationRow[]>;
-  createTask(data: {
-    title: string;
-    description: string;
-    repo_path?: string;
-    initial_prompt?: string;
-    branch?: string;
-    base_branch?: string;
-    draft?: boolean;
-    run_mode?: RunMode;
-    worktree_path?: string;
-    harness_id?: string;
-    model?: string | null;
-    notify_task_id?: string | null;
-  }): Promise<Task>;
+  createTask(data: CreateTaskRequest & { title: string; description: string }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
-  updateTask(id: string, data: { status: string }): Promise<Task>;
+  updateTask(id: string, data: UpdateTaskRequest): Promise<Task>;
   deleteTask(id: string): Promise<void>;
   addAgent(
     taskId: string,
@@ -156,16 +97,7 @@ export interface OctomuxClient {
   moveTask(taskId: string, data: { workflow_status: WorkflowStatus; note?: string }): Promise<Task>;
   postTaskSummary(taskId: string, data: { summary: string; author?: string }): Promise<Task>;
   postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
-  addTaskRef(
-    taskId: string,
-    data: {
-      integration: string;
-      external_id: string;
-      url?: string;
-      title?: string;
-      metadata?: Record<string, unknown>;
-    },
-  ): Promise<TaskExternalRef>;
+  addTaskRef(taskId: string, data: AddRefRequest): Promise<TaskExternalRef>;
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
   getTaskRefs(taskId: string): Promise<{ refs: TaskExternalRef[] }>;
@@ -175,189 +107,167 @@ export interface OctomuxClient {
   listTeams(): Promise<
     Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
   >;
+
+  listSavedFiles(repoPath: string): Promise<Array<{ path: string; size: number }>>;
+  getSavedFile(repoPath: string, relPath: string): Promise<{ path: string; content: string }>;
+  putSavedFile(
+    repoPath: string,
+    relPath: string,
+    content: string,
+  ): Promise<{ path: string; content: string }>;
 }
 
-function qs(params: Record<string, string | undefined>): string {
-  const entries = Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][];
-  if (entries.length === 0) return '';
-  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-}
-
-async function request<T>(baseUrl: string, path: string, options?: RequestInit): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}${path}`, {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-    });
-  } catch (err) {
-    if (
-      (err as NodeJS.ErrnoException).cause &&
-      ((err as NodeJS.ErrnoException).cause as NodeJS.ErrnoException).code === 'ECONNREFUSED'
-    ) {
-      throw new Error(
-        `Cannot connect to octomux server at ${baseUrl.replace('/api', '')}\nStart it with: octomux start`,
-      );
-    }
-    throw err;
+function cliFetchError(err: unknown, { baseUrl }: { baseUrl: string }): never {
+  if (
+    (err as NodeJS.ErrnoException).cause &&
+    ((err as NodeJS.ErrnoException).cause as NodeJS.ErrnoException).code === 'ECONNREFUSED'
+  ) {
+    throw new Error(
+      `Cannot connect to octomux server at ${baseUrl.replace('/api', '')}\nStart it with: octomux start`,
+    );
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || res.statusText);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  throw err;
 }
 
 export function createClient(serverUrl: string): OctomuxClient {
   const baseUrl = serverUrl.replace(/\/$/, '') + '/api';
+  const { request } = createRequestCore({
+    baseUrl,
+    alwaysJsonContentType: true,
+    onFetchError: cliFetchError,
+  });
 
   return {
     listIntegrations() {
-      return request<IntegrationRow[]>(baseUrl, '/integrations');
+      return request<IntegrationRow[]>('/integrations');
     },
     createTask(data) {
-      return request<Task>(baseUrl, '/tasks', { method: 'POST', body: JSON.stringify(data) });
+      return request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
     listTasks(params) {
-      return request<Task[]>(baseUrl, `/tasks${qs({ repo_path: params?.repo_path })}`);
+      return request<Task[]>(`/tasks${qs({ repo_path: params?.repo_path })}`);
     },
     getTask(id) {
-      return request<Task>(baseUrl, `/tasks/${encodeURIComponent(id)}`);
+      return request<Task>(`/tasks/${encodeURIComponent(id)}`);
     },
     updateTask(id, data) {
-      return request<Task>(baseUrl, `/tasks/${encodeURIComponent(id)}`, {
+      return request<Task>(`/tasks/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
       });
     },
     deleteTask(id) {
-      return request<void>(baseUrl, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      return request<void>(`/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
     },
     addAgent(taskId, data) {
-      return request<Agent>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/agents`, {
+      return request<Agent>(`/tasks/${encodeURIComponent(taskId)}/agents`, {
         method: 'POST',
         body: JSON.stringify(data || {}),
       });
     },
     stopAgent(taskId, agentId) {
       return request<void>(
-        baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}`,
         { method: 'DELETE' },
       );
     },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(
-        baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/message`,
         { method: 'POST', body: JSON.stringify({ message }) },
       );
     },
     listSkills() {
-      return request<{ name: string; description: string }[]>(baseUrl, '/skills');
+      return request<{ name: string; description: string }[]>('/skills');
     },
     getSkill(name) {
-      return request<{ name: string; content: string }>(
-        baseUrl,
-        `/skills/${encodeURIComponent(name)}`,
-      );
+      return request<{ name: string; content: string }>(`/skills/${encodeURIComponent(name)}`);
     },
     createSkill(data) {
-      return request<{ name: string; content: string }>(baseUrl, '/skills', {
+      return request<{ name: string; content: string }>('/skills', {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     deleteSkill(name) {
-      return request<void>(baseUrl, `/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      return request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
     },
     recentRepos() {
-      return request<{ repo_path: string; last_used: string }[]>(baseUrl, '/recent-repos');
+      return request<{ repo_path: string; last_used: string }[]>('/recent-repos');
     },
     defaultBranch(repoPath) {
-      return request<{ branch: string }>(baseUrl, `/default-branch${qs({ repo_path: repoPath })}`);
+      return request<{ branch: string }>(`/default-branch${qs({ repo_path: repoPath })}`);
     },
     getRepoConfig(repoPath) {
-      return request(baseUrl, `/repo-config${qs({ repo_path: repoPath })}`);
+      return request(`/repo-config${qs({ repo_path: repoPath })}`);
     },
     postComment(taskId, data) {
-      return request<InlineCommentRow>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/comments`, {
+      return request<InlineCommentRow>(`/tasks/${encodeURIComponent(taskId)}/comments`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     listComments(taskId, file) {
       return request<{ comments: InlineCommentWithOutdated[]; outdated_unavailable?: boolean }>(
-        baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/comments${qs({ file })}`,
       );
     },
     updateComment(taskId, commentId, data) {
       return request<InlineCommentRow>(
-        baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}`,
         { method: 'PATCH', body: JSON.stringify(data) },
       );
     },
     deleteComment(taskId, commentId) {
       return request<void>(
-        baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}`,
         { method: 'DELETE' },
       );
     },
     moveTask(taskId, data) {
-      return request<Task>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/move`, {
+      return request<Task>(`/tasks/${encodeURIComponent(taskId)}/move`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     postTaskSummary(taskId, data) {
-      return request<Task>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/summary`, {
+      return request<Task>(`/tasks/${encodeURIComponent(taskId)}/summary`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     postTaskNote(taskId, data) {
-      return request<{ ok: boolean }>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/note`, {
+      return request<{ ok: boolean }>(`/tasks/${encodeURIComponent(taskId)}/note`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     addTaskRef(taskId, data) {
-      return request<TaskExternalRef>(baseUrl, `/tasks/${encodeURIComponent(taskId)}/refs`, {
+      return request<TaskExternalRef>(`/tasks/${encodeURIComponent(taskId)}/refs`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     deleteTaskRef(taskId, integration) {
       return request<void>(
-        baseUrl,
         `/tasks/${encodeURIComponent(taskId)}/refs/${encodeURIComponent(integration)}`,
         { method: 'DELETE' },
       );
     },
     getTaskUpdates(taskId) {
-      return request<{ updates: TaskUpdate[] }>(
-        baseUrl,
-        `/tasks/${encodeURIComponent(taskId)}/updates`,
-      );
+      return request<{ updates: TaskUpdate[] }>(`/tasks/${encodeURIComponent(taskId)}/updates`);
     },
     getTaskRefs(taskId) {
-      return request<{ refs: TaskExternalRef[] }>(
-        baseUrl,
-        `/tasks/${encodeURIComponent(taskId)}/refs`,
-      );
+      return request<{ refs: TaskExternalRef[] }>(`/tasks/${encodeURIComponent(taskId)}/refs`);
     },
     teamRun(data) {
-      return request<{ task_id: string }>(baseUrl, '/teams/run', {
+      return request<{ task_id: string }>('/teams/run', {
         method: 'POST',
         body: JSON.stringify(data),
       });
     },
     teamSchedule(data) {
-      return request<{ ok: boolean }>(baseUrl, '/teams/schedule', {
+      return request<{ ok: boolean }>('/teams/schedule', {
         method: 'POST',
         body: JSON.stringify(data),
       });
@@ -365,7 +275,23 @@ export function createClient(serverUrl: string): OctomuxClient {
     listTeams() {
       return request<
         Array<{ name: string; cron: string; enabled: number; last_run_at: string | null }>
-      >(baseUrl, '/teams');
+      >('/teams');
+    },
+    listSavedFiles(repoPath) {
+      return request<{ path: string; size: number }[]>(
+        `/repos/${encodeURIComponent(repoPath)}/files`,
+      );
+    },
+    getSavedFile(repoPath, relPath) {
+      return request<{ path: string; content: string }>(
+        `/repos/${encodeURIComponent(repoPath)}/files/content${qs({ path: relPath })}`,
+      );
+    },
+    putSavedFile(repoPath, relPath, content) {
+      return request<{ path: string; content: string }>(
+        `/repos/${encodeURIComponent(repoPath)}/files/content${qs({ path: relPath })}`,
+        { method: 'PUT', body: JSON.stringify({ content }) },
+      );
     },
   };
 }

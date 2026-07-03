@@ -8,6 +8,7 @@ import {
   createCard,
   resolveCard,
   getCard,
+  listAllPendingCards,
   upsertManagedTask,
   appendEvent,
   eventsSince,
@@ -17,6 +18,15 @@ import {
   getGlobalMonitorConversation,
   getActionResult,
   putActionResult,
+  listPermissionRulesByToolName,
+  listPermissionRules,
+  insertPermissionRule,
+  deletePermissionRule,
+  findConversationForTask,
+  listManagedTasksForConversation,
+  listManagedTasksWithDependsOn,
+  incrementConversationUsage,
+  getConversationUsage,
 } from './store.js';
 
 describe('orchestrator store', () => {
@@ -276,6 +286,180 @@ describe('orchestrator store', () => {
       clearGlobalMonitor();
       const conv2 = getConversation(id);
       expect(conv2!.is_global_monitor).toBe(0);
+    });
+  });
+
+  describe('listAllPendingCards — global pending cards (gate.ts:rehydratePendingCards)', () => {
+    it('returns all pending cards across conversations ordered by created_at ASC', () => {
+      const conv1 = createConversation({ title: 'Conv1' });
+      const conv2 = createConversation({ title: 'Conv2' });
+      const card1 = createCard({
+        conversation_id: conv1,
+        tool_use_id: 'tu-a1',
+        tool_name: 'octomux',
+        input: '{}',
+      });
+      const card2 = createCard({
+        conversation_id: conv2,
+        tool_use_id: 'tu-a2',
+        tool_name: 'octomux',
+        input: '{}',
+      });
+      const pending = listAllPendingCards();
+      const ids = pending.map((c) => c.id);
+      expect(ids).toContain(card1);
+      expect(ids).toContain(card2);
+    });
+
+    it('excludes resolved cards', () => {
+      const conv = createConversation({ title: 'Conv Resolved' });
+      const card = createCard({
+        conversation_id: conv,
+        tool_use_id: 'tu-r1',
+        tool_name: 'octomux',
+        input: '{}',
+      });
+      resolveCard(card, 'approved', null);
+      const pending = listAllPendingCards();
+      expect(pending.map((c) => c.id)).not.toContain(card);
+    });
+
+    it('returns empty array when no pending cards exist', () => {
+      expect(listAllPendingCards()).toEqual([]);
+    });
+  });
+
+  describe('permission_rules helpers (policy.ts call sites)', () => {
+    it('insertPermissionRule / listPermissionRules round-trip', () => {
+      const id = insertPermissionRule({
+        tool_name: 'octomux',
+        match: JSON.stringify({ subcommand: 'create-task' }),
+        effect: 'allow',
+      });
+      expect(id).toMatch(/^[a-zA-Z0-9_-]{12}$/);
+      const rules = listPermissionRules();
+      expect(rules.length).toBeGreaterThanOrEqual(1);
+      const rule = rules.find((r) => r.id === id);
+      expect(rule).toBeDefined();
+      expect(rule!.tool_name).toBe('octomux');
+      expect(rule!.effect).toBe('allow');
+    });
+
+    it('listPermissionRulesByToolName filters by tool_name and effect=allow', () => {
+      insertPermissionRule({ tool_name: 'octomux', match: null, effect: 'allow' });
+      insertPermissionRule({ tool_name: 'Bash', match: null, effect: 'allow' });
+      insertPermissionRule({ tool_name: 'octomux', match: null, effect: 'deny' });
+      const rules = listPermissionRulesByToolName('octomux');
+      expect(rules.every((r) => r.tool_name === 'octomux')).toBe(true);
+      expect(rules.every((r) => r.effect === 'allow')).toBe(true);
+    });
+
+    it('deletePermissionRule removes the rule', () => {
+      const id = insertPermissionRule({ tool_name: 'octomux', match: null, effect: 'allow' });
+      deletePermissionRule(id);
+      const rules = listPermissionRules();
+      expect(rules.find((r) => r.id === id)).toBeUndefined();
+    });
+
+    it('deletePermissionRule is a no-op for unknown id', () => {
+      expect(() => deletePermissionRule('does-not-exist')).not.toThrow();
+    });
+
+    it('listPermissionRules returns rules ordered by created_at ASC', () => {
+      const id1 = insertPermissionRule({ tool_name: 'a', match: null, effect: 'allow' });
+      const id2 = insertPermissionRule({ tool_name: 'b', match: null, effect: 'allow' });
+      const rules = listPermissionRules().filter((r) => [id1, id2].includes(r.id));
+      expect(rules[0].id).toBe(id1);
+      expect(rules[1].id).toBe(id2);
+    });
+  });
+
+  describe('findConversationForTask (supervisor.ts:findConversationForTask)', () => {
+    it('returns conversation_id for a managed task', () => {
+      const db = getDb();
+      const task = insertTask(db, { id: 'task-fct-01', worktree: null });
+      const convId = createConversation({ title: 'FCT Test' });
+      upsertManagedTask({ conversation_id: convId, task_id: task.id });
+      expect(findConversationForTask(task.id)).toBe(convId);
+    });
+
+    it('returns null for an unowned task', () => {
+      expect(findConversationForTask('nonexistent-task')).toBeNull();
+    });
+  });
+
+  describe('listManagedTasksForConversation (supervisor.ts:replay)', () => {
+    it('returns task_id + last_event_seq rows for all tasks in a conversation', () => {
+      const db = getDb();
+      const task1 = insertTask(db, { id: 'task-lmtfc-01', worktree: null });
+      const task2 = insertTask(db, { id: 'task-lmtfc-02', worktree: null });
+      const convId = createConversation({ title: 'LMTFC Test' });
+      upsertManagedTask({ conversation_id: convId, task_id: task1.id, last_event_seq: 10 });
+      upsertManagedTask({ conversation_id: convId, task_id: task2.id, last_event_seq: 20 });
+      const rows = listManagedTasksForConversation(convId);
+      expect(rows).toHaveLength(2);
+      const t1 = rows.find((r) => r.task_id === task1.id);
+      expect(t1?.last_event_seq).toBe(10);
+      const t2 = rows.find((r) => r.task_id === task2.id);
+      expect(t2?.last_event_seq).toBe(20);
+    });
+
+    it('returns empty array for conversation with no managed tasks', () => {
+      const convId = createConversation({ title: 'Empty Conv' });
+      expect(listManagedTasksForConversation(convId)).toEqual([]);
+    });
+  });
+
+  describe('listManagedTasksWithDependsOn (verify.ts:scheduleDagStep)', () => {
+    it('returns only rows with non-null depends_on', () => {
+      const db = getDb();
+      const task1 = insertTask(db, { id: 'task-dep-01', worktree: null });
+      const task2 = insertTask(db, { id: 'task-dep-02', worktree: null });
+      const task3 = insertTask(db, { id: 'task-dep-03', worktree: null });
+      const convId = createConversation({ title: 'Dep Test' });
+      upsertManagedTask({
+        conversation_id: convId,
+        task_id: task1.id,
+        depends_on: JSON.stringify(['task-dep-02']),
+      });
+      upsertManagedTask({ conversation_id: convId, task_id: task2.id }); // no depends_on
+      upsertManagedTask({
+        conversation_id: convId,
+        task_id: task3.id,
+        depends_on: JSON.stringify(['task-dep-01', 'task-dep-02']),
+      });
+      const rows = listManagedTasksWithDependsOn(convId);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((r) => r.task_id)).toContain(task1.id);
+      expect(rows.map((r) => r.task_id)).toContain(task3.id);
+      expect(rows.map((r) => r.task_id)).not.toContain(task2.id);
+    });
+  });
+
+  describe('incrementConversationUsage (verify.ts:incrementConversationUsage)', () => {
+    it('inserts a new row on first call', () => {
+      const convId = createConversation({ title: 'Usage Test' });
+      incrementConversationUsage(convId, { tasks_spawned: 1 });
+      const usage = getConversationUsage(convId);
+      expect(usage?.tasks_spawned).toBe(1);
+      expect(usage?.tool_calls).toBe(0);
+    });
+
+    it('increments counters atomically on subsequent calls', () => {
+      const convId = createConversation({ title: 'Usage Incr' });
+      incrementConversationUsage(convId, { tasks_spawned: 2, tool_calls: 5 });
+      incrementConversationUsage(convId, { tool_calls: 3 });
+      const usage = getConversationUsage(convId);
+      expect(usage?.tasks_spawned).toBe(2);
+      expect(usage?.tool_calls).toBe(8);
+    });
+
+    it('handles zero delta (no-op increment)', () => {
+      const convId = createConversation({ title: 'Usage Zero' });
+      incrementConversationUsage(convId, {});
+      const usage = getConversationUsage(convId);
+      expect(usage?.tasks_spawned).toBe(0);
+      expect(usage?.tool_calls).toBe(0);
     });
   });
 

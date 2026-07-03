@@ -4,13 +4,15 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', async () => {
-  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
-  return { ...actual, api: apiProxy };
+vi.mock('@/lib/api/taskApi', async () => {
+  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+  return { ...actual, taskApi: taskApiProxy };
 });
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 // Monaco's DiffEditor does real DOM work; replace with a stub that exposes
 // the original/modified content, options, and a per-mount id so tests can
@@ -430,69 +432,6 @@ describe('DiffViewer', () => {
       expect(screen.getByTestId('diff-group-design')).toBeInTheDocument();
       expect(screen.getByTestId('diff-group-src')).toBeInTheDocument();
       expect(screen.getByTestId('diff-group-src/components')).toBeInTheDocument();
-    });
-  });
-
-  // ─── Inline comment composer ────────────────────────────────────────────
-
-  describe('inline comment composer', () => {
-    it('clicking a line opens the composer below it', async () => {
-      const user = userEvent.setup();
-      const onAddComment = vi.fn();
-      render(
-        <DiffViewer
-          oldContent={'a\nb\nc'}
-          newContent={'a\nbb\nc'}
-          path="src/foo.ts"
-          onAddComment={onAddComment}
-        />,
-      );
-      await user.click(screen.getByText('bb'));
-      expect(screen.getByPlaceholderText(/leave a comment/i)).toBeInTheDocument();
-    });
-
-    it('Enter saves the comment with file path, line, and line text', async () => {
-      const user = userEvent.setup();
-      const onAddComment = vi.fn();
-      render(
-        <DiffViewer oldContent="a" newContent="aa" path="src/foo.ts" onAddComment={onAddComment} />,
-      );
-      await user.click(screen.getByText('aa'));
-      const input = screen.getByPlaceholderText(/leave a comment/i);
-      await user.type(input, 'rename pls{Enter}');
-      expect(onAddComment).toHaveBeenCalledWith({
-        filePath: 'src/foo.ts',
-        line: 1,
-        lineText: 'aa',
-        body: 'rename pls',
-      });
-    });
-
-    it('Esc discards without calling onAddComment', async () => {
-      const user = userEvent.setup();
-      const onAddComment = vi.fn();
-      render(
-        <DiffViewer oldContent="a" newContent="aa" path="src/foo.ts" onAddComment={onAddComment} />,
-      );
-      await user.click(screen.getByText('aa'));
-      const input = screen.getByPlaceholderText(/leave a comment/i);
-      await user.type(input, 'wip{Escape}');
-      expect(onAddComment).not.toHaveBeenCalled();
-    });
-
-    it('shows existing queued comments as pills under the line', () => {
-      render(
-        <DiffViewer
-          oldContent="a"
-          newContent="aa"
-          path="src/foo.ts"
-          onAddComment={() => {}}
-          queuedComments={[
-            { id: '1', filePath: 'src/foo.ts', line: 1, lineText: 'aa', body: 'rename' },
-          ]}
-        />,
-      );
-      expect(screen.getByText('rename')).toBeInTheDocument();
     });
   });
 

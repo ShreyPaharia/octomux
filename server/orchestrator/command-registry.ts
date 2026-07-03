@@ -58,6 +58,11 @@ const resumeTaskInputSchema = z.object({
   task_id: z.string().describe('The octomux task id'),
 });
 
+// ─── Policy tier ──────────────────────────────────────────────────────────────
+
+/** Gate classification tier (spec §5). Declared once per command in the registry. */
+export type PolicyTier = 'auto' | 'ask' | 'always-ask';
+
 // ─── CommandDef type ──────────────────────────────────────────────────────────
 
 export interface CommandContext {
@@ -87,12 +92,43 @@ export interface CommandDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   input: S;
   /** Whether to register this command as an MCP write tool. */
   mcp: boolean;
+  /** PreToolUse gate tier for this command (octomux CLI subcommand + MCP write tool). */
+  tier: PolicyTier;
   /**
    * Execute the action. Receives the parsed input and the server-injected context.
    * Returns the result and optionally the activity receipt text.
    */
   handler: (parsedInput: z.infer<S>, ctx: CommandContext) => Promise<CommandResult>;
 }
+
+/**
+ * Read-only CLI / MCP commands that are not orchestrator write actions but still
+ * need a policy tier. Keeps AUTO_TOOLS and READ_SUBCOMMANDS in sync with COMMANDS.
+ */
+export interface PolicyOnlyCommand {
+  /** MCP tool name when invoked as a direct tool (snake_case). */
+  mcpName?: string;
+  /** octomux CLI subcommand when invoked via Bash (kebab-case). */
+  cliSubcommand?: string;
+  tier: PolicyTier;
+}
+
+export const POLICY_ONLY_COMMANDS: PolicyOnlyCommand[] = [
+  { mcpName: 'list_tasks', cliSubcommand: 'list-tasks', tier: 'auto' },
+  { mcpName: 'get_task', cliSubcommand: 'get-task', tier: 'auto' },
+  { mcpName: 'monitor_status', tier: 'auto' },
+  { mcpName: 'get_task_output', tier: 'auto' },
+  { mcpName: 'pull_linear_issue', tier: 'auto' },
+  { cliSubcommand: 'recent-repos', tier: 'auto' },
+  { cliSubcommand: 'default-branch', tier: 'auto' },
+  { cliSubcommand: 'list-skills', tier: 'auto' },
+  { cliSubcommand: 'get-skill', tier: 'auto' },
+  { cliSubcommand: 'task-summary', tier: 'auto' },
+  { cliSubcommand: 'task-updates', tier: 'auto' },
+  { cliSubcommand: 'hooks-list', tier: 'auto' },
+  { cliSubcommand: 'list-integrations', tier: 'auto' },
+  { cliSubcommand: 'request-review', tier: 'ask' },
+];
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +151,7 @@ export const COMMANDS: CommandDef[] = [
       'Returns the task id (a pointer).',
     input: createTaskInputSchema,
     mcp: true,
+    tier: 'ask',
     async handler(parsed, ctx) {
       const result = await runCreateTask({
         ...parsed,
@@ -131,6 +168,7 @@ export const COMMANDS: CommandDef[] = [
     summary: 'Send a message/instruction to a running task agent (e.g. nudge or redirect).',
     input: sendMessageInputSchema,
     mcp: true,
+    tier: 'ask',
     async handler(parsed, _ctx) {
       await runSendMessage(parsed.task_id, parsed.message);
       const result = { task_id: parsed.task_id };
@@ -146,6 +184,7 @@ export const COMMANDS: CommandDef[] = [
       'Set a task workflow status (backlog | planned | in_progress | human_review | pr | done).',
     input: setStatusInputSchema,
     mcp: true,
+    tier: 'ask',
     async handler(parsed, _ctx) {
       await runSetStatus(parsed.task_id, parsed.status as WorkflowStatus);
       const result = { task_id: parsed.task_id, status: parsed.status };
@@ -160,6 +199,7 @@ export const COMMANDS: CommandDef[] = [
     summary: 'Attach another agent (new tmux window) to a running task, sharing its worktree.',
     input: addAgentInputSchema,
     mcp: true,
+    tier: 'ask',
     async handler(parsed, _ctx) {
       const { task_id, ...opts } = parsed;
       const result = await runAddAgent(task_id, opts);
@@ -176,6 +216,7 @@ export const COMMANDS: CommandDef[] = [
       'so it can be resumed. Runs immediately (no approval).',
     input: closeTaskInputSchema,
     mcp: true,
+    tier: 'always-ask',
     async handler(parsed, _ctx) {
       await runCloseTask(parsed.task_id);
       const result = { task_id: parsed.task_id };
@@ -193,6 +234,7 @@ export const COMMANDS: CommandDef[] = [
     summary: '',
     input: resumeTaskInputSchema,
     mcp: false,
+    tier: 'ask',
     async handler(parsed, _ctx) {
       await runResumeTask(parsed.task_id);
       const result = { task_id: parsed.task_id };
@@ -209,6 +251,7 @@ export const COMMANDS: CommandDef[] = [
       'and irreversible. Runs immediately (no approval) -- only call when the user clearly intends it.',
     input: deleteTaskInputSchema,
     mcp: true,
+    tier: 'always-ask',
     async handler(parsed, _ctx) {
       await runDeleteTask(parsed.task_id);
       const result = { task_id: parsed.task_id };
@@ -217,6 +260,58 @@ export const COMMANDS: CommandDef[] = [
     },
   },
 ];
+
+// ─── Policy set derivation ────────────────────────────────────────────────────
+
+export interface PolicySets {
+  AUTO_TOOLS: Set<string>;
+  READ_SUBCOMMANDS: Set<string>;
+  ASK_SUBCOMMANDS: Set<string>;
+  ALWAYS_ASK_SUBCOMMANDS: Set<string>;
+}
+
+/** Build gate policy sets from the command registry at module load. */
+export function buildPolicySets(
+  commands: CommandDef[] = COMMANDS,
+  policyOnly: PolicyOnlyCommand[] = POLICY_ONLY_COMMANDS,
+): PolicySets {
+  const AUTO_TOOLS = new Set<string>();
+  const READ_SUBCOMMANDS = new Set<string>();
+  const ASK_SUBCOMMANDS = new Set<string>();
+  const ALWAYS_ASK_SUBCOMMANDS = new Set<string>();
+
+  for (const cmd of commands) {
+    switch (cmd.tier) {
+      case 'auto':
+        if (cmd.mcp) AUTO_TOOLS.add(cmd.name);
+        READ_SUBCOMMANDS.add(cmd.action);
+        break;
+      case 'ask':
+        ASK_SUBCOMMANDS.add(cmd.action);
+        break;
+      case 'always-ask':
+        ALWAYS_ASK_SUBCOMMANDS.add(cmd.action);
+        break;
+    }
+  }
+
+  for (const cmd of policyOnly) {
+    switch (cmd.tier) {
+      case 'auto':
+        if (cmd.mcpName) AUTO_TOOLS.add(cmd.mcpName);
+        if (cmd.cliSubcommand) READ_SUBCOMMANDS.add(cmd.cliSubcommand);
+        break;
+      case 'ask':
+        if (cmd.cliSubcommand) ASK_SUBCOMMANDS.add(cmd.cliSubcommand);
+        break;
+      case 'always-ask':
+        if (cmd.cliSubcommand) ALWAYS_ASK_SUBCOMMANDS.add(cmd.cliSubcommand);
+        break;
+    }
+  }
+
+  return { AUTO_TOOLS, READ_SUBCOMMANDS, ASK_SUBCOMMANDS, ALWAYS_ASK_SUBCOMMANDS };
+}
 
 // ─── Lookup helpers ───────────────────────────────────────────────────────────
 

@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InlineCommentCard } from './InlineCommentCard';
-import type { InlineCommentDTO } from '../../lib/api';
+import type { InlineCommentDTO } from '@/lib/api/reviewApi';
 
 const { mockPatchComment } = await vi.hoisted(async () => {
   const mockPatchComment = vi.fn();
   return { mockPatchComment };
 });
-vi.mock('@/lib/api', () => ({
-  api: { patchComment: mockPatchComment },
+vi.mock('@/lib/api/reviewApi', () => ({
+  reviewApi: { patchComment: mockPatchComment },
 }));
 
 vi.mock('./RejectDialog', () => ({

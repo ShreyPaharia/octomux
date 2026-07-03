@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { timeAgo } from '@/lib/time';
-import type { PermissionPrompt } from '../../server/types';
+import type { PermissionPrompt } from '@octomux/types';
 
 function abbreviateInput(toolInput: Record<string, unknown>): string {
   const command = toolInput.command || toolInput.file_path || toolInput.pattern || '';

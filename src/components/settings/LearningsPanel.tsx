@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
-import type { ReviewLearning } from '@/lib/api';
+import { reviewApi } from '@/lib/api/reviewApi';
+import type { ReviewLearning } from '@/lib/api/index';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
@@ -38,7 +38,7 @@ export function LearningsPanel({ repoPath }: LearningsPanelProps) {
 
   const load = useCallback(() => {
     setLoading(true);
-    api
+    reviewApi
       .listLearnings(repoPath)
       .then((data) => setLearnings(data))
       .catch((err: Error) => showToast('error', 'LEARNINGS', err.message))
@@ -56,7 +56,7 @@ export function LearningsPanel({ repoPath }: LearningsPanelProps) {
       setLearnings((prev) => prev.filter((l) => l.id !== id));
       setDeletingIds((prev) => new Set(prev).add(id));
       try {
-        await api.deleteLearning(id);
+        await reviewApi.deleteLearning(id);
       } catch (err) {
         // Revert on failure
         setLearnings(snapshot);

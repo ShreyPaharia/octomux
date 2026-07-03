@@ -1,11 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+const mockInvokeLinear = vi.fn();
+
+vi.mock('./integrations/linear/graphql.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./integrations/linear/graphql.js')>();
+  return {
+    ...actual,
+    invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
+  };
+});
 
 import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
+import { LinearApiError } from './integrations/linear/graphql.js';
 
 describe('POST /api/integrations/linear/prefill', () => {
   beforeEach(() => {
@@ -14,28 +22,23 @@ describe('POST /api/integrations/linear/prefill', () => {
   });
 
   it('returns prefilled map for given api key', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        data: {
-          teams: {
+    mockInvokeLinear.mockImplementation(async (_apiKey, fn) => {
+      const teams = [
+        {
+          id: 'team-bac',
+          key: 'BAC',
+          name: 'Backend',
+          states: vi.fn().mockResolvedValue({
             nodes: [
-              {
-                id: 'team-bac',
-                key: 'BAC',
-                name: 'Backend',
-                states: {
-                  nodes: [
-                    { id: 's-backlog', name: 'Backlog', type: 'backlog' },
-                    { id: 's-done', name: 'Done', type: 'completed' },
-                  ],
-                },
-              },
+              { id: 's-backlog', name: 'Backlog', type: 'backlog' },
+              { id: 's-done', name: 'Done', type: 'completed' },
             ],
-          },
+          }),
         },
-      }),
+      ];
+      return fn({
+        teams: vi.fn().mockResolvedValue({ nodes: teams }),
+      });
     });
 
     const app = createApp();
@@ -57,15 +60,7 @@ describe('POST /api/integrations/linear/prefill', () => {
   });
 
   it('returns 502 on Linear auth failure', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        errors: [
-          { message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } },
-        ],
-      }),
-    });
+    mockInvokeLinear.mockRejectedValue(new LinearApiError('Authentication failed'));
     const app = createApp();
     const res = await request(app)
       .post('/api/integrations/linear/prefill')

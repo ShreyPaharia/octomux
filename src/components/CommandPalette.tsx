@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
 import { repoName } from '@/lib/utils';
 import { StatusGlyph } from '@/components/ui/status-glyph';
-import { api } from '@/lib/api';
-import type { Task } from '../../server/types';
-import type { WorkflowStatus } from '../../server/types';
+import { taskApi } from '@/lib/api/taskApi';
+import type { Task } from '@octomux/types';
+import type { WorkflowStatus } from '@octomux/types';
 
 const WORKFLOW_STATUS_LABELS: Record<WorkflowStatus, string> = {
   backlog: 'Backlog',
@@ -100,7 +100,7 @@ export function CommandPalette() {
       setQuery('');
       setActive(0);
       try {
-        await api.moveTask(task.id, { workflow_status: targetStatus });
+        await taskApi.moveTask(task.id, { workflow_status: targetStatus });
         refreshTasks?.();
       } catch {
         // swallow — UI will show current state

@@ -2,15 +2,15 @@ import '@/lib/monaco-env';
 import { Suspense, forwardRef, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import type { DiffFileEntry, FileDiffResponse } from '@/lib/api';
-import type { Agent } from '../../server/types';
+import type { DiffFileEntry, FileDiffResponse } from '@/lib/api/taskApi';
+import type { Agent } from '@octomux/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ClampedExplainer } from '@/components/review/ClampedExplainer';
 import { useDiffEditorHostSize } from '@/hooks/useDiffEditorHostSize';
 import { useDiffEditorLayout } from '@/hooks/useDiffEditorLayout';
 import { useInlineCommentZones } from '@/hooks/useInlineCommentZones';
-import { useTaskCommentsContext } from '@/hooks/useTaskComments';
+import { useCommentsContext } from '@/hooks/useTaskComments';
 
 const MonacoDiff = lazy(() =>
   import('@monaco-editor/react').then((mod) => ({ default: mod.DiffEditor })),
@@ -302,7 +302,7 @@ function CommentZonePortals({
   agents: Agent[];
   rangeIsBase: boolean;
 }) {
-  const ctx = useTaskCommentsContext();
+  const ctx = useCommentsContext();
   const fileComments = useMemo(() => ctx.byFile(filePath), [ctx, filePath]);
 
   const portals = useInlineCommentZones({

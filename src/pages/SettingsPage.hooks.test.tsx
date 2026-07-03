@@ -8,7 +8,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SettingsPage from './SettingsPage';
 import { renderWithRouter } from '../test-helpers';
-import type { HookRegistryEntry } from '../../src/lib/api';
+import type { HookRegistryEntry } from '@/lib/api/configApi';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ const REPO_ENTRY: HookRegistryEntry = {
 const getHooksRegistryMock = vi.fn();
 const updateHookEnabledMock = vi.fn();
 
-const { apiProxy } = await vi.hoisted(async () => {
+const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () => {
   const { vi } = await import('vitest');
   const helpers = await import('../test-helpers');
   return helpers.setupApiMock({
@@ -69,23 +69,23 @@ const { apiProxy } = await vi.hoisted(async () => {
       claudeFlags: '',
       envOverrides: { claudeFlags: null },
     }),
-    // We can't reference module-level consts here (TDZ). The test-helper
-    // default resolves to { hooks: [] }, which we override per-test below.
   });
 });
 
-vi.mock('@/lib/api', () => ({
-  api: new Proxy(
+vi.mock('@/lib/api/configApi', () => ({
+  configApi: new Proxy(
     {},
     {
       get: (_t, prop: string) => {
         if (prop === 'getHooksRegistry') return getHooksRegistryMock;
         if (prop === 'updateHookEnabled') return updateHookEnabledMock;
-        return (apiProxy as Record<string, unknown>)[prop];
+        return (configApiProxy as Record<string, unknown>)[prop];
       },
     },
   ),
 }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 
 vi.mock('../lib/hooks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;

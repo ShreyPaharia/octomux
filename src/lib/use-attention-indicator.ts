@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 const NORMAL_TITLE = 'octomux';
 const NORMAL_FAVICON = '/logo.png';

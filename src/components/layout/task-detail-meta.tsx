@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { cn, repoName } from '@/lib/utils';
-import type { RunMode, Task } from '../../../server/types';
+import type { RunMode, Task } from '@octomux/types';
 
 const MODE_BRANCH_LABEL: Record<RunMode, string> = {
   new: 'Branch',

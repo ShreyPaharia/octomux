@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
 import { renderWithRouter, makeTask, makeAgent } from '../test-helpers';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -21,14 +21,16 @@ function simulateEvent(taskId = 'test-task-01') {
   for (const cb of eventCallbacks) cb(event);
 }
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
 
-vi.mock('@/lib/api', async () => {
-  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
-  return { ...actual, api: apiProxy };
+vi.mock('@/lib/api/taskApi', async () => {
+  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+  return { ...actual, taskApi: taskApiProxy };
 });
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
@@ -867,7 +869,7 @@ describe('TaskDetail', () => {
       await user.click(screen.getByRole('button', { name: /^diff$/i }));
     }
 
-    it('toggling a file checkbox calls api.markReviewed and refetches', async () => {
+    it('toggling a file checkbox calls taskApi.markReviewed and refetches', async () => {
       const user = userEvent.setup();
       apiMock.getTask.mockResolvedValue(
         makeTask({

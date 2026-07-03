@@ -57,6 +57,62 @@ export default tseslint.config(
       ],
     },
   },
+  // Guard: ban direct DB access (getDb()/.prepare()) outside the repository layer.
+  {
+    files: ['server/**/*.ts'],
+    ignores: [
+      'server/**/*.test.ts',
+      'server/tmux-bin.ts',
+      'server/test-helpers.ts',
+      'server/db.ts',
+      'server/db/**',
+      'server/repositories/**',
+      // The orchestrator's OWN repository for its owned tables (orchestrator_*,
+      // action_cards, managed_tasks, conversation_usage, permission_rules, events).
+      // All other orchestrator modules go through repositories/ + store.ts (SHR-179).
+      'server/orchestrator/store.ts',
+      'server/integrations/**',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.name=/^(execFile|execFileSync|spawn)$/] Literal[value='tmux']",
+          message:
+            "Do not invoke 'tmux' directly — use execTmux()/tmuxSpawnSpec() from server/tmux-bin.ts.",
+        },
+        {
+          selector: "CallExpression[callee.name='getDb']",
+          message:
+            'Do not call getDb() outside the repository layer (server/repositories/). Add or use a repository function instead.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='prepare']",
+          message:
+            'Do not call .prepare() outside the repository layer (server/repositories/). Add or use a repository function instead.',
+        },
+      ],
+    },
+  },
+  // Guard: ban express imports in the service layer — services must stay HTTP-agnostic.
+  {
+    files: ['server/services/**/*.ts'],
+    ignores: ['server/services/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'express',
+              message: 'Services must not import express — keep them HTTP-agnostic.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     ignores: [
       'dist/',

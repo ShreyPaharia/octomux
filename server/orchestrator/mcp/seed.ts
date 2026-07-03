@@ -16,14 +16,12 @@
  * The orchestrator must never receive plan/diff/description bodies — only
  * pointers. Both functions enforce this at the boundary.
  *
- * Linear API notes (from server/integrations/linear/graphql.ts):
- *   - Authorization header carries the bare API key, no "Bearer" prefix.
- *   - Errors come back as HTTP 200 with `errors[]` — handled by linearGraphql().
- *   - `LinearApiError` is thrown for both HTTP errors and GraphQL errors.
+ * Linear API access goes through @linear/sdk via server/integrations/linear/graphql.ts.
+ * API errors surface as LinearApiError.
  */
 
 import { childLogger } from '../../logger.js';
-import { linearGraphql, LinearApiError } from '../../integrations/linear/graphql.js';
+import { invokeLinear, LinearApiError } from '../../integrations/linear/graphql.js';
 
 export { LinearApiError };
 
@@ -125,56 +123,6 @@ export interface BatchPlanCard {
   supports_per_item_edit: boolean;
 }
 
-// ─── Linear GraphQL query ─────────────────────────────────────────────────────
-
-const ISSUE_SEED_QUERY = /* GraphQL */ `
-  query IssueSeed($id: String!) {
-    issue(id: $id) {
-      id
-      identifier
-      title
-      url
-      description
-      priority
-      estimate
-      state {
-        name
-      }
-      assignee {
-        name
-        email
-      }
-      team {
-        key
-        name
-      }
-      labels {
-        nodes {
-          name
-        }
-      }
-    }
-  }
-`;
-
-interface LinearIssueRaw {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  description?: string | null;
-  priority?: number | null;
-  estimate?: number | null;
-  state?: { name: string } | null;
-  assignee?: { name: string; email: string } | null;
-  team?: { key: string; name: string } | null;
-  labels?: { nodes: Array<{ name: string }> } | null;
-}
-
-interface IssueSeedResponse {
-  issue: LinearIssueRaw | null;
-}
-
 // ─── handlePullLinearIssue ────────────────────────────────────────────────────
 
 /**
@@ -184,8 +132,7 @@ interface IssueSeedResponse {
  * `description_snippet` (≤256 chars) may appear for planner context;
  * the `url` is the authoritative pointer to the full ticket.
  *
- * The api_key is passed directly as the Authorization header (no Bearer prefix).
- * LinearApiError is thrown for both HTTP errors and GraphQL errors.
+ * LinearApiError is thrown for API failures and when the issue is not found.
  */
 export async function handlePullLinearIssue(
   input: PullLinearIssueInput,
@@ -194,50 +141,54 @@ export async function handlePullLinearIssue(
 
   logger.info({ issue_id, operation: 'handlePullLinearIssue' }, 'pull_linear_issue: start');
 
-  const data = await linearGraphql<IssueSeedResponse>(api_key, ISSUE_SEED_QUERY, { id: issue_id });
+  const issue = await invokeLinear(api_key, (client) => client.issue(issue_id));
 
-  if (!data.issue) {
+  if (!issue) {
     throw new LinearApiError(`Linear issue not found: ${issue_id}`);
   }
 
-  const raw = data.issue;
+  const [state, team, labelsConnection] = await Promise.all([
+    issue.state ?? Promise.resolve(undefined),
+    issue.team ?? Promise.resolve(undefined),
+    issue.labels(),
+  ]);
 
-  // Build the lean summary — never include the full description body
   const summary: LinearIssueSummary = {
-    id: raw.id,
-    identifier: raw.identifier,
-    title: raw.title,
-    url: raw.url,
+    id: issue.id,
+    identifier: issue.identifier,
+    title: issue.title,
+    url: issue.url,
   };
 
-  if (raw.state?.name) {
-    summary.state = raw.state.name;
+  if (state?.name) {
+    summary.state = state.name;
   }
 
-  if (typeof raw.priority === 'number') {
-    summary.priority = raw.priority;
+  if (typeof issue.priority === 'number') {
+    summary.priority = issue.priority;
   }
 
-  if (typeof raw.estimate === 'number') {
-    summary.estimate = raw.estimate;
+  if (typeof issue.estimate === 'number') {
+    summary.estimate = issue.estimate;
   }
 
-  if (raw.labels?.nodes && raw.labels.nodes.length > 0) {
-    summary.labels = raw.labels.nodes.map((l) => l.name);
+  const labelNodes = labelsConnection.nodes;
+  if (labelNodes.length > 0) {
+    summary.labels = labelNodes.map((l) => l.name);
   }
 
-  if (raw.team?.key) {
-    summary.team_key = raw.team.key;
+  if (team?.key) {
+    summary.team_key = team.key;
   }
 
   // Bounded description snippet for planner context — truncated at DESCRIPTION_SNIPPET_MAX
-  if (raw.description && raw.description.trim().length > 0) {
-    const snippet = raw.description.trim().slice(0, DESCRIPTION_SNIPPET_MAX);
+  if (issue.description && issue.description.trim().length > 0) {
+    const snippet = issue.description.trim().slice(0, DESCRIPTION_SNIPPET_MAX);
     summary.description_snippet = snippet;
   }
 
   logger.info(
-    { issue_id, identifier: raw.identifier, title: raw.title },
+    { issue_id, identifier: issue.identifier, title: issue.title },
     'pull_linear_issue: done',
   );
 

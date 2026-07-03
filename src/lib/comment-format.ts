@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from 'react';
-import type { Agent } from '../../server/types';
+import type { Agent } from '@octomux/types';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
 

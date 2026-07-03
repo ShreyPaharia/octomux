@@ -6,14 +6,16 @@ import { MemoryRouter } from 'react-router-dom';
 import { TasksProvider } from '@/lib/tasks-context';
 import { Composer } from './Composer';
 import { makeTask } from '../test-helpers';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 // Keep websocket-backed hooks quiet.
 vi.mock('@/lib/hooks', () => ({
@@ -317,7 +319,7 @@ describe('Composer / submit', () => {
   it('conflict dialog opens when another task is on a different branch', async () => {
     apiMock.preflightNoneMode.mockResolvedValueOnce({
       ok: false,
-      conflicts: [{ task_id: 't1', title: 'other', status: 'running', branch: 'main' }],
+      conflicts: [{ task_id: 't1', title: 'other', runtime_state: 'running', branch: 'main' }],
       warnings: [],
       dirty: null,
       currentBranch: 'main',
@@ -334,7 +336,7 @@ describe('Composer / submit', () => {
     apiMock.preflightNoneMode.mockResolvedValueOnce({
       ok: true,
       conflicts: [],
-      warnings: [{ task_id: 't1', title: 'other', status: 'running', branch: 'feature-x' }],
+      warnings: [{ task_id: 't1', title: 'other', runtime_state: 'running', branch: 'feature-x' }],
       dirty: null,
       currentBranch: 'feature-x',
       targetBranch: 'feature-x',

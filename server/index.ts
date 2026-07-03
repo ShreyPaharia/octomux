@@ -32,14 +32,16 @@ import {
   cleanupOrphanedViewerSessions,
   reconcileOrphanSettingUp,
   gcScratchDirs,
-} from './task-runner.js';
-import { getDb } from './db.js';
+} from './task-engine/index.js';
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
-import type { Task } from './types.js';
-import { SELECT_TASK_SQL } from './task-select.js';
+import {
+  listRecoverableTasks,
+  setRuntimeState,
+  setRuntimeStateSetupInterrupted,
+} from './repositories/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
@@ -65,10 +67,7 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 
 // ─── Startup Recovery ──────────────────────────────────────────────────────
 async function recoverTasks(): Promise<void> {
-  const db = getDb();
-  const staleTasks = db
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up')`)
-    .all() as Task[];
+  const staleTasks = listRecoverableTasks();
 
   for (const task of staleTasks) {
     const status = await checkTaskStatus(task);
@@ -84,14 +83,10 @@ async function recoverTasks(): Promise<void> {
       });
     } else if (task.runtime_state === 'setting_up') {
       logger.warn({ task_id: task.id, title: task.title }, 'Recovery: setup was interrupted');
-      db.prepare(
-        `UPDATE tasks SET runtime_state = 'error', error = 'Setup interrupted', updated_at = datetime('now') WHERE id = ?`,
-      ).run(task.id);
+      setRuntimeStateSetupInterrupted(task.id);
     } else {
       logger.warn({ task_id: task.id, title: task.title }, 'Recovery: worktree missing');
-      db.prepare(
-        `UPDATE tasks SET runtime_state = 'error', error = 'Worktree missing after restart', updated_at = datetime('now') WHERE id = ?`,
-      ).run(task.id);
+      setRuntimeState(task.id, 'error', 'Worktree missing after restart');
     }
   }
 }

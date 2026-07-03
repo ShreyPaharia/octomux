@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { api, type ReviewInboxRow } from '../lib/api';
+import { taskApi } from '../lib/api/taskApi';
+import { reviewApi, type ReviewInboxRow } from '../lib/api/reviewApi';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -60,7 +61,7 @@ export default function ReviewsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    api
+    reviewApi
       .listReviewsInbox()
       .then((r) => {
         if (!cancelled) setRows(r);
@@ -69,7 +70,7 @@ export default function ReviewsPage() {
         if (!cancelled) setLoading(false);
       });
     const tick = setInterval(() => {
-      api
+      reviewApi
         .listReviewsInbox()
         .then((r) => {
           if (!cancelled) setRows(r);
@@ -96,7 +97,7 @@ export default function ReviewsPage() {
     if (!deleteTarget) return;
     const id = deleteTarget.task_id;
     try {
-      await api.deleteTask(id);
+      await taskApi.deleteTask(id);
       setRows((prev) => prev.filter((r) => r.task_id !== id));
       toast.success('Review deleted');
     } catch (e) {

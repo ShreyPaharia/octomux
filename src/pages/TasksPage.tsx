@@ -1,6 +1,7 @@
-import { useCallback, useState, useMemo, useEffect } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTasksContext } from '@/lib/tasks-context';
+import { useGraceHours } from '@/lib/hooks';
 import { TaskBoard } from '@/components/TaskBoard';
 import { EmptyState } from '@/components/EmptyState';
 import { PageHeader } from '@/components/layout/page-header';
@@ -13,8 +14,7 @@ import { isRegularTask } from '@/lib/task-filters';
 import { repoName } from '@/lib/utils';
 import { ChevronDownIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
-import type { Task } from '../../server/types';
-import { api } from '@/lib/api';
+import type { Task } from '@octomux/types';
 import { BulkCreateDialog } from '@/components/BulkCreateDialog';
 
 function TaskCreateActions({
@@ -187,19 +187,7 @@ export default function TasksPage() {
   const navigate = useNavigate();
   const openCreate = useCallback(() => navigate('/'), [navigate]);
   const [bulkOpen, setBulkOpen] = useState(false);
-
-  // Fetch grace hours for the trash countdown
-  const [graceHours, setGraceHours] = useState(6);
-  useEffect(() => {
-    api
-      .getSettings()
-      .then((s) => {
-        if (s.deleteGraceHours != null) setGraceHours(s.deleteGraceHours);
-      })
-      .catch(() => {
-        // use default
-      });
-  }, []);
+  const { graceHours } = useGraceHours();
 
   // Board filters
   const [activeRepo, setActiveRepo] = useState(

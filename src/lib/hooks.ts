@@ -1,8 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Task } from '../../server/types';
-import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api';
-import { api } from './api';
+import type { Task } from '@octomux/types';
+import type {
+  Skill,
+  RepoConfig,
+  AgentDefinition,
+  HarnessSummary,
+  IntegrationProvider,
+  IntegrationRow,
+  HookTemplate,
+  OctomuxSettings,
+} from './api/configApi';
+import { taskApi } from './api/taskApi';
+import { configApi } from './api/configApi';
+import { reviewApi, type ReviewDetail } from './api/reviewApi';
 import { subscribe } from './event-source';
+import { useResource } from './use-resource';
+
+const DEFAULT_GRACE_HOURS = 6;
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -15,8 +29,8 @@ export function useTasks() {
       // Fetch active tasks and trash tasks in parallel so the board can
       // populate the trash column with soft-deleted tasks.
       const [active, trashed] = await Promise.all([
-        api.listTasks(),
-        api.listTasks({ trash: true }),
+        taskApi.listTasks(),
+        taskApi.listTasks({ trash: true }),
       ]);
       // Deduplicate by id (active wins) in case mock returns overlapping data in tests
       const seen = new Set(active.map((t) => t.id));
@@ -58,134 +72,110 @@ export function useTasks() {
 }
 
 export function useTask(id: string) {
-  const [task, setTask] = useState<Task | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const lastJsonRef = useRef<string>('');
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.getTask(id);
-      // Only trigger a re-render when the task data actually changed.
-      // Without this, every event creates a new object reference and causes
-      // the entire TaskDetail tree to re-render, risking terminal remounts.
-      const json = JSON.stringify(data);
-      if (json !== lastJsonRef.current) {
-        lastJsonRef.current = json;
-        setTask(data);
-      }
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    refresh();
-    return subscribe((event) => {
-      if (event.payload.taskId === id) {
-        refresh();
-      }
-    });
-  }, [refresh, id]);
-
-  return { task, loading, error, refresh };
+  // Content-dedup (inside useResource) keeps the task object reference stable
+  // unless the data actually changed, so an unrelated event can't re-render the
+  // TaskDetail tree and remount its terminals.
+  const { data, loading, error, refresh } = useResource<Task>(
+    `task:${id}`,
+    () => taskApi.getTask(id),
+    {
+      events: (event) => event.payload.taskId === id,
+    },
+  );
+  return { task: data, loading, error, refresh };
 }
 
 export function useSkills() {
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listSkills();
-      setSkills(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { skills, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () =>
+    configApi.listSkills(),
+  );
+  return { skills: data ?? [], loading, error, refresh };
 }
 
 export function useRepoConfigs() {
-  const [configs, setConfigs] = useState<RepoConfig[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listRepoConfigs();
-      setConfigs(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { configs, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<RepoConfig[]>('repo-configs', () =>
+    configApi.listRepoConfigs(),
+  );
+  return { configs: data ?? [], loading, error, refresh };
 }
 
 export function useAgents() {
-  const [agents, setAgents] = useState<AgentDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listAgents();
-      setAgents(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { agents, loading, error, refresh };
+  const { data, loading, error, refresh } = useResource<AgentDefinition[]>('agents', () =>
+    configApi.listAgents(),
+  );
+  return { agents: data ?? [], loading, error, refresh };
 }
 
 export function useHarnesses() {
-  const [harnesses, setHarnesses] = useState<HarnessSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refresh } = useResource<HarnessSummary[]>('harnesses', () =>
+    configApi.listHarnesses(),
+  );
+  return { harnesses: data ?? [], loading, error, refresh };
+}
 
-  const refresh = useCallback(async () => {
+export function useGraceHours() {
+  const { data } = useResource('settings:grace-hours', async () => {
     try {
-      const data = await api.listHarnesses();
-      setHarnesses(data);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
+      const settings = await configApi.getSettings();
+      return settings.deleteGraceHours ?? DEFAULT_GRACE_HOURS;
+    } catch {
+      return DEFAULT_GRACE_HOURS;
     }
-  }, []);
+  });
+  return { graceHours: data ?? DEFAULT_GRACE_HOURS };
+}
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+export function useProviders() {
+  const { data, loading, error, refresh } = useResource<IntegrationProvider[]>('providers', () =>
+    configApi.listProviders(),
+  );
+  return { providers: data ?? [], loading, error, refresh };
+}
 
-  return { harnesses, loading, error, refresh };
+export function useIntegrations() {
+  const { data, loading, error, refresh } = useResource<IntegrationRow[]>('integrations', () =>
+    configApi.listIntegrations(),
+  );
+  return { integrations: data ?? [], loading, error, refresh };
+}
+
+export function useHookTemplates() {
+  const { data, loading, error, refresh } = useResource<HookTemplate[]>(
+    'hook-templates',
+    async () => {
+      try {
+        return await configApi.listHookTemplates();
+      } catch {
+        return [];
+      }
+    },
+  );
+  return { hookTemplates: data ?? [], loading, error, refresh };
+}
+
+export function useSettings() {
+  const { data, loading, error, refresh } = useResource<OctomuxSettings | null>(
+    'settings',
+    async () => {
+      try {
+        return await configApi.getSettings();
+      } catch {
+        return null;
+      }
+    },
+  );
+  return { settings: data, loading, error, refresh };
+}
+
+export function useReviewDetail(id: string | undefined) {
+  const { data, loading, error, refresh } = useResource<ReviewDetail>(
+    id ? `review:${id}` : null,
+    () => reviewApi.getReviewDetail(id!),
+    {
+      events: (e) =>
+        e.payload.taskId === id &&
+        (e.type === 'review:drafts-ready' || e.type === 'review:published'),
+    },
+  );
+  return { detail: data, loading, error, refresh };
 }

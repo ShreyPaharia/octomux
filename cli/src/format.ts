@@ -1,7 +1,9 @@
 import chalk from 'chalk';
+import type { Task } from '@octomux/types';
 
 const STATUS_COLORS: Record<string, (s: string) => string> = {
   draft: chalk.cyan,
+  idle: chalk.cyan,
   setting_up: chalk.yellow,
   running: chalk.green,
   closed: chalk.dim,
@@ -18,6 +20,21 @@ const AGENT_STATUS_COLORS: Record<string, (s: string) => string> = {
 export function colorStatus(status: string): string {
   const colorFn = STATUS_COLORS[status] || chalk.white;
   return colorFn(status);
+}
+
+/** Legacy CLI status label derived from runtime_state + workflow_status. */
+export function taskDisplayStatus(task: Pick<Task, 'runtime_state' | 'workflow_status'>): string {
+  if (task.runtime_state === 'idle') {
+    return task.workflow_status === 'backlog' ? 'draft' : 'closed';
+  }
+  return task.runtime_state;
+}
+
+export function taskMatchesStatusFilter(
+  task: Pick<Task, 'runtime_state' | 'workflow_status'>,
+  status: string,
+): boolean {
+  return taskDisplayStatus(task) === status;
 }
 
 export function colorAgentStatus(status: string): string {

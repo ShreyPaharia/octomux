@@ -4,14 +4,17 @@ import { SectionCard } from '@/components/layout/section-card';
 import { SettingsLayout } from '@/components/layout/settings-layout';
 import { Switch } from '@/components/ui/switch';
 import { InfoTooltip } from '@/components/ui/tooltip';
+import { FormSelect } from '@/components/ui/form-select';
 import { showToast } from '@/components/CustomToast';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
-import { api } from '@/lib/api';
-import type { IntegrationProvider, IntegrationRow, HookTemplate } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
+import type { IntegrationRow } from '@/lib/api/configApi';
+import { useProviders, useIntegrations, useHookTemplates, useSettings } from '@/lib/hooks';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
 import { LinearConfigForm, toLinearConfig } from '@/components/integrations/LinearConfigForm';
 import type { LinearConfig } from '@/components/integrations/LinearConfigForm';
+import { useCrudSection } from '@/hooks/useCrudSection';
 
 function providerIcon(kind: string): string {
   if (kind === 'jira') return 'J';
@@ -142,9 +145,20 @@ function Modal({
 }
 
 export default function IntegrationsPage() {
-  const [providers, setProviders] = useState<IntegrationProvider[]>([]);
-  const [integrations, setIntegrations] = useState<IntegrationRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { providers, loading: providersLoading, refresh: refreshProviders } = useProviders();
+  const {
+    integrations,
+    loading: integrationsLoading,
+    refresh: refreshIntegrations,
+  } = useIntegrations();
+  const {
+    hookTemplates,
+    loading: hookTemplatesLoading,
+    refresh: refreshHookTemplates,
+  } = useHookTemplates();
+  const { settings, loading: settingsLoading, refresh: refreshSettings } = useSettings();
+  const loading =
+    providersLoading || integrationsLoading || hookTemplatesLoading || settingsLoading;
   const [modal, setModal] = useState<
     | { kind: 'create-jira' }
     | { kind: 'edit-jira'; integration: IntegrationRow }
@@ -152,39 +166,36 @@ export default function IntegrationsPage() {
     | { kind: 'edit-linear'; integration: IntegrationRow }
     | null
   >(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const deleteCrud = useCrudSection({
+    onDelete: async (id) => {
+      await configApi.deleteIntegration(id);
+      void refresh();
+    },
+  });
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; message: string }>>(
     {},
   );
   const [testing, setTesting] = useState<Record<string, boolean>>({});
-  const [hookTemplates, setHookTemplates] = useState<HookTemplate[]>([]);
   const [installingHook, setInstallingHook] = useState<string | null>(null);
-  const [tracker, setTracker] = useState<'jira' | 'linear' | ''>('');
+  const [trackerOverride, setTrackerOverride] = useState<'jira' | 'linear' | '' | null>(null);
   const [savingTracker, setSavingTracker] = useState(false);
+  const tracker = trackerOverride ?? settings?.defaultTracker ?? '';
 
-  const refresh = useCallback(async () => {
-    try {
-      const [p, i, hooks, settings] = await Promise.all([
-        api.listProviders(),
-        api.listIntegrations(),
-        api.listHookTemplates().catch(() => [] as HookTemplate[]),
-        api.getSettings().catch(() => null),
-      ]);
-      setProviders(p);
-      setIntegrations(i);
-      setHookTemplates(hooks);
-      if (settings) setTracker(settings.defaultTracker ?? '');
-    } catch {
-      // silently ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const refresh = useCallback(() => {
+    void refreshProviders();
+    void refreshIntegrations();
+    void refreshHookTemplates();
+    void refreshSettings();
+  }, [refreshProviders, refreshIntegrations, refreshHookTemplates, refreshSettings]);
+
+  useEffect(() => {
+    setTrackerOverride(null);
+  }, [settings]);
 
   async function handleInstallHook(id: string) {
     setInstallingHook(id);
     try {
-      await api.installHookTemplate(id);
+      await configApi.installHookTemplate(id);
       showToast('success', 'HOOKS', `Installed ${hookTemplateLabel(id)}`);
       void refresh();
     } catch (err) {
@@ -195,10 +206,10 @@ export default function IntegrationsPage() {
   }
 
   async function handleTrackerChange(next: 'jira' | 'linear' | '') {
-    setTracker(next);
+    setTrackerOverride(next);
     setSavingTracker(true);
     try {
-      await api.updateSettings({ defaultTracker: next || undefined });
+      await configApi.updateSettings({ defaultTracker: next || undefined });
       showToast('success', 'INTEGRATIONS', 'Primary tracker saved');
     } catch (err) {
       showToast('error', 'INTEGRATIONS', err instanceof Error ? err.message : 'Save failed');
@@ -207,18 +218,14 @@ export default function IntegrationsPage() {
     }
   }
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
   async function handleCreateJira(config: JiraConfig, name: string) {
-    await api.createIntegration('jira', name, config as unknown as Record<string, unknown>);
+    await configApi.createIntegration('jira', name, config as unknown as Record<string, unknown>);
     setModal(null);
     void refresh();
   }
 
   async function handleEditJira(id: string, config: JiraConfig, name: string) {
-    await api.updateIntegration(id, {
+    await configApi.updateIntegration(id, {
       name,
       config: config as unknown as Record<string, unknown>,
     });
@@ -227,13 +234,13 @@ export default function IntegrationsPage() {
   }
 
   async function handleCreateLinear(config: LinearConfig, name: string) {
-    await api.createIntegration('linear', name, config as unknown as Record<string, unknown>);
+    await configApi.createIntegration('linear', name, config as unknown as Record<string, unknown>);
     setModal(null);
     void refresh();
   }
 
   async function handleEditLinear(id: string, config: LinearConfig, name: string) {
-    await api.updateIntegration(id, {
+    await configApi.updateIntegration(id, {
       name,
       config: config as unknown as Record<string, unknown>,
     });
@@ -241,21 +248,19 @@ export default function IntegrationsPage() {
     void refresh();
   }
 
-  async function handleDelete(id: string) {
-    await api.deleteIntegration(id);
-    setDeleteConfirmId(null);
-    void refresh();
+  async function handleDelete() {
+    await deleteCrud.delete.submit();
   }
 
   async function handleToggle(id: string, enabled: boolean) {
-    await api.updateIntegration(id, { enabled });
+    await configApi.updateIntegration(id, { enabled });
     void refresh();
   }
 
   async function handleTest(id: string) {
     setTesting((t) => ({ ...t, [id]: true }));
     try {
-      const result = await api.testIntegration(id);
+      const result = await configApi.testIntegration(id);
       setTestResults((r) => ({ ...r, [id]: result }));
     } catch (err) {
       setTestResults((r) => ({
@@ -328,7 +333,7 @@ export default function IntegrationsPage() {
                   if (i.kind === 'jira') setModal({ kind: 'edit-jira', integration: i });
                   else if (i.kind === 'linear') setModal({ kind: 'edit-linear', integration: i });
                 }}
-                onDelete={() => setDeleteConfirmId(i.id)}
+                onDelete={() => deleteCrud.delete.setTarget(i.id)}
                 onToggle={(enabled) => void handleToggle(i.id, enabled)}
                 onTest={() => void handleTest(i.id)}
                 testResult={testResults[i.id] ?? null}
@@ -350,18 +355,18 @@ export default function IntegrationsPage() {
                 Used by the create-task flow when more than one tracker is configured.
               </p>
             </div>
-            <select
+            <FormSelect
               value={tracker}
               disabled={savingTracker}
+              fieldSize="md"
               onChange={(e) => void handleTrackerChange(e.target.value as 'jira' | 'linear' | '')}
-              className="border border-glass-edge bg-[#0B0C0F] px-3 py-2 text-sm text-white outline-none focus:border-[#3B82F6]"
               data-testid="primary-tracker-select"
               aria-label="Primary tracker"
             >
               <option value="">— none —</option>
               <option value="linear">Linear</option>
               <option value="jira">Jira</option>
-            </select>
+            </FormSelect>
           </div>
         </SectionCard>
 
@@ -448,21 +453,26 @@ export default function IntegrationsPage() {
         </Modal>
       )}
 
-      {deleteConfirmId && (
-        <Modal title="Delete integration" onClose={() => setDeleteConfirmId(null)}>
+      {deleteCrud.delete.open && (
+        <Modal title="Delete integration" onClose={() => deleteCrud.delete.onOpenChange(false)}>
           <p className="mb-4 text-sm text-muted-foreground">
             Are you sure you want to delete this integration? This action cannot be undone.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => deleteCrud.delete.onOpenChange(false)}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
               size="sm"
-              onClick={() => void handleDelete(deleteConfirmId)}
+              disabled={deleteCrud.delete.deleting}
+              onClick={() => void handleDelete()}
             >
-              Delete
+              {deleteCrud.delete.deleting ? 'Deleting…' : 'Delete'}
             </Button>
           </div>
         </Modal>

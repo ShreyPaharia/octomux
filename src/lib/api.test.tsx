@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api } from './api';
+import { taskApi } from '../lib/api/taskApi';
 
 // ─── Fetch Mock ──────────────────────────────────────────────────────────────
 
@@ -24,7 +24,7 @@ beforeEach(() => {
 const apiCases = [
   {
     name: 'listTasks',
-    call: () => api.listTasks(),
+    call: () => taskApi.listTasks(),
     expectedUrl: '/api/tasks',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -32,7 +32,7 @@ const apiCases = [
   },
   {
     name: 'getTask',
-    call: () => api.getTask('t1'),
+    call: () => taskApi.getTask('t1'),
     expectedUrl: '/api/tasks/t1',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -40,7 +40,7 @@ const apiCases = [
   },
   {
     name: 'createTask',
-    call: () => api.createTask({ title: 'T', description: 'D', repo_path: '/tmp' }),
+    call: () => taskApi.createTask({ title: 'T', description: 'D', repo_path: '/tmp' }),
     expectedUrl: '/api/tasks',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({ title: 'T', description: 'D', repo_path: '/tmp' }),
@@ -48,15 +48,15 @@ const apiCases = [
   },
   {
     name: 'updateTask',
-    call: () => api.updateTask('t1', { status: 'closed' }),
+    call: () => taskApi.updateTask('t1', { runtime_state: 'idle' }),
     expectedUrl: '/api/tasks/t1',
     expectedMethod: 'PATCH',
-    expectedBody: JSON.stringify({ status: 'closed' }),
-    response: { id: 't1', status: 'closed' },
+    expectedBody: JSON.stringify({ runtime_state: 'idle' }),
+    response: { id: 't1', runtime_state: 'idle' },
   },
   {
     name: 'startTask',
-    call: () => api.startTask('t1'),
+    call: () => taskApi.startTask('t1'),
     expectedUrl: '/api/tasks/t1/start',
     expectedMethod: 'POST',
     expectedBody: undefined,
@@ -64,7 +64,7 @@ const apiCases = [
   },
   {
     name: 'deleteTask',
-    call: () => api.deleteTask('t1'),
+    call: () => taskApi.deleteTask('t1'),
     expectedUrl: '/api/tasks/t1',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
@@ -73,7 +73,7 @@ const apiCases = [
   },
   {
     name: 'addAgent with prompt',
-    call: () => api.addAgent('t1', { prompt: 'Write tests' }),
+    call: () => taskApi.addAgent('t1', { prompt: 'Write tests' }),
     expectedUrl: '/api/tasks/t1/agents',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({ prompt: 'Write tests' }),
@@ -81,7 +81,7 @@ const apiCases = [
   },
   {
     name: 'addAgent without data',
-    call: () => api.addAgent('t1'),
+    call: () => taskApi.addAgent('t1'),
     expectedUrl: '/api/tasks/t1/agents',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({}),
@@ -89,7 +89,7 @@ const apiCases = [
   },
   {
     name: 'stopAgent',
-    call: () => api.stopAgent('t1', 'a1'),
+    call: () => taskApi.stopAgent('t1', 'a1'),
     expectedUrl: '/api/tasks/t1/agents/a1',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
@@ -98,7 +98,7 @@ const apiCases = [
   },
   {
     name: 'browse with path',
-    call: () => api.browse('/tmp'),
+    call: () => taskApi.browse('/tmp'),
     expectedUrl: '/api/browse?path=%2Ftmp',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -106,7 +106,7 @@ const apiCases = [
   },
   {
     name: 'browse without path',
-    call: () => api.browse(),
+    call: () => taskApi.browse(),
     expectedUrl: '/api/browse',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -114,7 +114,7 @@ const apiCases = [
   },
   {
     name: 'recentRepos',
-    call: () => api.recentRepos(),
+    call: () => taskApi.recentRepos(),
     expectedUrl: '/api/recent-repos',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -122,7 +122,7 @@ const apiCases = [
   },
   {
     name: 'listBranches',
-    call: () => api.listBranches('/tmp/repo'),
+    call: () => taskApi.listBranches('/tmp/repo'),
     expectedUrl: '/api/branches?repo_path=%2Ftmp%2Frepo',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -130,7 +130,7 @@ const apiCases = [
   },
   {
     name: 'getDefaultBranch',
-    call: () => api.getDefaultBranch('/tmp/repo'),
+    call: () => taskApi.getDefaultBranch('/tmp/repo'),
     expectedUrl: '/api/default-branch?repo_path=%2Ftmp%2Frepo',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -139,7 +139,7 @@ const apiCases = [
 
   {
     name: 'createTerminal',
-    call: () => api.createTerminal('t1'),
+    call: () => taskApi.createTerminal('t1'),
     expectedUrl: '/api/tasks/t1/terminals',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({}),
@@ -154,7 +154,7 @@ const apiCases = [
   },
   {
     name: 'closeTerminal',
-    call: () => api.closeTerminal('t1', 'term-1'),
+    call: () => taskApi.closeTerminal('t1', 'term-1'),
     expectedUrl: '/api/tasks/t1/terminals/term-1',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
@@ -163,7 +163,7 @@ const apiCases = [
   },
   {
     name: 'markReviewed',
-    call: () => api.markReviewed('t1', 'src/foo.ts'),
+    call: () => taskApi.markReviewed('t1', 'src/foo.ts'),
     expectedUrl: '/api/tasks/t1/files/src/foo.ts/reviewed',
     expectedMethod: 'POST',
     expectedBody: undefined,
@@ -172,7 +172,7 @@ const apiCases = [
   },
   {
     name: 'unmarkReviewed',
-    call: () => api.unmarkReviewed('t1', 'src/foo.ts'),
+    call: () => taskApi.unmarkReviewed('t1', 'src/foo.ts'),
     expectedUrl: '/api/tasks/t1/files/src/foo.ts/reviewed',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
@@ -182,7 +182,7 @@ const apiCases = [
   {
     name: 'postComment',
     call: () =>
-      api.postComment('t1', {
+      taskApi.postComment('t1', {
         file_path: 'src/foo.ts',
         line: 12,
         side: 'new',
@@ -211,7 +211,7 @@ const apiCases = [
   },
   {
     name: 'listComments without file filter',
-    call: () => api.listComments('t1'),
+    call: () => taskApi.listComments('t1'),
     expectedUrl: '/api/tasks/t1/comments',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -219,7 +219,7 @@ const apiCases = [
   },
   {
     name: 'listComments with file filter',
-    call: () => api.listComments('t1', 'src/foo.ts'),
+    call: () => taskApi.listComments('t1', 'src/foo.ts'),
     expectedUrl: '/api/tasks/t1/comments?file=src%2Ffoo.ts',
     expectedMethod: undefined,
     expectedBody: undefined,
@@ -227,7 +227,7 @@ const apiCases = [
   },
   {
     name: 'updateComment resolve',
-    call: () => api.updateComment('t1', 'c1', { resolved: true }),
+    call: () => taskApi.updateComment('t1', 'c1', { resolved: true }),
     expectedUrl: '/api/tasks/t1/comments/c1',
     expectedMethod: 'PATCH',
     expectedBody: JSON.stringify({ resolved: true }),
@@ -246,7 +246,7 @@ const apiCases = [
   },
   {
     name: 'updateComment edit body',
-    call: () => api.updateComment('t1', 'c1', { body: 'updated' }),
+    call: () => taskApi.updateComment('t1', 'c1', { body: 'updated' }),
     expectedUrl: '/api/tasks/t1/comments/c1',
     expectedMethod: 'PATCH',
     expectedBody: JSON.stringify({ body: 'updated' }),
@@ -265,7 +265,7 @@ const apiCases = [
   },
   {
     name: 'deleteComment',
-    call: () => api.deleteComment('t1', 'c1'),
+    call: () => taskApi.deleteComment('t1', 'c1'),
     expectedUrl: '/api/tasks/t1/comments/c1',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
@@ -335,6 +335,6 @@ describe('request error handling', () => {
 
   it.each(errorCases)('$name', async ({ response, expectedError }) => {
     fetchMock.mockResolvedValue(response);
-    await expect(api.listTasks()).rejects.toThrow(expectedError);
+    await expect(taskApi.listTasks()).rejects.toThrow(expectedError);
   });
 });

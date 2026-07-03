@@ -5,7 +5,7 @@
  * 2.5 / SHR-128).
  *
  * This module runs approved octomux operations server-side, without going through
- * an external CLI subprocess. It reuses the existing task-runner and DB functions
+ * an external CLI subprocess. It reuses the task-engine and repository functions
  * directly — the orchestrator's gated Bash-deny path in Phase 3 will call these
  * same functions on approval.
  *
@@ -31,15 +31,18 @@
  * the artifact endpoint (§6.5); on failure the UI picks prose-fallback rendering.
  */
 
-import { nanoid } from 'nanoid';
-import { getDb } from '../db.js';
-import { startTask, closeTask, deleteTask, resumeTask, addAgent } from '../task-runner.js';
-import { sendMessageToAgent } from '../tmux-input.js';
-import { upsertManagedTask } from './store.js';
+import {
+  closeTask,
+  deleteTask,
+  resumeTask,
+  addAgent,
+  sendMessageToAgent,
+} from '../task-engine/index.js';
 import { childLogger } from '../logger.js';
-import { SELECT_TASK_SQL } from '../task-select.js';
 import { WORKFLOW_STATUSES } from '../types.js';
-import type { Task, Agent, RunMode, WorkflowStatus } from '../types.js';
+import { getTask, setWorkflowStatus, listActiveAgents } from '../repositories/index.js';
+import { createTask } from '../services/task-service.js';
+import type { RunMode, WorkflowStatus } from '../types.js';
 import type {
   CreateTaskInput as CreateTaskInputFromSchema,
   AddAgentOpts as AddAgentOptsFromSchema,
@@ -385,24 +388,9 @@ Then end your turn.
  * Returns only the task_id pointer — never plan/diff/file body contents.
  */
 export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskResult> {
-  const db = getDb();
-  const id = nanoid(12);
   const runMode: RunMode = input.run_mode ?? 'new';
   const isPlanning = input.kind === PLAN_KIND;
   const isWorkflow = input.kind === WORKFLOW_KIND;
-
-  logger.info(
-    {
-      task_id: id,
-      operation: 'runCreateTask',
-      kind: input.kind ?? 'default',
-      run_mode: runMode,
-      model: input.model ?? null,
-      effort: input.effort ?? null,
-      conversation_id: input.conversation_id ?? null,
-    },
-    'runCreateTask: start',
-  );
 
   // Resolve title and description from input, falling back to initial_prompt.
   const initialPromptTrimmed = input.initial_prompt?.trim() ?? '';
@@ -440,57 +428,55 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
     storedWorktree = null;
   }
 
-  const worktreeId = nanoid(12);
-  db.prepare(
-    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use')`,
-  ).run(
-    worktreeId,
-    storedWorktree ?? storedRepoPath,
-    storedRepoPath || null,
-    input.branch ?? null,
-    input.base_branch ?? null,
-    null,
-    runMode,
-  );
-
-  db.prepare(
-    `INSERT INTO tasks
-       (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, harness_id, model, notify_task_id)
-     VALUES (?, ?, ?, 'setting_up', 'planned', ?, ?, 'claude-code', ?, ?)`,
-  ).run(
-    id,
-    resolvedTitle,
-    resolvedDescription,
-    resolvedPrompt,
-    worktreeId,
-    input.model ?? null,
-    // notify_task is part of the canonical create_task schema (the MCP tool
-    // advertises it), so persist it like the REST path does — otherwise it's a
-    // false promise (schema↔executor drift).
-    input.notify_task ?? null,
-  );
-
-  const created = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task;
-
   // Register in managed_tasks so the supervisor can route events to the
   // owning conversation (spec §6, §9). Only when a conversation is provided.
   // Phase column:
   //   kind:'workflow'  → 'speccing'    (spec → plan → implement in one session)
   //   kind:'plan'      → 'planning'    (plan → await approval → implement)
   //   default          → 'implementing' (implements directly)
-  if (input.conversation_id) {
-    const initialPhase = isWorkflow ? 'speccing' : isPlanning ? 'planning' : 'implementing';
-    upsertManagedTask({
-      conversation_id: input.conversation_id,
-      task_id: id,
-      phase: initialPhase,
-    });
-  }
+  const managedInput = input.conversation_id
+    ? {
+        conversation_id: input.conversation_id,
+        phase: isWorkflow ? 'speccing' : isPlanning ? 'planning' : 'implementing',
+      }
+    : undefined;
 
   logger.info(
     {
-      task_id: id,
+      operation: 'runCreateTask',
+      kind: input.kind ?? 'default',
+      run_mode: runMode,
+      model: input.model ?? null,
+      effort: input.effort ?? null,
+      conversation_id: input.conversation_id ?? null,
+    },
+    'runCreateTask: start',
+  );
+
+  const created = await createTask({
+    resolved_title: resolvedTitle,
+    resolved_description: resolvedDescription,
+    initial_prompt: input.initial_prompt ?? null,
+    resolved_prompt: resolvedPrompt,
+    run_mode: runMode,
+    stored_repo_path: storedRepoPath,
+    staged_path: storedWorktree ?? storedRepoPath,
+    branch: input.branch ?? null,
+    base_branch: input.base_branch ?? null,
+    worktree_status: 'in_use',
+    runtime_state: 'setting_up',
+    workflow_status: 'planned',
+    agent: null,
+    harness_id: 'claude-code',
+    model: input.model ?? null,
+    notify_task_id: input.notify_task ?? null,
+    is_draft: false,
+    managed: managedInput,
+  });
+
+  logger.info(
+    {
+      task_id: created.id,
       operation: 'runCreateTask',
       title: resolvedTitle,
       kind: input.kind ?? 'default',
@@ -500,15 +486,7 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
     'runCreateTask: task created, starting',
   );
 
-  // Fire-and-forget: startTask handles the rest (worktree, tmux, agent).
-  void startTask(created).catch((err: unknown) => {
-    logger.error(
-      { task_id: id, operation: 'runCreateTask', err },
-      'runCreateTask: startTask failed',
-    );
-  });
-
-  return { task_id: id, title: resolvedTitle };
+  return { task_id: created.id, title: resolvedTitle };
 }
 
 // ─── runSendMessage ───────────────────────────────────────────────────────────
@@ -528,15 +506,13 @@ export async function runCreateTask(input: CreateTaskInput): Promise<CreateTaskR
  * contents. Callers must not pass plan/diff file bodies as the message.
  */
 export async function runSendMessage(taskId: string, message: string): Promise<void> {
-  const db = getDb();
-
   logger.info(
     { task_id: taskId, operation: 'runSendMessage', messageLen: message.length },
     'runSendMessage: start',
   );
 
   // Look up the task to find its tmux session.
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task) {
     logger.warn({ task_id: taskId, operation: 'runSendMessage' }, 'runSendMessage: task not found');
     throw new Error(`runSendMessage: task ${taskId} not found`);
@@ -551,14 +527,7 @@ export async function runSendMessage(taskId: string, message: string): Promise<v
   }
 
   // Find the first running agent for this task.
-  const agent = db
-    .prepare(
-      `SELECT * FROM agents
-       WHERE task_id = ? AND status != 'stopped'
-       ORDER BY window_index ASC
-       LIMIT 1`,
-    )
-    .get(taskId) as Agent | undefined;
+  const agent = listActiveAgents(taskId)[0];
 
   if (!agent) {
     logger.warn(
@@ -607,19 +576,17 @@ export interface AddAgentResult {
  * Add a new agent window to an existing running task.
  *
  * This is the server-side executor for the orchestrator's `add-agent` write
- * command (gated: ask tier). Reuses task-runner's `addAgent` function.
+ * command (gated: ask tier). Reuses the task-engine's `addAgent` function.
  *
  * Returns only the agent_id pointer — never plan/diff/file body contents.
  */
 export async function runAddAgent(taskId: string, opts: AddAgentInput): Promise<AddAgentResult> {
-  const db = getDb();
-
   logger.info(
     { task_id: taskId, operation: 'runAddAgent', label: opts.label ?? null },
     'runAddAgent: start',
   );
 
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task) {
     logger.warn({ task_id: taskId, operation: 'runAddAgent' }, 'runAddAgent: task not found');
     throw new Error(`runAddAgent: task ${taskId} not found`);
@@ -657,8 +624,6 @@ export async function runAddAgent(taskId: string, opts: AddAgentInput): Promise<
  * Valid statuses: backlog | planned | in_progress | human_review | pr | done.
  */
 export async function runSetStatus(taskId: string, status: WorkflowStatus): Promise<void> {
-  const db = getDb();
-
   logger.info({ task_id: taskId, operation: 'runSetStatus', status }, 'runSetStatus: start');
 
   if (!WORKFLOW_STATUSES.includes(status)) {
@@ -667,18 +632,13 @@ export async function runSetStatus(taskId: string, status: WorkflowStatus): Prom
     );
   }
 
-  const task = db
-    .prepare('SELECT id FROM tasks WHERE id = ? AND deleted_at IS NULL')
-    .get(taskId) as { id: string } | undefined;
-  if (!task) {
+  const task = getTask(taskId);
+  if (!task || task.deleted_at) {
     logger.warn({ task_id: taskId, operation: 'runSetStatus' }, 'runSetStatus: task not found');
     throw new Error(`runSetStatus: task ${taskId} not found`);
   }
 
-  db.prepare(`UPDATE tasks SET workflow_status = ?, updated_at = datetime('now') WHERE id = ?`).run(
-    status,
-    taskId,
-  );
+  setWorkflowStatus(taskId, status);
 
   logger.info(
     { task_id: taskId, operation: 'runSetStatus', status },
@@ -698,11 +658,9 @@ export async function runSetStatus(taskId: string, status: WorkflowStatus): Prom
  * full cleanup.
  */
 export async function runCloseTask(taskId: string): Promise<void> {
-  const db = getDb();
-
   logger.info({ task_id: taskId, operation: 'runCloseTask' }, 'runCloseTask: start');
 
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task) {
     logger.warn({ task_id: taskId, operation: 'runCloseTask' }, 'runCloseTask: task not found');
     throw new Error(`runCloseTask: task ${taskId} not found`);
@@ -722,11 +680,9 @@ export async function runCloseTask(taskId: string): Promise<void> {
  * command (gated: ask tier).
  */
 export async function runResumeTask(taskId: string): Promise<void> {
-  const db = getDb();
-
   logger.info({ task_id: taskId, operation: 'runResumeTask' }, 'runResumeTask: start');
 
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task) {
     logger.warn({ task_id: taskId, operation: 'runResumeTask' }, 'runResumeTask: task not found');
     throw new Error(`runResumeTask: task ${taskId} not found`);
@@ -748,11 +704,9 @@ export async function runResumeTask(taskId: string): Promise<void> {
  * Use runCloseTask to stop a task while preserving the worktree.
  */
 export async function runDeleteTask(taskId: string): Promise<void> {
-  const db = getDb();
-
   logger.info({ task_id: taskId, operation: 'runDeleteTask' }, 'runDeleteTask: start');
 
-  const task = db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as Task | undefined;
+  const task = getTask(taskId);
   if (!task) {
     logger.warn({ task_id: taskId, operation: 'runDeleteTask' }, 'runDeleteTask: task not found');
     throw new Error(`runDeleteTask: task ${taskId} not found`);

@@ -1,6 +1,12 @@
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import { outputJson, colorStatus, printTable } from '../format.js';
+import {
+  outputJson,
+  colorStatus,
+  printTable,
+  taskDisplayStatus,
+  taskMatchesStatusFilter,
+} from '../format.js';
 
 export function registerListTasks(program: Command): void {
   program
@@ -15,7 +21,7 @@ export function registerListTasks(program: Command): void {
       let tasks = await client.listTasks(opts.repoPath ? { repo_path: opts.repoPath } : undefined);
 
       if (opts.status) {
-        tasks = tasks.filter((t) => t.status === opts.status);
+        tasks = tasks.filter((t) => taskMatchesStatusFilter(t, opts.status));
       }
 
       if (json) {
@@ -31,7 +37,7 @@ export function registerListTasks(program: Command): void {
       printTable(
         [
           { header: 'ID', width: 14, get: (t) => t.id },
-          { header: 'STATUS', width: 14, get: (t) => colorStatus(t.status) },
+          { header: 'STATUS', width: 14, get: (t) => colorStatus(taskDisplayStatus(t)) },
           { header: 'TITLE', get: (t) => t.title },
         ],
         tasks,

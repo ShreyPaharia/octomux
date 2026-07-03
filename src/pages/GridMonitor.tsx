@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { regularTasksOnly } from '@/lib/task-filters';
 import { EmptyState } from '@/components/EmptyState';
 import { AgentGridCell } from '@/components/AgentGridCell';
 import { TerminalRectIcon } from '@/components/icons';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 const REFRESH_MS = 5000;
 
@@ -54,7 +54,7 @@ export default function GridMonitor() {
     let cancelled = false;
     const fetchTasks = async () => {
       try {
-        const data = regularTasksOnly(await api.listTasks());
+        const data = regularTasksOnly(await taskApi.listTasks());
         if (!cancelled) {
           setTasks(data);
           setLoaded(true);

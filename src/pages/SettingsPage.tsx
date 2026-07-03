@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
-import { api } from '@/lib/api';
-import type { RepoConfig, HookRegistryEntry } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
+import type { RepoConfig, HookRegistryEntry } from '@/lib/api/configApi';
 import {
   TERMINAL_CACHE_DEFAULT,
   TERMINAL_CACHE_MAX,
@@ -17,40 +17,32 @@ import { AddChip } from '@/components/layout/add-chip';
 import { SectionCard } from '@/components/layout/section-card';
 import { SettingRow } from '@/components/layout/setting-row';
 import { SettingsLayout, type SettingsScrollSection } from '@/components/layout/settings-layout';
+import { DataSection } from '@/components/data-section';
+import { CreateNameDialog, DeleteConfirmDialog, FormDialogActions } from '@/components/crud-dialog';
 import { GlassPanel } from '@/components/ui/glass-panel';
+import { GlassButton } from '@/components/ui/glass-button';
+import { GlassInput } from '@/components/ui/glass-input';
+import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+import { useCrudSection } from '@/hooks/useCrudSection';
 
 function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { agents, loading, error, refresh } = useAgents();
   const navigate = useNavigate();
-  const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  const handleCreate = useCallback(async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
-      await api.createAgent({ name: newName.trim(), content });
-      showToast('success', 'AGENT CREATED', `Agent "${newName.trim()}" created`);
-      setShowCreate(false);
-      setNewName('');
-      navigate(`/agents/${encodeURIComponent(newName.trim())}`);
-    } catch (err) {
-      showToast('error', 'ERROR', (err as Error).message);
-    } finally {
-      setCreating(false);
-    }
-  }, [newName, navigate]);
+  const crud = useCrudSection({
+    onCreate: async (name) => {
+      try {
+        const content = `---\nname: ${name}\ndescription: \n---\n`;
+        await configApi.createAgent({ name, content });
+        showToast('success', 'AGENT CREATED', `Agent "${name}" created`);
+        navigate(`/agents/${encodeURIComponent(name)}`);
+      } catch (err) {
+        showToast('error', 'ERROR', (err as Error).message);
+        throw err;
+      }
+    },
+  });
 
   return (
     <SectionCard
@@ -58,33 +50,15 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
       title="Agents"
       count={!loading && !error ? agents.length : undefined}
       scrollRef={scrollRef}
-      trailing={<AddChip label="+ New agent" onClick={() => setShowCreate(true)} />}
+      trailing={<AddChip label="+ New agent" onClick={crud.create.openDialog} />}
     >
-      {loading && (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
-          <span className="text-sm text-red-400">{error}</span>
-          <button
-            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
-            onClick={refresh}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {!loading && !error && agents.length === 0 && (
-        <div className="py-8 text-center text-sm text-[#8a8a8a]">No agents found.</div>
-      )}
-
-      {!loading && !error && agents.length > 0 && (
+      <DataSection
+        loading={loading}
+        error={error}
+        onRetry={refresh}
+        isEmpty={agents.length === 0}
+        empty={<div className="py-8 text-center text-sm text-[#8a8a8a]">No agents found.</div>}
+      >
         <div>
           {agents.map((agent, i) => (
             <div
@@ -103,39 +77,20 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
             </div>
           ))}
         </div>
-      )}
+      </DataSection>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold">Create Agent</DialogTitle>
-          </DialogHeader>
-          <input
-            type="text"
-            placeholder="Agent name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              className="focus-ring px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
-              onClick={() => setShowCreate(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="focus-ring bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
-              onClick={handleCreate}
-              disabled={creating || !newName.trim()}
-            >
-              {creating ? 'Creating...' : 'Create'}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CreateNameDialog
+        open={crud.create.open}
+        onOpenChange={crud.create.onOpenChange}
+        title="Create Agent"
+        placeholder="Agent name"
+        value={crud.create.value}
+        onChange={crud.create.onChange}
+        onSubmit={crud.create.submit}
+        submitting={crud.create.creating}
+        canSubmit={crud.create.canSubmit}
+        submittingLabel="Creating..."
+      />
     </SectionCard>
   );
 }
@@ -143,43 +98,29 @@ function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
 function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const { skills, loading, error, refresh } = useSkills();
   const navigate = useNavigate();
-  const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  const handleCreate = useCallback(async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const content = `---\nname: ${newName.trim()}\ndescription: \n---\n`;
-      await api.createSkill({ name: newName.trim(), content });
-      showToast('success', 'SKILL CREATED', `Skill "${newName.trim()}" created`);
-      setShowCreate(false);
-      setNewName('');
-      navigate(`/skills/${encodeURIComponent(newName.trim())}`);
-    } catch (err) {
-      showToast('error', 'ERROR', (err as Error).message);
-    } finally {
-      setCreating(false);
-    }
-  }, [newName, navigate]);
-
-  const handleDelete = useCallback(async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await api.deleteSkill(deleteTarget);
-      showToast('success', 'SKILL DELETED', `Skill "${deleteTarget}" deleted`);
-      setDeleteTarget(null);
-      refresh();
-    } catch (err) {
-      showToast('error', 'ERROR', (err as Error).message);
-    } finally {
-      setDeleting(false);
-    }
-  }, [deleteTarget, refresh]);
+  const crud = useCrudSection({
+    onCreate: async (name) => {
+      try {
+        const content = `---\nname: ${name}\ndescription: \n---\n`;
+        await configApi.createSkill({ name, content });
+        showToast('success', 'SKILL CREATED', `Skill "${name}" created`);
+        navigate(`/skills/${encodeURIComponent(name)}`);
+      } catch (err) {
+        showToast('error', 'ERROR', (err as Error).message);
+        throw err;
+      }
+    },
+    onDelete: async (target) => {
+      try {
+        await configApi.deleteSkill(target);
+        showToast('success', 'SKILL DELETED', `Skill "${target}" deleted`);
+        refresh();
+      } catch (err) {
+        showToast('error', 'ERROR', (err as Error).message);
+        throw err;
+      }
+    },
+  });
 
   return (
     <SectionCard
@@ -187,41 +128,22 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
       title="Skills"
       count={!loading && !error ? skills.length : undefined}
       scrollRef={scrollRef}
-      trailing={<AddChip label="+ New skill" onClick={() => setShowCreate(true)} />}
+      trailing={<AddChip label="+ New skill" onClick={crud.create.openDialog} />}
     >
-      {loading && (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
-          <span className="text-sm text-red-400">{error}</span>
-          <button
-            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
-            onClick={refresh}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {!loading && !error && skills.length === 0 && (
-        <div className="py-8 text-center text-sm text-[#8a8a8a]">
-          No skills installed.{' '}
-          <button
-            className="focus-ring text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
-            onClick={() => setShowCreate(true)}
-          >
-            Create your first skill
-          </button>
-        </div>
-      )}
-
-      {!loading && !error && skills.length > 0 && (
+      <DataSection
+        loading={loading}
+        error={error}
+        onRetry={refresh}
+        isEmpty={skills.length === 0}
+        empty={
+          <div className="py-8 text-center text-sm text-[#8a8a8a]">
+            No skills installed.{' '}
+            <GlassButton variant="link" size="inline" onClick={crud.create.openDialog}>
+              Create your first skill
+            </GlassButton>
+          </div>
+        }
+      >
         <div>
           {skills.map((skill, i) => (
             <div
@@ -238,7 +160,7 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
                 className="focus-ring text-xs text-[#8a8a8a] opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setDeleteTarget(skill.name);
+                  crud.delete.setTarget(skill.name);
                 }}
               >
                 Delete
@@ -246,71 +168,34 @@ function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
             </div>
           ))}
         </div>
-      )}
+      </DataSection>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold">Create Skill</DialogTitle>
-          </DialogHeader>
-          <input
-            type="text"
-            placeholder="Skill name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-sm text-white outline-none focus:border-[#3B82F6]"
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              className="focus-ring px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
-              onClick={() => setShowCreate(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="focus-ring bg-[#3B82F6] px-3 py-1.5 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
-              onClick={handleCreate}
-              disabled={creating || !newName.trim()}
-            >
-              {creating ? 'Creating…' : 'Create'}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CreateNameDialog
+        open={crud.create.open}
+        onOpenChange={crud.create.onOpenChange}
+        title="Create Skill"
+        placeholder="Skill name"
+        value={crud.create.value}
+        onChange={crud.create.onChange}
+        onSubmit={crud.create.submit}
+        submitting={crud.create.creating}
+        canSubmit={crud.create.canSubmit}
+      />
 
-      <Dialog
-        open={deleteTarget !== null}
-        onOpenChange={(next) => {
-          if (!next) setDeleteTarget(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold">Delete Skill</DialogTitle>
-            <DialogDescription className="text-xs text-[#b5b5bd]">
-              Are you sure you want to delete{' '}
-              <span className="font-mono text-white">{deleteTarget}</span>? This cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2">
-            <button
-              className="focus-ring px-3 py-1.5 text-xs text-[#b5b5bd] hover:text-white"
-              onClick={() => setDeleteTarget(null)}
-            >
-              Cancel
-            </button>
-            <button
-              className="focus-ring bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 active:bg-red-800 disabled:opacity-40"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? 'Deleting…' : 'Delete'}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={crud.delete.open}
+        onOpenChange={crud.delete.onOpenChange}
+        title="Delete Skill"
+        description={
+          <>
+            Are you sure you want to delete{' '}
+            <span className="font-mono text-white">{crud.delete.target}</span>? This cannot be
+            undone.
+          </>
+        }
+        onConfirm={crud.delete.submit}
+        submitting={crud.delete.deleting}
+      />
     </SectionCard>
   );
 }
@@ -399,7 +284,7 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     if (!editingPath || saving) return;
     setSaving(true);
     try {
-      await api.updateRepoConfig(editingPath, editForm);
+      await configApi.updateRepoConfig(editingPath, editForm);
       showToast('success', 'SAVED', 'Repository config updated');
       setEditingPath(null);
       refresh();
@@ -428,53 +313,40 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
         />
       }
     >
-      {loading && (
-        <div className="space-y-2">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
-          <span className="text-sm text-red-400">{error}</span>
-          <button
-            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
-            onClick={refresh}
+      <DataSection
+        loading={loading}
+        error={error}
+        onRetry={refresh}
+        isEmpty={configs.length === 0}
+        skeletonRows={2}
+        empty={
+          <div
+            data-testid="repos-empty"
+            className="flex flex-col items-center gap-2 py-10 text-center"
           >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {!loading && !error && configs.length === 0 && (
-        <div
-          data-testid="repos-empty"
-          className="flex flex-col items-center gap-2 py-10 text-center"
-        >
-          <button
-            type="button"
-            data-testid="repos-add-first"
-            onClick={() => {
-              navigate('/');
-              requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('focus-composer')));
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#3B82F666] bg-[#3B82F61F] px-3 py-2 text-[12px] font-semibold text-[#60a5fa] hover:bg-[#3B82F633]"
-          >
-            + Add your first repo
-          </button>
-          <p className="text-[11px] text-[#8a8a8a]">
-            Repositories appear here automatically when you create tasks.
-          </p>
-        </div>
-      )}
-
-      {!loading &&
-        !error &&
-        configs.map((config) => (
+            <button
+              type="button"
+              data-testid="repos-add-first"
+              onClick={() => {
+                navigate('/');
+                requestAnimationFrame(() =>
+                  window.dispatchEvent(new CustomEvent('focus-composer')),
+                );
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#3B82F666] bg-[#3B82F61F] px-3 py-2 text-[12px] font-semibold text-[#60a5fa] hover:bg-[#3B82F633]"
+            >
+              + Add your first repo
+            </button>
+            <p className="text-[11px] text-[#8a8a8a]">
+              Repositories appear here automatically when you create tasks.
+            </p>
+          </div>
+        }
+      >
+        {configs.map((config) => (
           <RepoRow key={config.repo_path} config={config} onEditClick={() => startEdit(config)} />
         ))}
+      </DataSection>
 
       {editing && (
         <div className="mt-3 space-y-2 border border-glass-edge bg-glass-l1 p-3">
@@ -485,30 +357,24 @@ function RepoConfigsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
             (field) => (
               <div key={field} className="flex items-center gap-2">
                 <label className="w-32 text-xs text-[#b5b5bd]">{field.replace(/_/g, ' ')}</label>
-                <input
+                <GlassInput
                   type="text"
+                  fieldSize="sm"
+                  className="flex-1"
                   value={editForm[field] ?? ''}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, [field]: e.target.value }))}
-                  className="flex-1 border border-glass-edge bg-[#0B0C0F] px-2 py-1 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
                 />
               </div>
             ),
           )}
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              onClick={() => setEditingPath(null)}
-              className="focus-ring px-3 py-1 text-xs text-[#b5b5bd] hover:text-white"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
-            >
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
+          <FormDialogActions
+            className="flex justify-end gap-2 pt-1"
+            onCancel={() => setEditingPath(null)}
+            onSubmit={handleSave}
+            submitLabel="Save"
+            submittingLabel="Saving..."
+            submitting={saving}
+          />
         </div>
       )}
     </SectionCard>
@@ -521,7 +387,7 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
 
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (!cancelled) setEditor(s.editor);
@@ -541,7 +407,7 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
     const prev = editor;
     setEditor(value);
     try {
-      await api.updateSettings({ editor: value as 'nvim' | 'vscode' | 'cursor' });
+      await configApi.updateSettings({ editor: value as 'nvim' | 'vscode' | 'cursor' });
       showToast('success', 'EDITOR', `Editor set to ${value}`);
     } catch (err) {
       setEditor(prev);
@@ -558,15 +424,11 @@ function EditorSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => v
         description="Editor to open when clicking the Editor button on tasks"
         lastRow
       >
-        <select
-          value={editor}
-          onChange={(e) => handleChange(e.target.value)}
-          className="focus-ring bg-[#0B0C0F] border border-glass-edge px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
-        >
+        <FormSelect value={editor} onChange={(e) => handleChange(e.target.value)}>
           <option value="nvim">Neovim</option>
           <option value="vscode">VS Code</option>
           <option value="cursor">Cursor</option>
-        </select>
+        </FormSelect>
       </SettingRow>
     </SectionCard>
   );
@@ -582,7 +444,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
 
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (cancelled) return;
@@ -606,7 +468,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
     const prev = dangerouslySkip;
     setDangerouslySkip(value);
     try {
-      await api.updateSettings({ dangerouslySkipPermissions: value });
+      await configApi.updateSettings({ dangerouslySkipPermissions: value });
       showToast(
         'success',
         'LAUNCH FLAGS',
@@ -625,7 +487,7 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
     if (!isDirty || saving) return;
     setSaving(true);
     try {
-      const result = await api.updateSettings({ claudeFlags: flagsBuffer });
+      const result = await configApi.updateSettings({ claudeFlags: flagsBuffer });
       setSavedFlags(result.claudeFlags);
       setFlagsBuffer(result.claudeFlags);
       showToast('success', 'LAUNCH FLAGS', 'Advanced flags saved');
@@ -671,21 +533,18 @@ function ClaudeLaunchFlagsSection({ scrollRef }: { scrollRef: (el: HTMLElement |
           </div>
           <div className="flex items-center gap-2">
             {isDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
-            <button
-              onClick={saveFlags}
-              disabled={!isDirty || saving}
-              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
-            >
+            <GlassButton size="inline" onClick={saveFlags} disabled={!isDirty || saving}>
               {saving ? 'Saving...' : 'Save'}
-            </button>
+            </GlassButton>
           </div>
         </div>
-        <input
+        <GlassInput
           type="text"
+          fieldSize="md"
+          className="text-xs"
           value={flagsBuffer}
           onChange={(e) => setFlagsBuffer(e.target.value)}
           placeholder="--model opus --verbose"
-          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
           spellCheck={false}
         />
       </div>
@@ -724,7 +583,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
 
   useEffect(() => {
     let cancelled = false;
-    api
+    configApi
       .getSettings()
       .then((s) => {
         if (cancelled) return;
@@ -757,7 +616,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     const prev = defaultHarnessId;
     setDefaultHarnessIdState(value);
     try {
-      await api.updateSettings({ defaultHarnessId: value });
+      await configApi.updateSettings({ defaultHarnessId: value });
       showToast('success', 'CODING AGENT', `Default set to ${value}`);
     } catch (err) {
       setDefaultHarnessIdState(prev);
@@ -776,7 +635,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     const prev = cursorModelSaved;
     setCursorModelSaved(next);
     try {
-      await api.updateSettings({
+      await configApi.updateSettings({
         harnesses: {
           cursor: buildCursorHarnessBlob({
             force: cursorForce,
@@ -799,7 +658,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     const prev = cursorForce;
     setCursorForce(next);
     try {
-      await api.updateSettings({
+      await configApi.updateSettings({
         harnesses: {
           cursor: buildCursorHarnessBlob({
             force: next,
@@ -824,7 +683,7 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
     if (!cursorFlagsDirty || savingFlags) return;
     setSavingFlags(true);
     try {
-      const result = await api.updateSettings({
+      const result = await configApi.updateSettings({
         harnesses: {
           cursor: buildCursorHarnessBlob({
             force: cursorForce,
@@ -858,18 +717,17 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
         label="Default coding agent"
         description="New tasks and chats use this coding agent unless overridden in the composer"
       >
-        <select
+        <FormSelect
           data-testid="default-harness-select"
           value={defaultHarnessId}
           onChange={(e) => handleDefaultChange(e.target.value)}
-          className="focus-ring bg-[#0B0C0F] border border-glass-edge px-3 py-1 text-xs text-white outline-none focus:border-[#3B82F6]"
         >
           {harnesses.map((h) => (
             <option key={h.id} value={h.id}>
               {h.displayName}
             </option>
           ))}
-        </select>
+        </FormSelect>
       </SettingRow>
 
       <div className="mt-4 mb-2 text-[10px] font-bold uppercase tracking-wider text-[#8a8a8a]">
@@ -887,26 +745,27 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           </div>
           <div className="flex items-center gap-2">
             {cursorModelDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
-            <button
+            <GlassButton
               type="button"
+              size="inline"
               onClick={handleCursorModelSave}
               disabled={!cursorModelDirty || savingModel}
-              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
             >
               {savingModel ? 'Saving...' : 'Save'}
-            </button>
+            </GlassButton>
           </div>
         </div>
-        <input
+        <GlassInput
           type="text"
           data-testid="cursor-model-input"
+          fieldSize="md"
+          className="text-xs"
           value={cursorModelBuffer}
           onChange={(e) => setCursorModelBuffer(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void handleCursorModelSave();
           }}
           placeholder={CURSOR_DEFAULT_MODEL}
-          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
           spellCheck={false}
         />
       </div>
@@ -943,22 +802,23 @@ function CodingAgentSection({ scrollRef }: { scrollRef: (el: HTMLElement | null)
           </div>
           <div className="flex items-center gap-2">
             {cursorFlagsDirty && <span className="text-xs text-[#FFB800]">unsaved</span>}
-            <button
+            <GlassButton
+              size="inline"
               onClick={saveCursorFlags}
               disabled={!cursorFlagsDirty || savingFlags}
-              className="focus-ring bg-[#3B82F6] px-3 py-1 text-xs text-white hover:bg-[#2563eb] active:bg-[#1d4ed8] disabled:opacity-40"
             >
               {savingFlags ? 'Saving...' : 'Save'}
-            </button>
+            </GlassButton>
           </div>
         </div>
-        <input
+        <GlassInput
           type="text"
           data-testid="cursor-flags-input"
+          fieldSize="md"
+          className="text-xs"
           value={cursorFlagsBuffer}
           onChange={(e) => setCursorFlagsBuffer(e.target.value)}
           placeholder="--print"
-          className="w-full border border-glass-edge bg-[#0B0C0F] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
           spellCheck={false}
         />
       </div>
@@ -974,7 +834,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    api
+    configApi
       .getHooksRegistry()
       .then((r) => setHooks(r.hooks))
       .catch((err: Error) => setError(err.message))
@@ -993,7 +853,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
       ),
     );
     try {
-      await api.updateHookEnabled(entry.scope, entry.key, next);
+      await configApi.updateHookEnabled(entry.scope, entry.key, next);
     } catch (err) {
       // Revert
       setHooks((prev) =>
@@ -1059,33 +919,11 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
       count={!loading && !error ? hooks.length : undefined}
       scrollRef={scrollRef}
     >
-      {loading && (
-        <div className="space-y-2">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-12 animate-pulse bg-glass-l1 border border-glass-edge" />
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-center gap-3 border border-red-400/30 bg-red-400/5 px-4 py-3">
-          <span className="text-sm text-red-400">{error}</span>
-          <button
-            className="focus-ring text-xs text-[#3B82F6] hover:text-[#60a5fa] active:text-[#93c5fd]"
-            onClick={load}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {!loading && !error && (
-        <>
-          <HookGroup title="Built-in" entries={builtins} emptyMsg="No built-in hooks." />
-          <HookGroup title="Global" entries={globals} emptyMsg="No global hooks installed." />
-          <HookGroup title="Repo" entries={repos} emptyMsg="No repo hooks from active tasks." />
-        </>
-      )}
+      <DataSection loading={loading} error={error} onRetry={load} isEmpty={false} skeletonRows={2}>
+        <HookGroup title="Built-in" entries={builtins} emptyMsg="No built-in hooks." />
+        <HookGroup title="Global" entries={globals} emptyMsg="No global hooks installed." />
+        <HookGroup title="Repo" entries={repos} emptyMsg="No repo hooks from active tasks." />
+      </DataSection>
     </SectionCard>
   );
 }
@@ -1145,8 +983,10 @@ function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) =>
         lastRow
       >
         <div className="flex items-center gap-2">
-          <input
+          <GlassInput
             type="number"
+            fieldSize="narrow"
+            className="focus-ring"
             min={TERMINAL_CACHE_MIN}
             max={TERMINAL_CACHE_MAX}
             value={buffer}
@@ -1158,7 +998,6 @@ function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) =>
               }
             }}
             data-testid="terminal-cache-size-input"
-            className="focus-ring w-20 border border-glass-edge bg-[#0B0C0F] px-2 py-1 text-right font-mono text-xs text-white outline-none focus:border-[#3B82F6]"
           />
         </div>
       </SettingRow>

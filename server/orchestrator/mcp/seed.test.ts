@@ -32,23 +32,29 @@ vi.mock('../runner.js', () => ({
   conversationTmuxTarget: vi.fn().mockReturnValue('mock-session:1'),
 }));
 
-// Mock global fetch for Linear API calls
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+const mockInvokeLinear = vi.fn();
+
+vi.mock('../../integrations/linear/graphql.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../integrations/linear/graphql.js')>();
+  return {
+    ...actual,
+    invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
+  };
+});
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 import {
   handlePullLinearIssue,
   buildBatchPlanCard,
+  LinearApiError,
   type LinearIssueSummary,
   type SubTaskItem,
 } from './seed.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Stub a successful Linear GraphQL response for a single issue. */
-function mockLinearIssueResponse(issue: {
+type MockIssueInput = {
   id: string;
   identifier: string;
   title: string;
@@ -60,35 +66,44 @@ function mockLinearIssueResponse(issue: {
   assignee?: { name: string; email: string } | null;
   team?: { key: string; name: string };
   description?: string | null;
-}) {
-  mockFetch.mockResolvedValueOnce({
-    ok: true,
-    json: async () => ({
-      data: {
-        issue,
-      },
-    }),
-  });
+};
+
+function buildMockIssue(issue: MockIssueInput) {
+  return {
+    id: issue.id,
+    identifier: issue.identifier,
+    title: issue.title,
+    url: issue.url,
+    priority: issue.priority,
+    estimate: issue.estimate,
+    description: issue.description,
+    get state() {
+      return issue.state ? Promise.resolve(issue.state) : Promise.resolve(undefined);
+    },
+    get team() {
+      return issue.team ? Promise.resolve(issue.team) : Promise.resolve(undefined);
+    },
+    labels: vi.fn().mockResolvedValue({ nodes: issue.labels?.nodes ?? [] }),
+  };
 }
 
-/** Stub a Linear API error response. */
+/** Stub a successful Linear SDK issue fetch. */
+function mockLinearIssueResponse(issue: MockIssueInput) {
+  mockInvokeLinear.mockImplementationOnce(async (_apiKey, fn) =>
+    fn({
+      issue: vi.fn().mockResolvedValue(buildMockIssue(issue)),
+    }),
+  );
+}
+
+/** Stub a Linear API error surfaced by invokeLinear. */
 function mockLinearError(message: string, code?: string) {
-  mockFetch.mockResolvedValueOnce({
-    ok: true,
-    json: async () => ({
-      errors: [{ message, extensions: code ? { code } : undefined }],
-    }),
-  });
+  mockInvokeLinear.mockRejectedValueOnce(new LinearApiError(message, code));
 }
 
-/** Stub a Linear HTTP failure. */
+/** Stub a Linear HTTP-style failure surfaced by invokeLinear. */
 function mockLinearHttpError(status: number) {
-  mockFetch.mockResolvedValueOnce({
-    ok: false,
-    status,
-    statusText: `HTTP ${status}`,
-    text: async () => `Error ${status}`,
-  });
+  mockInvokeLinear.mockRejectedValueOnce(new LinearApiError(`Linear API HTTP ${status}`));
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -232,17 +247,18 @@ describe('handlePullLinearIssue', () => {
   });
 
   it('throws when issue resolves to null (not found)', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data: { issue: null } }),
-    });
+    mockInvokeLinear.mockImplementationOnce(async (_apiKey, fn) =>
+      fn({
+        issue: vi.fn().mockResolvedValue(null),
+      }),
+    );
 
     await expect(
       handlePullLinearIssue({ issue_id: 'SHR-777', api_key: 'lin_api_test_key' }),
     ).rejects.toThrow(/not found|SHR-777/i);
   });
 
-  it('passes the api_key as the Authorization header (no Bearer prefix)', async () => {
+  it('passes the api key through invokeLinear (SDK uses bare key auth)', async () => {
     mockLinearIssueResponse({
       id: 'uuid-auth-001',
       identifier: 'SHR-500',
@@ -252,14 +268,7 @@ describe('handlePullLinearIssue', () => {
 
     await handlePullLinearIssue({ issue_id: 'SHR-500', api_key: 'lin_api_my_key' });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.linear.app/graphql',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'lin_api_my_key', // no "Bearer " prefix
-        }),
-      }),
-    );
+    expect(mockInvokeLinear).toHaveBeenCalledWith('lin_api_my_key', expect.any(Function));
   });
 });
 

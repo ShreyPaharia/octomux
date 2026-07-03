@@ -18,14 +18,16 @@ vi.mock('@/lib/event-source', () => ({
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
 
-vi.mock('@/lib/api', async () => {
-  const actual = (await vi.importActual('@/lib/api')) as Record<string, unknown>;
-  return { ...actual, api: apiProxy };
+vi.mock('@/lib/api/taskApi', async () => {
+  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+  return { ...actual, taskApi: taskApiProxy };
 });
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 // Render the real TerminalView as a thin stub so we can read its props off the DOM.
 vi.mock('@/components/TerminalView', () => ({

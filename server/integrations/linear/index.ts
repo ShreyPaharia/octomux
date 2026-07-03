@@ -1,20 +1,11 @@
 import { childLogger } from '../../logger.js';
-import type { IntegrationProvider, ValidationResult, JsonSchema } from '../types.js';
+import type { IntegrationProvider, ValidationResult, JsonSchema, OctomuxColumn } from '../types.js';
+import { isOctomuxColumn, validateStatusMapByTeam } from '../types.js';
 import type { HookEnvelope } from '../../hook-types.js';
 import { registerProvider } from '../registry.js';
-import { linearGraphql, LinearApiError } from './graphql.js';
+import { invokeLinear, LinearApiError } from './graphql.js';
 
 const logger = childLogger('integrations:linear');
-
-const OCTOMUX_COLUMNS = [
-  'backlog',
-  'planned',
-  'in_progress',
-  'human_review',
-  'pr',
-  'done',
-] as const;
-type OctomuxColumn = (typeof OCTOMUX_COLUMNS)[number];
 
 export interface LinearConfig {
   api_key: string;
@@ -38,8 +29,6 @@ const CONFIG_SCHEMA: JsonSchema = {
   },
 };
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 function validate(config: unknown): ValidationResult {
   if (typeof config !== 'object' || config === null) {
     return { ok: false, errors: ['config must be an object'] };
@@ -51,29 +40,7 @@ function validate(config: unknown): ValidationResult {
     errors.push('api_key is required');
   }
 
-  if (
-    !cfg.status_map_by_team ||
-    typeof cfg.status_map_by_team !== 'object' ||
-    Array.isArray(cfg.status_map_by_team)
-  ) {
-    errors.push('status_map_by_team must be an object');
-  } else {
-    for (const [teamKey, teamMap] of Object.entries(cfg.status_map_by_team)) {
-      if (typeof teamMap !== 'object' || teamMap === null || Array.isArray(teamMap)) {
-        errors.push(`status_map_by_team.${teamKey} must be an object`);
-        continue;
-      }
-      for (const [col, uuid] of Object.entries(teamMap as Record<string, unknown>)) {
-        if (!OCTOMUX_COLUMNS.includes(col as OctomuxColumn)) {
-          errors.push(`status_map_by_team.${teamKey}: invalid column "${col}"`);
-          continue;
-        }
-        if (typeof uuid !== 'string' || !UUID_RE.test(uuid)) {
-          errors.push(`status_map_by_team.${teamKey}.${col}: not a valid uuid`);
-        }
-      }
-    }
-  }
+  validateStatusMapByTeam(cfg.status_map_by_team, 'status_map_by_team', errors);
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
@@ -81,37 +48,13 @@ function validate(config: unknown): ValidationResult {
 async function testConnection(config: unknown): Promise<{ ok: boolean; message: string }> {
   const cfg = config as LinearConfig;
   try {
-    const data = await linearGraphql<{ viewer: { id: string; name: string; email: string } }>(
-      cfg.api_key,
-      'query { viewer { id name email } }',
-    );
-    return { ok: true, message: `Connected as ${data.viewer.name ?? data.viewer.email}` };
+    const viewer = await invokeLinear(cfg.api_key, (client) => client.viewer);
+    return { ok: true, message: `Connected as ${viewer.name ?? viewer.email}` };
   } catch (err) {
     const msg = err instanceof LinearApiError ? err.message : (err as Error).message;
     return { ok: false, message: `Connection failed: ${msg}` };
   }
 }
-
-const ISSUE_LOOKUP_QUERY = `
-  query Issue($id: String!) {
-    issue(id: $id) {
-      id
-      team { id key }
-    }
-  }
-`;
-
-const ISSUE_UPDATE_MUTATION = `
-  mutation IssueUpdate($id: String!, $stateId: String!) {
-    issueUpdate(id: $id, input: { stateId: $stateId }) { success }
-  }
-`;
-
-const COMMENT_CREATE_MUTATION = `
-  mutation CommentCreate($id: String!, $body: String!) {
-    commentCreate(input: { issueId: $id, body: $body }) { success }
-  }
-`;
 
 async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   const cfg = config as LinearConfig;
@@ -137,7 +80,6 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
     return;
   }
 
-  // Resolve team_key from metadata or by parsing the ref string.
   const metadata = (linearRef.metadata ?? {}) as Record<string, unknown>;
   let teamKey = typeof metadata.team_key === 'string' ? metadata.team_key : '';
   let issueId = typeof metadata.issue_id === 'string' ? metadata.issue_id : '';
@@ -156,9 +98,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   }
 
   const teamMap = cfg.status_map_by_team[teamKey];
-  const stateId = OCTOMUX_COLUMNS.includes(toStatus as OctomuxColumn)
-    ? teamMap?.[toStatus as OctomuxColumn]
-    : undefined;
+  const stateId = isOctomuxColumn(toStatus) ? teamMap?.[toStatus] : undefined;
   if (!stateId) {
     logger.debug(
       { task_id: task.id, team_key: teamKey, to_status: toStatus },
@@ -167,17 +107,14 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
     return;
   }
 
-  // Resolve issue UUID if we don't have it cached.
   if (!issueId) {
     try {
-      const resp = await linearGraphql<{
-        issue: { id: string; team: { key: string } } | null;
-      }>(cfg.api_key, ISSUE_LOOKUP_QUERY, { id: linearRef.ref });
-      if (!resp.issue) {
+      const issue = await invokeLinear(cfg.api_key, (client) => client.issue(linearRef.ref));
+      if (!issue) {
         logger.warn({ task_id: task.id, ref: linearRef.ref }, 'linear handler: issue not found');
         return;
       }
-      issueId = resp.issue.id;
+      issueId = issue.id;
     } catch (err) {
       logger.warn(
         { task_id: task.id, ref: linearRef.ref, err: (err as Error).message },
@@ -187,9 +124,8 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
     }
   }
 
-  // State change.
   try {
-    await linearGraphql(cfg.api_key, ISSUE_UPDATE_MUTATION, { id: issueId, stateId });
+    await invokeLinear(cfg.api_key, (client) => client.updateIssue(issueId, { stateId }));
     logger.info(
       {
         task_id: task.id,
@@ -208,16 +144,14 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
     return;
   }
 
-  // Comment-back, unless we're resetting to backlog.
   if (toStatus === 'backlog') return;
 
   const prUrl = typeof data?.pr_url === 'string' ? data.pr_url : '';
   const body = `octomux task moved to **${toStatus}**${prUrl ? ` — PR: ${prUrl}` : ''}.`;
 
   try {
-    await linearGraphql(cfg.api_key, COMMENT_CREATE_MUTATION, { id: issueId, body });
+    await invokeLinear(cfg.api_key, (client) => client.createComment({ issueId, body }));
   } catch (err) {
-    // Comment failure shouldn't block the integration; log and move on.
     logger.warn(
       { task_id: task.id, issue_id: issueId, err: (err as Error).message },
       'linear handler: commentCreate failed',

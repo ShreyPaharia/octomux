@@ -8,10 +8,15 @@
  * All errors are swallowed.
  */
 import { childLogger } from './logger.js';
-import { getDb } from './db.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { runClaudePrint } from './claude-cli.js';
+import {
+  getHookEnabled,
+  listTaskUpdatesForTranscript,
+  listRecentResolvedByAgent,
+  setCurrentSummary,
+} from './repositories/index.js';
 
 const logger = childLogger('summarize');
 
@@ -28,15 +33,7 @@ const SYSTEM_PROMPT =
  * Default for built-in = disabled (spec: "defaults disabled").
  */
 function isBuiltinEnabled(): boolean {
-  try {
-    const row = getDb()
-      .prepare(`SELECT enabled FROM hook_settings WHERE scope = ? AND key = ?`)
-      .get(BUILTIN_SCOPE, BUILTIN_KEY) as { enabled: number } | undefined;
-    if (row === undefined) return false;
-    return row.enabled !== 0;
-  } catch {
-    return false;
-  }
+  return getHookEnabled(BUILTIN_SCOPE, BUILTIN_KEY, false);
 }
 
 /**
@@ -47,21 +44,7 @@ function buildTranscript(taskId: string, agentId: string): string {
   const lines: string[] = [];
 
   try {
-    const updates = getDb()
-      .prepare(
-        `SELECT kind, from_status, to_status, body, created_at
-           FROM task_updates
-          WHERE task_id = ? AND kind IN ('summary', 'transition', 'note')
-          ORDER BY created_at DESC
-          LIMIT 30`,
-      )
-      .all(taskId) as Array<{
-      kind: string;
-      from_status: string | null;
-      to_status: string | null;
-      body: string | null;
-      created_at: string;
-    }>;
+    const updates = listTaskUpdatesForTranscript(taskId, 30);
 
     for (const u of updates.reverse()) {
       if (u.kind === 'transition' && u.from_status && u.to_status) {
@@ -72,24 +55,12 @@ function buildTranscript(taskId: string, agentId: string): string {
     }
 
     const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ');
-    const prompts = getDb()
-      .prepare(
-        `SELECT tool_name, tool_input, created_at
-           FROM permission_prompts
-          WHERE agent_id = ? AND resolved_at IS NOT NULL AND created_at >= ?
-          ORDER BY created_at DESC
-          LIMIT 10`,
-      )
-      .all(agentId, tenMinsAgo) as Array<{
-      tool_name: string;
-      tool_input: string;
-      created_at: string;
-    }>;
+    const prompts = listRecentResolvedByAgent(agentId, tenMinsAgo, 10);
 
     for (const p of prompts.reverse()) {
       let detail = '';
       try {
-        const inp = JSON.parse(p.tool_input) as Record<string, unknown>;
+        const inp = p.tool_input;
         detail = (inp.command ?? inp.file_path ?? inp.query ?? '') as string;
       } catch {
         // ignore parse errors
@@ -126,15 +97,7 @@ export async function summarizeAgentProgress(taskId: string, agentId: string): P
     const summary = stdout.slice(0, 120);
     if (!summary) return;
 
-    getDb()
-      .prepare(
-        `UPDATE tasks
-            SET current_summary = ?,
-                current_summary_updated_at = datetime('now'),
-                updated_at = datetime('now')
-          WHERE id = ?`,
-      )
-      .run(summary, taskId);
+    setCurrentSummary(taskId, summary);
 
     broadcast({ type: 'task:updated', payload: { taskId } });
 

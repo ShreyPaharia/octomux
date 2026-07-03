@@ -36,13 +36,17 @@
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from '../logger.js';
-import { getDb } from '../db.js';
 import { classify } from './policy.js';
-import { createCard, getCard, resolveCard, upsertManagedTask } from './store.js';
+import {
+  createCard,
+  getCard,
+  resolveCard,
+  upsertManagedTask,
+  listAllPendingCards,
+} from './store.js';
 import type { ActionCard } from './store.js';
 import { pushToConversation } from './stream.js';
-import { SELECT_TASK_SQL } from '../task-select.js';
-import type { Task } from '../types.js';
+import { getTask } from '../repositories/index.js';
 import {
   runCreateTask,
   runSendMessage,
@@ -354,9 +358,7 @@ async function executeApprovePlan(card: ActionCard): Promise<void> {
   // Delete any stale implement-done sentinel so the upcoming implement turn
   // starts fresh (the hook detector must not see a leftover from a prior run).
   try {
-    const taskRow = getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(taskId) as
-      | Task
-      | undefined;
+    const taskRow = getTask(taskId);
     const worktree = taskRow?.worktree ?? null;
     if (worktree) {
       const sentinelPath = path.join(worktree, '.octomux', 'implement-done');
@@ -429,10 +431,7 @@ async function executeApprovePlan(card: ActionCard): Promise<void> {
  * user can then approve/reject and the backend executes.
  */
 export function rehydratePendingCards(): ActionCard[] {
-  // listPendingCards is conversation-scoped; we need a global query here.
-  return getDb()
-    .prepare(`SELECT * FROM action_cards WHERE status = 'pending' ORDER BY created_at ASC`)
-    .all() as ActionCard[];
+  return listAllPendingCards();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

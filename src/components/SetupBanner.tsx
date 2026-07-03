@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '@/lib/api';
+import { configApi } from '@/lib/api/configApi';
 
 export function SetupBanner() {
   const [show, setShow] = useState(false);
@@ -10,7 +10,10 @@ export function SetupBanner() {
     let cancelled = false;
     (async () => {
       try {
-        const [settings, setup] = await Promise.all([api.getSettings(), api.getSetupStatus()]);
+        const [settings, setup] = await Promise.all([
+          configApi.getSettings(),
+          configApi.getSetupStatus(),
+        ]);
         if (cancelled) return;
         if (settings.onboardingCompletedAt) {
           setShow(false);

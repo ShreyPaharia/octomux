@@ -13,10 +13,12 @@
  *    hand-written registerWriteTools (ensuring the refactor is a pure rename).
  */
 
-import { describe, it, expect } from 'vitest';
-import { COMMANDS, getCommandByAction } from './command-registry.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { createTestDb } from '../test-helpers.js';
+import { COMMANDS, getCommandByAction, buildPolicySets } from './command-registry.js';
 import type { OrchestratorAction } from './command-registry.js';
 import { ORCHESTRATOR_ACTIONS } from './actions.js';
+import { classify } from './policy.js';
 
 // ─── All OrchestratorActions have a CommandDef ────────────────────────────────
 
@@ -153,5 +155,76 @@ describe('getCommandByAction', () => {
     // Cast to bypass type system — simulates an unexpected runtime value.
     const cmd = getCommandByAction('bogus-action' as OrchestratorAction);
     expect(cmd).toBeUndefined();
+  });
+});
+
+// ─── Policy tier derivation (SHR-213) ─────────────────────────────────────────
+
+describe('buildPolicySets', () => {
+  beforeEach(() => {
+    createTestDb();
+  });
+
+  it('matches the pre-registry hand-maintained tier sets', () => {
+    const { AUTO_TOOLS, READ_SUBCOMMANDS, ASK_SUBCOMMANDS, ALWAYS_ASK_SUBCOMMANDS } =
+      buildPolicySets();
+
+    expect([...AUTO_TOOLS].sort()).toEqual(
+      ['get_task', 'get_task_output', 'list_tasks', 'monitor_status', 'pull_linear_issue'].sort(),
+    );
+
+    expect([...READ_SUBCOMMANDS].sort()).toEqual(
+      [
+        'default-branch',
+        'get-skill',
+        'get-task',
+        'hooks-list',
+        'list-integrations',
+        'list-skills',
+        'list-tasks',
+        'recent-repos',
+        'task-summary',
+        'task-updates',
+      ].sort(),
+    );
+
+    expect([...ASK_SUBCOMMANDS].sort()).toEqual(
+      [
+        'add-agent',
+        'create-task',
+        'request-review',
+        'resume-task',
+        'send-message',
+        'set-status',
+      ].sort(),
+    );
+
+    expect([...ALWAYS_ASK_SUBCOMMANDS].sort()).toEqual(['close-task', 'delete-task'].sort());
+  });
+
+  it('every known command classifies to the same tier as before the registry refactor', () => {
+    const cases = [
+      ['list_tasks', [], 'auto'],
+      ['get_task', ['task-abc'], 'auto'],
+      ['monitor_status', [], 'auto'],
+      ['get_task_output', ['task-abc'], 'auto'],
+      ['pull_linear_issue', ['LIN-123'], 'auto'],
+      ['octomux', ['recent-repos'], 'auto'],
+      ['octomux', ['default-branch', '--repo-path', '/tmp/repo'], 'auto'],
+      ['octomux', ['list-tasks'], 'auto'],
+      ['octomux', ['get-task', 'task-abc'], 'auto'],
+      ['octomux', ['create-task', '--title', 'Foo'], 'ask'],
+      ['octomux', ['add-agent', '--task', 'task-abc'], 'ask'],
+      ['octomux', ['send-message', '--task', 'task-abc', '--text', 'hi'], 'ask'],
+      ['octomux', ['set-status', '--task', 'task-abc', '--status', 'in_progress'], 'ask'],
+      ['octomux', ['request-review', '--task', 'task-abc'], 'ask'],
+      ['octomux', ['resume-task', '--task', 'task-abc'], 'ask'],
+      ['octomux', ['delete-task', '--task', 'task-abc'], 'always-ask'],
+      ['octomux', ['close-task', '--task', 'task-abc'], 'always-ask'],
+    ] as const;
+
+    for (const [command, args, expected] of cases) {
+      expect(classify(command, [...args]), `${command} ${JSON.stringify(args)}`).toBe(expected);
+    }
   });
 });

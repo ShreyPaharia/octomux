@@ -33,10 +33,13 @@
 
 import { nanoid } from 'nanoid';
 import { childLogger } from '../../logger.js';
-import { getDb } from '../../db.js';
-import { getManagedTask, upsertManagedTask } from '../store.js';
+import {
+  getManagedTask,
+  upsertManagedTask,
+  listManagedTasksWithDependsOn,
+  getConversationUsage as storeGetConversationUsage,
+} from '../store.js';
 import { pushToConversation } from '../stream.js';
-import type { ManagedTask } from '../store.js';
 
 const logger = childLogger('orchestrator/mcp/verify');
 
@@ -193,12 +196,8 @@ export async function scheduleDagStep(
     'scheduleDagStep: evaluating DAG',
   );
 
-  const db = getDb();
-
   // Find all managed tasks for this conversation that have a depends_on list
-  const allManaged = db
-    .prepare(`SELECT * FROM managed_tasks WHERE conversation_id = ? AND depends_on IS NOT NULL`)
-    .all(conversationId) as ManagedTask[];
+  const allManaged = listManagedTasksWithDependsOn(conversationId);
 
   if (allManaged.length === 0) {
     return [];
@@ -342,43 +341,6 @@ export async function scheduleDagStep(
 // ─── Usage guardrail helpers ──────────────────────────────────────────────────
 
 /**
- * Increment per-conversation usage counters.
- *
- * Uses INSERT ... ON CONFLICT DO UPDATE to create the row on first access and
- * atomically increment the counters on subsequent calls.
- *
- * Called by the gate/exec layer when a task is spawned or a tool call runs.
- */
-export function incrementConversationUsage(conversationId: string, delta: UsageDelta): void {
-  const db = getDb();
-  const tasksSpawned = delta.tasks_spawned ?? 0;
-  const toolCalls = delta.tool_calls ?? 0;
-
-  db.prepare(
-    `INSERT INTO conversation_usage (conversation_id, tasks_spawned, tool_calls)
-     VALUES (?, ?, ?)
-     ON CONFLICT(conversation_id) DO UPDATE SET
-       tasks_spawned    = tasks_spawned + excluded.tasks_spawned,
-       tool_calls       = tool_calls + excluded.tool_calls,
-       last_activity_at = datetime('now')`,
-  ).run(conversationId, tasksSpawned, toolCalls);
-
-  logger.debug(
-    { conversation_id: conversationId, tasks_spawned: tasksSpawned, tool_calls: toolCalls },
-    'incrementConversationUsage',
-  );
-}
-
-/**
- * Return the current usage row for a conversation, or undefined if not yet created.
- */
-export function getConversationUsage(conversationId: string): ConversationUsage | undefined {
-  return getDb()
-    .prepare(`SELECT * FROM conversation_usage WHERE conversation_id = ?`)
-    .get(conversationId) as ConversationUsage | undefined;
-}
-
-/**
  * Check whether the conversation has reached a soft usage limit.
  *
  * Returns {halted: true, reason} if either tasks_spawned >= USAGE_TASKS_SOFT_LIMIT
@@ -388,7 +350,7 @@ export function getConversationUsage(conversationId: string): ConversationUsage 
  * before allowing further write-actions when halted=true.
  */
 export function checkUsageGuardrail(conversationId: string): GuardrailResult {
-  const usage = getConversationUsage(conversationId);
+  const usage = storeGetConversationUsage(conversationId) as ConversationUsage | undefined;
   if (!usage) {
     return { halted: false };
   }

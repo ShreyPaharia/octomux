@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
-import { api, type PublishedReviewVerdict } from '../../lib/api';
+import { reviewApi, type PublishedReviewVerdict } from '@/lib/api/reviewApi';
+import { taskApi } from '@/lib/api/taskApi';
 import { displayReviewTitle } from '@/lib/review-display';
 import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { cn } from '@/lib/utils';
@@ -62,7 +63,7 @@ export function PublishBar({
     if (acceptedCount === 0) return;
     setPublishing(true);
     try {
-      await api.publishReview(taskId, { verdict });
+      await reviewApi.publishReview(taskId, { verdict });
       toast.success('Review published to GitHub');
       onPublished();
     } catch (e) {
@@ -75,7 +76,7 @@ export function PublishBar({
   async function handleReRun() {
     setReRunning(true);
     try {
-      await api.requestReReview(taskId);
+      await reviewApi.requestReReview(taskId);
       toast.success('Re-review started');
       onReRun();
     } catch (e) {
@@ -87,7 +88,7 @@ export function PublishBar({
 
   async function handleDelete() {
     try {
-      await api.deleteTask(taskId);
+      await taskApi.deleteTask(taskId);
       toast.success('Review deleted');
       onDeleted?.();
     } catch (e) {

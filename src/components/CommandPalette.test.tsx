@@ -5,12 +5,14 @@ import { MemoryRouter } from 'react-router-dom';
 import { TasksProvider } from '@/lib/tasks-context';
 import { CommandPalette } from './CommandPalette';
 import { makeTask } from '../test-helpers';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 const mockTasksRef = { current: [] as Task[] };
 const mockRefresh = vi.fn();
@@ -176,7 +178,7 @@ describe('CommandPalette — move-task actions', () => {
     expect(results.length).toBeGreaterThan(0);
   });
 
-  it('calls api.moveTask when a move action is selected', async () => {
+  it('calls taskApi.moveTask when a move action is selected', async () => {
     const user = userEvent.setup();
     apiMock.moveTask.mockResolvedValue(makeTask({ id: 'tx', workflow_status: 'done' }));
     renderPalette([makeTask({ id: 'tx', title: 'Deploy task', workflow_status: 'in_progress' })]);

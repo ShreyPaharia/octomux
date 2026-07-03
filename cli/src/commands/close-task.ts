@@ -9,7 +9,7 @@ export function registerCloseTask(program: Command): void {
     .action(async (id: string, _opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      const task = await client.updateTask(id, { status: 'closed' });
+      const task = await client.updateTask(id, { runtime_state: 'idle' });
 
       if (json) {
         outputJson(task);

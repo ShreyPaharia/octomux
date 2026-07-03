@@ -24,6 +24,7 @@ demo-fixtures/
 .husky/prepare-commit-msg
 .config/nvim/.luarc.json
 docs/superpowers
+.superpowers/
 designs/
 octomux.pen
 .DS_Store
@@ -35,3 +36,4 @@ packages/*/bin/*
 !packages/*/bin/.gitkeep
 packages/*/share/terminfo/*
 !packages/*/share/terminfo/.gitkeep
+*.tsbuildinfo

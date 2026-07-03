@@ -9,13 +9,13 @@ import {
 } from 'react';
 import type { editor } from 'monaco-editor';
 import {
-  api,
   diffRangeToParam,
+  taskApi,
   type DiffFileEntry,
   type DiffRange,
   type FileDiffResponse,
-} from '@/lib/api';
-import type { Agent } from '../../server/types';
+} from '@/lib/api/taskApi';
+import type { Agent } from '@octomux/types';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
@@ -225,7 +225,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
         return next;
       });
 
-      api
+      taskApi
         .getTaskDiffFile(taskId, path, range)
         .then((d) => {
           setLoaded((prev) => {

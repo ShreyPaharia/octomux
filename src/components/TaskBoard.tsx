@@ -9,10 +9,10 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import type { Task, WorkflowStatus } from '../../server/types';
+import type { Task, WorkflowStatus } from '@octomux/types';
 import { TaskBoardColumn, COLUMN_DEFS, type BoardColumnId } from './TaskBoardColumn';
 import { MoveWithNoteDialog } from './MoveWithNoteDialog';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { showToast } from './CustomToast';
 
 // Columns that require a note when dragging into them
@@ -111,7 +111,7 @@ export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardPro
   // Soft-delete all done tasks (moves them to trash)
   const handleDeleteDone = useCallback(async () => {
     try {
-      const result = await api.deleteDone();
+      const result = await taskApi.deleteDone();
       if (result.deleted > 0) {
         showToast(
           'success',
@@ -146,7 +146,7 @@ export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardPro
       } else {
         // Apply optimistic move immediately
         setOptimisticMoves((prev) => new Map(prev).set(taskId, targetColumn));
-        api
+        taskApi
           .moveTask(taskId, { workflow_status: targetColumn })
           .then((updatedTask) => {
             // Clear optimistic when server responds; parent refresh handles the rest
@@ -182,7 +182,7 @@ export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardPro
 
       // Apply optimistic
       setOptimisticMoves((prev) => new Map(prev).set(taskId, targetColumn));
-      api
+      taskApi
         .moveTask(taskId, { workflow_status: targetColumn, note })
         .then((updatedTask) => {
           setOptimisticMoves((prev) => {

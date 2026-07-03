@@ -1,7 +1,9 @@
 import { childLogger } from '../../logger.js';
-import type { IntegrationProvider, ValidationResult, JsonSchema } from '../types.js';
+import type { IntegrationProvider, ValidationResult, JsonSchema, OctomuxColumn } from '../types.js';
 import type { HookEnvelope } from '../../hook-types.js';
 import { registerProvider } from '../registry.js';
+import { HttpIntegrationClient, HttpIntegrationError } from '../http-client.js';
+import { validateStatusMapObject } from '../types.js';
 
 const logger = childLogger('integrations:jira');
 
@@ -10,7 +12,7 @@ export interface JiraConfig {
   email: string;
   api_token: string;
   default_project?: string;
-  status_map: Record<string, string>;
+  status_map: Partial<Record<OctomuxColumn, string>>;
 }
 
 const CONFIG_SCHEMA: JsonSchema = {
@@ -56,6 +58,10 @@ function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 }
 
+function createClient(cfg: JiraConfig): HttpIntegrationClient {
+  return HttpIntegrationClient.basicAuth(cfg.base_url, cfg.email, cfg.api_token);
+}
+
 function validate(config: unknown): ValidationResult {
   if (typeof config !== 'object' || config === null) {
     return { ok: false, errors: ['config must be an object'] };
@@ -79,9 +85,7 @@ function validate(config: unknown): ValidationResult {
     errors.push('api_token is required');
   }
 
-  if (!cfg.status_map || typeof cfg.status_map !== 'object' || Array.isArray(cfg.status_map)) {
-    errors.push('status_map is required and must be an object');
-  }
+  validateStatusMapObject(cfg.status_map, 'status_map', errors);
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
@@ -89,23 +93,20 @@ function validate(config: unknown): ValidationResult {
 async function testConnection(config: unknown): Promise<{ ok: boolean; message: string }> {
   const cfg = config as JiraConfig;
   try {
-    const credentials = Buffer.from(`${cfg.email}:${cfg.api_token}`).toString('base64');
-    const res = await fetch(`${cfg.base_url}/rest/api/3/myself`, {
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        Accept: 'application/json',
-      },
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { displayName?: string; emailAddress?: string };
-      return {
-        ok: true,
-        message: `Connected as ${data.displayName ?? data.emailAddress ?? 'unknown user'}`,
-      };
-    }
-    return { ok: false, message: `Jira returned ${res.status}: ${res.statusText}` };
+    const data = await createClient(cfg).json<{ displayName?: string; emailAddress?: string }>(
+      '/rest/api/3/myself',
+    );
+    return {
+      ok: true,
+      message: `Connected as ${data.displayName ?? data.emailAddress ?? 'unknown user'}`,
+    };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg =
+      err instanceof HttpIntegrationError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : String(err);
     return { ok: false, message: `Connection failed: ${msg}` };
   }
 }
@@ -114,7 +115,6 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   const cfg = config as JiraConfig;
   const task = envelope.task;
 
-  // Find a matching external ref for Jira
   const refs = (task.external_refs ?? []) as Array<{ integration: string; ref: string }>;
   const jiraRef = refs.find((r) => r.integration === 'jira' || r.integration.startsWith('jira:'));
 
@@ -139,7 +139,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   }
 
   const statusMap = cfg.status_map ?? {};
-  const transitionId = statusMap[toStatus];
+  const transitionId = statusMap[toStatus as OctomuxColumn];
   if (!transitionId) {
     logger.debug(
       { task_id: task.id, event: envelope.event, to_status: toStatus },
@@ -148,15 +148,10 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
     return;
   }
 
-  const credentials = Buffer.from(`${cfg.email}:${cfg.api_token}`).toString('base64');
   try {
-    const res = await fetch(`${cfg.base_url}/rest/api/3/issue/${issueKey}/transitions`, {
+    const res = await createClient(cfg).request(`/rest/api/3/issue/${issueKey}/transitions`, {
       method: 'POST',
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transition: { id: transitionId } }),
     });
     if (res.ok || res.status === 204) {
@@ -165,7 +160,6 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
         'jira handler: transitioned issue',
       );
     } else {
-      const body = await res.text().catch(() => '');
       logger.warn(
         {
           task_id: task.id,
@@ -173,7 +167,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
           to_status: toStatus,
           transition_id: transitionId,
           status: res.status,
-          body,
+          body: res.body,
         },
         'jira handler: transition request failed',
       );
@@ -201,5 +195,4 @@ export const jiraProvider: IntegrationProvider = {
   handler,
 };
 
-// Register the provider
 registerProvider(jiraProvider);

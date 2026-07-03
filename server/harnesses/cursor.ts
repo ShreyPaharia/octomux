@@ -4,6 +4,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
+import {
+  formatHarnessFlags,
+  formatJsonConfig,
+  validateSettingsObject,
+  writeJsonConfig,
+} from './shared.js';
+import { registerHarness } from './registry.js';
 import type { OctomuxSettings } from '../settings.js';
 import { childLogger } from '../logger.js';
 import { execTmux } from '../tmux-bin.js';
@@ -100,9 +107,9 @@ function pruneOctomuxCursorRules(rulesDir: string): void {
   }
 }
 
-function expectedHooksPayload(bridgeDest: string): string {
+function hooksJsonObject(bridgeDest: string) {
   const hookEntry = { command: bridgeDest, type: 'command', timeout: 5 };
-  const hooksJson = {
+  return {
     version: 1,
     hooks: {
       sessionStart: [hookEntry],
@@ -112,7 +119,6 @@ function expectedHooksPayload(bridgeDest: string): string {
       afterFileEdit: [hookEntry],
     },
   };
-  return JSON.stringify(hooksJson, null, 2) + '\n';
 }
 
 /**
@@ -174,18 +180,19 @@ export const cursorHarness: Harness = {
     fs.copyFileSync(bridgeSrc, bridgeDest);
     fs.chmodSync(bridgeDest, 0o500);
 
-    const expectedConfig = JSON.stringify({ baseUrl, token: hookToken }, null, 2) + '\n';
+    const expectedConfig = formatJsonConfig({ baseUrl, token: hookToken });
     const configPath = path.join(hooksDir, 'config.json');
     try {
       if (!fs.existsSync(configPath) || fs.readFileSync(configPath, 'utf-8') !== expectedConfig) {
-        fs.writeFileSync(configPath, expectedConfig, { mode: 0o600 });
+        writeJsonConfig(configPath, { baseUrl, token: hookToken }, { mode: 0o600 });
       }
     } catch {
-      fs.writeFileSync(configPath, expectedConfig, { mode: 0o600 });
+      writeJsonConfig(configPath, { baseUrl, token: hookToken }, { mode: 0o600 });
     }
     fs.chmodSync(configPath, 0o600);
 
-    const hooksJsonExpected = expectedHooksPayload(bridgeDest);
+    const hooksJsonObj = hooksJsonObject(bridgeDest);
+    const hooksJsonExpected = formatJsonConfig(hooksJsonObj);
     const cursorDir = path.join(worktreePath, '.cursor');
     fs.mkdirSync(cursorDir, { recursive: true });
     const hooksJsonPath = path.join(cursorDir, 'hooks.json');
@@ -194,10 +201,10 @@ export const cursorHarness: Harness = {
         !fs.existsSync(hooksJsonPath) ||
         fs.readFileSync(hooksJsonPath, 'utf-8') !== hooksJsonExpected
       ) {
-        fs.writeFileSync(hooksJsonPath, hooksJsonExpected);
+        writeJsonConfig(hooksJsonPath, hooksJsonObj);
       }
     } catch {
-      fs.writeFileSync(hooksJsonPath, hooksJsonExpected);
+      writeJsonConfig(hooksJsonPath, hooksJsonObj);
     }
   },
 
@@ -207,10 +214,10 @@ export const cursorHarness: Harness = {
     fs.mkdirSync(rulesDir, { recursive: true });
     pruneOctomuxCursorRules(rulesDir);
 
-    const defs = await listAgents();
+    const defs = await listAgents(worktreePath);
     for (const def of defs) {
       try {
-        const detail = await getAgent(def.name);
+        const detail = await getAgent(def.name, worktreePath);
         const raw = `${OCTOMUX_CURSOR_RULE_PREFIX}${def.name}.mdc`;
         const dest = path.join(rulesDir, raw);
         const next = agentMarkdownToCursorRule(def.name, detail.content);
@@ -297,41 +304,37 @@ export const cursorHarness: Harness = {
           : CURSOR_DEFAULT_MODEL;
       parts.push(`--model ${modelId}`);
     }
-    return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+    return formatHarnessFlags(parts);
   },
 
   validateSettings(blob: unknown): Record<string, unknown> {
-    if (typeof blob !== 'object' || blob === null || Array.isArray(blob)) {
-      throw new Error('Invalid cursor settings: expected object');
-    }
-    const obj = blob as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    const allowed = new Set(['flags', 'force', 'model']);
-    for (const key of Object.keys(obj)) {
-      if (!allowed.has(key)) {
-        throw new Error(`Invalid cursor settings: unknown key "${key}"`);
-      }
-    }
-    if (obj.flags !== undefined) {
-      out.flags = validateFlagString(obj.flags as string, 'harnesses.cursor.flags');
-    }
-    if (obj.force !== undefined) {
-      if (typeof obj.force !== 'boolean') {
-        throw new Error('Invalid cursor.force: expected boolean');
-      }
-      out.force = obj.force;
-    }
-    if (obj.model !== undefined) {
-      if (typeof obj.model !== 'string') {
-        throw new Error('Invalid cursor.model: expected string');
-      }
-      const trimmed = obj.model.trim();
-      if (trimmed) out.model = validateCursorModel(trimmed);
-    }
-    return out;
+    return validateSettingsObject(
+      blob,
+      'cursor',
+      {
+        flags: (value) => validateFlagString(value as string, 'harnesses.cursor.flags'),
+        force: (value) => {
+          if (typeof value !== 'boolean') {
+            throw new Error('Invalid cursor.force: expected boolean');
+          }
+          return value;
+        },
+        model: (value) => {
+          if (typeof value !== 'string') {
+            throw new Error('Invalid cursor.model: expected string');
+          }
+          const trimmed = value.trim();
+          if (trimmed) return validateCursorModel(trimmed);
+          return undefined;
+        },
+      },
+      { rejectUnknownKeys: true },
+    );
   },
 
   validateAgentName(name: string): string {
     return validateAgentName(name);
   },
 };
+
+registerHarness(cursorHarness);

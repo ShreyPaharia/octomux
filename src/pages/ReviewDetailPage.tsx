@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, type ReviewDetail, type DiffSummaryResponse } from '../lib/api';
-import { subscribe } from '../lib/event-source';
+import { taskApi, type DiffSummaryResponse } from '../lib/api/taskApi';
+import { useReviewDetail } from '../lib/hooks';
 import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
 import type { Walkthrough } from '../components/review/walkthrough-types';
 import { buildGroups, orderedPathsFromGroups } from '@/lib/review-file-groups';
@@ -11,7 +11,7 @@ import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
 import { DiffViewer } from '../components/DiffViewer';
 import { CommentsSidePanel } from '../components/CommentsSidePanel';
-import { TaskCommentsContext, useTaskComments } from '../hooks/useTaskComments';
+import { CommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -31,8 +31,7 @@ function defaultCommentsPanelOpen(): boolean {
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [detail, setDetail] = useState<ReviewDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { detail, error, refresh } = useReviewDetail(id);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
@@ -47,29 +46,6 @@ export default function ReviewDetailPage() {
     }
   }, [showCommentsPanel]);
 
-  const refresh = useCallback(() => {
-    if (!id) return;
-    api
-      .getReviewDetail(id)
-      .then(setDetail)
-      .catch((e: Error) => setError(e.message));
-  }, [id]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!id) return;
-    return subscribe((event) => {
-      const e = event as { type: string; payload: { taskId?: string } };
-      if (!('taskId' in e.payload) || e.payload.taskId !== id) return;
-      if (e.type === 'review:drafts-ready' || e.type === 'review:published') {
-        refresh();
-      }
-    });
-  }, [id, refresh]);
-
   const taskComments = useTaskComments(id);
 
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set());
@@ -83,8 +59,8 @@ export default function ReviewDetailPage() {
         return next;
       });
       try {
-        if (currentlyReviewed) await api.unmarkReviewed(id!, path);
-        else await api.markReviewed(id!, path);
+        if (currentlyReviewed) await taskApi.unmarkReviewed(id!, path);
+        else await taskApi.markReviewed(id!, path);
       } catch {
         setReviewedFiles((prev) => {
           const next = new Set(prev);
@@ -178,7 +154,7 @@ export default function ReviewDetailPage() {
   );
 
   return (
-    <TaskCommentsContext.Provider value={taskComments}>
+    <CommentsContext.Provider value={taskComments}>
       <div className="flex h-full min-h-0 flex-col">
         <HeadAdvancedBanner taskId={id!} currentSha={detail.task.pr_head_sha} onRefresh={refresh} />
 
@@ -279,6 +255,6 @@ export default function ReviewDetailPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </TaskCommentsContext.Provider>
+    </CommentsContext.Provider>
   );
 }

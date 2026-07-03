@@ -7,9 +7,42 @@
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
 
+/**
+ * Every event type that can arrive over `/ws/events`. Mirrors the server-side
+ * broadcast union in `server/events.ts`; widened from the original three-type
+ * stub so consumers no longer need `as`-casts for `task:stuck`, `review:*`, etc.
+ */
+export type ServerEventType =
+  | 'task:updated'
+  | 'task:created'
+  | 'task:deleted'
+  | 'task:stuck'
+  | 'task:phase_complete'
+  | 'chat:updated'
+  | 'chat:deleted'
+  | 'review:drafts-ready'
+  | 'review:run-failed'
+  | 'review:published'
+  | 'review:head-advanced';
+
+/**
+ * A real-time event delivered over `/ws/events`. The payload is intentionally a
+ * single flat shape (rather than a discriminated union) so that consumers can
+ * read `payload.taskId` / `payload.newHeadSha` / etc. without first narrowing on
+ * `type`. All payload fields are optional because they vary by event type.
+ */
 export interface ServerEvent {
-  type: 'task:updated' | 'task:created' | 'task:deleted';
-  payload: { taskId: string };
+  type: ServerEventType;
+  payload: {
+    taskId?: string;
+    chatId?: string;
+    reviewRunId?: string;
+    newHeadSha?: string;
+    github_review_url?: string | null;
+    phase?: string;
+    reason?: string;
+    [key: string]: unknown;
+  };
 }
 
 let ws: WebSocket | null = null;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import type { PreflightConflict } from '@/lib/api';
+import type { PreflightConflict } from '@/lib/api/taskApi';
 
 interface Props {
   open: boolean;
@@ -52,7 +52,7 @@ export function NoneModeConflictDialog({
           {conflicts.map((c) => (
             <li key={c.task_id} className="flex items-center justify-between gap-2">
               <span className="truncate">
-                {c.title} <span className="text-xs text-muted-foreground">({c.status})</span>
+                {c.title} <span className="text-xs text-muted-foreground">({c.runtime_state})</span>
               </span>
               <Button
                 size="sm"

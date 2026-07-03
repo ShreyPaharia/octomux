@@ -6,7 +6,8 @@ future others) in octomux. Written 2026-05-08.
 ## Goals
 
 - Adding a new harness is a localised change — one new file in
-  `server/harnesses/`, one small frontend panel, two registry entries.
+  `server/harnesses/`, one side-effect import in `server/harnesses/index.ts`,
+  and (when the harness has settings) a small frontend panel.
 - Custom skills authored once are visible from any harness that supports them.
   (Already true between Claude Code and Cursor CLI: `cursor-agent`'s binary
   references `.claude/skills/` directly, so they cross-share for free.)
@@ -23,8 +24,8 @@ future others) in octomux. Written 2026-05-08.
 - Provider/model abstraction. We are abstracting the _CLI harness_ (binary +
   config conventions + hook protocol), not the underlying LLM. Model choice
   inside Claude or Cursor remains that harness's concern.
-- Plugin auto-discovery. The registry is an explicit typed map. We can evolve
-  toward auto-discovery later, but two harnesses do not justify it now.
+- Plugin auto-discovery from disk. Harnesses self-register via side-effect
+  imports (same pattern as `server/integrations/`). No runtime plugin loader.
 - Schema-driven settings UI. Each harness ships a small typed React panel.
 - A new web-facing public API for installing harnesses at runtime.
 
@@ -92,9 +93,10 @@ New module layout:
 ```
 server/harnesses/
   types.ts          interface Harness, HarnessLaunchOpts, validation helpers
-  registry.ts       HARNESSES map, getHarness(id), listHarnesses(), DEFAULT_HARNESS_ID
-  claude-code.ts    the only impl in step 1
-  index.ts          re-exports
+  registry.ts       registerHarness, getHarness, listHarnesses, DEFAULT_HARNESS_ID
+  claude-code.ts    Claude Code impl (self-registers on import)
+  cursor.ts         Cursor CLI impl (self-registers on import)
+  index.ts          side-effect imports + re-exports
 ```
 
 Touched call sites become harness-agnostic:
@@ -246,26 +248,57 @@ one impl risks the second impl forcing a different shape.
 
 ### Registry
 
+Harnesses self-register on import, mirroring `server/integrations/`:
+
 ```ts
 // server/harnesses/registry.ts
-import { claudeCodeHarness } from './claude-code.js';
 import type { Harness } from './types.js';
 
-const HARNESSES = new Map<string, Harness>([[claudeCodeHarness.id, claudeCodeHarness]]);
+const harnesses = new Map<string, Harness>();
 
-export const DEFAULT_HARNESS_ID = claudeCodeHarness.id;
+export const DEFAULT_HARNESS_ID = 'claude-code';
+
+export function registerHarness(h: Harness): void {
+  harnesses.set(h.id, h);
+}
 
 export function getHarness(id: string | null | undefined): Harness {
   const key = id ?? DEFAULT_HARNESS_ID;
-  const h = HARNESSES.get(key);
+  const h = harnesses.get(key);
   if (!h) throw new Error(`Unknown harness: ${key}`);
   return h;
 }
 
 export function listHarnesses(): Harness[] {
-  return Array.from(HARNESSES.values());
+  return Array.from(harnesses.values());
 }
 ```
+
+```ts
+// server/harnesses/index.ts
+import './claude-code.js';
+import './cursor.js';
+
+export { registerHarness, getHarness, listHarnesses, DEFAULT_HARNESS_ID } from './registry.js';
+// ...
+```
+
+Each harness module calls `registerHarness(...)` at the bottom of the file after
+exporting its `Harness` object.
+
+### How to add a harness
+
+1. Create `server/harnesses/<id>.ts` implementing the `Harness` interface from
+   `types.ts`. Export a single `Harness` object (e.g. `myHarness`).
+2. At the bottom of the module, import `registerHarness` from `./registry.js`
+   and call `registerHarness(myHarness)`.
+3. Add one side-effect import in `server/harnesses/index.ts`:
+   `import './<id>.js';`
+4. (Optional, step 2b+) Ship a `<MyHarnessSettingsPanel>` in the frontend and
+   wire it into `SettingsPage.tsx` if the harness has user-editable settings.
+
+No edit to `registry.ts` is required — only the new module and the
+`index.ts` import line.
 
 ### Claude Code implementation
 

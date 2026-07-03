@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { BoardCard } from './BoardCard';
 
 interface DraggableBoardCardProps {

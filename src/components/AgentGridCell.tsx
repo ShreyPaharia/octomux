@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { TerminalView } from './TerminalView';
 import { AgentActivityDot } from './AgentActivityDot';
-import type { HookActivity } from '../../server/types';
+import type { HookActivity } from '@octomux/types';
 
 export interface AgentGridCellProps {
   taskId: string;

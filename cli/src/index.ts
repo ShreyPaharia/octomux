@@ -30,6 +30,7 @@ import { registerHooksList } from './commands/hooks-list.js';
 import { registerListIntegrations } from './commands/list-integrations.js';
 import { registerInit } from './commands/init.js';
 import { registerTeam } from './commands/team.js';
+import { registerFiles } from './commands/files.js';
 
 const program = new Command();
 
@@ -71,6 +72,7 @@ registerHooksList(program);
 registerListIntegrations(program);
 registerInit(program);
 registerTeam(program);
+registerFiles(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();

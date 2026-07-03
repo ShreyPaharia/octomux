@@ -28,16 +28,27 @@ vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
 }));
 
-vi.mock('./harnesses/claude-code.js', async () => {
-  const actual = await vi.importActual<typeof import('./harnesses/claude-code.js')>(
-    './harnesses/claude-code.js',
-  );
+vi.mock('./skills.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./skills.js')>();
   return {
     ...actual,
-    claudeCodeHarness: {
-      ...actual.claudeCodeHarness,
-      installHooks: vi.fn().mockResolvedValue(undefined),
-      syncAgents: vi.fn().mockResolvedValue(undefined),
+    syncSkills: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock('./harnesses/index.js', async () => {
+  const actual =
+    await vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
+  const claudeCode = {
+    ...actual.getHarness('claude-code'),
+    installHooks: vi.fn().mockResolvedValue(undefined),
+    syncAgents: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    ...actual,
+    getHarness: (id?: string | null) => {
+      const h = actual.getHarness(id);
+      return h.id === 'claude-code' ? claudeCode : h;
     },
   };
 });
@@ -103,7 +114,7 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-const { startTask } = await import('./task-runner.js');
+const { startTask } = await import('./task-engine/index.js');
 
 let db: Database.Database;
 

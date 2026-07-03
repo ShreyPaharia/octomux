@@ -17,8 +17,8 @@ import { RepoPickerField } from '@/components/fields/RepoPickerField';
 import { BranchPickerField } from '@/components/fields/BranchPickerField';
 import { HarnessPicker } from '@/components/HarnessPicker';
 import { useTasksContext } from '@/lib/tasks-context';
-import { api } from '@/lib/api';
-import type { CreateTaskRequest } from '../../server/types';
+import { taskApi } from '@/lib/api/taskApi';
+import type { CreateTaskRequest } from '@octomux/types';
 
 type Mode = 'paste' | 'github';
 
@@ -196,7 +196,7 @@ export function BulkCreateDialog({ open, onOpenChange }: BulkCreateDialogProps) 
           ...(baseBranch.trim() ? { base_branch: baseBranch.trim() } : {}),
           ...(harnessId ? { harness_id: harnessId } : {}),
         };
-        await api.createTask(payload);
+        await taskApi.createTask(payload);
         created += 1;
       } catch (err) {
         failed.push({ label: producer.label, reason: (err as Error).message || 'unknown error' });

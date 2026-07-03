@@ -1,6 +1,6 @@
 import path from 'path';
 import { nanoid } from 'nanoid';
-import { getDb } from './db.js';
+import { insertTask, insertWorktree } from './repositories/index.js';
 
 /** Lowercased, dashed `basename(repoPath)` — safe for use in branch names. */
 export function repoShortName(repoPath: string): string {
@@ -131,31 +131,34 @@ export interface InsertReviewTaskParams {
  * GitHub-poller path (PR-only) and the manual `/review` endpoint.
  */
 export function insertReviewTask(params: InsertReviewTaskParams): string {
-  const db = getDb();
   const id = params.id ?? nanoid(12);
   const worktreeId = nanoid(12);
 
-  db.prepare(
-    `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status)
-     VALUES (?, '', ?, ?, ?, ?, 'new', 'available')`,
-  ).run(worktreeId, params.repoPath, params.branch, params.baseBranch, params.baseSha ?? null);
+  insertWorktree({
+    id: worktreeId,
+    path: '',
+    repo_path: params.repoPath,
+    branch: params.branch,
+    base_branch: params.baseBranch,
+    base_sha: params.baseSha ?? null,
+    mode: 'new',
+    status: 'available',
+  });
 
-  db.prepare(
-    `INSERT INTO tasks
-       (id, title, description, runtime_state, workflow_status, pr_url, pr_number, pr_head_sha,
-        initial_prompt, source, worktree_id, review_of_task_id)
-     VALUES (?, ?, ?, 'idle', 'backlog', ?, ?, ?, ?, 'auto_review', ?, ?)`,
-  ).run(
+  insertTask({
     id,
-    params.title,
-    params.description,
-    params.prUrl,
-    params.prNumber,
-    params.prHeadSha,
-    params.initialPrompt,
-    worktreeId,
-    params.reviewOfTaskId ?? null,
-  );
+    title: params.title,
+    description: params.description,
+    runtime_state: 'idle',
+    workflow_status: 'backlog',
+    pr_url: params.prUrl,
+    pr_number: params.prNumber,
+    pr_head_sha: params.prHeadSha,
+    initial_prompt: params.initialPrompt,
+    source: 'auto_review',
+    worktree_id: worktreeId,
+    review_of_task_id: params.reviewOfTaskId ?? null,
+  });
 
   return id;
 }

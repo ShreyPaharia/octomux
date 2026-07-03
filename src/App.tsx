@@ -7,14 +7,14 @@ import TasksPage from './pages/TasksPage';
 import ReviewsPage from './pages/ReviewsPage';
 import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
-import { UniversalSidebar } from './components/UniversalSidebar';
+import { UniversalSidebar } from './components/sidebar/universal-sidebar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { ResponsiveToaster } from './components/ResponsiveToaster';
 import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SHIP_EVENT } from './pages/TaskDetail';
 import { SetupBanner } from './components/SetupBanner';
-import type { Task } from '../server/types';
+import type { Task } from '@octomux/types';
 
 // The four most-clicked nav targets stay eager so navigating to them never
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.

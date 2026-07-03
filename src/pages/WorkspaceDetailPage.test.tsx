@@ -1,18 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderWithRouter, makeTask } from '../test-helpers';
-import type { Worktree } from '../../server/types';
-import type { WorktreeDetail } from '@/lib/api';
+import type { Worktree } from '@octomux/types';
+import type { WorktreeDetail } from '@/lib/api/taskApi';
 
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
-const { apiMock, apiProxy } = await vi.hoisted(async () =>
+const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
 
 vi.mock('react-router-dom', routerMockFactory);
-vi.mock('@/lib/api', () => ({ api: apiProxy }));
+vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
 const WorkspaceDetailPage = (await import('./WorkspaceDetailPage')).default;
 

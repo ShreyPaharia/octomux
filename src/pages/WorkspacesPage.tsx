@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/page-header';
 import { GlassPanel } from '@/components/ui/glass-panel';
-import { api } from '@/lib/api';
+import { taskApi } from '@/lib/api/taskApi';
 import { repoName } from '@/lib/utils';
-import type { RunMode, WorktreeSummary } from '../../server/types';
+import type { RunMode, WorktreeSummary } from '@octomux/types';
 
 function truncate(s: string, n = 48): string {
   if (!s) return '—';
@@ -46,7 +46,7 @@ export default function WorkspacesPage() {
     let cancelled = false;
     async function load() {
       try {
-        const rows = await api.listWorktrees();
+        const rows = await taskApi.listWorktrees();
         if (!cancelled) setWorktrees(rows);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);

@@ -6,3 +6,4 @@ data
 coverage
 bun.lock
 .worktrees
+.superpowers

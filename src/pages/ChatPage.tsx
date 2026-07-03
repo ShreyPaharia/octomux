@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { Agent } from '../../server/types';
+import type { Agent } from '@octomux/types';
 
 const TerminalView = lazy(() =>
   import('@/components/TerminalView').then((m) => ({ default: m.TerminalView })),

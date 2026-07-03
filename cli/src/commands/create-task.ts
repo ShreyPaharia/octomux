@@ -3,12 +3,12 @@ import { promisify } from 'node:util';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import type { OctomuxClient, RunMode, Task } from '../client.js';
-import { outputJson, label, success, colorStatus } from '../format.js';
+import { RUN_MODES } from '@octomux/types';
+import type { RunMode, Task } from '@octomux/types';
+import type { OctomuxClient } from '../client.js';
+import { outputJson, label, success, colorStatus, taskDisplayStatus } from '../format.js';
 
 const execFileAsync = promisify(execFile);
-
-const VALID_MODES: readonly RunMode[] = ['new', 'existing', 'none', 'scratch'] as const;
 
 export interface ForkResolution {
   baseBranch: string;
@@ -30,17 +30,16 @@ export async function resolveForkFrom(
     throw new Error(`cannot fork from ${forkFromId}: source not found (${msg})`);
   }
 
-  const status = source.status;
   const runMode = source.run_mode ?? 'new';
 
   if (runMode === 'scratch' || runMode === 'none' || runMode === 'existing') {
     throw new Error(
-      `cannot fork from ${forkFromId}: source has no managed branch (status=${status}, run_mode=${runMode})`,
+      `cannot fork from ${forkFromId}: source has no managed branch (runtime_state=${source.runtime_state}, run_mode=${runMode})`,
     );
   }
-  if (status === 'draft') {
+  if (source.runtime_state === 'idle') {
     throw new Error(
-      `cannot fork from ${forkFromId}: source has no branch (status=${status}, run_mode=${runMode})`,
+      `cannot fork from ${forkFromId}: source has no branch (runtime_state=${source.runtime_state}, run_mode=${runMode})`,
     );
   }
 
@@ -85,7 +84,7 @@ export function registerCreateTask(program: Command): void {
     .option('-p, --initial-prompt <prompt>', 'initial prompt for the agent')
     .option('-b, --branch <name>', 'branch name (new mode only)')
     .option('--base-branch <name>', 'base branch name (new mode only)')
-    .option('--mode <mode>', `run mode: ${VALID_MODES.join(' | ')} (default: new)`, 'new')
+    .option('--mode <mode>', `run mode: ${RUN_MODES.join(' | ')} (default: new)`, 'new')
     .option('--worktree-path <path>', 'existing worktree path (required for existing mode)')
     .option(
       '--fork-from <task-id>',
@@ -102,8 +101,8 @@ export function registerCreateTask(program: Command): void {
       const { client, json } = getContext(cmd);
 
       const mode = opts.mode as RunMode;
-      if (!VALID_MODES.includes(mode)) {
-        cmd.error(`--mode must be one of: ${VALID_MODES.join(', ')}`);
+      if (!RUN_MODES.includes(mode)) {
+        cmd.error(`--mode must be one of: ${RUN_MODES.join(', ')}`);
       }
 
       // --fork-from is only meaningful for new mode — it derives base_branch.
@@ -174,7 +173,7 @@ export function registerCreateTask(program: Command): void {
       success(`Created task ${task.id}`);
       console.log(label('Title', task.title));
       console.log(label('Mode', mode));
-      console.log(label('Status', colorStatus(task.status)));
+      console.log(label('Status', colorStatus(taskDisplayStatus(task))));
       console.log(label('Branch', task.branch));
       console.log(label('Repo', task.repo_path));
     });
