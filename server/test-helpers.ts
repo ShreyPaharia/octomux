@@ -1,5 +1,15 @@
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
+import {
+  IDLE_TASK_FIXTURE,
+  RUNNING_TASK_FIXTURE,
+  SERVER_AGENT_DEFAULTS,
+  USER_TERMINAL_FIXTURE,
+  PERMISSION_PROMPT_FIXTURE,
+  SESSION_PREFIX,
+  BRANCH_PREFIX,
+  WORKTREE_DIR,
+} from '@octomux/test-fixtures';
 import { getDb, initDb, setDb } from './db.js';
 import { SELECT_TASK_SQL } from './task-select.js';
 import type { Task, Agent, UserTerminal } from './types.js';
@@ -7,108 +17,14 @@ import type { Task, Agent, UserTerminal } from './types.js';
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 
 export const DEFAULTS = {
-  task: {
-    id: 'test-task-01',
-    title: 'Fix order validation',
-    description: 'Add negative quantity checks',
-    repo_path: '/tmp/test-repo',
-    runtime_state: 'idle' as const,
-    workflow_status: 'backlog' as const,
-    branch: null,
-    base_branch: null,
-    worktree: null,
-    tmux_session: null,
-    pr_url: null,
-    pr_number: null,
-    pr_head_sha: null,
-    user_window_index: null,
-    initial_prompt: null,
-    run_mode: 'new' as const,
-    base_sha: null,
-    last_viewed_at: null,
-    source: null,
-    worktree_id: null,
-    harness_id: 'claude-code' as const,
-    error: null,
-    current_summary: null,
-    current_summary_updated_at: null,
-    notify_task_id: null,
-    created_at: '2026-01-01 00:00:00',
-    updated_at: '2026-01-01 00:00:00',
-  },
+  task: IDLE_TASK_FIXTURE,
+  runningTask: RUNNING_TASK_FIXTURE,
+  agent: SERVER_AGENT_DEFAULTS,
+  userTerminal: USER_TERMINAL_FIXTURE,
+  permissionPrompt: PERMISSION_PROMPT_FIXTURE,
+};
 
-  runningTask: {
-    id: 'test-task-01',
-    title: 'Fix order validation',
-    description: 'Add negative quantity checks',
-    repo_path: '/tmp/test-repo',
-    runtime_state: 'running' as const,
-    workflow_status: 'in_progress' as const,
-    branch: 'agents/fix-order-validation-test-t',
-    base_branch: null,
-    worktree: '/tmp/test-repo/.worktrees/fix-order-validation-test-t',
-    tmux_session: 'octomux-agent-test-task-01',
-    pr_url: null,
-    pr_number: null,
-    pr_head_sha: null,
-    user_window_index: null,
-    initial_prompt: null,
-    run_mode: 'new' as const,
-    base_sha: 'abcdef0000000000000000000000000000000000',
-    last_viewed_at: null,
-    source: null,
-    worktree_id: null,
-    harness_id: 'claude-code' as const,
-    error: null,
-    current_summary: null,
-    current_summary_updated_at: null,
-    notify_task_id: null,
-    created_at: '2026-01-01 00:00:00',
-    updated_at: '2026-01-01 00:00:00',
-  },
-
-  agent: {
-    id: 'test-agent-01',
-    task_id: 'test-task-01',
-    window_index: 0,
-    label: 'Agent 1',
-    status: 'running' as const,
-    harness_session_id: 'test-session-uuid-01',
-    tmux_session: null,
-    agent: null as string | null,
-    notify_agent_id: null as string | null,
-    created_at: '2026-01-01 00:00:00',
-  },
-
-  userTerminal: {
-    id: 'test-terminal-01',
-    task_id: 'test-task-01',
-    window_index: 2,
-    label: 'Terminal 1',
-    status: 'idle' as const,
-    created_at: '2026-01-01 00:00:00',
-  },
-
-  permissionPrompt: {
-    id: 'pp_test123456',
-    task_id: 'task_test1234',
-    agent_id: 'agent_test123',
-    session_id: 'session-uuid-test',
-    tool_name: 'Bash',
-    tool_input: '{"command":"npm test"}',
-    status: 'pending' as const,
-    created_at: new Date().toISOString(),
-    resolved_at: null,
-  },
-} satisfies Record<
-  string,
-  Partial<Task> | Partial<Agent> | Partial<UserTerminal> | Record<string, unknown>
->;
-
-// Derived constants from defaults
-export const SESSION_PREFIX = 'octomux-agent-';
-export const BRANCH_PREFIX = 'agents/';
-export const WORKTREE_DIR = '.worktrees';
+export { SESSION_PREFIX, BRANCH_PREFIX, WORKTREE_DIR };
 
 // ─── Database Helpers ────────────────────────────────────────────────────────
 

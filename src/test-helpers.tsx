@@ -2,65 +2,24 @@ import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import type { Task, Agent } from '@octomux/types';
+import {
+  FRONTEND_AGENT_DEFAULTS,
+  FRONTEND_TASK_DEFAULTS,
+  makeAgent as makeAgentFixture,
+  makeTask as makeTaskFixture,
+} from '@octomux/test-fixtures';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 
-export const AGENT_DEFAULTS: Agent = {
-  id: 'agent-01',
-  task_id: 'test-task-01',
-  window_index: 0,
-  label: 'Agent 1',
-  status: 'running',
-  harness_id: 'claude-code',
-  harness_session_id: null,
-  hook_token: '',
-  hook_activity: 'active',
-  hook_activity_updated_at: null,
-  tmux_session: null,
-  agent: null,
-  notify_agent_id: null,
-  created_at: '2026-01-01 00:00:00',
-};
+export const AGENT_DEFAULTS = FRONTEND_AGENT_DEFAULTS;
+export const TASK_DEFAULTS = FRONTEND_TASK_DEFAULTS;
 
 export function makeAgent(overrides: Partial<Agent> = {}): Agent {
-  return { ...AGENT_DEFAULTS, ...overrides };
+  return makeAgentFixture(overrides);
 }
 
-export const TASK_DEFAULTS: Task = {
-  id: 'test-task-01',
-  title: 'Fix order validation',
-  description: 'Add negative quantity checks',
-  repo_path: '/Users/dev/projects/my-repo',
-  runtime_state: 'running',
-  workflow_status: 'in_progress',
-  branch: 'agents/test-task-01',
-  base_branch: null,
-  worktree: '/Users/dev/projects/my-repo/.worktrees/test-task-01',
-  tmux_session: 'octomux-agent-test-task-01',
-  pr_url: null,
-  pr_number: null,
-  pr_head_sha: null,
-  user_window_index: null,
-  initial_prompt: null,
-  run_mode: 'new',
-  base_sha: null,
-  last_viewed_at: null,
-  deleted_at: null,
-  source: null,
-  worktree_id: null,
-  harness_id: 'claude-code',
-  agent: null,
-  model: null,
-  notify_task_id: null,
-  error: null,
-  current_summary: null,
-  current_summary_updated_at: null,
-  created_at: '2026-01-01 00:00:00',
-  updated_at: '2026-01-01 00:00:00',
-};
-
 export function makeTask(overrides: Partial<Task> = {}): Task {
-  return { ...TASK_DEFAULTS, ...overrides };
+  return makeTaskFixture(overrides);
 }
 
 /** @deprecated status column was removed in Wave 4; use runtime_state directly */

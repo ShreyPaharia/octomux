@@ -29,15 +29,17 @@
   "workspaces": [
     "packages/api-client",
     "packages/diff-engine",
-    "packages/types"
+    "packages/types",
+    "packages/test-fixtures"
   ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
-    "build": "bun run build:diff-engine && bun run build:types && bun run build:api-client && vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
+    "build": "bun run build:diff-engine && bun run build:types && bun run build:test-fixtures && bun run build:api-client && vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
     "build:diff-engine": "tsc -b packages/diff-engine",
     "build:types": "tsc -b packages/types",
+    "build:test-fixtures": "tsc -b packages/test-fixtures",
     "build:api-client": "tsc -b packages/api-client",
     "build:server": "tsup --entry.index=server/index.ts --entry.startup=server/startup.ts --entry.cli-review=cli/review/index.ts --entry.orchestrator/mcp/server=server/orchestrator/mcp/server.ts --entry.agent-session/mcp/submit-result-server=server/agent-session/mcp/submit-result-server.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
     "start": "NODE_ENV=production node dist-server/index.js",
@@ -88,6 +90,7 @@
     "@octomux/api-client": "workspace:*",
     "@octomux/diff-engine": "workspace:*",
     "@octomux/types": "workspace:*",
+    "@octomux/test-fixtures": "workspace:*",
     "ajv": "^8.20.0",
     "better-sqlite3": "^12.0.0",
     "chalk": "^5.6.2",

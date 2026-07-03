@@ -7,6 +7,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@octomux/api-client': path.resolve(__dirname, './packages/api-client/src/index.ts'),
       '@octomux/diff-engine': path.resolve(__dirname, './packages/diff-engine/src/index.ts'),
+      '@octomux/test-fixtures': path.resolve(__dirname, './packages/test-fixtures/src/index.ts'),
     },
   },
   test: {
@@ -42,6 +43,10 @@ export default defineConfig({
         resolve: {
           alias: {
             '@': path.resolve(__dirname, './src'),
+            '@octomux/test-fixtures': path.resolve(
+              __dirname,
+              './packages/test-fixtures/src/index.ts',
+            ),
           },
         },
         test: {
