@@ -2,11 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Task } from '@octomux/types';
 import { taskApi } from '@/lib/api/taskApi';
-import {
-  type TaskMode,
-  getPerTaskUiState,
-  setPerTaskUiState,
-} from '@/hooks/perTaskUiState';
+import { type TaskMode, getPerTaskUiState, setPerTaskUiState } from '@/hooks/perTaskUiState';
 
 export interface UseTaskViewModeOptions {
   taskId: string;

@@ -20,12 +20,7 @@ describe('MixedThread', () => {
 
   it('shows empty state when no items and not working', () => {
     render(
-      <MixedThread
-        items={[]}
-        onCardDecision={noop}
-        onSpecCardDismiss={noop}
-        working={false}
-      />,
+      <MixedThread items={[]} onCardDecision={noop} onSpecCardDismiss={noop} working={false} />,
     );
     expect(screen.getByText('No messages yet. Start a conversation below.')).toBeInTheDocument();
   });
@@ -40,9 +35,7 @@ describe('MixedThread', () => {
   });
 
   it('shows working indicator when working', () => {
-    render(
-      <MixedThread items={[]} onCardDecision={noop} onSpecCardDismiss={noop} working />,
-    );
+    render(<MixedThread items={[]} onCardDecision={noop} onSpecCardDismiss={noop} working />);
     expect(screen.getByLabelText('Orchestrator is working')).toBeInTheDocument();
   });
 });

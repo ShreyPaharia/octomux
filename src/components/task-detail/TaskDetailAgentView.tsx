@@ -126,9 +126,7 @@ export function TaskDetailAgentView({
                 aria-hidden={!isActive}
                 inert={!isActive}
                 className={
-                  isActive
-                    ? 'absolute inset-0'
-                    : 'pointer-events-none absolute inset-0 opacity-0'
+                  isActive ? 'absolute inset-0' : 'pointer-events-none absolute inset-0 opacity-0'
                 }
               >
                 <TerminalView
@@ -145,7 +143,10 @@ export function TaskDetailAgentView({
   );
 }
 
-export async function detachAgent(agentId: string, navigate: (path: string) => void): Promise<void> {
+export async function detachAgent(
+  agentId: string,
+  navigate: (path: string) => void,
+): Promise<void> {
   try {
     await taskApi.moveAgentToTask(agentId, null);
     navigate(`/chats/${agentId}`);

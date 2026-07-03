@@ -32,12 +32,7 @@ export interface TaskDetailDiffViewProps {
   onSummaryLoaded: (summary: DiffSummaryResponse) => void;
   onToggleReviewed: (filePath: string, currentlyReviewed: boolean) => Promise<void>;
   onFilesChange: (files: string[]) => void;
-  onJumpToComment: (
-    filePath: string,
-    line: number,
-    side: 'old' | 'new',
-    commentId: string,
-  ) => void;
+  onJumpToComment: (filePath: string, line: number, side: 'old' | 'new', commentId: string) => void;
   onQueueRemove: (id: string) => void;
   onQueueJumpTo: (path: string) => void;
   onSendBatch: () => Promise<void>;

@@ -3,7 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { DiffFileListHandle } from '@/components/DiffFileList';
 import { useDiffKeyboardNav } from '@/hooks/useDiffKeyboardNav';
-import { diffRangeToParam, taskApi, type DiffRange, type DiffSummaryResponse } from '@/lib/api/taskApi';
+import {
+  diffRangeToParam,
+  taskApi,
+  type DiffRange,
+  type DiffSummaryResponse,
+} from '@/lib/api/taskApi';
 
 export interface UseDiffStateOptions {
   taskId: string;
