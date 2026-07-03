@@ -1,7 +1,4 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-
-const execFile = promisify(execFileCb);
+import { getRemoteOriginUrl } from '../task-engine/git.js';
 
 /** Parse a git remote URL into `owner/repo` (nameWithOwner) form. Returns null if non-GitHub. */
 export function parseNameWithOwner(remoteUrl: string): string | null {
@@ -20,12 +17,9 @@ const repoNwoCache = new Map<string, string>();
 export async function repoNameWithOwner(repoPath: string): Promise<string | null> {
   const cached = repoNwoCache.get(repoPath);
   if (cached) return cached;
-  try {
-    const { stdout } = await execFile('git', ['-C', repoPath, 'remote', 'get-url', 'origin']);
-    const nwo = parseNameWithOwner(stdout.trim());
-    if (nwo) repoNwoCache.set(repoPath, nwo);
-    return nwo;
-  } catch {
-    return null;
-  }
+  const remoteUrl = await getRemoteOriginUrl(repoPath);
+  if (!remoteUrl) return null;
+  const nwo = parseNameWithOwner(remoteUrl);
+  if (nwo) repoNwoCache.set(repoPath, nwo);
+  return nwo;
 }

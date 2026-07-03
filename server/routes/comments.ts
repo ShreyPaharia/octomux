@@ -1,9 +1,8 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs';
 import { childLogger } from '../logger.js';
+import { hashObject, revParseHead } from '../task-engine/git.js';
 import { safeResolvePath } from '@octomux/diff-engine';
 import { taskWorkingDir } from '../task-paths.js';
 import { setReviewed, clearReviewed } from '../repositories/file-review-state.js';
@@ -22,7 +21,6 @@ import { createInlineComment } from '../services/comment-service.js';
 import { loadTaskOrFail } from './_shared.js';
 import { badRequest, conflict, notFound } from '../services/errors.js';
 
-const execFile = promisify(execFileCb);
 const logger = childLogger('api:comments');
 
 function resolveRelPath(req: Request): string {
@@ -50,15 +48,8 @@ router.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Res
   const relPath = resolveRelPath(req);
   assertValidPath(cwd, relPath);
 
-  const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
-  const headSha = stdout.trim();
-  let blobSha: string | null = null;
-  try {
-    const { stdout: bs } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
-    blobSha = bs.trim() || null;
-  } catch {
-    blobSha = null;
-  }
+  const headSha = await revParseHead(cwd);
+  const blobSha = await hashObject(cwd, relPath);
   setReviewed(task.id, relPath, headSha, blobSha);
   res.status(204).send();
 });

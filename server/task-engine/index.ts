@@ -19,6 +19,11 @@ export {
 export {
   validateRepo,
   revParseHead,
+  getRemoteOriginUrl,
+  hashObject,
+  fetchOriginQuiet,
+  checkoutRef,
+  isAncestor,
   checkDirty,
   gitBranchExists,
   addWorktreeWithBranch,
