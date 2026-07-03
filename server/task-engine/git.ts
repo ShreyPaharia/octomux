@@ -19,6 +19,48 @@ export async function revParseHead(cwd: string, ref = 'HEAD'): Promise<string> {
   return stdout.trim();
 }
 
+export async function getRemoteOriginUrl(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile('git', ['-C', repoPath, 'remote', 'get-url', 'origin']);
+    const url = stdout.trim();
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function hashObject(cwd: string, relPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
+    const sha = stdout.trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchOriginQuiet(cwd: string): Promise<void> {
+  await execFile('git', ['-C', cwd, 'fetch', 'origin', '--quiet']);
+}
+
+export async function checkoutRef(cwd: string, ref: string): Promise<void> {
+  await execFile('git', ['-C', cwd, 'checkout', ref]);
+}
+
+/** True when `ancestor` is an ancestor of `descendant` in `cwd`. */
+export async function isAncestor(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  try {
+    await execFile('git', ['-C', cwd, 'merge-base', '--is-ancestor', ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function checkDirty(repoPath: string): Promise<string[]> {
   const { stdout } = await execFile('git', ['-C', repoPath, 'status', '--porcelain=v1']);
   return stdout

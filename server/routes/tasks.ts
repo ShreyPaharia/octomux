@@ -33,13 +33,11 @@ import {
   touchLastViewed,
   touchAllLastViewed,
   getWorktree,
-  listAllAgents,
   listAgentsByTasks,
-  listPendingPromptsByTask,
   listPendingPromptsByTasks,
-  listUserTerminals,
   listUserTerminalsByTasks,
 } from '../repositories/index.js';
+import type { PermissionPromptRow } from '../repositories/permission-prompts.js';
 
 import { createTask } from '../services/task-service.js';
 import { badRequest, conflict } from '../services/errors.js';
@@ -47,7 +45,8 @@ import {
   loadTaskOrFail,
   lookupExistingReviewId,
   fetchTaskBundle,
-  derivedStatus,
+  fetchTaskWithRelations,
+  formatTaskResponse,
   validateCreateTaskBody,
   applyDraftUpdates,
   resolveTaskTitleAndDescription,
@@ -86,11 +85,11 @@ router.get('/api/tasks', (req: Request, res: Response) => {
     agentsByTask.set(agent.task_id, list);
   }
 
-  const promptsByTask = new Map<string, Array<Record<string, unknown>>>();
+  const promptsByTask = new Map<string, PermissionPromptRow[]>();
   for (const pp of allPrompts) {
     const taskId = pp.task_id as string;
     const list = promptsByTask.get(taskId) || [];
-    list.push({ ...pp });
+    list.push(pp);
     promptsByTask.set(taskId, list);
   }
 
@@ -101,16 +100,13 @@ router.get('/api/tasks', (req: Request, res: Response) => {
     terminalsByTask.set(ut.task_id, list);
   }
 
-  const result = tasks.map((task) => {
-    const agents = agentsByTask.get(task.id) || [];
-    return {
-      ...task,
-      agents,
+  const result = tasks.map((task) =>
+    formatTaskResponse(task, {
+      agents: agentsByTask.get(task.id) || [],
       pending_prompts: promptsByTask.get(task.id) || [],
-      derived_status: derivedStatus({ runtime_state: task.runtime_state, agents }),
       user_terminals: terminalsByTask.get(task.id) || [],
-    };
-  });
+    }),
+  );
 
   res.json(result);
 });
@@ -161,28 +157,26 @@ router.patch('/api/tasks/:id/viewed', (req: Request, res: Response) => {
 // Get single task with agents
 router.get('/api/tasks/:id', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
-  const rawAgents = listAllAgents(task.id);
+  const { relations } = fetchTaskWithRelations(task.id);
   // Backfill hook_token for pre-step-1 agents that have an empty token.
   const agents = await Promise.all(
-    rawAgents.map(async (agent) => {
+    relations.agents.map(async (agent) => {
       if (agent.hook_token !== '') return agent;
       const token = await ensureHookToken(agent, task.worktree ?? null);
       return { ...agent, hook_token: token };
     }),
   );
-  const pendingPrompts = listPendingPromptsByTask(task.id);
-  const parsedPrompts = pendingPrompts;
-  const userTerminals = listUserTerminals(task.id);
   const worktreeRow = task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
-  res.json({
-    ...task,
-    agents,
-    pending_prompts: parsedPrompts,
-    derived_status: derivedStatus({ runtime_state: task.runtime_state, agents }),
-    user_terminals: userTerminals,
-    worktree_row: worktreeRow,
-    existing_review_id: lookupExistingReviewId(task),
-  });
+  res.json(
+    formatTaskResponse(
+      task,
+      { ...relations, agents },
+      {
+        worktree_row: worktreeRow,
+        existing_review_id: lookupExistingReviewId(task),
+      },
+    ),
+  );
 });
 
 // Create task

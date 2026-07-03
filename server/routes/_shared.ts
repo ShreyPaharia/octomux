@@ -4,12 +4,21 @@
  */
 import type { Request } from 'express';
 import { notFound, ServiceError } from '../services/errors.js';
-import { getTask as getTaskRepo, listAllAgents, listUserTerminals } from '../repositories/index.js';
+import {
+  getTask as getTaskRepo,
+  listAllAgents,
+  listUserTerminals,
+  listPendingPromptsByTask,
+} from '../repositories/index.js';
+import type { PermissionPromptRow } from '../repositories/permission-prompts.js';
 import { findReviewTaskByPrNumber, findReviewTaskBySource } from '../repositories/index.js';
 import { nanoid } from 'nanoid';
 import fs from 'fs';
 import type {
   Task,
+  Agent,
+  UserTerminal,
+  Worktree,
   DerivedTaskStatus,
   CreateTaskRequest,
   UpdateTaskRequest,
@@ -87,11 +96,54 @@ export function deepMerge(
   return result;
 }
 
-/** Reload a task with its related agents and user_terminals. */
-export function fetchTaskBundle(taskId: string): Task {
+export interface TaskRelations {
+  agents: Agent[];
+  user_terminals: UserTerminal[];
+  pending_prompts: PermissionPromptRow[];
+}
+
+export interface TaskResponseExtras {
+  worktree_row?: Worktree | null;
+  existing_review_id?: string | null;
+}
+
+/** Load a task plus agents, terminals, and pending permission prompts. */
+export function fetchTaskWithRelations(taskId: string): { task: Task; relations: TaskRelations } {
   const task = getTaskRepo(taskId) as Task;
-  task.agents = listAllAgents(taskId);
-  task.user_terminals = listUserTerminals(taskId);
+  return {
+    task,
+    relations: {
+      agents: listAllAgents(taskId),
+      user_terminals: listUserTerminals(taskId),
+      pending_prompts: listPendingPromptsByTask(taskId),
+    },
+  };
+}
+
+/** Shape a task + relations into the standard API envelope. */
+export function formatTaskResponse(
+  task: Task,
+  relations: TaskRelations,
+  extras?: TaskResponseExtras,
+) {
+  return {
+    ...task,
+    agents: relations.agents,
+    pending_prompts: relations.pending_prompts,
+    derived_status: derivedStatus({ runtime_state: task.runtime_state, agents: relations.agents }),
+    user_terminals: relations.user_terminals,
+    ...(extras?.worktree_row !== undefined ? { worktree_row: extras.worktree_row } : {}),
+    ...(extras?.existing_review_id !== undefined
+      ? { existing_review_id: extras.existing_review_id }
+      : {}),
+  };
+}
+
+/** Reload a task with its related agents and user_terminals (mutation-style, no prompts). */
+export function fetchTaskBundle(taskId: string): Task {
+  const { task, relations } = fetchTaskWithRelations(taskId);
+  task.agents = relations.agents;
+  task.user_terminals = relations.user_terminals;
   return task;
 }
 

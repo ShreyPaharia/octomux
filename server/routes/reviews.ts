@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { childLogger } from '../logger.js';
+import { getRemoteOriginUrl, revParseHead } from '../task-engine/git.js';
 import { listReviewsInbox, getReviewDetail } from '../reviews-inbox.js';
 import { taskWorkingDir } from '../task-paths.js';
 import {
@@ -51,14 +52,8 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
     for (const row of rows) {
       const candidatePath = row.repo_path;
       try {
-        const { stdout } = await execFile('git', [
-          '-C',
-          candidatePath,
-          'remote',
-          'get-url',
-          'origin',
-        ]);
-        const remoteUrl = stdout.trim();
+        const remoteUrl = await getRemoteOriginUrl(candidatePath);
+        if (!remoteUrl) continue;
         const sshMatch = remoteUrl.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
         const httpsMatch = remoteUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
         const remoteOwnerRepo = (sshMatch?.[1] ?? httpsMatch?.[1] ?? '').toLowerCase();
@@ -154,8 +149,7 @@ router.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => 
   if (!prHeadSha) {
     const cwd = taskWorkingDir(task);
     try {
-      const { stdout } = await execFile('git', ['-C', cwd!, 'rev-parse', 'HEAD']);
-      prHeadSha = stdout.trim();
+      prHeadSha = await revParseHead(cwd!);
     } catch (err) {
       throw new ServiceError(`failed to resolve HEAD: ${(err as Error).message}`, 500);
     }

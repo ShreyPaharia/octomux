@@ -16,6 +16,7 @@ import {
 } from '../repositories/tasks.js';
 import { deleteWorktree } from '../repositories/worktrees.js';
 import { findFirstActiveAgent } from '../repositories/agent-runtime.js';
+import { checkoutRef, fetchOriginQuiet, isAncestor } from '../task-engine/git.js';
 import { repoNameWithOwner } from './github-repo.js';
 
 const logger = childLogger('poller');
@@ -203,8 +204,8 @@ async function upsertReviewTask(
       let previousHeadReachable = true;
       if (existing.worktree_path) {
         try {
-          await execFile('git', ['-C', existing.worktree_path, 'fetch', 'origin', '--quiet']);
-          await execFile('git', ['-C', existing.worktree_path, 'checkout', pr.headRefOid]);
+          await fetchOriginQuiet(existing.worktree_path);
+          await checkoutRef(existing.worktree_path, pr.headRefOid);
         } catch (err) {
           logger.warn(
             { task_id: existing.id, err: (err as Error).message },
@@ -212,18 +213,11 @@ async function upsertReviewTask(
           );
         }
         if (existing.pr_head_sha) {
-          try {
-            await execFile('git', [
-              '-C',
-              existing.worktree_path,
-              'merge-base',
-              '--is-ancestor',
-              existing.pr_head_sha,
-              pr.headRefOid,
-            ]);
-          } catch {
-            previousHeadReachable = false;
-          }
+          previousHeadReachable = await isAncestor(
+            existing.worktree_path,
+            existing.pr_head_sha,
+            pr.headRefOid,
+          );
         }
       }
 
