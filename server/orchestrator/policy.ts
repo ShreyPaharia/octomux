@@ -21,57 +21,11 @@ import {
   insertPermissionRule,
   deletePermissionRule,
 } from './store.js';
+import { buildPolicySets } from './command-registry.js';
 
-// ─── Tier constants ───────────────────────────────────────────────────────────
+// ─── Tier sets (derived from command registry at startup) ───────────────────────
 
-/** Commands that run inline without a card (MCP read tools). */
-const AUTO_TOOLS = new Set([
-  'list_tasks',
-  'get_task',
-  'monitor_status',
-  'get_task_output',
-  'pull_linear_issue',
-]);
-
-/**
- * Read-only octomux subcommands. These never mutate state — they query the
- * running server (recent repos, default branch, task listings, …). They must
- * NOT be gated: the conductor uses them to gather context (e.g. find the repo
- * path before creating a task). Auto-allowed so they run without an approval
- * card. (Fixes: `octomux recent-repos` being denied then failing because it has
- * no server-side executor — it's a read, not a write.)
- */
-const READ_SUBCOMMANDS = new Set([
-  'list-tasks',
-  'get-task',
-  'recent-repos',
-  'default-branch',
-  'list-skills',
-  'get-skill',
-  'task-summary',
-  'task-updates',
-  'hooks-list',
-  'list-integrations',
-]);
-
-/**
- * octomux subcommands that are reversible writes.
- * A learnable allow-rule can promote these to 'auto'.
- */
-const ASK_SUBCOMMANDS = new Set([
-  'create-task',
-  'add-agent',
-  'send-message',
-  'set-status',
-  'request-review',
-  'resume-task',
-]);
-
-/**
- * octomux subcommands that are destructive.
- * These are ALWAYS gated — no rule can silence them.
- */
-const ALWAYS_ASK_SUBCOMMANDS = new Set(['delete-task', 'close-task']);
+const { AUTO_TOOLS, READ_SUBCOMMANDS, ALWAYS_ASK_SUBCOMMANDS } = buildPolicySets();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,9 +79,8 @@ export function classify(command: string, args: string[]): PolicyDecision {
       return 'always-ask';
     }
 
-    // Reversible write — check if a rule promotes it to auto.
-    const baseDecision: PolicyDecision = ASK_SUBCOMMANDS.has(subcommand) ? 'ask' : 'ask';
-    return applyRules(command, subcommand, baseDecision);
+    // Reversible write (or unknown subcommand — fail-safe ask); rule may promote to auto.
+    return applyRules(command, subcommand, 'ask');
   }
 
   // ── Any other command (bash, etc.) defaults to ask ────────────────────────
