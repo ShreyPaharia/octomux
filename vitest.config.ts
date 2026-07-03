@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@octomux/api-client': path.resolve(__dirname, './packages/api-client/src/index.ts'),
       '@octomux/diff-engine': path.resolve(__dirname, './packages/diff-engine/src/index.ts'),
     },
   },
@@ -13,6 +14,14 @@ export default defineConfig({
       NODE_ENV: 'test',
     },
     projects: [
+      {
+        test: {
+          name: 'api-client',
+          globals: true,
+          environment: 'node',
+          include: ['packages/api-client/**/*.test.ts'],
+        },
+      },
       {
         test: {
           name: 'diff-engine',
