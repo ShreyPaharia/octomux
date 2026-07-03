@@ -4,6 +4,7 @@
     { "path": "./packages/api-client" },
     { "path": "./packages/diff-engine" },
     { "path": "./packages/types" },
+    { "path": "./packages/test-fixtures" },
     { "path": "./tsconfig.app.json" }
   ]
 }

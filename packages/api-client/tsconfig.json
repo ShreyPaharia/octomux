@@ -1,16 +1,13 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "strict": true,
     "composite": true,
     "declaration": true,
     "declarationMap": true,
     "outDir": "dist",
     "rootDir": "src",
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
     "lib": ["ES2022", "DOM"],
     "types": ["vitest/globals"]
   },
