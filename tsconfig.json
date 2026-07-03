@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/api-client" },
     { "path": "./packages/diff-engine" },
     { "path": "./packages/types" },
     { "path": "./tsconfig.app.json" }

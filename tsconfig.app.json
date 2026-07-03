@@ -19,5 +19,9 @@
     }
   },
   "include": ["src", "server", "cli/review"],
-  "references": [{ "path": "./packages/diff-engine" }, { "path": "./packages/types" }]
+  "references": [
+    { "path": "./packages/api-client" },
+    { "path": "./packages/diff-engine" },
+    { "path": "./packages/types" }
+  ]
 }
