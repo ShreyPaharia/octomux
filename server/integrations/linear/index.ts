@@ -2,7 +2,7 @@ import { childLogger } from '../../logger.js';
 import type { IntegrationProvider, ValidationResult, JsonSchema } from '../types.js';
 import type { HookEnvelope } from '../../hook-types.js';
 import { registerProvider } from '../registry.js';
-import { linearGraphql, LinearApiError } from './graphql.js';
+import { invokeLinear, LinearApiError } from './graphql.js';
 
 const logger = childLogger('integrations:linear');
 
@@ -81,37 +81,13 @@ function validate(config: unknown): ValidationResult {
 async function testConnection(config: unknown): Promise<{ ok: boolean; message: string }> {
   const cfg = config as LinearConfig;
   try {
-    const data = await linearGraphql<{ viewer: { id: string; name: string; email: string } }>(
-      cfg.api_key,
-      'query { viewer { id name email } }',
-    );
-    return { ok: true, message: `Connected as ${data.viewer.name ?? data.viewer.email}` };
+    const viewer = await invokeLinear(cfg.api_key, (client) => client.viewer);
+    return { ok: true, message: `Connected as ${viewer.name ?? viewer.email}` };
   } catch (err) {
     const msg = err instanceof LinearApiError ? err.message : (err as Error).message;
     return { ok: false, message: `Connection failed: ${msg}` };
   }
 }
-
-const ISSUE_LOOKUP_QUERY = `
-  query Issue($id: String!) {
-    issue(id: $id) {
-      id
-      team { id key }
-    }
-  }
-`;
-
-const ISSUE_UPDATE_MUTATION = `
-  mutation IssueUpdate($id: String!, $stateId: String!) {
-    issueUpdate(id: $id, input: { stateId: $stateId }) { success }
-  }
-`;
-
-const COMMENT_CREATE_MUTATION = `
-  mutation CommentCreate($id: String!, $body: String!) {
-    commentCreate(input: { issueId: $id, body: $body }) { success }
-  }
-`;
 
 async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   const cfg = config as LinearConfig;
@@ -170,14 +146,12 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   // Resolve issue UUID if we don't have it cached.
   if (!issueId) {
     try {
-      const resp = await linearGraphql<{
-        issue: { id: string; team: { key: string } } | null;
-      }>(cfg.api_key, ISSUE_LOOKUP_QUERY, { id: linearRef.ref });
-      if (!resp.issue) {
+      const issue = await invokeLinear(cfg.api_key, (client) => client.issue(linearRef.ref));
+      if (!issue) {
         logger.warn({ task_id: task.id, ref: linearRef.ref }, 'linear handler: issue not found');
         return;
       }
-      issueId = resp.issue.id;
+      issueId = issue.id;
     } catch (err) {
       logger.warn(
         { task_id: task.id, ref: linearRef.ref, err: (err as Error).message },
@@ -189,7 +163,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
 
   // State change.
   try {
-    await linearGraphql(cfg.api_key, ISSUE_UPDATE_MUTATION, { id: issueId, stateId });
+    await invokeLinear(cfg.api_key, (client) => client.updateIssue(issueId, { stateId }));
     logger.info(
       {
         task_id: task.id,
@@ -215,7 +189,7 @@ async function handler(envelope: HookEnvelope, config: unknown): Promise<void> {
   const body = `octomux task moved to **${toStatus}**${prUrl ? ` — PR: ${prUrl}` : ''}.`;
 
   try {
-    await linearGraphql(cfg.api_key, COMMENT_CREATE_MUTATION, { id: issueId, body });
+    await invokeLinear(cfg.api_key, (client) => client.createComment({ issueId, body }));
   } catch (err) {
     // Comment failure shouldn't block the integration; log and move on.
     logger.warn(

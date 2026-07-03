@@ -1,7 +1,6 @@
-import { childLogger } from '../../logger.js';
+import { LinearClient, LinearError } from '@linear/sdk';
 
-const logger = childLogger('integrations:linear:graphql');
-
+/** Thrown for Linear API failures and app-local cases (e.g. issue not found). */
 export class LinearApiError extends Error {
   constructor(
     message: string,
@@ -12,37 +11,31 @@ export class LinearApiError extends Error {
   }
 }
 
-export async function linearGraphql<T = unknown>(
+export function createLinearClient(apiKey: string): LinearClient {
+  return new LinearClient({ apiKey });
+}
+
+export function toLinearApiError(err: unknown): LinearApiError {
+  if (err instanceof LinearApiError) return err;
+  if (err instanceof LinearError) {
+    const code = err.errors?.[0]?.type ?? err.type;
+    const statusSuffix =
+      err.status !== undefined && !err.message.includes(String(err.status))
+        ? ` (HTTP ${err.status})`
+        : '';
+    return new LinearApiError(`${err.message}${statusSuffix}`, code);
+  }
+  if (err instanceof Error) return new LinearApiError(err.message);
+  return new LinearApiError(String(err));
+}
+
+export async function invokeLinear<T>(
   apiKey: string,
-  query: string,
-  variables?: Record<string, unknown>,
+  fn: (client: LinearClient) => Promise<T>,
 ): Promise<T> {
-  const res = await fetch('https://api.linear.app/graphql', {
-    method: 'POST',
-    headers: {
-      Authorization: apiKey,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ query, ...(variables ? { variables } : {}) }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    logger.warn({ status: res.status, body: text }, 'linear graphql non-2xx');
-    throw new LinearApiError(`Linear API HTTP ${res.status} ${res.statusText ?? ''}: ${text}`);
+  try {
+    return await fn(createLinearClient(apiKey));
+  } catch (err) {
+    throw toLinearApiError(err);
   }
-
-  const body = (await res.json()) as {
-    data?: T;
-    errors?: Array<{ message: string; extensions?: { code?: string } }>;
-  };
-  if (body.errors && body.errors.length > 0) {
-    const first = body.errors[0];
-    throw new LinearApiError(first.message, first.extensions?.code);
-  }
-  if (body.data === undefined) {
-    throw new LinearApiError('Linear API returned no data and no errors');
-  }
-  return body.data;
 }

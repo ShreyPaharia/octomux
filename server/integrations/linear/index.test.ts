@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { HookEnvelope } from '../../hook-types.js';
 
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+const mockInvokeLinear = vi.fn();
+
+vi.mock('./graphql.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./graphql.js')>();
+  return {
+    ...actual,
+    invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
+  };
+});
 
 import { linearProvider } from './index.js';
+import { LinearApiError } from './graphql.js';
 
 const VALID_CONFIG = {
   api_key: 'lin_api_xyz',
@@ -20,15 +28,6 @@ const VALID_CONFIG = {
     },
   },
 };
-
-function mockFetchOk(data: unknown) {
-  mockFetch.mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: vi.fn().mockResolvedValue({ data }),
-    text: vi.fn().mockResolvedValue(''),
-  });
-}
 
 describe('linearProvider.validate', () => {
   it('accepts a valid config', () => {
@@ -71,27 +70,23 @@ describe('linearProvider.validate', () => {
 describe('linearProvider.test', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('calls Linear `viewer` query with bare api key', async () => {
-    mockFetchOk({ viewer: { id: 'u', name: 'Dev User', email: 'dev@x.io' } });
+  it('calls Linear viewer via SDK with configured api key', async () => {
+    mockInvokeLinear.mockImplementation(async (apiKey, fn) =>
+      fn({
+        get viewer() {
+          return Promise.resolve({ id: 'u', name: 'Dev User', email: 'dev@x.io' });
+        },
+      }),
+    );
+
     const result = await linearProvider.test!(VALID_CONFIG);
     expect(result.ok).toBe(true);
     expect(result.message).toContain('Dev User');
-
-    const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.linear.app/graphql');
-    expect((opts.headers as Record<string, string>)['Authorization']).toBe('lin_api_xyz');
+    expect(mockInvokeLinear).toHaveBeenCalledWith('lin_api_xyz', expect.any(Function));
   });
 
   it('returns ok:false on auth error', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        errors: [
-          { message: 'Authentication failed', extensions: { code: 'AUTHENTICATION_ERROR' } },
-        ],
-      }),
-    });
+    mockInvokeLinear.mockRejectedValue(new LinearApiError('Authentication failed'));
     const result = await linearProvider.test!(VALID_CONFIG);
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/authentication/i);
@@ -121,43 +116,35 @@ describe('linearProvider.handler', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('issueUpdate + commentCreate when ref + map hit + non-backlog target', async () => {
-    // Two sequential graphql calls expected: issueUpdate, then commentCreate.
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { issueUpdate: { success: true } } }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { commentCreate: { success: true } } }),
-    });
+    const updateIssue = vi.fn().mockResolvedValue({ success: true });
+    const createComment = vi.fn().mockResolvedValue({ success: true });
+
+    mockInvokeLinear.mockImplementation(async (_apiKey, fn) => fn({ updateIssue, createComment }));
 
     await linearProvider.handler(makeEnvelope(), VALID_CONFIG);
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    const firstBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-    expect(firstBody.query).toContain('issueUpdate');
-    expect(firstBody.variables).toMatchObject({
-      id: 'lin-uuid-1',
+    expect(mockInvokeLinear).toHaveBeenCalledTimes(2);
+    expect(updateIssue).toHaveBeenCalledWith('lin-uuid-1', {
       stateId: '55555555-5555-5555-5555-555555555555',
     });
-    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
-    expect(secondBody.query).toContain('commentCreate');
-    expect(secondBody.variables.body).toContain('done');
+    expect(createComment).toHaveBeenCalledWith({
+      issueId: 'lin-uuid-1',
+      body: expect.stringContaining('done'),
+    });
   });
 
   it('suppresses comment when target is backlog', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { issueUpdate: { success: true } } }),
-    });
+    const updateIssue = vi.fn().mockResolvedValue({ success: true });
+    const createComment = vi.fn();
+
+    mockInvokeLinear.mockImplementation(async (_apiKey, fn) => fn({ updateIssue, createComment }));
+
     await linearProvider.handler(
       makeEnvelope({ data: { from: 'planned', to: 'backlog' } }),
       VALID_CONFIG,
     );
-    expect(mockFetch).toHaveBeenCalledTimes(1); // only issueUpdate, no commentCreate
+    expect(mockInvokeLinear).toHaveBeenCalledTimes(1);
+    expect(createComment).not.toHaveBeenCalled();
   });
 
   it('skips when no linear ref on task', async () => {
@@ -167,7 +154,7 @@ describe('linearProvider.handler', () => {
       }),
       VALID_CONFIG,
     );
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockInvokeLinear).not.toHaveBeenCalled();
   });
 
   it('skips when team has no mapping for to_status', async () => {
@@ -175,27 +162,17 @@ describe('linearProvider.handler', () => {
       makeEnvelope({ data: { from: 'backlog', to: 'unknown_status' } as any }),
       VALID_CONFIG,
     );
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockInvokeLinear).not.toHaveBeenCalled();
   });
 
   it('parses team_key from ref string when metadata missing', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        data: { issue: { id: 'lin-uuid-2', team: { key: 'BAC' } } },
-      }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { issueUpdate: { success: true } } }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: { commentCreate: { success: true } } }),
-    });
+    const issue = vi.fn().mockResolvedValue({ id: 'lin-uuid-2' });
+    const updateIssue = vi.fn().mockResolvedValue({ success: true });
+    const createComment = vi.fn().mockResolvedValue({ success: true });
+
+    mockInvokeLinear.mockImplementation(async (_apiKey, fn) =>
+      fn({ issue, updateIssue, createComment }),
+    );
 
     await linearProvider.handler(
       makeEnvelope({
@@ -206,13 +183,10 @@ describe('linearProvider.handler', () => {
       }),
       VALID_CONFIG,
     );
-    expect(mockFetch).toHaveBeenCalledTimes(3); // issue lookup + issueUpdate + commentCreate
-    // Confirms the regex-derived team_key 'BAC' resolved through VALID_CONFIG's BAC map.
-    const lookupBody = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-    expect(lookupBody.variables).toEqual({ id: 'BAC-9' });
-    const updateBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
-    expect(updateBody.variables).toMatchObject({
-      id: 'lin-uuid-2',
+
+    expect(mockInvokeLinear).toHaveBeenCalledTimes(3);
+    expect(issue).toHaveBeenCalledWith('BAC-9');
+    expect(updateIssue).toHaveBeenCalledWith('lin-uuid-2', {
       stateId: '55555555-5555-5555-5555-555555555555',
     });
   });
