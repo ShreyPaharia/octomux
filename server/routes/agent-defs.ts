@@ -10,7 +10,7 @@ import {
   isBuiltInAgent,
   syncAgents,
 } from '../agents.js';
-import { sendDomainError } from './_shared.js';
+import { badRequest, toDomainServiceError } from '../services/errors.js';
 
 export const router = express.Router();
 
@@ -22,12 +22,8 @@ function repoPathFromQuery(req: Request): string | undefined {
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 router.get('/api/agents', async (req: Request, res: Response) => {
-  try {
-    const agents = await listAgents(repoPathFromQuery(req));
-    res.json(agents);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  const agents = await listAgents(repoPathFromQuery(req));
+  res.json(agents);
 });
 
 router.get('/api/agents/:name', async (req: Request, res: Response) => {
@@ -35,25 +31,20 @@ router.get('/api/agents/:name', async (req: Request, res: Response) => {
     const agent = await getAgent(req.params.name as string, repoPathFromQuery(req));
     res.json(agent);
   } catch (err) {
-    sendDomainError(res, err);
+    throw toDomainServiceError(err);
   }
 });
 
 router.put('/api/agents/:name', async (req: Request, res: Response) => {
   const { content } = req.body as { content?: string };
   if (content === undefined || content === null) {
-    res.status(400).json({ error: 'content is required' });
-    return;
+    throw badRequest('content is required');
   }
   const repoPath = repoPathFromQuery(req);
-  try {
-    await saveAgent(req.params.name as string, content, repoPath);
-    await syncAgents(repoPath);
-    const agent = await getAgent(req.params.name as string, repoPath);
-    res.json(agent);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  await saveAgent(req.params.name as string, content, repoPath);
+  await syncAgents(repoPath);
+  const agent = await getAgent(req.params.name as string, repoPath);
+  res.json(agent);
 });
 
 router.delete('/api/agents/:name', async (req: Request, res: Response) => {
@@ -68,15 +59,14 @@ router.delete('/api/agents/:name', async (req: Request, res: Response) => {
     await syncAgents(repoPath);
     res.json({ ok: true });
   } catch (err) {
-    sendDomainError(res, err);
+    throw toDomainServiceError(err);
   }
 });
 
 router.post('/api/agents', async (req: Request, res: Response) => {
   const { name, content } = req.body as { name?: string; content?: string };
   if (!name || !content) {
-    res.status(400).json({ error: 'name and content are required' });
-    return;
+    throw badRequest('name and content are required');
   }
   const repoPath = repoPathFromQuery(req);
   try {
@@ -85,6 +75,6 @@ router.post('/api/agents', async (req: Request, res: Response) => {
     const agent = await getAgent(name, repoPath);
     res.status(201).json(agent);
   } catch (err) {
-    sendDomainError(res, err);
+    throw toDomainServiceError(err);
   }
 });

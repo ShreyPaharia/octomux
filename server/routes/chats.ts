@@ -8,67 +8,51 @@ import { getHarness } from '../harnesses/index.js';
 import { hopAgent } from '../task-engine/index.js';
 import { getAgent as getAgentRepo, getTask as getTaskRepo } from '../repositories/index.js';
 import type { CreateChatRequest, Task } from '../types.js';
+import { badRequest, conflict, notFound, ServiceError } from '../services/errors.js';
 
 const apiLogger = childLogger('api');
 
 export const router = express.Router();
 
 router.get('/api/chats', (_req: Request, res: Response) => {
-  try {
-    res.json(listChats());
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  res.json(listChats());
 });
 
 router.get('/api/chats/:id', (req: Request, res: Response) => {
   const chat = getChat(req.params.id as string);
   if (!chat) {
-    res.status(404).json({ error: 'Chat not found' });
-    return;
+    throw notFound('Chat not found');
   }
   res.json(chat);
 });
 
-/**
- * Move a runtime agent between task ids (or detach to a standalone chat
- * with task_id=null). Kills the old tmux window, opens a new one at the new
- * cwd, and resumes claude so transcript context survives.
- */
 router.patch('/api/agents/:id/task', async (req: Request, res: Response) => {
   const agent = getAgentRepo(req.params.id as string);
   if (!agent) {
-    res.status(404).json({ error: 'Agent not found' });
-    return;
+    throw notFound('Agent not found');
   }
   const body = (req.body ?? {}) as { task_id?: string | null };
   if (!('task_id' in body)) {
-    res.status(400).json({ error: 'task_id is required (string or null)' });
-    return;
+    throw badRequest('task_id is required (string or null)');
   }
   const targetTaskId = body.task_id;
   if (targetTaskId !== null && typeof targetTaskId !== 'string') {
-    res.status(400).json({ error: 'task_id must be a string or null' });
-    return;
+    throw badRequest('task_id must be a string or null');
   }
   if (targetTaskId === agent.task_id) {
-    res.status(400).json({ error: 'Agent is already on that task' });
-    return;
+    throw badRequest('Agent is already on that task');
   }
   if (targetTaskId !== null) {
     const targetTask = getTaskRepo(targetTaskId);
     if (!targetTask) {
-      res.status(404).json({ error: `Task not found: ${targetTaskId}` });
-      return;
+      throw notFound(`Task not found: ${targetTaskId}`);
     }
     const trs = (targetTask as Task).runtime_state;
     if (!(['setting_up', 'running'] as const).includes(trs as 'running')) {
-      res.status(409).json({ error: `Target task is not active (runtime_state=${trs})` });
-      return;
+      throw conflict(`Target task is not active (runtime_state=${trs})`);
     }
     if (!targetTask.worktree_id) {
-      res.status(409).json({ error: 'Target task has no worktree' });
-      return;
+      throw conflict('Target task has no worktree');
     }
   }
 
@@ -89,10 +73,9 @@ router.patch('/api/agents/:id/task', async (req: Request, res: Response) => {
       'task_hop: failed',
     );
     if (msg.includes('not found') || msg.includes('does not exist')) {
-      res.status(409).json({ error: msg });
-    } else {
-      res.status(500).json({ error: msg });
+      throw conflict(msg);
     }
+    throw new ServiceError(msg, 500);
   }
 });
 
@@ -103,8 +86,7 @@ router.post('/api/chats', async (req: Request, res: Response) => {
     try {
       validateAgentName(body.agent);
     } catch (err) {
-      res.status(400).json({ error: (err as Error).message });
-      return;
+      throw badRequest((err as Error).message);
     }
   }
 
@@ -112,62 +94,41 @@ router.post('/api/chats', async (req: Request, res: Response) => {
     try {
       getHarness(body.harness_id);
     } catch (err) {
-      res.status(400).json({ error: (err as Error).message });
-      return;
+      throw badRequest((err as Error).message);
     }
   }
 
-  try {
-    const chat = await createChat({
-      label: body.label,
-      cwd: body.cwd,
-      agent: body.agent,
-      prompt: body.prompt,
-      harnessId: body.harness_id,
-    });
-    res.status(201).json(chat);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  const chat = await createChat({
+    label: body.label,
+    cwd: body.cwd,
+    agent: body.agent,
+    prompt: body.prompt,
+    harnessId: body.harness_id,
+  });
+  res.status(201).json(chat);
 });
 
-/**
- * Close a chat — stop the tmux session, mark the agent stopped.
- * Body: `{ status: 'stopped' }`. Preserves the row so history stays visible.
- */
 router.patch('/api/chats/:id', async (req: Request, res: Response) => {
   const chat = getChat(req.params.id as string);
   if (!chat) {
-    res.status(404).json({ error: 'Chat not found' });
-    return;
+    throw notFound('Chat not found');
   }
   const body = (req.body ?? {}) as { status?: string };
   if (body.status !== 'stopped') {
-    res.status(400).json({ error: "Only status='stopped' is supported" });
-    return;
+    throw badRequest("Only status='stopped' is supported");
   }
-  try {
-    await closeChat(chat);
-    const updated = getChat(chat.id);
-    broadcast({ type: 'chat:updated', payload: { chatId: chat.id } });
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  await closeChat(chat);
+  const updated = getChat(chat.id);
+  broadcast({ type: 'chat:updated', payload: { chatId: chat.id } });
+  res.json(updated);
 });
 
-/** Delete a chat — kill tmux, remove scratch dir, delete DB row. */
 router.delete('/api/chats/:id', async (req: Request, res: Response) => {
   const chat = getChat(req.params.id as string);
   if (!chat) {
-    res.status(404).json({ error: 'Chat not found' });
-    return;
+    throw notFound('Chat not found');
   }
-  try {
-    await deleteChat(chat);
-    broadcast({ type: 'chat:deleted', payload: { chatId: chat.id } });
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  await deleteChat(chat);
+  broadcast({ type: 'chat:deleted', payload: { chatId: chat.id } });
+  res.status(204).send();
 });

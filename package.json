@@ -91,6 +91,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "commander": "^14.0.3",
+    "croner": "^10.0.1",
     "express": "^5.0.1",
     "fix-path": "^4.0.0",
     "js-yaml": "^4.2.0",

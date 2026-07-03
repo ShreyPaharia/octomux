@@ -19,90 +19,73 @@ import {
 import { computeOutdated } from '../inline-comments-outdated.js';
 import { addLearning } from '../repositories/review-learnings.js';
 import { createInlineComment } from '../services/comment-service.js';
-import { ServiceError } from '../services/errors.js';
 import { loadTaskOrFail } from './_shared.js';
+import { badRequest, conflict, notFound } from '../services/errors.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('api:comments');
 
+function resolveRelPath(req: Request): string {
+  const params = req.params as Record<string, string | string[]>;
+  const rawPath = params.path ?? params['0'] ?? '';
+  return Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
+}
+
+function assertValidPath(cwd: string, relPath: string): void {
+  try {
+    safeResolvePath(cwd, relPath);
+  } catch {
+    throw badRequest('Invalid path');
+  }
+}
+
 export const router = express.Router();
 
-// POST /api/tasks/:id/files/*path/reviewed — mark a file as reviewed
 router.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
   const cwd = taskWorkingDir(task);
   if (!cwd) {
-    res.status(400).json({ error: 'Task has no worktree' });
-    return;
+    throw badRequest('Task has no worktree');
   }
-  const params = req.params as Record<string, string | string[]>;
-  const rawPath = params.path ?? params['0'] ?? '';
-  const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
+  const relPath = resolveRelPath(req);
+  assertValidPath(cwd, relPath);
+
+  const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+  const headSha = stdout.trim();
+  let blobSha: string | null = null;
   try {
-    safeResolvePath(cwd, relPath);
+    const { stdout: bs } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
+    blobSha = bs.trim() || null;
   } catch {
-    res.status(400).json({ error: 'Invalid path' });
-    return;
+    blobSha = null;
   }
-  try {
-    const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', 'HEAD']);
-    const headSha = stdout.trim();
-    // Capture the blob hash of the content actually reviewed (the working
-    // tree), so "changed since review" reacts to uncommitted edits too. Null
-    // when the file is gone (e.g. a reviewed deletion).
-    let blobSha: string | null = null;
-    try {
-      const { stdout: bs } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
-      blobSha = bs.trim() || null;
-    } catch {
-      blobSha = null;
-    }
-    setReviewed(task.id, relPath, headSha, blobSha);
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
+  setReviewed(task.id, relPath, headSha, blobSha);
+  res.status(204).send();
 });
 
-// DELETE /api/tasks/:id/files/*path/reviewed — unmark a file as reviewed
 router.delete('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
   const cwd = taskWorkingDir(task);
   if (!cwd) {
-    res.status(400).json({ error: 'Task has no worktree' });
-    return;
+    throw badRequest('Task has no worktree');
   }
-  const params = req.params as Record<string, string | string[]>;
-  const rawPath = params.path ?? params['0'] ?? '';
-  const relPath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
-  try {
-    safeResolvePath(cwd, relPath);
-  } catch {
-    res.status(400).json({ error: 'Invalid path' });
-    return;
-  }
+  const relPath = resolveRelPath(req);
+  assertValidPath(cwd, relPath);
   clearReviewed(task.id, relPath);
   res.status(204).send();
 });
 
-// POST /api/tasks/:id/comments — create an inline review comment
 router.post('/api/tasks/:id/comments', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
   if (task.run_mode === 'scratch') {
-    res.status(400).json({ error: 'no repo for scratch task' });
-    return;
+    throw badRequest('no repo for scratch task');
   }
   const cwd = taskWorkingDir(task);
   if (!cwd) {
-    res.status(400).json({ error: 'Task has no worktree' });
-    return;
+    throw badRequest('Task has no worktree');
   }
   if (!fs.existsSync(cwd)) {
-    res.status(400).json({ error: 'Worktree no longer exists on disk' });
-    return;
+    throw badRequest('Worktree no longer exists on disk');
   }
 
   const body = req.body as {
@@ -122,64 +105,43 @@ router.post('/api/tasks/:id/comments', async (req: Request, res: Response) => {
   const anchorRaw = body.anchor_commit_sha;
 
   if (!filePath) {
-    res.status(400).json({ error: 'file_path is required' });
-    return;
+    throw badRequest('file_path is required');
   }
   if (typeof lineRaw !== 'number' || !Number.isInteger(lineRaw) || lineRaw < 1) {
-    res.status(400).json({ error: 'line must be a positive integer' });
-    return;
+    throw badRequest('line must be a positive integer');
   }
   if (side !== 'old' && side !== 'new') {
-    res.status(400).json({ error: "side must be 'old' or 'new'" });
-    return;
+    throw badRequest("side must be 'old' or 'new'");
   }
   if (!commentBody.trim()) {
-    res.status(400).json({ error: 'body is required' });
-    return;
+    throw badRequest('body is required');
   }
   if (anchorRaw !== undefined && typeof anchorRaw !== 'string') {
-    res.status(400).json({ error: 'anchor_commit_sha must be a string' });
-    return;
+    throw badRequest('anchor_commit_sha must be a string');
   }
 
-  try {
-    safeResolvePath(cwd, filePath);
-  } catch {
-    res.status(400).json({ error: 'Invalid path' });
-    return;
-  }
+  assertValidPath(cwd, filePath);
 
   if (!task.base_sha) {
-    res.status(400).json({ error: 'base_sha not available for this task' });
-    return;
+    throw badRequest('base_sha not available for this task');
   }
 
-  try {
-    const row = await createInlineComment({
-      cwd,
-      task_id: task.id,
-      base_sha: task.base_sha,
-      file_path: filePath,
-      line: lineRaw as number,
-      side: side as 'old' | 'new',
-      body: commentBody,
-      agent_id: agentId,
-      anchor_commit_sha: anchorRaw as string | undefined,
-    });
-    res.status(201).json(row);
-  } catch (err) {
-    if (err instanceof ServiceError) {
-      res.status(err.status).json({ error: err.message });
-    } else {
-      res.status(500).json({ error: (err as Error).message });
-    }
-  }
+  const row = await createInlineComment({
+    cwd,
+    task_id: task.id,
+    base_sha: task.base_sha,
+    file_path: filePath,
+    line: lineRaw as number,
+    side: side as 'old' | 'new',
+    body: commentBody,
+    agent_id: agentId,
+    anchor_commit_sha: anchorRaw as string | undefined,
+  });
+  res.status(201).json(row);
 });
 
-// GET /api/tasks/:id/comments — list inline comments for a task
 router.get('/api/tasks/:id/comments', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   const fileFilter = typeof req.query.file === 'string' ? req.query.file : undefined;
   const rows = listComments(task.id, fileFilter ? { file: fileFilter } : undefined);
@@ -212,22 +174,17 @@ router.get('/api/tasks/:id/comments', async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/tasks/:id/comments/:cid — update a comment
 router.patch('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   const cid = (req.params as Record<string, string>).cid;
   const existing = getComment(cid);
   if (!existing || existing.task_id !== task.id) {
-    res.status(404).json({ error: 'Comment not found' });
-    return;
+    throw notFound('Comment not found');
   }
 
-  // Refuse updates on already-published comments
   if (existing.status === 'published') {
-    res.status(409).json({ error: 'Cannot update a published comment' });
-    return;
+    throw conflict('Cannot update a published comment');
   }
 
   const body = req.body as {
@@ -254,20 +211,16 @@ router.patch('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
   const VALID_STATUSES = ['draft', 'accepted', 'rejected', 'stale'];
 
   if (!hasResolved && !hasBody && !hasStatus && !hasExtended) {
-    res.status(400).json({ error: 'no fields to update' });
-    return;
+    throw badRequest('no fields to update');
   }
   if (hasResolved && typeof body.resolved !== 'boolean') {
-    res.status(400).json({ error: 'resolved must be a boolean' });
-    return;
+    throw badRequest('resolved must be a boolean');
   }
   if (hasBody && (typeof body.body !== 'string' || !body.body.trim())) {
-    res.status(400).json({ error: 'body must be a non-empty string' });
-    return;
+    throw badRequest('body must be a non-empty string');
   }
   if (hasStatus && !VALID_STATUSES.includes(body.status as string)) {
-    res.status(400).json({ error: `status must be one of ${VALID_STATUSES.join(', ')}` });
-    return;
+    throw badRequest(`status must be one of ${VALID_STATUSES.join(', ')}`);
   }
 
   let row = existing;
@@ -296,7 +249,6 @@ router.patch('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
     if (updated) row = updated;
   }
 
-  // Capture rejection learning if status='rejected' and rejection_why provided
   if (
     body.status === 'rejected' &&
     typeof body.rejection_why === 'string' &&
@@ -315,16 +267,13 @@ router.patch('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
   res.json(row);
 });
 
-// DELETE /api/tasks/:id/comments/:cid — delete a comment
 router.delete('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   const cid = (req.params as Record<string, string>).cid;
   const existing = getComment(cid);
   if (!existing || existing.task_id !== task.id) {
-    res.status(404).json({ error: 'Comment not found' });
-    return;
+    throw notFound('Comment not found');
   }
 
   deleteComment(cid);

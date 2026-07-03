@@ -12,6 +12,7 @@ import {
   deleteWorktree as deleteWorktreeRepo,
   unlinkWorktreeFromAllTasks,
 } from '../repositories/index.js';
+import { conflict, notFound } from '../services/errors.js';
 
 const execFile = promisify(execFileCb);
 const apiLogger = childLogger('api');
@@ -35,8 +36,7 @@ router.get('/api/worktrees', (_req: Request, res: Response) => {
 router.get('/api/worktrees/:id', (req: Request, res: Response) => {
   const worktree = getWorktree(req.params.id as string);
   if (!worktree) {
-    res.status(404).json({ error: 'Worktree not found' });
-    return;
+    throw notFound('Worktree not found');
   }
   const tasks = listTasksByWorktree(worktree.id);
   const active = tasks.find((t) => {
@@ -53,20 +53,17 @@ router.get('/api/worktrees/:id', (req: Request, res: Response) => {
 router.delete('/api/worktrees/:id', async (req: Request, res: Response) => {
   const worktree = getWorktree(req.params.id as string);
   if (!worktree) {
-    res.status(404).json({ error: 'Worktree not found' });
-    return;
+    throw notFound('Worktree not found');
   }
   if (worktree.status !== 'available') {
-    res.status(409).json({ error: 'Worktree is in use' });
-    return;
+    throw conflict('Worktree is in use');
   }
   const referencingTasks = listTasksForWorktree(worktree.id);
   const activeRef = referencingTasks.find((t) =>
     (['setting_up', 'running'] as const).includes(t.runtime_state as 'running'),
   );
   if (activeRef) {
-    res.status(409).json({ error: 'Worktree has an active task' });
-    return;
+    throw conflict('Worktree has an active task');
   }
 
   // Only delete filesystem for worktree-owned modes (new/scratch).

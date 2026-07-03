@@ -42,7 +42,7 @@ import {
 } from '../repositories/index.js';
 
 import { createTask } from '../services/task-service.js';
-import { ServiceError } from '../services/errors.js';
+import { badRequest, conflict } from '../services/errors.js';
 import {
   loadTaskOrFail,
   lookupExistingReviewId,
@@ -51,6 +51,7 @@ import {
   validateCreateTaskBody,
   applyDraftUpdates,
   resolveTaskTitleAndDescription,
+  throwIfValidationError,
 } from './_shared.js';
 
 const apiLogger = childLogger('api');
@@ -150,8 +151,7 @@ router.post('/api/tasks/delete-done', async (req: Request, res: Response) => {
 
 // Mark a single task viewed
 router.patch('/api/tasks/:id/viewed', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
   touchLastViewed(task.id);
   apiLogger.info({ task_id: task.id, operation: 'marked_viewed' }, 'marked task viewed');
   const updated = getTaskRepo(task.id) as Task;
@@ -160,8 +160,7 @@ router.patch('/api/tasks/:id/viewed', (req: Request, res: Response) => {
 
 // Get single task with agents
 router.get('/api/tasks/:id', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
   const rawAgents = listAllAgents(task.id);
   // Backfill hook_token for pre-step-1 agents that have an empty token.
   const agents = await Promise.all(
@@ -191,11 +190,7 @@ router.post('/api/tasks', async (req: Request, res: Response) => {
   const body = req.body as CreateTaskRequest;
   const runMode: RunMode = body.run_mode ?? 'new';
 
-  const validationError = validateCreateTaskBody(body, runMode);
-  if (validationError) {
-    res.status(validationError.status).json({ error: validationError.message });
-    return;
-  }
+  throwIfValidationError(validateCreateTaskBody(body, runMode));
 
   // Derive stored repo_path / worktree
   let storedRepoPath: string;
@@ -236,40 +231,31 @@ router.post('/api/tasks', async (req: Request, res: Response) => {
     initialWorkflowStatus = 'planned';
   }
 
-  try {
-    const created = await createTask({
-      resolved_title: resolvedTitle!,
-      resolved_description: resolvedDescription!,
-      initial_prompt: body.initial_prompt ?? null,
-      run_mode: runMode,
-      stored_repo_path: storedRepoPath,
-      staged_path: stagedPath,
-      branch: body.branch ?? null,
-      base_branch: body.base_branch ?? null,
-      worktree_status: 'available',
-      runtime_state: isDraft ? 'idle' : 'setting_up',
-      workflow_status: initialWorkflowStatus,
-      agent: body.agent ?? null,
-      harness_id: body.harness_id ?? 'claude-code',
-      model: body.model ?? null,
-      notify_task_id: body.notify_task_id ?? null,
-      is_draft: isDraft,
-    });
-    res.status(201).json(created);
-  } catch (err) {
-    if (err instanceof ServiceError) {
-      res.status(err.status).json({ error: err.message });
-    } else {
-      throw err;
-    }
-  }
+  const created = await createTask({
+    resolved_title: resolvedTitle!,
+    resolved_description: resolvedDescription!,
+    initial_prompt: body.initial_prompt ?? null,
+    run_mode: runMode,
+    stored_repo_path: storedRepoPath,
+    staged_path: stagedPath,
+    branch: body.branch ?? null,
+    base_branch: body.base_branch ?? null,
+    worktree_status: 'available',
+    runtime_state: isDraft ? 'idle' : 'setting_up',
+    workflow_status: initialWorkflowStatus,
+    agent: body.agent ?? null,
+    harness_id: body.harness_id ?? 'claude-code',
+    model: body.model ?? null,
+    notify_task_id: body.notify_task_id ?? null,
+    is_draft: isDraft,
+  });
+  res.status(201).json(created);
 });
 
 // Update task status
 router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
   const body = req.body as UpdateTaskRequest;
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   // Draft field updates
   const hasDraftFields = [
@@ -284,26 +270,19 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
   ].some((k) => (body as Record<string, unknown>)[k] !== undefined);
 
   if (hasDraftFields) {
-    const draftError = applyDraftUpdates(task, body);
-    if (draftError) {
-      res.status(draftError.status).json({ error: draftError.message });
-      return;
-    }
+    throwIfValidationError(applyDraftUpdates(task, body));
   } else if (body.status === 'running' || body.runtime_state === 'running') {
     // Resume task
     if (task.runtime_state !== 'idle' && task.runtime_state !== 'error') {
-      res.status(400).json({ error: 'Can only resume tasks in closed or error state' });
-      return;
+      throw badRequest('Can only resume tasks in closed or error state');
     }
     if (task.run_mode === 'new' || task.run_mode === 'existing' || task.run_mode === 'scratch') {
       if (!task.worktree || !fs.existsSync(task.worktree)) {
-        res.status(400).json({ error: 'Worktree no longer exists on disk' });
-        return;
+        throw badRequest('Worktree no longer exists on disk');
       }
     } else if (task.run_mode === 'none') {
       if (!fs.existsSync(task.repo_path)) {
-        res.status(400).json({ error: 'repo_path no longer exists on disk' });
-        return;
+        throw badRequest('repo_path no longer exists on disk');
       }
     }
     await resumeTask(task);
@@ -312,8 +291,7 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
   } else if (body.workflow_status) {
     // Direct workflow_status flip (simpler version without note/transition tracking)
     if (!WORKFLOW_STATUSES.includes(body.workflow_status)) {
-      res.status(400).json({ error: `invalid workflow_status: ${body.workflow_status}` });
-      return;
+      throw badRequest(`invalid workflow_status: ${body.workflow_status}`);
     }
     setWorkflowStatus(task.id, body.workflow_status);
   }
@@ -325,12 +303,10 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
 
 // Start a draft task
 router.post('/api/tasks/:id/start', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'idle') {
-    res.status(400).json({ error: 'Only draft tasks can be started' });
-    return;
+    throw badRequest('Only draft tasks can be started');
   }
 
   // Set status immediately so client sees setting_up
@@ -352,13 +328,11 @@ router.post('/api/tasks/:id/start', async (req: Request, res: Response) => {
 
 // Delete task (soft by default; ?purge=true hard-deletes a previously soft-deleted task)
 router.delete('/api/tasks/:id', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (req.query.purge === 'true') {
     if (task.deleted_at == null) {
-      res.status(409).json({ error: 'task must be soft-deleted before purge' });
-      return;
+      throw conflict('task must be soft-deleted before purge');
     }
     const taskId = task.id;
     await deleteTask(task);
@@ -375,12 +349,10 @@ router.delete('/api/tasks/:id', async (req: Request, res: Response) => {
 
 // Restore a soft-deleted task
 router.post('/api/tasks/:id/restore', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req, res);
-  if (!task) return;
+  const task = loadTaskOrFail(req);
 
   if (task.deleted_at == null) {
-    res.status(409).json({ error: 'task is not in trash' });
-    return;
+    throw conflict('task is not in trash');
   }
 
   restoreTaskRepo(task.id);
