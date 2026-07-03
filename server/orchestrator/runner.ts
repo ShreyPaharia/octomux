@@ -36,6 +36,7 @@ import { hookBaseUrl } from '../hook-base-url.js';
 import { octomuxRoot } from '../octomux-root.js';
 import { childLogger } from '../logger.js';
 import { DEFAULT_HARNESS_ID, getHarness } from '../harnesses/index.js';
+import { writeJsonConfig } from '../harnesses/shared.js';
 import { buildOrchestratorConductorFlags } from './conductor-flags.js';
 import {
   getConversation,
@@ -154,7 +155,7 @@ function writeOrchestratorsettings(convId: string): string {
     },
   };
 
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  writeJsonConfig(settingsPath, settings);
   return settingsPath;
 }
 
@@ -245,7 +246,7 @@ function writeOrchestratorMcpConfig(convId: string, hookToken: string): string |
       },
     },
   };
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+  writeJsonConfig(cfgPath, cfg);
   return cfgPath;
 }
 

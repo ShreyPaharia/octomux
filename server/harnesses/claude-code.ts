@@ -1,17 +1,18 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
+import type { Harness } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
+import {
+  buildClaudeContinueCommand,
+  buildClaudeLaunchCommand,
+  buildClaudeResumeCommand,
+  formatHarnessFlags,
+  validateSettingsObject,
+  writeJsonConfig,
+} from './shared.js';
 import { registerHarness } from './registry.js';
 import type { OctomuxSettings } from '../settings.js';
-
-/** Strip any existing --model <value> from a flags string, then append --model <model>. */
-function applyModel(flags: string, model: string | null | undefined): string {
-  if (!model) return flags;
-  const stripped = flags.replace(/\s*--model\s+\S+/g, '');
-  return `${stripped} --model ${model}`;
-}
 
 function buildHookEvents(baseUrl: string, token: string) {
   const url = (event: string) => `${baseUrl}/api/hooks/${event}?token=${encodeURIComponent(token)}`;
@@ -32,21 +33,9 @@ export const claudeCodeHarness: Harness = {
     return crypto.randomUUID();
   },
 
-  buildLaunchCommand({ sessionId, agent, flags = '', model }: HarnessLaunchOpts): string {
-    const agentPart = agent ? ` --agent ${validateAgentName(agent)}` : '';
-    const resolvedFlags = applyModel(flags, model);
-    return `claude${agentPart} --session-id ${sessionId}${resolvedFlags}`;
-  },
-
-  buildResumeCommand({ sessionId, flags = '', model }: HarnessResumeOpts): string {
-    const resolvedFlags = applyModel(flags, model);
-    return `claude --resume ${sessionId}${resolvedFlags}`;
-  },
-
-  buildContinueCommand({ sessionId, flags = '', model }: HarnessResumeOpts): string {
-    const resolvedFlags = applyModel(flags, model);
-    return `claude --continue --session-id ${sessionId}${resolvedFlags}`;
-  },
+  buildLaunchCommand: buildClaudeLaunchCommand,
+  buildResumeCommand: buildClaudeResumeCommand,
+  buildContinueCommand: buildClaudeContinueCommand,
 
   async installHooks(worktreePath: string, baseUrl: string, hookToken: string) {
     const { ALLOWED_TOOLS, DENIED_TOOLS } = await import('../hook-settings.js');
@@ -88,7 +77,7 @@ export const claudeCodeHarness: Harness = {
     const mergedPermissions = { ...existingPerms, allow: mergedAllow, deny: mergedDeny };
 
     const merged = { ...existing, permissions: mergedPermissions, hooks: mergedHooks };
-    fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n');
+    writeJsonConfig(settingsPath, merged);
   },
 
   async syncAgents(worktreePath: string) {
@@ -120,25 +109,19 @@ export const claudeCodeHarness: Harness = {
     if (sub.flags) {
       parts.push(validateFlagString(sub.flags, 'harnesses.claude-code.flags'));
     }
-    return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+    return formatHarnessFlags(parts);
   },
 
   validateSettings(blob: unknown): Record<string, unknown> {
-    if (typeof blob !== 'object' || blob === null || Array.isArray(blob)) {
-      throw new Error('Invalid claude-code settings: expected object');
-    }
-    const obj = blob as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    if (obj.flags !== undefined) {
-      out.flags = validateFlagString(obj.flags as string, 'harnesses.claude-code.flags');
-    }
-    if (obj.dangerouslySkipPermissions !== undefined) {
-      if (typeof obj.dangerouslySkipPermissions !== 'boolean') {
-        throw new Error('Invalid claude-code.dangerouslySkipPermissions: expected boolean');
-      }
-      out.dangerouslySkipPermissions = obj.dangerouslySkipPermissions;
-    }
-    return out;
+    return validateSettingsObject(blob, 'claude-code', {
+      flags: (value) => validateFlagString(value as string, 'harnesses.claude-code.flags'),
+      dangerouslySkipPermissions: (value) => {
+        if (typeof value !== 'boolean') {
+          throw new Error('Invalid claude-code.dangerouslySkipPermissions: expected boolean');
+        }
+        return value;
+      },
+    });
   },
 
   validateAgentName(name: string): string {
