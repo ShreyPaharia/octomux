@@ -319,7 +319,7 @@ describe('Composer / submit', () => {
   it('conflict dialog opens when another task is on a different branch', async () => {
     apiMock.preflightNoneMode.mockResolvedValueOnce({
       ok: false,
-      conflicts: [{ task_id: 't1', title: 'other', status: 'running', branch: 'main' }],
+      conflicts: [{ task_id: 't1', title: 'other', runtime_state: 'running', branch: 'main' }],
       warnings: [],
       dirty: null,
       currentBranch: 'main',
@@ -336,7 +336,7 @@ describe('Composer / submit', () => {
     apiMock.preflightNoneMode.mockResolvedValueOnce({
       ok: true,
       conflicts: [],
-      warnings: [{ task_id: 't1', title: 'other', status: 'running', branch: 'feature-x' }],
+      warnings: [{ task_id: 't1', title: 'other', runtime_state: 'running', branch: 'feature-x' }],
       dirty: null,
       currentBranch: 'feature-x',
       targetBranch: 'feature-x',

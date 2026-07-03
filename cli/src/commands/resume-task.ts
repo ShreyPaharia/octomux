@@ -9,7 +9,7 @@ export function registerResumeTask(program: Command): void {
     .action(async (id: string, _opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      const task = await client.updateTask(id, { status: 'running' });
+      const task = await client.updateTask(id, { runtime_state: 'running' });
 
       if (json) {
         outputJson(task);

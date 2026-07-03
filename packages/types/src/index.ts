@@ -1,5 +1,3 @@
-export type TaskStatus = 'draft' | 'setting_up' | 'running' | 'closed' | 'error';
-/** New runtime state — replaces TaskStatus for the runtime column. */
 export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error';
 /** Workflow status — human-facing board column. */
 export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
@@ -207,7 +205,6 @@ export interface AddAgentRequest {
 }
 
 export interface UpdateTaskRequest {
-  status?: 'closed' | 'running';
   runtime_state?: RuntimeState;
   workflow_status?: WorkflowStatus;
   title?: string;

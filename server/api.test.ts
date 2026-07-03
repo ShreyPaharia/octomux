@@ -259,7 +259,7 @@ const notFoundCases = [
     name: 'PATCH /api/tasks/:id',
     method: 'patch' as const,
     url: '/api/tasks/nonexistent',
-    body: { status: 'closed' },
+    body: { runtime_state: 'idle' },
   },
   { name: 'DELETE /api/tasks/:id', method: 'delete' as const, url: '/api/tasks/nonexistent' },
   {
@@ -679,13 +679,13 @@ describe('POST /api/tasks/:id/start', () => {
 // ─── PATCH /api/tasks/:id ────────────────────────────────────────────────────
 
 describe('PATCH /api/tasks/:id', () => {
-  it('updates status and returns updated task with agents', async () => {
+  it('updates runtime_state and returns updated task with agents', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'closed' });
+      .send({ runtime_state: 'idle' });
 
     expect(res.status).toBe(200);
     expect(res.body.runtime_state).toBe('idle');
@@ -697,16 +697,16 @@ describe('PATCH /api/tasks/:id', () => {
 
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'closed' });
+      .send({ runtime_state: 'idle' });
 
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
   });
 
   // ─── closeTask trigger ─────────────────────────────────────────────────
 
-  it('calls closeTask when status=closed', async () => {
+  it('calls closeTask when runtime_state=idle', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ status: 'closed' });
+    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ runtime_state: 'idle' });
     expect(closeTask).toHaveBeenCalledOnce();
   });
 
@@ -714,7 +714,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db);
     await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' } as any);
+      .send({ runtime_state: 'running' } as any);
     expect(closeTask).not.toHaveBeenCalled();
   });
 
@@ -726,13 +726,13 @@ describe('PATCH /api/tasks/:id', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
-  // ─── Resume flow (status=running) ─────────────────────────────────────
+  // ─── Resume flow (runtime_state=running) ─────────────────────────────────
 
   it('returns 400 when resuming a non-closed/non-error task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('resume');
   });
@@ -744,7 +744,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Worktree');
   });
@@ -754,7 +754,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(200);
     expect(resumeTask).toHaveBeenCalledOnce();
   });
@@ -769,7 +769,7 @@ describe('PATCH /api/tasks/:id', () => {
     });
     const res = await request(app)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(200);
     expect(resumeTask).toHaveBeenCalledOnce();
   });
@@ -786,7 +786,7 @@ describe('PATCH /api/tasks/:id', () => {
       });
       const res = await request(app)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
-        .send({ status: 'running' });
+        .send({ runtime_state: 'running' });
       expect(res.status).toBe(400);
     },
   );
@@ -2084,7 +2084,7 @@ describe('Chats API (standalone agents)', () => {
     const created = await request(app).post('/api/chats').send({ label: 'Bad patch' });
     const res = await request(app)
       .patch(`/api/chats/${created.body.id}`)
-      .send({ status: 'running' });
+      .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
   });
 

@@ -357,7 +357,7 @@ export function Composer({ onSubmitted }: Props = {}) {
           targetBranch={preflightBlock.result.targetBranch}
           onClose={() => setPreflightBlock(null)}
           onCloseTask={async (taskId) => {
-            await taskApi.updateTask(taskId, { status: 'closed' });
+            await taskApi.updateTask(taskId, { runtime_state: 'idle' });
             const repoForPreflight = preflightBlock.payload.repo_path!;
             const branchForPreflight = preflightBlock.payload.base_branch!;
             const next = await taskApi.preflightNoneMode(repoForPreflight, branchForPreflight);

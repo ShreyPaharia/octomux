@@ -265,7 +265,7 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
 
   if (hasDraftFields) {
     throwIfValidationError(applyDraftUpdates(task, body));
-  } else if (body.status === 'running' || body.runtime_state === 'running') {
+  } else if (body.runtime_state === 'running') {
     // Resume task
     if (task.runtime_state !== 'idle' && task.runtime_state !== 'error') {
       throw badRequest('Can only resume tasks in closed or error state');
@@ -280,7 +280,7 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
       }
     }
     await resumeTask(task);
-  } else if (body.status === 'closed' || body.runtime_state === 'idle') {
+  } else if (body.runtime_state === 'idle') {
     await closeTask(task);
   } else if (body.workflow_status) {
     // Direct workflow_status flip (simpler version without note/transition tracking)

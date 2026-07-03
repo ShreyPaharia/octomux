@@ -7,6 +7,7 @@ import type {
   Task,
   TaskExternalRef,
   TaskUpdate,
+  UpdateTaskRequest,
   WorkflowStatus,
 } from '@octomux/types';
 
@@ -54,7 +55,7 @@ export interface OctomuxClient {
   createTask(data: CreateTaskRequest & { title: string; description: string }): Promise<Task>;
   listTasks(params?: { repo_path?: string }): Promise<Task[]>;
   getTask(id: string): Promise<Task>;
-  updateTask(id: string, data: { status: string }): Promise<Task>;
+  updateTask(id: string, data: UpdateTaskRequest): Promise<Task>;
   deleteTask(id: string): Promise<void>;
   addAgent(
     taskId: string,

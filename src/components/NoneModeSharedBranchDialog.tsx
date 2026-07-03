@@ -46,7 +46,7 @@ export function NoneModeSharedBranchDialog({
         <ul className="mt-4 space-y-1">
           {warnings.map((w) => (
             <li key={w.task_id} className="truncate text-sm">
-              {w.title} <span className="text-xs text-muted-foreground">({w.status})</span>
+              {w.title} <span className="text-xs text-muted-foreground">({w.runtime_state})</span>
             </li>
           ))}
         </ul>
