@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
+import { Cron } from 'croner';
 import { nanoid } from 'nanoid';
 import { startTask } from './task-engine/index.js';
 import { childLogger } from './logger.js';
@@ -221,29 +222,25 @@ export function listTeamSchedules(): TeamScheduleRow[] {
 
 // ─── Cron evaluation ─────────────────────────────────────────────────────────
 
-/**
- * Minimal 5-field cron parser: "min hour dom mon dow"
- * Supports: exact values, asterisks. Returns true if now matches the expr.
- * Does NOT support ranges, step values, or lists — sufficient for daily schedules.
- */
-export function cronMatches(expr: string, now: Date): boolean {
-  const fields = expr.trim().split(/\s+/);
-  if (fields.length !== 5) return false;
-  const [min, hour, dom, mon, dow] = fields;
+const cronCache = new Map<string, Cron>();
 
-  const matches = (field: string, value: number): boolean => {
-    if (field === '*') return true;
-    const n = parseInt(field, 10);
-    return !isNaN(n) && n === value;
-  };
+function getCronJob(expr: string): Cron | null {
+  let job = cronCache.get(expr);
+  if (!job) {
+    try {
+      job = new Cron(expr, { timezone: 'UTC', paused: true });
+      cronCache.set(expr, job);
+    } catch {
+      return null;
+    }
+  }
+  return job;
+}
 
-  return (
-    matches(min!, now.getUTCMinutes()) &&
-    matches(hour!, now.getUTCHours()) &&
-    matches(dom!, now.getUTCDate()) &&
-    matches(mon!, now.getUTCMonth() + 1) &&
-    matches(dow!, now.getUTCDay())
-  );
+/** Returns true when `expr` matches `now` (UTC). Invalid expressions never match. */
+export function isCronDue(expr: string, now: Date): boolean {
+  const job = getCronJob(expr);
+  return job?.match(now) ?? false;
 }
 
 /**
@@ -254,7 +251,7 @@ export async function pollTeamSchedules(now: Date = new Date()): Promise<void> {
   const schedules = listEnabledTeamSchedules();
 
   for (const schedule of schedules) {
-    if (!cronMatches(schedule.cron, now)) continue;
+    if (!isCronDue(schedule.cron, now)) continue;
 
     // Idempotency: skip only if the linked Lead task is still actually running.
     // Joining tasks avoids the stuck-forever bug where team_runs.status never
