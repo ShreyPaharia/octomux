@@ -12,11 +12,7 @@ import {
   getTaskHookToken,
   insertAgentWithNotify,
 } from '../../repositories/index.js';
-import {
-  buildAgentStartupCommand,
-  launchAgentWindow,
-  computeFreshSessionIds,
-} from '../launch.js';
+import { buildAgentStartupCommand, launchAgentWindow, computeFreshSessionIds } from '../launch.js';
 import type { Agent, Task } from '../../types.js';
 import type { AddAgentOpts } from './types.js';
 

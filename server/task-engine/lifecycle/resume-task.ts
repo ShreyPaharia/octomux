@@ -15,11 +15,7 @@ import {
   setAgentWindowRunning,
   stopRunningAgents,
 } from '../../repositories/index.js';
-import {
-  buildAgentStartupCommand,
-  launchAgentWindow,
-  prepareResumeLaunch,
-} from '../launch.js';
+import { buildAgentStartupCommand, launchAgentWindow, prepareResumeLaunch } from '../launch.js';
 import { cleanupLinkedSessions } from '../sessions.js';
 import { checkDirty } from '../git.js';
 
@@ -65,7 +61,11 @@ export async function prepareResumeSession(task: Task, session: string): Promise
 }
 
 /** Install hooks once before relaunching stopped agents (or create an empty session). */
-export async function bootstrapResumeHooks(task: Task, cwd: string, session: string): Promise<void> {
+export async function bootstrapResumeHooks(
+  task: Task,
+  cwd: string,
+  session: string,
+): Promise<void> {
   const agents = listStoppedAgents(task.id);
 
   if (agents.length > 0) {

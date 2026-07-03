@@ -18,7 +18,9 @@ export class HttpIntegrationError extends Error {
 
   static async fromResponse(res: Response): Promise<HttpIntegrationError> {
     const body = await res.text().catch(() => '');
-    const message = body ? `${res.status}: ${res.statusText} — ${body}` : `${res.status}: ${res.statusText}`;
+    const message = body
+      ? `${res.status}: ${res.statusText} — ${body}`
+      : `${res.status}: ${res.statusText}`;
     return new HttpIntegrationError(message, { status: res.status, body });
   }
 }

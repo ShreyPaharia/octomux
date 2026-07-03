@@ -50,11 +50,7 @@ export function validateStatusMapByTeam(
   pathPrefix: string,
   errors: string[],
 ): void {
-  if (
-    !statusMapByTeam ||
-    typeof statusMapByTeam !== 'object' ||
-    Array.isArray(statusMapByTeam)
-  ) {
+  if (!statusMapByTeam || typeof statusMapByTeam !== 'object' || Array.isArray(statusMapByTeam)) {
     errors.push(`${pathPrefix} must be an object`);
     return;
   }

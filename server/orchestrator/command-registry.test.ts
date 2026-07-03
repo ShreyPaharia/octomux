@@ -170,13 +170,7 @@ describe('buildPolicySets', () => {
       buildPolicySets();
 
     expect([...AUTO_TOOLS].sort()).toEqual(
-      [
-        'get_task',
-        'get_task_output',
-        'list_tasks',
-        'monitor_status',
-        'pull_linear_issue',
-      ].sort(),
+      ['get_task', 'get_task_output', 'list_tasks', 'monitor_status', 'pull_linear_issue'].sort(),
     );
 
     expect([...READ_SUBCOMMANDS].sort()).toEqual(
