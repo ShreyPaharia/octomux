@@ -1,25 +1,39 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { resolveForkFrom, registerCreateTask } from './create-task.js';
-import type { OctomuxClient, Task } from '../client.js';
+import type { Task } from '@octomux/types';
+import type { OctomuxClient } from '../client.js';
 
 function makeTask(partial: Partial<Task> = {}): Task {
   return {
     id: 'abc123',
     title: 'source',
     description: 'desc',
-    status: 'running',
+    runtime_state: 'running',
+    workflow_status: 'in_progress',
     repo_path: '/repo/src',
     branch: 'agents/abc123',
     base_branch: 'main',
     worktree: '/repo/src/.worktrees/abc123',
+    tmux_session: 'octomux-agent-abc123',
     pr_url: null,
     pr_number: null,
+    pr_head_sha: null,
+    user_window_index: null,
     initial_prompt: null,
     run_mode: 'new',
     base_sha: null,
     last_viewed_at: null,
+    deleted_at: null,
+    source: null,
+    worktree_id: 'wt-abc123',
+    agent: null,
+    model: null,
+    notify_task_id: null,
+    harness_id: 'claude-code',
     error: null,
+    current_summary: null,
+    current_summary_updated_at: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...partial,
@@ -79,7 +93,7 @@ describe('resolveForkFrom', () => {
   });
 
   it.each([
-    ['draft status', { status: 'draft' }],
+    ['idle runtime_state', { runtime_state: 'idle' as const }],
     ['scratch run_mode', { run_mode: 'scratch' as const }],
     ['none run_mode', { run_mode: 'none' as const }],
     ['existing run_mode', { run_mode: 'existing' as const }],

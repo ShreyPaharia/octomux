@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
 import { renderWithRouter, makeTask, makeAgent } from '../test-helpers';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 

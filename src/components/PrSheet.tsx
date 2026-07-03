@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { taskApi, type DiffSummaryResponse } from '@/lib/api/taskApi';
 import { PullRequestIcon } from '@/components/icons';
 import { showToast } from '@/components/CustomToast';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 interface Props {
   open: boolean;

@@ -19,5 +19,5 @@
     }
   },
   "include": ["src", "server", "cli/review"],
-  "references": [{ "path": "./packages/diff-engine" }]
+  "references": [{ "path": "./packages/diff-engine" }, { "path": "./packages/types" }]
 }

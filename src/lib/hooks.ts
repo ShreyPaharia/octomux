@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import type { Skill, RepoConfig, AgentDefinition, HarnessSummary } from './api/configApi';
 import { taskApi } from './api/taskApi';
 import { configApi } from './api/configApi';

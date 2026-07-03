@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import type { WorkflowStatus } from '../../server/types';
+import type { WorkflowStatus } from '@octomux/types';
 
 interface MoveWithNoteDialogProps {
   open: boolean;

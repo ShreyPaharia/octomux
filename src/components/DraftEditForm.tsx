@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { taskApi } from '@/lib/api/taskApi';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { RepoPickerField } from './fields/RepoPickerField';
 import { BranchPickerField } from './fields/BranchPickerField';
 

@@ -3,7 +3,7 @@ import { Suspense, forwardRef, lazy, useCallback, useMemo, useRef, useState } fr
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type { DiffFileEntry, FileDiffResponse } from '@/lib/api/taskApi';
-import type { Agent } from '../../server/types';
+import type { Agent } from '@octomux/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ClampedExplainer } from '@/components/review/ClampedExplainer';

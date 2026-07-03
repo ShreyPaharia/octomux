@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import type { Task, WorkflowStatus } from '../../server/types';
+import type { Task, WorkflowStatus } from '@octomux/types';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { BoardCard } from './BoardCard';
 import { EmptyColumnPlaceholder } from './EmptyColumnPlaceholder';

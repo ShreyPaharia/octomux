@@ -13,7 +13,7 @@ import { isRegularTask } from '@/lib/task-filters';
 import { repoName } from '@/lib/utils';
 import { ChevronDownIcon } from '@/components/icons';
 import { cn } from '@/lib/utils';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { configApi } from '@/lib/api/configApi';
 import { BulkCreateDialog } from '@/components/BulkCreateDialog';
 

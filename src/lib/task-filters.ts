@@ -1,4 +1,4 @@
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 export function isRegularTask(task: Pick<Task, 'source'>): boolean {
   return task.source !== 'auto_review';

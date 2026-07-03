@@ -2,7 +2,7 @@ import { memo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { GlassPanel } from '@/components/ui/glass-panel';
-import type { Task, WorkflowStatus } from '../../server/types';
+import type { Task, WorkflowStatus } from '@octomux/types';
 import { timeAgo } from '@/lib/time';
 import { formatDuration } from '@/lib/format-duration';
 import { cn, repoName } from '@/lib/utils';

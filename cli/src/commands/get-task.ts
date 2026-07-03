@@ -1,7 +1,14 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { getContext } from '../action.js';
-import { outputJson, label, heading, colorStatus, colorAgentStatus } from '../format.js';
+import {
+  outputJson,
+  label,
+  heading,
+  colorStatus,
+  colorAgentStatus,
+  taskDisplayStatus,
+} from '../format.js';
 
 export function registerGetTask(program: Command): void {
   program
@@ -20,7 +27,7 @@ export function registerGetTask(program: Command): void {
 
       heading(`Task ${task.id}`);
       console.log(label('Title', task.title));
-      console.log(label('Status', colorStatus(task.status)));
+      console.log(label('Status', colorStatus(taskDisplayStatus(task))));
       console.log(label('Repo', task.repo_path));
       console.log(label('Branch', task.branch));
       if (task.base_branch) console.log(label('Base Branch', task.base_branch));

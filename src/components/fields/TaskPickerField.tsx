@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Input } from '@/components/ui/input';
 import { taskApi } from '@/lib/api/taskApi';
 import { isRegularTask } from '@/lib/task-filters';
-import type { Task } from '../../../server/types';
+import type { Task } from '@octomux/types';
 import { ChevronDownIcon } from '@/components/icons';
 
 interface TaskPickerFieldProps {

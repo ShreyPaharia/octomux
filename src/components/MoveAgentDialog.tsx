@@ -4,7 +4,7 @@ import { taskApi } from '@/lib/api/taskApi';
 import { isRegularTask } from '@/lib/task-filters';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 interface MoveAgentDialogProps {
   open: boolean;

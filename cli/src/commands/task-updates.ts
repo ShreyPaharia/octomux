@@ -23,18 +23,12 @@ export function registerTaskUpdates(program: Command): void {
 
       heading(`Updates for task ${id}`);
       for (const u of updates) {
-        const who = u.author ? ` [${u.author}]` : '';
         const ts = new Date(u.created_at).toLocaleString();
-        console.log(`  ${ts}${who}  ${u.kind}`);
-        if (u.payload) {
-          try {
-            const parsed = JSON.parse(u.payload);
-            if (parsed.note) console.log(`    ${parsed.note}`);
-            if (parsed.summary) console.log(`    ${parsed.summary}`);
-            if (parsed.to) console.log(`    → ${parsed.to}`);
-          } catch {
-            console.log(`    ${u.payload}`);
-          }
+        const transition =
+          u.from_status && u.to_status ? `${u.from_status} → ${u.to_status}` : null;
+        console.log(`  ${ts}  ${u.kind}${transition ? `  ${transition}` : ''}`);
+        if (u.body) {
+          console.log(`    ${u.body}`);
         }
       }
     });

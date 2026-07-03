@@ -15,7 +15,7 @@ import {
   type DiffRange,
   type FileDiffResponse,
 } from '@/lib/api/taskApi';
-import type { Agent } from '../../server/types';
+import type { Agent } from '@octomux/types';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderWithRouter, makeTask } from '../test-helpers';
-import type { Worktree } from '../../server/types';
+import type { Worktree } from '@octomux/types';
 import type { WorktreeDetail } from '@/lib/api/taskApi';
 
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>

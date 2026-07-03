@@ -24,7 +24,7 @@ import type {
   TaskExternalRef,
   TaskUpdate,
   RuntimeState,
-} from '../../../server/types';
+} from '@octomux/types';
 import { request } from './client';
 
 export interface WorktreeDetail {

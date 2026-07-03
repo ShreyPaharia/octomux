@@ -53,9 +53,7 @@ export const tmuxWindowSubstrate: TmuxWindowSubstrate = {
     );
 
     if (fresh) {
-      await execTmux(
-        appendStartupCmd(['new-session', '-d', '-s', session, '-c', cwd], startupCmd),
-      );
+      await execTmux(appendStartupCmd(['new-session', '-d', '-s', session, '-c', cwd], startupCmd));
       await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
       return getActiveWindowIndex(session);
     }

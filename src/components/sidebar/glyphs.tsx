@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { SidebarItem } from '@/lib/sidebar-utils';
-import type { RunMode } from '../../../server/types';
+import type { RunMode } from '@octomux/types';
 
 // ─── Status Icons (both color AND shape — colorblind safe) ─────────────────
 

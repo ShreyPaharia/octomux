@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { TasksProvider } from '@/lib/tasks-context';
 import { CommandPalette } from './CommandPalette';
 import { makeTask } from '../test-helpers';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),

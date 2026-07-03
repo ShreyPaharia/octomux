@@ -10,7 +10,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { Agent, UserTerminal } from '../../server/types';
+import type { Agent, UserTerminal } from '@octomux/types';
 import { CloseIcon } from '@/components/icons';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 

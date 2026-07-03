@@ -5,7 +5,7 @@ import { UniversalSidebar } from './sidebar/universal-sidebar';
 import { forkDisabledReason } from './sidebar/nav-items';
 import { renderWithRouter, makeTask } from '../test-helpers';
 import { TasksProvider } from '../lib/tasks-context';
-import type { RunMode } from '../../server/types';
+import type { RunMode } from '@octomux/types';
 import type { SidebarItem } from '@/lib/sidebar-utils';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>

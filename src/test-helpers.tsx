@@ -1,7 +1,7 @@
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
-import type { Task, Agent } from '../server/types';
+import type { Task, Agent } from '@octomux/types';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 

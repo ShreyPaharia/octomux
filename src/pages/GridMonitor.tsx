@@ -5,7 +5,7 @@ import { regularTasksOnly } from '@/lib/task-filters';
 import { EmptyState } from '@/components/EmptyState';
 import { AgentGridCell } from '@/components/AgentGridCell';
 import { TerminalRectIcon } from '@/components/icons';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 const REFRESH_MS = 5000;
 

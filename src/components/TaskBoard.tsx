@@ -9,7 +9,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import type { Task, WorkflowStatus } from '../../server/types';
+import type { Task, WorkflowStatus } from '@octomux/types';
 import { TaskBoardColumn, COLUMN_DEFS, type BoardColumnId } from './TaskBoardColumn';
 import { MoveWithNoteDialog } from './MoveWithNoteDialog';
 import { taskApi } from '@/lib/api/taskApi';

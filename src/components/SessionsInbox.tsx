@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 import { InboxSectionHeader } from '@/components/layout/inbox-section-header';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';

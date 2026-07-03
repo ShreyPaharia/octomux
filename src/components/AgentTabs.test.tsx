@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentTabs } from './AgentTabs';
 import { renderWithRouter, makeAgent } from '../test-helpers';
-import type { UserTerminal } from '../../server/types';
+import type { UserTerminal } from '@octomux/types';
 
 function makeUserTerminal(overrides: Partial<UserTerminal> = {}): UserTerminal {
   return {

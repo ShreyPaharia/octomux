@@ -36,3 +36,4 @@ packages/*/bin/*
 !packages/*/bin/.gitkeep
 packages/*/share/terminfo/*
 !packages/*/share/terminfo/.gitkeep
+*.tsbuildinfo

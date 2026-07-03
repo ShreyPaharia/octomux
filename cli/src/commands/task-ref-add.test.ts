@@ -40,7 +40,7 @@ describe('task-ref-add CLI', () => {
       'task-1',
       expect.objectContaining({
         integration: 'linear',
-        external_id: 'BAC-1',
+        ref: 'BAC-1',
         metadata: { team_key: 'BAC', team_id: 'uuid-1' },
       }),
     );

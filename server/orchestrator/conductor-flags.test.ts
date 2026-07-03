@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { claudeCodeHarness } from '../harnesses/claude-code.js';
-import {
-  buildOrchestratorConductorFlags,
-  ORCHESTRATOR_SYSTEM_PROMPT,
-} from './conductor-flags.js';
+import { buildOrchestratorConductorFlags, ORCHESTRATOR_SYSTEM_PROMPT } from './conductor-flags.js';
 
 describe('buildOrchestratorConductorFlags', () => {
   it('includes --settings, --append-system-prompt, and optional MCP flags', () => {

@@ -3,7 +3,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithRouter, makeTask } from '../test-helpers';
 import { TaskBoard } from './TaskBoard';
-import type { Task } from '../../server/types';
+import type { Task } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),

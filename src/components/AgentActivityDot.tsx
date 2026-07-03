@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { HookActivity } from '../../server/types';
+import type { HookActivity } from '@octomux/types';
 
 const ACTIVITY_STYLES: Record<HookActivity, { dot: string; label: string }> = {
   active: { dot: 'bg-[#22C55E]', label: 'Active' },
