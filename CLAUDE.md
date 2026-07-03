@@ -189,10 +189,9 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
   `JSON.parse(row.metadata ?? 'null')` server-side, never expose the raw string. The
   hook dispatcher's `loadTaskExternalRefs(taskId)` helper already does this for
   provider envelopes; route handlers must parse on read too.
-- Linear API uses the bare API key in the `Authorization` header (no `Bearer` prefix)
-  — see `server/integrations/linear/graphql.ts`.
-- Linear errors come back as HTTP 200 with an `errors[]` array. `linearGraphql`
-  throws `LinearApiError` for those; callers must catch.
+- Linear integration uses `@linear/sdk` via `server/integrations/linear/graphql.ts`
+  (`createLinearClient` / `invokeLinear`). Pass the bare API key — the SDK sends it
+  without a `Bearer` prefix. SDK errors are wrapped as `LinearApiError`.
 
 ## Dispatching parallel Claude Code sub-agents in this repo
 

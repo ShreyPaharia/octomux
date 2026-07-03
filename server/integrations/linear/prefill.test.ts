@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+const mockInvokeLinear = vi.fn();
+
+vi.mock('./graphql.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./graphql.js')>();
+  return {
+    ...actual,
+    invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
+  };
+});
 
 import { prefillFromLinear } from './prefill.js';
 
@@ -39,15 +46,25 @@ const TEAMS_RESPONSE = {
   },
 };
 
+function mockTeamsFromSdk() {
+  mockInvokeLinear.mockImplementation(async (_apiKey, fn) => {
+    const teams = TEAMS_RESPONSE.teams.nodes.map((t) => ({
+      id: t.id,
+      key: t.key,
+      name: t.name,
+      states: vi.fn().mockResolvedValue({ nodes: t.states.nodes }),
+    }));
+    return fn({
+      teams: vi.fn().mockResolvedValue({ nodes: teams }),
+    });
+  });
+}
+
 describe('prefillFromLinear', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('maps Backend states by name with auto-prefill, prefers Backend as default', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: TEAMS_RESPONSE }),
-    });
+    mockTeamsFromSdk();
 
     const result = await prefillFromLinear('lin_xyz');
 
@@ -64,11 +81,7 @@ describe('prefillFromLinear', () => {
   });
 
   it('falls back to completed-type state for done when no name match', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: TEAMS_RESPONSE }),
-    });
+    mockTeamsFromSdk();
 
     const result = await prefillFromLinear('lin_xyz');
     // OGE has no "Done" by name — should pick the completed-typed "Shipped"
@@ -76,11 +89,7 @@ describe('prefillFromLinear', () => {
   });
 
   it('leaves slots unmapped when no candidate matches', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ data: TEAMS_RESPONSE }),
-    });
+    mockTeamsFromSdk();
 
     const result = await prefillFromLinear('lin_xyz');
     // OGE has no "Todo" / "Review" — those slots should be absent
@@ -89,12 +98,17 @@ describe('prefillFromLinear', () => {
   });
 
   it('first team becomes default suggestion when no Backend team exists', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({
-        data: { teams: { nodes: [TEAMS_RESPONSE.teams.nodes[1]] } },
-      }),
+    mockInvokeLinear.mockImplementation(async (_apiKey, fn) => {
+      const t = TEAMS_RESPONSE.teams.nodes[1];
+      const team = {
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        states: vi.fn().mockResolvedValue({ nodes: t.states.nodes }),
+      };
+      return fn({
+        teams: vi.fn().mockResolvedValue({ nodes: [team] }),
+      });
     });
 
     const result = await prefillFromLinear('lin_xyz');

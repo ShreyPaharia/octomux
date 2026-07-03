@@ -1,36 +1,10 @@
-import { linearGraphql } from './graphql.js';
+import { invokeLinear } from './graphql.js';
 
 interface LinearState {
   id: string;
   name: string;
   type: string;
 }
-
-interface LinearTeam {
-  id: string;
-  key: string;
-  name: string;
-  states: { nodes: LinearState[] };
-}
-
-interface TeamsResponse {
-  teams: { nodes: LinearTeam[] };
-}
-
-const TEAMS_QUERY = `
-  query Teams {
-    teams {
-      nodes {
-        id
-        key
-        name
-        states {
-          nodes { id name type }
-        }
-      }
-    }
-  }
-`;
 
 const COLUMN_PATTERNS: Record<string, RegExp> = {
   backlog: /^backlog$/i,
@@ -68,15 +42,26 @@ function pickDone(states: LinearState[]): string | undefined {
 }
 
 export async function prefillFromLinear(apiKey: string): Promise<PrefillResult> {
-  const data = await linearGraphql<TeamsResponse>(apiKey, TEAMS_QUERY);
-  const teamsRaw = data.teams?.nodes ?? [];
+  const teamsRaw = await invokeLinear(apiKey, async (client) => {
+    const connection = await client.teams();
+    return connection.nodes;
+  });
 
-  const teams = teamsRaw.map((t) => ({
-    id: t.id,
-    key: t.key,
-    name: t.name,
-    states: t.states.nodes,
-  }));
+  const teams = await Promise.all(
+    teamsRaw.map(async (t) => {
+      const statesConnection = await t.states();
+      return {
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        states: statesConnection.nodes.map((s) => ({
+          id: s.id,
+          name: s.name,
+          type: s.type,
+        })),
+      };
+    }),
+  );
 
   const status_map_by_team: PrefillResult['status_map_by_team'] = {};
   for (const t of teams) {
