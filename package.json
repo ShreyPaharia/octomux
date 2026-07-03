@@ -74,7 +74,8 @@
   },
   "trustedDependencies": [
     "better-sqlite3",
-    "husky"
+    "husky",
+    "node-pty"
   ],
   "dependencies": {
     "@base-ui/react": "^1.2.0",
