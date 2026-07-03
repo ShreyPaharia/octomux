@@ -48,11 +48,11 @@ const apiCases = [
   },
   {
     name: 'updateTask',
-    call: () => taskApi.updateTask('t1', { status: 'closed' }),
+    call: () => taskApi.updateTask('t1', { runtime_state: 'idle' }),
     expectedUrl: '/api/tasks/t1',
     expectedMethod: 'PATCH',
-    expectedBody: JSON.stringify({ status: 'closed' }),
-    response: { id: 't1', status: 'closed' },
+    expectedBody: JSON.stringify({ runtime_state: 'idle' }),
+    response: { id: 't1', runtime_state: 'idle' },
   },
   {
     name: 'startTask',

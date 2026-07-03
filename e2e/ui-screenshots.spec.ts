@@ -43,7 +43,7 @@ async function createDraftTask(
     },
   });
   expect(res.ok()).toBeTruthy();
-  return (await res.json()) as { id: string; status: string };
+  return (await res.json()) as { id: string; runtime_state: string };
 }
 
 // Track test tasks so we can clean them up
@@ -156,8 +156,8 @@ test.describe.serial('UI Screenshots', () => {
     await page.setViewportSize(DESKTOP);
     // Find a running task
     const res = await page.request.get(`${API}/tasks`);
-    const tasks = (await res.json()) as { id: string; status: string }[];
-    const runningTask = tasks.find((t) => t.status === 'running');
+    const tasks = (await res.json()) as { id: string; runtime_state: string }[];
+    const runningTask = tasks.find((t) => t.runtime_state === 'running');
     if (!runningTask) {
       test.skip();
       return;
@@ -300,8 +300,8 @@ test.describe.serial('UI Screenshots', () => {
 
   test('16 responsive - task detail tablet', async ({ page }) => {
     const res = await page.request.get(`${API}/tasks`);
-    const tasks = (await res.json()) as { id: string; status: string }[];
-    const task = tasks.find((t) => t.status === 'running') ?? tasks[0];
+    const tasks = (await res.json()) as { id: string; runtime_state: string }[];
+    const task = tasks.find((t) => t.runtime_state === 'running') ?? tasks[0];
     if (!task) {
       test.skip();
       return;
@@ -315,8 +315,8 @@ test.describe.serial('UI Screenshots', () => {
 
   test('17 responsive - task detail mobile', async ({ page }) => {
     const res = await page.request.get(`${API}/tasks`);
-    const tasks = (await res.json()) as { id: string; status: string }[];
-    const task = tasks.find((t) => t.status === 'running') ?? tasks[0];
+    const tasks = (await res.json()) as { id: string; runtime_state: string }[];
+    const task = tasks.find((t) => t.runtime_state === 'running') ?? tasks[0];
     if (!task) {
       test.skip();
       return;

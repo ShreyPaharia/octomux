@@ -3,8 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NoneModeConflictDialog } from './NoneModeConflictDialog';
 
 const conflicts = [
-  { task_id: 't1', title: 'first', status: 'running' as const, branch: 'feature-x' },
-  { task_id: 't2', title: 'second', status: 'setting_up' as const, branch: 'feature-x' },
+  { task_id: 't1', title: 'first', runtime_state: 'running' as const, branch: 'feature-x' },
+  { task_id: 't2', title: 'second', runtime_state: 'setting_up' as const, branch: 'feature-x' },
 ];
 
 describe('NoneModeConflictDialog', () => {

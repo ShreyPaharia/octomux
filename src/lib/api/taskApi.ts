@@ -47,7 +47,7 @@ export interface RecentRepo {
 export interface PreflightConflict {
   task_id: string;
   title: string;
-  status: RuntimeState;
+  runtime_state: RuntimeState;
   branch: string | null;
 }
 

@@ -1,4 +1,5 @@
 import { type Page, expect } from '@playwright/test';
+import type { RuntimeState } from '@octomux/types';
 
 const SERVER_URL = (process.env.OCTOMUX_URL || 'http://localhost:7777').replace(/\/$/, '');
 const API = `${SERVER_URL}/api`;
@@ -17,31 +18,33 @@ export async function createTaskViaAPI(
   });
   expect(res.ok()).toBeTruthy();
   const task = await res.json();
-  return task as { id: string; status: string };
+  return task as { id: string; runtime_state: RuntimeState };
 }
 
-/** Wait for a task to reach a given status via polling. */
+/** Wait for a task to reach a given runtime_state via polling. */
 export async function waitForStatus(
   page: Page,
   taskId: string,
-  status: string,
+  runtimeState: RuntimeState,
   timeoutMs = 15_000,
 ) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const res = await page.request.get(`${API}/tasks/${taskId}`);
     const task = await res.json();
-    if (task.status === status) return task;
+    if (task.runtime_state === runtimeState) return task;
     await page.waitForTimeout(500);
   }
-  throw new Error(`Task ${taskId} did not reach status "${status}" within ${timeoutMs}ms`);
+  throw new Error(
+    `Task ${taskId} did not reach runtime_state "${runtimeState}" within ${timeoutMs}ms`,
+  );
 }
 
 /** Close + delete a task and clean up its resources. */
 export async function cleanupTask(page: Page, taskId: string) {
   // Close first (stops tmux, removes worktree)
   await page.request.patch(`${API}/tasks/${taskId}`, {
-    data: { status: 'closed' },
+    data: { runtime_state: 'idle' },
   });
   // Then delete the DB record
   await page.request.delete(`${API}/tasks/${taskId}`);
@@ -89,9 +92,9 @@ export async function cleanupTasks(page: Page, taskIds: readonly string[]) {
     try {
       const res = await page.request.get(`${API}/tasks/${id}`);
       if (!res.ok()) continue;
-      const task = (await res.json()) as { status: string };
-      if (task.status === 'running' || task.status === 'setting_up') {
-        await page.request.patch(`${API}/tasks/${id}`, { data: { status: 'closed' } });
+      const task = (await res.json()) as { runtime_state: RuntimeState };
+      if (task.runtime_state === 'running' || task.runtime_state === 'setting_up') {
+        await page.request.patch(`${API}/tasks/${id}`, { data: { runtime_state: 'idle' } });
       }
       await page.request.delete(`${API}/tasks/${id}`);
     } catch {
@@ -106,11 +109,11 @@ export async function cleanupTasks(page: Page, taskIds: readonly string[]) {
  */
 export async function deleteAllTasks(page: Page) {
   const res = await page.request.get(`${API}/tasks`);
-  const tasks = (await res.json()) as { id: string; status: string }[];
+  const tasks = (await res.json()) as { id: string; runtime_state: RuntimeState }[];
   for (const task of tasks) {
-    if (task.status === 'running' || task.status === 'setting_up') {
+    if (task.runtime_state === 'running' || task.runtime_state === 'setting_up') {
       await page.request.patch(`${API}/tasks/${task.id}`, {
-        data: { status: 'closed' },
+        data: { runtime_state: 'idle' },
       });
     }
     await page.request.delete(`${API}/tasks/${task.id}`);

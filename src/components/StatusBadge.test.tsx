@@ -23,7 +23,7 @@ describe('StatusBadge', () => {
     },
   );
 
-  it('covers every TaskStatus value', () => {
+  it('covers every RuntimeState value', () => {
     const testedStatuses = statusLabels.map(([s]) => s);
     expect(testedStatuses).toEqual(TASK_STATUSES);
   });

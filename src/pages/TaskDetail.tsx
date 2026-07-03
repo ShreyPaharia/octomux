@@ -193,7 +193,7 @@ export default function TaskDetail() {
     if (!taskId) return;
     setResuming(true);
     try {
-      await taskApi.updateTask(taskId, { status: 'running' });
+      await taskApi.updateTask(taskId, { runtime_state: 'running' });
       refresh();
     } catch (err) {
       console.error('Failed to resume task:', err);
