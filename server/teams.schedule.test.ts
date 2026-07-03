@@ -48,13 +48,14 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-const { cronMatches, upsertTeamSchedule, listTeamSchedules, pollTeamSchedules } =
+const { isCronDue, upsertTeamSchedule, listTeamSchedules, pollTeamSchedules } =
   await import('./teams.js');
 
-// ─── cronMatches ──────────────────────────────────────────────────────────────
+// ─── isCronDue (croner) ───────────────────────────────────────────────────────
 
-describe('cronMatches', () => {
+describe('isCronDue', () => {
   const cases: Array<{ expr: string; date: string; expected: boolean }> = [
+    // regression: exact schedules that worked with the old parser
     { expr: '0 7 * * *', date: '2026-06-09T07:00:00Z', expected: true },
     { expr: '0 7 * * *', date: '2026-06-09T07:01:00Z', expected: false },
     { expr: '0 7 * * *', date: '2026-06-09T08:00:00Z', expected: false },
@@ -64,10 +65,18 @@ describe('cronMatches', () => {
     { expr: '0 0 1 1 *', date: '2026-01-01T00:00:00Z', expected: true },
     { expr: '0 0 1 1 *', date: '2026-01-02T00:00:00Z', expected: false },
     { expr: 'bad', date: '2026-06-09T07:00:00Z', expected: false },
+    // newly supported: steps, ranges, named weekdays
+    { expr: '*/15 * * * *', date: '2026-06-09T07:00:00Z', expected: true },
+    { expr: '*/15 * * * *', date: '2026-06-09T07:14:00Z', expected: false },
+    { expr: '*/15 * * * *', date: '2026-06-09T07:15:00Z', expected: true },
+    { expr: '1-5 * * * *', date: '2026-06-09T07:03:00Z', expected: true },
+    { expr: '1-5 * * * *', date: '2026-06-09T07:06:00Z', expected: false },
+    { expr: '0 7 * * mon-fri', date: '2026-06-09T07:00:00Z', expected: true }, // Tuesday
+    { expr: '0 7 * * mon-fri', date: '2026-06-07T07:00:00Z', expected: false }, // Sunday
   ];
 
   it.each(cases)('expr="$expr" @ $date → $expected', ({ expr, date, expected }) => {
-    expect(cronMatches(expr, new Date(date))).toBe(expected);
+    expect(isCronDue(expr, new Date(date))).toBe(expected);
   });
 });
 
@@ -145,6 +154,24 @@ describe('pollTeamSchedules', () => {
     await pollTeamSchedules(new Date('2026-06-10T07:00:00Z'));
     runs = db.prepare(`SELECT * FROM team_runs`).all() as any[];
     expect(runs).toHaveLength(2);
+  });
+
+  it('triggers on step expressions (*/15)', async () => {
+    upsertTeamSchedule({ name: 'sched-team', repoPath: tmpDir, cron: '*/15 * * * *' });
+
+    await pollTeamSchedules(new Date('2026-06-09T07:15:00Z'));
+
+    const runs = db.prepare(`SELECT * FROM team_runs`).all() as any[];
+    expect(runs).toHaveLength(1);
+  });
+
+  it('triggers on weekday ranges (mon-fri)', async () => {
+    upsertTeamSchedule({ name: 'sched-team', repoPath: tmpDir, cron: '0 7 * * mon-fri' });
+
+    await pollTeamSchedules(new Date('2026-06-09T07:00:00Z')); // Tuesday
+
+    const runs = db.prepare(`SELECT * FROM team_runs`).all() as any[];
+    expect(runs).toHaveLength(1);
   });
 
   it('advances last_run_at after a successful run', async () => {
