@@ -4,13 +4,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { installTerminalMobileTouch, scrollTerminalByWheel } from '@/lib/terminal-mobile-touch';
+import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
-import { MobileTerminalScrollControls } from '@/components/MobileTerminalScrollControls';
 import { CloudOffIcon } from './icons';
-
-const MOBILE_SCROLL_LINES = 5;
 
 interface TerminalViewProps {
   taskId?: string;
@@ -73,20 +70,6 @@ export function TerminalView({
     if (textarea && document.activeElement === textarea) {
       term.scrollToBottom();
     }
-  }, []);
-
-  // Buttons scroll via synthetic wheel events (same path as touch) so they work
-  // in both the normal buffer and an alternate-buffer TUI like Claude Code.
-  const scrollOlder = useCallback(() => {
-    if (containerRef.current) scrollTerminalByWheel(containerRef.current, -MOBILE_SCROLL_LINES);
-  }, []);
-
-  const scrollNewer = useCallback(() => {
-    if (containerRef.current) scrollTerminalByWheel(containerRef.current, MOBILE_SCROLL_LINES);
-  }, []);
-
-  const scrollToLatest = useCallback(() => {
-    termRef.current?.scrollToBottom();
   }, []);
 
   // Helper to fit terminal and send resize dimensions over WebSocket
@@ -456,14 +439,6 @@ export function TerminalView({
             </span>
           </span>
         </div>
-      )}
-      {isMobile && visible && !connecting && (
-        <MobileTerminalScrollControls
-          onScrollOlder={scrollOlder}
-          onScrollNewer={scrollNewer}
-          onScrollToBottom={scrollToLatest}
-          className="absolute bottom-2 right-2 z-20 md:hidden"
-        />
       )}
       {showOverlay && (
         <div
