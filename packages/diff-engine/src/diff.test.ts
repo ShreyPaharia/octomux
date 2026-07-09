@@ -206,6 +206,31 @@ describe('diff module', () => {
       expect(files.find((f) => f.path === 'a.txt')?.post_blob_sha).toBe(workingHash.trim());
     });
 
+    it('marks untracked files under dot-folders as ignored', async () => {
+      const skillFile = path.join(repo, '.claude', 'skills', 'foo', 'SKILL.md');
+      await fs.promises.mkdir(path.dirname(skillFile), { recursive: true });
+      await fs.promises.writeFile(skillFile, 'skill\n');
+      await fs.promises.writeFile(path.join(repo, 'new.txt'), 'new\n');
+      const summary = await getDiffSummary({ target: makeTargetForRepo() });
+      const dot = summary.files.find((f) => f.path === '.claude/skills/foo/SKILL.md');
+      expect(dot).toMatchObject({ status: 'A', ignored: true });
+      expect(summary.total_count).toBe(1);
+    });
+
+    it('marks committed dot-folder changes as ignored', async () => {
+      await commit(repo, { '.octomux/team.yaml': 'name: t\n' }, 'add team config');
+      const summary = await getDiffSummary({ target: makeTargetForRepo() });
+      const entry = summary.files.find((f) => f.path === '.octomux/team.yaml');
+      expect(entry).toMatchObject({ status: 'A', ignored: true });
+      expect(summary.total_count).toBe(0);
+    });
+
+    it('does not ignore root dot-files or non-dot paths', async () => {
+      await fs.promises.writeFile(path.join(repo, '.gitignore'), '*.log\n');
+      const { files } = await getDiffSummary({ target: makeTargetForRepo() });
+      expect(files.find((f) => f.path === '.gitignore')?.ignored).toBeUndefined();
+    });
+
     it('total_count excludes ignored files', async () => {
       await fs.promises.writeFile(path.join(repo, '.gitignore'), '*.log\n');
       await fs.promises.writeFile(path.join(repo, 'debug.log'), 'x\n');
