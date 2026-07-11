@@ -89,6 +89,10 @@ export async function pollStatuses(): Promise<void> {
     if (status !== 'dead') continue;
 
     const rs = task.runtime_state;
+    // 'looping' tasks are exempt: respawnAgentFresh briefly swaps tmux windows
+    // (new window up, then old one killed), which can make has-session look
+    // dead for an instant. Tearing the task down on that gap would kill the loop.
+    if (rs === 'looping') continue;
     if (rs === 'running') {
       setRuntimeStateIdle(task.id);
     } else if (rs === 'setting_up') {

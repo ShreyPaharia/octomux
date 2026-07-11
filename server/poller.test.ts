@@ -195,6 +195,64 @@ describe('pollStatuses', () => {
     expect(task.runtime_state).toBe('running');
   });
 
+  // ─── Loop-task poller exemption ────────────────────────────────────────────
+  // A 'looping' task's tmux session briefly appears dead during respawnAgentFresh's
+  // new-window-then-kill-old-window swap. The poller must never tear the loop
+  // down for that gap — only a normal 'running'/'setting_up' task is affected.
+
+  describe('when a "looping" task session dies', () => {
+    beforeEach(() => {
+      vi.mocked(execFile).mockImplementation(deadSessionMock as any);
+    });
+
+    it('does not flip runtime_state away from "looping"', async () => {
+      insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'looping' });
+      insertAgent(db);
+
+      await pollStatuses();
+
+      const task = getTask(db, DEFAULTS.task.id)!;
+      expect(task.runtime_state).toBe('looping');
+    });
+
+    it('does not mark its agents as stopped', async () => {
+      insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'looping' });
+      insertAgent(db);
+      insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
+
+      await pollStatuses();
+
+      const agents = getAgents(db, DEFAULTS.task.id);
+      expect(agents.every((a) => a.status !== 'stopped')).toBe(true);
+    });
+
+    it('still checks tmux has-session for it (poller keeps tracking the task)', async () => {
+      insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'looping' });
+
+      await pollStatuses();
+
+      expect(execFile).toHaveBeenCalledWith(
+        'tmux',
+        expect.arrayContaining(['has-session', '-t', DEFAULTS.runningTask.tmux_session]),
+        expect.anything(),
+        expect.any(Function),
+      );
+    });
+  });
+
+  it('still flips a normal "running" task to idle in the same poll (existing behavior preserved)', async () => {
+    vi.mocked(execFile).mockImplementation(deadSessionMock as any);
+    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'running' });
+    insertAgent(db);
+
+    await pollStatuses();
+
+    const task = getTask(db, DEFAULTS.task.id)!;
+    expect(task.runtime_state).toBe('idle');
+    const agents = getAgents(db, DEFAULTS.task.id);
+    expect(agents.every((a) => a.status === 'stopped')).toBe(true);
+  });
+
   // ─── Status filtering (table-driven) ──────────────────────────────────────
 
   const ignoredStates = ['idle', 'error'] as const;

@@ -16,3 +16,4 @@ export {
   relaunchStoppedAgents,
 } from './resume-task.js';
 export { hopAgent } from './hop-agent.js';
+export { respawnAgentFresh } from './respawn-agent.js';

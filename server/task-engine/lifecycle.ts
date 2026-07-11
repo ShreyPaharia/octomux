@@ -5,6 +5,7 @@ export {
   addAgent,
   resumeTask,
   hopAgent,
+  respawnAgentFresh,
   validateAndResolveAddAgentOpts,
   prepareAddAgentLaunch,
   launchAddAgentWindow,
