@@ -63,23 +63,23 @@ Three workflows octomux makes one-click:
 
 ## How it compares
 
-|                                        | **octomux**      | vibe-kanban       | Conductor     | Emdash          |
-| -------------------------------------- | ---------------- | ----------------- | ------------- | --------------- |
-| License                                | MIT, open source | MIT (community\*) | Closed        | Open source     |
-| Fully local, no cloud                  | Yes              | Now local\*       | Cloud account | Yes             |
-| One permission inbox                   | **Yes**          | No                | No            | No              |
-| Monitor grid (all agents at once)      | **Yes**          | No                | No            | No              |
-| Automated review + human-gated publish | **Yes**          | Partial           | Partial       | No              |
-| Recursive orchestration                | **Yes**          | No                | No            | No              |
-| Reach it from your phone               | **Yes** (tailnet)| No                | No            | Partial (SSH)   |
-| Claude Code + Cursor                   | Yes              | Yes (10+)         | Yes           | Yes (20+)       |
-| Platform                               | macOS + Linux    | macOS/Linux/Win   | macOS only    | macOS/Linux/Win |
+|                                        | **octomux**       | vibe-kanban       | Conductor     | Emdash          |
+| -------------------------------------- | ----------------- | ----------------- | ------------- | --------------- |
+| License                                | MIT, open source  | MIT (community\*) | Closed        | Open source     |
+| Fully local, no cloud                  | Yes               | Now local\*       | Cloud account | Yes             |
+| One permission inbox                   | **Yes**           | No                | No            | No              |
+| Monitor grid (all agents at once)      | **Yes**           | No                | No            | No              |
+| Automated review + human-gated publish | **Yes**           | Partial           | Partial       | No              |
+| Recursive orchestration                | **Yes**           | No                | No            | No              |
+| Reach it from your phone               | **Yes** (tailnet) | No                | No            | Partial (SSH)   |
+| Claude Code + Cursor                   | Yes               | Yes (10+)         | Yes           | Yes (20+)       |
+| Platform                               | macOS + Linux     | macOS/Linux/Win   | macOS only    | macOS/Linux/Win |
 
 <sub>\* Bloop, the company behind vibe-kanban, wound down in early 2026; it continues as a community project.</sub>
 
 ## Why octomux
 
-The editor was built around a human typing one file at a time. That's not the job anymore. The job is directing a fleet — and the hard part moved from *writing* code to *reviewing* it, *unblocking* it, and *knowing what's happening* across ten sessions.
+The editor was built around a human typing one file at a time. That's not the job anymore. The job is directing a fleet — and the hard part moved from _writing_ code to _reviewing_ it, _unblocking_ it, and _knowing what's happening_ across ten sessions.
 
 octomux is a bet on what that surface should look like: not a chat box bolted onto a file tree, but a control deck. It handles the ugly backend of running agents and puts the human's job — the inbox, the fleet grid, the review workstation, the orchestrator — front and center. It's early and opinionated, and the roadmap is shaped in the open.
 
@@ -92,17 +92,17 @@ octomux is a bet on what that surface should look like: not a chat box bolted on
 <details>
 <summary><b>Full CLI reference</b></summary>
 
-| Command                                  | Description                                                         |
-| ---------------------------------------- | ------------------------------------------------------------------ |
-| `octomux start`                          | Dashboard at `:7777` (add `--bind 0.0.0.0` for remote)             |
-| `octomux init`                           | Defaults wizard (Jira/Linear, base branch, harness prefs)          |
-| `octomux create-task`                    | New task (`--harness`, `--model`, `--mode`, `--fork-from`)         |
-| `octomux list-tasks` / `get-task`        | Inspect tasks                                                      |
-| `octomux close-task` / `delete-task`     | Stop or fully remove                                               |
-| `octomux resume-task`                    | Resume a closed task                                               |
-| `octomux add-agent`                      | Another agent window (`--model`, `--notify-agent`)                 |
-| `octomux send-message`                   | Message a running agent — course-correct without restart           |
-| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`            |
+| Command                                  | Description                                                |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `octomux start`                          | Dashboard at `:7777` (add `--bind 0.0.0.0` for remote)     |
+| `octomux init`                           | Defaults wizard (Jira/Linear, base branch, harness prefs)  |
+| `octomux create-task`                    | New task (`--harness`, `--model`, `--mode`, `--fork-from`) |
+| `octomux list-tasks` / `get-task`        | Inspect tasks                                              |
+| `octomux close-task` / `delete-task`     | Stop or fully remove                                       |
+| `octomux resume-task`                    | Resume a closed task                                       |
+| `octomux add-agent`                      | Another agent window (`--model`, `--notify-agent`)         |
+| `octomux send-message`                   | Message a running agent — course-correct without restart   |
+| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`    |
 
 Full setup, Jira/Linear, and orchestrator skills: **[ONBOARDING.md](./ONBOARDING.md)**.
 
