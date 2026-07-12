@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
@@ -10,11 +10,8 @@ import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/sidebar/universal-sidebar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { ResponsiveToaster } from './components/ResponsiveToaster';
-import { PrSheet } from './components/PrSheet';
 import { OfflineBanner } from './components/OfflineBanner';
-import { SHIP_EVENT } from './pages/TaskDetail';
 import { SetupBanner } from './components/SetupBanner';
-import type { Task } from '@octomux/types';
 
 // The four most-clicked nav targets stay eager so navigating to them never
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.
@@ -29,6 +26,8 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
+const LoopsPage = lazy(() => import('./pages/LoopsPage'));
+const LoopDetailPage = lazy(() => import('./pages/LoopDetailPage'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -81,20 +80,6 @@ export default function App() {
 }
 
 export function AppShell() {
-  const { tasks, refresh: refreshTasks } = useTasksContext();
-  const [prSheetTask, setPrSheetTask] = useState<Task | null>(null);
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ taskId?: string }>).detail;
-      if (!detail?.taskId) return;
-      const task = tasks.find((t) => t.id === detail.taskId);
-      if (task) setPrSheetTask(task);
-    };
-    window.addEventListener(SHIP_EVENT, handler);
-    return () => window.removeEventListener(SHIP_EVENT, handler);
-  }, [tasks]);
-
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
       <OfflineBanner />
@@ -129,16 +114,12 @@ export function AppShell() {
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/setup" element={<SetupPage />} />
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
+                <Route path="/loops" element={<LoopsPage />} />
+                <Route path="/loops/:id" element={<LoopDetailPage />} />
               </Routes>
             </Suspense>
           </div>
         </main>
-        <PrSheet
-          open={!!prSheetTask}
-          task={prSheetTask}
-          onClose={() => setPrSheetTask(null)}
-          onShipped={() => refreshTasks()}
-        />
         <MobileBottomNav />
       </div>
     </div>

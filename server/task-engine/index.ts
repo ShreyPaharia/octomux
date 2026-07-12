@@ -15,6 +15,7 @@ export {
   scratchDirFor,
   reconcileOrphanSettingUp,
   gcScratchDirs,
+  recoverTasks,
 } from './reconcile.js';
 export {
   validateRepo,
@@ -28,6 +29,7 @@ export {
   gitBranchExists,
   addWorktreeWithBranch,
   slugifyTitle,
+  commitAll,
 } from './git.js';
 export {
   buildAgentStartupCommand,
@@ -39,7 +41,14 @@ export {
   prepareResumeLaunch,
 } from './launch.js';
 export type { AddAgentOpts } from './lifecycle.js';
-export { preflightWorktree, startTask, addAgent, resumeTask, hopAgent } from './lifecycle.js';
+export {
+  preflightWorktree,
+  startTask,
+  addAgent,
+  resumeTask,
+  hopAgent,
+  respawnAgentFresh,
+} from './lifecycle.js';
 export { closeTask, softDeleteTask, deleteTask, stopAgent } from './cleanup.js';
 export type { UserTerminalResult } from './terminals.js';
 export { createUserTerminal, createShellTerminal, closeShellTerminal } from './terminals.js';

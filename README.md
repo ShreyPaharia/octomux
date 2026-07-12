@@ -1,3 +1,4 @@
+[![CI](https://github.com/ShreyPaharia/octomux/actions/workflows/ci.yml/badge.svg)](https://github.com/ShreyPaharia/octomux/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/octomux)](https://www.npmjs.com/package/octomux)
 [![license](https://img.shields.io/github/license/ShreyPaharia/octomux)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/ShreyPaharia/octomux)](https://github.com/ShreyPaharia/octomux)
@@ -6,25 +7,27 @@
 
 > **Coding got faster. Managing agents didn't.**
 
-A local web app to **dispatch, watch, and review** parallel **Claude Code** and **Cursor** agents from one place. Kanban for fleet status. One inbox for every "allow this tool?" prompt. In-app diff review with **Ship**. Run it from npm or the native macOS app. No cloud. MIT.
+octomux is a **local dashboard for running many Claude Code and Cursor agents in parallel.** Each agent works in its own git worktree; you get **one inbox** for every "allow this tool?" prompt, a **live grid** of the whole fleet, and **in-app diff review** with a Ship button. Runs on your machine — no cloud, no telemetry, MIT.
 
 ```bash
 npm install -g octomux && octomux init && cd your-repo && octomux start
 ```
 
-Open [http://localhost:7777](http://localhost:7777) — describe a task in the composer, pick **Claude Code** or **Cursor**, and watch agents work in place.
+Open **[localhost:7777](http://localhost:7777)**, describe a task, pick **Claude Code** or **Cursor**, and watch it work.
 
 ![octomux demo](assets/demo.gif)
 
-## From prompt to merged PR
+---
 
-Three phases, one window:
+## What you get
 
-- **01 — Dispatch.** Type a task. Pick Claude Code or Cursor. Hit go. The composer takes plain English, Jira or Linear links, or GitHub issue URLs. Drop a second agent on the same branch with one click — or paste a whole list and **bulk-create** a worktree, branch, and agent for each.
-- **02 — Watch.** See every agent work, live. Each task streams its own view — files the agent is editing, the diff as it grows, terminal output as it runs. The **Monitor** view tiles every running agent into one grid so you can scan the whole fleet at a glance. When an agent needs permission, the prompt lands in your inbox so you don't have to babysit every pane.
-- **03 — Review & Ship.** Diff review in the same window. File tree, per-file reviewed state, inline comments. Hit **Ship** and the PR auto-links to the task — closes itself when the PR merges.
+Three phases, one window — from prompt to merged PR:
 
-Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
+- **① Dispatch** — Type a task (or paste a Jira/Linear/GitHub link, or a whole list). Each one gets its own worktree, branch, and agent. Pick the model per task.
+- **② Watch** — Every agent's live terminal, the diff as it grows, and a **Monitor grid** of the whole fleet. Permission prompts land in one **inbox** instead of scattered across panes.
+- **③ Review & Ship** — Diff review in the same window: mark files reviewed, leave inline comments, send them back to the agent to fix, then **Ship** to open the PR — which auto-closes the task when it merges.
+
+Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
 
 ## Screenshots
 
@@ -32,203 +35,145 @@ Code never leaves your laptop. No telemetry, no cloud sync. Crash, reboot, close
 | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
 | **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png)           |
 | **Command center** — kanban from backlog → done                               | ![Command center](assets/screenshots/command-center.png) |
-| **Settings** — default harness, Cursor model & `--force`                      | ![Settings](assets/screenshots/settings-harnesses.png)   |
-| **Task cockpit** — agent tabs, live Claude session, Ship, Done                | ![Task detail](assets/screenshots/task-detail.png)       |
+| **Task cockpit** — agent tabs, live session, Ship, Done                       | ![Task detail](assets/screenshots/task-detail.png)       |
 | **Diff review** — file tree, reviewed state, inline comments                  | ![Diff](assets/screenshots/diff-review.png)              |
 
 ## Features
 
-- **Sessions inbox** — every permission prompt and question lands in one place; reply once, agents keep going. Tab title shows `(N) octomux` when something needs you.
-- **Command center** — kanban for backlog → done; drag status, archive, workflow from draft → ship. Empty board? A first-run guide shows you where to start.
-- **Monitor grid** — every running agent tiled into one auto-sized grid; scan the whole fleet's activity (active / idle / waiting) without opening each task.
-- **Bulk dispatch** — paste a list of prompts or a GitHub issue list and spin up one task — worktree, branch, agent — per line in a single shot.
-- **In-app diff review** — compare to `main`, mark files reviewed, queue inline comments, open lazygit in-editor.
-- **Dual harnesses** — run **Claude Code** (`claude`) or **Cursor** (`cursor-agent`) per task; mix agents on one task via **Add agent**.
-- **Worktrees keep agents off each other** — each task gets its own git worktree and `agents/<task-id>` branch; five agents can edit `auth.ts` at the same time without conflicts on your main tree.
-- **Live task view** — see every agent work in real time: files edited, diff growing, terminal output streaming via xterm.js. Attach the same session from the CLI if you prefer.
-- **Agents that dispatch agents** — `/create-task`, `/list-tasks`, `/send-agent-message` skills work inside any Claude Code window; recursive dispatch from inside an agent.
-- **Agent teams** — reusable crews defined as code in `<repo>/.octomux/team.yaml`: a lead spawns workers from a roster, each with its own model. Run on demand (`octomux team run`) or on a cron schedule.
-- **Per-task model** — pin any task or added agent to a specific model (`--model claude-opus-4-8`); mix models across a fleet so the right one lands on each job.
-- **Completion notifications** — link a worker to an orchestrator with `add-agent --notify-agent`; the lead gets pinged when each worker finishes. Teams wire this up automatically.
-- **Mobile-ready dashboard** — bottom nav, responsive pages, and mobile-friendly terminal scroll buttons; check the fleet and answer prompts from your phone.
-- **Integrations** — Jira and Linear sync (status push + comment-back, composer prefill) plus orchestrator skills for GitHub / auto-review intake.
-- **CLI ↔ dashboard parity** — `octomux create-task`, `send-message`, `resume-task` — same tasks the UI shows.
-- **Reboot-proof** — WAL SQLite + preserved worktrees across restarts.
-- **Local-only** — no telemetry, no cloud sync, no analytics. Your `.env` stays on the host.
+Each screen is a lens over one managed agent backend:
+
+- **Sessions inbox** — every permission prompt across every agent in one place; reply once, agents keep going. Tab title shows `(N) octomux` when something needs you.
+- **Command center** — kanban across the real workflow (backlog → planned → in progress → review → PR → done), with filter-to-attention and a restore grace period on delete.
+- **Monitor grid** — every running agent's terminal tiled into one live wall; spot the stuck one instantly.
+- **Orchestrator view** — watch an agent that dispatches agents: the parent planning, its children coding, who's blocked — the whole tree at once.
+- **Review workstation** — an agent drafts a walkthrough + inline comments (grounded against the real diff, no invented line numbers); nothing hits GitHub until you accept it, then it posts as one batched review. Reject a comment with a reason and it remembers for next time.
+- **Chats, Workspaces, Skill & Agent editors** — detach a quick spike as its own session, manage the reusable worktrees behind your tasks, and author your Claude Code skills and subagents in the browser.
+- **Agent teams** — reusable crews as code in `<repo>/.octomux/team.yaml`; a lead spawns workers (each with its own model) on demand or on a schedule.
+- **Worktrees keep agents off each other** — five agents can edit `auth.ts` at once without conflicts on your main tree.
+- **Run it anywhere** — npm CLI, a **macOS desktop app** ([`.dmg`](https://github.com/ShreyPaharia/octomux/releases)), or hosted on a box and reached from your **phone over Tailscale** (the UI is mobile-ready).
+- **Local-only** — no telemetry, no cloud sync. Your `.env` stays on the host.
 
 ## Patterns
 
 Three workflows octomux makes one-click:
 
-### Verifier — two agents, two opinions
+- **Verifier — two agents, two opinions.** Claude wrote it; drop Cursor on the same branch for a second pass. A different model reads the diff without inheriting the first's assumptions, catching the bugs that pass type-checking but break in prod.
+- **Sweep — five PRs by lunch.** Paste a Jira filter or GitHub issue list; each ticket gets its own worktree and agent. Come back from standup to a kanban of ready-to-review PRs.
+- **Operator — one prompt becomes an epic.** Give an agent the orchestrator skills; it plans a spec, breaks it into subtasks, and dispatches each into its own worktree. You supervise from the Orchestrator view.
 
-Claude wrote it. Drop Cursor on the same branch for a second pass. Same-model self-review is just self-confirmation — a different model reads the diff without inheriting the first agent's assumptions. Catches missing nonce checks, off-by-one TTLs, and the kind of mistakes that pass type-checking but break in prod.
+## How it compares
 
-> Finish a task with Claude → hit **Add agent** → pick Cursor → reviews land as inline comments → you arbitrate, Ship.
+|                                        | **octomux**       | vibe-kanban       | Conductor     | Emdash          |
+| -------------------------------------- | ----------------- | ----------------- | ------------- | --------------- |
+| License                                | MIT, open source  | MIT (community\*) | Closed        | Open source     |
+| Fully local, no cloud                  | Yes               | Now local\*       | Cloud account | Yes             |
+| One permission inbox                   | **Yes**           | No                | No            | No              |
+| Monitor grid (all agents at once)      | **Yes**           | No                | No            | No              |
+| Automated review + human-gated publish | **Yes**           | Partial           | Partial       | No              |
+| Recursive orchestration                | **Yes**           | No                | No            | No              |
+| Reach it from your phone               | **Yes** (tailnet) | No                | No            | Partial (SSH)   |
+| Claude Code + Cursor                   | Yes               | Yes (10+)         | Yes           | Yes (20+)       |
+| Platform                               | macOS + Linux     | macOS/Linux/Win   | macOS only    | macOS/Linux/Win |
 
-### Sweep — five PRs by lunch
+<sub>\* Bloop, the company behind vibe-kanban, wound down in early 2026; it continues as a community project.</sub>
 
-Paste a Jira filter or GitHub issue list into the composer. Each ticket gets its own worktree, branch, and agent. Mix Claude and Cursor across the batch so the model best at each kind of task ends up on it. Come back from standup to a kanban of ready-to-review PRs.
+## Why octomux
 
-### Operator — one prompt becomes an epic
+The editor was built around a human typing one file at a time. That's not the job anymore. The job is directing a fleet — and the hard part moved from _writing_ code to _reviewing_ it, _unblocking_ it, and _knowing what's happening_ across ten sessions.
 
-Give an agent the orchestrator skills. It plans the work, breaks down the spec, and dispatches subtasks — each one gets its own worktree, mergeable independently. Inside a Claude Code window, the agent itself becomes the user of octomux. You supervise from the dashboard.
-
-> `/create-task`, `/list-tasks`, `/send-agent-message` skills inside any Claude Code window. Recursive dispatch.
-
-## Quick start
-
-```bash
-brew install git
-npm install -g @anthropic-ai/claude-code    # and/or Cursor CLI
-npm install -g octomux
-octomux init
-cd your-project
-octomux start
-```
-
-`tmux` ships bundled — octomux installs a static `tmux` for your platform (macOS and Linux,
-arm64/x64) and uses it automatically, so there's no separate `brew install tmux` step.
-
-```bash
-octomux create-task -t "Add OAuth login" -r .
-octomux create-task -t "Spike with Cursor" -r . --harness cursor
-```
-
-**Prefer a desktop app?** macOS users can download the `.dmg` from
-[GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) instead of the npm CLI.
-It bundles its own `tmux` and runs against an isolated data directory (its own DB, tmux
-socket, and logs), so it never collides with a CLI install on the same machine. The build is
-ad-hoc signed (not notarized) — if macOS warns on first launch, right-click the app → **Open**.
-
-Step-by-step setup, Jira, and orchestrator skills: [ONBOARDING.md](./ONBOARDING.md)
-
-## How it works
-
-```
-DISPATCH → BRANCH → CODE → INBOX → REVIEW → MERGE
-```
-
-| Phase        | What happens                                                                |
-| ------------ | --------------------------------------------------------------------------- |
-| **Dispatch** | Composer, CLI, orchestrator skills, or Jira/GitHub drafts                   |
-| **Branch**   | Automatic git worktree + `agents/<task-id>` branch                          |
-| **Code**     | tmux session per task; harness launches `claude` or `cursor-agent`          |
-| **Inbox**    | Every permission prompt or question collects in one place                   |
-| **Review**   | Diff tab, lazygit terminal, mark files reviewed, **Ship** / **Done**        |
-| **Merge**    | PR poller links branches; tasks close when their PRs merge                  |
-| _Recovery_   | DB + worktrees survive reboot — `octomux start` picks up where you left off |
-
-## CLI
-
-| Command                                  | Description                                                               |
-| ---------------------------------------- | ------------------------------------------------------------------------- |
-| `octomux start`                          | Dashboard at `:7777`                                                      |
-| `octomux init`                           | Defaults wizard (Jira, base branch, harness prefs)                        |
-| `octomux create-task`                    | New task (`--harness cursor` optional)                                    |
-| `octomux list-tasks` / `get-task`        | Inspect tasks                                                             |
-| `octomux close-task` / `delete-task`     | Stop or fully remove                                                      |
-| `octomux resume-task`                    | Resume a closed task                                                      |
-| `octomux add-agent`                      | Another agent window (`--skeleton`, `--model`, `--notify-agent` optional) |
-| `octomux send-message`                   | Message a running agent — course-correct without restart                  |
-| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`                   |
-
-## Architecture
-
-```mermaid
-flowchart LR
-  subgraph intake [Intake]
-    C[Composer]
-    CLI[CLI / skills]
-  end
-  subgraph core [octomux]
-    API[API + SQLite]
-    IN[Inbox]
-    BC[Command center]
-  end
-  subgraph run [Per task]
-    WT[Worktree]
-    TM[tmux]
-    H[Claude or Cursor]
-  end
-  C --> API
-  CLI --> API
-  API --> WT
-  API --> TM
-  TM --> H
-  H -->|hooks| API
-  API --> IN
-  API --> BC
-  WT --> DIFF[Diff review]
-  H --> GH[GitHub PR]
-  GH -->|poller| API
-```
+octomux is a bet on what that surface should look like: not a chat box bolted onto a file tree, but a control deck. It handles the ugly backend of running agents and puts the human's job — the inbox, the fleet grid, the review workstation, the orchestrator — front and center. It's early and opinionated, and the roadmap is shaped in the open.
 
 ## Requirements
 
-- macOS (ARM64 or x64), Node.js 20+ (24 LTS recommended)
-- `git` (`tmux` ships bundled — installed automatically, no manual step)
+- macOS (arm64/x64) or Linux for the CLI; macOS for the desktop app
+- Node.js 20+ · `git` (`tmux` ships bundled)
 - At least one harness: **Claude Code** (`claude`) and/or **Cursor CLI** (`cursor-agent`)
-- Recommended: `lazygit`, `neovim`
-- macOS desktop app (`.dmg`) available on [GitHub Releases](https://github.com/ShreyPaharia/octomux/releases) as an alternative to the npm CLI
 
-> First run flags only the deps you're actually missing — install what the setup banner asks for and you're good. Jira, Linear, and other integrations are configured later from the in-app **Integrations** page.
+<details>
+<summary><b>Full CLI reference</b></summary>
 
-## Configuration
+| Command                                  | Description                                                |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `octomux start`                          | Dashboard at `:7777` (add `--bind 0.0.0.0` for remote)     |
+| `octomux init`                           | Defaults wizard (Jira/Linear, base branch, harness prefs)  |
+| `octomux create-task`                    | New task (`--harness`, `--model`, `--mode`, `--fork-from`) |
+| `octomux list-tasks` / `get-task`        | Inspect tasks                                              |
+| `octomux close-task` / `delete-task`     | Stop or fully remove                                       |
+| `octomux resume-task`                    | Resume a closed task                                       |
+| `octomux add-agent`                      | Another agent window (`--model`, `--notify-agent`)         |
+| `octomux send-message`                   | Message a running agent — course-correct without restart   |
+| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`    |
 
-| Variable / flag           | Purpose                          |
-| ------------------------- | -------------------------------- |
-| `OCTOMUX_PORT` / `--port` | Dashboard port (default `7777`)  |
-| `OCTOMUX_URL`             | CLI → API base URL               |
-| `OCTOMUX_DB_PATH`         | Override task DB path            |
-| `OCTOMUX_GITHUB_LOGIN`    | Reviewer-request polling account |
+Full setup, Jira/Linear, and orchestrator skills: **[ONBOARDING.md](./ONBOARDING.md)**.
 
-## Remote access over Tailscale
+</details>
 
-octomux binds to `127.0.0.1` by default — reachable only from the host machine. To view
-and control sessions from your other devices (phone, second laptop), put them on a
-[Tailscale](https://tailscale.com) tailnet and enable remote mode:
+<details>
+<summary><b>Remote access from your phone (Tailscale)</b></summary>
 
-1. Install Tailscale on the host and each device; run `tailscale up` on each. Enable
-   MagicDNS so the host is reachable by name.
-2. Start octomux in remote mode:
-   ```bash
-   octomux start --bind 0.0.0.0
-   # or: OCTOMUX_BIND=0.0.0.0 octomux start
-   ```
-   On first start a random access token is generated and its file path is logged
-   (`~/.octomux/data/remote-token`). Override it with `OCTOMUX_REMOTE_TOKEN=<secret>`.
-3. (Optional) Restrict the accepted `Host` header to your tailnet name:
-   `OCTOMUX_ALLOWED_HOSTS=mybox.your-tailnet.ts.net`. The `100.64.0.0/10` tailnet IP range
-   is accepted automatically.
-4. From a device on the tailnet, open `http://<host-magicdns-name>:7777` and sign in once
-   with the token. Local (loopback) access never requires the token.
+octomux binds to `127.0.0.1` by default. To reach it from another device, put them on a
+[Tailscale](https://tailscale.com) tailnet and start in remote mode:
 
-**Security notes:** only devices on your tailnet can reach the port; the token is a second
-factor so a single compromised tailnet device cannot silently drive your agents. Binding
-`0.0.0.0` also exposes the port on any other LAN the host is on — the token gates those out,
-and you can add a host firewall rule limiting port 7777 to the `100.64.0.0/10` range for
-belt-and-suspenders. For HTTPS, front octomux with `tailscale serve`.
+```bash
+octomux start --bind 0.0.0.0     # or: OCTOMUX_BIND=0.0.0.0 octomux start
+```
+
+A random access token is generated on first start (path logged to
+`~/.octomux/data/remote-token`; override with `OCTOMUX_REMOTE_TOKEN`). Open
+`http://<host-magicdns-name>:7777` from a tailnet device and sign in once. Only tailnet
+devices can reach the port; the token is a second factor. For HTTPS, front it with
+`tailscale serve`.
+
+</details>
+
+<details>
+<summary><b>Built to extend</b></summary>
+
+octomux keeps a clean line between the **agent backend** (done for you) and the **views**
+(where the value is). Building blocks available today:
+
+- **REST API** (~95 endpoints) over tasks, agents, diffs, reviews, chats, workspaces, skills.
+- **Two live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux.
+- **A queryable SQLite schema** — tasks, agents, permission prompts, review runs, comments, learnings.
+- **A pluggable harness interface** — add a new agent backend by implementing one interface and registering it.
+- **User hook scripts** — drop executables in `~/.octomux/hooks` to fire on task-lifecycle events.
+
+There isn't a drop-in plugin API for custom UI views yet — adding one means building against
+these blocks in the codebase. A first-class way to author and share views is the direction
+we're building toward; if that's what you want, [open an issue](https://github.com/ShreyPaharia/octomux/issues).
+
+</details>
 
 ## FAQ
 
-**What's the difference between octomux and just running tmux + Claude Code?**
-octomux adds the kanban, the inbox, and diff review on top. tmux is just plumbing underneath.
+**How is this different from tmux + Claude Code?** octomux adds the inbox, the fleet grid, the review workstation, and the orchestrator view on top. tmux is plumbing underneath.
 
-**Does it work with Cursor?**
-Yes. Pick Claude Code or Cursor per task. Mix them on the same task with **Add agent**.
+**What if two agents touch the same file?** They can't — each task runs in its own git worktree on its own branch.
 
-**What happens if two agents touch the same file?**
-They can't — each task runs in its own git worktree on its own branch. Five agents can edit `auth.ts` at the same time without conflicts on your main tree.
+**Can I use it from my phone?** Yes — host it on a tailnet box and open the mobile-ready dashboard from any device on the tailnet.
 
-**What if my laptop reboots or crashes?**
-Run `octomux start`. Tasks, branches, terminals, and review state all come back.
+**What if my laptop reboots?** Run `octomux start`; tasks, branches, terminals, and review state come back.
 
-**How do I track what each agent is costing me?**
-Each agent's tmux session has its own session log; Claude Code and Cursor both emit token usage there. A first-class cost view in the dashboard is on the roadmap.
+## Contributing
+
+Issues and PRs are welcome — the roadmap is shaped in the open.
+
+```bash
+git clone https://github.com/ShreyPaharia/octomux && cd octomux
+bun install
+bun run dev        # Express :7777 + Vite
+bun run test       # vitest
+```
+
+Then open a PR **against `next`** with a short description of the change. See
+**[CONTRIBUTING.md](./CONTRIBUTING.md)** for architecture and testing patterns, and
+[good first issues](https://github.com/ShreyPaharia/octomux/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+to get started. We try to respond to PRs within a couple of days.
+
+## Star it
+
+If octomux saves you an afternoon of babysitting agents, a ⭐ helps other people find it — and tells me which parts to build next. Thanks for trying it.
 
 ## Links
 
-- [GitHub](https://github.com/ShreyPaharia/octomux) · [npm](https://www.npmjs.com/package/octomux) · [octomux.dev](https://octomux.dev)
-
-Issues and PRs welcome.
+[GitHub](https://github.com/ShreyPaharia/octomux) · [npm](https://www.npmjs.com/package/octomux) · [octomux.com](https://octomux.com) · [Releases](https://github.com/ShreyPaharia/octomux/releases)

@@ -18,6 +18,25 @@ export function setDiffExpanded(taskId: string, filePath: string, value: boolean
   }
 }
 
+const DIFF_VIEW_KEY = 'octomux:diff-view-mode';
+
+/** Global diff view preference. Defaults to side-by-side (split). */
+export function getDiffSideBySide(): boolean {
+  try {
+    return localStorage.getItem(DIFF_VIEW_KEY) !== 'unified';
+  } catch {
+    return true;
+  }
+}
+
+export function setDiffSideBySide(value: boolean): void {
+  try {
+    localStorage.setItem(DIFF_VIEW_KEY, value ? 'split' : 'unified');
+  } catch {
+    // localStorage unavailable — degrade silently
+  }
+}
+
 export function reviewedKey(taskId: string, filePath: string): string {
   return `octomux:reviewed:${taskId}:${filePath}`;
 }

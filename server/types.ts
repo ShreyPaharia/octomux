@@ -78,6 +78,46 @@ export interface ReviewLearning {
 
 export type CommentStatus = 'draft' | 'accepted' | 'rejected' | 'published' | 'stale';
 export type CommentKind = 'comment' | 'suggestion';
+
+// ── Loop harness types ────────────────────────────────────────────────────
+
+export type LoopEmitStatus = 'done' | 'blocked' | 'needs_human';
+export type LoopRunStatus = 'running' | LoopEmitStatus;
+
+export interface LoopRun {
+  id: string;
+  task_id: string;
+  spec_json: string;
+  status: LoopRunStatus;
+  iteration: number;
+  max_iterations: number | null;
+  budget_json: string | null;
+  termination_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoopIteration {
+  id: string;
+  loop_run_id: string;
+  n: number;
+  sha_from: string | null;
+  sha_to: string | null;
+  verify_passed: number | null;
+  tokens: number | null;
+  emit_status: string | null;
+  emit_reason: string | null;
+  created_at: string;
+}
+
+export interface LoopSpec {
+  prompt: string;
+  verify: string;
+  maxIterations: number;
+  budget?: { tokens?: number; timeMs?: number };
+  noProgress?: { afterIters: number };
+}
+
 export type CommentBucket = 'actionable' | 'informational';
 export type CommentSeverity = 'nit' | 'suggestion' | 'issue' | 'critical';
 export type LastCheckStatus = 'resolved' | 'still_applies' | 'partial' | 'unclear';

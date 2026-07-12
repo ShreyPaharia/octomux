@@ -1,17 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, act } from '@testing-library/react';
 
 const useMediaQueryMock = vi.fn((..._args: unknown[]) => false);
 vi.mock('@/lib/use-media-query', () => ({
   useMediaQuery: (...args: unknown[]) => useMediaQueryMock(...args),
 }));
-const { scrollTerminalByWheelMock } = vi.hoisted(() => ({
-  scrollTerminalByWheelMock: vi.fn(),
-}));
 vi.mock('@/lib/terminal-mobile-touch', () => ({
   installTerminalMobileTouch: () => () => {},
-  scrollTerminalByWheel: scrollTerminalByWheelMock,
 }));
 vi.mock('@/lib/terminal-visual-viewport', () => ({
   installTerminalVisualViewport: () => () => {},
@@ -126,7 +121,6 @@ let OriginalResizeObserver: typeof ResizeObserver;
 
 beforeEach(() => {
   useMediaQueryMock.mockReturnValue(false);
-  scrollTerminalByWheelMock.mockClear();
   terminalInstances.length = 0;
   MockWebSocket.instances = [];
   lastOnDataCb.current = null;
@@ -353,29 +347,5 @@ describe('TerminalView', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
     const stale = MockWebSocket.instances.find((ws, idx) => idx >= 2 && ws.url.endsWith('/0'));
     expect(stale).toBeUndefined();
-  });
-
-  it('shows mobile scroll controls and scrolls via wheel events', async () => {
-    useMediaQueryMock.mockReturnValue(true);
-    const user = userEvent.setup();
-    const TerminalView = await importTerminalView();
-    render(<TerminalView taskId="task-mobile" windowIndex={0} />);
-
-    const ws = MockWebSocket.instances[0];
-    act(() => {
-      ws._open();
-      ws.onmessage?.({ data: 'hello\n' } as MessageEvent);
-    });
-
-    expect(screen.getByTestId('mobile-terminal-scroll-controls')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Older output' }));
-    await user.click(screen.getByRole('button', { name: 'Jump to latest output' }));
-
-    const term = terminalInstances.at(-1)!;
-    // Older output scrolls back via wheel-up (negative lines); Latest jumps to
-    // the bottom of the scrollback buffer.
-    expect(scrollTerminalByWheelMock).toHaveBeenCalledWith(expect.anything(), -5);
-    expect(term.scrollToBottomCalls).toBeGreaterThanOrEqual(1);
   });
 });

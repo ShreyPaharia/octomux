@@ -25,6 +25,10 @@ export type ServerEvent =
   | {
       type: 'task:stuck';
       payload: { taskId: string; reason?: string; [key: string]: unknown };
+    }
+  | {
+      type: 'loop:emit';
+      payload: { taskId: string; loopRunId: string; status: string; reason: string };
     };
 
 /** Event types that carry a taskId and should be persisted to the durable events log. */

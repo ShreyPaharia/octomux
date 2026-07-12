@@ -268,6 +268,25 @@ export function OrchestratorIcon({ color }: { color: string }) {
   );
 }
 
+export function LoopsIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M17 2.1 21 6l-4 3.9M3 12v-2a4 4 0 0 1 4-4h14M7 21.9 3 18l4-3.9M21 12v2a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
 export function SettingsIcon({ color }: { color: string }) {
   return (
     <svg

@@ -14,6 +14,7 @@ export type { ReviewLearning } from '../../../server/types';
 export * from './taskApi';
 export * from './reviewApi';
 export * from './configApi';
+export * from './loopApi';
 
 // Re-export the orchestrator REST + WebSocket client. It stays a separate,
 // incompatibly-shaped surface (its `/ws/orchestrator/:id` socket is not folded

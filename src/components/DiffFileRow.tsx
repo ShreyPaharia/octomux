@@ -69,6 +69,8 @@ export interface DiffFileRowProps {
   enableComments?: boolean;
   /** Walkthrough file summary — shown below the file header in review mode. */
   explainer?: string;
+  /** Render the diff side-by-side (split) when true, unified/inline when false. */
+  sideBySide?: boolean;
 }
 
 export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function DiffFileRow(
@@ -89,6 +91,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
     rangeIsBase = true,
     enableComments = false,
     explainer,
+    sideBySide = true,
   },
   ref,
 ) {
@@ -245,7 +248,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
                 }
               >
                 <MonacoDiff
-                  key={`${path}:${expanded ? 'e' : 'c'}:${hostSize.width}`}
+                  key={`${path}:${expanded ? 'e' : 'c'}:${sideBySide ? 's' : 'u'}:${hostSize.width}`}
                   width={hostSize.width}
                   height={editorHeight}
                   className="diff-editor-host-inner"
@@ -256,7 +259,7 @@ export const DiffFileRow = forwardRef<HTMLElement, DiffFileRowProps>(function Di
                   onMount={handleMount}
                   options={{
                     readOnly: true,
-                    renderSideBySide: true,
+                    renderSideBySide: sideBySide,
                     useInlineViewWhenSpaceIsLimited: false,
                     automaticLayout: false,
                     minimap: { enabled: false },

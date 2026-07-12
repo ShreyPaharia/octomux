@@ -6,6 +6,7 @@ import {
   MonitorIcon,
   WorkspacesIcon,
   OrchestratorIcon,
+  LoopsIcon,
   SettingsIcon,
   type NavIcon,
 } from './glyphs';
@@ -30,6 +31,7 @@ export const MORE_ITEMS = [
   { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
   { key: 'orchestrator', label: 'Orchestrator', to: '/orchestrator', Icon: OrchestratorIcon },
+  { key: 'loops', label: 'Loops', to: '/loops', Icon: LoopsIcon },
 ] as const;
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────

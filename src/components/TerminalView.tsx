@@ -4,12 +4,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { installTerminalMobileTouch, scrollTerminalByWheel } from '@/lib/terminal-mobile-touch';
+import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
-import { MobileTerminalScrollControls } from '@/components/MobileTerminalScrollControls';
+import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
 import { CloudOffIcon } from './icons';
-
-const MOBILE_SCROLL_LINES = 5;
 
 interface TerminalViewProps {
   taskId?: string;
@@ -43,6 +41,7 @@ export function TerminalView({
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewportCleanup = useRef<(() => void) | null>(null);
   const mobileTouchCleanup = useRef<(() => void) | null>(null);
+  const androidImeCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
@@ -71,20 +70,6 @@ export function TerminalView({
     if (textarea && document.activeElement === textarea) {
       term.scrollToBottom();
     }
-  }, []);
-
-  // Buttons scroll via synthetic wheel events (same path as touch) so they work
-  // in both the normal buffer and an alternate-buffer TUI like Claude Code.
-  const scrollOlder = useCallback(() => {
-    if (containerRef.current) scrollTerminalByWheel(containerRef.current, -MOBILE_SCROLL_LINES);
-  }, []);
-
-  const scrollNewer = useCallback(() => {
-    if (containerRef.current) scrollTerminalByWheel(containerRef.current, MOBILE_SCROLL_LINES);
-  }, []);
-
-  const scrollToLatest = useCallback(() => {
-    termRef.current?.scrollToBottom();
   }, []);
 
   // Helper to fit terminal and send resize dimensions over WebSocket
@@ -194,6 +179,8 @@ export function TerminalView({
     viewportCleanup.current = null;
     mobileTouchCleanup.current?.();
     mobileTouchCleanup.current = null;
+    androidImeCleanup.current?.();
+    androidImeCleanup.current = null;
 
     const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
 
@@ -216,6 +203,20 @@ export function TerminalView({
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
 
+    // De-decorate xterm's hidden capture textarea so mobile Safari / Chrome
+    // don't draw autofill / suggestion / accessory UI above the soft
+    // keyboard. Harmless on desktop (there's no textarea chrome to suppress
+    // there), so this runs unconditionally rather than gating on isMobile.
+    const helperTextarea =
+      containerRef.current.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+    if (helperTextarea) {
+      helperTextarea.setAttribute('autocapitalize', 'off');
+      helperTextarea.setAttribute('autocorrect', 'off');
+      helperTextarea.setAttribute('autocomplete', 'off');
+      helperTextarea.spellcheck = false;
+      helperTextarea.setAttribute('enterkeyhint', 'send');
+    }
+
     // Force the xterm viewport to use a non-overlay scrollbar so FitAddon
     // correctly subtracts scrollbar width when calculating columns.
     // Without this, macOS overlay scrollbars report 0 width and the last
@@ -233,17 +234,65 @@ export function TerminalView({
     fitRef.current = fitAddon;
     reconnectDelay.current = INITIAL_RECONNECT_DELAY;
 
+    const androidIme = !readOnly && isAndroid();
+    if (androidIme) {
+      androidImeCleanup.current = attachAndroidImeBridge(term, (bytes) => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(bytes);
+        }
+      });
+      // Short-circuit xterm's broken composition path: returning false for
+      // keydown keyCode 229 (IME composition) stops CompositionHelper from
+      // scheduling its own naive textarea diff before the bridge above can
+      // translate the mutation itself. Every other key falls through to
+      // xterm's normal keymap untouched.
+      term.attachCustomKeyEventHandler((e) => e.keyCode !== 229);
+    }
+
     // Register input handler once per terminal lifetime — always forwards to
     // the latest WebSocket via wsRef, so reconnects don't accumulate listeners.
     // Skipped in readOnly mode so panes can't receive keystrokes.
     if (!readOnly) {
-      term.onData((data) => {
-        const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
+      // PHANTOM-ENTER GUARD. `term.onData` fires both for real user input
+      // (keystroke / paste / IME) AND for xterm-synthesized control-sequence
+      // responses (focus-report escapes, DSR/CPR cursor reports, etc.) that
+      // xterm emits on its own in response to programmatic calls like
+      // `term.focus()`. Forwarding the latter to the pty can land stray
+      // escape bytes at the shell prompt. xterm's internal
+      // `coreService.onUserInput` fires immediately before `onData` on the
+      // genuine user-input path (same synchronous tick), so gating on a flag
+      // set there forwards only real input. If a future xterm rev removes
+      // this internal, fall back to forwarding everything so the terminal
+      // never silently stops accepting input.
+      const coreService = (
+        term as unknown as {
+          _core?: { coreService?: { onUserInput?: (cb: () => void) => unknown } };
         }
-        scrollCursorIntoView();
-      });
+      )._core?.coreService;
+      if (coreService?.onUserInput) {
+        let wasUserInput = false;
+        coreService.onUserInput(() => {
+          wasUserInput = true;
+        });
+        term.onData((data) => {
+          if (!wasUserInput) return;
+          wasUserInput = false;
+          const ws = wsRef.current;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
+          }
+          scrollCursorIntoView();
+        });
+      } else {
+        term.onData((data) => {
+          const ws = wsRef.current;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
+          }
+          scrollCursorIntoView();
+        });
+      }
     }
 
     // Defer initial fit to next frame so the browser has completed flex layout.
@@ -291,6 +340,8 @@ export function TerminalView({
       viewportCleanup.current = null;
       mobileTouchCleanup.current?.();
       mobileTouchCleanup.current = null;
+      androidImeCleanup.current?.();
+      androidImeCleanup.current = null;
     };
   }, [connect]);
 
@@ -361,6 +412,18 @@ export function TerminalView({
         ref={containerRef}
         className="octomux-terminal-host h-full w-full min-h-0 overflow-hidden rounded-lg bg-[#09090b] transition-opacity"
         style={{ opacity: showOverlay ? 0.7 : 1 }}
+        onClick={() => {
+          // Focus inside a real user gesture (tap) so mobile browsers raise
+          // the soft keyboard. The terminal may already be disposed (e.g. a
+          // tap racing an unmount), so this is best-effort.
+          if (!readOnly) {
+            try {
+              termRef.current?.focus();
+            } catch {
+              /* terminal disposed mid-tap — nothing to focus */
+            }
+          }
+        }}
       />
       {connecting && (
         <div
@@ -376,14 +439,6 @@ export function TerminalView({
             </span>
           </span>
         </div>
-      )}
-      {isMobile && visible && !connecting && (
-        <MobileTerminalScrollControls
-          onScrollOlder={scrollOlder}
-          onScrollNewer={scrollNewer}
-          onScrollToBottom={scrollToLatest}
-          className="absolute bottom-2 right-2 z-20 md:hidden"
-        />
       )}
       {showOverlay && (
         <div

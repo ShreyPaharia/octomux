@@ -48,6 +48,8 @@ interface Props {
   enableComments?: boolean;
   /** When provided, render sticky group-name dividers above each group's files. */
   groups?: RenderGroup[];
+  /** Render diffs side-by-side (split) when true, unified/inline when false. */
+  sideBySide?: boolean;
 }
 
 function readHashPath(): string | null {
@@ -73,6 +75,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     rangeIsBase = true,
     enableComments = false,
     groups,
+    sideBySide = true,
   },
   ref,
 ) {
@@ -260,6 +263,25 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     loadedShas.current.clear();
   }, [rangeKey]);
 
+  // Keep a target row pinned to the top of the viewport across the settle
+  // window. Rows mount their Monaco editors lazily as they scroll into view,
+  // swapping the placeholder estimate for the real content height. That reflow
+  // shifts every following row's offset mid-scroll, so a one-shot scrollIntoView
+  // lands off-file and then visibly jumps once heights settle. Re-anchoring the
+  // target to the top each frame keeps it glued in place as heights resolve.
+  const anchorRef = useRef<number>(0);
+  const anchorToTop = useCallback((el: HTMLElement) => {
+    const token = performance.now();
+    anchorRef.current = token;
+    const settleUntil = token + PROGRAMMATIC_SCROLL_MS;
+    const step = () => {
+      if (anchorRef.current !== token) return; // superseded by a newer target
+      el.scrollIntoView({ block: 'start' });
+      if (performance.now() < settleUntil) requestAnimationFrame(step);
+    };
+    step();
+  }, []);
+
   // ─── Initial hash scroll ─────────────────────────────────────────────────
   const didInitialScrollRef = useRef(false);
   useEffect(() => {
@@ -275,8 +297,8 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     didInitialScrollRef.current = true;
     programmaticScrollUntil.current = performance.now() + PROGRAMMATIC_SCROLL_MS;
     spy.setActiveId(target);
-    el.scrollIntoView({ block: 'start' });
-  }, [orderedFiles, spy]);
+    anchorToTop(el);
+  }, [orderedFiles, spy, anchorToTop]);
 
   // ─── Scroll-to-file (sidebar click + imperative handle) ───────────────────
   const scrollToFile = useCallback(
@@ -285,7 +307,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
       if (!el) return;
       programmaticScrollUntil.current = performance.now() + PROGRAMMATIC_SCROLL_MS;
       spy.setActiveId(path);
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      anchorToTop(el);
       try {
         const url = `${window.location.pathname}${window.location.search}${HASH_PREFIX}${encodeURIComponent(path)}`;
         window.history.replaceState(null, '', url);
@@ -293,7 +315,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
         // ignore (older browsers / opaque origin)
       }
     },
-    [spy],
+    [spy, anchorToTop],
   );
 
   const revealLineInFile = useCallback(
@@ -550,6 +572,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
               rangeIsBase={rangeIsBase}
               enableComments={enableComments}
               explainer={fileSummaries.get(path)}
+              sideBySide={sideBySide}
             />
           </div>
         );

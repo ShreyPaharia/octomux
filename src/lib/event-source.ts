@@ -23,7 +23,8 @@ export type ServerEventType =
   | 'review:drafts-ready'
   | 'review:run-failed'
   | 'review:published'
-  | 'review:head-advanced';
+  | 'review:head-advanced'
+  | 'loop:emit';
 
 /**
  * A real-time event delivered over `/ws/events`. The payload is intentionally a
@@ -41,6 +42,8 @@ export interface ServerEvent {
     github_review_url?: string | null;
     phase?: string;
     reason?: string;
+    loopRunId?: string;
+    status?: string;
     [key: string]: unknown;
   };
 }

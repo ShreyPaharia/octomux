@@ -7,6 +7,7 @@ import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
+import { handleLoopIterationBoundary } from './task-engine/loop/engine.js';
 import {
   isOrchestratorManaged,
   upsertManagedTask,
@@ -32,6 +33,7 @@ import {
 } from './repositories/agent-runtime.js';
 import {
   getTaskWorkflowStatus,
+  getTaskRuntimeState,
   getWorktreePathForTask,
   setWorkflowStatus,
   addTaskUpdate,
@@ -333,6 +335,20 @@ router.post(
 
       setAgentHookActivity(agent.id, 'idle');
     });
+
+    // Loop harness: a looping task's Stop hook marks an iteration boundary, not
+    // a normal turn end — bypass human_review/task_updates/fireHook/summarizer
+    // entirely and hand off to the loop engine instead.
+    if (getTaskRuntimeState(agent.task_id)?.runtime_state === 'looping') {
+      void handleLoopIterationBoundary(agent.task_id, agent.id).catch((err) => {
+        logger.error(
+          { task_id: agent.task_id, agent_id: agent.id, operation: 'loop_iteration_boundary', err },
+          'loop: iteration boundary handler failed',
+        );
+      });
+      res.status(200).send();
+      return;
+    }
 
     // B4: Auto-transition in_progress → human_review when the last agent stops.
     // SUPPRESSED for orchestrator-managed tasks (§6.5, R3-I1): managed_tasks.phase

@@ -834,4 +834,35 @@ export function runMigrations(instance: Database.Database): void {
   // Ensure at most one row has is_global_monitor=1 (partial unique index — SQLite
   // WHERE clause filters NULLs but since we use 0/1 we need a different approach;
   // enforce uniqueness in application logic via setGlobalMonitor clearing old value).
+
+  // ── Loop harness persistence (2026-07-12, P1a) ──────────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS loop_runs (
+      id                  TEXT PRIMARY KEY,
+      task_id             TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      spec_json           TEXT NOT NULL,
+      status              TEXT NOT NULL DEFAULT 'running',
+      iteration           INTEGER NOT NULL DEFAULT 0,
+      max_iterations      INTEGER,
+      budget_json         TEXT,
+      termination_reason  TEXT,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_loop_runs_task ON loop_runs(task_id);
+
+    CREATE TABLE IF NOT EXISTS loop_iterations (
+      id             TEXT PRIMARY KEY,
+      loop_run_id    TEXT NOT NULL REFERENCES loop_runs(id) ON DELETE CASCADE,
+      n              INTEGER NOT NULL,
+      sha_from       TEXT,
+      sha_to         TEXT,
+      verify_passed  INTEGER,
+      tokens         INTEGER,
+      emit_status    TEXT,
+      emit_reason    TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_loop_iterations_run ON loop_iterations(loop_run_id, n);
+  `);
 }
