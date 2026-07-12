@@ -109,12 +109,20 @@ export function recordEmit(loopRunId: string, input: RecordEmitInput): void {
   logger.info({ loop_run_id: loopRunId, status: input.status }, 'loop_run emit recorded');
 }
 
-/** Most recent still-'running' loop_run for a task, if any. */
+/**
+ * Most recent loop_run for a task, regardless of status.
+ *
+ * Deliberately NOT filtered to status='running': `recordEmit` (the agent's
+ * `octomux emit` callback) flips status to 'done'/'blocked'/'needs_human'
+ * *before* the Stop hook that reports the same turn's end ever fires, so a
+ * status filter here would hide the very run the engine needs to process
+ * that emit against. `tasks.runtime_state === 'looping'` — checked by the
+ * Stop hook before it ever calls into the loop engine — is the authoritative
+ * "is this task's loop still active" signal, not this column.
+ */
 export function getActiveLoopRunForTask(taskId: string): LoopRun | undefined {
   return getDb()
-    .prepare(
-      `SELECT * FROM loop_runs WHERE task_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1`,
-    )
+    .prepare(`SELECT * FROM loop_runs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1`)
     .get(taskId) as LoopRun | undefined;
 }
 

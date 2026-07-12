@@ -88,15 +88,27 @@ describe('loop-runs', () => {
     expect(iterations.emit_reason).toBe('all tests pass');
   });
 
-  it('getActiveLoopRunForTask returns the running run for a task', () => {
+  it('getActiveLoopRunForTask returns the run for a task', () => {
     const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
     expect(getActiveLoopRunForTask(TASK_ID)?.id).toBe(run.id);
   });
 
-  it('getActiveLoopRunForTask returns undefined once the run is terminated', () => {
+  it('getActiveLoopRunForTask still finds a run after an emit flips its status (not status-filtered)', () => {
+    // recordEmit (the agent's `octomux emit` callback) flips status to
+    // 'done'/'blocked'/'needs_human' BEFORE the Stop hook that reports the
+    // same turn's end ever fires. getActiveLoopRunForTask must still find the
+    // run in that window so the engine can process the emit against it —
+    // tasks.runtime_state is the authoritative "still looping" signal, not
+    // this column. See getActiveLoopRunForTask's doc comment.
+    const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
+    recordEmit(run.id, { status: 'done', reason: 'agent thinks it is done' });
+    expect(getActiveLoopRunForTask(TASK_ID)?.id).toBe(run.id);
+  });
+
+  it('getActiveLoopRunForTask still returns the run after engine termination (most-recent-for-task lookup)', () => {
     const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
     terminateLoopRun(run.id, 'needs_human', 'max_iterations');
-    expect(getActiveLoopRunForTask(TASK_ID)).toBeUndefined();
+    expect(getActiveLoopRunForTask(TASK_ID)?.id).toBe(run.id);
   });
 
   it('terminateLoopRun sets status and a canonical termination_reason', () => {
