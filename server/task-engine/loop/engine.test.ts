@@ -25,9 +25,8 @@ const { buildLoopPrompt, evaluateTermination, startLoop, handleLoopIterationBoun
 const { revParseHead, commitAll } = await import('../git.js');
 const { runVerify } = await import('./verify.js');
 const { respawnAgentFresh } = await import('../lifecycle/respawn-agent.js');
-const { getLoopRun, listIterationsForRun, recordEmit } = await import(
-  '../../repositories/loop-runs.js'
-);
+const { getLoopRun, listIterationsForRun, recordEmit } =
+  await import('../../repositories/loop-runs.js');
 
 function makeRun(overrides: Partial<LoopRun> = {}): LoopRun {
   return {
@@ -97,17 +96,13 @@ describe('evaluateTermination', () => {
   });
 
   it('terminates max_iterations once iterationN reaches spec.maxIterations', () => {
-    expect(evaluateTermination({ ...base, run: makeRun(), iterationN: 5 })).toBe(
-      'max_iterations',
-    );
+    expect(evaluateTermination({ ...base, run: makeRun(), iterationN: 5 })).toBe('max_iterations');
     expect(evaluateTermination({ ...base, run: makeRun(), iterationN: 4 })).toBeNull();
   });
 
   it('terminates budget on token ceiling', () => {
     const spec: LoopSpec = { ...SPEC, budget: { tokens: 1000 } };
-    expect(evaluateTermination({ ...base, spec, run: makeRun(), tokensUsed: 1000 })).toBe(
-      'budget',
-    );
+    expect(evaluateTermination({ ...base, spec, run: makeRun(), tokensUsed: 1000 })).toBe('budget');
     expect(evaluateTermination({ ...base, spec, run: makeRun(), tokensUsed: 999 })).toBeNull();
   });
 
@@ -122,18 +117,14 @@ describe('evaluateTermination', () => {
 
   it('terminates no_progress once the streak reaches spec.noProgress.afterIters', () => {
     const spec: LoopSpec = { ...SPEC, noProgress: { afterIters: 3 } };
-    expect(
-      evaluateTermination({ ...base, spec, run: makeRun(), noProgressStreak: 3 }),
-    ).toBe('no_progress');
-    expect(
-      evaluateTermination({ ...base, spec, run: makeRun(), noProgressStreak: 2 }),
-    ).toBeNull();
+    expect(evaluateTermination({ ...base, spec, run: makeRun(), noProgressStreak: 3 })).toBe(
+      'no_progress',
+    );
+    expect(evaluateTermination({ ...base, spec, run: makeRun(), noProgressStreak: 2 })).toBeNull();
   });
 
   it('skips no_progress evaluation when spec.noProgress is not set', () => {
-    expect(
-      evaluateTermination({ ...base, run: makeRun(), noProgressStreak: 999 }),
-    ).toBeNull();
+    expect(evaluateTermination({ ...base, run: makeRun(), noProgressStreak: 999 })).toBeNull();
   });
 });
 

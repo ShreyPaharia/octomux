@@ -161,10 +161,7 @@ export async function startLoop(taskId: string, spec: LoopSpec): Promise<LoopRun
  * Auto-commits, verifies, records the iteration, evaluates termination, and
  * either closes the loop or respawns the agent fresh for the next iteration.
  */
-export async function handleLoopIterationBoundary(
-  taskId: string,
-  agentId: string,
-): Promise<void> {
+export async function handleLoopIterationBoundary(taskId: string, agentId: string): Promise<void> {
   const run = getActiveLoopRunForTask(taskId);
   if (!run) {
     logger.warn({ task_id: taskId, agent_id: agentId }, 'loop: no active run for looping task');
