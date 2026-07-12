@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
-import { createLoopRun, getLoopRun, appendIteration, recordEmit } from './loop-runs.js';
+import {
+  createLoopRun,
+  getLoopRun,
+  appendIteration,
+  recordEmit,
+  getActiveLoopRunForTask,
+  terminateLoopRun,
+  resumeLoopRun,
+} from './loop-runs.js';
 
 const TASK_ID = 't_task1';
 
@@ -78,5 +86,37 @@ describe('loop-runs', () => {
     };
     expect(iterations.emit_status).toBe('done');
     expect(iterations.emit_reason).toBe('all tests pass');
+  });
+
+  it('getActiveLoopRunForTask returns the running run for a task', () => {
+    const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
+    expect(getActiveLoopRunForTask(TASK_ID)?.id).toBe(run.id);
+  });
+
+  it('getActiveLoopRunForTask returns undefined once the run is terminated', () => {
+    const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
+    terminateLoopRun(run.id, 'needs_human', 'max_iterations');
+    expect(getActiveLoopRunForTask(TASK_ID)).toBeUndefined();
+  });
+
+  it('terminateLoopRun sets status and a canonical termination_reason', () => {
+    const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
+    recordEmit(run.id, { status: 'done', reason: 'agent free-text reason' });
+
+    terminateLoopRun(run.id, 'done', 'done');
+
+    const updated = getLoopRun(run.id);
+    expect(updated?.status).toBe('done');
+    expect(updated?.termination_reason).toBe('done');
+  });
+
+  it('resumeLoopRun resets status back to running', () => {
+    const run = createLoopRun({ task_id: TASK_ID, spec_json: '{}' });
+    recordEmit(run.id, { status: 'done', reason: 'verify failed after this' });
+
+    resumeLoopRun(run.id);
+
+    expect(getLoopRun(run.id)?.status).toBe('running');
+    expect(getActiveLoopRunForTask(TASK_ID)?.id).toBe(run.id);
   });
 });
