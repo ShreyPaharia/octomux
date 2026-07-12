@@ -9,8 +9,10 @@ import {
   listIterationsForRun,
   recordEmit,
 } from '../repositories/loop-runs.js';
+import { getTask } from '../repositories/tasks.js';
 import { badRequest, notFound } from '../services/errors.js';
-import type { LoopEmitStatus } from '../types.js';
+import { startLoop } from '../task-engine/loop/engine.js';
+import type { LoopEmitStatus, LoopSpec } from '../types.js';
 
 const logger = childLogger('routes/loops');
 
@@ -32,6 +34,37 @@ function requireBearerHookToken(req: Request, res: Response, next: NextFunction)
   }
   next();
 }
+
+router.post('/api/loops', async (req: Request, res: Response) => {
+  const body = req.body as { taskId?: unknown; spec?: unknown };
+  if (typeof body.taskId !== 'string' || !body.taskId) {
+    throw badRequest('taskId is required');
+  }
+  const spec = body.spec as Partial<LoopSpec> | undefined;
+  if (!spec || typeof spec.prompt !== 'string' || !spec.prompt.trim()) {
+    throw badRequest('spec.prompt is required');
+  }
+  if (typeof spec.verify !== 'string' || !spec.verify.trim()) {
+    throw badRequest('spec.verify is required');
+  }
+  if (
+    typeof spec.maxIterations !== 'number' ||
+    !Number.isFinite(spec.maxIterations) ||
+    spec.maxIterations < 1
+  ) {
+    throw badRequest('spec.maxIterations must be a positive number');
+  }
+
+  const task = getTask(body.taskId);
+  if (!task) throw notFound('Task not found');
+
+  try {
+    const run = await startLoop(body.taskId, spec as LoopSpec);
+    res.status(201).json(run);
+  } catch (err) {
+    throw badRequest((err as Error).message);
+  }
+});
 
 router.post('/api/loops/:runId/emit', requireBearerHookToken, (req: Request, res: Response) => {
   const { runId } = req.params as Record<string, string>;
