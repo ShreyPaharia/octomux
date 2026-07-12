@@ -1,4 +1,4 @@
-export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error';
+export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error' | 'looping';
 /** Workflow status — human-facing board column. */
 export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
 export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
