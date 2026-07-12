@@ -4,6 +4,7 @@ import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';
 import { checkAgentTokenExists } from '../repositories/agent-runtime.js';
 import {
+  getActiveLoopRunForTask,
   getLoopRun,
   listLoopRuns,
   listIterationsForRun,
@@ -11,7 +12,7 @@ import {
   terminateLoopRun,
 } from '../repositories/loop-runs.js';
 import { getTask, setRuntimeState } from '../repositories/tasks.js';
-import { badRequest, notFound } from '../services/errors.js';
+import { badRequest, conflict, notFound } from '../services/errors.js';
 import { startLoop } from '../task-engine/loop/engine.js';
 import type { LoopEmitStatus, LoopSpec } from '../types.js';
 
@@ -58,6 +59,11 @@ router.post('/api/loops', async (req: Request, res: Response) => {
 
   const task = getTask(body.taskId);
   if (!task) throw notFound('Task not found');
+
+  const activeRun = getActiveLoopRunForTask(body.taskId);
+  if (task.runtime_state === 'looping' || activeRun?.status === 'running') {
+    throw conflict('task already has an active loop run');
+  }
 
   try {
     const run = await startLoop(body.taskId, spec as LoopSpec);

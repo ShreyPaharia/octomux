@@ -116,6 +116,34 @@ describe('loop routes', () => {
         .send({ taskId: 't1', spec: { prompt: 'x', verify: 'y', maxIterations: 5 } });
       expect(res.status).toBe(400);
     });
+
+    it('returns 409 when the task already has an active loop run', async () => {
+      createLoopRun({ task_id: 't1', spec_json: '{}' });
+      db.prepare(`UPDATE tasks SET runtime_state = 'looping' WHERE id = 't1'`).run();
+
+      const res = await request(app)
+        .post('/api/loops')
+        .send({
+          taskId: 't1',
+          spec: { prompt: 'do the thing', verify: 'echo ok', maxIterations: 5 },
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/already has an active loop run/);
+    });
+
+    it('returns 409 when a loop_run is running even if runtime_state has not flipped yet', async () => {
+      createLoopRun({ task_id: 't1', spec_json: '{}' });
+
+      const res = await request(app)
+        .post('/api/loops')
+        .send({
+          taskId: 't1',
+          spec: { prompt: 'do the thing', verify: 'echo ok', maxIterations: 5 },
+        });
+
+      expect(res.status).toBe(409);
+    });
   });
 
   describe('POST /api/loops/:runId/emit', () => {
