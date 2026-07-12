@@ -24,7 +24,7 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(
     (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('list-windows')) {
+      if (args.includes('list-windows') || args.includes('display-message')) {
         cb(null, { stdout: String(nextWindowIndex), stderr: '' });
       } else if (args.includes('new-window')) {
         nextWindowIndex++;
@@ -210,5 +210,17 @@ describe('respawnAgentFresh', () => {
 
     const { checkAgentTokenExists } = await import('../../repositories/agent-runtime.js');
     expect(checkAgentTokenExists('real-hook-token-abc')).toBe(true);
+  });
+
+  it('opts.fresh=true creates a brand-new tmux session instead of a window, and never kill-windows', async () => {
+    const agent = makeAgentRow();
+    const task = { ...DEFAULTS.runningTask } as Task;
+
+    await respawnAgentFresh(task, agent, { fresh: true });
+
+    const calls = vi.mocked(execFile).mock.calls;
+    expect(calls.some((c) => (c[1] as string[])?.includes('new-session'))).toBe(true);
+    expect(calls.some((c) => (c[1] as string[])?.includes('new-window'))).toBe(false);
+    expect(calls.some((c) => (c[1] as string[])?.includes('kill-window'))).toBe(false);
   });
 });

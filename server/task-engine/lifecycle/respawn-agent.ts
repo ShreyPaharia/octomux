@@ -26,11 +26,16 @@ const logger = childLogger('task-engine/lifecycle');
  * memory of prior turns). `opts.env` is exported into the new window's shell
  * — used by the loop harness to carry OCTOMUX_ACTION_TOKEN/BASE_URL so the
  * agent's `octomux emit` CLI call can authenticate.
+ *
+ * `opts.fresh` (default false): the task's tmux session died along with it
+ * (e.g. server restart) — create a brand-new session instead of a window in
+ * the (nonexistent) old one, and skip killing the old window since there's
+ * nothing left to kill.
  */
 export async function respawnAgentFresh(
   task: Task,
   agent: Agent,
-  opts?: { prompt?: string; env?: Record<string, string> },
+  opts?: { prompt?: string; env?: Record<string, string>; fresh?: boolean },
 ): Promise<Agent> {
   logger.info(
     { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh' },
@@ -60,12 +65,13 @@ export async function respawnAgentFresh(
     env: opts?.env,
   });
 
+  const fresh = opts?.fresh ?? false;
   const oldWindowIndex = agent.window_index;
   const newWindowIndex = await launchAgentWindow({
     session: task.tmux_session!,
     cwd: task.worktree!,
     startupCmd,
-    fresh: false,
+    fresh,
   });
 
   setAgentWindowRunning(agent.id, newWindowIndex);
@@ -76,14 +82,16 @@ export async function respawnAgentFresh(
   const target = `${task.tmux_session}:${newWindowIndex}`;
   void harness.postLaunch?.(target);
 
-  await execTmux(['kill-window', '-t', `${task.tmux_session}:${oldWindowIndex}`]).catch((err) => {
-    if (!isTmuxTargetMissing(err)) {
-      logger.warn(
-        { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh', err },
-        'respawn_fresh: kill old window failed',
-      );
-    }
-  });
+  if (!fresh) {
+    await execTmux(['kill-window', '-t', `${task.tmux_session}:${oldWindowIndex}`]).catch((err) => {
+      if (!isTmuxTargetMissing(err)) {
+        logger.warn(
+          { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh', err },
+          'respawn_fresh: kill old window failed',
+        );
+      }
+    });
+  }
 
   const updated = getAgent(agent.id) as Agent;
   broadcast({ type: 'task:updated', payload: { taskId: task.id } });

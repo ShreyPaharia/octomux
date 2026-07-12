@@ -15,6 +15,7 @@ export {
   scratchDirFor,
   reconcileOrphanSettingUp,
   gcScratchDirs,
+  recoverTasks,
 } from './reconcile.js';
 export {
   validateRepo,

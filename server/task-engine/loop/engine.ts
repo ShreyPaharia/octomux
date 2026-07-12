@@ -14,7 +14,7 @@ import { runVerify } from './verify.js';
 import { respawnAgentFresh } from '../lifecycle/respawn-agent.js';
 import { broadcast } from '../../events.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
-import type { LoopRun, LoopIteration, LoopSpec, LoopRunStatus } from '../../types.js';
+import type { LoopRun, LoopIteration, LoopSpec, LoopRunStatus, Task } from '../../types.js';
 
 const logger = childLogger('task-engine/loop');
 
@@ -216,4 +216,54 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
     prompt: buildLoopPrompt(spec, run.id, verify.passed ? null : verify.output),
     env: loopAgentEnv(taskId, agent.hook_token),
   });
+}
+
+/**
+ * Startup crash-resume for a looping task whose tmux session died with the
+ * server. Recovers controller state from the loop_run and kicks a FRESH
+ * iteration (never `--resume`s the old harness session — a loop iteration is
+ * fresh-context by design) into a brand-new tmux session, carrying the same
+ * loopAgentEnv so `octomux emit` auth keeps working.
+ *
+ * Only gates on the run existing, not `run.status === 'running'`: a crash
+ * right after an emit (which sets loop_runs.status to done/blocked/
+ * needs_human *before* the Stop hook evaluates verify — see
+ * getActiveLoopRunForTask's doc comment) must still resume. `runtime_state
+ * === 'looping'`, already checked by the caller, is the authoritative "is
+ * this loop still active" signal.
+ *
+ * ponytail: doesn't clean up orphaned user-terminal/viewer-session rows tied
+ * to the dead session (prepareResumeSession does this for normal tasks) —
+ * add if loop-crash-resume leaves visible terminal cruft.
+ */
+export async function resumeLoopOnStartup(task: Task): Promise<void> {
+  const run = getActiveLoopRunForTask(task.id);
+  if (!run) {
+    logger.warn({ task_id: task.id }, 'loop: no loop_run to resume on startup');
+    setRuntimeState(task.id, 'idle');
+    return;
+  }
+
+  const agentRef = findFirstActiveAgent(task.id);
+  const agent = agentRef ? getAgent(agentRef.id) : undefined;
+  if (!agent) {
+    logger.warn(
+      { task_id: task.id, loop_run_id: run.id },
+      'loop: no agent to resume loop on startup',
+    );
+    terminateLoopRun(run.id, 'needs_human', 'no_agent_on_startup');
+    setRuntimeState(task.id, 'idle');
+    return;
+  }
+
+  const spec = JSON.parse(run.spec_json) as LoopSpec;
+
+  await respawnAgentFresh(task, agent, {
+    prompt: buildLoopPrompt(spec, run.id),
+    env: loopAgentEnv(task.id, agent.hook_token),
+    fresh: true,
+  });
+
+  logger.info({ task_id: task.id, loop_run_id: run.id }, 'loop: resumed on startup');
+  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 }

@@ -111,12 +111,13 @@ export function listWalkthroughHandoffTasks(): Task[] {
 }
 
 /**
- * List all running/setting_up tasks regardless of tmux_session.
- * Used by startup recovery (recoverTasks).
+ * List all running/setting_up/looping tasks regardless of tmux_session.
+ * Used by startup recovery (recoverTasks) — 'looping' tasks are routed to
+ * the loop's fresh-context resume, never the normal --resume ladder.
  */
 export function listRecoverableTasks(): Task[] {
   return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up')`)
+    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'setting_up', 'looping')`)
     .all() as Task[];
 }
 

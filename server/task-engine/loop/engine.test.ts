@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
-import type { LoopRun, LoopSpec } from '../../types.js';
+import type { LoopRun, LoopSpec, Task } from '../../types.js';
 
 vi.mock('../git.js', () => ({
   revParseHead: vi.fn(),
@@ -20,12 +20,17 @@ vi.mock('../../hook-base-url.js', () => ({
   hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777'),
 }));
 
-const { buildLoopPrompt, evaluateTermination, startLoop, handleLoopIterationBoundary } =
-  await import('./engine.js');
+const {
+  buildLoopPrompt,
+  evaluateTermination,
+  startLoop,
+  handleLoopIterationBoundary,
+  resumeLoopOnStartup,
+} = await import('./engine.js');
 const { revParseHead, commitAll } = await import('../git.js');
 const { runVerify } = await import('./verify.js');
 const { respawnAgentFresh } = await import('../lifecycle/respawn-agent.js');
-const { getLoopRun, listIterationsForRun, recordEmit } =
+const { getLoopRun, listIterationsForRun, recordEmit, createLoopRun } =
   await import('../../repositories/loop-runs.js');
 
 function makeRun(overrides: Partial<LoopRun> = {}): LoopRun {
@@ -257,5 +262,58 @@ describe('handleLoopIterationBoundary', () => {
 
     expect(vi.mocked(respawnAgentFresh).mock.calls.length).toBe(callsBefore); // no new respawn
     expect(getLoopRun(run.id)?.termination_reason).toBe('budget');
+  });
+});
+
+describe('resumeLoopOnStartup', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+    vi.clearAllMocks();
+    insertTask(db, { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'looping' });
+    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-1', status: 'running' } as any);
+  });
+
+  it('resumes an active loop_run via a fresh respawn, not --resume', async () => {
+    const run = createLoopRun({
+      task_id: 't1',
+      spec_json: JSON.stringify(LOOP_SPEC),
+      max_iterations: LOOP_SPEC.maxIterations,
+    });
+    const task = { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'looping' } as Task;
+
+    await resumeLoopOnStartup(task);
+
+    expect(respawnAgentFresh).toHaveBeenCalledTimes(1);
+    const [, , opts] = vi.mocked(respawnAgentFresh).mock.calls[0];
+    expect(opts?.fresh).toBe(true);
+    expect(opts?.prompt).toContain(`Loop run id: ${run.id}`);
+    expect(opts?.env).toMatchObject({ OCTOMUX_ACTION_TOKEN: 'tok-1', OCTOMUX_TASK_ID: 't1' });
+  });
+
+  it('idles the task when there is no active loop_run to resume', async () => {
+    const task = { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'looping' } as Task;
+
+    await resumeLoopOnStartup(task);
+
+    expect(respawnAgentFresh).not.toHaveBeenCalled();
+    const updated = db.prepare('SELECT runtime_state FROM tasks WHERE id = ?').get('t1') as {
+      runtime_state: string;
+    };
+    expect(updated.runtime_state).toBe('idle');
+  });
+
+  it("still resumes when the run's last-known status is a terminal emit status (crash right after emit, before the Stop hook processed it)", async () => {
+    // recordEmit sets loop_runs.status to done/blocked/needs_human *before*
+    // the Stop hook evaluates verify and actually terminates the run — a
+    // crash in that window must not be mistaken for "already terminated".
+    const run = createLoopRun({ task_id: 't1', spec_json: JSON.stringify(LOOP_SPEC) });
+    recordEmit(run.id, { status: 'done', reason: 'looks done' });
+    const task = { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'looping' } as Task;
+
+    await resumeLoopOnStartup(task);
+
+    expect(respawnAgentFresh).toHaveBeenCalledTimes(1);
   });
 });
