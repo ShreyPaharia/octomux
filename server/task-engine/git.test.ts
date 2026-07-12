@@ -41,8 +41,14 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-const { addWorktreeWithBranch, slugifyTitle, gitBranchExists, revParseHead, checkDirty } =
-  await import('./git.js');
+const {
+  addWorktreeWithBranch,
+  slugifyTitle,
+  gitBranchExists,
+  revParseHead,
+  checkDirty,
+  commitAll,
+} = await import('./git.js');
 const { execFile } = await import('child_process');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -364,5 +370,64 @@ describe('addWorktreeWithBranch', () => {
       argsInclude: ['worktree', 'add', '-b', 'develop'],
     });
     expect(fallbackCall).toBeDefined();
+  });
+});
+
+// ─── commitAll ────────────────────────────────────────────────────────────────
+
+describe('commitAll', () => {
+  it('commits when the worktree is dirty', async () => {
+    // Scoped via mockImplementationOnce (one per execFile call: status, add, commit) rather
+    // than a persistent mockImplementation — vi.clearAllMocks() in beforeEach only clears call
+    // history, not implementations, so a persistent override here would leak into later tests.
+    vi.mocked(execFile)
+      .mockImplementationOnce(((
+        _cmd: string,
+        _args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        cb(null, { stdout: ' M src/foo.ts\n', stderr: '' });
+      }) as any)
+      .mockImplementationOnce(((
+        _cmd: string,
+        _args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        cb(null, { stdout: '', stderr: '' });
+      }) as any)
+      .mockImplementationOnce(((
+        _cmd: string,
+        _args: string[],
+        optsOrCb: Function | object,
+        maybeCb?: Function,
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        cb(null, { stdout: '', stderr: '' });
+      }) as any);
+
+    const committed = await commitAll('/repo/wt', 'loop(run1): iteration 1');
+    expect(committed).toBe(true);
+
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['add', '-A'] }),
+    ).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), {
+        cmd: 'git',
+        argsInclude: ['commit', '-m', 'loop(run1): iteration 1'],
+      }),
+    ).toBeDefined();
+  });
+
+  it('skips commit when the worktree is clean', async () => {
+    const committed = await commitAll('/repo/wt', 'loop(run1): iteration 1');
+    expect(committed).toBe(false);
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['add', '-A'] }),
+    ).toBeUndefined();
   });
 });

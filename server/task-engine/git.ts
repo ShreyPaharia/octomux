@@ -69,6 +69,15 @@ export async function checkDirty(repoPath: string): Promise<string[]> {
     .filter(Boolean);
 }
 
+/** Stage and commit all changes if the worktree is dirty. Returns false (no-op) when clean. */
+export async function commitAll(cwd: string, message: string): Promise<boolean> {
+  const dirty = await checkDirty(cwd);
+  if (dirty.length === 0) return false;
+  await execFile('git', ['-C', cwd, 'add', '-A']);
+  await execFile('git', ['-C', cwd, 'commit', '-m', message]);
+  return true;
+}
+
 /** True if `refs/heads/<branch>` exists in the repo. */
 export async function gitBranchExists(repoPath: string, branch: string): Promise<boolean> {
   try {
