@@ -450,3 +450,36 @@ for the ones already sketched lives in §4 (registry), §5 (candidates), §6 (pa
 | **Continued-context loop mode**                                                        | when a use case wants accumulated context       | P1 is fresh-only; one code path                                          |
 | **Best-of-N / parallel loops**                                                         | P4                                              | needs `llmJudge` to pick a winner                                        |
 | **`@octomux/workflow-core` package**                                                   | P5, only if a third-party plugin need appears   | optional, not a goal                                                     |
+
+## 12. Generalization roadmap — the harness lens
+
+Framing (per [Lilian Weng, "Agent Harness Engineering", 2026-07-04](https://lilianweng.github.io/posts/2026-07-04-harness/)):
+octomux is a **harness** — the OS-like layer around the model that governs control flow, context/memory,
+tools, evaluation, and permissions — not merely an orchestrator. The loop harness (P0/P1) is the
+control-flow piece. The article validates most of our design and adds two dimensions the earlier spec
+did not name: **curated cross-iteration memory** and **self-improvement**.
+
+**What the article confirms we already got right:**
+
+- Evaluator sits _outside_ agent self-report — loop `done` requires the verifier to pass, not just the
+  agent's `emit` (mitigates the "over-optimism / numerical duct tape" failure mode and reward hacking).
+- Durable state in the file system (per-iteration git commits + the ledger), not in context.
+- Fresh context per iteration (Ralph reset) as a context-degradation mitigation.
+- Human checkpoints + permission control kept outside the automated loop (Gate primitive, gated sinks).
+
+**Finalized, prioritized next steps:**
+
+| When                      | Item                                                                                                                                                                                                                                                                                                                                                                               | Basis                                           |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **Finish P1**             | Crash-resume of an in-flight loop (recover controller state from `loop_runs`, start a fresh iteration — never `--resume`). Guard `POST /api/loops` against a second loop on an already-`looping` task (smoke-test finding).                                                                                                                                                        | spec §11 + article "recover after interruption" |
+| **P2 (highest leverage)** | **Curated learnings playbook** — each iteration distills its trajectory into a persistent, structured playbook file (Generator→Reflector→Curator) that seeds the next fresh-context iteration; reuse the existing `review-learnings` machinery. Turns loops from amnesiac into cumulative. Plus verifier hardening (deterministic-first; `llmJudge` advisory unless corroborated). | article **ACE** + reward-hacking                |
+| **P3**                    | Trigger→output→sink workflows (PR-extract→SQL) — the harness's I/O edges.                                                                                                                                                                                                                                                                                                          | spec §11                                        |
+| **P4**                    | Best-of-N / parallel loops with **file-based status records** (explicit, inspectable, recoverable) · generic `/w/:kind` registry.                                                                                                                                                                                                                                                  | spec §11 + article subagent pattern             |
+| **Frontier (spike only)** | Self-improving harness: Propose→Evaluate→Accept over editable surfaces (skills/prompts/hooks), with the article's guardrails — evaluator + permissions **outside** the evolving loop, **bounded editable surfaces**, held-in/held-out regression, human accept-gate. High ceiling, high reward-hacking risk.                                                                       | article DGM/STOP/Self-Harness Loop              |
+
+**The one reordering the article drives:** promote the **curated-playbook** (P2) ahead of the
+trigger→sink workflows. It is cheap (reuses `review-learnings`), directly attacks the memory-degradation
+failure mode, and makes loops cumulative — the highest-ROI next step. The self-improving harness is
+named for completeness but is a gated research spike, not committed work, precisely because a
+self-improvement loop optimizes whatever signal it is given (reward hacking) — its evaluator and
+permission layer must live outside the loop it evolves.
