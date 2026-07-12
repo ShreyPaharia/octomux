@@ -28,8 +28,6 @@ import { useTaskDetailComments } from '@/hooks/useTaskDetailComments';
 import { _resetPerTaskUiState } from '@/hooks/perTaskUiState';
 import type { RunMode } from '@octomux/types';
 
-export const SHIP_EVENT = 'octomux:open-pr-sheet';
-
 /** Re-export for tests that import from TaskDetail. */
 export { _resetPerTaskUiState };
 
@@ -100,11 +98,6 @@ export default function TaskDetail() {
 
   const [reviewBusy, setReviewBusy] = useState(false);
   const existingReviewId = task?.existing_review_id ?? null;
-
-  const handleShip = useCallback(() => {
-    if (!taskId) return;
-    window.dispatchEvent(new CustomEvent(SHIP_EVENT, { detail: { taskId } }));
-  }, [taskId]);
 
   const handleReview = useCallback(async () => {
     if (!taskId) return;
@@ -289,7 +282,6 @@ export default function TaskDetail() {
         existingReviewId={existingReviewId}
         reviewBusy={reviewBusy}
         onResume={handleResume}
-        onShip={handleShip}
         onToggleEditor={handleToggleEditor}
         onModeChange={setMode}
         onStart={handleStart}

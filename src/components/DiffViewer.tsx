@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { taskApi, type DiffFileEntry, type DiffRange } from '@/lib/api/taskApi';
 import type { Agent } from '@octomux/types';
-import { getReviewed, setReviewed as persistReviewed } from '@/lib/diff-state';
+import {
+  getReviewed,
+  setReviewed as persistReviewed,
+  getDiffSideBySide,
+  setDiffSideBySide,
+} from '@/lib/diff-state';
 import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { DiffFileTree } from './DiffFileTree';
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
@@ -69,6 +74,15 @@ export function DiffViewer({
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [reviewed, setReviewedState] = useState<Set<string>>(new Set());
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [sideBySide, setSideBySide] = useState<boolean>(getDiffSideBySide);
+
+  const toggleView = useCallback(() => {
+    setSideBySide((prev) => {
+      const next = !prev;
+      setDiffSideBySide(next);
+      return next;
+    });
+  }, []);
 
   const internalListRef = useRef<DiffFileListHandle | null>(null);
   const listRef = externalListRef ?? internalListRef;
@@ -265,37 +279,47 @@ export function DiffViewer({
         data-testid="diff-pane"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-glass-l0"
       >
-        {!hideFileTree && reviewCounts.total > 0 ? (
+        {!hideFileTree && orderedFiles.length > 0 ? (
           <div
             data-testid="diff-pane-header"
             data-collapsed={allReviewed ? 'true' : 'false'}
-            className={`diff-pane-header flex shrink-0 items-center gap-2 overflow-hidden border-b border-glass-edge px-4 transition-all duration-200 ease-out ${
-              allReviewed ? 'justify-between py-1' : 'justify-end py-2'
-            }`}
+            className="diff-pane-header flex shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-glass-edge px-4 py-2 transition-all duration-200 ease-out"
           >
-            {allReviewed ? (
-              <>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {reviewCounts.total} {reviewCounts.total === 1 ? 'file' : 'files'} reviewed
+            <button
+              type="button"
+              data-testid="diff-view-toggle"
+              onClick={toggleView}
+              aria-label={sideBySide ? 'Switch to unified diff' : 'Switch to side-by-side diff'}
+              title={sideBySide ? 'Switch to unified diff' : 'Switch to side-by-side diff'}
+              className="rounded-md border border-glass-edge px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-glass-l2/60 hover:text-foreground"
+            >
+              {sideBySide ? 'Unified' : 'Side-by-side'}
+            </button>
+            {reviewCounts.total > 0 ? (
+              allReviewed ? (
+                <span className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {reviewCounts.total} {reviewCounts.total === 1 ? 'file' : 'files'} reviewed
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="reopen-review"
+                    onClick={reopenReview}
+                    className="rounded-md border border-glass-edge px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-glass-l2/60 hover:text-foreground"
+                  >
+                    Reopen review
+                  </button>
                 </span>
-                <button
-                  type="button"
-                  data-testid="reopen-review"
-                  onClick={reopenReview}
-                  className="rounded-md border border-glass-edge px-2 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-glass-l2/60 hover:text-foreground"
+              ) : (
+                <span
+                  data-testid="review-progress"
+                  aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
+                  className={DIFF_REVIEW_BADGE}
                 >
-                  Reopen review
-                </button>
-              </>
-            ) : (
-              <span
-                data-testid="review-progress"
-                aria-label={`${reviewCounts.done} of ${reviewCounts.total} reviewed`}
-                className={DIFF_REVIEW_BADGE}
-              >
-                {reviewCounts.done} / {reviewCounts.total} reviewed
-              </span>
-            )}
+                  {reviewCounts.done} / {reviewCounts.total} reviewed
+                </span>
+              )
+            ) : null}
           </div>
         ) : null}
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -312,6 +336,7 @@ export function DiffViewer({
               rangeIsBase={isBaseRange}
               enableComments={enableComments}
               groups={groups}
+              sideBySide={sideBySide}
             />
           )}
         </div>

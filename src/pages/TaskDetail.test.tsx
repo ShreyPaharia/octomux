@@ -294,39 +294,6 @@ describe('TaskDetail', () => {
     expect(tab.querySelector('[role="img"][aria-label="running"]')).not.toBeNull();
   });
 
-  // ─── Ship button ──────────────────────────────────────────────────────────
-
-  it('shows the Ship button for a running task and dispatches open-pr-sheet on click', async () => {
-    const user = userEvent.setup();
-    renderDetail();
-    const ship = await screen.findByTestId('ship-button');
-    const spy = vi.fn();
-    window.addEventListener('octomux:open-pr-sheet', spy);
-    try {
-      await user.click(ship);
-      expect(spy).toHaveBeenCalled();
-      const evt = spy.mock.calls[0][0] as CustomEvent<{ taskId: string }>;
-      expect(evt.detail.taskId).toBe('test-task-01');
-    } finally {
-      window.removeEventListener('octomux:open-pr-sheet', spy);
-    }
-  });
-
-  it('hides the Ship button for a scratch task (no repo)', async () => {
-    apiMock.getTask.mockResolvedValue(
-      makeTask({
-        run_mode: 'scratch',
-        runtime_state: 'running',
-        agents: [makeAgent({ id: 'a1' })],
-      }),
-    );
-    renderDetail();
-    await waitFor(() => {
-      expect(screen.getByText('Fix order validation')).toBeInTheDocument();
-    });
-    expect(screen.queryByTestId('ship-button')).not.toBeInTheDocument();
-  });
-
   // ─── Review button ────────────────────────────────────────────────────────
 
   it('renders a Review button labelled "Review" for a running task without an existing review', async () => {

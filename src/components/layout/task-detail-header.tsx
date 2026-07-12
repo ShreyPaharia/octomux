@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { StatusBadge } from '@/components/StatusBadge';
-import { ClipboardCheckIcon, PullRequestIcon } from '@/components/icons';
+import { ClipboardCheckIcon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
@@ -37,7 +37,6 @@ export interface TaskDetailHeaderProps {
   /** Manual-review trigger in-flight. */
   reviewBusy: boolean;
   onResume: () => void;
-  onShip: () => void;
   onToggleEditor: () => void;
   onModeChange: (mode: 'agents' | 'editor' | 'diff' | 'info') => void;
   onStart: () => void;
@@ -60,7 +59,6 @@ export function TaskDetailHeader({
   existingReviewId,
   reviewBusy,
   onResume,
-  onShip,
   onToggleEditor,
   onModeChange,
   onStart,
@@ -106,18 +104,6 @@ export function TaskDetailHeader({
             onClick={onResume}
           >
             {resuming ? '…' : 'Resume'}
-          </Button>
-        )}
-
-        {canShowDiff && (
-          <Button
-            size="sm"
-            data-testid="ship-button"
-            onClick={onShip}
-            className="gap-1.5 border border-success/40 bg-success/10 text-green-100 hover:bg-success/20"
-          >
-            <PullRequestIcon size={14} aria-hidden />
-            Ship
           </Button>
         )}
 
