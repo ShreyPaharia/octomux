@@ -174,4 +174,41 @@ describe('respawnAgentFresh', () => {
       .mock.calls.find((c) => (c[1] as string[])?.includes('new-session'));
     expect(newSessionCall).toBeUndefined();
   });
+
+  it('passes opts.prompt through to the startup command as a prompt file', async () => {
+    const agent = makeAgentRow();
+    const task = { ...DEFAULTS.runningTask } as Task;
+
+    await respawnAgentFresh(task, agent, { prompt: 'do the loop thing' });
+
+    const fs = await import('fs');
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(`.claude-prompt-${agent.id}`),
+      'do the loop thing',
+      expect.anything(),
+    );
+  });
+
+  it('exposes a hook token in the startup env that checkAgentTokenExists accepts (loop emit auth)', async () => {
+    const agent = makeAgentRow({ hook_token: 'real-hook-token-abc' });
+    const task = { ...DEFAULTS.runningTask } as Task;
+
+    await respawnAgentFresh(task, agent, {
+      env: {
+        OCTOMUX_TASK_ID: task.id,
+        OCTOMUX_ACTION_TOKEN: agent.hook_token,
+        OCTOMUX_ACTION_BASE_URL: 'http://127.0.0.1:7777',
+      },
+    });
+
+    const newWindowCall = vi
+      .mocked(execFile)
+      .mock.calls.find((c) => (c[1] as string[])?.includes('new-window'));
+    const startupCmd = (newWindowCall![1] as string[]).at(-1) as string;
+    expect(startupCmd).toContain('OCTOMUX_ACTION_TOKEN=');
+    expect(startupCmd).toContain('real-hook-token-abc');
+
+    const { checkAgentTokenExists } = await import('../../repositories/agent-runtime.js');
+    expect(checkAgentTokenExists('real-hook-token-abc')).toBe(true);
+  });
 });
