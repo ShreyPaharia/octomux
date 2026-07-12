@@ -21,8 +21,17 @@ const logger = childLogger('task-engine/lifecycle');
  * (no --resume), in the task's EXISTING tmux session. The new window is
  * created (and its index confirmed via tmux) before the old one is killed, so
  * the session never drops to zero windows — which would otherwise destroy it.
+ *
+ * `opts.prompt` seeds the fresh session's first turn (a fresh session has no
+ * memory of prior turns). `opts.env` is exported into the new window's shell
+ * — used by the loop harness to carry OCTOMUX_ACTION_TOKEN/BASE_URL so the
+ * agent's `octomux emit` CLI call can authenticate.
  */
-export async function respawnAgentFresh(task: Task, agent: Agent): Promise<Agent> {
+export async function respawnAgentFresh(
+  task: Task,
+  agent: Agent,
+  opts?: { prompt?: string; env?: Record<string, string> },
+): Promise<Agent> {
   logger.info(
     { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh' },
     'respawn_fresh: start',
@@ -43,7 +52,13 @@ export async function respawnAgentFresh(task: Task, agent: Agent): Promise<Agent
     model: (task as { model?: string | null }).model ?? null,
     workspacePath: task.worktree!,
   });
-  const startupCmd = buildAgentStartupCommand({ baseCmd });
+  const startupCmd = buildAgentStartupCommand({
+    baseCmd,
+    prompt: opts?.prompt,
+    worktreePath: opts?.prompt ? task.worktree! : undefined,
+    agentId: opts?.prompt ? agent.id : undefined,
+    env: opts?.env,
+  });
 
   const oldWindowIndex = agent.window_index;
   const newWindowIndex = await launchAgentWindow({

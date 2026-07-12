@@ -1,18 +1,121 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
 import { createLoopRun, appendIteration } from './repositories/loop-runs.js';
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  const mocked = {
+    ...actual,
+    existsSync: vi.fn(() => true),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
+  };
+  return { ...mocked, default: mocked };
+});
+
+let nextWindowIndex = 5;
+vi.mock('child_process', () => ({
+  execFile: vi.fn(
+    (_cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      if (args.includes('list-windows')) {
+        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
+      } else if (args.includes('new-window')) {
+        nextWindowIndex++;
+        cb(null, { stdout: '', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    },
+  ),
+}));
+
+vi.mock('./orchestrator/store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./orchestrator/store.js')>();
+  return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
+});
+vi.mock('./orchestrator/runner.js', () => ({ mcpServerInvocation: vi.fn(() => null) }));
+vi.mock('./hook-base-url.js', () => ({ hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777') }));
+vi.mock('./settings.js', () => ({ getSettings: vi.fn(async () => ({})) }));
+vi.mock('./skills.js', () => ({ syncSkills: vi.fn(async () => undefined) }));
+vi.mock('./harnesses/index.js', () => ({
+  getHarness: vi.fn(() => ({
+    id: 'claude-code',
+    sessionIdMode: 'orchestrator-assigned',
+    newSessionId: vi.fn(() => 'fresh-session-id'),
+    buildLaunchCommand: vi.fn(() => 'claude --session-id fresh-session-id'),
+    buildResumeCommand: vi.fn(),
+    resolveFlags: vi.fn(() => ''),
+    syncAgents: vi.fn(async () => undefined),
+    installHooks: vi.fn(async () => undefined),
+    postLaunch: vi.fn(async () => undefined),
+  })),
+}));
 
 describe('loop routes', () => {
   let app: ReturnType<typeof createApp>;
   let db: ReturnType<typeof createTestDb>;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    nextWindowIndex = 5;
     db = createTestDb();
     app = createApp();
-    insertTask(db, { id: 't1', runtime_state: 'looping' });
-    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-loop' } as any);
+    insertTask(db, { id: 't1', runtime_state: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-loop', status: 'running' } as any);
+  });
+
+  describe('POST /api/loops', () => {
+    it('creates and starts a loop run', async () => {
+      const res = await request(app)
+        .post('/api/loops')
+        .send({
+          taskId: 't1',
+          spec: { prompt: 'do the thing', verify: 'echo ok', maxIterations: 5 },
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.task_id).toBe('t1');
+      expect(res.body.status).toBe('running');
+
+      const task = db.prepare('SELECT runtime_state FROM tasks WHERE id = ?').get('t1') as {
+        runtime_state: string;
+      };
+      expect(task.runtime_state).toBe('looping');
+    });
+
+    it('rejects a missing taskId with 400', async () => {
+      const res = await request(app)
+        .post('/api/loops')
+        .send({ spec: { prompt: 'x', verify: 'y', maxIterations: 5 } });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a missing spec.verify with 400', async () => {
+      const res = await request(app)
+        .post('/api/loops')
+        .send({ taskId: 't1', spec: { prompt: 'x', maxIterations: 5 } });
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 for an unknown task', async () => {
+      const res = await request(app)
+        .post('/api/loops')
+        .send({ taskId: 'nope', spec: { prompt: 'x', verify: 'y', maxIterations: 5 } });
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 400 when the task has no active agent', async () => {
+      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+      const res = await request(app)
+        .post('/api/loops')
+        .send({ taskId: 't1', spec: { prompt: 'x', verify: 'y', maxIterations: 5 } });
+      expect(res.status).toBe(400);
+    });
   });
 
   describe('POST /api/loops/:runId/emit', () => {

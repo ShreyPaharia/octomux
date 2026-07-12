@@ -32,6 +32,7 @@ import { registerInit } from './commands/init.js';
 import { registerTeam } from './commands/team.js';
 import { registerFiles } from './commands/files.js';
 import { registerEmit } from './commands/emit.js';
+import { registerLoopStart } from './commands/loop-start.js';
 
 const program = new Command();
 
@@ -75,6 +76,7 @@ registerInit(program);
 registerTeam(program);
 registerFiles(program);
 registerEmit(program);
+registerLoopStart(program);
 
 program.hook('preAction', (thisCommand) => {
   const opts = thisCommand.optsWithGlobals();

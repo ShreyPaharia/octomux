@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
-import type { LoopRun, LoopIteration, LoopEmitStatus } from '../types.js';
+import type { LoopRun, LoopIteration, LoopEmitStatus, LoopRunStatus } from '../types.js';
 
 const logger = childLogger('loop-runs');
 
@@ -107,4 +107,45 @@ export function recordEmit(loopRunId: string, input: RecordEmitInput): void {
   }
 
   logger.info({ loop_run_id: loopRunId, status: input.status }, 'loop_run emit recorded');
+}
+
+/**
+ * Most recent loop_run for a task, regardless of status.
+ *
+ * Deliberately NOT filtered to status='running': `recordEmit` (the agent's
+ * `octomux emit` callback) flips status to 'done'/'blocked'/'needs_human'
+ * *before* the Stop hook that reports the same turn's end ever fires, so a
+ * status filter here would hide the very run the engine needs to process
+ * that emit against. `tasks.runtime_state === 'looping'` — checked by the
+ * Stop hook before it ever calls into the loop engine — is the authoritative
+ * "is this task's loop still active" signal, not this column.
+ */
+export function getActiveLoopRunForTask(taskId: string): LoopRun | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM loop_runs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .get(taskId) as LoopRun | undefined;
+}
+
+/** Close a loop_run with a final status + canonical short-code termination_reason. */
+export function terminateLoopRun(
+  loopRunId: string,
+  status: LoopRunStatus,
+  terminationReason: string,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE loop_runs SET status = ?, termination_reason = ?, updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(status, terminationReason, loopRunId);
+  logger.info(
+    { loop_run_id: loopRunId, status, termination_reason: terminationReason },
+    'loop_run terminated',
+  );
+}
+
+/** Reset a loop_run's status back to 'running' (e.g. a 'done' emit whose verify then failed). */
+export function resumeLoopRun(loopRunId: string): void {
+  getDb()
+    .prepare(`UPDATE loop_runs SET status = 'running', updated_at = datetime('now') WHERE id = ?`)
+    .run(loopRunId);
 }

@@ -109,6 +109,15 @@ export interface LoopIteration {
   emit_reason: string | null;
   created_at: string;
 }
+
+export interface LoopSpec {
+  prompt: string;
+  verify: string;
+  maxIterations: number;
+  budget?: { tokens?: number; timeMs?: number };
+  noProgress?: { afterIters: number };
+}
+
 export type CommentBucket = 'actionable' | 'informational';
 export type CommentSeverity = 'nit' | 'suggestion' | 'issue' | 'critical';
 export type LastCheckStatus = 'resolved' | 'still_applies' | 'partial' | 'unclear';

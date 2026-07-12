@@ -28,6 +28,7 @@ export {
   gitBranchExists,
   addWorktreeWithBranch,
   slugifyTitle,
+  commitAll,
 } from './git.js';
 export {
   buildAgentStartupCommand,

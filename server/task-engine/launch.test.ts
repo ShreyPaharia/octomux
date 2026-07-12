@@ -157,6 +157,28 @@ describe('buildAgentStartupCommand', () => {
     });
     expect(cmd).not.toContain('$(cat ');
   });
+
+  it('prepends shell-quoted env exports when env is provided', () => {
+    const cmd = buildAgentStartupCommand({
+      baseCmd: 'claude --session-id abc',
+      env: { OCTOMUX_ACTION_TOKEN: 'tok-123', OCTOMUX_ACTION_BASE_URL: 'http://127.0.0.1:7777' },
+    });
+    // The whole script (export prefix included) is itself shell-quoted by the
+    // outer shellQuoteSingle(script) call, which re-escapes the single quotes
+    // from each per-value shellQuoteSingle() into `'\''`. So we assert on the
+    // substrings that survive that re-escaping unchanged (key=, values), the
+    // same pattern the prompt-file tests above use (e.g. `"$(cat `).
+    expect(cmd).toContain('export OCTOMUX_ACTION_TOKEN=');
+    expect(cmd).toContain('tok-123');
+    expect(cmd).toContain('OCTOMUX_ACTION_BASE_URL=');
+    expect(cmd).toContain('http://127.0.0.1:7777');
+    expect(cmd.indexOf('export ')).toBeLessThan(cmd.indexOf('claude --session-id abc'));
+  });
+
+  it('omits the export prefix when env is not provided', () => {
+    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
+    expect(cmd).not.toContain('export ');
+  });
 });
 
 // ─── computeFreshSessionIds ───────────────────────────────────────────────────
