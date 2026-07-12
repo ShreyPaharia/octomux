@@ -3,13 +3,57 @@ import fs from 'fs';
 import { octomuxRoot } from '../octomux-root.js';
 import { execTmux } from '../tmux-bin.js';
 import { childLogger } from '../logger.js';
+import { checkTaskStatus } from '../poller/status.js';
 import {
   listSettingUpTasks,
+  listRecoverableTasks,
   setRuntimeState,
+  setRuntimeStateSetupInterrupted,
   listActiveScratchTaskIds,
 } from '../repositories/index.js';
+import { resumeTask } from './lifecycle.js';
+import { resumeLoopOnStartup } from './loop/engine.js';
 
 const logger = childLogger('task-engine/reconcile');
+
+/**
+ * Boot-time task recovery: resume tasks whose runtime_state says they should
+ * be running/setting_up/looping but whose tmux session died with the server.
+ * Looping tasks are routed through the loop's fresh-context respawn — never
+ * the normal `--resume` ladder, which would continue the wrong (non-loop)
+ * context.
+ */
+export async function recoverTasks(): Promise<void> {
+  const staleTasks = listRecoverableTasks();
+
+  for (const task of staleTasks) {
+    const status = await checkTaskStatus(task);
+    if (status === 'alive') continue;
+
+    // Session is dead. Require tmux_session too — without it the task never
+    // reached the new-session step, so there's nothing for resumeTask to
+    // re-attach to; treat it as an interrupted setup instead.
+    if (task.worktree && fs.existsSync(task.worktree) && task.tmux_session) {
+      if (task.runtime_state === 'looping') {
+        logger.warn({ task_id: task.id, title: task.title }, 'Recovery: resuming loop');
+        resumeLoopOnStartup(task).catch((err) => {
+          logger.error({ task_id: task.id, err }, 'Recovery: resumeLoopOnStartup failed');
+        });
+      } else {
+        logger.warn({ task_id: task.id, title: task.title }, 'Recovery: resuming task');
+        resumeTask(task).catch((err) => {
+          logger.error({ task_id: task.id, err }, 'Recovery: resumeTask failed');
+        });
+      }
+    } else if (task.runtime_state === 'setting_up') {
+      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: setup was interrupted');
+      setRuntimeStateSetupInterrupted(task.id);
+    } else {
+      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: worktree missing');
+      setRuntimeState(task.id, 'error', 'Worktree missing after restart');
+    }
+  }
+}
 
 /** Root directory for scratch-mode task working dirs. */
 export function scratchRoot(): string {

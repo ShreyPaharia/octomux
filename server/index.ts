@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import path from 'path';
-import fs from 'fs';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
@@ -26,22 +25,16 @@ import { createSupervisor } from './orchestrator/supervisor.js';
 import { rehydrateConversations } from './orchestrator/runner.js';
 import { rehydratePendingCards } from './orchestrator/gate.js';
 import { startPolling, stopPolling } from './poller.js';
-import { checkTaskStatus } from './poller.js';
 import {
-  resumeTask,
   cleanupOrphanedViewerSessions,
   reconcileOrphanSettingUp,
   gcScratchDirs,
+  recoverTasks,
 } from './task-engine/index.js';
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
-import {
-  listRecoverableTasks,
-  setRuntimeState,
-  setRuntimeStateSetupInterrupted,
-} from './repositories/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
@@ -64,32 +57,6 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
   if (handleOrchestratorUpgrade(req, socket, head)) return;
   socket.destroy();
 });
-
-// ─── Startup Recovery ──────────────────────────────────────────────────────
-async function recoverTasks(): Promise<void> {
-  const staleTasks = listRecoverableTasks();
-
-  for (const task of staleTasks) {
-    const status = await checkTaskStatus(task);
-    if (status === 'alive') continue;
-
-    // Session is dead. Require tmux_session too — without it the task never
-    // reached the new-session step, so there's nothing for resumeTask to
-    // re-attach to; treat it as an interrupted setup instead.
-    if (task.worktree && fs.existsSync(task.worktree) && task.tmux_session) {
-      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: resuming task');
-      resumeTask(task).catch((err) => {
-        logger.error({ task_id: task.id, err }, 'Recovery: resumeTask failed');
-      });
-    } else if (task.runtime_state === 'setting_up') {
-      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: setup was interrupted');
-      setRuntimeStateSetupInterrupted(task.id);
-    } else {
-      logger.warn({ task_id: task.id, title: task.title }, 'Recovery: worktree missing');
-      setRuntimeState(task.id, 'error', 'Worktree missing after restart');
-    }
-  }
-}
 
 // Create the run/ dir holding the private tmux socket before any tmux call.
 ensureTmuxRuntimeDir();
