@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
 import type { LoopRun, LoopSpec, Task } from '../../types.js';
@@ -6,6 +9,7 @@ import type { LoopRun, LoopSpec, Task } from '../../types.js';
 vi.mock('../git.js', () => ({
   revParseHead: vi.fn(),
   commitAll: vi.fn(async () => true),
+  diffNameOnly: vi.fn(async () => []),
 }));
 vi.mock('./verify.js', () => ({
   runVerify: vi.fn(),
@@ -27,7 +31,7 @@ const {
   handleLoopIterationBoundary,
   resumeLoopOnStartup,
 } = await import('./engine.js');
-const { revParseHead, commitAll } = await import('../git.js');
+const { revParseHead, commitAll, diffNameOnly } = await import('../git.js');
 const { runVerify } = await import('./verify.js');
 const { respawnAgentFresh } = await import('../lifecycle/respawn-agent.js');
 const { getLoopRun, listIterationsForRun, recordEmit, createLoopRun } =
@@ -67,6 +71,12 @@ describe('buildLoopPrompt', () => {
   it('omits the verify-failure section when there is none', () => {
     const prompt = buildLoopPrompt(SPEC, 'run-1', null);
     expect(prompt).not.toContain('verify command failed');
+  });
+
+  it('tells the agent to read the loop playbook first', () => {
+    const prompt = buildLoopPrompt(SPEC, 'run-1');
+    expect(prompt).toContain('.octomux/loop-playbook.md');
+    expect(prompt).toMatch(/read it first/);
   });
 });
 
@@ -262,6 +272,72 @@ describe('handleLoopIterationBoundary', () => {
 
     expect(vi.mocked(respawnAgentFresh).mock.calls.length).toBe(callsBefore); // no new respawn
     expect(getLoopRun(run.id)?.termination_reason).toBe('budget');
+  });
+});
+
+describe('loop playbook', () => {
+  let db: Database.Database;
+  let worktree: string;
+
+  beforeEach(() => {
+    db = createTestDb();
+    vi.clearAllMocks();
+    worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-loop-playbook-'));
+    insertTask(db, { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'running', worktree });
+    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-1', status: 'running' } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  });
+
+  function readPlaybook(): string {
+    return fs.readFileSync(path.join(worktree, '.octomux', 'loop-playbook.md'), 'utf-8');
+  }
+
+  it('appends a PASS entry with changed files and no verify output on success', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
+    vi.mocked(diffNameOnly).mockResolvedValueOnce(['src/foo.ts', 'src/bar.ts']);
+    vi.mocked(runVerify).mockResolvedValueOnce({ passed: true, output: 'all good' });
+
+    const run = await startLoop('t1', LOOP_SPEC);
+    recordEmit(run.id, { status: 'done', reason: 'iter1' });
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const playbook = readPlaybook();
+    expect(playbook).toContain('## Iteration 1 — verify PASS');
+    expect(playbook).toContain('src/foo.ts, src/bar.ts');
+    expect(playbook).not.toContain('verify output');
+  });
+
+  it('appends a FAIL entry including the verify output', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
+    vi.mocked(diffNameOnly).mockResolvedValueOnce(['src/foo.ts']);
+    vi.mocked(runVerify).mockResolvedValueOnce({
+      passed: false,
+      output: 'assertion failed: x != y',
+    });
+
+    await startLoop('t1', LOOP_SPEC);
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const playbook = readPlaybook();
+    expect(playbook).toContain('## Iteration 1 — verify FAIL');
+    expect(playbook).toContain('verify output: assertion failed: x != y');
+  });
+
+  it('accumulates entries across iterations instead of overwriting', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
+    vi.mocked(diffNameOnly).mockResolvedValue([]);
+    vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
+
+    await startLoop('t1', LOOP_SPEC);
+    await handleLoopIterationBoundary('t1', 'a1');
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const playbook = readPlaybook();
+    expect(playbook).toContain('## Iteration 1 — verify FAIL');
+    expect(playbook).toContain('## Iteration 2 — verify FAIL');
   });
 });
 

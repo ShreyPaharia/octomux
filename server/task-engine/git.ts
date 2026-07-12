@@ -69,6 +69,21 @@ export async function checkDirty(repoPath: string): Promise<string[]> {
     .filter(Boolean);
 }
 
+/** Files changed between two commits (`git diff --name-only <from>..<to>`). */
+export async function diffNameOnly(cwd: string, shaFrom: string, shaTo: string): Promise<string[]> {
+  const { stdout } = await execFile('git', [
+    '-C',
+    cwd,
+    'diff',
+    '--name-only',
+    `${shaFrom}..${shaTo}`,
+  ]);
+  return stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
 /** Stage and commit all changes if the worktree is dirty. Returns false (no-op) when clean. */
 export async function commitAll(cwd: string, message: string): Promise<boolean> {
   const dirty = await checkDirty(cwd);
