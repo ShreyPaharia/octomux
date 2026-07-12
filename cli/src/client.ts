@@ -39,6 +39,25 @@ export interface PostCommentInput {
   anchor_commit_sha?: string;
 }
 
+export interface LoopSpecInput {
+  prompt: string;
+  verify: string;
+  maxIterations: number;
+  budget?: { tokens?: number; timeMs?: number };
+  noProgress?: { afterIters: number };
+}
+
+export interface LoopRunResult {
+  id: string;
+  task_id: string;
+  status: string;
+  iteration: number;
+  max_iterations: number | null;
+  termination_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface IntegrationRow {
   id: string;
   kind: string;
@@ -69,6 +88,7 @@ export interface OctomuxClient {
     },
   ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
+  startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<LoopRunResult>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
@@ -170,6 +190,9 @@ export function createClient(serverUrl: string): OctomuxClient {
         `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}`,
         { method: 'DELETE' },
       );
+    },
+    startLoop(data) {
+      return request<LoopRunResult>('/loops', { method: 'POST', body: JSON.stringify(data) });
     },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(
