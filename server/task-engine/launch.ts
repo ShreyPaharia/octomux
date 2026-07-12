@@ -54,6 +54,7 @@ export function buildAgentStartupCommand(args: {
   prompt?: string | null;
   worktreePath?: string;
   agentId?: string;
+  env?: Record<string, string>;
 }): string {
   let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
@@ -72,6 +73,12 @@ export function buildAgentStartupCommand(args: {
         // already removed or never existed
       }
     }, PROMPT_FILE_CLEANUP_MS);
+  }
+  if (args.env && Object.keys(args.env).length > 0) {
+    const exports = Object.entries(args.env)
+      .map(([key, value]) => `${key}=${shellQuoteSingle(value)}`)
+      .join(' ');
+    inner = `export ${exports}; ${inner}`;
   }
   const shell = process.env.SHELL || '/bin/sh';
   // Keep the window alive as an interactive shell once the harness exits, so
