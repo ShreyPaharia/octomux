@@ -8,8 +8,9 @@ import {
   listLoopRuns,
   listIterationsForRun,
   recordEmit,
+  terminateLoopRun,
 } from '../repositories/loop-runs.js';
-import { getTask } from '../repositories/tasks.js';
+import { getTask, setRuntimeState } from '../repositories/tasks.js';
 import { badRequest, notFound } from '../services/errors.js';
 import { startLoop } from '../task-engine/loop/engine.js';
 import type { LoopEmitStatus, LoopSpec } from '../types.js';
@@ -91,6 +92,21 @@ router.post('/api/loops/:runId/emit', requireBearerHookToken, (req: Request, res
   });
 
   res.status(200).json(getLoopRun(runId));
+});
+
+router.post('/api/loops/:runId/stop', (req: Request, res: Response) => {
+  const { runId } = req.params as Record<string, string>;
+  const run = getLoopRun(runId);
+  if (!run) throw notFound('Loop run not found');
+
+  if (run.status === 'running') {
+    terminateLoopRun(runId, 'needs_human', 'stopped');
+    setRuntimeState(run.task_id, 'idle');
+    logger.info({ task_id: run.task_id, loop_run_id: runId }, 'loop: stopped by user');
+    broadcast({ type: 'task:updated', payload: { taskId: run.task_id } });
+  }
+
+  res.json(getLoopRun(runId));
 });
 
 router.get('/api/loops', (_req: Request, res: Response) => {

@@ -203,6 +203,38 @@ describe('loop routes', () => {
     });
   });
 
+  describe('POST /api/loops/:runId/stop', () => {
+    it('terminates a running loop and idles the task', async () => {
+      const run = createLoopRun({ task_id: 't1', spec_json: '{}' });
+      db.prepare(`UPDATE tasks SET runtime_state = 'looping' WHERE id = 't1'`).run();
+
+      const res = await request(app).post(`/api/loops/${run.id}/stop`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('needs_human');
+      expect(res.body.termination_reason).toBe('stopped');
+
+      const task = db.prepare('SELECT runtime_state FROM tasks WHERE id = ?').get('t1') as {
+        runtime_state: string;
+      };
+      expect(task.runtime_state).toBe('idle');
+    });
+
+    it('is a no-op for an already-terminated loop', async () => {
+      const run = createLoopRun({ task_id: 't1', spec_json: '{}' });
+      await request(app).post(`/api/loops/${run.id}/stop`);
+
+      const res = await request(app).post(`/api/loops/${run.id}/stop`);
+      expect(res.status).toBe(200);
+      expect(res.body.termination_reason).toBe('stopped');
+    });
+
+    it('returns 404 for an unknown run id', async () => {
+      const res = await request(app).post('/api/loops/does-not-exist/stop');
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe('GET /api/loops', () => {
     it('lists loop runs', async () => {
       createLoopRun({ task_id: 't1', spec_json: '{}' });

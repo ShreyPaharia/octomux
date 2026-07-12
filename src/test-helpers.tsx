@@ -79,12 +79,14 @@ export function setupRouterNavigateMock() {
 type ApiMock = ReturnType<typeof mockTaskApi> &
   ReturnType<typeof mockReviewApi> &
   ReturnType<typeof mockConfigApi> &
+  ReturnType<typeof mockLoopApi> &
   Record<string, unknown>;
 
 export function setupApiMock(overrides: Record<string, unknown> = {}) {
   const taskApiMock = mockTaskApi(overrides);
   const reviewApiMock = mockReviewApi(overrides);
   const configApiMock = mockConfigApi(overrides);
+  const loopApiMock = mockLoopApi(overrides);
   const taskApiProxy = new Proxy(
     {},
     { get: (_target, prop: string) => taskApiMock[prop as keyof typeof taskApiMock] },
@@ -97,6 +99,10 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     {},
     { get: (_target, prop: string) => configApiMock[prop as keyof typeof configApiMock] },
   );
+  const loopApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => loopApiMock[prop as keyof typeof loopApiMock] },
+  );
   const apiMock = new Proxy(
     {},
     {
@@ -104,6 +110,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
         if (prop in taskApiMock) return taskApiMock[prop as keyof typeof taskApiMock];
         if (prop in reviewApiMock) return reviewApiMock[prop as keyof typeof reviewApiMock];
         if (prop in configApiMock) return configApiMock[prop as keyof typeof configApiMock];
+        if (prop in loopApiMock) return loopApiMock[prop as keyof typeof loopApiMock];
         return overrides[prop];
       },
       set: (_target, prop: string, value) => {
@@ -119,6 +126,10 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           (configApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
+        if (prop in loopApiMock) {
+          (loopApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
         overrides[prop] = value;
         return true;
       },
@@ -132,9 +143,11 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     taskApiMock,
     reviewApiMock,
     configApiMock,
+    loopApiMock,
     taskApiProxy,
     reviewApiProxy,
     configApiProxy,
+    loopApiProxy,
     apiMock,
     apiProxy,
   };
@@ -377,6 +390,33 @@ export function mockConfigApi(overrides: Record<string, unknown> = {}) {
   return { ...defaults, ...overrides };
 }
 
+export function mockLoopApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    listLoops: vi.fn().mockResolvedValue([]),
+    getLoop: vi.fn().mockResolvedValue(null),
+    createLoop: vi.fn().mockResolvedValue({
+      id: 'loop-1',
+      task_id: 'test-task-01',
+      spec_json: '{}',
+      status: 'running',
+      iteration: 0,
+      max_iterations: 10,
+      budget_json: null,
+      termination_reason: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+    }),
+    stopLoop: vi.fn().mockResolvedValue({ id: 'loop-1', status: 'needs_human' }),
+  };
+  return { ...defaults, ...overrides };
+}
+
 export function mockApi(overrides: Record<string, unknown> = {}) {
-  return { ...mockTaskApi(), ...mockReviewApi(), ...mockConfigApi(), ...overrides };
+  return {
+    ...mockTaskApi(),
+    ...mockReviewApi(),
+    ...mockConfigApi(),
+    ...mockLoopApi(),
+    ...overrides,
+  };
 }
