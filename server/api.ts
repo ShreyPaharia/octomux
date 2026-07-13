@@ -3,6 +3,7 @@ import { seedInlineComment } from './repositories/inline-comments.js';
 import { seedReviewRun } from './repositories/review-runs.js';
 import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 import { hookRoutes } from './hooks.js';
+import './workflows/index.js';
 
 import { router as miscRouter } from './routes/misc.js';
 import { router as learningsRouter } from './routes/learnings.js';

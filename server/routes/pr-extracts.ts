@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
+import { PR_EXTRACT_OUTPUT_SCHEMA } from '@octomux/types';
 import { requireBearerHookToken } from './hook-auth.js';
-import { validateAgainstSchema, type JsonSchema } from '../services/output-contract.js';
+import { validateAgainstSchema } from '../services/output-contract.js';
 import {
   createExtract,
   getExtract,
@@ -15,19 +16,6 @@ import type { PrExtractRisk } from '../types.js';
 
 const logger = childLogger('routes/pr-extracts');
 
-export const PR_EXTRACT_SCHEMA: JsonSchema = {
-  type: 'object',
-  required: ['area', 'risk', 'has_migration', 'surface', 'loc'],
-  properties: {
-    area: { type: 'string', minLength: 1 },
-    risk: { type: 'string', enum: ['low', 'medium', 'high'] },
-    has_migration: { type: 'boolean' },
-    surface: { type: 'string', minLength: 1 },
-    loc: { type: 'integer', minimum: 0 },
-  },
-  additionalProperties: false,
-};
-
 export const router = Router();
 
 router.post(
@@ -41,7 +29,7 @@ router.post(
       throw badRequest('Task has no associated PR to extract from');
     }
 
-    const result = validateAgainstSchema('pr-extract', PR_EXTRACT_SCHEMA, req.body);
+    const result = validateAgainstSchema('pr-extract', PR_EXTRACT_OUTPUT_SCHEMA, req.body);
     if (!result.valid) {
       throw badRequest(`Invalid pr-extract payload: ${(result.errors ?? []).join('; ')}`);
     }

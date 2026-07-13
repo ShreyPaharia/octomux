@@ -1,4 +1,19 @@
 export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error' | 'looping';
+
+/** PR-extract output contract — shared by server/routes/pr-extracts.ts (ajv validation) and the
+ * client's schema-driven default detail view for the `pr-extract` workflow kind. */
+export const PR_EXTRACT_OUTPUT_SCHEMA = {
+  type: 'object',
+  required: ['area', 'risk', 'has_migration', 'surface', 'loc'],
+  properties: {
+    area: { type: 'string', minLength: 1 },
+    risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+    has_migration: { type: 'boolean' },
+    surface: { type: 'string', minLength: 1 },
+    loc: { type: 'integer', minimum: 0 },
+  },
+  additionalProperties: false,
+} as const;
 /** Workflow status — human-facing board column. */
 export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
 export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
