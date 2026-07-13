@@ -884,4 +884,29 @@ export function runMigrations(instance: Database.Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pr_extracts_task ON pr_extracts(task_id);
     CREATE INDEX IF NOT EXISTS idx_pr_extracts_pr ON pr_extracts(repo_path, pr_number);
   `);
+
+  // ── Best-of-N loop groups (2026-07-13, P4) ──────────────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS loop_groups (
+      id                  TEXT PRIMARY KEY,
+      spec_json           TEXT NOT NULL,
+      n                   INTEGER NOT NULL,
+      repo_path           TEXT NOT NULL,
+      base_branch         TEXT NOT NULL,
+      judge_status        TEXT NOT NULL DEFAULT 'not_run',
+      winner_loop_run_id  TEXT REFERENCES loop_runs(id),
+      judge_rationale     TEXT,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  const loopRunsColsForGroup = columnsOf(instance, 'loop_runs');
+  addColumn(
+    instance,
+    'loop_runs',
+    'group_id',
+    'group_id TEXT REFERENCES loop_groups(id)',
+    loopRunsColsForGroup,
+  );
+  instance.exec(`CREATE INDEX IF NOT EXISTS idx_loop_runs_group ON loop_runs(group_id);`);
 }

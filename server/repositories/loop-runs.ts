@@ -10,14 +10,15 @@ export interface CreateLoopRunInput {
   spec_json: string;
   max_iterations?: number | null;
   budget_json?: string | null;
+  group_id?: string | null;
 }
 
 export function createLoopRun(input: CreateLoopRunInput): LoopRun {
   const id = nanoid(12);
   getDb()
     .prepare(
-      `INSERT INTO loop_runs (id, task_id, spec_json, max_iterations, budget_json)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO loop_runs (id, task_id, spec_json, max_iterations, budget_json, group_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -25,6 +26,7 @@ export function createLoopRun(input: CreateLoopRunInput): LoopRun {
       input.spec_json,
       input.max_iterations ?? null,
       input.budget_json ?? null,
+      input.group_id ?? null,
     );
   const row = getLoopRun(id);
   if (!row) throw new Error('failed to read loop_run after insert');
