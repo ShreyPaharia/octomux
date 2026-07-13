@@ -118,6 +118,24 @@ export interface LoopSpec {
   noProgress?: { afterIters: number };
 }
 
+// ── PR-extract workflow types ─────────────────────────────────────────────
+
+export type PrExtractRisk = 'low' | 'medium' | 'high';
+
+export interface PrExtract {
+  id: string;
+  task_id: string;
+  repo_path: string;
+  pr_number: number;
+  pr_head_sha: string;
+  area: string;
+  risk: PrExtractRisk;
+  has_migration: boolean;
+  surface: string;
+  loc: number;
+  created_at: string;
+}
+
 export type CommentBucket = 'actionable' | 'informational';
 export type CommentSeverity = 'nit' | 'suggestion' | 'issue' | 'critical';
 export type LastCheckStatus = 'resolved' | 'still_applies' | 'partial' | 'unclear';

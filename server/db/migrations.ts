@@ -865,4 +865,23 @@ export function runMigrations(instance: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_loop_iterations_run ON loop_iterations(loop_run_id, n);
   `);
+
+  // ── PR-extract workflow persistence (2026-07-13, P3) ────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS pr_extracts (
+      id             TEXT PRIMARY KEY,
+      task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      repo_path      TEXT NOT NULL,
+      pr_number      INTEGER NOT NULL,
+      pr_head_sha    TEXT NOT NULL,
+      area           TEXT NOT NULL,
+      risk           TEXT NOT NULL,
+      has_migration  INTEGER NOT NULL,
+      surface        TEXT NOT NULL,
+      loc            INTEGER NOT NULL,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pr_extracts_task ON pr_extracts(task_id);
+    CREATE INDEX IF NOT EXISTS idx_pr_extracts_pr ON pr_extracts(repo_path, pr_number);
+  `);
 }

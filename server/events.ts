@@ -29,6 +29,10 @@ export type ServerEvent =
   | {
       type: 'loop:emit';
       payload: { taskId: string; loopRunId: string; status: string; reason: string };
+    }
+  | {
+      type: 'pr_extract:created';
+      payload: { taskId: string; extractId: string };
     };
 
 /** Event types that carry a taskId and should be persisted to the durable events log. */
