@@ -24,7 +24,10 @@ describe('validateAgainstSchema', () => {
   });
 
   it('rejects a payload with an out-of-enum value', () => {
-    const result = validateAgainstSchema('test-schema', SCHEMA, { area: 'server', risk: 'extreme' });
+    const result = validateAgainstSchema('test-schema', SCHEMA, {
+      area: 'server',
+      risk: 'extreme',
+    });
     expect(result.valid).toBe(false);
   });
 
