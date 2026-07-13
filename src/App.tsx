@@ -28,6 +28,7 @@ const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
 const LoopsPage = lazy(() => import('./pages/LoopsPage'));
 const LoopDetailPage = lazy(() => import('./pages/LoopDetailPage'));
+const ExtractsPage = lazy(() => import('./pages/ExtractsPage'));
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -116,6 +117,7 @@ export function AppShell() {
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
                 <Route path="/loops" element={<LoopsPage />} />
                 <Route path="/loops/:id" element={<LoopDetailPage />} />
+                <Route path="/extracts" element={<ExtractsPage />} />
               </Routes>
             </Suspense>
           </div>
