@@ -33,6 +33,10 @@ export type ServerEvent =
   | {
       type: 'pr_extract:created';
       payload: { taskId: string; extractId: string };
+    }
+  | {
+      type: 'loop_group:judging' | 'loop_group:judged';
+      payload: { groupId: string };
     };
 
 /** Event types that carry a taskId and should be persisted to the durable events log. */
