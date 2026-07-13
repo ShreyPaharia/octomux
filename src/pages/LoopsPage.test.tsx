@@ -83,4 +83,12 @@ describe('LoopsPage', () => {
     await user.click(row);
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/loops/loop-42'));
   });
+
+  it('opens the best-of-N dialog from the "Best of N" button', async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<LoopsPage />);
+
+    await user.click(await screen.findByText('Best of N'));
+    expect(await screen.findByTestId('new-loop-group-dialog')).toBeInTheDocument();
+  });
 });
