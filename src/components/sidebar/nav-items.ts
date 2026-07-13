@@ -1,4 +1,5 @@
 import type { SidebarItem } from '@/lib/sidebar-utils';
+import { listWorkflowUIs } from '@/workflows/registry';
 import {
   HomeIcon,
   TasksIcon,
@@ -6,7 +7,6 @@ import {
   MonitorIcon,
   WorkspacesIcon,
   OrchestratorIcon,
-  LoopsIcon,
   SettingsIcon,
   type NavIcon,
 } from './glyphs';
@@ -27,12 +27,23 @@ export const NAV_ITEMS: ReadonlyArray<{
   { key: 'settings', label: 'Settings', to: '/settings', Icon: SettingsIcon },
 ];
 
-export const MORE_ITEMS = [
+const STATIC_MORE_ITEMS = [
   { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
   { key: 'orchestrator', label: 'Orchestrator', to: '/orchestrator', Icon: OrchestratorIcon },
-  { key: 'loops', label: 'Loops', to: '/loops', Icon: LoopsIcon },
 ] as const;
+
+// Registered workflow kinds (loops, pr-extract, ...) contribute their own "More" entries — nav
+// generated from the registry, not hardcoded (spec/workflow-framework.md §4).
+export const MORE_ITEMS = [
+  ...STATIC_MORE_ITEMS,
+  ...listWorkflowUIs().map((ui) => ({
+    key: ui.kind,
+    label: ui.navLabel,
+    to: `/w/${ui.kind}`,
+    Icon: ui.icon,
+  })),
+];
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────
 
