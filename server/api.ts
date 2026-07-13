@@ -3,6 +3,7 @@ import { seedInlineComment } from './repositories/inline-comments.js';
 import { seedReviewRun } from './repositories/review-runs.js';
 import { mountArtifactEndpoint } from './orchestrator/artifact-endpoint.js';
 import { hookRoutes } from './hooks.js';
+import './workflows/index.js';
 
 import { router as miscRouter } from './routes/misc.js';
 import { router as learningsRouter } from './routes/learnings.js';
@@ -19,6 +20,7 @@ import { router as integrationsRouter } from './routes/integrations.js';
 import { router as reviewsRouter } from './routes/reviews.js';
 import { router as reviewRunsRouter } from './routes/review-runs.js';
 import { router as loopsRouter } from './routes/loops.js';
+import { router as loopGroupsRouter } from './routes/loop-groups.js';
 import { router as prExtractsRouter } from './routes/pr-extracts.js';
 import { router as commentsRouter } from './routes/comments.js';
 import { router as diffsRouter } from './routes/diffs.js';
@@ -49,6 +51,7 @@ export function setupRoutes(app: Express): void {
   app.use(reviewsRouter);
   app.use(reviewRunsRouter);
   app.use(loopsRouter);
+  app.use(loopGroupsRouter);
   app.use(prExtractsRouter);
   app.use(commentsRouter);
   app.use(diffsRouter);

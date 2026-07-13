@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import HomePage from './pages/HomePage';
@@ -26,9 +26,16 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
-const LoopsPage = lazy(() => import('./pages/LoopsPage'));
-const LoopDetailPage = lazy(() => import('./pages/LoopDetailPage'));
-const ExtractsPage = lazy(() => import('./pages/ExtractsPage'));
+const WorkflowListRoute = lazy(() => import('./workflows/WorkflowListRoute'));
+const WorkflowDetailRoute = lazy(() => import('./workflows/WorkflowDetailRoute'));
+const LoopGroupDetailPage = lazy(() => import('./pages/LoopGroupDetailPage'));
+
+/** `/loops/:id` predates the generic registry; redirect it to the equivalent `/w/loops/:id`
+ * rather than dropping support for old bookmarks/links. */
+function LoopsRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/w/loops/${id}`} replace />;
+}
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -115,9 +122,12 @@ export function AppShell() {
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/setup" element={<SetupPage />} />
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
-                <Route path="/loops" element={<LoopsPage />} />
-                <Route path="/loops/:id" element={<LoopDetailPage />} />
-                <Route path="/extracts" element={<ExtractsPage />} />
+                <Route path="/w/:kind" element={<WorkflowListRoute />} />
+                <Route path="/w/:kind/:id" element={<WorkflowDetailRoute />} />
+                <Route path="/loops" element={<Navigate to="/w/loops" replace />} />
+                <Route path="/loops/:id" element={<LoopsRedirect />} />
+                <Route path="/extracts" element={<Navigate to="/w/pr-extract" replace />} />
+                <Route path="/loop-groups/:id" element={<LoopGroupDetailPage />} />
               </Routes>
             </Suspense>
           </div>

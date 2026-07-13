@@ -58,6 +58,19 @@ export interface LoopRunResult {
   updated_at: string;
 }
 
+export interface LoopGroupResult {
+  id: string;
+  n: number;
+  repo_path: string;
+  base_branch: string;
+  judge_status: string;
+  winner_loop_run_id: string | null;
+  judge_rationale: string | null;
+  created_at: string;
+  updated_at: string;
+  loopRuns: LoopRunResult[];
+}
+
 export interface IntegrationRow {
   id: string;
   kind: string;
@@ -89,6 +102,12 @@ export interface OctomuxClient {
   ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<LoopRunResult>;
+  startLoopGroup(data: {
+    repoPath: string;
+    baseBranch: string;
+    spec: LoopSpecInput;
+    n: number;
+  }): Promise<LoopGroupResult>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
@@ -193,6 +212,12 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     startLoop(data) {
       return request<LoopRunResult>('/loops', { method: 'POST', body: JSON.stringify(data) });
+    },
+    startLoopGroup(data) {
+      return request<LoopGroupResult>('/loop-groups', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
     },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(

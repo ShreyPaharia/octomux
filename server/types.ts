@@ -93,6 +93,24 @@ export interface LoopRun {
   max_iterations: number | null;
   budget_json: string | null;
   termination_reason: string | null;
+  group_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Best-of-N loop group types ────────────────────────────────────────────
+
+export type JudgeStatus = 'not_run' | 'running' | 'done' | 'error';
+
+export interface LoopGroup {
+  id: string;
+  spec_json: string;
+  n: number;
+  repo_path: string;
+  base_branch: string;
+  judge_status: JudgeStatus;
+  winner_loop_run_id: string | null;
+  judge_rationale: string | null;
   created_at: string;
   updated_at: string;
 }
