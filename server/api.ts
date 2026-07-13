@@ -19,6 +19,7 @@ import { router as integrationsRouter } from './routes/integrations.js';
 import { router as reviewsRouter } from './routes/reviews.js';
 import { router as reviewRunsRouter } from './routes/review-runs.js';
 import { router as loopsRouter } from './routes/loops.js';
+import { router as prExtractsRouter } from './routes/pr-extracts.js';
 import { router as commentsRouter } from './routes/comments.js';
 import { router as diffsRouter } from './routes/diffs.js';
 import { router as tasksRouter } from './routes/tasks.js';
@@ -48,6 +49,7 @@ export function setupRoutes(app: Express): void {
   app.use(reviewsRouter);
   app.use(reviewRunsRouter);
   app.use(loopsRouter);
+  app.use(prExtractsRouter);
   app.use(commentsRouter);
   app.use(diffsRouter);
   app.use(tasksRouter);
