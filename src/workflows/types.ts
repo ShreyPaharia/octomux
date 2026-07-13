@@ -1,8 +1,9 @@
 import type { ComponentType } from 'react';
+import type { NavIcon } from '@/components/sidebar/glyphs';
 
 export interface WorkflowUI {
   navLabel: string;
-  icon: ComponentType<{ className?: string }>;
+  icon: NavIcon;
   ListView?: ComponentType;
   /** Receives the item id from the route; fetches its own data. Omit to fall back to
    * DefaultDetailView, which needs `getItem` + `outputSchema` instead. */
