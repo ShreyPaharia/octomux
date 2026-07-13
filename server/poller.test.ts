@@ -655,6 +655,60 @@ describe('checkMergedPRs', () => {
 
     expect(execFile).not.toHaveBeenCalled();
   });
+
+  describe('pr-extract trigger', () => {
+    it('creates a pr_extract task when a tracked PR merges', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: 'sha-merged',
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+
+      const extractTask = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .get(42);
+      expect(extractTask).toBeTruthy();
+    });
+
+    it('does not create a pr_extract task when the merged task has no pr_head_sha', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: null,
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+
+      const extractTask = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .get(42);
+      expect(extractTask).toBeFalsy();
+    });
+
+    it('does not create a second pr_extract task on a repeat poll (same head sha)', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: 'sha-merged',
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+      await checkMergedPRs();
+
+      const rows = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .all(42);
+      expect(rows).toHaveLength(1);
+    });
+  });
 });
 
 // ─── pollTerminalActivity ────────────────────────────────────────────────────
