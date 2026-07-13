@@ -36,6 +36,7 @@ const { runVerify } = await import('./verify.js');
 const { respawnAgentFresh } = await import('../lifecycle/respawn-agent.js');
 const { getLoopRun, listIterationsForRun, recordEmit, createLoopRun } =
   await import('../../repositories/loop-runs.js');
+const { createLoopGroup } = await import('../../repositories/loop-groups.js');
 
 function makeRun(overrides: Partial<LoopRun> = {}): LoopRun {
   return {
@@ -176,6 +177,22 @@ describe('startLoop', () => {
   it('throws when the task has no active agent', async () => {
     db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
     await expect(startLoop('t1', LOOP_SPEC)).rejects.toThrow(/no active agent/);
+  });
+
+  it('passes groupId through to createLoopRun when best-of-N launches this candidate', async () => {
+    const group = createLoopGroup({
+      spec_json: '{}',
+      n: 3,
+      repo_path: '/repo',
+      base_branch: 'main',
+    });
+    const run = await startLoop('t1', LOOP_SPEC, group.id);
+    expect(run.group_id).toBe(group.id);
+  });
+
+  it('defaults group_id to null for a plain single loop', async () => {
+    const run = await startLoop('t1', LOOP_SPEC);
+    expect(run.group_id).toBeNull();
   });
 });
 
@@ -339,6 +356,73 @@ describe('loop playbook', () => {
     const playbook = readPlaybook();
     expect(playbook).toContain('## Iteration 1 — verify FAIL');
     expect(playbook).toContain('## Iteration 2 — verify FAIL');
+  });
+});
+
+describe('loop status file', () => {
+  let db: Database.Database;
+  let worktree: string;
+
+  beforeEach(() => {
+    db = createTestDb();
+    vi.clearAllMocks();
+    worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-loop-status-'));
+    insertTask(db, { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'running', worktree });
+    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-1', status: 'running' } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  });
+
+  function readStatus(): Record<string, unknown> {
+    return JSON.parse(
+      fs.readFileSync(path.join(worktree, '.octomux', 'loop-status.json'), 'utf-8'),
+    );
+  }
+
+  it('startLoop writes an initial running status file with the group id', async () => {
+    const group = createLoopGroup({
+      spec_json: '{}',
+      n: 3,
+      repo_path: '/repo',
+      base_branch: 'main',
+    });
+    const run = await startLoop('t1', LOOP_SPEC, group.id);
+
+    const status = readStatus();
+    expect(status).toMatchObject({
+      loopRunId: run.id,
+      groupId: group.id,
+      taskId: 't1',
+      status: 'running',
+      iteration: 0,
+      maxIterations: LOOP_SPEC.maxIterations,
+      terminationReason: null,
+    });
+  });
+
+  it('handleLoopIterationBoundary updates the status file on the resume path', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => `sha-${Math.random()}`);
+    vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
+
+    await startLoop('t1', LOOP_SPEC);
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const status = readStatus();
+    expect(status).toMatchObject({ status: 'running', iteration: 1, terminationReason: null });
+  });
+
+  it('handleLoopIterationBoundary updates the status file on the terminate path', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
+    vi.mocked(runVerify).mockResolvedValueOnce({ passed: true, output: 'ok' });
+
+    const run = await startLoop('t1', LOOP_SPEC);
+    recordEmit(run.id, { status: 'done', reason: 'iter1' });
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const status = readStatus();
+    expect(status).toMatchObject({ status: 'done', iteration: 1, terminationReason: 'done' });
   });
 });
 

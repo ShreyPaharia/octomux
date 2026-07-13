@@ -13,6 +13,7 @@ import {
 } from '../../repositories/loop-runs.js';
 import { revParseHead, commitAll, diffNameOnly } from '../git.js';
 import { runVerify } from './verify.js';
+import { writeLoopStatusFile } from './status-file.js';
 import { respawnAgentFresh } from '../lifecycle/respawn-agent.js';
 import { broadcast } from '../../events.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
@@ -158,7 +159,11 @@ function finalStatusFor(reason: TerminationReason): LoopRunStatus {
  * with the loop prompt (pinning the loop run id, mirroring how review prompts
  * pin the review-task id).
  */
-export async function startLoop(taskId: string, spec: LoopSpec): Promise<LoopRun> {
+export async function startLoop(
+  taskId: string,
+  spec: LoopSpec,
+  groupId?: string,
+): Promise<LoopRun> {
   const task = getTask(taskId);
   if (!task) throw new Error(`startLoop: task not found: ${taskId}`);
 
@@ -172,16 +177,28 @@ export async function startLoop(taskId: string, spec: LoopSpec): Promise<LoopRun
     spec_json: JSON.stringify(spec),
     max_iterations: spec.maxIterations,
     budget_json: spec.budget ? JSON.stringify(spec.budget) : null,
+    group_id: groupId ?? null,
   });
 
   setRuntimeState(taskId, 'looping');
+
+  writeLoopStatusFile(task.worktree!, {
+    loopRunId: run.id,
+    groupId: run.group_id,
+    taskId,
+    status: 'running',
+    iteration: 0,
+    maxIterations: spec.maxIterations,
+    terminationReason: null,
+    updatedAt: new Date().toISOString(),
+  });
 
   await respawnAgentFresh(task, agent, {
     prompt: buildLoopPrompt(spec, run.id),
     env: loopAgentEnv(taskId, agent.hook_token),
   });
 
-  logger.info({ task_id: taskId, loop_run_id: run.id }, 'loop: started');
+  logger.info({ task_id: taskId, loop_run_id: run.id, group_id: run.group_id }, 'loop: started');
   broadcast({ type: 'task:updated', payload: { taskId } });
 
   return run;
@@ -237,6 +254,16 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
   if (reason) {
     terminateLoopRun(run.id, finalStatusFor(reason), reason);
     setRuntimeState(taskId, 'idle');
+    writeLoopStatusFile(worktree, {
+      loopRunId: run.id,
+      groupId: run.group_id,
+      taskId,
+      status: finalStatusFor(reason),
+      iteration: iteration.n,
+      maxIterations: spec.maxIterations,
+      terminationReason: reason,
+      updatedAt: new Date().toISOString(),
+    });
     logger.info(
       { task_id: taskId, loop_run_id: run.id, termination_reason: reason },
       'loop: terminated',
@@ -246,6 +273,16 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
   }
 
   resumeLoopRun(run.id);
+  writeLoopStatusFile(worktree, {
+    loopRunId: run.id,
+    groupId: run.group_id,
+    taskId,
+    status: 'running',
+    iteration: iteration.n,
+    maxIterations: spec.maxIterations,
+    terminationReason: null,
+    updatedAt: new Date().toISOString(),
+  });
   await respawnAgentFresh(task, agent, {
     prompt: buildLoopPrompt(spec, run.id, verify.passed ? null : verify.output),
     env: loopAgentEnv(taskId, agent.hook_token),
