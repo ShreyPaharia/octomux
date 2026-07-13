@@ -201,26 +201,3 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
   await fs.promises.writeFile(filePath, JSON.stringify(merged, null, 2), 'utf-8');
   return merged;
 }
-
-/**
- * @deprecated use claudeCodeHarness.resolveFlags instead.
- * Kept until Tasks 14-17 update the callers (task-runner.ts, chats.ts).
- *
- * Reads flags from the new harnesses['claude-code'] sub-object. Falls back
- * gracefully to an empty string for settings that have neither key set.
- */
-export function resolveClaudeFlags(settings: OctomuxSettings): string {
-  const envFlagsRaw = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
-  if (envFlagsRaw) return ` ${envFlagsRaw}`;
-
-  const sub = (settings.harnesses?.['claude-code'] ?? {}) as {
-    flags?: string;
-    dangerouslySkipPermissions?: boolean;
-  };
-
-  const parts: string[] = [];
-  if (sub.dangerouslySkipPermissions) parts.push('--dangerously-skip-permissions');
-  const trimmed = (sub.flags ?? '').trim();
-  if (trimmed) parts.push(trimmed);
-  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
-}

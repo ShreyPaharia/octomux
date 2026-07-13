@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getSettings, updateSettings, resolveClaudeFlags, DEFAULT_SETTINGS } from './settings.js';
+import { getSettings, updateSettings, DEFAULT_SETTINGS } from './settings.js';
 import type { OctomuxSettings } from './settings.js';
 
 // Mock fs
@@ -340,58 +340,5 @@ describe('OctomuxSettings tracker fields', () => {
     await expect(updateSettings({ defaultTracker: 'asana' as any })).rejects.toThrow(
       /defaultTracker/,
     );
-  });
-});
-
-describe('resolveClaudeFlags', () => {
-  afterEach(() => {
-    delete process.env.OCTOMUX_CLAUDE_FLAGS;
-  });
-
-  it('returns empty string when nothing configured', () => {
-    const settings: OctomuxSettings = { ...DEFAULT_SETTINGS };
-    expect(resolveClaudeFlags(settings)).toBe('');
-  });
-
-  it('prefixes with a single space when dangerouslySkipPermissions is set in harness', () => {
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { dangerouslySkipPermissions: true } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --dangerously-skip-permissions');
-  });
-
-  it('composes dangerouslySkipPermissions before flags', () => {
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { dangerouslySkipPermissions: true, flags: '--model opus' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --dangerously-skip-permissions --model opus');
-  });
-
-  it('appends only flags when dangerouslySkipPermissions is false', () => {
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { flags: '--model opus' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --model opus');
-  });
-
-  it('uses OCTOMUX_CLAUDE_FLAGS env var verbatim when set', () => {
-    process.env.OCTOMUX_CLAUDE_FLAGS = '--env-only';
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { dangerouslySkipPermissions: true, flags: '--from-settings' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --env-only');
-  });
-
-  it('treats whitespace-only env var as unset', () => {
-    process.env.OCTOMUX_CLAUDE_FLAGS = '   ';
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { flags: '--from-settings' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --from-settings');
   });
 });
