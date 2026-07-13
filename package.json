@@ -41,7 +41,7 @@
     "build:types": "tsc -b packages/types",
     "build:test-fixtures": "tsc -b packages/test-fixtures",
     "build:api-client": "tsc -b packages/api-client",
-    "build:server": "tsup --entry.index=server/index.ts --entry.startup=server/startup.ts --entry.cli-review=cli/review/index.ts --entry.orchestrator/mcp/server=server/orchestrator/mcp/server.ts --entry.agent-session/mcp/submit-result-server=server/agent-session/mcp/submit-result-server.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
+    "build:server": "tsup --entry.index=server/index.ts --entry.startup=server/startup.ts --entry.cli-review=cli/review/index.ts --entry.orchestrator/mcp/server=server/orchestrator/mcp/server.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
     "start": "NODE_ENV=production node dist-server/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
