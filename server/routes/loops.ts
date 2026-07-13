@@ -1,8 +1,8 @@
 import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
 import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';
-import { checkAgentTokenExists } from '../repositories/agent-runtime.js';
+import { requireBearerHookToken } from './hook-auth.js';
 import {
   getActiveLoopRunForTask,
   getLoopRun,
@@ -21,21 +21,6 @@ const logger = childLogger('routes/loops');
 export const router = express.Router();
 
 const EMIT_STATUSES: LoopEmitStatus[] = ['done', 'blocked', 'needs_human'];
-
-/**
- * Authorize a loop emit by its `Authorization: Bearer <hook_token>` header —
- * reuses the same agent hook_token verification as server/hooks.ts.
- */
-function requireBearerHookToken(req: Request, res: Response, next: NextFunction): void {
-  const match = /^Bearer (.+)$/.exec(req.headers.authorization ?? '');
-  const token = match?.[1];
-  if (!token || !checkAgentTokenExists(token)) {
-    logger.warn({ path: req.path, ip: req.ip }, 'loop emit: missing or invalid bearer token');
-    res.status(401).send();
-    return;
-  }
-  next();
-}
 
 router.post('/api/loops', async (req: Request, res: Response) => {
   const body = req.body as { taskId?: unknown; spec?: unknown };
