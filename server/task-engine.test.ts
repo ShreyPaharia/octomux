@@ -191,7 +191,7 @@ describe('buildAgentStartupCommand', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
       'Do the thing',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
@@ -273,7 +273,7 @@ describe('startTask', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Do the thing',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
@@ -1159,7 +1159,7 @@ describe('addAgent', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Write tests',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
