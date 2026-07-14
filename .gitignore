@@ -37,3 +37,7 @@ packages/*/bin/*
 packages/*/share/terminfo/*
 !packages/*/share/terminfo/.gitkeep
 *.tsbuildinfo
+
+# Loop runtime state written into worktrees — not source
+.octomux/loop-playbook.md
+.octomux/loop-status.json
