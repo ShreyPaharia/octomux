@@ -242,6 +242,39 @@ describe('handleLoopIterationBoundary', () => {
     expect(task.runtime_state).toBe('idle');
   });
 
+  it('does not terminate done when run.status is done but verify fails — respawns for another iteration instead', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => `sha-${Math.random()}`);
+    vi.mocked(runVerify).mockResolvedValueOnce({ passed: false, output: 'still failing' });
+
+    const run = await startLoop('t1', LOOP_SPEC);
+    const respawnCallsBefore = vi.mocked(respawnAgentFresh).mock.calls.length;
+
+    recordEmit(run.id, { status: 'done', reason: 'looks done but verify disagrees' });
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    expect(vi.mocked(respawnAgentFresh).mock.calls.length).toBe(respawnCallsBefore + 1);
+    // resumeLoopRun resets status back to 'running' — the emit's 'done' status
+    // never survives evaluateTermination when verify failed.
+    const finalRun = getLoopRun(run.id);
+    expect(finalRun?.status).toBe('running');
+  });
+
+  it('terminates done when run.status is done and verify passes', async () => {
+    vi.mocked(revParseHead).mockImplementation(async () => `sha-${Math.random()}`);
+    vi.mocked(runVerify).mockResolvedValueOnce({ passed: true, output: 'ok' });
+
+    const run = await startLoop('t1', LOOP_SPEC);
+    const respawnCallsBefore = vi.mocked(respawnAgentFresh).mock.calls.length;
+
+    recordEmit(run.id, { status: 'done', reason: 'iter1' });
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    expect(vi.mocked(respawnAgentFresh).mock.calls.length).toBe(respawnCallsBefore); // no further respawn
+    const finalRun = getLoopRun(run.id);
+    expect(finalRun?.status).toBe('done');
+    expect(finalRun?.termination_reason).toBe('done');
+  });
+
   it('terminates max_iterations once the cap is hit, without waiting for a done emit', async () => {
     vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
     vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
