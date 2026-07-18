@@ -178,6 +178,23 @@ CREATE TABLE IF NOT EXISTS schedules (
   UNIQUE(kind, repo_path)
 );
 
+CREATE TABLE IF NOT EXISTS runs (
+  id            TEXT PRIMARY KEY,
+  workflow_kind TEXT NOT NULL,
+  trigger       TEXT NOT NULL,
+  schedule_id   TEXT,
+  task_id       TEXT,
+  chat_id       TEXT,
+  loop_run_id   TEXT,
+  status        TEXT NOT NULL DEFAULT 'running',
+  result_json   TEXT,
+  error         TEXT,
+  started_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runs_workflow_kind ON runs(workflow_kind);
+CREATE INDEX IF NOT EXISTS idx_runs_schedule_id ON runs(schedule_id);
+
 `;
 
 /** Apply SQLite pragmas required for octomux (WAL + foreign keys). */
