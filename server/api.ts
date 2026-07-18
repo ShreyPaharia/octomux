@@ -9,7 +9,6 @@ import { router as miscRouter } from './routes/misc.js';
 import { router as learningsRouter } from './routes/learnings.js';
 import { router as skillsRouter } from './routes/skills.js';
 import { router as savedFilesRouter } from './routes/saved-files.js';
-import { router as teamsRouter } from './routes/teams.js';
 import { router as setupRouter } from './routes/setup.js';
 import { router as settingsRouter } from './routes/settings.js';
 import { router as hooksRegistryRouter } from './routes/hooks-registry.js';
@@ -40,7 +39,6 @@ export function setupRoutes(app: Express): void {
   app.use(learningsRouter);
   app.use(skillsRouter);
   app.use(savedFilesRouter);
-  app.use(teamsRouter);
   app.use(setupRouter);
   app.use(settingsRouter);
   app.use(hooksRegistryRouter);

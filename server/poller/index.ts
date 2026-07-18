@@ -6,7 +6,6 @@ import {
   PR_INTERVAL,
   MERGED_PR_INTERVAL,
   DELETE_INTERVAL,
-  TEAM_SCHEDULE_INTERVAL,
   HANDOFF_INTERVAL,
   APPROVAL_INTERVAL,
 } from './intervals.js';
@@ -28,14 +27,6 @@ export function startPolling(): void {
     createPoller(pollPRsAndReviewers, PR_INTERVAL),
     createPoller(pollMergedPRs, MERGED_PR_INTERVAL),
     createPoller(pollSoftDeletes, DELETE_INTERVAL),
-    createPoller(async () => {
-      try {
-        const { pollTeamSchedules } = await import('../teams.js');
-        await pollTeamSchedules();
-      } catch (err) {
-        logger.error({ err, operation: 'pollTeamSchedules' }, 'pollTeamSchedules failed');
-      }
-    }, TEAM_SCHEDULE_INTERVAL),
     createPoller(pollWalkthroughHandoffs, HANDOFF_INTERVAL),
     createPoller(async () => {
       try {
