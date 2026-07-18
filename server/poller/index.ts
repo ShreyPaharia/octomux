@@ -9,12 +9,14 @@ import {
   HANDOFF_INTERVAL,
   APPROVAL_INTERVAL,
   SCHEDULE_INTERVAL,
+  TRIAGE_PR_COMMENTS_INTERVAL,
 } from './intervals.js';
 import { pollMergedPRs } from './merged-pr.js';
 import { pollPRsAndReviewers } from './pr-and-reviewers.js';
 import { pollSchedules } from './schedule-cron.js';
 import { pollSoftDeletes } from './soft-deletes.js';
 import { pollStatuses } from './status.js';
+import { pollTriagePrComments } from './triage-pr-comments.js';
 import { pollWalkthroughHandoffs } from './walkthrough-handoff.js';
 
 const logger = childLogger('poller');
@@ -31,6 +33,7 @@ export function startPolling(): void {
     createPoller(pollSoftDeletes, DELETE_INTERVAL),
     createPoller(pollWalkthroughHandoffs, HANDOFF_INTERVAL),
     createPoller(pollSchedules, SCHEDULE_INTERVAL),
+    createPoller(pollTriagePrComments, TRIAGE_PR_COMMENTS_INTERVAL),
     createPoller(async () => {
       try {
         const { sweepExpiredApprovalCards } = await import('../orchestrator/approval-timeout.js');
@@ -67,4 +70,5 @@ export { pollSoftDeletes } from './soft-deletes.js';
 export { attachDeepReviewAgent, pollWalkthroughHandoffs } from './walkthrough-handoff.js';
 export { pollPRsAndReviewers } from './pr-and-reviewers.js';
 export { pollSchedules } from './schedule-cron.js';
+export { checkTriagePrComments, pollTriagePrComments } from './triage-pr-comments.js';
 export { repoNameWithOwner, parseNameWithOwner } from './github-repo.js';
