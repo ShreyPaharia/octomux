@@ -10,5 +10,6 @@ describe('reviewer workflow registration', () => {
     expect(wf?.displayName).toBe('PR Reviewer');
     expect(wf?.surfaces).toEqual(['feed', 'artifact']);
     expect(wf?.apiRouter).toBe(reviewsRouter);
+    expect(wf?.trigger).toEqual({ kind: 'github', event: 'review_requested' });
   });
 });

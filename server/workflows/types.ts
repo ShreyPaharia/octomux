@@ -18,4 +18,7 @@ export interface WorkflowType {
   /** Bespoke Express router for workflows that keep their existing concrete endpoints
    * (loops: /api/loops, pr-extract: /api/pr-extracts) rather than a generic API surface. */
   apiRouter?: Router;
+  /** How this workflow's runs are initiated — drives the trigger badge on the
+   * Workflows control-plane page. */
+  trigger?: { kind: 'cron' | 'github' | 'manual'; event?: string };
 }

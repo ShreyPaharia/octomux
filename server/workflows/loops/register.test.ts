@@ -9,5 +9,6 @@ describe('loops workflow registration', () => {
     expect(wf?.displayName).toBe('Loops');
     expect(wf?.surfaces).toEqual(['feed', 'artifact', 'session']);
     expect(wf?.apiRouter).toBeDefined();
+    expect(wf?.trigger).toEqual({ kind: 'manual' });
   });
 });

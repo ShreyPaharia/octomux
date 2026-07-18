@@ -20,6 +20,7 @@ export const prodLogTriageWorkflow: WorkflowType = {
   displayName: 'Prod Log Triage',
   surfaces: ['feed', 'artifact'],
   // No `output`/sink — the fix PRs opened via `gh` inside the run are the product.
+  trigger: { kind: 'cron' },
 };
 
 registerWorkflow(prodLogTriageWorkflow);

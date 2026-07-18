@@ -7,6 +7,7 @@ export const reviewerWorkflow: WorkflowType = {
   displayName: 'PR Reviewer',
   surfaces: ['feed', 'artifact'],
   apiRouter: reviewsRouter,
+  trigger: { kind: 'github', event: 'review_requested' },
 };
 
 registerWorkflow(reviewerWorkflow);

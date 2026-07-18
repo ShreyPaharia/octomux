@@ -11,5 +11,6 @@ describe('pr-extract workflow registration', () => {
     expect(wf?.output).toMatchObject({
       required: ['area', 'risk', 'has_migration', 'surface', 'loc'],
     });
+    expect(wf?.trigger).toEqual({ kind: 'github', event: 'pr_merged' });
   });
 });

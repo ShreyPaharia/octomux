@@ -9,6 +9,7 @@ export const prExtractWorkflow: WorkflowType = {
   surfaces: ['feed', 'artifact'],
   output: PR_EXTRACT_OUTPUT_SCHEMA as Record<string, unknown>,
   apiRouter: prExtractRouter,
+  trigger: { kind: 'github', event: 'pr_merged' },
 };
 
 registerWorkflow(prExtractWorkflow);

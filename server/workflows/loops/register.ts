@@ -7,6 +7,7 @@ export const loopsWorkflow: WorkflowType = {
   displayName: 'Loops',
   surfaces: ['feed', 'artifact', 'session'],
   apiRouter: loopsRouter,
+  trigger: { kind: 'manual' },
 };
 
 registerWorkflow(loopsWorkflow);

@@ -37,6 +37,7 @@ describe('prod-log-triage workflow registration', () => {
     expect(wf?.displayName).toBe('Prod Log Triage');
     expect(wf?.surfaces).toEqual(['feed', 'artifact']);
     expect(wf?.output).toBeUndefined();
+    expect(wf?.trigger).toEqual({ kind: 'cron' });
   });
 
   it('registers a schedule handler for prod-log-triage', () => {
