@@ -12,8 +12,11 @@ const logger = childLogger('workflows/prod-log-triage');
 // per schedule. Add columns (or a config_json blob) if a repo needs a
 // different log command / verify contract than this default.
 const DEFAULT_LOG_COMMAND = 'gh run list --limit 20 --json databaseId,conclusion,name,url';
+// Scoped to THIS task's branch (via --head), not repo-wide — a stale PR
+// elsewhere titled "fix" must not satisfy this. Repos should append their
+// own build/test clause via per-schedule config (see config_json, FIX 3).
 const DEFAULT_VERIFY =
-  'test -n "$(ls desk/incidents/*.md 2>/dev/null)" && bun run build && gh pr list --search "in:title fix" --limit 1 --json number | grep -q number';
+  'test -f "desk/incidents/$(date +%F).md" && [ -n "$(gh pr list --head "$(git rev-parse --abbrev-ref HEAD)" --state open --json number --jq \'.[0].number\')" ]';
 const DEFAULT_MAX_ITERATIONS = 5;
 
 export const prodLogTriageWorkflow: WorkflowType = {
