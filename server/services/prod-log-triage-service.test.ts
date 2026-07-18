@@ -1,0 +1,100 @@
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { createTestDb } from '../test-helpers.js';
+import { getDb } from '../db.js';
+
+const mockStartTask = vi.fn();
+vi.mock('../task-engine/index.js', () => ({
+  startTask: vi.fn((...args: unknown[]) => mockStartTask(...args)),
+}));
+
+const mockStartLoop = vi.fn().mockResolvedValue(undefined);
+vi.mock('../task-engine/loop/engine.js', () => ({
+  startLoop: vi.fn((...args: unknown[]) => mockStartLoop(...args)),
+}));
+
+const mockBroadcast = vi.fn();
+vi.mock('../events.js', () => ({
+  broadcast: vi.fn((...args: unknown[]) => mockBroadcast(...args)),
+}));
+
+// ─── Import after mocks ─────────────────────────────────────────────────────
+
+import { createTriageTaskFromSchedule } from './prod-log-triage-service.js';
+import { setRuntimeState } from '../repositories/tasks.js';
+
+function insertActiveAgent(taskId: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO agents (id, task_id, window_index, label, status, harness_id, hook_token)
+       VALUES (?, ?, 0, 'Agent 1', 'running', 'claude-code', 'tok')`,
+    )
+    .run(`${taskId}-agent`, taskId);
+}
+
+describe('createTriageTaskFromSchedule', () => {
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    mockStartTask.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('happy path: inserts a task, starts it, and starts the retry loop once a live agent exists', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      insertActiveAgent(task.id);
+    });
+
+    const result = await createTriageTaskFromSchedule({
+      repoPath: '/repo',
+      logCommand: 'flyctl logs -a my-app',
+      verify: 'test -f desk/incidents/*.md && bun run build',
+      maxIterations: 5,
+    });
+
+    expect(result.task.source).toBe('prod_log_triage');
+    expect(mockStartTask).toHaveBeenCalledTimes(1);
+    expect(mockStartLoop).toHaveBeenCalledTimes(1);
+    expect(mockStartLoop).toHaveBeenCalledWith(
+      result.id,
+      expect.objectContaining({
+        verify: 'test -f desk/incidents/*.md && bun run build',
+        maxIterations: 5,
+      }),
+    );
+  });
+
+  it('does NOT call startLoop when startTask leaves the task in runtime_state=error', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      setRuntimeState(task.id, 'error', 'setup failed');
+    });
+
+    const result = await createTriageTaskFromSchedule({
+      repoPath: '/repo',
+      logCommand: 'flyctl logs -a my-app',
+      verify: 'bun run build',
+      maxIterations: 3,
+    });
+
+    expect(mockStartTask).toHaveBeenCalledTimes(1);
+    expect(mockStartLoop).not.toHaveBeenCalled();
+    expect(result.id).toBeTruthy();
+  });
+
+  it('does NOT call startLoop when startTask resolves but no active agent exists', async () => {
+    mockStartTask.mockResolvedValue(undefined); // resolves, no agent row inserted, no error state
+
+    const result = await createTriageTaskFromSchedule({
+      repoPath: '/repo',
+      logCommand: 'flyctl logs -a my-app',
+      verify: 'bun run build',
+      maxIterations: 3,
+    });
+
+    expect(mockStartTask).toHaveBeenCalledTimes(1);
+    expect(mockStartLoop).not.toHaveBeenCalled();
+    expect(result.id).toBeTruthy();
+  });
+});
