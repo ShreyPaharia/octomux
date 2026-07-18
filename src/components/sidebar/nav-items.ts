@@ -7,6 +7,7 @@ import {
   MonitorIcon,
   WorkspacesIcon,
   OrchestratorIcon,
+  SchedulesIcon,
   SettingsIcon,
   type NavIcon,
 } from './glyphs';
@@ -31,6 +32,7 @@ const STATIC_MORE_ITEMS = [
   { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
   { key: 'orchestrator', label: 'Orchestrator', to: '/orchestrator', Icon: OrchestratorIcon },
+  { key: 'schedules', label: 'Schedules', to: '/schedules', Icon: SchedulesIcon },
 ] as const;
 
 // Registered workflow kinds (loops, pr-extract, ...) contribute their own "More" entries — nav
