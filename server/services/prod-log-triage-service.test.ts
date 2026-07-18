@@ -21,6 +21,7 @@ vi.mock('../events.js', () => ({
 
 import { createTriageTaskFromSchedule } from './prod-log-triage-service.js';
 import { setRuntimeState } from '../repositories/tasks.js';
+import { listRunsForWorkflow } from '../repositories/runs.js';
 
 function insertActiveAgent(taskId: string): void {
   getDb()
@@ -81,6 +82,26 @@ describe('createTriageTaskFromSchedule', () => {
 
     const row = getDb().prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(result.id);
     expect(row).toEqual({ schedule_id: 'sched-1' });
+  });
+
+  it('records exactly one runs row linking the task, kind, trigger, and scheduleId', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      insertActiveAgent(task.id);
+    });
+
+    const result = await createTriageTaskFromSchedule({
+      repoPath: '/repo',
+      logCommand: 'flyctl logs -a my-app',
+      verify: 'bun run build',
+      maxIterations: 5,
+      scheduleId: 'sched-1',
+    });
+
+    const rows = listRunsForWorkflow('prod-log-triage');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].trigger).toBe('cron');
+    expect(rows[0].task_id).toBe(result.id);
+    expect(rows[0].schedule_id).toBe('sched-1');
   });
 
   it('does NOT call startLoop when startTask leaves the task in runtime_state=error', async () => {

@@ -8,7 +8,7 @@
 import { nanoid } from 'nanoid';
 import { buildTriagePrompt, insertTriageTask } from '../prod-log-triage-tasks.js';
 import { repoShortName } from '../review-tasks.js';
-import { getTask, findFirstActiveAgent } from '../repositories/index.js';
+import { getTask, findFirstActiveAgent, insertRun } from '../repositories/index.js';
 import { startTask } from '../task-engine/index.js';
 import { startLoop } from '../task-engine/loop/engine.js';
 import { broadcast } from '../events.js';
@@ -57,6 +57,13 @@ export async function createTriageTaskFromSchedule(
   });
 
   broadcast({ type: 'task:created', payload: { taskId: id } });
+
+  insertRun({
+    workflowKind: 'prod-log-triage',
+    trigger: 'cron',
+    scheduleId: input.scheduleId,
+    taskId: id,
+  });
 
   const fresh = getTask(id) as Task;
   fresh.agents = [];

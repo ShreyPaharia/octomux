@@ -8,7 +8,7 @@
 import { nanoid } from 'nanoid';
 import { buildPrExtractPrompt, insertExtractTask } from '../pr-extract-tasks.js';
 import { repoShortName } from '../review-tasks.js';
-import { getTask } from '../repositories/index.js';
+import { getTask, insertRun } from '../repositories/index.js';
 import { startTask } from '../task-engine/index.js';
 import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';
@@ -61,6 +61,8 @@ export async function createExtractTaskFromMergedPr(
   });
 
   broadcast({ type: 'task:created', payload: { taskId: id } });
+
+  insertRun({ workflowKind: 'pr-extract', trigger: 'github', taskId: id });
 
   const fresh = getTask(id) as Task;
   fresh.agents = [];

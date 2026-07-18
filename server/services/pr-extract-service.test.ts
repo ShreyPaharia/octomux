@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
+import { listRunsForWorkflow } from '../repositories/runs.js';
 
 const mockStartTask = vi.fn().mockResolvedValue(undefined);
 vi.mock('../task-engine/index.js', () => ({
@@ -44,5 +45,22 @@ describe('createExtractTaskFromMergedPr', () => {
       payload: { taskId: result.id },
     });
     expect(mockStartTask).toHaveBeenCalled();
+  });
+
+  it('records exactly one runs row linking the task with kind pr-extract, trigger github', async () => {
+    const result = await createExtractTaskFromMergedPr({
+      repo_path: '/repo',
+      branch: 'main',
+      base_branch: 'main',
+      pr_number: 100,
+      pr_url: 'https://github.com/org/repo/pull/100',
+      pr_head_sha: 'sha-abc',
+      title: 'Add feature Y',
+    });
+
+    const rows = listRunsForWorkflow('pr-extract');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].trigger).toBe('github');
+    expect(rows[0].task_id).toBe(result.id);
   });
 });
