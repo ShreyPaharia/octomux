@@ -1,14 +1,19 @@
 ---
 name: prod-log-triage
-description: Use when running a scheduled prod-log-triage task — fetch production logs, group errors into classes, write an incident summary, and open one fix PR per error class directly via `gh`
+description: Use when running a scheduled prod-log-triage task — fetch production logs, group errors into classes, write an incident summary, and open a fix PR directly via `gh`
 ---
 
 # Prod log triage
 
 Triage production logs for a repo on a schedule: fetch recent logs, group
 recurring errors into distinct classes, record an incident summary, and open
-one fix PR per error class. This skill has **no octomux sink** — you open PRs
-yourself with `gh`; nothing reads a structured `emit` from this task.
+a fix PR. This skill has **no octomux sink** — you open the PR yourself with
+`gh`; nothing reads a structured `emit` from this task.
+
+A task maps to a single PR: octomux's PR-detection poller matches on this
+task's own branch, so every error class you fix this run goes into **one**
+PR, as separate commits, opened from the branch octomux already checked out
+for you. Do not create a separate `fix/...` branch per error class.
 
 ## Steps
 
@@ -36,19 +41,34 @@ yourself with `gh`; nothing reads a structured `emit` from this task.
    - Fix: <one-line description> — see PR #<n>
    ```
 
-4. **Open one fix PR per error class** directly with `gh` — do not use any
-   octomux sink or emit command for this workflow:
+4. **Open one fix PR from this task's current branch** directly with `gh` —
+   do not use any octomux sink or emit command for this workflow, and do not
+   `git checkout -b` a new branch. Commit each error class's fix separately
+   on the branch you're already on, then open a single PR:
 
    ```bash
-   git checkout -b fix/<short-error-class>-<date>
-   # make the fix
+   # for each fixable error class:
    git add -A && git commit -m "fix(<scope>): <description>"
-   git push -u origin fix/<short-error-class>-<date>
-   gh pr create --title "fix(<scope>): <description>" --body "<why + link to desk/incidents/<date>.md>"
+
+   # after all fixes are committed, open (or reuse) exactly one PR:
+   branch="$(git rev-parse --abbrev-ref HEAD)"
+   git push -u origin "$branch"
+   existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')"
+   if [ -z "$existing" ]; then
+     gh pr create --title "fix: prod log triage <date>" \
+       --body "<one section per error class fixed + link to desk/incidents/<date>.md>"
+   fi
    ```
 
-   If a class has no clear fix (needs human judgement), skip the PR and note
-   that in the incident summary instead of forcing a speculative change.
+   Checking for an existing open PR on this branch first makes the step
+   idempotent — later loop iterations push more commits and refine the same
+   PR instead of creating duplicates. The incident summary should list every
+   error class handled in this run, whether fixed (with a note that the fix
+   is in this PR) or skipped.
+
+   If a class has no clear fix (needs human judgement), skip fixing it and
+   note that in the incident summary instead of forcing a speculative
+   change.
 
 5. **Verify contract:** this task runs inside octomux's retry-loop (see the
    scheduling service that launched you). Each iteration re-runs the repo's
