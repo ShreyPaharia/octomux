@@ -918,4 +918,8 @@ export function runMigrations(instance: Database.Database): void {
   // ── Per-schedule config overrides (2026-07-18, P4) ───────────────────────
   const scheduleCols = columnsOf(instance, 'schedules');
   addColumn(instance, 'schedules', 'config_json', 'config_json TEXT', scheduleCols);
+
+  // ── Link scheduled runs back to their schedule (2026-07-18, P5) ──────────
+  const taskColsForSchedule = columnsOf(instance, 'tasks');
+  addColumn(instance, 'tasks', 'schedule_id', 'schedule_id TEXT', taskColsForSchedule);
 }

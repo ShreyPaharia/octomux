@@ -174,6 +174,15 @@ export function listTasksByWorktree(worktreeId: string): Task[] {
     .all(worktreeId) as Task[];
 }
 
+/** List runs fired by a given schedule, newest-first (for GET /api/schedules/:id/runs). */
+export function listTasksBySchedule(scheduleId: string): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.schedule_id = ? AND t.deleted_at IS NULL ORDER BY t.created_at DESC`,
+    )
+    .all(scheduleId) as Task[];
+}
+
 /**
  * Distinct repo paths from worktrees that have non-deleted tasks.
  * Used by the hook registry to discover active repos.
@@ -332,6 +341,8 @@ export interface InsertTaskInput {
   pr_head_sha?: string | null;
   /** Used by review tasks. */
   review_of_task_id?: string | null;
+  /** Set on scheduled runs — links back to the `schedules` row that fired them. */
+  schedule_id?: string | null;
 }
 
 /** Insert a new task row. Returns the generated id. */
@@ -340,8 +351,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -360,6 +371,7 @@ export function insertTask(input: InsertTaskInput): string {
       input.pr_number ?? null,
       input.pr_head_sha ?? null,
       input.review_of_task_id ?? null,
+      input.schedule_id ?? null,
     );
   logger.info({ task_id: id, operation: 'insertTask' }, 'task inserted');
   return id;

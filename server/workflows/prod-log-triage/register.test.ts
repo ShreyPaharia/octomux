@@ -52,6 +52,13 @@ describe('prod-log-triage workflow registration', () => {
     expect(call.verify).not.toContain('--search');
   });
 
+  it('passes the schedule id through as scheduleId', async () => {
+    await SCHEDULE_HANDLERS['prod-log-triage'](makeRow({ id: 'sched-42' }));
+
+    const call = mockCreateTriageTaskFromSchedule.mock.calls[0][0];
+    expect(call.scheduleId).toBe('sched-42');
+  });
+
   it('falls back to defaults when the row has no config_json', async () => {
     await SCHEDULE_HANDLERS['prod-log-triage'](makeRow({ config_json: null }));
 

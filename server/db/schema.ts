@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     initial_prompt               TEXT,
     last_viewed_at               TEXT,
     source                       TEXT,
+    schedule_id                  TEXT,
     error                        TEXT,
     current_summary              TEXT,
     current_summary_updated_at   TEXT,

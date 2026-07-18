@@ -35,4 +35,33 @@ describe('insertTriageTask', () => {
     const row = getDb().prepare('SELECT source FROM tasks WHERE id = ?').get(id);
     expect(row).toEqual({ source: 'prod_log_triage' });
   });
+
+  it('stamps schedule_id when scheduleId is provided', () => {
+    const id = insertTriageTask({
+      id: 'triage-2',
+      repoPath: '/repo',
+      branch: 'triage/octomux-agents-2026-07-18',
+      baseBranch: 'main',
+      title: 'Prod log triage: octomux-agents',
+      description: 'Scheduled prod-log-triage run',
+      initialPrompt: 'do the thing',
+      scheduleId: 'sched-1',
+    });
+    const row = getDb().prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id);
+    expect(row).toEqual({ schedule_id: 'sched-1' });
+  });
+
+  it('leaves schedule_id null when scheduleId is omitted', () => {
+    const id = insertTriageTask({
+      id: 'triage-3',
+      repoPath: '/repo',
+      branch: 'triage/octomux-agents-2026-07-18',
+      baseBranch: 'main',
+      title: 'Prod log triage: octomux-agents',
+      description: 'Scheduled prod-log-triage run',
+      initialPrompt: 'do the thing',
+    });
+    const row = getDb().prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id);
+    expect(row).toEqual({ schedule_id: null });
+  });
 });

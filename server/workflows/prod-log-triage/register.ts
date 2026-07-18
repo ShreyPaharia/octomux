@@ -32,6 +32,7 @@ async function handleProdLogTriageSchedule(row: ScheduleRow): Promise<void> {
     logCommand: cfg.logCommand ?? DEFAULT_LOG_COMMAND,
     verify: cfg.verify ?? DEFAULT_VERIFY,
     maxIterations: cfg.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+    scheduleId: row.id,
   });
 }
 

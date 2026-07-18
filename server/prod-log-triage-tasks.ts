@@ -36,6 +36,8 @@ export interface InsertTriageTaskParams {
   title: string;
   description: string;
   initialPrompt: string;
+  /** Set when this task was fired by a schedule — stamps tasks.schedule_id. */
+  scheduleId?: string;
 }
 
 /**
@@ -66,6 +68,7 @@ export function insertTriageTask(params: InsertTriageTaskParams): string {
     initial_prompt: params.initialPrompt,
     source: 'prod_log_triage',
     worktree_id: worktreeId,
+    schedule_id: params.scheduleId ?? null,
   });
 
   return id;

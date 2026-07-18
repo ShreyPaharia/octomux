@@ -22,6 +22,8 @@ export interface CreateTriageTaskFromScheduleInput {
   logCommand: string;
   verify: string;
   maxIterations: number;
+  /** Set when this run was fired by a schedule — stamps tasks.schedule_id. */
+  scheduleId?: string;
 }
 
 export interface CreateTriageTaskResult {
@@ -51,6 +53,7 @@ export async function createTriageTaskFromSchedule(
     title: `Prod log triage: ${short} (${dateStamp})`,
     description: `Scheduled prod-log-triage run for ${short}`,
     initialPrompt,
+    scheduleId: input.scheduleId,
   });
 
   broadcast({ type: 'task:created', payload: { taskId: id } });

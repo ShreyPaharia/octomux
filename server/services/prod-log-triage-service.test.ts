@@ -66,6 +66,23 @@ describe('createTriageTaskFromSchedule', () => {
     );
   });
 
+  it('stamps schedule_id on the task when scheduleId is passed', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      insertActiveAgent(task.id);
+    });
+
+    const result = await createTriageTaskFromSchedule({
+      repoPath: '/repo',
+      logCommand: 'flyctl logs -a my-app',
+      verify: 'bun run build',
+      maxIterations: 5,
+      scheduleId: 'sched-1',
+    });
+
+    const row = getDb().prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(result.id);
+    expect(row).toEqual({ schedule_id: 'sched-1' });
+  });
+
   it('does NOT call startLoop when startTask leaves the task in runtime_state=error', async () => {
     mockStartTask.mockImplementation(async (task: { id: string }) => {
       setRuntimeState(task.id, 'error', 'setup failed');
