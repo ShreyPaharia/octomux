@@ -83,6 +83,7 @@ type ApiMock = ReturnType<typeof mockTaskApi> &
   ReturnType<typeof mockExtractApi> &
   ReturnType<typeof mockLoopGroupApi> &
   ReturnType<typeof mockSchedulesApi> &
+  ReturnType<typeof mockWorkflowsApi> &
   Record<string, unknown>;
 
 export function setupApiMock(overrides: Record<string, unknown> = {}) {
@@ -93,6 +94,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
   const extractApiMock = mockExtractApi(overrides);
   const loopGroupApiMock = mockLoopGroupApi(overrides);
   const schedulesApiMock = mockSchedulesApi(overrides);
+  const workflowsApiMock = mockWorkflowsApi(overrides);
   const taskApiProxy = new Proxy(
     {},
     { get: (_target, prop: string) => taskApiMock[prop as keyof typeof taskApiMock] },
@@ -121,6 +123,10 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     {},
     { get: (_target, prop: string) => schedulesApiMock[prop as keyof typeof schedulesApiMock] },
   );
+  const workflowsApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => workflowsApiMock[prop as keyof typeof workflowsApiMock] },
+  );
   const apiMock = new Proxy(
     {},
     {
@@ -134,6 +140,8 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           return loopGroupApiMock[prop as keyof typeof loopGroupApiMock];
         if (prop in schedulesApiMock)
           return schedulesApiMock[prop as keyof typeof schedulesApiMock];
+        if (prop in workflowsApiMock)
+          return workflowsApiMock[prop as keyof typeof workflowsApiMock];
         return overrides[prop];
       },
       set: (_target, prop: string, value) => {
@@ -165,6 +173,10 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           (schedulesApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
+        if (prop in workflowsApiMock) {
+          (workflowsApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
         overrides[prop] = value;
         return true;
       },
@@ -182,6 +194,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     extractApiMock,
     loopGroupApiMock,
     schedulesApiMock,
+    workflowsApiMock,
     taskApiProxy,
     reviewApiProxy,
     configApiProxy,
@@ -189,6 +202,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     extractApiProxy,
     loopGroupApiProxy,
     schedulesApiProxy,
+    workflowsApiProxy,
     apiMock,
     apiProxy,
   };
@@ -510,6 +524,14 @@ export function mockSchedulesApi(overrides: Record<string, unknown> = {}) {
   return { ...defaults, ...overrides };
 }
 
+export function mockWorkflowsApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    listWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
+    getWorkflowRuns: vi.fn().mockResolvedValue({ runs: [] }),
+  };
+  return { ...defaults, ...overrides };
+}
+
 export function mockApi(overrides: Record<string, unknown> = {}) {
   return {
     ...mockTaskApi(),
@@ -519,6 +541,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     ...mockExtractApi(),
     ...mockLoopGroupApi(),
     ...mockSchedulesApi(),
+    ...mockWorkflowsApi(),
     ...overrides,
   };
 }
