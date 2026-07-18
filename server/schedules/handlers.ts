@@ -12,3 +12,8 @@ export const SCHEDULE_HANDLERS: Record<string, ScheduleHandler> = {};
 export function registerScheduleHandler(kind: string, handler: ScheduleHandler): void {
   SCHEDULE_HANDLERS[kind] = handler;
 }
+
+/** Kinds that can be scheduled — registered via `registerScheduleHandler`. */
+export function listScheduleKinds(): string[] {
+  return Object.keys(SCHEDULE_HANDLERS);
+}

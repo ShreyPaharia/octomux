@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
-import { listEnabledSchedules, upsertSchedule, touchScheduleLastRun } from './schedules.js';
+import {
+  listEnabledSchedules,
+  upsertSchedule,
+  touchScheduleLastRun,
+  listSchedules,
+  getSchedule,
+  updateSchedule,
+  deleteSchedule,
+} from './schedules.js';
 
 describe('schedules repo', () => {
   beforeEach(() => {
@@ -78,5 +86,57 @@ describe('schedules repo', () => {
 
     const rows = listEnabledSchedules();
     expect(rows[0].last_run_at).not.toBeNull();
+  });
+
+  it('listSchedules returns all rows, enabled and disabled', () => {
+    upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo-a', cron: '0 7 * * *' });
+    upsertSchedule({
+      kind: 'prod-log-triage',
+      repoPath: '/repo-b',
+      cron: '0 7 * * *',
+      enabled: false,
+    });
+
+    const rows = listSchedules();
+    expect(rows).toHaveLength(2);
+  });
+
+  it('getSchedule returns a row by id', () => {
+    const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
+    expect(getSchedule(row.id)).toEqual(row);
+  });
+
+  it('getSchedule returns undefined for an unknown id', () => {
+    expect(getSchedule('nope')).toBeUndefined();
+  });
+
+  it('updateSchedule partially updates cron/enabled/config', () => {
+    const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
+
+    const updated = updateSchedule(row.id, { cron: '0 8 * * *', enabled: false });
+
+    expect(updated?.cron).toBe('0 8 * * *');
+    expect(updated?.enabled).toBe(0);
+    expect(updated?.repo_path).toBe('/repo');
+  });
+
+  it('updateSchedule serializes config to config_json', () => {
+    const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
+
+    const updated = updateSchedule(row.id, { config: { maxIterations: 7 } });
+
+    expect(JSON.parse(updated?.config_json as string)).toEqual({ maxIterations: 7 });
+  });
+
+  it('updateSchedule returns undefined for an unknown id', () => {
+    expect(updateSchedule('nope', { cron: '0 8 * * *' })).toBeUndefined();
+  });
+
+  it('deleteSchedule removes the row', () => {
+    const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
+
+    deleteSchedule(row.id);
+
+    expect(getSchedule(row.id)).toBeUndefined();
   });
 });

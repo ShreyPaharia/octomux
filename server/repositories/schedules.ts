@@ -73,3 +73,51 @@ export function touchScheduleLastRun(id: string): void {
     )
     .run(id);
 }
+
+/** All schedules, across every kind and enabled state — for the management UI. */
+export function listSchedules(): ScheduleRow[] {
+  return getDb()
+    .prepare(`SELECT id, kind, repo_path, cron, enabled, last_run_at, config_json FROM schedules`)
+    .all() as ScheduleRow[];
+}
+
+/** Fetch a single schedule by id (returns undefined if not found). */
+export function getSchedule(id: string): ScheduleRow | undefined {
+  return getDb()
+    .prepare(
+      `SELECT id, kind, repo_path, cron, enabled, last_run_at, config_json FROM schedules WHERE id = ?`,
+    )
+    .get(id) as ScheduleRow | undefined;
+}
+
+export interface UpdateScheduleInput {
+  cron?: string;
+  enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+
+/** Partially update a schedule's cron/enabled/config. Returns undefined if not found. */
+export function updateSchedule(id: string, patch: UpdateScheduleInput): ScheduleRow | undefined {
+  const existing = getSchedule(id);
+  if (!existing) return undefined;
+
+  const cron = patch.cron ?? existing.cron;
+  const enabled = patch.enabled === undefined ? existing.enabled : patch.enabled ? 1 : 0;
+  const configJson =
+    patch.config !== undefined ? JSON.stringify(patch.config) : existing.config_json;
+
+  getDb()
+    .prepare(
+      `UPDATE schedules SET cron = ?, enabled = ?, config_json = ?, updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(cron, enabled, configJson, id);
+
+  logger.info({ schedule_id: id }, 'schedule updated');
+  return getSchedule(id);
+}
+
+/** Delete a schedule by id. No-op if it doesn't exist. */
+export function deleteSchedule(id: string): void {
+  getDb().prepare(`DELETE FROM schedules WHERE id = ?`).run(id);
+  logger.info({ schedule_id: id }, 'schedule deleted');
+}
