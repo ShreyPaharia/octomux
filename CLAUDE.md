@@ -195,18 +195,24 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 
 ## Dispatching parallel Claude Code sub-agents in this repo
 
-When working on this codebase via Claude Code, parallel `Agent({ isolation: "worktree" })`
-dispatches have proved unreliable: agents leaked back into the parent worktree and
-clobbered each other's commits during the wave-2 implementation. Until that's
-verified end-to-end, default to **sequential dispatch** — one sub-agent at a time, or
-a single agent for an entire wave.
+When working on this codebase via Claude Code, **default to parallel dispatch** — fan
+out independent work across sub-agents concurrently. This is the intended way to move
+fast on multi-part changes.
 
-If you must run agents in parallel:
+To keep parallel `Agent({ isolation: "worktree" })` dispatches reliable (an earlier
+wave saw agents leak back into the parent worktree and clobber each other's commits),
+always:
 
+- Give each agent a **disjoint file set** — no two concurrent agents editing the same
+  file. Split the work so their diffs can't overlap.
 - After dispatch, capture each agent's actual worktree path with `git worktree list`.
 - Pass the absolute path explicitly in the prompt and tell the agent to `cd` there
   before any file or git operation.
-- Verify both agents are on distinct branches before they start committing.
+- Verify each agent is on its own distinct branch before it starts committing.
+
+Fall back to sequential dispatch only for a phase whose file sets genuinely can't be
+made disjoint (e.g. several changes to the same shared file like `api.ts` or the DB
+schema).
 
 This is unrelated to octomux's own runtime tasks (worktree + tmux + agents) — see
 "Task Lifecycle" above for that. The note here is purely about Claude Code's
