@@ -164,6 +164,18 @@ CREATE TABLE IF NOT EXISTS hook_settings (
   PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS schedules (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL,
+  repo_path     TEXT NOT NULL,
+  cron          TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  last_run_at   TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(kind, repo_path)
+);
+
 `;
 
 /** Apply SQLite pragmas required for octomux (WAL + foreign keys). */
