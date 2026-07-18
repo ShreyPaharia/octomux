@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
 import { insertRun } from './repositories/runs.js';
+import './workflows/index.js';
 
 describe('GET /api/workflows/:kind/runs', () => {
   let app: ReturnType<typeof createApp>;
@@ -28,5 +29,39 @@ describe('GET /api/workflows/:kind/runs', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.runs).toEqual([]);
+  });
+});
+
+describe('GET /api/workflows', () => {
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    createTestDb();
+    app = createApp();
+  });
+
+  it('lists every registered workflow with trigger + run count', async () => {
+    insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
+    insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
+
+    const res = await request(app).get('/api/workflows');
+
+    expect(res.status).toBe(200);
+    const kinds = res.body.workflows.map((w: { kind: string }) => w.kind);
+    expect(kinds).toEqual(
+      expect.arrayContaining(['loops', 'pr-extract', 'prod-log-triage', 'reviewer']),
+    );
+
+    const prExtract = res.body.workflows.find((w: { kind: string }) => w.kind === 'pr-extract');
+    expect(prExtract).toMatchObject({
+      displayName: 'PR Extracts',
+      surfaces: ['feed', 'artifact'],
+      trigger: { kind: 'github', event: 'pr_merged' },
+      runCount: 2,
+    });
+
+    const loops = res.body.workflows.find((w: { kind: string }) => w.kind === 'loops');
+    expect(loops.runCount).toBe(0);
+    expect(loops.trigger).toEqual({ kind: 'manual' });
   });
 });

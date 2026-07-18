@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { getDb } from '../db.js';
-import { insertRun, finishRun, getRun, listRunsForWorkflow, listRunsForSchedule } from './runs.js';
+import {
+  insertRun,
+  finishRun,
+  getRun,
+  listRunsForWorkflow,
+  listRunsForSchedule,
+  countRunsForWorkflow,
+} from './runs.js';
 
 describe('runs repo', () => {
   beforeEach(() => {
@@ -88,5 +95,15 @@ describe('runs repo', () => {
 
     const rows = listRunsForSchedule('sched-1');
     expect(rows.map((r) => r.id).sort()).toEqual([first.id, second.id].sort());
+  });
+
+  it('countRunsForWorkflow counts only runs for the given kind', () => {
+    insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
+    insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
+    insertRun({ workflowKind: 'reviewer', trigger: 'github' });
+
+    expect(countRunsForWorkflow('pr-extract')).toBe(2);
+    expect(countRunsForWorkflow('reviewer')).toBe(1);
+    expect(countRunsForWorkflow('loops')).toBe(0);
   });
 });

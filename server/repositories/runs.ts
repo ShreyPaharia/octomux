@@ -96,6 +96,13 @@ export function listRunsForWorkflow(kind: string): Array<RunRow & { effective_st
     .all(kind) as Array<RunRow & { effective_status: string }>;
 }
 
+export function countRunsForWorkflow(kind: string): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS count FROM runs WHERE workflow_kind = ?`)
+    .get(kind) as { count: number };
+  return row.count;
+}
+
 export function listRunsForSchedule(
   scheduleId: string,
 ): Array<RunRow & { effective_status: string }> {
