@@ -8,9 +8,11 @@ import {
   DELETE_INTERVAL,
   HANDOFF_INTERVAL,
   APPROVAL_INTERVAL,
+  SCHEDULE_INTERVAL,
 } from './intervals.js';
 import { pollMergedPRs } from './merged-pr.js';
 import { pollPRsAndReviewers } from './pr-and-reviewers.js';
+import { pollSchedules } from './schedule-cron.js';
 import { pollSoftDeletes } from './soft-deletes.js';
 import { pollStatuses } from './status.js';
 import { pollWalkthroughHandoffs } from './walkthrough-handoff.js';
@@ -28,6 +30,7 @@ export function startPolling(): void {
     createPoller(pollMergedPRs, MERGED_PR_INTERVAL),
     createPoller(pollSoftDeletes, DELETE_INTERVAL),
     createPoller(pollWalkthroughHandoffs, HANDOFF_INTERVAL),
+    createPoller(pollSchedules, SCHEDULE_INTERVAL),
     createPoller(async () => {
       try {
         const { sweepExpiredApprovalCards } = await import('../orchestrator/approval-timeout.js');
@@ -63,4 +66,5 @@ export { sweepStuckReviewRuns } from './review-runs.js';
 export { pollSoftDeletes } from './soft-deletes.js';
 export { attachDeepReviewAgent, pollWalkthroughHandoffs } from './walkthrough-handoff.js';
 export { pollPRsAndReviewers } from './pr-and-reviewers.js';
+export { pollSchedules } from './schedule-cron.js';
 export { repoNameWithOwner, parseNameWithOwner } from './github-repo.js';

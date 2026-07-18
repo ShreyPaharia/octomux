@@ -6,3 +6,5 @@ export const DELETE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60 * 60 * 1
 export const HANDOFF_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 /** Sweep expired orchestrator approval cards once a minute (SHR-164). */
 export const APPROVAL_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
+/** Generic cron trigger: check `schedules` rows against the current UTC minute once a minute. */
+export const SCHEDULE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
