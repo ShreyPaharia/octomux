@@ -1,0 +1,38 @@
+import { registerWorkflow } from '../registry.js';
+import { registerScheduleHandler } from '../../schedules/handlers.js';
+import { createTriageTaskFromSchedule } from '../../services/prod-log-triage-service.js';
+import { childLogger } from '../../logger.js';
+import type { WorkflowType } from '../types.js';
+import type { ScheduleRow } from '../../repositories/schedules.js';
+
+const logger = childLogger('workflows/prod-log-triage');
+
+// ponytail: the `schedules` table (T5) carries no per-row config columns yet —
+// logCommand/verify/maxIterations are fixed defaults here rather than stored
+// per schedule. Add columns (or a config_json blob) if a repo needs a
+// different log command / verify contract than this default.
+const DEFAULT_LOG_COMMAND = 'gh run list --limit 20 --json databaseId,conclusion,name,url';
+const DEFAULT_VERIFY =
+  'test -n "$(ls desk/incidents/*.md 2>/dev/null)" && bun run build && gh pr list --search "in:title fix" --limit 1 --json number | grep -q number';
+const DEFAULT_MAX_ITERATIONS = 5;
+
+export const prodLogTriageWorkflow: WorkflowType = {
+  kind: 'prod-log-triage',
+  displayName: 'Prod Log Triage',
+  surfaces: ['feed', 'artifact'],
+  // No `output`/sink — the fix PRs opened via `gh` inside the run are the product.
+};
+
+registerWorkflow(prodLogTriageWorkflow);
+
+async function handleProdLogTriageSchedule(row: ScheduleRow): Promise<void> {
+  logger.info({ repo_path: row.repo_path, schedule_id: row.id }, 'prod-log-triage: schedule fired');
+  await createTriageTaskFromSchedule({
+    repoPath: row.repo_path,
+    logCommand: DEFAULT_LOG_COMMAND,
+    verify: DEFAULT_VERIFY,
+    maxIterations: DEFAULT_MAX_ITERATIONS,
+  });
+}
+
+registerScheduleHandler('prod-log-triage', handleProdLogTriageSchedule);
