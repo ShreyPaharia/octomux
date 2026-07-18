@@ -27,6 +27,7 @@ import { router as tasksRouter } from './routes/tasks.js';
 import { router as taskWorkflowRouter } from './routes/task-workflow.js';
 import { router as taskAgentsRouter } from './routes/task-agents.js';
 import { router as worktreesRouter } from './routes/worktrees.js';
+import { router as schedulesRouter } from './routes/schedules.js';
 
 import { insertWorktreeIfAbsent, insertTaskIfAbsent, inTransaction } from './repositories/index.js';
 
@@ -57,6 +58,7 @@ export function setupRoutes(app: Express): void {
   app.use(taskWorkflowRouter);
   app.use(taskAgentsRouter);
   app.use(worktreesRouter);
+  app.use(schedulesRouter);
 
   // ─── Test-only seed endpoint ─────────────────────────────────────────────────
   // Gated strictly on NODE_ENV=test. Never exposed in production.
