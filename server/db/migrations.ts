@@ -909,4 +909,9 @@ export function runMigrations(instance: Database.Database): void {
     loopRunsColsForGroup,
   );
   instance.exec(`CREATE INDEX IF NOT EXISTS idx_loop_runs_group ON loop_runs(group_id);`);
+
+  // ── Remove the Teams feature (2026-07-18, P0) ────────────────────────────
+  // Forward-only drop: team_schedules/team_runs are no longer read or written.
+  instance.exec('DROP TABLE IF EXISTS team_runs;');
+  instance.exec('DROP TABLE IF EXISTS team_schedules;');
 }
