@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   cron          TEXT NOT NULL,
   enabled       INTEGER NOT NULL DEFAULT 1,
   last_run_at   TEXT,
+  config_json   TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(kind, repo_path)

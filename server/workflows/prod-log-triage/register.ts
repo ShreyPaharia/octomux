@@ -7,10 +7,6 @@ import type { ScheduleRow } from '../../repositories/schedules.js';
 
 const logger = childLogger('workflows/prod-log-triage');
 
-// ponytail: the `schedules` table (T5) carries no per-row config columns yet —
-// logCommand/verify/maxIterations are fixed defaults here rather than stored
-// per schedule. Add columns (or a config_json blob) if a repo needs a
-// different log command / verify contract than this default.
 const DEFAULT_LOG_COMMAND = 'gh run list --limit 20 --json databaseId,conclusion,name,url';
 // Scoped to THIS task's branch (via --head), not repo-wide — a stale PR
 // elsewhere titled "fix" must not satisfy this. Repos should append their
@@ -30,11 +26,12 @@ registerWorkflow(prodLogTriageWorkflow);
 
 async function handleProdLogTriageSchedule(row: ScheduleRow): Promise<void> {
   logger.info({ repo_path: row.repo_path, schedule_id: row.id }, 'prod-log-triage: schedule fired');
+  const cfg = row.config_json ? JSON.parse(row.config_json) : {};
   await createTriageTaskFromSchedule({
     repoPath: row.repo_path,
-    logCommand: DEFAULT_LOG_COMMAND,
-    verify: DEFAULT_VERIFY,
-    maxIterations: DEFAULT_MAX_ITERATIONS,
+    logCommand: cfg.logCommand ?? DEFAULT_LOG_COMMAND,
+    verify: cfg.verify ?? DEFAULT_VERIFY,
+    maxIterations: cfg.maxIterations ?? DEFAULT_MAX_ITERATIONS,
   });
 }
 

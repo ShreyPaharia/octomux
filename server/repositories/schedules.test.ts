@@ -49,6 +49,27 @@ describe('schedules repo', () => {
     expect(rows[0].repo_path).toBe('/repo-a');
   });
 
+  it('upsertSchedule stores config_json, round-trips through listEnabledSchedules', () => {
+    upsertSchedule({
+      kind: 'prod-log-triage',
+      repoPath: '/repo',
+      cron: '0 7 * * *',
+      config: { logCommand: 'flyctl logs -a my-app', maxIterations: 3 },
+    });
+
+    const [row] = listEnabledSchedules();
+    expect(row.config_json).not.toBeNull();
+    expect(JSON.parse(row.config_json as string)).toEqual({
+      logCommand: 'flyctl logs -a my-app',
+      maxIterations: 3,
+    });
+  });
+
+  it('upsertSchedule without config leaves config_json null', () => {
+    const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
+    expect(row.config_json).toBeNull();
+  });
+
   it('touchScheduleLastRun sets last_run_at', () => {
     const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
     expect(row.last_run_at).toBeNull();
