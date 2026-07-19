@@ -29,6 +29,7 @@ function makeWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
     displayName: 'PR Extracts',
     surfaces: ['feed', 'artifact'],
     trigger: { kind: 'github', event: 'pr_merged' },
+    output: null,
     runCount: 3,
     ...overrides,
   };
@@ -131,6 +132,66 @@ describe('WorkflowsPage', () => {
     await user.click(taskLink);
 
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-1');
+  });
+
+  it('a session run (no task_id, with result_json) renders its result fields', async () => {
+    const user = userEvent.setup();
+    apiMock.listWorkflows.mockResolvedValue({
+      workflows: [
+        makeWorkflow({
+          kind: 'overnight-log-summary',
+          displayName: 'Overnight Log Summary',
+          surfaces: ['artifact'],
+          trigger: { kind: 'cron' },
+          runCount: 1,
+          output: {
+            type: 'object',
+            properties: {
+              window: { type: 'string' },
+              summary: { type: 'string' },
+              errorClasses: { type: 'array' },
+              notableEvents: { type: 'array' },
+            },
+          },
+        }),
+      ],
+    });
+    apiMock.getWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: 'run-3',
+          workflow_kind: 'overnight-log-summary',
+          trigger: 'cron',
+          status: 'done',
+          effective_status: 'done',
+          task_id: null,
+          loop_run_id: null,
+          started_at: '2026-01-01 00:00:00',
+          result_json: JSON.stringify({
+            window: 'last 12h',
+            summary: 'One recurring timeout error.',
+            errorClasses: [{ name: 'db timeout', count: 4, severity: 'medium' }],
+            notableEvents: ['Deployed v2.3.0 at 02:00'],
+          }),
+        },
+      ],
+    });
+
+    renderWithRouter(<WorkflowsPage />);
+    await user.click(await screen.findByTestId('workflow-expand-overnight-log-summary'));
+    await screen.findByTestId('workflow-run-run-3');
+
+    // Task/loop links must not appear for a session run.
+    expect(screen.queryByTestId('workflow-run-task-link-run-3')).toBeNull();
+    expect(screen.queryByTestId('workflow-run-loop-link-run-3')).toBeNull();
+
+    await user.click(await screen.findByTestId('workflow-run-result-toggle-run-3'));
+
+    const panel = await screen.findByTestId('workflow-run-result-run-3');
+    expect(panel.textContent).toContain('last 12h');
+    expect(panel.textContent).toContain('One recurring timeout error.');
+    expect(panel.textContent).toContain('db timeout');
+    expect(panel.textContent).toContain('Deployed v2.3.0 at 02:00');
   });
 
   it('a run with a loop_run_id links to /w/loops/:id', async () => {

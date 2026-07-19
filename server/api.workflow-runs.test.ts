@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
-import { insertRun } from './repositories/runs.js';
+import { insertRun, finishRun } from './repositories/runs.js';
 import './workflows/index.js';
 
 describe('GET /api/workflows/:kind/runs', () => {
@@ -30,6 +30,20 @@ describe('GET /api/workflows/:kind/runs', () => {
     expect(res.status).toBe(200);
     expect(res.body.runs).toEqual([]);
   });
+
+  it('includes result_json for a finished session run (no task_id)', async () => {
+    const run = insertRun({ workflowKind: 'overnight-log-summary', trigger: 'cron' });
+    finishRun(run.id, { status: 'done', result: { window: 'last 12h', summary: 'all clear' } });
+
+    const res = await request(app).get('/api/workflows/overnight-log-summary/runs');
+
+    expect(res.status).toBe(200);
+    expect(res.body.runs[0].task_id).toBeNull();
+    expect(JSON.parse(res.body.runs[0].result_json)).toEqual({
+      window: 'last 12h',
+      summary: 'all clear',
+    });
+  });
 });
 
 describe('GET /api/workflows', () => {
@@ -49,7 +63,14 @@ describe('GET /api/workflows', () => {
     expect(res.status).toBe(200);
     const kinds = res.body.workflows.map((w: { kind: string }) => w.kind);
     expect(kinds).toEqual(
-      expect.arrayContaining(['doc-drift', 'loops', 'pr-extract', 'prod-log-triage', 'reviewer']),
+      expect.arrayContaining([
+        'doc-drift',
+        'loops',
+        'overnight-log-summary',
+        'pr-extract',
+        'prod-log-triage',
+        'reviewer',
+      ]),
     );
 
     const prExtract = res.body.workflows.find((w: { kind: string }) => w.kind === 'pr-extract');
@@ -59,9 +80,21 @@ describe('GET /api/workflows', () => {
       trigger: { kind: 'github', event: 'pr_merged' },
       runCount: 2,
     });
+    expect(prExtract.output).toBeDefined();
 
     const loops = res.body.workflows.find((w: { kind: string }) => w.kind === 'loops');
     expect(loops.runCount).toBe(0);
     expect(loops.trigger).toEqual({ kind: 'manual' });
+    expect(loops.output).toBeNull();
+
+    const overnightLogSummary = res.body.workflows.find(
+      (w: { kind: string }) => w.kind === 'overnight-log-summary',
+    );
+    expect(overnightLogSummary).toMatchObject({
+      displayName: 'Overnight Log Summary',
+      surfaces: ['artifact'],
+      trigger: { kind: 'cron' },
+    });
+    expect(overnightLogSummary.output).toBeDefined();
   });
 });
