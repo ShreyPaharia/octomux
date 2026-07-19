@@ -49,7 +49,7 @@ describe('GET /api/workflows', () => {
     expect(res.status).toBe(200);
     const kinds = res.body.workflows.map((w: { kind: string }) => w.kind);
     expect(kinds).toEqual(
-      expect.arrayContaining(['loops', 'pr-extract', 'prod-log-triage', 'reviewer']),
+      expect.arrayContaining(['doc-drift', 'loops', 'pr-extract', 'prod-log-triage', 'reviewer']),
     );
 
     const prExtract = res.body.workflows.find((w: { kind: string }) => w.kind === 'pr-extract');
