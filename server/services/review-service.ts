@@ -15,7 +15,7 @@ import {
   insertReviewTask,
   repoShortName,
 } from '../review-tasks.js';
-import { getTask } from '../repositories/index.js';
+import { getTask, insertRun } from '../repositories/index.js';
 import { startTask } from '../task-engine/index.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import { findFirstActiveAgent } from '../repositories/agent-runtime.js';
@@ -87,6 +87,8 @@ export async function createReviewTaskFromPr(
     prNumber: input.pr_number,
     prHeadSha: input.pr_head_sha,
   });
+
+  insertRun({ workflowKind: 'reviewer', trigger: 'github', taskId: id });
 
   const task = readbackAndKick(id);
   return { id, task };

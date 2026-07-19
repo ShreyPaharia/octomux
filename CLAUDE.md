@@ -78,73 +78,14 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - **close** = stop agents + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
 
-## Agent Teams
+## Per-task model override
 
-Reusable crews of agents that run on a schedule against any repo. Config-as-code: definitions
-live in `<repo>/.octomux/team.yaml`; octomux reads at run time, never stores in DB.
-
-### CLI commands
-
-```
-octomux team run <name> [-r <repo-path>]       # fire immediately from .octomux/team.yaml
-octomux team schedule <name> --cron <expr> [-r <path>]  # upsert cron schedule
-octomux team list                              # list configured schedules
-```
-
-### team.yaml schema
-
-```yaml
-name: my-team # must match name passed to CLI
-base_branch: main # optional; default main
-schedule: '0 7 * * 1-5' # optional; only used as reference — use `team schedule` to activate
-notify_command: "slack-notify.sh '#alerts'" # optional; passed to Lead
-journal_dir: desk/journal # optional; default desk/journal
-incidents_dir: desk/incidents # optional; default desk/incidents
-roster:
-  - role: lead # REQUIRED; exactly one lead
-    skeleton: desk-lead # filename under agents/ (no .md)
-    model: claude-opus-4-8
-    overlay: .octomux/overlays/lead.md # optional repo-specific override
-  - role: researcher
-    skeleton: researcher
-    model: claude-sonnet-4-6
-  - role: risk-ops
-    skeleton: risk-ops
-    model: claude-sonnet-4-6
-```
-
-### Skeletons
-
-Skeletons live in the **target repo** at `<repo>/.octomux/agents/<name>.md`. octomux
-ships no built-in skeletons — each consuming repo owns its own. A Lead receives the full
-roster in its kick-off prompt and spawns workers via `octomux create-task --model <model> ...`.
-
-### Per-task model override
-
-`tasks.model TEXT` column added in Phase 0. Propagated through:
+`tasks.model TEXT` column. Propagated through:
 
 - `POST /api/tasks` body: `{ model: "claude-opus-4-8" }` → stored in DB
 - `POST /api/tasks/:id/agents` body: `{ model: ... }` → stored on agent launch
 - `octomux create-task --model <id>` and `octomux add-agent --model <id>`
 - Harness: `applyModel(flags, model)` strips any existing `--model` then appends the per-task one
-
-### DB tables (additive migrations)
-
-```sql
--- operational state only; definitions stay in team.yaml
-team_schedules (name PK, repo_path, config_path, cron, enabled, last_run_at, created_at, updated_at)
-team_runs      (id PK, team, lead_task_id → tasks.id, started_at, status)
-```
-
-### Poller integration
-
-`startPolling()` sets a 60 s interval calling `pollTeamSchedules()`. For each enabled schedule:
-
-1. evaluate 5-field cron (`* * * * *`) against current UTC minute via `croner` (`isCronDue`)
-2. skip if a `team_runs` row with `status='running'` already exists (idempotent)
-3. call `runTeam()`, insert `team_runs` row, update `last_run_at`
-
-Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/15`, `1-5`, `mon-fri`). Schedules are evaluated in UTC.
 
 ## Testing Patterns
 
@@ -195,18 +136,24 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 
 ## Dispatching parallel Claude Code sub-agents in this repo
 
-When working on this codebase via Claude Code, parallel `Agent({ isolation: "worktree" })`
-dispatches have proved unreliable: agents leaked back into the parent worktree and
-clobbered each other's commits during the wave-2 implementation. Until that's
-verified end-to-end, default to **sequential dispatch** — one sub-agent at a time, or
-a single agent for an entire wave.
+When working on this codebase via Claude Code, **default to parallel dispatch** — fan
+out independent work across sub-agents concurrently. This is the intended way to move
+fast on multi-part changes.
 
-If you must run agents in parallel:
+To keep parallel `Agent({ isolation: "worktree" })` dispatches reliable (an earlier
+wave saw agents leak back into the parent worktree and clobber each other's commits),
+always:
 
+- Give each agent a **disjoint file set** — no two concurrent agents editing the same
+  file. Split the work so their diffs can't overlap.
 - After dispatch, capture each agent's actual worktree path with `git worktree list`.
 - Pass the absolute path explicitly in the prompt and tell the agent to `cd` there
   before any file or git operation.
-- Verify both agents are on distinct branches before they start committing.
+- Verify each agent is on its own distinct branch before it starts committing.
+
+Fall back to sequential dispatch only for a phase whose file sets genuinely can't be
+made disjoint (e.g. several changes to the same shared file like `api.ts` or the DB
+schema).
 
 This is unrelated to octomux's own runtime tasks (worktree + tmux + agents) — see
 "Task Lifecycle" above for that. The note here is purely about Claude Code's

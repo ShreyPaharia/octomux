@@ -27,6 +27,13 @@ describe('skills repo precedence', () => {
     expect(repoSkill?.description).toBe('From repo');
   });
 
+  it('listSkills includes the built-in prod-log-triage skill', async () => {
+    const skills = await listSkills({ repoPath: repoDir });
+    const triage = skills.find((s) => s.name === 'prod-log-triage');
+    expect(triage).toBeDefined();
+    expect(triage?.description.length).toBeGreaterThan(0);
+  });
+
   it('getSkill reads repo skill without home copy', async () => {
     const skill = await getSkill('repo-skill', { repoPath: repoDir });
     expect(skill.content).toContain('# Repo skill');

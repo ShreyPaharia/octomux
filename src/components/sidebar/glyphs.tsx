@@ -307,6 +307,48 @@ export function ExtractsIcon({ color }: { color: string }) {
   );
 }
 
+export function SchedulesIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
+
+export function WorkflowsIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <circle cx="5" cy="6" r="3" />
+      <circle cx="5" cy="18" r="3" />
+      <circle cx="19" cy="12" r="3" />
+      <path d="M8 6h5a4 4 0 0 1 4 4M8 18h5a4 4 0 0 0 4-4" />
+    </svg>
+  );
+}
+
 export function SettingsIcon({ color }: { color: string }) {
   return (
     <svg

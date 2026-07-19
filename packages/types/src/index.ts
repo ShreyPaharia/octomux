@@ -29,7 +29,7 @@ export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
 export type HookActivity = 'active' | 'idle' | 'waiting';
 export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
 
-export type TaskSource = 'auto_review' | 'pr_extract' | null;
+export type TaskSource = 'auto_review' | 'pr_extract' | 'prod_log_triage' | null;
 
 export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
 

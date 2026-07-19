@@ -14,7 +14,6 @@ import {
   stopAgent,
   getNotifyAgentTarget,
 } from '../repositories/agent-runtime.js';
-import { completeTeamRunByLeadTask } from '../repositories/team-schedules.js';
 import type { Task } from '../types.js';
 import { pollTerminalActivity } from './terminal-activity.js';
 
@@ -100,7 +99,6 @@ export async function pollStatuses(): Promise<void> {
     } else {
       continue;
     }
-    completeTeamRunByLeadTask(task.id);
     stopRunningAgentsForTask(task.id);
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 

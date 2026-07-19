@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createTestDb, insertTestTask, insertAgent } from '../test-helpers.js';
 import { getDb } from '../db.js';
+import { listRunsForWorkflow } from '../repositories/runs.js';
 import type { Task } from '../types.js';
 
 // ─── Mock side-effecting deps ───────────────────────────────────────────────
@@ -104,6 +105,24 @@ describe('review-service.createReviewTaskFromPr', () => {
       type: 'task:updated',
       payload: { taskId: id },
     });
+  });
+
+  it('records exactly one runs row linking the task with kind reviewer, trigger github', async () => {
+    const { id } = await createReviewTaskFromPr({
+      repo_path: '/tmp/test-repo',
+      pr_number: 55,
+      pr_url: 'https://github.com/o/r/pull/55',
+      pr_head_sha: 'head-sha-55',
+      base_branch: 'main',
+      title: 'Add feature',
+      author: 'alice',
+      requested_at: '2026-06-22T00:00:00.000Z',
+    });
+
+    const rows = listRunsForWorkflow('reviewer');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].trigger).toBe('github');
+    expect(rows[0].task_id).toBe(id);
   });
 });
 

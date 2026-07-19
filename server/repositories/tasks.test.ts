@@ -27,6 +27,7 @@ import {
   unlinkWorktree,
   markTaskRunning,
   countTasks,
+  listTasksBySchedule,
 } from './tasks.js';
 import { inTransaction } from './tx.js';
 
@@ -112,6 +113,24 @@ describe('repositories/tasks', () => {
       expect(row.pr_number).toBe(42);
       expect(row.pr_head_sha).toBe('abc123');
     });
+
+    it('accepts an optional schedule_id at insert', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBe('sched-1');
+    });
+
+    it('leaves schedule_id null when not provided', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBeNull();
+    });
   });
 
   // ─── getTaskByWorktreeId ─────────────────────────────────────────────────────
@@ -168,6 +187,30 @@ describe('repositories/tasks', () => {
       const tasks = listTasks({ trash: true });
       expect(tasks.map((t) => t.id)).toContain('t1');
       expect(tasks.map((t) => t.id)).not.toContain('t2');
+    });
+  });
+
+  // ─── listTasksBySchedule ─────────────────────────────────────────────────────
+
+  describe('listTasksBySchedule', () => {
+    it('returns only tasks stamped with the given schedule_id, newest first', () => {
+      insertTask({ id: 't1', title: 'A', description: '', schedule_id: 'sched-1' });
+      insertTask({ id: 't2', title: 'B', description: '', schedule_id: 'sched-1' });
+      insertTask({ id: 't3', title: 'C', description: '', schedule_id: 'sched-2' });
+
+      const rows = listTasksBySchedule('sched-1');
+      expect(rows.map((t) => t.id).sort()).toEqual(['t1', 't2']);
+    });
+
+    it('excludes soft-deleted tasks', () => {
+      insertTask({ id: 't1', title: 'A', description: '', schedule_id: 'sched-1' });
+      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't1'`).run();
+
+      expect(listTasksBySchedule('sched-1')).toHaveLength(0);
+    });
+
+    it('returns an empty array for a schedule with no runs', () => {
+      expect(listTasksBySchedule('no-such-schedule')).toEqual([]);
     });
   });
 

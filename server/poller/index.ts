@@ -6,14 +6,17 @@ import {
   PR_INTERVAL,
   MERGED_PR_INTERVAL,
   DELETE_INTERVAL,
-  TEAM_SCHEDULE_INTERVAL,
   HANDOFF_INTERVAL,
   APPROVAL_INTERVAL,
+  SCHEDULE_INTERVAL,
+  TRIAGE_PR_COMMENTS_INTERVAL,
 } from './intervals.js';
 import { pollMergedPRs } from './merged-pr.js';
 import { pollPRsAndReviewers } from './pr-and-reviewers.js';
+import { pollSchedules } from './schedule-cron.js';
 import { pollSoftDeletes } from './soft-deletes.js';
 import { pollStatuses } from './status.js';
+import { pollTriagePrComments } from './triage-pr-comments.js';
 import { pollWalkthroughHandoffs } from './walkthrough-handoff.js';
 
 const logger = childLogger('poller');
@@ -28,15 +31,9 @@ export function startPolling(): void {
     createPoller(pollPRsAndReviewers, PR_INTERVAL),
     createPoller(pollMergedPRs, MERGED_PR_INTERVAL),
     createPoller(pollSoftDeletes, DELETE_INTERVAL),
-    createPoller(async () => {
-      try {
-        const { pollTeamSchedules } = await import('../teams.js');
-        await pollTeamSchedules();
-      } catch (err) {
-        logger.error({ err, operation: 'pollTeamSchedules' }, 'pollTeamSchedules failed');
-      }
-    }, TEAM_SCHEDULE_INTERVAL),
     createPoller(pollWalkthroughHandoffs, HANDOFF_INTERVAL),
+    createPoller(pollSchedules, SCHEDULE_INTERVAL),
+    createPoller(pollTriagePrComments, TRIAGE_PR_COMMENTS_INTERVAL),
     createPoller(async () => {
       try {
         const { sweepExpiredApprovalCards } = await import('../orchestrator/approval-timeout.js');
@@ -72,4 +69,6 @@ export { sweepStuckReviewRuns } from './review-runs.js';
 export { pollSoftDeletes } from './soft-deletes.js';
 export { attachDeepReviewAgent, pollWalkthroughHandoffs } from './walkthrough-handoff.js';
 export { pollPRsAndReviewers } from './pr-and-reviewers.js';
+export { pollSchedules } from './schedule-cron.js';
+export { checkTriagePrComments, pollTriagePrComments } from './triage-pr-comments.js';
 export { repoNameWithOwner, parseNameWithOwner } from './github-repo.js';

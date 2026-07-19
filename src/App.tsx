@@ -29,6 +29,8 @@ const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
 const WorkflowListRoute = lazy(() => import('./workflows/WorkflowListRoute'));
 const WorkflowDetailRoute = lazy(() => import('./workflows/WorkflowDetailRoute'));
 const LoopGroupDetailPage = lazy(() => import('./pages/LoopGroupDetailPage'));
+const SchedulesPage = lazy(() => import('./pages/SchedulesPage'));
+const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'));
 
 /** `/loops/:id` predates the generic registry; redirect it to the equivalent `/w/loops/:id`
  * rather than dropping support for old bookmarks/links. */
@@ -128,6 +130,8 @@ export function AppShell() {
                 <Route path="/loops/:id" element={<LoopsRedirect />} />
                 <Route path="/extracts" element={<Navigate to="/w/pr-extract" replace />} />
                 <Route path="/loop-groups/:id" element={<LoopGroupDetailPage />} />
+                <Route path="/schedules" element={<SchedulesPage />} />
+                <Route path="/workflows" element={<WorkflowsPage />} />
               </Routes>
             </Suspense>
           </div>

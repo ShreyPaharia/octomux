@@ -58,6 +58,9 @@ describe('runMigrations (isolated)', () => {
     ).map((i) => i.name);
     expect(indexes).toContain('idx_tasks_active_worktree');
 
+    expect(tables).not.toContain('team_schedules');
+    expect(tables).not.toContain('team_runs');
+
     expect(tables).toContain('pr_extracts');
     const extractCols = (db.pragma('table_info(pr_extracts)') as Array<{ name: string }>).map(
       (c) => c.name,

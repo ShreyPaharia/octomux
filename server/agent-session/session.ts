@@ -5,8 +5,10 @@
  *   - a ProcessSubstrate (pty headless or tmux reattachable) for launching the agent,
  *   - a CaptureStrategy (default: MCP submit_result) for receiving the structured result.
  *
- * DB-free: only type-only import of Harness; no task-engine / repositories /
- * orchestrator / task-runner imports.
+ * DB-free by default: only type-only import of Harness; no task-engine /
+ * repositories / orchestrator / task-runner imports at load time. Passing
+ * `opts.run` opts a single call into `runs` persistence via a dynamic
+ * `repositories/runs.js` import, so the no-run path stays untouched.
  */
 
 import fs from 'fs';
@@ -65,6 +67,11 @@ export interface RunAgentSessionOptions<T = unknown> {
    * Default: a fresh os.tmpdir() subdirectory.
    */
   resultDir?: string;
+  /**
+   * When set, persists a `runs` row for this session (insertRun before spawn,
+   * finishRun on settle). Omit to keep this call DB-free, as today.
+   */
+  run?: { workflowKind: string; trigger: string; scheduleId?: string };
 }
 
 // ─── Default capture: MCP submit_result ──────────────────────────────────────
@@ -246,6 +253,20 @@ export async function runAgentSession<T = unknown>(
 
   const resultDir = opts.resultDir ?? path.join(os.tmpdir(), `octomux-as-${nanoid(8)}`);
 
+  // Optional run-record persistence: dynamic import so the module stays
+  // DB-free at load time when `run` is omitted (the default, unchanged path).
+  let runRec: { id: string } | undefined;
+  let finishRunFn: (typeof import('../repositories/runs.js'))['finishRun'] | undefined;
+  if (opts.run) {
+    const { insertRun, finishRun } = await import('../repositories/runs.js');
+    finishRunFn = finishRun;
+    runRec = insertRun({
+      workflowKind: opts.run.workflowKind,
+      trigger: opts.run.trigger,
+      scheduleId: opts.run.scheduleId ?? null,
+    });
+  }
+
   const capture: CaptureStrategy<T> =
     opts.capture ?? mcpSubmitResultCapture<T>(outputSchema, { resultDir });
 
@@ -309,7 +330,11 @@ export async function runAgentSession<T = unknown>(
   try {
     const result = await Promise.race([capture.waitForResult(), exitPromise, timeoutPromise]);
     logger.info({ workspaceDir, sessionId }, 'runAgentSession: result received');
+    if (runRec) finishRunFn?.(runRec.id, { status: 'done', result });
     return { result };
+  } catch (err) {
+    if (runRec) finishRunFn?.(runRec.id, { status: 'failed', error: (err as Error).message });
+    throw err;
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
     handle.dispose();
