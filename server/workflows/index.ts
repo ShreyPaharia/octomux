@@ -1,7 +1,11 @@
 // Side-effect imports register all known workflow kinds.
+import './daily-plan/register.js';
+import './doc-drift/register.js';
 import './loops/register.js';
+import './overnight-log-summary/register.js';
 import './pr-extract/register.js';
 import './prod-log-triage/register.js';
 import './reviewer/register.js';
+import './weekly-update/register.js';
 
 export { registerWorkflow, getWorkflow, listWorkflows } from './registry.js';

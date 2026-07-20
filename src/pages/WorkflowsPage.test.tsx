@@ -29,6 +29,7 @@ function makeWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
     displayName: 'PR Extracts',
     surfaces: ['feed', 'artifact'],
     trigger: { kind: 'github', event: 'pr_merged' },
+    output: null,
     runCount: 3,
     ...overrides,
   };
@@ -92,6 +93,7 @@ describe('WorkflowsPage', () => {
         effective_status: 'done',
         task_id: 'task-1',
         loop_run_id: null,
+        chat_id: null,
         started_at: '2026-01-01 00:00:00',
       },
     ];
@@ -119,6 +121,7 @@ describe('WorkflowsPage', () => {
           effective_status: 'done',
           task_id: 'task-1',
           loop_run_id: null,
+          chat_id: null,
           started_at: '2026-01-01 00:00:00',
         },
       ],
@@ -131,6 +134,67 @@ describe('WorkflowsPage', () => {
     await user.click(taskLink);
 
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-1');
+  });
+
+  it('a session run (no task_id, with result_json) renders its result fields', async () => {
+    const user = userEvent.setup();
+    apiMock.listWorkflows.mockResolvedValue({
+      workflows: [
+        makeWorkflow({
+          kind: 'overnight-log-summary',
+          displayName: 'Overnight Log Summary',
+          surfaces: ['artifact'],
+          trigger: { kind: 'cron' },
+          runCount: 1,
+          output: {
+            type: 'object',
+            properties: {
+              window: { type: 'string' },
+              summary: { type: 'string' },
+              errorClasses: { type: 'array' },
+              notableEvents: { type: 'array' },
+            },
+          },
+        }),
+      ],
+    });
+    apiMock.getWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: 'run-3',
+          workflow_kind: 'overnight-log-summary',
+          trigger: 'cron',
+          status: 'done',
+          effective_status: 'done',
+          task_id: null,
+          loop_run_id: null,
+          chat_id: null,
+          started_at: '2026-01-01 00:00:00',
+          result_json: JSON.stringify({
+            window: 'last 12h',
+            summary: 'One recurring timeout error.',
+            errorClasses: [{ name: 'db timeout', count: 4, severity: 'medium' }],
+            notableEvents: ['Deployed v2.3.0 at 02:00'],
+          }),
+        },
+      ],
+    });
+
+    renderWithRouter(<WorkflowsPage />);
+    await user.click(await screen.findByTestId('workflow-expand-overnight-log-summary'));
+    await screen.findByTestId('workflow-run-run-3');
+
+    // Task/loop links must not appear for a session run.
+    expect(screen.queryByTestId('workflow-run-task-link-run-3')).toBeNull();
+    expect(screen.queryByTestId('workflow-run-loop-link-run-3')).toBeNull();
+
+    await user.click(await screen.findByTestId('workflow-run-result-toggle-run-3'));
+
+    const panel = await screen.findByTestId('workflow-run-result-run-3');
+    expect(panel.textContent).toContain('last 12h');
+    expect(panel.textContent).toContain('One recurring timeout error.');
+    expect(panel.textContent).toContain('db timeout');
+    expect(panel.textContent).toContain('Deployed v2.3.0 at 02:00');
   });
 
   it('a run with a loop_run_id links to /w/loops/:id', async () => {
@@ -146,6 +210,7 @@ describe('WorkflowsPage', () => {
           effective_status: 'running',
           task_id: 'task-2',
           loop_run_id: 'loop-2',
+          chat_id: null,
           started_at: '2026-01-01 00:00:00',
         },
       ],
@@ -158,5 +223,43 @@ describe('WorkflowsPage', () => {
     await user.click(loopLink);
 
     expect(mockNavigate).toHaveBeenCalledWith('/w/loops/loop-2');
+  });
+
+  it('a run with a chat_id links to /chats/:id', async () => {
+    const user = userEvent.setup();
+    apiMock.listWorkflows.mockResolvedValue({
+      workflows: [
+        makeWorkflow({
+          kind: 'daily-plan',
+          displayName: 'Daily Plan',
+          surfaces: ['session'],
+          trigger: { kind: 'cron' },
+          runCount: 1,
+        }),
+      ],
+    });
+    apiMock.getWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: 'run-4',
+          workflow_kind: 'daily-plan',
+          trigger: 'cron',
+          status: 'running',
+          effective_status: 'running',
+          task_id: null,
+          loop_run_id: null,
+          chat_id: 'chat-4',
+          started_at: '2026-01-01 00:00:00',
+        },
+      ],
+    });
+
+    renderWithRouter(<WorkflowsPage />);
+    await user.click(await screen.findByTestId('workflow-expand-daily-plan'));
+
+    const chatLink = await screen.findByTestId('workflow-run-chat-link-run-4');
+    await user.click(chatLink);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/chats/chat-4');
   });
 });

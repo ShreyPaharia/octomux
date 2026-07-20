@@ -27,11 +27,73 @@ function deepLinkFor(kind: string): string | null {
   return null;
 }
 
-function WorkflowRuns({ kind }: { kind: string }) {
+/** Renders a submit_result field value: primitives inline, arrays as a bullet
+ * list (objects within an array are flattened to "key: value" pairs). */
+function formatResultField(value: unknown) {
+  if (value === null || value === undefined) return '—';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return 'None';
+    return (
+      <ul className="list-disc pl-4">
+        {value.map((item, i) => (
+          <li key={i}>
+            {item !== null && typeof item === 'object'
+              ? Object.entries(item as Record<string, unknown>)
+                  .map(([k, v]) => `${k}: ${String(v)}`)
+                  .join(', ')
+              : String(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
+}
+
+/** Session runs (runAgentSession) carry no task_id, only a JSON result_json —
+ * render one labeled row per output-schema property, schema-declaration order. */
+function SessionRunResult({
+  resultJson,
+  outputSchema,
+}: {
+  resultJson: string;
+  outputSchema: Record<string, unknown> | null;
+}) {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(resultJson) as Record<string, unknown>;
+  } catch {
+    return <p className="px-4 py-2 text-xs text-destructive">Failed to parse result.</p>;
+  }
+
+  const properties = outputSchema?.properties as Record<string, unknown> | undefined;
+  const fields = properties ? Object.keys(properties) : Object.keys(parsed);
+
+  return (
+    <GlassPanel level={1} className="flex flex-col gap-2 rounded-xl p-3 text-xs">
+      {fields.map((field) => (
+        <div key={field} data-testid={`workflow-run-result-field-${field}`}>
+          <span className="font-medium text-muted-foreground">{field}: </span>
+          <span className="text-foreground">{formatResultField(parsed[field])}</span>
+        </div>
+      ))}
+    </GlassPanel>
+  );
+}
+
+function WorkflowRuns({
+  kind,
+  outputSchema,
+}: {
+  kind: string;
+  outputSchema: Record<string, unknown> | null;
+}) {
   const nav = useNavigate();
   const { data: runs, loading } = useResource<WorkflowRunRow[]>(kind, () =>
     workflowsApi.getWorkflowRuns(kind).then((res) => res.runs),
   );
+  const [expandedResultId, setExpandedResultId] = useState<string | null>(null);
 
   if (loading) {
     return <p className="px-4 py-2 text-xs text-muted-foreground">Loading runs…</p>;
@@ -42,36 +104,65 @@ function WorkflowRuns({ kind }: { kind: string }) {
 
   return (
     <ul className="flex flex-col gap-1 px-4 py-2">
-      {runs.map((run) => (
-        <li
-          key={run.id}
-          data-testid={`workflow-run-${run.id}`}
-          className="flex items-center gap-2 text-xs"
-        >
-          <span className="text-foreground">{run.effective_status}</span>
-          <span className="text-muted-soft">{timeAgo(run.started_at)}</span>
-          {run.task_id && (
-            <button
-              type="button"
-              data-testid={`workflow-run-task-link-${run.id}`}
-              className="text-muted-foreground hover:text-primary hover:underline"
-              onClick={() => nav(`/tasks/${run.task_id}`)}
-            >
-              task
-            </button>
-          )}
-          {run.loop_run_id && (
-            <button
-              type="button"
-              data-testid={`workflow-run-loop-link-${run.id}`}
-              className="text-muted-foreground hover:text-primary hover:underline"
-              onClick={() => nav(`/w/loops/${run.loop_run_id}`)}
-            >
-              loop
-            </button>
-          )}
-        </li>
-      ))}
+      {runs.map((run) => {
+        const isSessionRun = !run.task_id && !run.loop_run_id && !!run.result_json;
+        return (
+          <li key={run.id} data-testid={`workflow-run-${run.id}`} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-foreground">{run.effective_status}</span>
+              <span className="text-muted-soft">{timeAgo(run.started_at)}</span>
+              {run.task_id && (
+                <button
+                  type="button"
+                  data-testid={`workflow-run-task-link-${run.id}`}
+                  className="text-muted-foreground hover:text-primary hover:underline"
+                  onClick={() => nav(`/tasks/${run.task_id}`)}
+                >
+                  task
+                </button>
+              )}
+              {run.loop_run_id && (
+                <button
+                  type="button"
+                  data-testid={`workflow-run-loop-link-${run.id}`}
+                  className="text-muted-foreground hover:text-primary hover:underline"
+                  onClick={() => nav(`/w/loops/${run.loop_run_id}`)}
+                >
+                  loop
+                </button>
+              )}
+              {run.chat_id && (
+                <button
+                  type="button"
+                  data-testid={`workflow-run-chat-link-${run.id}`}
+                  className="text-muted-foreground hover:text-primary hover:underline"
+                  onClick={() => nav(`/chats/${run.chat_id}`)}
+                >
+                  chat
+                </button>
+              )}
+              {isSessionRun && (
+                <button
+                  type="button"
+                  data-testid={`workflow-run-result-toggle-${run.id}`}
+                  className="text-muted-foreground hover:text-primary hover:underline"
+                  onClick={() => setExpandedResultId(expandedResultId === run.id ? null : run.id)}
+                >
+                  {expandedResultId === run.id ? 'hide result' : 'result'}
+                </button>
+              )}
+            </div>
+            {isSessionRun && expandedResultId === run.id && (
+              <div data-testid={`workflow-run-result-${run.id}`}>
+                <SessionRunResult
+                  resultJson={run.result_json as string}
+                  outputSchema={outputSchema}
+                />
+              </div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -142,7 +233,9 @@ export default function WorkflowsPage() {
                       </button>
                     )}
                   </div>
-                  {expandedKind === wf.kind && <WorkflowRuns kind={wf.kind} />}
+                  {expandedKind === wf.kind && (
+                    <WorkflowRuns kind={wf.kind} outputSchema={wf.output} />
+                  )}
                 </GlassPanel>
               </li>
             );

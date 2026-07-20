@@ -17,6 +17,8 @@ export interface WorkflowRow {
   displayName: string;
   surfaces: string[];
   trigger: WorkflowTrigger | null;
+  /** JSON Schema for this workflow's result shape, or null if it has none. */
+  output: Record<string, unknown> | null;
   runCount: number;
 }
 
@@ -28,7 +30,10 @@ export interface WorkflowRunRow {
   effective_status: string;
   task_id: string | null;
   loop_run_id: string | null;
+  chat_id: string | null;
   started_at: string;
+  /** Structured result from a headless session run (runAgentSession), JSON-stringified. */
+  result_json?: string | null;
 }
 
 export const workflowsApi = {
