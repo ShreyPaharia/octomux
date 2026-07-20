@@ -106,9 +106,11 @@ export function handleListTasks(input: ListTasksInput): TaskSummary[] {
 
   logger.debug({ operation: 'list_tasks', workflow_status, limit }, 'list_tasks called');
 
-  // Fetch all non-deleted tasks (including auto_review), ordered newest-updated first.
+  // Fetch all non-deleted tasks (including auto_review and automated workflow sources),
+  // ordered newest-updated first. The dashboard board hides automated tasks; the orchestrator
+  // must still see them.
   // listTasks orders by created_at; we replicate the original updated_at ordering in JS.
-  let rows = listTasks({ includeAutoReview: true });
+  let rows = listTasks({ includeAutoReview: true, includeAutomated: true });
 
   // Apply workflow_status filter if provided
   if (workflow_status) {
@@ -178,8 +180,9 @@ export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusRe
   // Total active (non-deleted) tasks
   const total = countTasks();
 
-  // All non-deleted tasks (including auto_review) for rollup computation
-  const allTasks = listTasks({ includeAutoReview: true });
+  // All non-deleted tasks for rollup computation. Must match countTasks()'s scope — it counts
+  // every task, so excluding automated sources here would desync `total` from the breakdown.
+  const allTasks = listTasks({ includeAutoReview: true, includeAutomated: true });
   const taskIds = allTasks.map((t) => t.id);
   const taskMap = new Map<string, Task>(allTasks.map((t) => [t.id, t]));
 

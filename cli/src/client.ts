@@ -184,7 +184,11 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
     listTasks(params) {
-      return request<Task[]>(`/tasks${qs({ repo_path: params?.repo_path })}`);
+      // The dashboard board hides automated tasks (doc-drift, prod-log-triage, …) by default;
+      // the CLI is an operator surface and must keep showing every task, as it always has.
+      return request<Task[]>(
+        `/tasks${qs({ repo_path: params?.repo_path, includeAutomated: 'true' })}`,
+      );
     },
     getTask(id) {
       return request<Task>(`/tasks/${encodeURIComponent(id)}`);
