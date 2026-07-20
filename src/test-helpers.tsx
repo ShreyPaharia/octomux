@@ -499,7 +499,15 @@ export function mockLoopGroupApi(overrides: Record<string, unknown> = {}) {
 export function mockSchedulesApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listSchedules: vi.fn().mockResolvedValue([]),
-    getScheduleKinds: vi.fn().mockResolvedValue({ kinds: ['prod-log-triage'] }),
+    getScheduleKinds: vi.fn().mockResolvedValue({
+      kinds: [
+        {
+          kind: 'prod-log-triage',
+          displayName: 'Prod Log Triage',
+          configSchema: null,
+        },
+      ],
+    }),
     createSchedule: vi.fn().mockResolvedValue({
       id: 'sched-1',
       kind: 'prod-log-triage',

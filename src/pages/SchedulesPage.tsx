@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Task } from '@octomux/types';
-import { schedulesApi, type ScheduleRow } from '@/lib/api/schedulesApi';
+import { schedulesApi, type ScheduleKindInfo, type ScheduleRow } from '@/lib/api/schedulesApi';
 import { loopApi } from '@/lib/api/loopApi';
 import { useResource } from '@/lib/use-resource';
 import { GlassPanel } from '@/components/ui/glass-panel';
@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
-import { InfoTooltip } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -22,21 +21,39 @@ import {
 } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { timeAgo } from '@/lib/time';
+import { SchemaConfigForm, defaultsFromSchema } from '@/components/schedules/SchemaConfigForm';
 
-function ScheduleForm({ kinds, onCreated }: { kinds: string[]; onCreated: () => void }) {
+function ScheduleForm({
+  kinds,
+  onCreated,
+}: {
+  kinds: ScheduleKindInfo[];
+  onCreated: () => void;
+}) {
   const [kind, setKind] = useState('');
   const [repoPath, setRepoPath] = useState('');
   const [cron, setCron] = useState('');
   const [enabled, setEnabled] = useState(true);
-  const [logCommand, setLogCommand] = useState('');
-  const [verify, setVerify] = useState('');
-  const [maxIterations, setMaxIterations] = useState('');
+  const [config, setConfig] = useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const selectedKind = useMemo(
+    () => kinds.find((k) => k.kind === kind) ?? null,
+    [kinds, kind],
+  );
+
   useEffect(() => {
-    if (!kind && kinds.length > 0) setKind(kinds[0]);
+    if (!kind && kinds.length > 0) setKind(kinds[0].kind);
   }, [kind, kinds]);
+
+  useEffect(() => {
+    if (!selectedKind?.configSchema) {
+      setConfig({});
+      return;
+    }
+    setConfig(defaultsFromSchema(selectedKind.configSchema));
+  }, [selectedKind]);
 
   const canSubmit = kind.length > 0 && repoPath.trim().length > 0 && cron.trim().length > 0;
 
@@ -45,35 +62,32 @@ function ScheduleForm({ kinds, onCreated }: { kinds: string[]; onCreated: () => 
     setSubmitting(true);
     setError(null);
     try {
-      const config: Record<string, unknown> = {};
-      if (logCommand.trim()) config.logCommand = logCommand.trim();
-      if (verify.trim()) config.verify = verify.trim();
-      const maxIterationsN = Number.parseInt(maxIterations, 10);
-      if (Number.isInteger(maxIterationsN) && maxIterationsN >= 1) {
-        config.maxIterations = maxIterationsN;
-      }
+      const payloadConfig =
+        selectedKind?.configSchema && Object.keys(config).length > 0 ? config : undefined;
 
       await schedulesApi.createSchedule({
         kind,
         repoPath: repoPath.trim(),
         cron: cron.trim(),
         enabled,
-        ...(Object.keys(config).length > 0 ? { config } : {}),
+        ...(payloadConfig ? { config: payloadConfig } : {}),
       });
 
       setRepoPath('');
       setCron('');
       setEnabled(true);
-      setLogCommand('');
-      setVerify('');
-      setMaxIterations('');
+      if (selectedKind?.configSchema) {
+        setConfig(defaultsFromSchema(selectedKind.configSchema));
+      } else {
+        setConfig({});
+      }
       onCreated();
     } catch (err) {
       setError((err as Error).message || 'Failed to create schedule');
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, kind, repoPath, cron, enabled, logCommand, verify, maxIterations, onCreated]);
+  }, [canSubmit, kind, repoPath, cron, enabled, config, selectedKind, onCreated]);
 
   return (
     <GlassPanel level={2} className="flex flex-col gap-3 rounded-2xl p-4">
@@ -87,8 +101,8 @@ function ScheduleForm({ kinds, onCreated }: { kinds: string[]; onCreated: () => 
             onChange={(e) => setKind(e.target.value)}
           >
             {kinds.map((k) => (
-              <option key={k} value={k}>
-                {k}
+              <option key={k.kind} value={k.kind}>
+                {k.displayName}
               </option>
             ))}
           </FormSelect>
@@ -126,47 +140,20 @@ function ScheduleForm({ kinds, onCreated }: { kinds: string[]; onCreated: () => 
         Enabled
       </label>
 
-      <details className="group">
-        <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-          Advanced config
-          <InfoTooltip content="These overrides currently apply to the prod-log-triage kind only." />
-        </summary>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="schedule-log-command">Log command</Label>
-            <Input
-              id="schedule-log-command"
-              data-testid="schedule-log-command"
-              placeholder="flyctl logs -a my-app"
-              value={logCommand}
-              onChange={(e) => setLogCommand(e.target.value)}
+      {selectedKind?.configSchema ? (
+        <details className="group" open>
+          <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            Workflow config
+          </summary>
+          <div className="mt-3">
+            <SchemaConfigForm
+              schema={selectedKind.configSchema}
+              value={config}
+              onChange={setConfig}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="schedule-verify">Verify</Label>
-            <Input
-              id="schedule-verify"
-              data-testid="schedule-verify"
-              className="font-mono text-sm"
-              placeholder="bun run test"
-              value={verify}
-              onChange={(e) => setVerify(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="schedule-max-iterations">Max iterations</Label>
-            <Input
-              id="schedule-max-iterations"
-              data-testid="schedule-max-iterations"
-              type="number"
-              min={1}
-              placeholder="5"
-              value={maxIterations}
-              onChange={(e) => setMaxIterations(e.target.value)}
-            />
-          </div>
-        </div>
-      </details>
+        </details>
+      ) : null}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
@@ -296,7 +283,7 @@ export default function SchedulesPage() {
   const { data, loading, refresh } = useResource<ScheduleRow[]>('schedules', () =>
     schedulesApi.listSchedules(),
   );
-  const [kinds, setKinds] = useState<string[]>([]);
+  const [kinds, setKinds] = useState<ScheduleKindInfo[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduleRow | null>(null);
   const schedules = data ?? [];

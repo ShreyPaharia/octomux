@@ -21,7 +21,7 @@ vi.mock('../events.js', () => ({
 
 import { upsertSchedule } from '../repositories/schedules.js';
 import { pollSchedules } from '../poller/schedule-cron.js';
-import './index.js';
+import './prod-log-triage/index.js';
 
 function insertActiveAgent(taskId: string): void {
   getDb()

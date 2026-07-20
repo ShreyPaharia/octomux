@@ -17,10 +17,11 @@ describe('schedule routes', () => {
     it('lists registered schedule kinds', async () => {
       const res = await request(app).get('/api/schedules/kinds');
       expect(res.status).toBe(200);
-      expect(res.body.kinds).toContain('prod-log-triage');
-      expect(res.body.kinds).toContain('doc-drift');
-      expect(res.body.kinds).toContain('weekly-update');
-      expect(res.body.kinds).toContain('daily-plan');
+      const kinds = res.body.kinds.map((k: { kind: string }) => k.kind);
+      expect(kinds).toContain('prod-log-triage');
+      expect(kinds).toContain('doc-drift');
+      expect(kinds).toContain('weekly-update');
+      expect(kinds).toContain('daily-plan');
     });
   });
 

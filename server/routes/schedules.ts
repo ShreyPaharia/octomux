@@ -8,18 +8,47 @@ import {
   updateSchedule,
   deleteSchedule,
 } from '../repositories/schedules.js';
-import { listScheduleKinds } from '../schedules/handlers.js';
+import { getWorkflow, listCronWorkflowKinds } from '../workflows/registry.js';
+import { validateWorkflowConfig } from '../workflows/config.js';
 import { listTasksBySchedule } from '../repositories/tasks.js';
-import { badRequest, notFound } from '../services/errors.js';
+import { badRequest, notFound, ServiceError } from '../services/errors.js';
 
 const logger = childLogger('routes/schedules');
 
 export const router = express.Router();
 
+function assertCronKind(kind: string): void {
+  if (!listCronWorkflowKinds().includes(kind)) {
+    throw badRequest(`kind must be one of: ${listCronWorkflowKinds().join(', ')}`);
+  }
+}
+
+function validateScheduleConfig(kind: string, config: unknown): void {
+  const wf = getWorkflow(kind);
+  if (!wf) throw badRequest(`unknown workflow kind: ${kind}`);
+  if (config === undefined) return;
+  const result = validateWorkflowConfig(wf, config);
+  if (!result.valid) {
+    throw new ServiceError('config validation failed', 400, {
+      error: 'config validation failed',
+      details: result.errors,
+    });
+  }
+}
+
 // NOTE: registered before '/api/schedules/:id' — Express matches routes in
 // declaration order, so the literal 'kinds' segment must win over the :id param.
 router.get('/api/schedules/kinds', (_req: Request, res: Response) => {
-  res.json({ kinds: listScheduleKinds() });
+  res.json({
+    kinds: listCronWorkflowKinds().map((kind) => {
+      const wf = getWorkflow(kind)!;
+      return {
+        kind: wf.kind,
+        displayName: wf.displayName,
+        configSchema: wf.config ?? null,
+      };
+    }),
+  });
 });
 
 router.get('/api/schedules', (_req: Request, res: Response) => {
@@ -35,15 +64,17 @@ router.post('/api/schedules', (req: Request, res: Response) => {
     config?: unknown;
   };
 
-  if (typeof body.kind !== 'string' || !listScheduleKinds().includes(body.kind)) {
-    throw badRequest(`kind must be one of: ${listScheduleKinds().join(', ')}`);
+  if (typeof body.kind !== 'string') {
+    throw badRequest('kind is required');
   }
+  assertCronKind(body.kind);
   if (typeof body.repoPath !== 'string' || !body.repoPath.trim()) {
     throw badRequest('repoPath is required');
   }
   if (typeof body.cron !== 'string' || !body.cron.trim()) {
     throw badRequest('cron is required');
   }
+  validateScheduleConfig(body.kind, body.config);
 
   const row = upsertSchedule({
     kind: body.kind,
@@ -66,6 +97,12 @@ router.patch('/api/schedules/:id', (req: Request, res: Response) => {
   }
   if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
     throw badRequest('enabled must be a boolean');
+  }
+
+  const existing = getSchedule(id);
+  if (!existing) throw notFound('Schedule not found');
+  if (body.config !== undefined) {
+    validateScheduleConfig(existing.kind, body.config);
   }
 
   const updated = updateSchedule(id, {

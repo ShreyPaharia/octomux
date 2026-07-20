@@ -16,11 +16,7 @@ import { router as chatsRouter } from './routes/chats.js';
 import { router as agentDefsRouter } from './routes/agent-defs.js';
 import { router as orchestratorRouter } from './routes/orchestrator.js';
 import { router as integrationsRouter } from './routes/integrations.js';
-import { router as reviewsRouter } from './routes/reviews.js';
-import { router as reviewRunsRouter } from './routes/review-runs.js';
-import { router as loopsRouter } from './routes/loops.js';
 import { router as loopGroupsRouter } from './routes/loop-groups.js';
-import { router as prExtractsRouter } from './routes/pr-extracts.js';
 import { router as commentsRouter } from './routes/comments.js';
 import { router as diffsRouter } from './routes/diffs.js';
 import { router as tasksRouter } from './routes/tasks.js';
@@ -29,6 +25,7 @@ import { router as taskAgentsRouter } from './routes/task-agents.js';
 import { router as worktreesRouter } from './routes/worktrees.js';
 import { router as schedulesRouter } from './routes/schedules.js';
 import { router as workflowRunsRouter } from './routes/workflow-runs.js';
+import { listWorkflows } from './workflows/registry.js';
 
 import { insertWorktreeIfAbsent, insertTaskIfAbsent, inTransaction } from './repositories/index.js';
 
@@ -48,11 +45,10 @@ export function setupRoutes(app: Express): void {
   app.use(agentDefsRouter);
   app.use(orchestratorRouter);
   app.use(integrationsRouter);
-  app.use(reviewsRouter);
-  app.use(reviewRunsRouter);
-  app.use(loopsRouter);
+  for (const wf of listWorkflows()) {
+    if (wf.apiRouter) app.use(wf.apiRouter);
+  }
   app.use(loopGroupsRouter);
-  app.use(prExtractsRouter);
   app.use(commentsRouter);
   app.use(diffsRouter);
   app.use(tasksRouter);

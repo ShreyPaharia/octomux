@@ -39,7 +39,21 @@ function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
 describe('SchedulesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    apiMock.getScheduleKinds.mockResolvedValue({ kinds: ['prod-log-triage'] });
+    apiMock.getScheduleKinds.mockResolvedValue({
+      kinds: [
+        {
+          kind: 'prod-log-triage',
+          displayName: 'Prod Log Triage',
+          configSchema: {
+            type: 'object',
+            properties: {
+              logCommand: { type: 'string', default: 'gh run list' },
+              maxIterations: { type: 'integer', default: 5 },
+            },
+          },
+        },
+      ],
+    });
     apiMock.listLoops.mockResolvedValue([]);
   });
 

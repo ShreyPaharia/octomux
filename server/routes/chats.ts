@@ -7,7 +7,7 @@ import { validateAgentName } from '../harnesses/types.js';
 import { getHarness } from '../harnesses/index.js';
 import { hopAgent } from '../task-engine/index.js';
 import { getAgent as getAgentRepo, getTask as getTaskRepo } from '../repositories/index.js';
-import { finishDailyPlanRunForChat } from '../services/daily-plan-service.js';
+import { finishDailyPlanRunForChat } from '../workflows/daily-plan/run.js';
 import type { CreateChatRequest, Task } from '../types.js';
 import { badRequest, conflict, notFound, ServiceError } from '../services/errors.js';
 
