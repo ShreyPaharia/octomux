@@ -32,12 +32,19 @@ files, or make any changes. Your only output is the `submit_result` call.
 
    ```json
    {
+     "outcome": "done",
      "window": "<the time window you summarized, e.g. last 12h>",
      "summary": "<2-4 sentence overview>",
      "errorClasses": [{ "name": "...", "count": 0, "severity": "low" }],
-     "notableEvents": ["..."]
+     "notableEvents": ["..."],
+     "links": [{ "label": "...", "url": "..." }]
    }
    ```
+
+   `outcome` is required: `"done"` for a normal summary, `"blocked"` if you
+   could not fetch the logs at all, `"failed"` only if something about the
+   summarization itself broke. `links` is optional — omit it, or point to a
+   dashboard/incident file if one is relevant.
 
 ## Notes
 

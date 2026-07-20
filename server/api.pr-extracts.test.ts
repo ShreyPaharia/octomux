@@ -3,6 +3,8 @@ import type Database from 'better-sqlite3';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
+import { insertRun, getRun } from './repositories/runs.js';
+import type { RunResult } from './types.js';
 
 describe('POST /api/pr-extracts/:taskId/emit', () => {
   let app: ReturnType<typeof createApp>;
@@ -107,6 +109,35 @@ describe('POST /api/pr-extracts/:taskId/emit', () => {
       .set('Authorization', 'Bearer tok-1')
       .send(validBody);
     expect(res.status).toBe(409);
+  });
+
+  it('finishes the run row when an extract is emitted', async () => {
+    seed();
+    const run = insertRun({ workflowKind: 'pr-extract', trigger: 'github', taskId: 'task-1' });
+
+    const res = await request(app)
+      .post('/api/pr-extracts/task-1/emit')
+      .set('Authorization', 'Bearer tok-1')
+      .send(validBody);
+    expect(res.status).toBe(201);
+
+    const finished = getRun(run.id);
+    expect(finished?.status).toBe('done');
+    expect(finished?.ended_at).not.toBeNull();
+    const result = JSON.parse(finished!.result_json!) as RunResult;
+    expect(result.outcome).toBe('done');
+    expect(result.summary).toContain('server');
+    expect(result.summary).toContain('low');
+    expect(result.summary).toContain('42');
+  });
+
+  it('does not throw when no run row exists for the task', async () => {
+    seed();
+    const res = await request(app)
+      .post('/api/pr-extracts/task-1/emit')
+      .set('Authorization', 'Bearer tok-1')
+      .send(validBody);
+    expect(res.status).toBe(201);
   });
 });
 

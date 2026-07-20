@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
-import type { LoopRun, LoopSpec, Task } from '../../types.js';
+import type { LoopRun, LoopSpec, Task, RunResult } from '../../types.js';
 
 vi.mock('../git.js', () => ({
   revParseHead: vi.fn(),
@@ -37,6 +37,7 @@ const { respawnAgentFresh } = await import('../lifecycle/respawn-agent.js');
 const { getLoopRun, listIterationsForRun, recordEmit, createLoopRun } =
   await import('../../repositories/loop-runs.js');
 const { createLoopGroup } = await import('../../repositories/loop-groups.js');
+const { insertRun, getRun } = await import('../../repositories/runs.js');
 
 function makeRun(overrides: Partial<LoopRun> = {}): LoopRun {
   return {
@@ -509,5 +510,153 @@ describe('resumeLoopOnStartup', () => {
     await resumeLoopOnStartup(task);
 
     expect(respawnAgentFresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('run-result envelope on termination', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+    vi.clearAllMocks();
+    insertTask(db, { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'running' });
+    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-1', status: 'running' } as any);
+    let sha = 0;
+    vi.mocked(revParseHead).mockImplementation(async () => `sha${sha++}`);
+    vi.mocked(commitAll).mockResolvedValue(true);
+    vi.mocked(diffNameOnly).mockResolvedValue([]);
+  });
+
+  type Case = {
+    reason: string;
+    expectedOutcome: RunResult['outcome'];
+    specOverrides?: Partial<LoopSpec>;
+    drive: (loopRunId: string) => Promise<void>;
+  };
+
+  const CASES: Case[] = [
+    {
+      reason: 'done',
+      expectedOutcome: 'done',
+      drive: async (loopRunId) => {
+        vi.mocked(runVerify).mockResolvedValueOnce({ passed: true, output: 'ok' });
+        recordEmit(loopRunId, { status: 'done', reason: 'All tests pass now.' });
+        await handleLoopIterationBoundary('t1', 'a1');
+      },
+    },
+    {
+      reason: 'blocked',
+      expectedOutcome: 'blocked',
+      drive: async (loopRunId) => {
+        vi.mocked(runVerify).mockResolvedValueOnce({ passed: false, output: 'n/a' });
+        recordEmit(loopRunId, { status: 'blocked', reason: 'Need clarification on scope.' });
+        await handleLoopIterationBoundary('t1', 'a1');
+      },
+    },
+    {
+      reason: 'needs_human',
+      expectedOutcome: 'blocked',
+      drive: async (loopRunId) => {
+        vi.mocked(runVerify).mockResolvedValueOnce({ passed: false, output: 'n/a' });
+        recordEmit(loopRunId, { status: 'needs_human', reason: 'Requires human review.' });
+        await handleLoopIterationBoundary('t1', 'a1');
+      },
+    },
+    {
+      reason: 'max_iterations',
+      expectedOutcome: 'failed',
+      specOverrides: { maxIterations: 1 },
+      drive: async () => {
+        vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
+        await handleLoopIterationBoundary('t1', 'a1');
+      },
+    },
+    {
+      reason: 'budget',
+      expectedOutcome: 'failed',
+      specOverrides: { maxIterations: 100, budget: { timeMs: 1 } },
+      drive: async (loopRunId) => {
+        vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
+        db.prepare(`UPDATE loop_runs SET created_at = datetime('now', '-1 hour') WHERE id = ?`).run(
+          loopRunId,
+        );
+        await handleLoopIterationBoundary('t1', 'a1');
+      },
+    },
+    {
+      reason: 'no_progress',
+      expectedOutcome: 'failed',
+      specOverrides: { maxIterations: 100, noProgress: { afterIters: 1 } },
+      drive: async () => {
+        vi.mocked(revParseHead).mockImplementation(async () => 'same-sha-every-time');
+        vi.mocked(commitAll).mockResolvedValue(false);
+        vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'nothing changed' });
+        await handleLoopIterationBoundary('t1', 'a1');
+      },
+    },
+  ];
+
+  it.each(CASES)(
+    'termination reason $reason finishes the run as $expectedOutcome',
+    async ({ expectedOutcome, specOverrides, drive }) => {
+      const runsRow = insertRun({ workflowKind: 'doc-drift', trigger: 'cron', taskId: 't1' });
+      const loopRunId = 'loop-run-1';
+      await startLoop(
+        't1',
+        { ...LOOP_SPEC, ...specOverrides, runId: runsRow.id },
+        undefined,
+        loopRunId,
+      );
+
+      await drive(loopRunId);
+
+      const finished = getRun(runsRow.id);
+      expect(finished?.status).not.toBe('running');
+      expect(finished?.ended_at).not.toBeNull();
+      const result = JSON.parse(finished!.result_json!) as RunResult;
+      expect(result.outcome).toBe(expectedOutcome);
+      expect(typeof result.summary).toBe('string');
+      expect(result.summary.length).toBeGreaterThan(0);
+    },
+  );
+
+  it('uses the agent-emitted reason text as the summary for done', async () => {
+    const runsRow = insertRun({ workflowKind: 'doc-drift', trigger: 'cron', taskId: 't1' });
+    const loopRunId = 'loop-run-2';
+    await startLoop('t1', { ...LOOP_SPEC, runId: runsRow.id }, undefined, loopRunId);
+
+    vi.mocked(runVerify).mockResolvedValueOnce({ passed: true, output: 'ok' });
+    recordEmit(loopRunId, { status: 'done', reason: 'Fixed the flaky test and verified locally.' });
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const finished = getRun(runsRow.id);
+    const result = JSON.parse(finished!.result_json!) as RunResult;
+    expect(result.summary).toBe('Fixed the flaky test and verified locally.');
+  });
+
+  it('falls back to a mechanical summary for max_iterations, which never has an agent emit', async () => {
+    const runsRow = insertRun({ workflowKind: 'doc-drift', trigger: 'cron', taskId: 't1' });
+    const loopRunId = 'loop-run-3';
+    await startLoop(
+      't1',
+      { ...LOOP_SPEC, maxIterations: 1, runId: runsRow.id },
+      undefined,
+      loopRunId,
+    );
+
+    vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
+    await handleLoopIterationBoundary('t1', 'a1');
+
+    const finished = getRun(runsRow.id);
+    const result = JSON.parse(finished!.result_json!) as RunResult;
+    expect(result.summary).toContain('max_iterations');
+  });
+
+  it('does not touch the runs table when the loop spec carries no runId', async () => {
+    await startLoop('t1', { ...LOOP_SPEC, maxIterations: 1 });
+
+    vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
+    // Must not throw for a spec with no runId (loops created via POST /api/loops today).
+    await expect(handleLoopIterationBoundary('t1', 'a1')).resolves.toBeUndefined();
   });
 });

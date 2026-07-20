@@ -11,10 +11,14 @@ export interface CreateLoopRunInput {
   max_iterations?: number | null;
   budget_json?: string | null;
   group_id?: string | null;
+  /** Pre-generated id, so a caller can thread it into `insertRun({ loopRunId })`
+   * before this row exists (see doc-drift/prod-log-triage services). Defaults
+   * to a fresh nanoid when omitted. */
+  id?: string;
 }
 
 export function createLoopRun(input: CreateLoopRunInput): LoopRun {
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   getDb()
     .prepare(
       `INSERT INTO loop_runs (id, task_id, spec_json, max_iterations, budget_json, group_id)
