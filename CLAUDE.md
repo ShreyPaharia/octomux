@@ -1,8 +1,9 @@
 # octomux
 
-npm package (`octomux`) for orchestrating autonomous Claude Code agents from a web dashboard.
-Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
-`./data/` in development (`NODE_ENV !== 'production'`).
+npm package (`octomux`) for orchestrating autonomous Claude Code and Cursor agents from a
+web dashboard. Single binary: `octomux <command>`. Data stored at `~/.octomux/` in
+production, `./data/` in development (`NODE_ENV !== 'production'`); override the production
+root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path).
 
 ## Tech Stack
 
@@ -23,19 +24,25 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
 - `bun run test:e2e:ui` — Playwright interactive UI mode
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
-- `bun run typecheck` — tsc --noEmit
-- `bun run build` — Vite build + tsc server
+- `bun run typecheck` — `tsc -b` (project references across `packages/*`)
+- `bun run build` — builds `packages/*` (diff-engine, types, test-fixtures, api-client),
+  then Vite build + tsup server bundle + `cli:build`, then `scripts/verify-build.js`
 
 ## Architecture
 
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
-  - `api.ts` — REST routes mounted on Express app
+  - `api.ts` — mounts the routers from `routes/` onto the Express app
+  - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, reviews,
+    review-runs, comments, chats, loops, skills, teams, settings, orchestrator, …)
   - `app.ts` — extracted `createApp()` for testability
-  - `task-runner.ts` — worktree + tmux + harness lifecycle (closeTask, deleteTask)
+  - `task-engine/` — worktree + tmux + harness lifecycle. `cleanup.ts` holds `closeTask` /
+    `deleteTask`; also `launch.ts`, `git.ts`, `sessions.ts`, `terminals.ts`, `reconcile.ts`,
+    plus `lifecycle/`, `setup/`, `loop/` subdirs.
   - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
   - `logger.ts` — pino root + `childLogger('<module>')` helper
   - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
-  - `harnesses/` — pluggable harness implementations (Claude Code today; Cursor planned).
+  - `harnesses/` — pluggable harness implementations (`claude-code.ts`, `cursor.ts`;
+    `claude-code` is the default via `DEFAULT_HARNESS_ID`).
     Each `Harness` exports `id`, `displayName`, `sessionIdMode`, command builders,
     `installHooks`, `syncAgents`, `resolveFlags`, `validateSettings`. Spec at
     `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
@@ -43,11 +50,16 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
   - `teams.ts` — team feature: `parseTeamConfig`, `validateTeamConfig`, `runTeam`, `upsertTeamSchedule`,
     `listTeamSchedules`, `isCronDue`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
 - `src/` — React SPA (pages, components, lib/api.ts)
-- `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
+- `cli/` — CLI tool; one file per subcommand in `cli/src/commands/` (create-task, list-tasks,
+  get-task, close-task, resume-task, delete-task, add-agent, send-message, stop-agent, init,
+  team, emit, loop-start, post-review, task-move/note/summary/updates, skills, files, …)
+- `packages/` — bun workspaces: `types`, `diff-engine`, `api-client`, `test-fixtures`, plus
+  the prebuilt `tmux-{darwin,linux}-{arm64,x64}` binaries
+- `electron/` — macOS desktop app wrapper (`build:electron` / `dist:electron`)
 - `e2e/` — Playwright E2E tests
 
-DB migrations are forward-only. Back up `~/.octomux/octomux.sqlite` (prod) or
-`./data/octomux.sqlite` (dev) before upgrading across the harness-abstraction
+DB migrations are forward-only. Back up `~/.octomux/data/tasks.db` (prod) or
+`./data/tasks.db` (dev) before upgrading across the harness-abstraction
 migration (renames `agents.claude_session_id` → `harness_session_id`, adds
 `tasks.harness_id` / `agents.harness_id` / `agents.hook_token`, relaxes
 `permission_prompts.session_id` to nullable).
@@ -94,9 +106,8 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - Shared test harness: `server/test-helpers.ts` (DEFAULTS fixtures, insert/get helpers,
   shell mock assertion helpers via `findExecCall`/`countExecCalls`)
 - DB tests use in-memory SQLite via `createTestDb()` → calls `setDb()` for isolation
-- task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
+- task-engine tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
-- `CLAUDE_INIT_DELAY` is 0 in test env to avoid 3s sleeps
 - `OCTOMUX_AI_TASK_NAMING=1` (or `true`) — optional: on task create with `initial_prompt`, run Claude CLI to polish omitted title/description; off by default so POST `/api/tasks` returns immediately without that subprocess
 - E2E: Playwright tests in `e2e/`, config in `playwright.config.ts`
 - E2E: `webServer` config auto-starts Express + Vite, reuses running servers in dev
@@ -115,7 +126,7 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 ## Gotchas
 
 - SQLite `datetime('now')` needs single-quoted `'now'` — use template literals, not regular strings
-- `fs` mock for task-runner needs `default: mocked` in vi.mock return (default import)
+- `fs` mock for task-engine needs `default: mocked` in vi.mock return (default import)
 - Express 5 uses `req.params` differently — use `as Record<string, string>` if needed
 - better-sqlite3 is synchronous — no await needed for DB calls
 - node-pty `spawn-helper` may lack +x after install — postinstall script fixes this
