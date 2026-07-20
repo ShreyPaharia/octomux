@@ -4,11 +4,52 @@ import os from 'os';
 import path from 'path';
 import {
   applyModel,
+  buildClaudeContinueCommand,
+  buildClaudeLaunchCommand,
+  buildClaudeResumeCommand,
   formatHarnessFlags,
   formatJsonConfig,
   validateSettingsObject,
   writeJsonConfig,
 } from './shared.js';
+
+describe('buildClaudeLaunchCommand — flag spacing', () => {
+  // Regression: flags must never glue onto the session id. runAgentSession passes
+  // flags without a leading space; the builder must still separate them, or claude
+  // reads `<uuid><flags>` as the session id → "Invalid session ID" and exits.
+  it('separates session id from flags with a single space', () => {
+    const cmd = buildClaudeLaunchCommand({
+      sessionId: 'abc-123',
+      flags: '--dangerously-skip-permissions --mcp-config /x.json',
+      model: null,
+    });
+    expect(cmd).toBe(
+      'claude --session-id abc-123 --dangerously-skip-permissions --mcp-config /x.json',
+    );
+    expect(cmd).not.toContain('abc-123--');
+  });
+
+  it('handles a stray leading space in flags without doubling', () => {
+    expect(buildClaudeLaunchCommand({ sessionId: 'sid', flags: '  --print', model: null })).toBe(
+      'claude --session-id sid --print',
+    );
+  });
+
+  it('emits no trailing space when flags are empty', () => {
+    expect(buildClaudeLaunchCommand({ sessionId: 'sid', flags: '', model: null })).toBe(
+      'claude --session-id sid',
+    );
+  });
+
+  it('resume and continue commands separate flags too', () => {
+    expect(buildClaudeResumeCommand({ sessionId: 'sid', flags: '--foo', model: null })).toBe(
+      'claude --resume sid --foo',
+    );
+    expect(buildClaudeContinueCommand({ sessionId: 'sid', flags: '--foo', model: null })).toBe(
+      'claude --continue --session-id sid --foo',
+    );
+  });
+});
 
 describe('formatJsonConfig / writeJsonConfig', () => {
   it('serializes with 2-space indent and trailing newline', () => {

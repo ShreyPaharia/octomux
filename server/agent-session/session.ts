@@ -286,7 +286,7 @@ export async function runAgentSession<T = unknown>(
   const baseCmd = harness.buildLaunchCommand({
     sessionId,
     agent: null,
-    flags: extraArgs.trim(),
+    flags: `--dangerously-skip-permissions ${extraArgs}`.trim(),
     model,
     workspacePath: workspaceDir,
   });
@@ -308,15 +308,23 @@ export async function runAgentSession<T = unknown>(
     env: captureEnv,
   });
 
-  // 6. Race: result vs early exit vs timeout
+  // 6. Race: result vs early exit vs timeout.
+  // The agent legitimately writes result.json and *then* exits. `onExit` must
+  // NOT immediately win the race against the result-poll (100ms), or a successful
+  // submit-then-exit is misreported as "exited before submitting result". Give the
+  // capture a short grace period after exit to read a just-written result; if
+  // `waitForResult` resolves during the grace, this delayed rejection is ignored.
+  const EXIT_GRACE_MS = 1_500;
   const exitPromise = new Promise<never>((_resolve, reject) => {
     handle.onExit(({ code }) => {
-      reject(
-        new Error(
-          `Agent exited before submitting result (exit code ${code}). ` +
-            'Ensure the agent calls submit_result before exiting.',
-        ),
-      );
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Agent exited before submitting result (exit code ${code}). ` +
+              'Ensure the agent calls submit_result before exiting.',
+          ),
+        );
+      }, EXIT_GRACE_MS);
     });
   });
 
