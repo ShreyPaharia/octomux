@@ -77,6 +77,7 @@ const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
 const { getSettings } = await import('./settings.js');
+await import('./workflows/index.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 

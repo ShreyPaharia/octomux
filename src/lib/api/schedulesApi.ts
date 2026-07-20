@@ -18,6 +18,12 @@ export interface ScheduleRow {
   config_json: string | null;
 }
 
+export interface ScheduleKindInfo {
+  kind: string;
+  displayName: string;
+  configSchema: Record<string, unknown> | null;
+}
+
 export interface CreateScheduleInput {
   kind: string;
   repoPath: string;
@@ -34,7 +40,7 @@ export interface UpdateScheduleInput {
 
 export const schedulesApi = {
   listSchedules: () => request<ScheduleRow[]>('/schedules'),
-  getScheduleKinds: () => request<{ kinds: string[] }>('/schedules/kinds'),
+  getScheduleKinds: () => request<{ kinds: ScheduleKindInfo[] }>('/schedules/kinds'),
   createSchedule: (data: CreateScheduleInput) =>
     request<ScheduleRow>('/schedules', { method: 'POST', body: JSON.stringify(data) }),
   updateSchedule: (id: string, data: UpdateScheduleInput) =>

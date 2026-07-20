@@ -13,3 +13,10 @@ export function getWorkflow(kind: string): WorkflowType | undefined {
 export function listWorkflows(): WorkflowType[] {
   return Array.from(workflows.values());
 }
+
+/** Kinds with a cron trigger and a `run` handler — backs schedule creation and the poller. */
+export function listCronWorkflowKinds(): string[] {
+  return listWorkflows()
+    .filter((w) => w.trigger?.kind === 'cron' && w.run)
+    .map((w) => w.kind);
+}

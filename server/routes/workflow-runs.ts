@@ -16,6 +16,7 @@ router.get('/api/workflows', (_req: Request, res: Response) => {
       displayName: w.displayName,
       surfaces: w.surfaces,
       trigger: w.trigger ?? null,
+      config: w.config ?? null,
       output: w.output ?? null,
       runCount: countRunsForWorkflow(w.kind),
     })),
