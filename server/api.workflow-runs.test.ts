@@ -64,12 +64,14 @@ describe('GET /api/workflows', () => {
     const kinds = res.body.workflows.map((w: { kind: string }) => w.kind);
     expect(kinds).toEqual(
       expect.arrayContaining([
+        'daily-plan',
         'doc-drift',
         'loops',
         'overnight-log-summary',
         'pr-extract',
         'prod-log-triage',
         'reviewer',
+        'weekly-update',
       ]),
     );
 

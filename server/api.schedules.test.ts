@@ -19,6 +19,8 @@ describe('schedule routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.kinds).toContain('prod-log-triage');
       expect(res.body.kinds).toContain('doc-drift');
+      expect(res.body.kinds).toContain('weekly-update');
+      expect(res.body.kinds).toContain('daily-plan');
     });
   });
 

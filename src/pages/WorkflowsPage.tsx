@@ -131,6 +131,16 @@ function WorkflowRuns({
                   loop
                 </button>
               )}
+              {run.chat_id && (
+                <button
+                  type="button"
+                  data-testid={`workflow-run-chat-link-${run.id}`}
+                  className="text-muted-foreground hover:text-primary hover:underline"
+                  onClick={() => nav(`/chats/${run.chat_id}`)}
+                >
+                  chat
+                </button>
+              )}
               {isSessionRun && (
                 <button
                   type="button"

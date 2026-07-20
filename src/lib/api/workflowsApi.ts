@@ -30,6 +30,7 @@ export interface WorkflowRunRow {
   effective_status: string;
   task_id: string | null;
   loop_run_id: string | null;
+  chat_id: string | null;
   started_at: string;
   /** Structured result from a headless session run (runAgentSession), JSON-stringified. */
   result_json?: string | null;

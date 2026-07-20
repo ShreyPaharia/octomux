@@ -93,6 +93,7 @@ describe('WorkflowsPage', () => {
         effective_status: 'done',
         task_id: 'task-1',
         loop_run_id: null,
+        chat_id: null,
         started_at: '2026-01-01 00:00:00',
       },
     ];
@@ -120,6 +121,7 @@ describe('WorkflowsPage', () => {
           effective_status: 'done',
           task_id: 'task-1',
           loop_run_id: null,
+          chat_id: null,
           started_at: '2026-01-01 00:00:00',
         },
       ],
@@ -166,6 +168,7 @@ describe('WorkflowsPage', () => {
           effective_status: 'done',
           task_id: null,
           loop_run_id: null,
+          chat_id: null,
           started_at: '2026-01-01 00:00:00',
           result_json: JSON.stringify({
             window: 'last 12h',
@@ -207,6 +210,7 @@ describe('WorkflowsPage', () => {
           effective_status: 'running',
           task_id: 'task-2',
           loop_run_id: 'loop-2',
+          chat_id: null,
           started_at: '2026-01-01 00:00:00',
         },
       ],
@@ -219,5 +223,43 @@ describe('WorkflowsPage', () => {
     await user.click(loopLink);
 
     expect(mockNavigate).toHaveBeenCalledWith('/w/loops/loop-2');
+  });
+
+  it('a run with a chat_id links to /chats/:id', async () => {
+    const user = userEvent.setup();
+    apiMock.listWorkflows.mockResolvedValue({
+      workflows: [
+        makeWorkflow({
+          kind: 'daily-plan',
+          displayName: 'Daily Plan',
+          surfaces: ['session'],
+          trigger: { kind: 'cron' },
+          runCount: 1,
+        }),
+      ],
+    });
+    apiMock.getWorkflowRuns.mockResolvedValue({
+      runs: [
+        {
+          id: 'run-4',
+          workflow_kind: 'daily-plan',
+          trigger: 'cron',
+          status: 'running',
+          effective_status: 'running',
+          task_id: null,
+          loop_run_id: null,
+          chat_id: 'chat-4',
+          started_at: '2026-01-01 00:00:00',
+        },
+      ],
+    });
+
+    renderWithRouter(<WorkflowsPage />);
+    await user.click(await screen.findByTestId('workflow-expand-daily-plan'));
+
+    const chatLink = await screen.findByTestId('workflow-run-chat-link-run-4');
+    await user.click(chatLink);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/chats/chat-4');
   });
 });
