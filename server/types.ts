@@ -134,6 +134,10 @@ export interface LoopSpec {
   maxIterations: number;
   budget?: { tokens?: number; timeMs?: number };
   noProgress?: { afterIters: number };
+  /** The `runs.id` this loop's run row lives under — round-tripped through
+   * spec_json (see `startLoop`) so the loop engine can `finishRun` it at
+   * termination without a schema migration. */
+  runId?: string;
 }
 
 // ── PR-extract workflow types ─────────────────────────────────────────────

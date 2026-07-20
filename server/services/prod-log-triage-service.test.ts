@@ -22,6 +22,7 @@ vi.mock('../events.js', () => ({
 import { createTriageTaskFromSchedule } from './prod-log-triage-service.js';
 import { setRuntimeState } from '../repositories/tasks.js';
 import { listRunsForWorkflow } from '../repositories/runs.js';
+import type { RunResult } from '../types.js';
 
 function insertActiveAgent(taskId: string): void {
   getDb()
@@ -63,7 +64,10 @@ describe('createTriageTaskFromSchedule', () => {
       expect.objectContaining({
         verify: 'test -f desk/incidents/*.md && bun run build',
         maxIterations: 5,
+        runId: expect.any(String),
       }),
+      undefined,
+      expect.any(String),
     );
   });
 
@@ -102,9 +106,10 @@ describe('createTriageTaskFromSchedule', () => {
     expect(rows[0].trigger).toBe('cron');
     expect(rows[0].task_id).toBe(result.id);
     expect(rows[0].schedule_id).toBe('sched-1');
+    expect(rows[0].loop_run_id).toEqual(expect.any(String));
   });
 
-  it('does NOT call startLoop when startTask leaves the task in runtime_state=error', async () => {
+  it('does NOT call startLoop when startTask leaves the task in runtime_state=error, and finishes the run as failed', async () => {
     mockStartTask.mockImplementation(async (task: { id: string }) => {
       setRuntimeState(task.id, 'error', 'setup failed');
     });
@@ -119,9 +124,16 @@ describe('createTriageTaskFromSchedule', () => {
     expect(mockStartTask).toHaveBeenCalledTimes(1);
     expect(mockStartLoop).not.toHaveBeenCalled();
     expect(result.id).toBeTruthy();
+
+    const rows = listRunsForWorkflow('prod-log-triage');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].ended_at).not.toBeNull();
+    const parsed = JSON.parse(rows[0].result_json!) as RunResult;
+    expect(parsed.outcome).toBe('failed');
   });
 
-  it('does NOT call startLoop when startTask resolves but no active agent exists', async () => {
+  it('does NOT call startLoop when startTask resolves but no active agent exists, and finishes the run as failed', async () => {
     mockStartTask.mockResolvedValue(undefined); // resolves, no agent row inserted, no error state
 
     const result = await createTriageTaskFromSchedule({
@@ -134,5 +146,9 @@ describe('createTriageTaskFromSchedule', () => {
     expect(mockStartTask).toHaveBeenCalledTimes(1);
     expect(mockStartLoop).not.toHaveBeenCalled();
     expect(result.id).toBeTruthy();
+
+    const rows = listRunsForWorkflow('prod-log-triage');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('failed');
   });
 });

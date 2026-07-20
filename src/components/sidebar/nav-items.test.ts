@@ -1,21 +1,27 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { MORE_ITEMS, NAV_ITEMS, deriveActiveNav } from './nav-items';
 
 describe('MORE_ITEMS', () => {
-  beforeAll(async () => {
-    await import('@/workflows/index');
-  });
-
-  it('includes both registered workflow kinds alongside the static entries', async () => {
-    const { MORE_ITEMS } = await import('./nav-items');
+  it('is the static list — no per-workflow-kind rows', () => {
     const keys = MORE_ITEMS.map((item) => item.key);
-    expect(keys).toEqual(
-      expect.arrayContaining(['monitor', 'workspaces', 'orchestrator', 'loops', 'pr-extract']),
-    );
+    expect(keys).toEqual(['monitor', 'workspaces', 'orchestrator', 'schedules']);
   });
 
-  it('does not list a workflow kind twice', async () => {
-    const { MORE_ITEMS } = await import('./nav-items');
+  it('does not list a workflow kind twice', () => {
     const keys = MORE_ITEMS.map((item) => item.key);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe('NAV_ITEMS', () => {
+  it('includes Runs between Tasks and Reviews', () => {
+    const keys = NAV_ITEMS.map((item) => item.key);
+    expect(keys).toEqual(['home', 'tasks', 'runs', 'reviews', 'settings']);
+  });
+});
+
+describe('deriveActiveNav', () => {
+  it('marks /runs active', () => {
+    expect(deriveActiveNav('/runs', null)).toBe('runs');
   });
 });

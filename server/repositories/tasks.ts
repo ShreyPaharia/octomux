@@ -59,6 +59,13 @@ export interface ListTasksOpts {
    * /api/reviews endpoint.  Pass true to include them.
    */
   includeAutoReview?: boolean;
+  /**
+   * When false (default) tasks created by an automated workflow (any non-null
+   * `source` other than 'auto_review', which has its own `includeAutoReview`
+   * flag) are excluded — the Tasks board shows manual work only, automated
+   * runs live on /runs. Pass true to include them (CLI, orchestrator, pollers).
+   */
+  includeAutomated?: boolean;
   /** When true, include soft-deleted tasks only (trash view). */
   trash?: boolean;
   /** Filter by exact repo_path. */
@@ -68,23 +75,27 @@ export interface ListTasksOpts {
 /** List tasks with optional filtering. Results ordered newest-first by created_at (or deleted_at for trash). */
 export function listTasks(opts: ListTasksOpts = {}): Task[] {
   const db = getDb();
-  const { includeAutoReview = false, trash = false, repoPath } = opts;
+  const { includeAutoReview = false, includeAutomated = false, trash = false, repoPath } = opts;
 
   const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
   const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
   const autoReviewClause = includeAutoReview ? '' : `AND ${SQL_EXCLUDE_AUTO_REVIEW}`;
+  const automatedFlag = includeAutomated ? 1 : 0;
 
   if (repoPath) {
     return db
       .prepare(
-        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND w.repo_path = ? ${orderBy}`,
+        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause}
+                              AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') AND w.repo_path = ? ${orderBy}`,
       )
-      .all(repoPath) as Task[];
+      .all(automatedFlag, repoPath) as Task[];
   }
 
   return db
-    .prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} ${orderBy}`)
-    .all() as Task[];
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') ${orderBy}`,
+    )
+    .all(automatedFlag) as Task[];
 }
 
 /** List soft-deleted tasks that have passed their grace window. */

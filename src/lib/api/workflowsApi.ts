@@ -39,4 +39,5 @@ export interface WorkflowRunRow {
 export const workflowsApi = {
   listWorkflows: () => request<{ workflows: WorkflowRow[] }>('/workflows'),
   getWorkflowRuns: (kind: string) => request<{ runs: WorkflowRunRow[] }>(`/workflows/${kind}/runs`),
+  listAllRuns: () => request<{ runs: WorkflowRunRow[] }>('/runs'),
 };

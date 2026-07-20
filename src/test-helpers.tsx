@@ -528,6 +528,7 @@ export function mockWorkflowsApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
     getWorkflowRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    listAllRuns: vi.fn().mockResolvedValue({ runs: [] }),
   };
   return { ...defaults, ...overrides };
 }

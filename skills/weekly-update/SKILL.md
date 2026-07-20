@@ -37,6 +37,8 @@ not open a PR, edit files, or make any changes. Your only output is the
 
    ```json
    {
+     "outcome": "done",
+     "summary": "<1-2 sentence overview of the week>",
      "period": "<the date range covered, e.g. Mon DD - DD>",
      "themes": [
        {
@@ -44,9 +46,15 @@ not open a PR, edit files, or make any changes. Your only output is the
          "items": ["**Feature** — concise description (IN-123 — Done)"]
        }
      ],
-     "highlights": ["..."]
+     "highlights": ["..."],
+     "links": [{ "label": "...", "url": "..." }]
    }
    ```
+
+   `outcome` and `summary` are required: `outcome` is `"done"` for a normal
+   report, `"blocked"` if you could not gather git history or ticket context
+   at all. `links` is optional — omit it, or point to a published report if
+   one exists.
 
 ## Notes
 

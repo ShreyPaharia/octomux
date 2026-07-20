@@ -14,6 +14,48 @@ export const PR_EXTRACT_OUTPUT_SCHEMA = {
   },
   additionalProperties: false,
 } as const;
+/** Universal run-result envelope. Every workflow finishes its run with this shape; kind-specific
+ * `output` schemas merge their own fields in alongside these keys. Stored as `runs.result_json`,
+ * rendered by the unified /runs feed. See `spec/workflow-consolidation.md` §5. */
+export interface RunResult {
+  outcome: 'done' | 'blocked' | 'failed';
+  /** Agent-authored prose: what happened. */
+  summary: string;
+  links?: { label: string; url: string }[];
+  [key: string]: unknown;
+}
+
+/** Envelope keys every workflow `output` schema must require. Merge into kind-specific schemas
+ * rather than validating separately — one ajv compile per kind, not two. */
+export const RUN_RESULT_SCHEMA = {
+  type: 'object',
+  required: ['outcome', 'summary'],
+  properties: {
+    outcome: { type: 'string', enum: ['done', 'blocked', 'failed'] },
+    summary: { type: 'string', minLength: 1 },
+    links: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['label', 'url'],
+        properties: { label: { type: 'string' }, url: { type: 'string' } },
+        additionalProperties: false,
+      },
+    },
+  },
+} as const;
+
+/** Type guard for the render path — `runs.result_json` is untrusted TEXT that predates this
+ * envelope, so older rows will not match. Callers must also guard `JSON.parse` itself. */
+export function isRunResult(v: unknown): v is RunResult {
+  if (typeof v !== 'object' || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    (o.outcome === 'done' || o.outcome === 'blocked' || o.outcome === 'failed') &&
+    typeof o.summary === 'string'
+  );
+}
+
 /** Workflow status — human-facing board column. */
 export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
 export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [

@@ -9,14 +9,43 @@ import {
   listExtracts,
 } from '../repositories/pr-extracts.js';
 import { getTask } from '../repositories/index.js';
+import { listRunsForWorkflow, finishRun } from '../repositories/runs.js';
 import { badRequest, notFound, conflict } from '../services/errors.js';
 import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';
-import type { PrExtractRisk } from '../types.js';
+import type { PrExtractRisk, RunResult, Task } from '../types.js';
 
 const logger = childLogger('routes/pr-extracts');
 
 export const router = Router();
+
+/**
+ * Finish the pr-extract run row for this task, if one exists. `pr_extracts`
+ * stays the source of truth for the extract itself (see
+ * spec/workflow-consolidation.md §5 shape C) — this only makes the run
+ * visible as terminal instead of stuck at 'running' forever. Silently a
+ * no-op when no run row was created for this task (e.g. an extract created
+ * outside the cron/github-triggered flow).
+ */
+function finishPrExtractRun(
+  task: Task,
+  body: { area: string; risk: PrExtractRisk; loc: number },
+): void {
+  const run = listRunsForWorkflow('pr-extract').find(
+    (r) => r.task_id === task.id && r.status === 'running',
+  );
+  if (!run) return;
+
+  finishRun(run.id, {
+    status: 'done',
+    result: {
+      outcome: 'done',
+      summary: `Extracted: ${body.area} · risk ${body.risk} · ${body.loc} LOC`,
+      links: task.pr_url ? [{ label: `PR #${task.pr_number}`, url: task.pr_url }] : undefined,
+    } satisfies RunResult,
+  });
+  logger.info({ task_id: task.id, run_id: run.id }, 'pr-extract: run finished on emit');
+}
 
 router.post(
   '/api/pr-extracts/:taskId/emit',
@@ -59,6 +88,7 @@ router.post(
     });
 
     logger.info({ task_id: taskId, extract_id: row.id }, 'pr-extract emit recorded');
+    finishPrExtractRun(task, body);
     broadcast({ type: 'pr_extract:created', payload: { taskId, extractId: row.id } });
     res.status(201).json(row);
   },

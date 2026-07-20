@@ -8,6 +8,7 @@ import {
   listRunsForWorkflow,
   listRunsForSchedule,
   countRunsForWorkflow,
+  listAllRuns,
 } from './runs.js';
 
 describe('runs repo', () => {
@@ -105,5 +106,25 @@ describe('runs repo', () => {
     expect(countRunsForWorkflow('pr-extract')).toBe(2);
     expect(countRunsForWorkflow('reviewer')).toBe(1);
     expect(countRunsForWorkflow('loops')).toBe(0);
+  });
+
+  describe('listAllRuns', () => {
+    it('returns runs across all kinds, newest first', () => {
+      insertRun({ workflowKind: 'doc-drift', trigger: 'cron' });
+      insertRun({ workflowKind: 'weekly-update', trigger: 'cron' });
+
+      const rows = listAllRuns();
+
+      expect(rows).toHaveLength(2);
+      expect(rows.map((r) => r.workflow_kind).sort()).toEqual(['doc-drift', 'weekly-update']);
+      expect(rows[0]).toHaveProperty('effective_status');
+    });
+
+    it('honours the limit argument', () => {
+      insertRun({ workflowKind: 'doc-drift', trigger: 'cron' });
+      insertRun({ workflowKind: 'doc-drift', trigger: 'cron' });
+
+      expect(listAllRuns(1)).toHaveLength(1);
+    });
   });
 });

@@ -63,7 +63,10 @@ describe('cron -> doc-drift e2e', () => {
       expect.objectContaining({
         verify: expect.any(String),
         maxIterations: expect.any(Number),
+        runId: expect.any(String),
       }),
+      undefined,
+      expect.any(String),
     );
   });
 });

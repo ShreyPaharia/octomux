@@ -61,8 +61,9 @@ export const router = express.Router();
 router.get('/api/tasks', (req: Request, res: Response) => {
   const repoPath = req.query.repo_path as string | undefined;
   const trash = req.query.trash === 'true';
+  const includeAutomated = req.query.includeAutomated === 'true';
 
-  const tasks = listTasks({ trash, repoPath, includeAutoReview: false });
+  const tasks = listTasks({ trash, repoPath, includeAutoReview: false, includeAutomated });
 
   if (tasks.length === 0) {
     res.json([]);

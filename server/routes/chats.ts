@@ -7,6 +7,7 @@ import { validateAgentName } from '../harnesses/types.js';
 import { getHarness } from '../harnesses/index.js';
 import { hopAgent } from '../task-engine/index.js';
 import { getAgent as getAgentRepo, getTask as getTaskRepo } from '../repositories/index.js';
+import { finishDailyPlanRunForChat } from '../services/daily-plan-service.js';
 import type { CreateChatRequest, Task } from '../types.js';
 import { badRequest, conflict, notFound, ServiceError } from '../services/errors.js';
 
@@ -118,6 +119,7 @@ router.patch('/api/chats/:id', async (req: Request, res: Response) => {
     throw badRequest("Only status='stopped' is supported");
   }
   await closeChat(chat);
+  finishDailyPlanRunForChat(chat.id); // no-op for any chat that isn't a daily-plan run
   const updated = getChat(chat.id);
   broadcast({ type: 'chat:updated', payload: { chatId: chat.id } });
   res.json(updated);
