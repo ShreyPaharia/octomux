@@ -22,6 +22,9 @@ LIBEVENT_VERSION="2.1.12"
 TMUX_VERSION="3.5a"
 
 NCURSES_URL="https://ftp.gnu.org/pub/gnu/ncurses/ncurses-${NCURSES_VERSION}.tar.gz"
+# invisible-mirror.net is upstream ncurses' own archive — used when ftp.gnu.org
+# is unreachable (see fetch_and_extract).
+NCURSES_MIRROR_URL="https://invisible-mirror.net/archives/ncurses/ncurses-${NCURSES_VERSION}.tar.gz"
 LIBEVENT_URL="https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}-stable/libevent-${LIBEVENT_VERSION}-stable.tar.gz"
 TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz"
 
@@ -29,10 +32,15 @@ TMUX_URL="https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${
 PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"   # darwin | linux
 ARCH="$(uname -m)"                                     # arm64 | x86_64
 
-# Node uses 'x64' for x86_64; normalise to match npm package naming.
-if [ "$ARCH" = "x86_64" ]; then
-  ARCH="x64"
-fi
+# The packages/ dirs and npm package names use Node's arch naming ('x64',
+# 'arm64'); `uname -m` reports 'x86_64' / 'aarch64' on Linux. Normalise BOTH.
+# The missing aarch64 case silently built into packages/tmux-linux-aarch64/, so
+# packages/tmux-linux-arm64/ kept no bin/tmux and the publish step died on
+# `chmod: cannot access 'bin/tmux'` at every release tag.
+case "$ARCH" in
+  x86_64) ARCH="x64" ;;
+  aarch64) ARCH="arm64" ;;
+esac
 
 PKG_NAME="tmux-${PLATFORM}-${ARCH}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,6 +50,14 @@ DEST_DIR="$ROOT_DIR/packages/$PKG_NAME"
 echo "Building tmux ${TMUX_VERSION} for ${PLATFORM}/${ARCH}"
 echo "Destination: ${DEST_DIR}"
 
+# Fail loudly if we resolved to a package dir that isn't in the repo — that means
+# the arch normalisation above missed a case, and building on regardless just
+# defers the failure to the publish step with a much worse error.
+if [ ! -d "$DEST_DIR" ]; then
+  echo "ERROR: no package dir at $DEST_DIR — unhandled platform/arch '${PLATFORM}/${ARCH}' (uname -m: $(uname -m))" >&2
+  exit 1
+fi
+
 # ─── Working directory ────────────────────────────────────────────────────────
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
@@ -49,12 +65,27 @@ INSTALL_PREFIX="$BUILD_DIR/prefix"
 mkdir -p "$INSTALL_PREFIX"
 
 # ─── Helper: download and extract ────────────────────────────────────────────
+# fetch_and_extract <url> <outdir> [mirror_url]
+# ftp.gnu.org has gone unreachable mid-release before (curl exit 28 after a
+# 134s connect timeout, killing the whole build). Retry, bound the hang, then
+# fall back to the mirror if one is given.
 fetch_and_extract() {
   local url="$1"
   local outdir="$2"
+  local mirror="${3:-}"
   local tarball="$BUILD_DIR/$(basename "$url")"
+  local curl_opts=(-fsSL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 300)
+
   echo "  Downloading $url ..."
-  curl -fsSL "$url" -o "$tarball"
+  if ! curl "${curl_opts[@]}" "$url" -o "$tarball"; then
+    if [ -z "$mirror" ]; then
+      echo "  ✗ download failed and no mirror configured for $url" >&2
+      return 1
+    fi
+    echo "  ⚠  primary host failed; retrying via mirror $mirror ..."
+    curl "${curl_opts[@]}" "$mirror" -o "$tarball"
+  fi
+
   mkdir -p "$outdir"
   tar -xzf "$tarball" -C "$outdir" --strip-components=1
 }
@@ -63,7 +94,7 @@ fetch_and_extract() {
 echo ""
 echo "==> Building ncurses ${NCURSES_VERSION} ..."
 NCURSES_SRC="$BUILD_DIR/ncurses"
-fetch_and_extract "$NCURSES_URL" "$NCURSES_SRC"
+fetch_and_extract "$NCURSES_URL" "$NCURSES_SRC" "$NCURSES_MIRROR_URL"
 
 (
   cd "$NCURSES_SRC"
