@@ -100,3 +100,24 @@ describe('GET /api/workflows', () => {
     expect(overnightLogSummary.output).toBeDefined();
   });
 });
+
+describe('GET /api/runs', () => {
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    createTestDb();
+    app = createApp();
+  });
+
+  it('returns runs across all kinds', async () => {
+    insertRun({ workflowKind: 'doc-drift', trigger: 'cron' });
+    insertRun({ workflowKind: 'reviewer', trigger: 'github' });
+
+    const res = await request(app).get('/api/runs');
+
+    expect(res.status).toBe(200);
+    expect(res.body.runs).toHaveLength(2);
+    expect(res.body.runs[0]).toHaveProperty('workflow_kind');
+    expect(res.body.runs[0]).toHaveProperty('effective_status');
+  });
+});

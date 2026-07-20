@@ -368,6 +368,24 @@ describe('GET /api/tasks', () => {
     expect(res.status).toBe(200);
     expect(res.body.map((t: Task) => t.id)).toEqual(['regular']);
   });
+
+  it('excludes automated (non-null source) tasks from the list by default', async () => {
+    insertTask(db, { id: 'manual', source: null });
+    insertTask(db, { id: 'drift', source: 'doc_drift' });
+
+    const res = await request(app).get('/api/tasks');
+    expect(res.status).toBe(200);
+    expect(res.body.map((t: Task) => t.id)).toEqual(['manual']);
+  });
+
+  it('includes automated tasks when includeAutomated=true', async () => {
+    insertTask(db, { id: 'manual', source: null });
+    insertTask(db, { id: 'drift', source: 'doc_drift' });
+
+    const res = await request(app).get('/api/tasks?includeAutomated=true');
+    expect(res.status).toBe(200);
+    expect(res.body.map((t: Task) => t.id).sort()).toEqual(['drift', 'manual']);
+  });
 });
 
 // ─── Inbox ──────────────────────────────────────────────────────────────────

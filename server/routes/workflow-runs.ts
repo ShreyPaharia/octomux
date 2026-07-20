@@ -1,9 +1,13 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { listRunsForWorkflow, countRunsForWorkflow } from '../repositories/runs.js';
+import { listRunsForWorkflow, countRunsForWorkflow, listAllRuns } from '../repositories/runs.js';
 import { listWorkflows } from '../workflows/registry.js';
 
 export const router = express.Router();
+
+router.get('/api/runs', (_req: Request, res: Response) => {
+  res.json({ runs: listAllRuns() });
+});
 
 router.get('/api/workflows', (_req: Request, res: Response) => {
   res.json({

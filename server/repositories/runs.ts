@@ -96,6 +96,13 @@ export function listRunsForWorkflow(kind: string): Array<RunRow & { effective_st
     .all(kind) as Array<RunRow & { effective_status: string }>;
 }
 
+/** Every run across all kinds, newest first. Backs the unified /runs feed. */
+export function listAllRuns(limit = 200): Array<RunRow & { effective_status: string }> {
+  return getDb()
+    .prepare(`${LIST_WITH_EFFECTIVE_STATUS_SQL} ORDER BY runs.started_at DESC LIMIT ?`)
+    .all(limit) as Array<RunRow & { effective_status: string }>;
+}
+
 export function countRunsForWorkflow(kind: string): number {
   const row = getDb()
     .prepare(`SELECT COUNT(*) AS count FROM runs WHERE workflow_kind = ?`)

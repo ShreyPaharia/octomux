@@ -54,7 +54,9 @@ export default function GridMonitor() {
     let cancelled = false;
     const fetchTasks = async () => {
       try {
-        const data = regularTasksOnly(await taskApi.listTasks());
+        // Monitor shows every live agent, including automated (doc-drift, prod-log-triage, ...)
+        // task runs — only auto_review is excluded (regularTasksOnly), never source-based hiding.
+        const data = regularTasksOnly(await taskApi.listTasks({ includeAutomated: true }));
         if (!cancelled) {
           setTasks(data);
           setLoaded(true);

@@ -190,6 +190,29 @@ describe('repositories/tasks', () => {
     });
   });
 
+  describe('listTasks automated filtering', () => {
+    beforeEach(() => {
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('manual', 'manual', '', 'idle', 'backlog', NULL)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('drift', 'drift', '', 'idle', 'backlog', 'doc_drift')`,
+      ).run();
+    });
+
+    it('hides tasks with a non-null source by default', () => {
+      const rows = listTasks();
+      expect(rows.map((t) => t.id)).toEqual(['manual']);
+    });
+
+    it('includes automated tasks when asked', () => {
+      const rows = listTasks({ includeAutomated: true });
+      expect(rows.map((t) => t.id).sort()).toEqual(['drift', 'manual']);
+    });
+  });
+
   // ─── listTasksBySchedule ─────────────────────────────────────────────────────
 
   describe('listTasksBySchedule', () => {

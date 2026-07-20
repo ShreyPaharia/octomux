@@ -1,5 +1,4 @@
 import type { SidebarItem } from '@/lib/sidebar-utils';
-import { listWorkflowUIs } from '@/workflows/registry';
 import {
   HomeIcon,
   TasksIcon,
@@ -15,7 +14,7 @@ import {
 
 // ─── Static config ──────────────────────────────────────────────────────────
 
-export type NavKey = 'home' | 'tasks' | 'reviews' | 'settings';
+export type NavKey = 'home' | 'tasks' | 'runs' | 'reviews' | 'settings';
 
 export const NAV_ITEMS: ReadonlyArray<{
   key: NavKey;
@@ -25,29 +24,19 @@ export const NAV_ITEMS: ReadonlyArray<{
 }> = [
   { key: 'home', label: 'Home', to: '/', Icon: HomeIcon },
   { key: 'tasks', label: 'Tasks', to: '/tasks', Icon: TasksIcon },
+  { key: 'runs', label: 'Runs', to: '/runs', Icon: WorkflowsIcon },
   { key: 'reviews', label: 'Reviews', to: '/reviews', Icon: ReviewsIcon },
   { key: 'settings', label: 'Settings', to: '/settings', Icon: SettingsIcon },
 ];
 
-const STATIC_MORE_ITEMS = [
+// Every kind's run history now lives in the unified /runs feed (see RunsPage) — no more
+// generated per-kind "More" rows (spec/workflow-consolidation.md §4.1).
+export const MORE_ITEMS = [
   { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
   { key: 'orchestrator', label: 'Orchestrator', to: '/orchestrator', Icon: OrchestratorIcon },
   { key: 'schedules', label: 'Schedules', to: '/schedules', Icon: SchedulesIcon },
-  { key: 'workflows', label: 'Workflows', to: '/workflows', Icon: WorkflowsIcon },
 ] as const;
-
-// Registered workflow kinds (loops, pr-extract, ...) contribute their own "More" entries — nav
-// generated from the registry, not hardcoded (spec/workflow-framework.md §4).
-export const MORE_ITEMS = [
-  ...STATIC_MORE_ITEMS,
-  ...listWorkflowUIs().map((ui) => ({
-    key: ui.kind,
-    label: ui.navLabel,
-    to: `/w/${ui.kind}`,
-    Icon: ui.icon,
-  })),
-];
 
 // ─── Fork refusal helper ────────────────────────────────────────────────────
 
@@ -85,6 +74,7 @@ export function buildAddAgentUrl(taskId: string): string {
 export function deriveActiveNav(pathname: string, activeTaskId: string | null): NavKey | null {
   if (pathname === '/settings') return 'settings';
   if (pathname === '/reviews' || pathname.startsWith('/reviews/')) return 'reviews';
+  if (pathname === '/runs') return 'runs';
   if (pathname === '/tasks' || pathname.startsWith('/tasks/')) return 'tasks';
   if (activeTaskId) return null;
   if (pathname === '/') return 'home';
