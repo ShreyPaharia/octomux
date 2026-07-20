@@ -45,6 +45,20 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
+      # electron-release.yml runs on the same v* tag and its
+      # `electron-builder --publish always` (releaseType: release) creates the
+      # release too if it gets there first. softprops/action-gh-release lost that
+      # race and hard-failed with
+      #   Validation Failed: {"resource":"Release","code":"already_exists"}.
+      # Create-or-adopt instead: both sides create a PUBLISHED release, so
+      # whichever one exists is the right one to attach artifacts to.
+      - name: Ensure GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — adopting it"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+              || gh release view "$GITHUB_REF_NAME"
+          fi
