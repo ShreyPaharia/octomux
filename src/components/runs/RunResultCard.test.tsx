@@ -21,4 +21,35 @@ describe('RunResultCard', () => {
     );
     expect(screen.getByRole('link', { name: 'PR #12' })).toHaveAttribute('href', 'https://e/12');
   });
+
+  it('renders kind-specific output fields beyond the envelope', () => {
+    render(
+      <RunResultCard
+        result={{
+          outcome: 'done',
+          summary: 'x',
+          period: 'Jul 14 - Jul 20',
+          highlights: ['shipped runs feed'],
+        }}
+      />,
+    );
+    expect(screen.getByText('Period')).toBeInTheDocument();
+    expect(screen.getByText('Jul 14 - Jul 20')).toBeInTheDocument();
+    expect(screen.getByText('shipped runs feed')).toBeInTheDocument();
+  });
+
+  it('renders nested object arrays without printing [object Object]', () => {
+    const { container } = render(
+      <RunResultCard
+        result={{
+          outcome: 'done',
+          summary: 'x',
+          themes: [{ title: 'Automation', items: ['new cron handler'] }],
+        }}
+      />,
+    );
+    expect(screen.getByText('Automation')).toBeInTheDocument();
+    expect(screen.getByText('new cron handler')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('[object Object]');
+  });
 });
