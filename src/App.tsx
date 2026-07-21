@@ -17,8 +17,6 @@ import { SetupBanner } from './components/SetupBanner';
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const GridMonitor = lazy(() => import('./pages/GridMonitor'));
-const SkillEditor = lazy(() => import('./pages/SkillEditor'));
-const AgentEditor = lazy(() => import('./pages/AgentEditor'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'));
@@ -116,8 +114,6 @@ export function AppShell() {
                 <Route path="/reviews/:id" element={<ReviewDetailPage />} />
                 <Route path="/monitor" element={<GridMonitor />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/skills/:name" element={<SkillEditor />} />
-                <Route path="/agents/:name" element={<AgentEditor />} />
                 <Route path="/chats/:id" element={<ChatPage />} />
                 <Route path="/workspaces" element={<WorkspacesPage />} />
                 <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />

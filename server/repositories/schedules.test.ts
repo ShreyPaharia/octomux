@@ -132,16 +132,6 @@ describe('schedules repo', () => {
     expect(updateSchedule('nope', { cron: '0 8 * * *' })).toBeUndefined();
   });
 
-  it('updateSchedule stores and clears prompt', () => {
-    const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
-
-    const updated = updateSchedule(row.id, { prompt: 'Custom prompt' });
-    expect(updated?.prompt).toBe('Custom prompt');
-
-    const cleared = updateSchedule(row.id, { prompt: null });
-    expect(cleared?.prompt).toBeNull();
-  });
-
   it('deleteSchedule removes the row', () => {
     const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
 

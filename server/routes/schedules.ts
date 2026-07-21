@@ -12,7 +12,6 @@ import { listRunsForSchedule } from '../repositories/runs.js';
 import { getWorkflow, listCronWorkflowKinds } from '../workflows/registry.js';
 import { validateWorkflowConfig } from '../workflows/config.js';
 import { executeScheduleRun } from '../poller/execute-schedule-run.js';
-import { getDefaultPromptForKind, isCronPromptKind } from '../schedule-prompt.js';
 import { badRequest, notFound, ServiceError } from '../services/errors.js';
 
 const logger = childLogger('routes/schedules');
@@ -53,16 +52,6 @@ router.get('/api/schedules/kinds', (_req: Request, res: Response) => {
   });
 });
 
-router.get('/api/schedules/prompt-default', async (req: Request, res: Response) => {
-  const kind = req.query.kind as string | undefined;
-  const repoPath = req.query.repo_path as string | undefined;
-  if (!kind || !isCronPromptKind(kind)) {
-    throw badRequest(`kind must be one of: ${listCronWorkflowKinds().join(', ')}`);
-  }
-  const content = await getDefaultPromptForKind(kind, repoPath);
-  res.json({ content });
-});
-
 router.get('/api/schedules', (_req: Request, res: Response) => {
   res.json(listSchedules());
 });
@@ -74,7 +63,6 @@ router.post('/api/schedules', (req: Request, res: Response) => {
     cron?: unknown;
     enabled?: unknown;
     config?: unknown;
-    prompt?: unknown;
   };
 
   if (typeof body.kind !== 'string') {
@@ -87,9 +75,6 @@ router.post('/api/schedules', (req: Request, res: Response) => {
   if (typeof body.cron !== 'string' || !body.cron.trim()) {
     throw badRequest('cron is required');
   }
-  if (body.prompt !== undefined && body.prompt !== null && typeof body.prompt !== 'string') {
-    throw badRequest('prompt must be a string or null');
-  }
   validateScheduleConfig(body.kind, body.config);
 
   const row = upsertSchedule({
@@ -98,7 +83,6 @@ router.post('/api/schedules', (req: Request, res: Response) => {
     cron: body.cron,
     enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
     config: body.config as Record<string, unknown> | undefined,
-    prompt: body.prompt as string | null | undefined,
   });
 
   logger.info({ schedule_id: row.id, kind: row.kind }, 'schedule: created via API');
@@ -111,7 +95,6 @@ router.patch('/api/schedules/:id', (req: Request, res: Response) => {
     cron?: unknown;
     enabled?: unknown;
     config?: unknown;
-    prompt?: unknown;
   };
 
   if (body.cron !== undefined && (typeof body.cron !== 'string' || !body.cron.trim())) {
@@ -119,9 +102,6 @@ router.patch('/api/schedules/:id', (req: Request, res: Response) => {
   }
   if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
     throw badRequest('enabled must be a boolean');
-  }
-  if (body.prompt !== undefined && body.prompt !== null && typeof body.prompt !== 'string') {
-    throw badRequest('prompt must be a string or null');
   }
 
   const existing = getSchedule(id);
@@ -134,7 +114,6 @@ router.patch('/api/schedules/:id', (req: Request, res: Response) => {
     cron: body.cron as string | undefined,
     enabled: body.enabled as boolean | undefined,
     config: body.config as Record<string, unknown> | undefined,
-    prompt: body.prompt as string | null | undefined,
   });
   if (!updated) throw notFound('Schedule not found');
 

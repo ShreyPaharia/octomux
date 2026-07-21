@@ -17,7 +17,6 @@ export interface ScheduleRow {
   enabled: number;
   last_run_at: string | null;
   config_json: string | null;
-  prompt: string | null;
 }
 
 export interface UpsertScheduleInput {
@@ -26,30 +25,27 @@ export interface UpsertScheduleInput {
   cron: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
-  prompt?: string | null;
 }
 
-const SCHEDULE_COLUMNS = 'id, kind, repo_path, cron, enabled, last_run_at, config_json, prompt';
+const SCHEDULE_COLUMNS = 'id, kind, repo_path, cron, enabled, last_run_at, config_json';
 
-/** Insert a schedule, or update cron/enabled/config/prompt on conflict for (kind, repo_path). */
+/** Insert a schedule, or update cron/enabled/config on conflict for (kind, repo_path). */
 export function upsertSchedule(input: UpsertScheduleInput): ScheduleRow {
   const id = nanoid(12);
   const enabled = input.enabled === false ? 0 : 1;
   const configJson = input.config ? JSON.stringify(input.config) : null;
-  const prompt = input.prompt === undefined ? null : input.prompt;
 
   getDb()
     .prepare(
-      `INSERT INTO schedules (id, kind, repo_path, cron, enabled, config_json, prompt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO schedules (id, kind, repo_path, cron, enabled, config_json)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(kind, repo_path) DO UPDATE SET
          cron = excluded.cron,
          enabled = excluded.enabled,
          config_json = excluded.config_json,
-         prompt = excluded.prompt,
          updated_at = datetime('now')`,
     )
-    .run(id, input.kind, input.repoPath, input.cron, enabled, configJson, prompt);
+    .run(id, input.kind, input.repoPath, input.cron, enabled, configJson);
 
   const row = getDb()
     .prepare(`SELECT ${SCHEDULE_COLUMNS} FROM schedules WHERE kind = ? AND repo_path = ?`)
@@ -91,11 +87,9 @@ export interface UpdateScheduleInput {
   cron?: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
-  /** Set to null to clear the DB override and fall back to SKILL.md. */
-  prompt?: string | null;
 }
 
-/** Partially update a schedule's cron/enabled/config/prompt. Returns undefined if not found. */
+/** Partially update a schedule's cron/enabled/config. Returns undefined if not found. */
 export function updateSchedule(id: string, patch: UpdateScheduleInput): ScheduleRow | undefined {
   const existing = getSchedule(id);
   if (!existing) return undefined;
@@ -104,13 +98,12 @@ export function updateSchedule(id: string, patch: UpdateScheduleInput): Schedule
   const enabled = patch.enabled === undefined ? existing.enabled : patch.enabled ? 1 : 0;
   const configJson =
     patch.config !== undefined ? JSON.stringify(patch.config) : existing.config_json;
-  const prompt = patch.prompt !== undefined ? patch.prompt : existing.prompt;
 
   getDb()
     .prepare(
-      `UPDATE schedules SET cron = ?, enabled = ?, config_json = ?, prompt = ?, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE schedules SET cron = ?, enabled = ?, config_json = ?, updated_at = datetime('now') WHERE id = ?`,
     )
-    .run(cron, enabled, configJson, prompt, id);
+    .run(cron, enabled, configJson, id);
 
   logger.info({ schedule_id: id }, 'schedule updated');
   return getSchedule(id);

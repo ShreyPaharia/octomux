@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '@octomux/types';
 import type {
-  Skill,
   RepoConfig,
   AgentDefinition,
   HarnessSummary,
@@ -83,13 +82,6 @@ export function useTask(id: string) {
     },
   );
   return { task: data, loading, error, refresh };
-}
-
-export function useSkills() {
-  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () =>
-    configApi.listSkills(),
-  );
-  return { skills: data ?? [], loading, error, refresh };
 }
 
 export function useRepoConfigs() {

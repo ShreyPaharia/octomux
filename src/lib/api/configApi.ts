@@ -163,30 +163,10 @@ export const configApi = {
   // Skills
   listSkills: () => request<Skill[]>('/skills'),
   getSkill: (name: string) => request<SkillDetail>(`/skills/${encodeURIComponent(name)}`),
-  createSkill: (data: { name: string; content: string }) =>
-    request<SkillDetail>('/skills', { method: 'POST', body: JSON.stringify(data) }),
-  updateSkill: (name: string, data: { content: string }) =>
-    request<SkillDetail>(`/skills/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-  deleteSkill: (name: string) =>
-    request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   // Agents
   listAgents: () => request<AgentDefinition[]>('/agents'),
   getAgent: (name: string) => request<AgentDetail>(`/agents/${encodeURIComponent(name)}`),
-  saveAgent: (name: string, content: string) =>
-    request<AgentDetail>(`/agents/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    }),
-  resetAgent: (name: string) =>
-    request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  createAgent: (data: { name: string; content: string }) =>
-    request<AgentDetail>('/agents', { method: 'POST', body: JSON.stringify(data) }),
-  deleteAgent: (name: string) =>
-    request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   // Repo Config
   listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),

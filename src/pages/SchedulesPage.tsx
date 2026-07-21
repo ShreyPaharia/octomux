@@ -7,7 +7,6 @@ import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -23,7 +22,6 @@ import { timeAgo } from '@/lib/time';
 import { SchemaConfigForm, defaultsFromSchema } from '@/components/schedules/SchemaConfigForm';
 import { CronPresetField } from '@/components/schedules/CronPresetField';
 import { CRON_PRESETS } from '@/components/schedules/cronPresets';
-import { resolveStoredPrompt } from '@/components/schedules/schedulePrompt';
 import { RepoPickerField } from '@/components/fields/RepoPickerField';
 
 function parseConfigJson(configJson: string | null): Record<string, unknown> {
@@ -41,8 +39,6 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
   const [cron, setCron] = useState(CRON_PRESETS[0].cron);
   const [enabled, setEnabled] = useState(true);
   const [config, setConfig] = useState<Record<string, unknown>>({});
-  const [prompt, setPrompt] = useState('');
-  const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,25 +56,6 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
     setConfig(defaultsFromSchema(selectedKind.configSchema));
   }, [selectedKind]);
 
-  useEffect(() => {
-    if (!kind || !repoPath.trim()) {
-      setDefaultPrompt(null);
-      setPrompt('');
-      return;
-    }
-
-    let cancelled = false;
-    schedulesApi.getDefaultPrompt(kind, repoPath.trim()).then((res) => {
-      if (!cancelled) {
-        setDefaultPrompt(res.content);
-        setPrompt(res.content);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [kind, repoPath]);
-
   const canSubmit = kind.length > 0 && repoPath.trim().length > 0 && cron.trim().length > 0;
 
   const handleSubmit = useCallback(async () => {
@@ -88,21 +65,17 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
     try {
       const payloadConfig =
         selectedKind?.configSchema && Object.keys(config).length > 0 ? config : undefined;
-      const storedPrompt = resolveStoredPrompt(prompt, defaultPrompt);
 
       await schedulesApi.createSchedule({
         kind,
         repoPath: repoPath.trim(),
         cron: cron.trim(),
         enabled,
-        prompt: storedPrompt,
         ...(payloadConfig ? { config: payloadConfig } : {}),
       });
 
       setRepoPath('');
       setCron(CRON_PRESETS[0].cron);
-      setPrompt('');
-      setDefaultPrompt(null);
       setEnabled(true);
       if (selectedKind?.configSchema) {
         setConfig(defaultsFromSchema(selectedKind.configSchema));
@@ -115,18 +88,7 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
     } finally {
       setSubmitting(false);
     }
-  }, [
-    canSubmit,
-    kind,
-    repoPath,
-    cron,
-    enabled,
-    config,
-    prompt,
-    defaultPrompt,
-    selectedKind,
-    onCreated,
-  ]);
+  }, [canSubmit, kind, repoPath, cron, enabled, config, selectedKind, onCreated]);
 
   return (
     <GlassPanel level={2} className="flex flex-col gap-3 rounded-2xl p-4">
@@ -174,27 +136,6 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
               value={config}
               onChange={setConfig}
             />
-          </div>
-        </details>
-      ) : null}
-
-      {repoPath.trim() ? (
-        <details className="group">
-          <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-            Customize prompt
-          </summary>
-          <div className="mt-3 flex flex-col gap-2">
-            <Textarea
-              data-testid="schedule-prompt-create"
-              className="min-h-48 font-mono text-xs"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={defaultPrompt === null ? 'Loading default prompt…' : undefined}
-            />
-            <p className="text-[10px] text-muted-soft">
-              Pre-filled with the shipped default. Edit only if you need a custom prompt; unchanged
-              text tracks future SKILL.md updates.
-            </p>
           </div>
         </details>
       ) : null}
@@ -290,8 +231,6 @@ function ScheduleDetail({
   const [config, setConfig] = useState<Record<string, unknown>>(() =>
     parseConfigJson(row.config_json),
   );
-  const [prompt, setPrompt] = useState(row.prompt ?? '');
-  const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -300,21 +239,7 @@ function ScheduleDetail({
     setCron(row.cron);
     setEnabled(row.enabled === 1);
     setConfig(parseConfigJson(row.config_json));
-    setPrompt(row.prompt ?? '');
   }, [row]);
-
-  useEffect(() => {
-    let cancelled = false;
-    schedulesApi.getDefaultPrompt(row.kind, row.repo_path).then((res) => {
-      if (!cancelled) {
-        setDefaultPrompt(res.content);
-        if (row.prompt === null) setPrompt(res.content);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [row.id, row.kind, row.repo_path, row.prompt]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -324,7 +249,6 @@ function ScheduleDetail({
         cron: cron.trim(),
         enabled,
         ...(kindInfo?.configSchema ? { config } : {}),
-        prompt: resolveStoredPrompt(prompt, defaultPrompt),
       });
       onSaved();
     } catch (err) {
@@ -332,7 +256,7 @@ function ScheduleDetail({
     } finally {
       setSaving(false);
     }
-  }, [row.id, cron, enabled, config, prompt, defaultPrompt, kindInfo, onSaved]);
+  }, [row.id, cron, enabled, config, kindInfo, onSaved]);
 
   const handleRunNow = useCallback(async () => {
     setRunning(true);
@@ -346,10 +270,6 @@ function ScheduleDetail({
       setRunning(false);
     }
   }, [row.id, onRunStarted]);
-
-  const handleResetPrompt = useCallback(() => {
-    if (defaultPrompt !== null) setPrompt(defaultPrompt);
-  }, [defaultPrompt]);
 
   return (
     <div className="flex flex-col gap-4 border-t border-glass-edge pt-3">
@@ -379,33 +299,6 @@ function ScheduleDetail({
           <SchemaConfigForm schema={kindInfo.configSchema} value={config} onChange={setConfig} />
         </div>
       ) : null}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-medium text-muted-foreground">Agent prompt</p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            data-testid={`schedule-reset-prompt-${row.id}`}
-            disabled={defaultPrompt === null}
-            onClick={handleResetPrompt}
-          >
-            Reset to default
-          </Button>
-        </div>
-        <Textarea
-          data-testid={`schedule-prompt-${row.id}`}
-          className="min-h-48 font-mono text-xs"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={defaultPrompt === null ? 'Loading default prompt…' : undefined}
-        />
-        <p className="text-[10px] text-muted-soft">
-          Pre-filled with the shipped default. Edit only for a custom override; unchanged text
-          tracks future SKILL.md updates.
-        </p>
-      </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 

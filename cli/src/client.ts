@@ -111,8 +111,6 @@ export interface OctomuxClient {
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
-  createSkill(data: { name: string; content: string }): Promise<{ name: string; content: string }>;
-  deleteSkill(name: string): Promise<void>;
   recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
   defaultBranch(repoPath: string): Promise<{ branch: string }>;
   getRepoConfig(repoPath: string): Promise<{
@@ -234,15 +232,6 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     getSkill(name) {
       return request<{ name: string; content: string }>(`/skills/${encodeURIComponent(name)}`);
-    },
-    createSkill(data) {
-      return request<{ name: string; content: string }>('/skills', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    deleteSkill(name) {
-      return request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
     },
     recentRepos() {
       return request<{ repo_path: string; last_used: string }[]>('/recent-repos');

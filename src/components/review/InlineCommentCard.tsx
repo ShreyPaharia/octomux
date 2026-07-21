@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -10,8 +10,8 @@ interface InlineCommentCardProps {
   taskId: string;
   onUpdated: () => void;
   onError?: (message: string) => void;
-  /** Register imperative accept/reject handlers for keyboard shortcuts. */
-  registerActions?: (actions: { accept: () => void; reject: () => void }) => void;
+  /** Register imperative accept/reject/edit handlers for keyboard shortcuts. */
+  registerActions?: (actions: { accept: () => void; reject: () => void; edit: () => void }) => void;
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -56,6 +56,13 @@ export function InlineCommentCard({
     setEditing(false);
   }, [initialComment]);
 
+  const startEditing = useCallback(() => {
+    setEditBody(comment.body);
+    setEditExisting(comment.existing_code ?? '');
+    setEditSuggested(comment.suggested_code ?? '');
+    setEditing(true);
+  }, [comment.body, comment.existing_code, comment.suggested_code]);
+
   useEffect(() => {
     if (!registerActions) return;
     registerActions({
@@ -63,6 +70,7 @@ export function InlineCommentCard({
         void handleAccept();
       },
       reject: () => setRejectOpen(true),
+      edit: startEditing,
     });
   });
 
@@ -226,16 +234,7 @@ export function InlineCommentCard({
                 Reject
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                setEditBody(comment.body);
-                setEditExisting(comment.existing_code ?? '');
-                setEditSuggested(comment.suggested_code ?? '');
-                setEditing(true);
-              }}
-            >
+            <Button variant="ghost" size="xs" onClick={startEditing}>
               Edit
             </Button>
           </div>

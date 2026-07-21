@@ -52,3 +52,80 @@ export function prepareFindingQueue(
 ): InlineCommentDTO[] {
   return rankFindings(filterFindings(comments, filters));
 }
+
+/** Blocking = the few the agent flagged as must-fix (critical / issue). */
+export function isBlocking(severity: InlineCommentDTO['severity']): boolean {
+  return severity === 'critical' || severity === 'issue';
+}
+
+/** Active triage set: draft or accepted, not auto-resolved. History lives in Discussion. */
+export function activeFindings(comments: InlineCommentDTO[]): InlineCommentDTO[] {
+  return comments.filter(
+    (c) => (c.status === 'draft' || c.status === 'accepted') && !c.auto_resolved_at,
+  );
+}
+
+/** Conversation history: everything that has left the triage queue. */
+export function historyFindings(comments: InlineCommentDTO[]): InlineCommentDTO[] {
+  return comments.filter(
+    (c) =>
+      c.status === 'published' ||
+      c.status === 'rejected' ||
+      c.status === 'stale' ||
+      !!c.auto_resolved_at,
+  );
+}
+
+export interface FindingGroup {
+  name: string;
+  blocking: InlineCommentDTO[];
+  nits: InlineCommentDTO[];
+}
+
+interface GroupLike {
+  name: string;
+  files: { path: string }[];
+}
+
+/**
+ * Bucket findings under their walkthrough group, blocking-first within each.
+ * Groups keep walkthrough order; findings with no group land under "Other".
+ * Empty groups are dropped.
+ */
+export function groupFindings(comments: InlineCommentDTO[], groups: GroupLike[]): FindingGroup[] {
+  const pathToGroup = new Map<string, string>();
+  for (const g of groups) {
+    for (const f of g.files) if (!pathToGroup.has(f.path)) pathToGroup.set(f.path, g.name);
+  }
+  const order = groups.map((g) => g.name);
+  const byName = new Map<string, FindingGroup>();
+  const ensure = (name: string): FindingGroup => {
+    let fg = byName.get(name);
+    if (!fg) {
+      fg = { name, blocking: [], nits: [] };
+      byName.set(name, fg);
+    }
+    return fg;
+  };
+  for (const c of rankFindings(comments)) {
+    const fg = ensure(pathToGroup.get(c.file_path) ?? 'Other');
+    (isBlocking(c.severity) ? fg.blocking : fg.nits).push(c);
+  }
+  const rank = (name: string): number => {
+    const i = order.indexOf(name);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  return [...byName.values()]
+    .sort((a, b) => rank(a.name) - rank(b.name))
+    .filter((g) => g.blocking.length + g.nits.length > 0);
+}
+
+/** Flatten grouped findings into keyboard-nav order: all blocking first, then nits when shown. */
+export function flattenFindingQueue(
+  groups: FindingGroup[],
+  includeNits: boolean,
+): InlineCommentDTO[] {
+  const blocking = groups.flatMap((g) => g.blocking);
+  const nits = includeNits ? groups.flatMap((g) => g.nits) : [];
+  return [...blocking, ...nits];
+}

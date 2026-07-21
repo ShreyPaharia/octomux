@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSkills, useRepoConfigs, useAgents, useHarnesses } from '../lib/hooks';
+import { useRepoConfigs, useHarnesses } from '../lib/hooks';
 import { configApi } from '@/lib/api/configApi';
 import type { RepoConfig, HookRegistryEntry } from '@/lib/api/configApi';
 import {
@@ -11,6 +11,7 @@ import {
   setTerminalCacheSize,
 } from '@/lib/terminal-cache-settings';
 import { ReviewsSection } from '@/components/settings/LearningsPanel';
+import { scheduleSkillsApi, type ScheduleSkill } from '@/lib/api/schedulesApi';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { AddChip } from '@/components/layout/add-chip';
@@ -18,187 +19,13 @@ import { SectionCard } from '@/components/layout/section-card';
 import { SettingRow } from '@/components/layout/setting-row';
 import { SettingsLayout, type SettingsScrollSection } from '@/components/layout/settings-layout';
 import { DataSection } from '@/components/data-section';
-import { CreateNameDialog, DeleteConfirmDialog, FormDialogActions } from '@/components/crud-dialog';
+import { FormDialogActions } from '@/components/crud-dialog';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { GlassButton } from '@/components/ui/glass-button';
 import { GlassInput } from '@/components/ui/glass-input';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
-import { useCrudSection } from '@/hooks/useCrudSection';
-
-function AgentsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
-  const { agents, loading, error, refresh } = useAgents();
-  const navigate = useNavigate();
-  const crud = useCrudSection({
-    onCreate: async (name) => {
-      try {
-        const content = `---\nname: ${name}\ndescription: \n---\n`;
-        await configApi.createAgent({ name, content });
-        showToast('success', 'AGENT CREATED', `Agent "${name}" created`);
-        navigate(`/agents/${encodeURIComponent(name)}`);
-      } catch (err) {
-        showToast('error', 'ERROR', (err as Error).message);
-        throw err;
-      }
-    },
-  });
-
-  return (
-    <SectionCard
-      id="agents"
-      title="Agents"
-      count={!loading && !error ? agents.length : undefined}
-      scrollRef={scrollRef}
-      trailing={<AddChip label="+ New agent" onClick={crud.create.openDialog} />}
-    >
-      <DataSection
-        loading={loading}
-        error={error}
-        onRetry={refresh}
-        isEmpty={agents.length === 0}
-        empty={<div className="py-8 text-center text-sm text-[#8a8a8a]">No agents found.</div>}
-      >
-        <div>
-          {agents.map((agent, i) => (
-            <div
-              key={agent.name}
-              className="flex items-center justify-between py-3 cursor-pointer hover:bg-glass-l1 px-1 -mx-1"
-              style={i === agents.length - 1 ? undefined : ROW_DIVIDER}
-              onClick={() => navigate(`/agents/${encodeURIComponent(agent.name)}`)}
-            >
-              <div>
-                <span className="text-sm font-mono">{agent.name}</span>
-                {agent.description && <p className="text-xs text-[#b5b5bd]">{agent.description}</p>}
-              </div>
-              <span className={`text-xs ${agent.isCustom ? 'text-[#FFB800]' : 'text-[#8a8a8a]'}`}>
-                {agent.isCustom ? 'Custom' : 'Default'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </DataSection>
-
-      <CreateNameDialog
-        open={crud.create.open}
-        onOpenChange={crud.create.onOpenChange}
-        title="Create Agent"
-        placeholder="Agent name"
-        value={crud.create.value}
-        onChange={crud.create.onChange}
-        onSubmit={crud.create.submit}
-        submitting={crud.create.creating}
-        canSubmit={crud.create.canSubmit}
-        submittingLabel="Creating..."
-      />
-    </SectionCard>
-  );
-}
-
-function SkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
-  const { skills, loading, error, refresh } = useSkills();
-  const navigate = useNavigate();
-  const crud = useCrudSection({
-    onCreate: async (name) => {
-      try {
-        const content = `---\nname: ${name}\ndescription: \n---\n`;
-        await configApi.createSkill({ name, content });
-        showToast('success', 'SKILL CREATED', `Skill "${name}" created`);
-        navigate(`/skills/${encodeURIComponent(name)}`);
-      } catch (err) {
-        showToast('error', 'ERROR', (err as Error).message);
-        throw err;
-      }
-    },
-    onDelete: async (target) => {
-      try {
-        await configApi.deleteSkill(target);
-        showToast('success', 'SKILL DELETED', `Skill "${target}" deleted`);
-        refresh();
-      } catch (err) {
-        showToast('error', 'ERROR', (err as Error).message);
-        throw err;
-      }
-    },
-  });
-
-  return (
-    <SectionCard
-      id="skills"
-      title="Skills"
-      count={!loading && !error ? skills.length : undefined}
-      scrollRef={scrollRef}
-      trailing={<AddChip label="+ New skill" onClick={crud.create.openDialog} />}
-    >
-      <DataSection
-        loading={loading}
-        error={error}
-        onRetry={refresh}
-        isEmpty={skills.length === 0}
-        empty={
-          <div className="py-8 text-center text-sm text-[#8a8a8a]">
-            No skills installed.{' '}
-            <GlassButton variant="link" size="inline" onClick={crud.create.openDialog}>
-              Create your first skill
-            </GlassButton>
-          </div>
-        }
-      >
-        <div>
-          {skills.map((skill, i) => (
-            <div
-              key={skill.name}
-              className="group flex items-center justify-between py-3 cursor-pointer hover:bg-glass-l1 px-1 -mx-1"
-              style={i === skills.length - 1 ? undefined : ROW_DIVIDER}
-              onClick={() => navigate(`/skills/${encodeURIComponent(skill.name)}`)}
-            >
-              <div>
-                <span className="text-sm font-mono">{skill.name}</span>
-                {skill.description && <p className="text-xs text-[#b5b5bd]">{skill.description}</p>}
-              </div>
-              <button
-                className="focus-ring text-xs text-[#8a8a8a] opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  crud.delete.setTarget(skill.name);
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          ))}
-        </div>
-      </DataSection>
-
-      <CreateNameDialog
-        open={crud.create.open}
-        onOpenChange={crud.create.onOpenChange}
-        title="Create Skill"
-        placeholder="Skill name"
-        value={crud.create.value}
-        onChange={crud.create.onChange}
-        onSubmit={crud.create.submit}
-        submitting={crud.create.creating}
-        canSubmit={crud.create.canSubmit}
-      />
-
-      <DeleteConfirmDialog
-        open={crud.delete.open}
-        onOpenChange={crud.delete.onOpenChange}
-        title="Delete Skill"
-        description={
-          <>
-            Are you sure you want to delete{' '}
-            <span className="font-mono text-white">{crud.delete.target}</span>? This cannot be
-            undone.
-          </>
-        }
-        onConfirm={crud.delete.submit}
-        submitting={crud.delete.deleting}
-      />
-    </SectionCard>
-  );
-}
 
 function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () => void }) {
   const [showMenu, setShowMenu] = useState(false);
@@ -1005,6 +832,116 @@ function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) =>
   );
 }
 
+function ScheduleSkillRow({ skill, onChanged }: { skill: ScheduleSkill; onChanged: () => void }) {
+  const [content, setContent] = useState(skill.content);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setContent(skill.content);
+  }, [skill.content]);
+
+  const dirty = content !== skill.content;
+
+  const handleSave = useCallback(async () => {
+    setBusy(true);
+    try {
+      await scheduleSkillsApi.updateScheduleSkill(skill.kind, content);
+      showToast('success', 'SAVED', `${skill.kind} skill updated.`);
+      onChanged();
+    } catch (err) {
+      showToast('error', 'SAVE FAILED', (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [skill.kind, content, onChanged]);
+
+  const handleReset = useCallback(async () => {
+    setBusy(true);
+    try {
+      await scheduleSkillsApi.resetScheduleSkill(skill.kind);
+      showToast('info', 'RESET', `${skill.kind} skill reset to shipped default.`);
+      onChanged();
+    } catch (err) {
+      showToast('error', 'RESET FAILED', (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [skill.kind, onChanged]);
+
+  return (
+    <details className="group py-3" style={ROW_DIVIDER}>
+      <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
+        {skill.kind}
+        {dirty && <span className="text-[10px] text-[#8a8aff]">unsaved</span>}
+      </summary>
+      <div className="mt-3 flex flex-col gap-2">
+        <textarea
+          data-testid={`schedule-skill-${skill.kind}`}
+          className="focus-ring min-h-48 w-full rounded-lg border border-glass-edge bg-glass-l1 p-2 font-mono text-xs"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+        />
+        <div className="flex gap-2">
+          <GlassButton
+            variant="primary"
+            size="inline"
+            data-testid={`schedule-skill-save-${skill.kind}`}
+            disabled={busy || !content.trim() || !dirty}
+            onClick={handleSave}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </GlassButton>
+          <GlassButton
+            variant="cancel"
+            size="inline"
+            data-testid={`schedule-skill-reset-${skill.kind}`}
+            disabled={busy}
+            onClick={handleReset}
+          >
+            Reset to default
+          </GlassButton>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ScheduleSkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
+  const [skills, setSkills] = useState<ScheduleSkill[] | null>(null);
+
+  const load = useCallback(() => {
+    scheduleSkillsApi.listScheduleSkills().then(setSkills);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <SectionCard
+      id="schedule-skills"
+      title="Schedule skills"
+      help="Prompt bodies used by cron workflows — the DB is the source of truth."
+      scrollRef={scrollRef}
+    >
+      {skills === null ? (
+        <p
+          className="py-6 text-center text-sm text-[#8a8a8a]"
+          data-testid="schedule-skills-loading"
+        >
+          Loading…
+        </p>
+      ) : (
+        <div data-testid="schedule-skills-list">
+          {skills.map((skill) => (
+            <ScheduleSkillRow key={skill.kind} skill={skill} onChanged={load} />
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 export default function SettingsPage() {
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const [activeSection, setActiveSection] = useState<SettingsScrollSection>('general');
@@ -1032,14 +969,13 @@ export default function SettingsPage() {
       onScrollTo={scrollTo}
     >
       <GeneralSection scrollRef={setRef('general')} />
-      <AgentsSection scrollRef={setRef('agents')} />
-      <SkillsSection scrollRef={setRef('skills')} />
       <HooksSection scrollRef={setRef('hooks')} />
       <RepoConfigsSection scrollRef={setRef('repositories')} />
       <ReviewsSection scrollRef={setRef('reviews')} />
       <EditorSection scrollRef={setRef('editor')} />
       <CodingAgentSection scrollRef={setRef('coding-agent')} />
       <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
+      <ScheduleSkillsSection scrollRef={setRef('schedule-skills')} />
       <AdvancedSection scrollRef={setRef('advanced')} />
     </SettingsLayout>
   );

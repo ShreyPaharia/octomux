@@ -41,7 +41,6 @@ function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     enabled: 1,
     last_run_at: null,
     config_json: null,
-    prompt: null,
     ...overrides,
   };
 }
@@ -64,7 +63,6 @@ describe('SchedulesPage', () => {
         },
       ],
     });
-    apiMock.getDefaultPrompt.mockResolvedValue({ content: 'Default skill prompt' });
     apiMock.listLoops.mockResolvedValue([]);
   });
 
@@ -93,7 +91,6 @@ describe('SchedulesPage', () => {
     await screen.findByText(/no schedules yet/i);
 
     await user.type(screen.getByTestId('schedule-repo-path'), '/my/repo');
-    await waitFor(() => expect(apiMock.getDefaultPrompt).toHaveBeenCalled());
     await user.click(screen.getByTestId('schedule-submit'));
 
     await waitFor(() => expect(apiMock.createSchedule).toHaveBeenCalledTimes(1));
@@ -103,45 +100,7 @@ describe('SchedulesPage', () => {
         repoPath: '/my/repo',
         cron: '0 9 * * 1-5',
         enabled: true,
-        prompt: null,
       }),
-    );
-  });
-
-  it('stores null prompt when create form default is left unchanged', async () => {
-    const user = userEvent.setup();
-    apiMock.listSchedules.mockResolvedValue([]);
-    apiMock.getDefaultPrompt.mockResolvedValue({ content: 'Default skill prompt' });
-    renderWithRouter(<SchedulesPage />);
-
-    await screen.findByText(/no schedules yet/i);
-    await user.type(screen.getByTestId('schedule-repo-path'), '/my/repo');
-    await waitFor(() =>
-      expect(screen.getByTestId('schedule-prompt-create')).toHaveValue('Default skill prompt'),
-    );
-    await user.click(screen.getByTestId('schedule-submit'));
-
-    await waitFor(() => expect(apiMock.createSchedule).toHaveBeenCalledTimes(1));
-    expect(apiMock.createSchedule).toHaveBeenCalledWith(expect.objectContaining({ prompt: null }));
-  });
-
-  it('stores edited prompt when create form prompt is customized', async () => {
-    const user = userEvent.setup();
-    apiMock.listSchedules.mockResolvedValue([]);
-    apiMock.getDefaultPrompt.mockResolvedValue({ content: 'Default skill prompt' });
-    renderWithRouter(<SchedulesPage />);
-
-    await screen.findByText(/no schedules yet/i);
-    await user.type(screen.getByTestId('schedule-repo-path'), '/my/repo');
-    const promptField = await screen.findByTestId('schedule-prompt-create');
-    await waitFor(() => expect(promptField).toHaveValue('Default skill prompt'));
-    await user.clear(promptField);
-    await user.type(promptField, 'Custom triage prompt');
-    await user.click(screen.getByTestId('schedule-submit'));
-
-    await waitFor(() => expect(apiMock.createSchedule).toHaveBeenCalledTimes(1));
-    expect(apiMock.createSchedule).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: 'Custom triage prompt' }),
     );
   });
 
@@ -204,7 +163,7 @@ describe('SchedulesPage', () => {
     await waitFor(() =>
       expect(apiMock.updateSchedule).toHaveBeenCalledWith(
         'sched-1',
-        expect.objectContaining({ cron: '0 9 * * *', prompt: null }),
+        expect.objectContaining({ cron: '0 9 * * *' }),
       ),
     );
   });

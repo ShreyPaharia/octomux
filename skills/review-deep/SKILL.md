@@ -64,7 +64,7 @@ Workflow({
     baseBranch:      <start.base_branch>,           // lets the engine diff the true PR scope
     headSha:         <start.pr_head_sha>,
     risk:            <walkthrough.global.risk>,      // "low" | "medium" | "high"
-    keyReviewPoints: <walkthrough.global.key_review_points>,
+    keyReviewPoints: <walkthrough.highlights mapped to their `title` strings>,
     groups:          <names from walkthrough.groups>,
     playbook:        <start.playbook as a single string: index + each file body>,
     learnings:       <start.learnings mapped to their `why` strings>,
@@ -87,6 +87,8 @@ It returns:
 For each finding the engine returned, draft a comment with `octomux review draft-comment`, mapping the finding's `file`/`line`/`severity`/`kind`/`body` straight through.
 
 Kind: **comment** (narrative — architectural concerns, "should we use X", FYI) or **suggestion** (a clean line-range patch — typos, simple fixes). Severity: `critical` | `issue` | `suggestion` | `nit`. Bucket: `actionable` (author should change something) | `informational` (FYI).
+
+The review UI tiers severity: `critical` and `issue` render as **blocking** (shown expanded), while `suggestion` and `nit` render as **nits/optional** (collapsed by default). Be disciplined — reserve `critical`/`issue` for the genuinely blocking few, and use `suggestion`/`nit` for everything else.
 
 ### For `kind=comment`:
 

@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { InlineCommentDTO } from '@/lib/api/reviewApi';
-import { prepareFindingQueue } from '@/lib/review-findings';
+import {
+  activeFindings,
+  filterFindings,
+  flattenFindingQueue,
+  groupFindings,
+  type FindingGroup,
+} from '@/lib/review-findings';
 import {
   REVIEW_FINDING_KEYBINDS,
   useReviewFindingKeyboard,
 } from '@/hooks/useReviewFindingKeyboard';
 import { cn } from '@/lib/utils';
+import { ChevronDownIcon } from '../icons';
+import type { RenderGroup } from '@/lib/review-file-groups';
 import { ReviewFilters, type CommentFilters } from './ReviewFilters';
 import { InlineCommentCard } from './InlineCommentCard';
 
@@ -27,6 +35,7 @@ const SEVERITY_DOT: Record<string, string> = {
 interface FindingQueueProps {
   taskId: string;
   comments: InlineCommentDTO[];
+  groups: RenderGroup[];
   selectedId: string | null;
   onSelect: (comment: InlineCommentDTO) => void;
   onUpdated: () => void;
@@ -38,18 +47,78 @@ function shortPath(path: string): string {
   return idx === -1 ? path : path.slice(idx + 1);
 }
 
+interface FindingRowProps {
+  comment: InlineCommentDTO;
+  selected: boolean;
+  onSelect: (c: InlineCommentDTO) => void;
+}
+
+function FindingRow({ comment: c, selected, onSelect }: FindingRowProps) {
+  const dot = c.severity ? SEVERITY_DOT[c.severity] : 'bg-muted-foreground';
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid={`finding-queue-item-${c.id}`}
+        data-selected={selected ? 'true' : undefined}
+        onClick={() => onSelect(c)}
+        className={cn(
+          'flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-glass-l2/40',
+          selected && 'bg-primary/10',
+        )}
+      >
+        <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', dot)} aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-1.5">
+            {c.severity ? (
+              <span className="rounded border border-glass-edge px-1 py-0.5 text-[10px]">
+                {c.severity}
+              </span>
+            ) : null}
+            {c.status === 'accepted' ? (
+              <span className="text-[10px] text-primary">accepted</span>
+            ) : null}
+            <span className="truncate font-mono text-[10px] text-blue-300">
+              {shortPath(c.file_path)}:{c.line}
+            </span>
+          </span>
+          <span className="mt-0.5 line-clamp-2 block text-foreground">{c.body}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
 export function FindingQueue({
   taskId,
   comments,
+  groups,
   selectedId,
   onSelect,
   onUpdated,
   onJumpToCode,
 }: FindingQueueProps) {
   const [filters, setFilters] = useState<CommentFilters>(DEFAULT_FILTERS);
-  const queue = useMemo(() => prepareFindingQueue(comments, filters), [comments, filters]);
+  const [nitsExpanded, setNitsExpanded] = useState(false);
+
+  const fgroups = useMemo<FindingGroup[]>(() => {
+    const active = filterFindings(activeFindings(comments), filters);
+    return groupFindings(active, groups);
+  }, [comments, filters, groups]);
+
+  const totalBlocking = useMemo(
+    () => fgroups.reduce((n, g) => n + g.blocking.length, 0),
+    [fgroups],
+  );
+  const totalNits = useMemo(() => fgroups.reduce((n, g) => n + g.nits.length, 0), [fgroups]);
+
+  const queue = useMemo(() => flattenFindingQueue(fgroups, nitsExpanded), [fgroups, nitsExpanded]);
   const selected = queue.find((c) => c.id === selectedId) ?? queue[0] ?? null;
-  const cardActionsRef = useRef<{ accept: () => void; reject: () => void } | null>(null);
+  const cardActionsRef = useRef<{
+    accept: () => void;
+    reject: () => void;
+    edit: () => void;
+  } | null>(null);
 
   useEffect(() => {
     if (!selected && queue.length > 0) {
@@ -76,10 +145,13 @@ export function FindingQueue({
     onPrevFinding: () => selectByOffset(-1),
     onAccept: () => cardActionsRef.current?.accept(),
     onReject: () => cardActionsRef.current?.reject(),
+    onEdit: () => cardActionsRef.current?.edit(),
     onJumpToCode: () => {
       if (selected) onJumpToCode(selected);
     },
   });
+
+  const total = totalBlocking + totalNits;
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="finding-queue">
@@ -89,62 +161,84 @@ export function FindingQueue({
             Findings
           </span>
           <span className="font-mono text-[10px] text-muted-foreground">
-            {queue.length} to triage
+            {totalBlocking} blocking · {totalNits} nits
           </span>
         </div>
         <ReviewFilters filters={filters} onChange={setFilters} />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {queue.length === 0 ? (
+        {total === 0 ? (
           <p className="p-4 text-xs text-muted-foreground" data-testid="finding-queue-empty">
             No actionable findings. Accept drafts to enable publish, or re-run the review.
           </p>
         ) : (
-          <ul className="divide-y divide-glass-edge/60">
-            {queue.map((c, index) => {
-              const isSelected = selected?.id === c.id;
-              const dot = c.severity ? SEVERITY_DOT[c.severity] : 'bg-muted-foreground';
-              return (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    data-testid={`finding-queue-item-${c.id}`}
-                    data-selected={isSelected ? 'true' : undefined}
-                    onClick={() => onSelect(c)}
-                    className={cn(
-                      'flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-glass-l2/40',
-                      isSelected && 'bg-primary/10',
-                    )}
-                  >
-                    <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', dot)} aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {index + 1}/{queue.length}
-                        </span>
-                        {c.severity ? (
-                          <span className="rounded border border-glass-edge px-1 py-0.5 text-[10px]">
-                            {c.severity}
-                          </span>
-                        ) : null}
-                        {c.bucket ? (
-                          <span className="text-[10px] text-muted-foreground">{c.bucket}</span>
-                        ) : null}
-                        {c.status === 'accepted' ? (
-                          <span className="text-[10px] text-primary">accepted</span>
-                        ) : null}
-                      </span>
-                      <span className="mt-0.5 block truncate font-mono text-[10px] text-blue-300">
-                        {shortPath(c.file_path)}:{c.line}
-                      </span>
-                      <span className="mt-0.5 line-clamp-2 text-foreground">{c.body}</span>
+          <>
+            {totalBlocking === 0 && (
+              <p className="px-3 py-2 text-[11px] text-muted-foreground" data-testid="no-blocking">
+                No blocking findings — nits below.
+              </p>
+            )}
+            {fgroups.map((g) =>
+              g.blocking.length > 0 ? (
+                <section
+                  key={g.name}
+                  data-testid={`finding-group-${g.name}`}
+                  className="border-b border-glass-edge/50"
+                >
+                  <h3 className="flex items-center gap-2 px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span className="min-w-0 flex-1 truncate">{g.name}</span>
+                    <span className="shrink-0 font-mono normal-case text-muted-foreground">
+                      {g.blocking.length}
                     </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  </h3>
+                  <ul>
+                    {g.blocking.map((c) => (
+                      <FindingRow
+                        key={c.id}
+                        comment={c}
+                        selected={selected?.id === c.id}
+                        onSelect={onSelect}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              ) : null,
+            )}
+
+            {totalNits > 0 && (
+              <section data-testid="finding-nits">
+                <button
+                  type="button"
+                  data-testid="finding-nits-toggle"
+                  onClick={() => setNitsExpanded((v) => !v)}
+                  aria-expanded={nitsExpanded}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] font-medium text-muted-foreground hover:bg-glass-l2/30"
+                >
+                  <ChevronDownIcon
+                    aria-hidden
+                    className={cn('size-3.5 shrink-0', !nitsExpanded && '-rotate-90')}
+                  />
+                  Nits &amp; optional
+                  <span className="font-mono text-[10px]">({totalNits})</span>
+                </button>
+                {nitsExpanded && (
+                  <ul>
+                    {fgroups.flatMap((g) =>
+                      g.nits.map((c) => (
+                        <FindingRow
+                          key={c.id}
+                          comment={c}
+                          selected={selected?.id === c.id}
+                          onSelect={onSelect}
+                        />
+                      )),
+                    )}
+                  </ul>
+                )}
+              </section>
+            )}
+          </>
         )}
       </div>
 

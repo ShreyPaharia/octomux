@@ -55,8 +55,6 @@ function makeClient(overrides: Partial<OctomuxClient> = {}): OctomuxClient {
     sendMessage: notImpl as never,
     listSkills: notImpl as never,
     getSkill: notImpl as never,
-    createSkill: notImpl as never,
-    deleteSkill: notImpl as never,
     recentRepos: notImpl as never,
     defaultBranch: notImpl as never,
     getRepoConfig: vi.fn(async () => ({
