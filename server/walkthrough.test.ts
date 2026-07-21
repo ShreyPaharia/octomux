@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { validateWalkthrough } from './walkthrough.js';
 
 const VALID = {
+  verdict: 'Adds a schema column; low risk.',
+  highlights: [
+    { title: 'Check the new column default', file: 'server/db.ts', line: 3, side: 'new' },
+  ],
   global: {
     type: 'Enhancement',
     risk: 'low',
@@ -10,7 +14,6 @@ const VALID = {
     security_concerns: null,
     ticket_compliance: [],
     summary: 'adds a thing',
-    key_review_points: ['look at the thing'],
   },
   groups: [
     {
@@ -64,5 +67,35 @@ describe('validateWalkthrough', () => {
     const result = validateWalkthrough(VALID, ['server/db.ts', 'package-lock.json']);
     expect(result.ok).toBe(true);
     expect(result.orphans).toEqual(['package-lock.json']);
+  });
+
+  it('rejects a missing verdict', () => {
+    const { verdict: _verdict, ...bad } = VALID;
+    const result = validateWalkthrough(bad, ['server/db.ts']);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toContain('verdict must be a non-empty one-line string');
+  });
+
+  it('rejects more than 5 highlights', () => {
+    const bad = {
+      ...VALID,
+      highlights: Array.from({ length: 6 }, (_, i) => ({ title: `h${i}`, file: 'server/db.ts' })),
+    };
+    const result = validateWalkthrough(bad, ['server/db.ts']);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]).toMatch(/at most 5/);
+  });
+
+  it('rejects a highlight pointing at a file not in the diff', () => {
+    const bad = {
+      ...VALID,
+      highlights: [{ title: 'nope', file: 'made/up.ts' }],
+    };
+    const result = validateWalkthrough(bad, ['server/db.ts']);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => /hallucinated highlight file path/.test(e))).toBe(true);
   });
 });

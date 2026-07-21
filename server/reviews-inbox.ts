@@ -102,7 +102,9 @@ export function getReviewDetail(taskId: string): ReviewDetail | null {
 
   const runs = listRunsForTask(taskId);
   const latestRun = runs[0] ?? null;
-  const comments = listComments(taskId, { activeOnly: true });
+  // Return every comment — the review surface partitions active triage
+  // (draft/accepted) from the Discussion history (published/rejected/stale/resolved).
+  const comments = listComments(taskId);
   const publishedHistory = listPublishedReviews(taskId);
 
   return {

@@ -5,7 +5,13 @@ export interface ReviewFindingKeyHandlers {
   onPrevFinding?: () => void;
   onAccept?: () => void;
   onReject?: () => void;
+  onEdit?: () => void;
   onJumpToCode?: () => void;
+  onNextFile?: () => void;
+  onPrevFile?: () => void;
+  onNextUnreviewed?: () => void;
+  onPublish?: () => void;
+  onToggleCheatsheet?: () => void;
 }
 
 export interface ReviewFindingKeybind {
@@ -13,12 +19,17 @@ export interface ReviewFindingKeybind {
   description: string;
 }
 
+/** Advertised shortcuts — every entry here is wired to a real handler below. */
 export const REVIEW_FINDING_KEYBINDS: readonly ReviewFindingKeybind[] = [
-  { keys: 'j', description: 'Next finding' },
-  { keys: 'k', description: 'Previous finding' },
-  { keys: 'a', description: 'Accept finding' },
-  { keys: 'x', description: 'Reject finding' },
-  { keys: 'g', description: 'Jump to code in diff' },
+  { keys: 'j / k', description: 'Next / prev finding' },
+  { keys: 'a', description: 'Accept' },
+  { keys: 'r', description: 'Reject' },
+  { keys: 'e', description: 'Edit' },
+  { keys: '↵', description: 'Jump to code' },
+  { keys: '] / [', description: 'Next / prev file' },
+  { keys: '⇧N', description: 'Next unreviewed file' },
+  { keys: '⌘/Ctrl ↵', description: 'Publish' },
+  { keys: '?', description: 'Toggle shortcuts' },
 ] as const;
 
 function isEditableElement(t: unknown): boolean {
@@ -31,30 +42,52 @@ function isEditableElement(t: unknown): boolean {
 
 export function useReviewFindingKeyboard(handlers: ReviewFindingKeyHandlers): void {
   useEffect(() => {
+    function fire(handler: (() => void) | undefined, e: KeyboardEvent): void {
+      if (!handler) return;
+      e.preventDefault();
+      handler();
+    }
+
     function onKey(e: KeyboardEvent) {
-      if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const editable = isEditableElement(e.target) || isEditableElement(document.activeElement);
+
+      // Cmd/Ctrl+Enter publishes even from within an editor (batch-then-publish).
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        fire(handlers.onPublish, e);
+        return;
+      }
+      if (editable || e.metaKey || e.ctrlKey || e.altKey) return;
 
       switch (e.key) {
         case 'j':
-          e.preventDefault();
-          handlers.onNextFinding?.();
+          fire(handlers.onNextFinding, e);
           break;
         case 'k':
-          e.preventDefault();
-          handlers.onPrevFinding?.();
+          fire(handlers.onPrevFinding, e);
           break;
         case 'a':
-          e.preventDefault();
-          handlers.onAccept?.();
+          fire(handlers.onAccept, e);
           break;
-        case 'x':
-          e.preventDefault();
-          handlers.onReject?.();
+        case 'r':
+          fire(handlers.onReject, e);
           break;
-        case 'g':
-          e.preventDefault();
-          handlers.onJumpToCode?.();
+        case 'e':
+          fire(handlers.onEdit, e);
+          break;
+        case 'Enter':
+          fire(handlers.onJumpToCode, e);
+          break;
+        case ']':
+          fire(handlers.onNextFile, e);
+          break;
+        case '[':
+          fire(handlers.onPrevFile, e);
+          break;
+        case 'N': // Shift+N
+          fire(handlers.onNextUnreviewed, e);
+          break;
+        case '?':
+          fire(handlers.onToggleCheatsheet, e);
           break;
       }
     }

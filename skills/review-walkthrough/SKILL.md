@@ -52,6 +52,16 @@ Compose a single JSON file at `.octomux/review-walkthrough.json` with this exact
 
 ```json
 {
+  "verdict": "One sentence: what this PR does + its risk. e.g. 'Adds cron-driven schedule execution; medium risk from the new DB migration.'",
+  "highlights": [
+    {
+      "title": "The one thing to look at, in a line",
+      "file": "exact/path/from/repo/root.ts",
+      "line": 42,
+      "side": "new",
+      "detail": "Optional one-sentence expansion."
+    }
+  ],
   "global": {
     "type": "Bug fix | Tests | Enhancement | Documentation | Other",
     "risk": "low | medium | high",
@@ -65,8 +75,7 @@ Compose a single JSON file at `.octomux/review-walkthrough.json` with this exact
         "notes": "One sentence on how the PR satisfies the ticket."
       }
     ],
-    "summary": "...",
-    "key_review_points": ["..."]
+    "summary": "A short paragraph of context (2-3 sentences max), secondary to the verdict."
   },
   "groups": [
     {
@@ -84,15 +93,19 @@ Compose a single JSON file at `.octomux/review-walkthrough.json` with this exact
 }
 ```
 
+Think of the walkthrough as a **pyramid**: the verdict is the tip, the highlights are the ranked few things worth looking at, and everything below (summary, groups) is supporting context.
+
 Rules:
 
+- **verdict** (REQUIRED) — exactly one sentence: what the PR does + its risk. This is the headline the reviewer reads first, so make it land.
+- **highlights** (REQUIRED) — a ranked array of **at most 5** entries, most-important-first, each tied to specific code. `file` is REQUIRED and must be a real file in the diff; `line`/`side` are optional anchors and `detail` an optional one-sentence expansion. Highlights are where the reviewer's attention goes — they replace the old `key_review_points`. If more than 5 things seem to qualify, it is YOUR job to rank and cut to the 5 that actually matter — do not offload that to the reviewer. The CLI rejects more than 5.
 - Group files **logically**, not alphabetically. Imagine narrating the change top-to-bottom to a smart colleague.
 - A file MAY appear in more than one group (cross-cutting concerns like "Untested files" group → real architectural groups).
 - If you forget a file, octomux will auto-append it to an "Other changes" group at the end — but try not to miss any.
-- `key_review_points` should be at most 5 short bullets that tell the reviewer where to focus.
+- `global.summary` is now SHORT — 2-3 sentences of context, secondary to the verdict. It is no longer the primary "where to focus" surface; highlights are.
 - `ticket_compliance` should have one entry per linked ticket parsed from the PR body (look for IN-1234, github#456, etc.). If none, leave the array empty.
 - Each entry: `ticket` (id string), `status` one of `met` | `partial` | `not_met` | `n/a`, and `notes` (required when status is not `n/a` — one or two sentences the human reviewer will see in the dashboard).
-- Do NOT ship a walkthrough without all scalar fields (`type`, `risk`, `effort`, `relevant_tests`, `summary`) filled in.
+- Do NOT ship a walkthrough without the verdict, highlights, and all scalar fields (`type`, `risk`, `effort`, `relevant_tests`, `summary`) filled in.
 
 Then ingest:
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -24,6 +24,8 @@ interface PublishBarProps {
   onPublished: () => void;
   onReRun: () => void;
   onDeleted?: () => void;
+  /** Register an imperative publish trigger (for the ⌘/Ctrl+↵ shortcut). */
+  registerPublish?: (fn: () => void) => void;
 }
 
 const VERDICT_OPTIONS: Array<{ value: PublishedReviewVerdict; label: string }> = [
@@ -46,6 +48,7 @@ export function PublishBar({
   onPublished,
   onReRun,
   onDeleted,
+  registerPublish,
 }: PublishBarProps) {
   const [verdict, setVerdict] = useState<PublishedReviewVerdict>('COMMENT');
   const [summary, setSummary] = useState('');
@@ -55,6 +58,15 @@ export function PublishBar({
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const title = displayReviewTitle(prTitle);
+
+  const publishRef = useRef<() => void>(() => {});
+  publishRef.current = () => {
+    if (acceptedCount === 0 || publishing) return;
+    void handlePublish();
+  };
+  useEffect(() => {
+    registerPublish?.(() => publishRef.current());
+  }, [registerPublish]);
 
   async function handlePublish() {
     if (acceptedCount === 0) return;

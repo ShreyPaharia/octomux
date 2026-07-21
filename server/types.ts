@@ -21,7 +21,28 @@ export interface TicketCompliance {
   reason?: string;
 }
 
+/**
+ * A single ranked "look at this" — the pyramid's middle tier. Each highlight is
+ * linked to specific code so the walkthrough summary and the diff stay welded.
+ */
+export interface WalkthroughHighlight {
+  /** One-line "look at this" the reviewer actually needs to check. */
+  title: string;
+  /** Diff-relative file path this highlight points at (must exist in the diff). */
+  file: string;
+  /** Optional anchor line in `file`. */
+  line?: number;
+  /** Which side of the diff `line` refers to. */
+  side?: 'old' | 'new';
+  /** Optional one-sentence expansion, shown on demand. */
+  detail?: string;
+}
+
 export interface Walkthrough {
+  /** One-line verdict: what this PR does + its risk, in a sentence. */
+  verdict: string;
+  /** ≤5 ranked, code-linked highlights — the only things that actually matter. */
+  highlights: WalkthroughHighlight[];
   global: {
     type: PRType;
     risk: 'low' | 'medium' | 'high';
@@ -30,7 +51,6 @@ export interface Walkthrough {
     security_concerns: string | null;
     ticket_compliance: TicketCompliance[];
     summary: string;
-    key_review_points: string[];
   };
   groups: Array<{
     name: string;

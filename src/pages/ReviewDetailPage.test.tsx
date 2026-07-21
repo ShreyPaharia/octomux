@@ -95,11 +95,12 @@ function makeDetail(overrides: Partial<ReviewDetail> = {}): ReviewDetail {
 }
 
 const WALKTHROUGH_JSON = JSON.stringify({
+  verdict: 'adds the thing; low risk',
+  highlights: [{ title: 'watch migration', file: 'server/db.ts', line: 5, side: 'new' }],
   global: {
     type: 'Enhancement',
     risk: 'low',
     summary: 'adds the thing',
-    key_review_points: ['watch migration'],
   },
   groups: [
     {
@@ -109,6 +110,13 @@ const WALKTHROUGH_JSON = JSON.stringify({
     },
   ],
 });
+
+function detailWithWalkthrough(extra: Partial<ReviewDetail> = {}): ReviewDetail {
+  return makeDetail({
+    latest_run: { id: 'r1', pr_head_sha: 'sha1', walkthrough: WALKTHROUGH_JSON, status: 'done' },
+    ...extra,
+  });
+}
 
 describe('ReviewDetailPage', () => {
   beforeEach(() => {
@@ -138,39 +146,36 @@ describe('ReviewDetailPage', () => {
     expect(await screen.findByText(/not found/i)).toBeTruthy();
   });
 
-  it('renders WalkthroughPanel with summary and key review points', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-      }),
-    );
+  it('orients first: renders the walkthrough verdict, risk, and highlights', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough());
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    const panel = await screen.findByTestId('walkthrough-panel');
-    expect(panel).toBeTruthy();
-    expect(screen.getByText(/adds the thing/i)).toBeTruthy();
+    const orient = await screen.findByTestId('walkthrough-orient');
+    expect(orient).toBeTruthy();
+    expect(screen.getByTestId('walkthrough-verdict').textContent).toMatch(/adds the thing/i);
     expect(screen.getByText(/risk: low/)).toBeTruthy();
     expect(screen.getByText('watch migration')).toBeTruthy();
+    // The heavy finding queue is not mounted while orienting.
+    expect(screen.queryByTestId('finding-queue')).toBeNull();
   });
 
-  it('renders ReviewContextStrip with file notes when a file is selected via finding', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-        comments: [comment()],
-      }),
-    );
+  it('clicking a highlight enters review, reveals the code, and syncs the spine', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough());
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    await screen.findByTestId('finding-queue');
+    const hl = await screen.findByTestId('walkthrough-highlight-0');
+    fireEvent.click(hl);
+    // summary → code linking
+    await waitFor(() => expect(revealLineSpy).toHaveBeenCalledWith('server/db.ts', 5, 'new'));
+    // now in review mode with the spine docked and "you are here" synced to the group
+    expect(await screen.findByTestId('walkthrough-spine')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('spine-group-Schema').getAttribute('data-active')).toBe('true'),
+    );
+  });
+
+  it('Start review docks the spine and shows the per-file note in one canonical place', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough({ comments: [comment()] }));
+    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    fireEvent.click(await screen.findByTestId('start-review-btn'));
     const item = await screen.findByTestId('finding-queue-item-c1');
     fireEvent.click(item);
     const fileCtx = await screen.findByTestId('review-context-file');
@@ -198,7 +203,7 @@ describe('ReviewDetailPage', () => {
     await waitFor(() => expect(publishBtn.disabled).toBe(false));
   });
 
-  it('renders published history with GitHub link', async () => {
+  it('shows published history in the Discussion tab with a GitHub link', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
         published_history: [
@@ -213,24 +218,16 @@ describe('ReviewDetailPage', () => {
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    fireEvent.click(await screen.findByTestId('review-tab-discussion'));
     const panel = await screen.findByTestId('published-history-panel');
     expect(panel).toBeTruthy();
     expect(screen.getByText('View on GitHub').closest('a')?.href).toContain('review-1');
   });
 
   it('selecting a finding reveals its line in the diff', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-        comments: [comment()],
-      }),
-    );
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough({ comments: [comment()] }));
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    fireEvent.click(await screen.findByTestId('start-review-btn'));
     const item = await screen.findByTestId('finding-queue-item-c1');
     fireEvent.click(item);
     await waitFor(() => expect(revealLineSpy).toHaveBeenCalledWith('server/db.ts', 5, 'new'));

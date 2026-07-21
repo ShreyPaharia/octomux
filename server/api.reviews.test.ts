@@ -92,7 +92,7 @@ describe('GET /api/reviews/:id', () => {
     app = createApp();
   });
 
-  it('returns full review detail with only actionable comments', async () => {
+  it('returns full review detail with all comments (active + history for Discussion)', async () => {
     const db = getDb();
     db.prepare(
       `INSERT INTO inline_comments
@@ -103,8 +103,9 @@ describe('GET /api/reviews/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.task.id).toBe('task-rev1');
     expect(res.body.latest_run.id).toBe('run-r1');
-    expect(res.body.comments).toHaveLength(2);
-    expect(res.body.comments.every((c: { status: string }) => c.status !== 'rejected')).toBe(true);
+    // The rejected comment is included so the Discussion tab can render history.
+    expect(res.body.comments).toHaveLength(3);
+    expect(res.body.comments.some((c: { status: string }) => c.status === 'rejected')).toBe(true);
     expect(res.body.published_history).toEqual([]);
   });
 

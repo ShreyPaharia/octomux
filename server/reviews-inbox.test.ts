@@ -46,12 +46,13 @@ describe('reviews-inbox', () => {
     expect(row.status).toBe('drafts-ready'); // accepted > 0 OR drafts > 0 AND latest run completed
   });
 
-  it('getReviewDetail returns task + latest run + comments + published history', () => {
+  it('getReviewDetail returns task + latest run + all comments (active + history) + published history', () => {
     const detail = getReviewDetail('t1');
     expect(detail).not.toBeNull();
     expect(detail!.task.id).toBe('t1');
     expect(detail!.latest_run?.id).toBe('r1');
-    expect(detail!.comments.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
+    // Includes the rejected comment so the Discussion tab can render history.
+    expect(detail!.comments.map((c) => c.id).sort()).toEqual(['c1', 'c2', 'c3']);
     expect(detail!.published_history).toEqual([]);
   });
 
