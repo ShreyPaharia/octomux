@@ -13,6 +13,15 @@ vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 vi.mock('@/lib/api/loopApi', () => ({ loopApi: loopApiProxy }));
 vi.mock('@/lib/api/schedulesApi', () => ({ schedulesApi: schedulesApiProxy }));
+vi.mock('@/components/fields/RepoPickerField', () => ({
+  RepoPickerField: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <input
+      data-testid="schedule-repo-path"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
@@ -82,7 +91,6 @@ describe('SchedulesPage', () => {
     await screen.findByText(/no schedules yet/i);
 
     await user.type(screen.getByTestId('schedule-repo-path'), '/my/repo');
-    await user.type(screen.getByTestId('schedule-cron'), '0 8 * * *');
     await user.click(screen.getByTestId('schedule-submit'));
 
     await waitFor(() => expect(apiMock.createSchedule).toHaveBeenCalledTimes(1));
@@ -90,7 +98,7 @@ describe('SchedulesPage', () => {
       expect.objectContaining({
         kind: 'prod-log-triage',
         repoPath: '/my/repo',
-        cron: '0 8 * * *',
+        cron: '0 9 * * 1-5',
         enabled: true,
       }),
     );
@@ -148,9 +156,8 @@ describe('SchedulesPage', () => {
     renderWithRouter(<SchedulesPage />);
     await user.click(await screen.findByTestId('schedule-expand-sched-1'));
 
-    const cronInput = await screen.findByTestId('schedule-edit-cron-sched-1');
-    await user.clear(cronInput);
-    await user.type(cronInput, '0 9 * * *');
+    const presetSelect = await screen.findByTestId('schedule-edit-cron-preset-sched-1');
+    await user.selectOptions(presetSelect, 'daily');
     await user.click(screen.getByTestId('schedule-save-sched-1'));
 
     await waitFor(() =>

@@ -6,7 +6,6 @@ import { useResource } from '@/lib/use-resource';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
@@ -21,6 +20,9 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { timeAgo } from '@/lib/time';
 import { SchemaConfigForm, defaultsFromSchema } from '@/components/schedules/SchemaConfigForm';
+import { CronPresetField } from '@/components/schedules/CronPresetField';
+import { CRON_PRESETS } from '@/components/schedules/cronPresets';
+import { RepoPickerField } from '@/components/fields/RepoPickerField';
 
 function parseConfigJson(configJson: string | null): Record<string, unknown> {
   if (!configJson) return {};
@@ -34,7 +36,7 @@ function parseConfigJson(configJson: string | null): Record<string, unknown> {
 function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreated: () => void }) {
   const [kind, setKind] = useState('');
   const [repoPath, setRepoPath] = useState('');
-  const [cron, setCron] = useState('');
+  const [cron, setCron] = useState(CRON_PRESETS[0].cron);
   const [enabled, setEnabled] = useState(true);
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -73,7 +75,7 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
       });
 
       setRepoPath('');
-      setCron('');
+      setCron(CRON_PRESETS[0].cron);
       setEnabled(true);
       if (selectedKind?.configSchema) {
         setConfig(defaultsFromSchema(selectedKind.configSchema));
@@ -107,26 +109,10 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
           </FormSelect>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="schedule-repo-path">Repo path</Label>
-          <Input
-            id="schedule-repo-path"
-            data-testid="schedule-repo-path"
-            placeholder="/path/to/repo"
-            value={repoPath}
-            onChange={(e) => setRepoPath(e.target.value)}
-          />
+          <Label htmlFor="repo-path">Repository</Label>
+          <RepoPickerField value={repoPath} onChange={setRepoPath} />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="schedule-cron">Cron</Label>
-          <Input
-            id="schedule-cron"
-            data-testid="schedule-cron"
-            className="font-mono text-sm"
-            placeholder="0 7 * * 1-5"
-            value={cron}
-            onChange={(e) => setCron(e.target.value)}
-          />
-        </div>
+        <CronPresetField value={cron} onChange={setCron} />
       </div>
 
       <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
@@ -288,16 +274,13 @@ function ScheduleDetail({
   return (
     <div className="flex flex-col gap-4 border-t border-glass-edge pt-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`schedule-edit-cron-${row.id}`}>Cron</Label>
-          <Input
-            id={`schedule-edit-cron-${row.id}`}
-            data-testid={`schedule-edit-cron-${row.id}`}
-            className="font-mono text-sm"
-            value={cron}
-            onChange={(e) => setCron(e.target.value)}
-          />
-        </div>
+        <CronPresetField
+          id={`schedule-edit-cron-${row.id}`}
+          value={cron}
+          onChange={setCron}
+          presetTestId={`schedule-edit-cron-preset-${row.id}`}
+          customTestId={`schedule-edit-cron-${row.id}`}
+        />
         <div className="flex items-end gap-3 pb-1">
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
             <Switch
