@@ -50,10 +50,6 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-function writeSkillsDir(opts?: SkillsOptions): string {
-  return opts?.repoPath ? repoSkillsDir(opts.repoPath) : homeSkillsDir();
-}
-
 async function listSkillNamesInDir(dir: string): Promise<string[]> {
   if (!(await exists(dir))) return [];
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -125,57 +121,6 @@ export async function getSkill(name: string, opts?: SkillsOptions): Promise<Skil
   }
 
   return { name, content };
-}
-
-export async function createSkill(
-  name: string,
-  content: string,
-  opts?: SkillsOptions,
-): Promise<SkillDetail> {
-  validateName(name);
-
-  const dir = writeSkillsDir(opts);
-  const skillDir = path.join(dir, name);
-
-  if (await exists(skillDir)) {
-    throw new Error(`Skill already exists: ${name}`);
-  }
-
-  await fs.promises.mkdir(skillDir, { recursive: true });
-  await fs.promises.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
-
-  return { name, content };
-}
-
-export async function updateSkill(
-  name: string,
-  content: string,
-  opts?: SkillsOptions,
-): Promise<SkillDetail> {
-  validateName(name);
-
-  const dir = writeSkillsDir(opts);
-  const skillDir = path.join(dir, name);
-
-  if (!(await exists(skillDir))) {
-    throw new Error(`Skill not found: ${name}`);
-  }
-
-  await fs.promises.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
-  return { name, content };
-}
-
-export async function deleteSkill(name: string, opts?: SkillsOptions): Promise<void> {
-  validateName(name);
-
-  const dir = writeSkillsDir(opts);
-  const skillDir = path.join(dir, name);
-
-  if (!(await exists(skillDir))) {
-    throw new Error(`Skill not found: ${name}`);
-  }
-
-  await fs.promises.rm(skillDir, { recursive: true });
 }
 
 /**

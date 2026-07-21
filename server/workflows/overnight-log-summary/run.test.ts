@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createTestDb } from '../../test-helpers.js';
 
 const mockGetSkill = vi.fn();
 const mockRunSessionVertical = vi.fn();
@@ -17,6 +18,7 @@ import { OVERNIGHT_LOG_SUMMARY_SCHEMA } from './schema.js';
 
 describe('runOvernightLogSummary', () => {
   beforeEach(() => {
+    createTestDb();
     mockGetSkill.mockReset();
     mockRunSessionVertical.mockReset();
   });
@@ -35,9 +37,9 @@ describe('runOvernightLogSummary', () => {
     });
 
     expect(result).toEqual({ summary: 'ok' });
-    expect(mockGetSkill).toHaveBeenCalledWith('overnight-log-summary', {
-      repoPath: '/repos/My App',
-    });
+    // The DB is the source of truth now — the prompt seeds from the shipped
+    // SKILL.md (no repo override).
+    expect(mockGetSkill).toHaveBeenCalledWith('overnight-log-summary');
     expect(mockRunSessionVertical).toHaveBeenCalledTimes(1);
     const call = mockRunSessionVertical.mock.calls[0][0];
     expect(call.kind).toBe('overnight-log-summary');

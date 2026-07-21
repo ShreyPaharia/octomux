@@ -21,7 +21,6 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     enabled: 1,
     last_run_at: null,
     config_json: null,
-    prompt: null,
     ...overrides,
   };
 }

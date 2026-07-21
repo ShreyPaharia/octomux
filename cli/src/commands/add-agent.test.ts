@@ -32,8 +32,6 @@ function makeClient(addAgent: OctomuxClient['addAgent']): OctomuxClient {
     sendMessage: notImpl as never,
     listSkills: notImpl as never,
     getSkill: notImpl as never,
-    createSkill: notImpl as never,
-    deleteSkill: notImpl as never,
     recentRepos: notImpl as never,
     defaultBranch: notImpl as never,
     getRepoConfig: notImpl as never,

@@ -94,11 +94,10 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   }
 
   await harness.syncAgents(cwd);
-  await syncSkills(cwd, {
-    skillContentOverrides: skillContentOverridesForScheduleId(
-      (hopTask as { schedule_id?: string | null } | null)?.schedule_id,
-    ),
-  });
+  const skillContentOverrides = await skillContentOverridesForScheduleId(
+    (hopTask as { schedule_id?: string | null } | null)?.schedule_id,
+  );
+  await syncSkills(cwd, { skillContentOverrides });
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });

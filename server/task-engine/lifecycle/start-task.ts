@@ -155,11 +155,10 @@ async function prepareFirstAgentLaunch(
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   await harness.syncAgents(setup.worktreePath);
-  await syncSkills(setup.worktreePath, {
-    skillContentOverrides: skillContentOverridesForScheduleId(
-      (task as { schedule_id?: string | null }).schedule_id,
-    ),
-  });
+  const skillContentOverrides = await skillContentOverridesForScheduleId(
+    (task as { schedule_id?: string | null }).schedule_id,
+  );
+  await syncSkills(setup.worktreePath, { skillContentOverrides });
   await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);

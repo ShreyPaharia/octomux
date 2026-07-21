@@ -16,7 +16,11 @@ export interface ScheduleRow {
   enabled: number;
   last_run_at: string | null;
   config_json: string | null;
-  prompt: string | null;
+}
+
+export interface ScheduleSkill {
+  kind: string;
+  content: string;
 }
 
 export interface ScheduleKindInfo {
@@ -31,24 +35,17 @@ export interface CreateScheduleInput {
   cron: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
-  prompt?: string | null;
 }
 
 export interface UpdateScheduleInput {
   cron?: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
-  prompt?: string | null;
 }
 
 export const schedulesApi = {
   listSchedules: () => request<ScheduleRow[]>('/schedules'),
   getScheduleKinds: () => request<{ kinds: ScheduleKindInfo[] }>('/schedules/kinds'),
-  getDefaultPrompt: (kind: string, repoPath?: string) => {
-    const params = new URLSearchParams({ kind });
-    if (repoPath) params.set('repo_path', repoPath);
-    return request<{ content: string }>(`/schedules/prompt-default?${params}`);
-  },
   createSchedule: (data: CreateScheduleInput) =>
     request<ScheduleRow>('/schedules', { method: 'POST', body: JSON.stringify(data) }),
   updateSchedule: (id: string, data: UpdateScheduleInput) =>
@@ -57,4 +54,15 @@ export const schedulesApi = {
   runScheduleNow: (id: string) =>
     request<{ ok: boolean }>(`/schedules/${id}/run`, { method: 'POST' }),
   getScheduleRuns: (id: string) => request<{ runs: WorkflowRunRow[] }>(`/schedules/${id}/runs`),
+};
+
+export const scheduleSkillsApi = {
+  listScheduleSkills: () => request<ScheduleSkill[]>('/schedule-skills'),
+  updateScheduleSkill: (kind: string, content: string) =>
+    request<ScheduleSkill>(`/schedule-skills/${kind}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+  resetScheduleSkill: (kind: string) =>
+    request<void>(`/schedule-skills/${kind}`, { method: 'DELETE' }),
 };

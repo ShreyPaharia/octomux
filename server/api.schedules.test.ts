@@ -189,18 +189,4 @@ describe('schedule routes', () => {
       expect(res.status).toBe(404);
     });
   });
-
-  describe('GET /api/schedules/prompt-default', () => {
-    it('returns the shipped SKILL.md body for a cron kind', async () => {
-      const res = await request(app).get('/api/schedules/prompt-default?kind=weekly-update');
-      expect(res.status).toBe(200);
-      expect(typeof res.body.content).toBe('string');
-      expect(res.body.content.length).toBeGreaterThan(0);
-    });
-
-    it('rejects an unknown kind with 400', async () => {
-      const res = await request(app).get('/api/schedules/prompt-default?kind=not-real');
-      expect(res.status).toBe(400);
-    });
-  });
 });

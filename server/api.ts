@@ -24,6 +24,7 @@ import { router as taskWorkflowRouter } from './routes/task-workflow.js';
 import { router as taskAgentsRouter } from './routes/task-agents.js';
 import { router as worktreesRouter } from './routes/worktrees.js';
 import { router as schedulesRouter } from './routes/schedules.js';
+import { router as scheduleSkillsRouter } from './routes/schedule-skills.js';
 import { router as workflowRunsRouter } from './routes/workflow-runs.js';
 import { listWorkflows } from './workflows/registry.js';
 
@@ -56,6 +57,7 @@ export function setupRoutes(app: Express): void {
   app.use(taskAgentsRouter);
   app.use(worktreesRouter);
   app.use(schedulesRouter);
+  app.use(scheduleSkillsRouter);
   app.use(workflowRunsRouter);
 
   // ─── Test-only seed endpoint ─────────────────────────────────────────────────

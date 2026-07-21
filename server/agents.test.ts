@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-import { listAgents, getAgent, saveAgent, resetAgent, deleteAgent } from './agents.js';
+import { listAgents, getAgent } from './agents.js';
 
 describe('agents', () => {
   const tmpDir = path.join(os.tmpdir(), `octomux-agents-test-${Date.now()}`);
@@ -82,41 +82,6 @@ describe('agents', () => {
 
     it('throws for non-existent agent', async () => {
       await expect(getAgent('nonexistent')).rejects.toThrow();
-    });
-  });
-
-  describe('saveAgent', () => {
-    it('writes custom override file', async () => {
-      await saveAgent('orchestrator', 'My custom prompt');
-
-      const content = fs.readFileSync(path.join(tmpDir, 'orchestrator.md'), 'utf-8');
-      expect(content).toBe('My custom prompt');
-    });
-  });
-
-  describe('resetAgent', () => {
-    it('deletes custom override for built-in agent', async () => {
-      fs.writeFileSync(path.join(tmpDir, 'orchestrator.md'), 'Custom');
-      await resetAgent('orchestrator');
-
-      expect(fs.existsSync(path.join(tmpDir, 'orchestrator.md'))).toBe(false);
-    });
-
-    it('no-ops when no custom override exists', async () => {
-      await resetAgent('orchestrator');
-    });
-  });
-
-  describe('deleteAgent', () => {
-    it('deletes user-created agent', async () => {
-      fs.writeFileSync(path.join(tmpDir, 'my-agent.md'), 'Content');
-      await deleteAgent('my-agent');
-
-      expect(fs.existsSync(path.join(tmpDir, 'my-agent.md'))).toBe(false);
-    });
-
-    it('throws when trying to delete built-in agent', async () => {
-      await expect(deleteAgent('orchestrator')).rejects.toThrow();
     });
   });
 });

@@ -32,7 +32,6 @@ function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     enabled: 1,
     last_run_at: null,
     config_json: null,
-    prompt: null,
     ...overrides,
   };
 }
@@ -55,7 +54,6 @@ describe('SchedulesPage', () => {
         },
       ],
     });
-    apiMock.getDefaultPrompt.mockResolvedValue({ content: 'Default skill prompt' });
     apiMock.listLoops.mockResolvedValue([]);
   });
 

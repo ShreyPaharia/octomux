@@ -77,11 +77,10 @@ export async function prepareAddAgentLaunch(
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   await harness.syncAgents(task.worktree!);
-  await syncSkills(task.worktree!, {
-    skillContentOverrides: skillContentOverridesForScheduleId(
-      (task as { schedule_id?: string | null }).schedule_id,
-    ),
-  });
+  const skillContentOverrides = await skillContentOverridesForScheduleId(
+    (task as { schedule_id?: string | null }).schedule_id,
+  );
+  await syncSkills(task.worktree!, { skillContentOverrides });
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const baseCmd = harness.buildLaunchCommand({

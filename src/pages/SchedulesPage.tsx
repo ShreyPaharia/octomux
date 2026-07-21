@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -246,8 +245,6 @@ function ScheduleDetail({
   const [config, setConfig] = useState<Record<string, unknown>>(() =>
     parseConfigJson(row.config_json),
   );
-  const [prompt, setPrompt] = useState(row.prompt ?? '');
-  const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,18 +253,7 @@ function ScheduleDetail({
     setCron(row.cron);
     setEnabled(row.enabled === 1);
     setConfig(parseConfigJson(row.config_json));
-    setPrompt(row.prompt ?? '');
   }, [row]);
-
-  useEffect(() => {
-    let cancelled = false;
-    schedulesApi.getDefaultPrompt(row.kind, row.repo_path).then((res) => {
-      if (!cancelled) setDefaultPrompt(res.content);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [row.kind, row.repo_path]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -277,7 +263,6 @@ function ScheduleDetail({
         cron: cron.trim(),
         enabled,
         ...(kindInfo?.configSchema ? { config } : {}),
-        prompt: prompt.trim() ? prompt : null,
       });
       onSaved();
     } catch (err) {
@@ -285,7 +270,7 @@ function ScheduleDetail({
     } finally {
       setSaving(false);
     }
-  }, [row.id, cron, enabled, config, prompt, kindInfo, onSaved]);
+  }, [row.id, cron, enabled, config, kindInfo, onSaved]);
 
   const handleRunNow = useCallback(async () => {
     setRunning(true);
@@ -299,10 +284,6 @@ function ScheduleDetail({
       setRunning(false);
     }
   }, [row.id, onRunStarted]);
-
-  const handleResetPrompt = useCallback(() => {
-    if (defaultPrompt !== null) setPrompt(defaultPrompt);
-  }, [defaultPrompt]);
 
   return (
     <div className="flex flex-col gap-4 border-t border-glass-edge pt-3">
@@ -335,32 +316,6 @@ function ScheduleDetail({
           <SchemaConfigForm schema={kindInfo.configSchema} value={config} onChange={setConfig} />
         </div>
       ) : null}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-medium text-muted-foreground">Agent prompt</p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            data-testid={`schedule-reset-prompt-${row.id}`}
-            disabled={defaultPrompt === null}
-            onClick={handleResetPrompt}
-          >
-            Reset to default
-          </Button>
-        </div>
-        <Textarea
-          data-testid={`schedule-prompt-${row.id}`}
-          className="min-h-48 font-mono text-xs"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={defaultPrompt ?? 'Loading default prompt…'}
-        />
-        <p className="text-[10px] text-muted-soft">
-          Stored in the database. Leave empty to use the shipped SKILL.md default on the next run.
-        </p>
-      </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
