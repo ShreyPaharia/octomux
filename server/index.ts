@@ -35,6 +35,7 @@ import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { childLogger } from './logger.js';
+import { wireReviewerRunFinisher } from './workflows/reviewer/finish-run.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
@@ -75,6 +76,9 @@ await syncAgents().catch((err: unknown) => {
 ensureGithubLogin().catch((err) => {
   logger.warn({ err }, 'ensureGithubLogin failed — reviewer polling disabled');
 });
+
+// Finish reviewer workflow runs when drafting completes (not on publish).
+wireReviewerRunFinisher();
 
 // ─── Orchestrator supervisor ───────────────────────────────────────────────
 // The supervisor is the single in-process subscriber to the durable events log.

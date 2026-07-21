@@ -242,6 +242,14 @@ export function countCommentsByStatus(taskId: string): CommentStatusCounts {
     .get(taskId) as CommentStatusCounts;
 }
 
+/** Count inline comments drafted in a specific review run. */
+export function countCommentsForRun(reviewRunId: string): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS c FROM inline_comments WHERE review_run_id = ?`)
+    .get(reviewRunId) as { c: number };
+  return row.c;
+}
+
 // ─── Staleness helpers ────────────────────────────────────────────────────────
 
 export interface StalenessCandidate {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
 import {
   createReviewRun,
@@ -7,6 +7,10 @@ import {
   completeRun,
   failRun,
 } from './review-runs.js';
+
+vi.mock('../events.js', () => ({ broadcast: vi.fn() }));
+
+import { broadcast } from '../events.js';
 
 const TASK_ID = 't_task1';
 
@@ -23,6 +27,7 @@ describe('review-runs', () => {
   beforeEach(() => {
     db = createTestDb();
     insertTask(db);
+    vi.mocked(broadcast).mockClear();
   });
 
   it('createReviewRun inserts a row with status=running', () => {
@@ -40,13 +45,17 @@ describe('review-runs', () => {
     expect(current?.id).toBe(newer.id);
   });
 
-  it('completeRun stores walkthrough JSON and marks completed', () => {
+  it('completeRun stores walkthrough JSON, marks completed, and broadcasts drafts-ready', () => {
     const run = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     completeRun(run.id, { walkthrough: '{"global":{}}' });
     const fresh = getReviewRun(run.id);
     expect(fresh?.status).toBe('completed');
     expect(fresh?.walkthrough).toBe('{"global":{}}');
     expect(fresh?.completed_at).not.toBeNull();
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'review:drafts-ready',
+      payload: { taskId: TASK_ID, reviewRunId: run.id },
+    });
   });
 
   it('failRun records error and marks failed', () => {

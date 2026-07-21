@@ -1,7 +1,6 @@
 import { parseArgs } from 'node:util';
 import { completeRun, getCurrentRun } from '../../server/repositories/review-runs.js';
 import { autoResolvePublished } from '../../server/review-staleness.js';
-import { broadcast } from '../../server/events.js';
 
 export async function runComplete(argv: string[]): Promise<void> {
   const { values } = parseArgs({
@@ -31,8 +30,6 @@ export async function runComplete(argv: string[]): Promise<void> {
 
   completeRun(run.id);
   await autoResolvePublished(taskId, run.id);
-
-  broadcast({ type: 'review:drafts-ready', payload: { taskId, reviewRunId: run.id } });
 
   process.stdout.write(JSON.stringify({ ok: true, run_id: run.id }) + '\n');
 }
