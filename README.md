@@ -7,7 +7,7 @@
 
 > **Coding got faster. Managing agents didn't.**
 
-octomux is a **local dashboard for running many Claude Code and Cursor agents in parallel.** Each agent works in its own git worktree; you get **one inbox** for every "allow this tool?" prompt, a **live grid** of the whole fleet, and **in-app diff review** with a Ship button. Runs on your machine — no cloud, no telemetry, MIT.
+octomux is a **local dashboard for running many Claude Code and Cursor agents in parallel.** Each agent works in its own git worktree; you get **one inbox** for every "allow this tool?" prompt, a **live grid** of the whole fleet, and **in-app diff review**. Runs on your machine — no cloud, no telemetry, MIT.
 
 ```bash
 npm install -g octomux && octomux init && cd your-repo && octomux start
@@ -25,7 +25,7 @@ Three phases, one window — from prompt to merged PR:
 
 - **① Dispatch** — Type a task (or paste a Jira/Linear/GitHub link, or a whole list). Each one gets its own worktree, branch, and agent. Pick the model per task.
 - **② Watch** — Every agent's live terminal, the diff as it grows, and a **Monitor grid** of the whole fleet. Permission prompts land in one **inbox** instead of scattered across panes.
-- **③ Review & Ship** — Diff review in the same window: mark files reviewed, leave inline comments, send them back to the agent to fix, then **Ship** to open the PR — which auto-closes the task when it merges.
+- **③ Review & Ship** — Diff review in the same window: mark files reviewed, leave inline comments, send them back to the agent to fix. The agent opens the PR — octomux detects it by branch and auto-closes the task when it merges.
 
 Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
 
@@ -35,7 +35,7 @@ Crash, reboot, close the lid — `octomux start` restores every task, branch, an
 | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
 | **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png)           |
 | **Command center** — kanban from backlog → done                               | ![Command center](assets/screenshots/command-center.png) |
-| **Task cockpit** — agent tabs, live session, Ship, Done                       | ![Task detail](assets/screenshots/task-detail.png)       |
+| **Task cockpit** — agent tabs, live session, Review, Done                     | ![Task detail](assets/screenshots/task-detail.png)       |
 | **Diff review** — file tree, reviewed state, inline comments                  | ![Diff](assets/screenshots/diff-review.png)              |
 
 ## Features
