@@ -34,10 +34,16 @@ import {
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
+import { acquireInstanceLock } from './single-instance.js';
 import { childLogger } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
+
+// Refuse to boot a second server against the same database (see incident: a
+// stale dev build kept re-closing a resumed task via the merged-PR poller).
+acquireInstanceLock();
+
 const app = createApp();
 const server = createServer(app);
 const PORT = process.env.OCTOMUX_PORT || process.env.PORT || 7777;
