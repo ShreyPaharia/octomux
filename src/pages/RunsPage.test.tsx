@@ -104,6 +104,48 @@ describe('RunsPage', () => {
     expect(screen.getByTestId('run-row-run-1')).toBeInTheDocument();
   });
 
+  it('shows the outcome as a pill on the row without expanding it', async () => {
+    apiMock.listAllRuns.mockResolvedValue({
+      runs: [
+        makeRun({
+          id: 'run-1',
+          result_json: JSON.stringify({ outcome: 'failed', summary: 'Build broke' }),
+        }),
+      ],
+    });
+
+    renderWithRouter(<RunsPage />);
+
+    expect(await screen.findByTestId('run-outcome-run-1')).toHaveTextContent('failed');
+    // The result body itself should not be rendered until the row is expanded.
+    expect(screen.queryByText('Build broke')).not.toBeInTheDocument();
+  });
+
+  it('falls back to effective_status on the row when there is no parsed result', async () => {
+    apiMock.listAllRuns.mockResolvedValue({
+      runs: [makeRun({ id: 'run-1', effective_status: 'running', result_json: null })],
+    });
+
+    renderWithRouter(<RunsPage />);
+
+    const row = await screen.findByTestId('run-row-run-1');
+    expect(row).toHaveTextContent('running');
+    expect(screen.queryByTestId('run-outcome-run-1')).not.toBeInTheDocument();
+  });
+
+  it('shows an explanatory message instead of a silent no-op for resultless rows', async () => {
+    const user = userEvent.setup();
+    apiMock.listAllRuns.mockResolvedValue({
+      runs: [makeRun({ id: 'run-1', result_json: null })],
+    });
+
+    renderWithRouter(<RunsPage />);
+
+    await user.click(await screen.findByTestId('run-row-run-1'));
+
+    expect(await screen.findByText('No result recorded for this run.')).toBeInTheDocument();
+  });
+
   it('deep-links to the detail view when the run has a task_id and a registered kind', async () => {
     const user = userEvent.setup();
     registerWorkflowUI('loops', {

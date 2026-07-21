@@ -9,7 +9,7 @@ import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { timeAgo } from '@/lib/time';
-import { RunResultCard } from '@/components/runs/RunResultCard';
+import { RunResultCard, OUTCOME_TONE } from '@/components/runs/RunResultCard';
 
 const ALL_KIND = '__all__';
 
@@ -43,7 +43,17 @@ function RunRow({ run }: { run: WorkflowRunRow }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-foreground">{run.workflow_kind}</span>
           <Badge variant="outline">{run.trigger}</Badge>
-          <span className="text-xs text-muted-foreground">{run.effective_status}</span>
+          {result ? (
+            <span
+              data-testid={`run-outcome-${run.id}`}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${OUTCOME_TONE[result.outcome]}`}
+            >
+              {result.outcome}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{run.effective_status}</span>
+          )}
+          {result && <span className="text-[10px] text-muted-soft">{run.effective_status}</span>}
           <span className="text-[10px] text-muted-soft">{timeAgo(run.started_at)}</span>
           {deepLink && (
             <button
@@ -59,7 +69,12 @@ function RunRow({ run }: { run: WorkflowRunRow }) {
             </button>
           )}
         </div>
-        {expanded && result && <RunResultCard result={result} />}
+        {expanded &&
+          (result ? (
+            <RunResultCard result={result} />
+          ) : (
+            <p className="text-xs text-muted-soft">No result recorded for this run.</p>
+          ))}
       </GlassPanel>
     </li>
   );
