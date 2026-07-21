@@ -21,6 +21,7 @@ export const weeklyUpdateWorkflow: WorkflowType = {
     void runWeeklyUpdate({
       repoPath: ctx.repoPath,
       scheduleId: ctx.scheduleId,
+      trigger: ctx.trigger,
     }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },

@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
 import { upsertSchedule } from './repositories/schedules.js';
-import { insertTask } from './repositories/tasks.js';
+import { insertRun } from './repositories/runs.js';
 
 describe('schedule routes', () => {
   let app: ReturnType<typeof createApp>;
@@ -143,20 +143,64 @@ describe('schedule routes', () => {
   });
 
   describe('GET /api/schedules/:id/runs', () => {
-    it('returns tasks stamped with this schedule id', async () => {
+    it('returns runs stamped with this schedule id from the runs table', async () => {
       const row = upsertSchedule({ kind: 'prod-log-triage', repoPath: '/repo', cron: '0 7 * * *' });
-      insertTask({ id: 'run-1', title: 'T', description: 'D', schedule_id: row.id });
-      insertTask({ id: 'run-2', title: 'T', description: 'D', schedule_id: 'other-schedule' });
+      insertRun({
+        workflowKind: 'weekly-update',
+        trigger: 'manual',
+        scheduleId: row.id,
+      });
+      insertRun({
+        workflowKind: 'prod-log-triage',
+        trigger: 'cron',
+        scheduleId: 'other-schedule',
+      });
 
       const res = await request(app).get(`/api/schedules/${row.id}/runs`);
 
       expect(res.status).toBe(200);
-      expect(res.body.runs.map((t: { id: string }) => t.id)).toEqual(['run-1']);
+      expect(res.body.runs).toHaveLength(1);
+      expect(res.body.runs[0].workflow_kind).toBe('weekly-update');
+      expect(res.body.runs[0].schedule_id).toBe(row.id);
     });
 
     it('returns 404 for an unknown schedule id', async () => {
       const res = await request(app).get('/api/schedules/does-not-exist/runs');
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /api/schedules/:id/run', () => {
+    it('triggers a manual run via executeScheduleRun', async () => {
+      const row = upsertSchedule({
+        kind: 'weekly-update',
+        repoPath: '/repo',
+        cron: '0 7 * * *',
+      });
+
+      const res = await request(app).post(`/api/schedules/${row.id}/run`);
+
+      expect(res.status).toBe(202);
+      expect(res.body.ok).toBe(true);
+    });
+
+    it('returns 404 for an unknown schedule id', async () => {
+      const res = await request(app).post('/api/schedules/does-not-exist/run');
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('GET /api/schedules/prompt-default', () => {
+    it('returns the shipped SKILL.md body for a cron kind', async () => {
+      const res = await request(app).get('/api/schedules/prompt-default?kind=weekly-update');
+      expect(res.status).toBe(200);
+      expect(typeof res.body.content).toBe('string');
+      expect(res.body.content.length).toBeGreaterThan(0);
+    });
+
+    it('rejects an unknown kind with 400', async () => {
+      const res = await request(app).get('/api/schedules/prompt-default?kind=not-real');
+      expect(res.status).toBe(400);
     });
   });
 });

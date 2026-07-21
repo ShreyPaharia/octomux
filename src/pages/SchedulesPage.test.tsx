@@ -32,6 +32,7 @@ function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     enabled: 1,
     last_run_at: null,
     config_json: null,
+    prompt: null,
     ...overrides,
   };
 }
@@ -54,6 +55,7 @@ describe('SchedulesPage', () => {
         },
       ],
     });
+    apiMock.getDefaultPrompt.mockResolvedValue({ content: 'Default skill prompt' });
     apiMock.listLoops.mockResolvedValue([]);
   });
 
@@ -116,9 +118,16 @@ describe('SchedulesPage', () => {
     apiMock.getScheduleRuns.mockResolvedValue({
       runs: [
         {
-          id: 'task-1',
-          title: 'Prod log triage: repo',
-          created_at: '2026-01-01 00:00:00',
+          id: 'run-1',
+          workflow_kind: 'prod-log-triage',
+          trigger: 'cron',
+          status: 'done',
+          effective_status: 'done',
+          schedule_id: 'sched-1',
+          task_id: 'task-1',
+          loop_run_id: null,
+          chat_id: null,
+          started_at: '2026-01-01 00:00:00',
         },
       ],
     });
@@ -127,10 +136,43 @@ describe('SchedulesPage', () => {
 
     await user.click(await screen.findByTestId('schedule-expand-sched-1'));
 
-    const runLink = await screen.findByText('Prod log triage: repo');
+    const runLink = await screen.findByText('prod-log-triage · cron');
     await user.click(runLink);
 
     expect(mockNavigate).toHaveBeenCalledWith('/tasks/task-1');
+  });
+
+  it('saves schedule edits from the expanded detail panel', async () => {
+    const user = userEvent.setup();
+    apiMock.listSchedules.mockResolvedValue([makeSchedule({ id: 'sched-1' })]);
+    apiMock.getScheduleRuns.mockResolvedValue({ runs: [] });
+
+    renderWithRouter(<SchedulesPage />);
+    await user.click(await screen.findByTestId('schedule-expand-sched-1'));
+
+    const cronInput = await screen.findByTestId('schedule-edit-cron-sched-1');
+    await user.clear(cronInput);
+    await user.type(cronInput, '0 9 * * *');
+    await user.click(screen.getByTestId('schedule-save-sched-1'));
+
+    await waitFor(() =>
+      expect(apiMock.updateSchedule).toHaveBeenCalledWith(
+        'sched-1',
+        expect.objectContaining({ cron: '0 9 * * *' }),
+      ),
+    );
+  });
+
+  it('triggers run now from the expanded detail panel', async () => {
+    const user = userEvent.setup();
+    apiMock.listSchedules.mockResolvedValue([makeSchedule({ id: 'sched-1' })]);
+    apiMock.getScheduleRuns.mockResolvedValue({ runs: [] });
+
+    renderWithRouter(<SchedulesPage />);
+    await user.click(await screen.findByTestId('schedule-expand-sched-1'));
+    await user.click(await screen.findByTestId('schedule-run-now-sched-1'));
+
+    await waitFor(() => expect(apiMock.runScheduleNow).toHaveBeenCalledWith('sched-1'));
   });
 
   it('deletes a schedule via the inline confirm dialog (no window.confirm)', async () => {

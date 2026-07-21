@@ -31,6 +31,7 @@ function makeRun(overrides: Partial<WorkflowRunRow> = {}): WorkflowRunRow {
     trigger: 'cron',
     status: 'done',
     effective_status: 'done',
+    schedule_id: null,
     task_id: null,
     loop_run_id: null,
     chat_id: null,
@@ -163,5 +164,18 @@ describe('RunsPage', () => {
     await user.click(link);
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/w/loops/task-9'));
+  });
+
+  it('links back to the schedule that produced a run', async () => {
+    const user = userEvent.setup();
+    apiMock.listAllRuns.mockResolvedValue({
+      runs: [makeRun({ id: 'run-1', schedule_id: 'sched-42' })],
+    });
+
+    renderWithRouter(<RunsPage />);
+
+    await user.click(await screen.findByTestId('run-schedule-link-run-1'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/schedules?expand=sched-42');
   });
 });

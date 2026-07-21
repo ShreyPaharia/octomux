@@ -6,6 +6,7 @@ import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { syncSkills } from '../../skills.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { childLogger } from '../../logger.js';
 import {
   listActiveAgents,
@@ -76,7 +77,11 @@ export async function prepareAddAgentLaunch(
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   await harness.syncAgents(task.worktree!);
-  await syncSkills(task.worktree!);
+  await syncSkills(task.worktree!, {
+    skillContentOverrides: skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const baseCmd = harness.buildLaunchCommand({

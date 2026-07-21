@@ -5,12 +5,12 @@ import { hookBaseUrl } from '../../hook-base-url.js';
 import { childLogger } from '../../logger.js';
 import { execTmux } from '../../tmux-bin.js';
 import { syncSkills } from '../../skills.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { chatDirFor, chatSessionName } from '../../chats.js';
 import type { Agent, Worktree } from '../../types.js';
 import {
   getTask as getTaskRepo,
   getTaskTmuxSession,
-  getTaskModel,
   getWorktree,
   hopAgentToTask,
   getAgent,
@@ -88,13 +88,17 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   const flags = harness.resolveFlags(await getSettings());
 
   let hopModel: string | null = null;
-  if (targetTaskId) {
-    const hopTask = getTaskModel(targetTaskId);
-    hopModel = hopTask?.model ?? null;
+  const hopTask = targetTaskId ? getTaskRepo(targetTaskId) : null;
+  if (hopTask) {
+    hopModel = hopTask.model ?? null;
   }
 
   await harness.syncAgents(cwd);
-  await syncSkills(cwd);
+  await syncSkills(cwd, {
+    skillContentOverrides: skillContentOverridesForScheduleId(
+      (hopTask as { schedule_id?: string | null } | null)?.schedule_id,
+    ),
+  });
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });

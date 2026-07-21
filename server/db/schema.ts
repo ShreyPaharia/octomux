@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   enabled       INTEGER NOT NULL DEFAULT 1,
   last_run_at   TEXT,
   config_json   TEXT,
+  prompt        TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(kind, repo_path)

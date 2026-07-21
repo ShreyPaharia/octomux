@@ -11,6 +11,8 @@ export interface RunContext {
   scheduleId?: string;
   /** Present for github triggers. */
   event?: unknown;
+  /** How this invocation was triggered — cron poller or manual run-now. */
+  trigger?: 'cron' | 'manual';
 }
 
 export interface WorkflowType {

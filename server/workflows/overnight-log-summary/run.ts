@@ -3,7 +3,7 @@
  * interpolates the schedule's log command, and runs it as a headless
  * `runSessionVertical` call (session run — no task/worktree/loop).
  */
-import { getSkill } from '../../skills.js';
+import { resolveSchedulePrompt } from '../../schedule-prompt.js';
 import { repoShortName } from '../../review-tasks.js';
 import { runSessionVertical } from '../../services/session-vertical-service.js';
 import { OVERNIGHT_LOG_SUMMARY_SCHEMA } from './schema.js';
@@ -12,6 +12,7 @@ export interface RunOvernightLogSummaryInput {
   repoPath: string;
   scheduleId?: string | null;
   logCommand: string;
+  trigger?: 'cron' | 'manual';
 }
 
 export interface OvernightLogSummaryResult {
@@ -24,8 +25,12 @@ export interface OvernightLogSummaryResult {
 export async function runOvernightLogSummary(
   input: RunOvernightLogSummaryInput,
 ): Promise<{ result: OvernightLogSummaryResult }> {
-  const skill = await getSkill('overnight-log-summary', { repoPath: input.repoPath });
-  const prompt = skill.content
+  const skillContent = await resolveSchedulePrompt({
+    scheduleId: input.scheduleId,
+    kind: 'overnight-log-summary',
+    repoPath: input.repoPath,
+  });
+  const prompt = skillContent
     .replace(/\{\{logCommand\}\}/g, input.logCommand)
     .replace(/\{\{repoShort\}\}/g, repoShortName(input.repoPath));
 
@@ -35,5 +40,6 @@ export async function runOvernightLogSummary(
     workspaceDir: input.repoPath,
     input: prompt,
     outputSchema: OVERNIGHT_LOG_SUMMARY_SCHEMA,
+    trigger: input.trigger ?? 'cron',
   });
 }

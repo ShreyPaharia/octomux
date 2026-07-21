@@ -55,6 +55,19 @@ function RunRow({ run }: { run: WorkflowRunRow }) {
           )}
           {result && <span className="text-[10px] text-muted-soft">{run.effective_status}</span>}
           <span className="text-[10px] text-muted-soft">{timeAgo(run.started_at)}</span>
+          {run.schedule_id && (
+            <button
+              type="button"
+              data-testid={`run-schedule-link-${run.id}`}
+              className="ml-auto text-xs text-muted-foreground hover:text-primary hover:underline"
+              onClick={(e) => {
+                e.stopPropagation();
+                nav(`/schedules?expand=${run.schedule_id}`);
+              }}
+            >
+              Schedule
+            </button>
+          )}
           {deepLink && (
             <button
               type="button"

@@ -3,7 +3,7 @@
  * an interactive chat (not a headless session) — the agent preps the day's
  * plan, then waits for the user to join and steer.
  */
-import { getSkill } from '../../skills.js';
+import { resolveSchedulePrompt } from '../../schedule-prompt.js';
 import { createChat } from '../../chats.js';
 import { insertRun, listRunsForWorkflow, finishRun } from '../../repositories/runs.js';
 import { childLogger } from '../../logger.js';
@@ -13,17 +13,22 @@ const logger = childLogger('workflows/daily-plan');
 
 export interface RunDailyPlanFromScheduleInput {
   scheduleId: string;
+  trigger?: 'cron' | 'manual';
 }
 
 export async function runDailyPlanFromSchedule(
   input: RunDailyPlanFromScheduleInput,
 ): Promise<void> {
-  const skill = await getSkill('daily-plan');
-  const agent = await createChat({ prompt: skill.content });
+  const prompt = await resolveSchedulePrompt({
+    scheduleId: input.scheduleId,
+    kind: 'daily-plan',
+  });
+  const agent = await createChat({ prompt });
+  const trigger = input.trigger ?? 'cron';
 
   insertRun({
     workflowKind: 'daily-plan',
-    trigger: 'cron',
+    trigger,
     scheduleId: input.scheduleId,
     chatId: agent.id,
   });
