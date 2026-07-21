@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { taskApi, type DiffSummaryResponse } from '../lib/api/taskApi';
+import type { InlineCommentDTO } from '../lib/api/reviewApi';
 import { useReviewDetail } from '../lib/hooks';
 import { WalkthroughPanel } from '../components/review/WalkthroughPanel';
 import type { Walkthrough } from '../components/review/walkthrough-types';
@@ -9,24 +10,12 @@ import { ReviewFileTree } from '../components/review/ReviewFileTree';
 import { ReviewContextStrip } from '../components/review/ReviewContextStrip';
 import { PublishBar } from '../components/review/PublishBar';
 import { HeadAdvancedBanner } from '../components/review/HeadAdvancedBanner';
+import { FindingQueue } from '../components/review/FindingQueue';
+import { PublishedHistoryPanel } from '../components/review/PublishedHistoryPanel';
 import { DiffViewer } from '../components/DiffViewer';
-import { CommentsSidePanel } from '../components/CommentsSidePanel';
-import { CommentsContext, useTaskComments } from '../hooks/useTaskComments';
 import type { DiffFileListHandle } from '../components/DiffFileList';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-const COMMENTS_PANEL_KEY = 'octomux:review:comments-panel-open';
-
-function defaultCommentsPanelOpen(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const stored = localStorage.getItem(COMMENTS_PANEL_KEY);
-    if (stored !== null) return stored === 'true';
-  } catch {
-    // localStorage unavailable
-  }
-  return window.innerWidth >= 1440;
-}
 
 export default function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -34,19 +23,10 @@ export default function ReviewDetailPage() {
   const { detail, error, refresh } = useReviewDetail(id);
   const [filesInDiff, setFilesInDiff] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [showCommentsPanel, setShowCommentsPanel] = useState(defaultCommentsPanelOpen);
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
+  const [showFileTree, setShowFileTree] = useState(false);
   const [mobileFileTreeOpen, setMobileFileTreeOpen] = useState(false);
   const diffListRef = useRef<DiffFileListHandle | null>(null);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(COMMENTS_PANEL_KEY, String(showCommentsPanel));
-    } catch {
-      // ignore
-    }
-  }, [showCommentsPanel]);
-
-  const taskComments = useTaskComments(id);
 
   const [reviewedFiles, setReviewedFiles] = useState<Set<string>>(new Set());
 
@@ -82,8 +62,6 @@ export default function ReviewDetailPage() {
     setReviewedFiles(set);
   }, []);
 
-  const filesInDiffSet = useMemo(() => new Set(filesInDiff), [filesInDiff]);
-
   const walkthrough = useMemo<Walkthrough | null>(() => {
     const raw = detail?.latest_run?.walkthrough;
     if (!raw) return null;
@@ -107,25 +85,24 @@ export default function ReviewDetailPage() {
     setMobileFileTreeOpen(false);
   }, []);
 
-  const handleJumpToComment = useCallback(
-    (filePath: string, line: number, side: 'old' | 'new', commentId: string) => {
-      setSelectedPath(filePath);
-      diffListRef.current?.revealLineInFile(filePath, line, side);
-      taskComments.setFocusedId(commentId);
-      setShowCommentsPanel(false);
-      window.setTimeout(() => {
-        if (taskComments.focusedId === commentId) taskComments.setFocusedId(null);
-      }, 1600);
-    },
-    [taskComments],
-  );
+  const handleSelectFinding = useCallback((comment: InlineCommentDTO) => {
+    setSelectedFindingId(comment.id);
+    setSelectedPath(comment.file_path);
+    diffListRef.current?.revealLineInFile(comment.file_path, comment.line, comment.side);
+  }, []);
+
+  const handleJumpToFindingCode = useCallback((comment: InlineCommentDTO) => {
+    setSelectedPath(comment.file_path);
+    diffListRef.current?.revealLineInFile(comment.file_path, comment.line, comment.side);
+  }, []);
 
   if (error) return <div className="p-4 text-red-500 md:p-6">{error}</div>;
   if (!detail) return <div className="p-4 text-sm text-muted-foreground md:p-6">Loading…</div>;
 
-  const draftCount = detail.comments.filter((c) => c.status === 'draft').length;
-  const acceptedCount = detail.comments.filter((c) => c.status === 'accepted').length;
-  const staleCount = detail.comments.filter((c) => c.status === 'stale').length;
+  const comments = detail.comments;
+  const draftCount = comments.filter((c) => c.status === 'draft').length;
+  const acceptedCount = comments.filter((c) => c.status === 'accepted').length;
+  const staleCount = comments.filter((c) => c.status === 'stale').length;
 
   const isRunning =
     detail.latest_run?.status === 'running' || detail.all_runs.some((r) => r.status === 'running');
@@ -134,127 +111,122 @@ export default function ReviewDetailPage() {
     <ReviewFileTree
       files={filesInDiff}
       walkthrough={walkthrough}
-      comments={detail.comments}
+      comments={comments}
       selectedPath={selectedPath}
       reviewedFiles={reviewedFiles}
       onToggleReviewed={handleToggleReviewed}
       onSelect={handleSelectFile}
-    />
-  );
-
-  const commentsPanel = (
-    <CommentsSidePanel
-      agents={[]}
-      filesInDiff={filesInDiffSet}
-      rangeIsBase={true}
-      onJumpTo={handleJumpToComment}
-      onClose={() => setShowCommentsPanel(false)}
-      className="h-full w-full max-w-none lg:w-80"
+      hideFileSummaries
     />
   );
 
   return (
-    <CommentsContext.Provider value={taskComments}>
-      <div className="flex h-full min-h-0 flex-col">
-        <HeadAdvancedBanner taskId={id!} currentSha={detail.task.pr_head_sha} onRefresh={refresh} />
+    <div className="flex h-full min-h-0 flex-col">
+      <HeadAdvancedBanner taskId={id!} currentSha={detail.task.pr_head_sha} onRefresh={refresh} />
 
-        <PublishBar
-          taskId={id!}
-          prTitle={detail.task.title}
-          prNumber={detail.task.pr_number}
-          prUrl={detail.task.pr_url ?? undefined}
-          acceptedCount={acceptedCount}
-          draftCount={draftCount}
-          staleCount={staleCount}
-          reviewedDone={reviewedFiles.size}
-          reviewedTotal={filesInDiff.length}
-          totalCommentsCount={taskComments.byId.size}
-          showCommentsPanel={showCommentsPanel}
-          onToggleCommentsPanel={() => setShowCommentsPanel((v) => !v)}
-          isRunning={isRunning}
-          onPublished={refresh}
-          onReRun={refresh}
-          onDeleted={() => navigate('/reviews')}
-        />
+      <PublishBar
+        taskId={id!}
+        prTitle={detail.task.title}
+        prNumber={detail.task.pr_number}
+        prUrl={detail.task.pr_url ?? undefined}
+        acceptedCount={acceptedCount}
+        draftCount={draftCount}
+        staleCount={staleCount}
+        reviewedDone={reviewedFiles.size}
+        reviewedTotal={filesInDiff.length}
+        isRunning={isRunning}
+        onPublished={refresh}
+        onReRun={refresh}
+        onDeleted={() => navigate('/reviews')}
+      />
 
-        {walkthrough && <WalkthroughPanel walkthrough={walkthrough} />}
+      <PublishedHistoryPanel history={detail.published_history} />
 
-        <ReviewContextStrip groups={orderedGroups} selectedPath={selectedPath} />
+      {walkthrough ? <WalkthroughPanel walkthrough={walkthrough} /> : null}
 
-        <div className="flex min-h-0 flex-1">
-          <aside
-            data-testid="review-file-tree-pane"
-            className="glass-chrome hidden w-[320px] shrink-0 flex-col overflow-hidden border-r border-glass-edge lg:flex"
-          >
-            {fileTree}
-          </aside>
+      <ReviewContextStrip groups={orderedGroups} selectedPath={selectedPath} />
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="flex items-center gap-2 border-b border-glass-edge px-4 py-2 lg:hidden">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                data-testid="review-mobile-files-button"
-                onClick={() => setMobileFileTreeOpen(true)}
-              >
-                Files{filesInDiff.length > 0 ? ` (${filesInDiff.length})` : ''}
-              </Button>
-              {selectedPath ? (
-                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-                  {selectedPath}
-                </span>
-              ) : null}
-            </div>
+      <div className="flex min-h-0 flex-1">
+        <aside
+          data-testid="finding-queue-pane"
+          className="glass-chrome flex w-full max-w-md shrink-0 flex-col overflow-hidden border-r border-glass-edge lg:w-[360px]"
+        >
+          <FindingQueue
+            taskId={id!}
+            comments={comments}
+            selectedId={selectedFindingId}
+            onSelect={handleSelectFinding}
+            onUpdated={refresh}
+            onJumpToCode={handleJumpToFindingCode}
+          />
+        </aside>
 
-            <DiffViewer
-              taskId={id!}
-              isRunning={isRunning}
-              range={{ kind: 'base' }}
-              listRef={diffListRef}
-              enableComments
-              onFilesChange={setFilesInDiff}
-              onSelectionChange={setSelectedPath}
-              onSummaryLoaded={handleSummaryLoaded}
-              onToggleReviewed={handleToggleReviewed}
-              hideFileTree
-              fileOrder={orderedFileOrder}
-              groups={orderedGroups}
-            />
-          </div>
-
-          {showCommentsPanel ? (
-            <div className="hidden shrink-0 lg:flex">{commentsPanel}</div>
-          ) : null}
-        </div>
-
-        {showCommentsPanel ? (
-          <div
-            className="fixed inset-0 z-50 flex lg:hidden"
-            data-testid="review-mobile-comments-overlay"
-          >
-            <button
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex items-center gap-2 border-b border-glass-edge px-4 py-2">
+            <Button
               type="button"
-              className="absolute inset-0 bg-black/60"
-              aria-label="Close comments"
-              onClick={() => setShowCommentsPanel(false)}
-            />
-            <div className="relative ml-auto h-full w-full max-w-sm">{commentsPanel}</div>
+              size="sm"
+              variant="outline"
+              data-testid="review-files-toggle"
+              onClick={() => setShowFileTree((v) => !v)}
+              className="hidden lg:inline-flex"
+            >
+              {showFileTree ? 'Hide files' : 'Browse files'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="review-mobile-files-button"
+              onClick={() => setMobileFileTreeOpen(true)}
+              className="lg:hidden"
+            >
+              Files{filesInDiff.length > 0 ? ` (${filesInDiff.length})` : ''}
+            </Button>
+            {selectedPath ? (
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                {selectedPath}
+              </span>
+            ) : null}
           </div>
-        ) : null}
 
-        <Dialog open={mobileFileTreeOpen} onOpenChange={setMobileFileTreeOpen}>
-          <DialogContent
-            className="flex max-h-[min(85dvh,100dvh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
-            showCloseButton
-          >
-            <DialogHeader className="border-b border-glass-edge px-4 py-3">
-              <DialogTitle>Changed files</DialogTitle>
-            </DialogHeader>
-            <div className="min-h-0 flex-1 overflow-auto">{fileTree}</div>
-          </DialogContent>
-        </Dialog>
+          {showFileTree ? (
+            <div
+              data-testid="review-file-tree-inline"
+              className="hidden max-h-48 shrink-0 overflow-auto border-b border-glass-edge lg:block"
+            >
+              {fileTree}
+            </div>
+          ) : null}
+
+          <DiffViewer
+            taskId={id!}
+            isRunning={isRunning}
+            range={{ kind: 'base' }}
+            listRef={diffListRef}
+            onFilesChange={setFilesInDiff}
+            onSelectionChange={setSelectedPath}
+            onSummaryLoaded={handleSummaryLoaded}
+            onToggleReviewed={handleToggleReviewed}
+            hideFileTree
+            hideExplainers
+            fileOrder={orderedFileOrder}
+            groups={orderedGroups}
+          />
+        </div>
       </div>
-    </CommentsContext.Provider>
+
+      <Dialog open={mobileFileTreeOpen} onOpenChange={setMobileFileTreeOpen}>
+        <DialogContent
+          className="flex max-h-[min(85dvh,100dvh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
+          showCloseButton
+        >
+          <DialogHeader className="border-b border-glass-edge px-4 py-3">
+            <DialogTitle>Changed files</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto">{fileTree}</div>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

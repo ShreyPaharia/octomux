@@ -102,7 +102,7 @@ export function getReviewDetail(taskId: string): ReviewDetail | null {
 
   const runs = listRunsForTask(taskId);
   const latestRun = runs[0] ?? null;
-  const comments = listComments(taskId);
+  const comments = listComments(taskId, { activeOnly: true });
   const publishedHistory = listPublishedReviews(taskId);
 
   return {

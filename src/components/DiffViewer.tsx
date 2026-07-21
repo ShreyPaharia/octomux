@@ -47,6 +47,8 @@ interface Props {
   /** When provided, render sticky group-name dividers above each group's files
    *  in the diff stream. */
   groups?: import('@/lib/review-file-groups').RenderGroup[];
+  /** Hide per-file walkthrough explainers in the diff stream (review cockpit uses ReviewContextStrip). */
+  hideExplainers?: boolean;
 }
 
 export function DiffViewer({
@@ -63,6 +65,7 @@ export function DiffViewer({
   hideFileTree = false,
   fileOrder,
   groups,
+  hideExplainers = false,
 }: Props) {
   const isBaseRange = !range || range.kind === 'base';
   const [files, setFiles] = useState<DiffFileEntry[]>([]);
@@ -337,6 +340,7 @@ export function DiffViewer({
               enableComments={enableComments}
               groups={groups}
               sideBySide={sideBySide}
+              hideExplainers={hideExplainers}
             />
           )}
         </div>

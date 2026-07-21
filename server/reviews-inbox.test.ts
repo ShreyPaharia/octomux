@@ -51,7 +51,7 @@ describe('reviews-inbox', () => {
     expect(detail).not.toBeNull();
     expect(detail!.task.id).toBe('t1');
     expect(detail!.latest_run?.id).toBe('r1');
-    expect(detail!.comments.map((c) => c.id).sort()).toEqual(['c1', 'c2', 'c3']);
+    expect(detail!.comments.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
     expect(detail!.published_history).toEqual([]);
   });
 

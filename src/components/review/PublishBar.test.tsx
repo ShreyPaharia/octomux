@@ -37,9 +37,6 @@ function defaultProps(overrides: Partial<Parameters<typeof PublishBar>[0]> = {})
     staleCount: 0,
     reviewedDone: 0,
     reviewedTotal: 0,
-    totalCommentsCount: 0,
-    showCommentsPanel: false,
-    onToggleCommentsPanel: vi.fn(),
     isRunning: false,
     onPublished: vi.fn(),
     onReRun: vi.fn(),
@@ -90,24 +87,18 @@ describe('PublishBar', () => {
     expect(screen.queryByTestId('pr-review-progress')).toBeNull();
   });
 
-  it('renders Comments toggle button with count', () => {
-    render(<PublishBar {...defaultProps({ totalCommentsCount: 4 })} />);
-    expect(screen.getByTestId('comments-toggle')).toBeTruthy();
-    expect(screen.getByText('Comments (4)')).toBeTruthy();
-  });
-
-  it('applies active styling when showCommentsPanel=true', () => {
-    render(<PublishBar {...defaultProps({ showCommentsPanel: true })} />);
-    const btn = screen.getByTestId('comments-toggle');
-    expect(btn.dataset.active).toBe('true');
-  });
-
-  it('calls onToggleCommentsPanel when Comments button clicked', async () => {
+  it('publishes with optional summary body', async () => {
     const user = userEvent.setup();
-    const onToggleCommentsPanel = vi.fn();
-    render(<PublishBar {...defaultProps({ onToggleCommentsPanel })} />);
-    await user.click(screen.getByTestId('comments-toggle'));
-    expect(onToggleCommentsPanel).toHaveBeenCalled();
+    render(<PublishBar {...defaultProps({ acceptedCount: 2 })} />);
+    await user.click(screen.getByTestId('publish-summary-toggle'));
+    await user.type(screen.getByTestId('publish-summary-input'), 'Looks good overall');
+    await user.click(screen.getByText('Publish review'));
+    await waitFor(() => {
+      expect(mockPublishReview).toHaveBeenCalledWith('t1', {
+        verdict: 'COMMENT',
+        body: 'Looks good overall',
+      });
+    });
   });
 
   it('disables Publish button when accepted count is 0', () => {
