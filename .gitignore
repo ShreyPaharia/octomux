@@ -41,3 +41,7 @@ packages/*/share/terminfo/*
 # Loop runtime state written into worktrees — not source
 .octomux/loop-playbook.md
 .octomux/loop-status.json
+
+# Cursor harness hook install — written into worktrees at launch, not source
+.cursor/
+.octomux-hooks/

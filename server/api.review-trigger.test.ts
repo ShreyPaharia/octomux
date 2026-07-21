@@ -72,7 +72,7 @@ describe('POST /api/tasks/:taskId/review', () => {
     expect(review!.repo_path).toBe('/repos/foo');
     expect(review!.branch).toMatch(/^review\/.+-task-src1$/);
     expect(review!.base_branch).toBe('main');
-    expect(String(review!.initial_prompt)).toContain('/review-walkthrough');
+    expect(String(review!.initial_prompt)).toContain('/octomux:review-walkthrough');
     // The prompt must pin the review task's OWN id for --task, not the source id.
     expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
     expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);

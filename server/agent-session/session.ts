@@ -20,6 +20,7 @@ import { shellQuoteSingle } from '../shell-quote.js';
 import { writeSubmitResultMcpConfig } from './mcp/config.js';
 import type { ProcessSubstrate } from './substrate.js';
 import type { Harness } from '../harnesses/types.js';
+import { appendOctomuxPluginFlags } from '../octomux-plugin.js';
 
 const logger = childLogger('agent-session/session');
 
@@ -286,7 +287,7 @@ export async function runAgentSession<T = unknown>(
   const baseCmd = harness.buildLaunchCommand({
     sessionId,
     agent: null,
-    flags: `--dangerously-skip-permissions ${extraArgs}`.trim(),
+    flags: appendOctomuxPluginFlags(`--dangerously-skip-permissions ${extraArgs}`.trim()),
     model,
     workspacePath: workspaceDir,
   });

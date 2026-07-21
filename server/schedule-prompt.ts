@@ -2,7 +2,9 @@
  * Resolve workflow prompts for cron schedules. The DB `schedule_skills` table
  * is the single source of truth: one editable body per cron kind, lazily
  * seeded once from the shipped SKILL.md the first time a kind is read. There is
- * no per-schedule override and no SKILL.md runtime fallback.
+ * no per-schedule override and no SKILL.md runtime fallback. Task-backed kinds
+ * pass the DB body into harness plugin flags via an ephemeral overlay plugin
+ * at launch (`appendOctomuxPluginFlags`).
  */
 import { getSkill } from './skills.js';
 import { getSchedule } from './repositories/schedules.js';
@@ -55,9 +57,10 @@ export async function resolveSchedulePrompt(input: {
 }
 
 /**
- * Overrides passed into `syncSkills` for task-backed scheduled runs so the
- * agent reads the DB skill body from its worktree. Always injects the DB body
- * for doc-drift / prod-log-triage; undefined for every other kind.
+ * Overrides passed into harness plugin flags for task-backed scheduled runs so
+ * the agent reads the DB skill body via an ephemeral overlay plugin. Always
+ * injects the DB body for doc-drift / prod-log-triage; undefined for every
+ * other kind.
  */
 export async function skillContentOverridesForScheduleId(
   scheduleId: string | null | undefined,

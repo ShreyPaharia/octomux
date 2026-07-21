@@ -10,7 +10,7 @@ describe('buildDocDriftPrompt', () => {
       repoShort: 'octomux-agents',
     });
     expect(prompt).toContain('drift-1');
-    expect(prompt).toContain('doc-drift');
+    expect(prompt).toContain('/octomux:doc-drift');
   });
 });
 

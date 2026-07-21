@@ -1,4 +1,5 @@
 ---
+name: doc-drift
 description: Use when running a scheduled doc-drift task — compare the repo's docs against its code, fix drift, and open a doc-fix PR directly via `gh`
 ---
 

@@ -102,13 +102,3 @@ export async function getAgent(name: string, repoPath?: string): Promise<AgentDe
     isCustom: hasRepo || hasHome,
   };
 }
-
-/**
- * Sync effective agent files (repo → home → built-in) to
- * `.claude/agents/` in `cwd` (defaults to process.cwd) so `claude --agent <name>`
- * resolves them when launched in that directory.
- */
-export async function syncAgents(cwd?: string): Promise<void> {
-  const { claudeCodeHarness } = await import('./harnesses/claude-code.js');
-  await claudeCodeHarness.syncAgents(cwd ?? process.cwd());
-}

@@ -29,11 +29,7 @@ vi.mock('./hook-settings.js', () => ({
 }));
 
 vi.mock('./skills.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./skills.js')>();
-  return {
-    ...actual,
-    syncSkills: vi.fn().mockResolvedValue(undefined),
-  };
+  return await importOriginal<typeof import('./skills.js')>();
 });
 
 vi.mock('./harnesses/index.js', async () => {

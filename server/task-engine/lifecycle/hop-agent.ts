@@ -1,10 +1,9 @@
 import fs from 'fs';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { childLogger } from '../../logger.js';
 import { execTmux } from '../../tmux-bin.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
 import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { chatDirFor, chatSessionName } from '../../chats.js';
 import type { Agent, Worktree } from '../../types.js';
@@ -85,7 +84,6 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   }
 
   const harness = getHarness(agent.harness_id);
-  const flags = harness.resolveFlags(await getSettings());
 
   let hopModel: string | null = null;
   const hopTask = targetTaskId ? getTaskRepo(targetTaskId) : null;
@@ -93,11 +91,13 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     hopModel = hopTask.model ?? null;
   }
 
-  await harness.syncAgents(cwd);
-  const skillContentOverrides = await skillContentOverridesForScheduleId(
-    (hopTask as { schedule_id?: string | null } | null)?.schedule_id,
-  );
-  await syncSkills(cwd, { skillContentOverrides });
+  const flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (hopTask as { schedule_id?: string | null } | null)?.schedule_id,
+    ),
+  });
+
+
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });

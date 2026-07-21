@@ -1,4 +1,5 @@
 ---
+name: overnight-log-summary
 description: Use when running a scheduled overnight-log-summary session — fetch overnight logs, cluster errors, and submit a structured summary via submit_result
 ---
 
