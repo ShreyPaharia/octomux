@@ -6,6 +6,7 @@ import { childLogger } from '../../logger.js';
 import { tmuxWindowSubstrate } from '../../agent-session/substrate-tmux-windowed.js';
 import { execTmux } from '../../tmux-bin.js';
 import { syncSkills } from '../../skills.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import type { Task, RunMode } from '../../types.js';
 import {
   setRuntimeState,
@@ -71,7 +72,11 @@ export async function bootstrapResumeHooks(
   if (agents.length > 0) {
     const bootstrapHarness = getHarness(agents[0]!.harness_id);
     await bootstrapHarness.syncAgents(cwd);
-    await syncSkills(cwd);
+    await syncSkills(cwd, {
+      skillContentOverrides: skillContentOverridesForScheduleId(
+        (task as { schedule_id?: string | null }).schedule_id,
+      ),
+    });
     await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agents[0]!.hook_token);
   } else {
     await tmuxWindowSubstrate.createEmptySession({ session, cwd });

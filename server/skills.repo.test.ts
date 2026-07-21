@@ -57,4 +57,19 @@ describe('skills repo precedence', () => {
 
     fs.rmSync(worktree, { recursive: true, force: true });
   });
+
+  it('syncSkills writes schedule prompt overrides into the worktree skill file', async () => {
+    const worktree = path.join(os.tmpdir(), `octomux-skills-override-${Date.now()}`);
+    fs.mkdirSync(worktree, { recursive: true });
+
+    await syncSkills(worktree, {
+      skillContentOverrides: { 'prod-log-triage': '# DB override prompt' },
+    });
+
+    const synced = path.join(worktree, '.claude', 'skills', 'prod-log-triage', 'SKILL.md');
+    expect(fs.existsSync(synced)).toBe(true);
+    expect(fs.readFileSync(synced, 'utf-8')).toBe('# DB override prompt');
+
+    fs.rmSync(worktree, { recursive: true, force: true });
+  });
 });

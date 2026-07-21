@@ -25,6 +25,7 @@ export const overnightLogSummaryWorkflow: WorkflowType = {
       repoPath: ctx.repoPath,
       scheduleId: ctx.scheduleId,
       logCommand: cfg.logCommand,
+      trigger: ctx.trigger,
     }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },

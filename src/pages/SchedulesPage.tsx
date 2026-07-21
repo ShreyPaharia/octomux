@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import type { Task } from '@octomux/types';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { schedulesApi, type ScheduleKindInfo, type ScheduleRow } from '@/lib/api/schedulesApi';
-import { loopApi } from '@/lib/api/loopApi';
+import type { WorkflowRunRow } from '@/lib/api/workflowsApi';
 import { useResource } from '@/lib/use-resource';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -22,6 +22,15 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { timeAgo } from '@/lib/time';
 import { SchemaConfigForm, defaultsFromSchema } from '@/components/schedules/SchemaConfigForm';
+
+function parseConfigJson(configJson: string | null): Record<string, unknown> {
+  if (!configJson) return {};
+  try {
+    return JSON.parse(configJson) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
 
 function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreated: () => void }) {
   const [kind, setKind] = useState('');
@@ -162,26 +171,24 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
   );
 }
 
+function runDestination(run: WorkflowRunRow): string | null {
+  if (run.task_id) return `/tasks/${run.task_id}`;
+  if (run.chat_id) return `/chats/${run.chat_id}`;
+  if (run.loop_run_id) return `/w/loops/${run.loop_run_id}`;
+  return null;
+}
+
 function ScheduleRuns({ scheduleId }: { scheduleId: string }) {
   const nav = useNavigate();
-  const [runs, setRuns] = useState<Task[] | null>(null);
-  const [loopRunByTask, setLoopRunByTask] = useState<Record<string, string>>({});
+  const [runs, setRuns] = useState<WorkflowRunRow[] | null>(null);
+
+  const refresh = useCallback(() => {
+    schedulesApi.getScheduleRuns(scheduleId).then((res) => setRuns(res.runs));
+  }, [scheduleId]);
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([schedulesApi.getScheduleRuns(scheduleId), loopApi.listLoops()]).then(
-      ([runsRes, loops]) => {
-        if (cancelled) return;
-        setRuns(runsRes.runs);
-        const map: Record<string, string> = {};
-        for (const l of loops) map[l.task_id] = l.id;
-        setLoopRunByTask(map);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [scheduleId]);
+    refresh();
+  }, [refresh]);
 
   if (runs === null) {
     return <p className="px-4 py-2 text-xs text-muted-foreground">Loading runs…</p>;
@@ -192,32 +199,196 @@ function ScheduleRuns({ scheduleId }: { scheduleId: string }) {
 
   return (
     <ul className="flex flex-col gap-1 px-4 py-2">
-      {runs.map((run) => (
-        <li
-          key={run.id}
-          data-testid={`schedule-run-${run.id}`}
-          className="flex items-center gap-2 text-xs"
-        >
-          <button
-            type="button"
-            className="truncate text-foreground hover:text-primary hover:underline"
-            onClick={() => nav(`/tasks/${run.id}`)}
+      {runs.map((run) => {
+        const dest = runDestination(run);
+        const label = `${run.workflow_kind} · ${run.trigger}`;
+        return (
+          <li
+            key={run.id}
+            data-testid={`schedule-run-${run.id}`}
+            className="flex items-center gap-2 text-xs"
           >
-            {run.title || run.id}
-          </button>
-          <span className="text-muted-soft">{timeAgo(run.created_at)}</span>
-          {loopRunByTask[run.id] && (
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-primary hover:underline"
-              onClick={() => nav(`/w/loops/${loopRunByTask[run.id]}`)}
-            >
-              loop
-            </button>
-          )}
-        </li>
-      ))}
+            {dest ? (
+              <button
+                type="button"
+                className="truncate text-foreground hover:text-primary hover:underline"
+                onClick={() => nav(dest)}
+              >
+                {label}
+              </button>
+            ) : (
+              <span className="truncate text-foreground">{label}</span>
+            )}
+            <Badge variant="outline" className="text-[10px]">
+              {run.effective_status}
+            </Badge>
+            <span className="text-muted-soft">{timeAgo(run.started_at)}</span>
+          </li>
+        );
+      })}
     </ul>
+  );
+}
+
+function ScheduleDetail({
+  row,
+  kindInfo,
+  onSaved,
+  onRunStarted,
+}: {
+  row: ScheduleRow;
+  kindInfo: ScheduleKindInfo | null;
+  onSaved: () => void;
+  onRunStarted: () => void;
+}) {
+  const [cron, setCron] = useState(row.cron);
+  const [enabled, setEnabled] = useState(row.enabled === 1);
+  const [config, setConfig] = useState<Record<string, unknown>>(() =>
+    parseConfigJson(row.config_json),
+  );
+  const [prompt, setPrompt] = useState(row.prompt ?? '');
+  const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCron(row.cron);
+    setEnabled(row.enabled === 1);
+    setConfig(parseConfigJson(row.config_json));
+    setPrompt(row.prompt ?? '');
+  }, [row]);
+
+  useEffect(() => {
+    let cancelled = false;
+    schedulesApi.getDefaultPrompt(row.kind, row.repo_path).then((res) => {
+      if (!cancelled) setDefaultPrompt(res.content);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [row.kind, row.repo_path]);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await schedulesApi.updateSchedule(row.id, {
+        cron: cron.trim(),
+        enabled,
+        ...(kindInfo?.configSchema ? { config } : {}),
+        prompt: prompt.trim() ? prompt : null,
+      });
+      onSaved();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to save schedule');
+    } finally {
+      setSaving(false);
+    }
+  }, [row.id, cron, enabled, config, prompt, kindInfo, onSaved]);
+
+  const handleRunNow = useCallback(async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      await schedulesApi.runScheduleNow(row.id);
+      onRunStarted();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to trigger run');
+    } finally {
+      setRunning(false);
+    }
+  }, [row.id, onRunStarted]);
+
+  const handleResetPrompt = useCallback(() => {
+    if (defaultPrompt !== null) setPrompt(defaultPrompt);
+  }, [defaultPrompt]);
+
+  return (
+    <div className="flex flex-col gap-4 border-t border-glass-edge pt-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`schedule-edit-cron-${row.id}`}>Cron</Label>
+          <Input
+            id={`schedule-edit-cron-${row.id}`}
+            data-testid={`schedule-edit-cron-${row.id}`}
+            className="font-mono text-sm"
+            value={cron}
+            onChange={(e) => setCron(e.target.value)}
+          />
+        </div>
+        <div className="flex items-end gap-3 pb-1">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            <Switch
+              checked={enabled}
+              onChange={setEnabled}
+              aria-label={`Enable ${row.kind} schedule`}
+            />
+            Enabled
+          </label>
+        </div>
+      </div>
+
+      {kindInfo?.configSchema ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium text-muted-foreground">Workflow config</p>
+          <SchemaConfigForm schema={kindInfo.configSchema} value={config} onChange={setConfig} />
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-muted-foreground">Agent prompt</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid={`schedule-reset-prompt-${row.id}`}
+            disabled={defaultPrompt === null}
+            onClick={handleResetPrompt}
+          >
+            Reset to default
+          </Button>
+        </div>
+        <Textarea
+          data-testid={`schedule-prompt-${row.id}`}
+          className="min-h-48 font-mono text-xs"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={defaultPrompt ?? 'Loading default prompt…'}
+        />
+        <p className="text-[10px] text-muted-soft">
+          Stored in the database. Leave empty to use the shipped SKILL.md default on the next run.
+        </p>
+      </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          data-testid={`schedule-save-${row.id}`}
+          disabled={saving || !cron.trim()}
+          onClick={handleSave}
+        >
+          {saving ? 'Saving…' : 'Save changes'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid={`schedule-run-now-${row.id}`}
+          disabled={running}
+          onClick={handleRunNow}
+        >
+          {running ? 'Starting…' : 'Run now'}
+        </Button>
+      </div>
+
+      <div>
+        <p className="px-4 pb-1 text-xs font-medium text-muted-foreground">Run history</p>
+        <ScheduleRuns scheduleId={row.id} />
+      </div>
+    </div>
   );
 }
 
@@ -271,13 +442,17 @@ function ScheduleDeleteDialog({
 }
 
 export default function SchedulesPage() {
+  const [searchParams] = useSearchParams();
   const { data, loading, refresh } = useResource<ScheduleRow[]>('schedules', () =>
     schedulesApi.listSchedules(),
   );
   const [kinds, setKinds] = useState<ScheduleKindInfo[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(() => searchParams.get('expand'));
   const [deleteTarget, setDeleteTarget] = useState<ScheduleRow | null>(null);
+  const [runsKey, setRunsKey] = useState(0);
   const schedules = data ?? [];
+
+  const kindByName = useMemo(() => new Map(kinds.map((k) => [k.kind, k])), [kinds]);
 
   useEffect(() => {
     schedulesApi.getScheduleKinds().then((res) => setKinds(res.kinds));
@@ -353,7 +528,18 @@ export default function SchedulesPage() {
                     </button>
                   </div>
                 </div>
-                {expandedId === row.id && <ScheduleRuns scheduleId={row.id} />}
+                {expandedId === row.id && (
+                  <ScheduleDetail
+                    key={`${row.id}-${runsKey}`}
+                    row={row}
+                    kindInfo={kindByName.get(row.kind) ?? null}
+                    onSaved={refresh}
+                    onRunStarted={() => {
+                      setRunsKey((k) => k + 1);
+                      refresh();
+                    }}
+                  />
+                )}
               </GlassPanel>
             </li>
           ))}

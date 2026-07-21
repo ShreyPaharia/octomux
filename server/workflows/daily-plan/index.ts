@@ -7,7 +7,8 @@ export const dailyPlanWorkflow: WorkflowType = {
   displayName: 'Daily Plan',
   surfaces: ['session'],
   trigger: { kind: 'cron' },
-  run: (ctx: RunContext) => runDailyPlanFromSchedule({ scheduleId: ctx.scheduleId! }),
+  run: (ctx: RunContext) =>
+    runDailyPlanFromSchedule({ scheduleId: ctx.scheduleId!, trigger: ctx.trigger }),
 };
 
 registerWorkflow(dailyPlanWorkflow);

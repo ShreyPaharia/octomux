@@ -24,6 +24,7 @@ export interface CreateDocDriftTaskFromScheduleInput {
   maxIterations: number;
   /** Set when this run was fired by a schedule — stamps tasks.schedule_id. */
   scheduleId?: string;
+  trigger?: 'cron' | 'manual';
 }
 
 export interface CreateDocDriftTaskResult {
@@ -76,6 +77,7 @@ export async function createDocDriftTaskFromSchedule(
   // to do it for us.
   const settled = getTask(id);
   const activeAgent = findFirstActiveAgent(id);
+  const trigger = input.trigger ?? 'cron';
   if (!settled || settled.runtime_state === 'error' || !activeAgent) {
     logger.warn(
       { task_id: id, runtime_state: settled?.runtime_state },
@@ -83,7 +85,7 @@ export async function createDocDriftTaskFromSchedule(
     );
     const failedRun = insertRun({
       workflowKind: 'doc-drift',
-      trigger: 'cron',
+      trigger,
       scheduleId: input.scheduleId,
       taskId: id,
     });
@@ -101,7 +103,7 @@ export async function createDocDriftTaskFromSchedule(
   const loopRunId = nanoid(12);
   const runsRow = insertRun({
     workflowKind: 'doc-drift',
-    trigger: 'cron',
+    trigger,
     scheduleId: input.scheduleId,
     taskId: id,
     loopRunId,

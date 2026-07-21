@@ -24,6 +24,7 @@ export const docDriftWorkflow: WorkflowType = {
       verify: cfg.verify,
       maxIterations: cfg.maxIterations,
       scheduleId: ctx.scheduleId,
+      trigger: ctx.trigger,
     });
   },
 };

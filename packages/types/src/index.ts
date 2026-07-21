@@ -143,6 +143,8 @@ export interface Task {
   model: string | null;
   /** If set, poller sends a completion message to this task's active agent when this task finishes. */
   notify_task_id: string | null;
+  /** Set when this task was created by a cron schedule run. */
+  schedule_id?: string | null;
   harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */

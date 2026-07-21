@@ -10,6 +10,7 @@ import { inferRefs } from '../../ref-inference.js';
 import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
 import { syncSkills } from '../../skills.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import type { RepoConfig } from '../../repositories/repo-config.js';
 import type { Task, RunMode } from '../../types.js';
 import {
@@ -154,7 +155,11 @@ async function prepareFirstAgentLaunch(
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   await harness.syncAgents(setup.worktreePath);
-  await syncSkills(setup.worktreePath);
+  await syncSkills(setup.worktreePath, {
+    skillContentOverrides: skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
   await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);

@@ -516,6 +516,7 @@ export function mockSchedulesApi(overrides: Record<string, unknown> = {}) {
       enabled: 1,
       last_run_at: null,
       config_json: null,
+      prompt: null,
     }),
     updateSchedule: vi.fn().mockResolvedValue({
       id: 'sched-1',
@@ -525,8 +526,11 @@ export function mockSchedulesApi(overrides: Record<string, unknown> = {}) {
       enabled: 0,
       last_run_at: null,
       config_json: null,
+      prompt: null,
     }),
     deleteSchedule: vi.fn().mockResolvedValue(undefined),
+    getDefaultPrompt: vi.fn().mockResolvedValue({ content: 'Default prompt' }),
+    runScheduleNow: vi.fn().mockResolvedValue({ ok: true }),
     getScheduleRuns: vi.fn().mockResolvedValue({ runs: [] }),
   };
   return { ...defaults, ...overrides };

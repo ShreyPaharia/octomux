@@ -28,6 +28,7 @@ export interface WorkflowRunRow {
   trigger: string;
   status: string;
   effective_status: string;
+  schedule_id: string | null;
   task_id: string | null;
   loop_run_id: string | null;
   chat_id: string | null;
