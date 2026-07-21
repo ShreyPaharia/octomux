@@ -775,7 +775,9 @@ export function listAutoReviewDrafts(
  */
 export function listRunningTasksWithPr(): Task[] {
   return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL AND t.workflow_status != 'done'`,
+    )
     .all() as Task[];
 }
 

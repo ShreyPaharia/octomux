@@ -592,6 +592,20 @@ describe('checkMergedPRs', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
+  it('does not re-close a task already marked done (resumed after auto-close)', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+      workflow_status: 'done',
+    });
+    mockPrStates({ pr0: 'MERGED' });
+
+    await checkMergedPRs();
+
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+
   it('skips tasks without pr_number', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
