@@ -22,7 +22,13 @@ describe('SchemaConfigForm', () => {
   it('renders fields from the schema and calls onChange', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<SchemaConfigForm schema={schema} value={{ logCommand: 'gh run list' }} onChange={onChange} />);
+    render(
+      <SchemaConfigForm
+        schema={schema}
+        value={{ logCommand: 'gh run list' }}
+        onChange={onChange}
+      />,
+    );
 
     expect(screen.getByLabelText('Log command')).toBeInTheDocument();
     expect(screen.getByLabelText('Max iterations')).toBeInTheDocument();

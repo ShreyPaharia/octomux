@@ -23,13 +23,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { timeAgo } from '@/lib/time';
 import { SchemaConfigForm, defaultsFromSchema } from '@/components/schedules/SchemaConfigForm';
 
-function ScheduleForm({
-  kinds,
-  onCreated,
-}: {
-  kinds: ScheduleKindInfo[];
-  onCreated: () => void;
-}) {
+function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreated: () => void }) {
   const [kind, setKind] = useState('');
   const [repoPath, setRepoPath] = useState('');
   const [cron, setCron] = useState('');
@@ -38,10 +32,7 @@ function ScheduleForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedKind = useMemo(
-    () => kinds.find((k) => k.kind === kind) ?? null,
-    [kinds, kind],
-  );
+  const selectedKind = useMemo(() => kinds.find((k) => k.kind === kind) ?? null, [kinds, kind]);
 
   useEffect(() => {
     if (!kind && kinds.length > 0) setKind(kinds[0].kind);
