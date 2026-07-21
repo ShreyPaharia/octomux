@@ -1,3 +1,4 @@
+import { octomuxSkillRef } from './octomux-plugin.js';
 import { nanoid } from 'nanoid';
 import { insertTask, insertWorktree } from './repositories/index.js';
 
@@ -12,18 +13,11 @@ export interface TriagePromptInput {
 /** Prompt for the scheduled prod-log-triage agent. */
 export function buildTriagePrompt(input: TriagePromptInput): string {
   return [
-    `Triage production logs for ${input.repoShort} and open fix PRs for what you find.`,
+    octomuxSkillRef('prod-log-triage'),
     '',
     `Triage task id: ${input.triageTaskId}`,
+    `Repo: ${input.repoShort}`,
     `Log command: ${input.logCommand}`,
-    '',
-    'Use the prod-log-triage skill to run this task:',
-    '  1. Fetch recent prod logs by running the log command above.',
-    '  2. Group errors into distinct classes.',
-    '  3. Write an incident summary to desk/incidents/<date>.md.',
-    '  4. Open one fix PR per error class using your own `gh` — there is no octomux sink for this workflow.',
-    '',
-    'Read the prod-log-triage skill (SKILL.md) for the full verify contract before starting.',
   ].join('\n');
 }
 

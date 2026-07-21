@@ -2,10 +2,9 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
 import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { childLogger } from '../../logger.js';
 import {
@@ -73,14 +72,14 @@ export async function prepareAddAgentLaunch(
   const agentId = nanoid(12);
   const existingTokenRow = getTaskHookToken(task.id);
   const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
-  const flags = harness.resolveFlags(await getSettings());
+  const flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.syncAgents(task.worktree!);
-  const skillContentOverrides = await skillContentOverridesForScheduleId(
-    (task as { schedule_id?: string | null }).schedule_id,
-  );
-  await syncSkills(task.worktree!, { skillContentOverrides });
+
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const baseCmd = harness.buildLaunchCommand({

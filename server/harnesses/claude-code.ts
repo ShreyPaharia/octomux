@@ -80,16 +80,8 @@ export const claudeCodeHarness: Harness = {
     writeJsonConfig(settingsPath, merged);
   },
 
-  async syncAgents(worktreePath: string) {
-    const { listAgents, getAgent } = await import('../agents.js');
-    const targetDir = path.join(worktreePath, '.claude', 'agents');
-    await fs.promises.mkdir(targetDir, { recursive: true });
-
-    const agents = await listAgents(worktreePath);
-    for (const def of agents) {
-      const agent = await getAgent(def.name, worktreePath);
-      await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
-    }
+  async syncAgents(_worktreePath: string) {
+    // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
   },
 
   resolveFlags(settings: OctomuxSettings): string {

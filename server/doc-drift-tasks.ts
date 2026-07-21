@@ -1,3 +1,4 @@
+import { octomuxSkillRef } from './octomux-plugin.js';
 import { nanoid } from 'nanoid';
 import { insertTask, insertWorktree } from './repositories/index.js';
 
@@ -10,17 +11,13 @@ export interface DocDriftPromptInput {
 /** Prompt for the scheduled doc-drift agent. */
 export function buildDocDriftPrompt(input: DocDriftPromptInput): string {
   return [
-    `Check ${input.repoShort} for drift between its docs and its code, and open a fix PR for what you find.`,
+    octomuxSkillRef('doc-drift'),
     '',
     `Doc-drift task id: ${input.docDriftTaskId}`,
+    `Repo: ${input.repoShort}`,
     '',
-    'Use the doc-drift skill to run this task:',
-    '  1. Survey the documented surface (README, docs/, CLAUDE.md).',
-    '  2. Compare it against the actual code.',
-    '  3. Fix drift you find with small, targeted doc edits.',
-    '  4. Open one doc-fix PR using your own `gh` — there is no octomux sink for this workflow.',
-    '',
-    'Read the doc-drift skill (SKILL.md) for the full verify contract before starting.',
+    'Survey the documented surface (README, docs/, CLAUDE.md), compare against code,',
+    'fix drift with small targeted doc edits, and open one doc-fix PR via `gh`.',
   ].join('\n');
 }
 

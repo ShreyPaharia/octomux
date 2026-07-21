@@ -32,7 +32,6 @@ import {
   recoverTasks,
 } from './task-engine/index.js';
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
-import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
 import { acquireInstanceLock } from './single-instance.js';
 import { childLogger } from './logger.js';
@@ -72,11 +71,6 @@ await reconcileOrphanSettingUp();
 await recoverTasks();
 await cleanupOrphanedViewerSessions();
 await gcScratchDirs();
-
-// Sync built-in agent definitions to .claude/agents/
-await syncAgents().catch((err: unknown) => {
-  logger.error({ err }, 'Failed to sync agents');
-});
 
 // Resolve owner's GitHub login for reviewer-request polling (non-blocking)
 ensureGithubLogin().catch((err) => {

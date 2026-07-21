@@ -53,10 +53,6 @@ vi.mock('../../settings.js', () => ({
   getSettings: vi.fn(async () => ({})),
 }));
 
-vi.mock('../../skills.js', () => ({
-  syncSkills: vi.fn(async () => undefined),
-}));
-
 vi.mock('../../events.js', () => ({
   broadcast: vi.fn(),
 }));

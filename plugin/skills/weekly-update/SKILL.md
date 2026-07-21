@@ -1,4 +1,5 @@
 ---
+name: weekly-update
 description: Use when running a scheduled weekly-update session — gather git commits and available Jira/Linear context for the past week, produce a themed status report, and submit it via submit_result
 ---
 

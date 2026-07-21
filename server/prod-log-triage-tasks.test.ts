@@ -12,7 +12,7 @@ describe('buildTriagePrompt', () => {
     });
     expect(prompt).toContain('triage-1');
     expect(prompt).toContain('flyctl logs -a my-app');
-    expect(prompt).toContain('prod-log-triage');
+    expect(prompt).toContain('/octomux:prod-log-triage');
   });
 });
 

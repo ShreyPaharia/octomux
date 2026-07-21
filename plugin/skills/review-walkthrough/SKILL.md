@@ -1,4 +1,5 @@
 ---
+name: review-walkthrough
 description: Drive the walkthrough phase of an automated PR review. Produces a structured walkthrough JSON only — no inline comment drafts. The deep-review agent is attached automatically by the server after this agent finishes.
 ---
 

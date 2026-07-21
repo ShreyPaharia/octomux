@@ -70,7 +70,7 @@ vi.mock('./orchestrator/store.js', async (importOriginal) => {
 vi.mock('./orchestrator/runner.js', () => ({ mcpServerInvocation: vi.fn(() => null) }));
 vi.mock('./hook-base-url.js', () => ({ hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777') }));
 vi.mock('./settings.js', () => ({ getSettings: vi.fn(async () => ({})) }));
-vi.mock('./skills.js', () => ({ syncSkills: vi.fn(async () => undefined) }));
+vi.mock('./skills.js', () => ({}));
 vi.mock('./harnesses/index.js', () => ({
   getHarness: vi.fn(() => ({
     id: 'claude-code',

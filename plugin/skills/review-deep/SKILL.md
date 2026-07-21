@@ -1,4 +1,5 @@
 ---
+name: review-deep
 description: Drive the deep-review phase of an automated PR review. Consumes the walkthrough, runs the deterministic deep-review workflow (parallel lenses → adversarial validation → code-enforced threshold/caps), drafts the surviving findings, and completes the review run.
 ---
 

@@ -20,11 +20,6 @@ export interface SkillsOptions {
   repoPath?: string;
 }
 
-export interface SyncSkillsOptions extends SkillsOptions {
-  /** Per-skill SKILL.md body overrides (e.g. schedule DB prompt for task-backed kinds). */
-  skillContentOverrides?: Record<string, string>;
-}
-
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function validateName(name: string): void {
@@ -121,24 +116,4 @@ export async function getSkill(name: string, opts?: SkillsOptions): Promise<Skil
   }
 
   return { name, content };
-}
-
-/**
- * Mirror effective skills (repo → home → built-in) into `<worktree>/.claude/skills/`
- * so Claude Code resolves them in the worktree without touching `~/.claude/skills`.
- */
-export async function syncSkills(worktreePath: string, opts?: SyncSkillsOptions): Promise<void> {
-  const targetDir = path.join(worktreePath, '.claude', 'skills');
-  await fs.promises.mkdir(targetDir, { recursive: true });
-
-  const skillsOpts: SkillsOptions = { repoPath: worktreePath, ...opts };
-  const overrides = opts?.skillContentOverrides ?? {};
-  const skills = await listSkills(skillsOpts);
-  for (const skill of skills) {
-    const detail = await getSkill(skill.name, skillsOpts);
-    const content = overrides[skill.name] ?? detail.content;
-    const skillDir = path.join(targetDir, skill.name);
-    await fs.promises.mkdir(skillDir, { recursive: true });
-    await fs.promises.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf-8');
-  }
 }

@@ -29,21 +29,6 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => 'NVIM v0.10.0'),
 }));
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
-  return {
-    ...actual,
-    existsSync: vi.fn((p: string) => {
-      if (String(p).includes('skills')) return true;
-      return false;
-    }),
-    readdirSync: vi.fn(() => ['create-task']),
-    cpSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    copyFileSync: vi.fn(),
-  };
-});
-
 const { getSetupStatus, runSetupInstall, applyRecommendedDefaults } =
   await import('./setup-status.js');
 const { probeBinary } = await import('./binary-check.js');
@@ -94,11 +79,6 @@ describe('getSetupStatus', () => {
 describe('runSetupInstall', () => {
   it('rejects unknown install ids', async () => {
     await expect(runSetupInstall('rm-rf')).rejects.toThrow(/not allowed/);
-  });
-
-  it('installs skills when allowed', async () => {
-    const result = await runSetupInstall('skills');
-    expect(result.ok).toBe(true);
   });
 
   it('runs the fixed shell installer for cursor-agent and re-probes', async () => {

@@ -1,4 +1,5 @@
 ---
+name: daily-plan
 description: Use when running a scheduled daily-plan session — pull Slack, Gmail, and Calendar context plus repo/Jira work, draft replies where warranted, propose the day's todos, and hand off to the user
 ---
 
