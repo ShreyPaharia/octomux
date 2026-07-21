@@ -92,12 +92,19 @@ describe('GET /api/reviews/:id', () => {
     app = createApp();
   });
 
-  it('returns full review detail', async () => {
+  it('returns full review detail with only actionable comments', async () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO inline_comments
+         (id, task_id, file_path, line, side, original_commit_sha, body, status, kind, review_run_id)
+       VALUES ('cc3', 'task-rev1', 'a.ts', 3, 'new', 'sha-head', 'rejected', 'rejected', 'comment', 'run-r1')`,
+    ).run();
     const res = await request(app).get('/api/reviews/task-rev1');
     expect(res.status).toBe(200);
     expect(res.body.task.id).toBe('task-rev1');
     expect(res.body.latest_run.id).toBe('run-r1');
     expect(res.body.comments).toHaveLength(2);
+    expect(res.body.comments.every((c: { status: string }) => c.status !== 'rejected')).toBe(true);
     expect(res.body.published_history).toEqual([]);
   });
 

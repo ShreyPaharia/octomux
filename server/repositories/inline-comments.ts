@@ -93,12 +93,23 @@ export function addComment(input: AddCommentInput): InlineCommentRow {
   return row;
 }
 
-export function listComments(taskId: string, opts?: { file?: string }): InlineCommentRow[] {
+export interface ListCommentsOpts {
+  file?: string;
+  /** When true, return only draft/accepted comments that are not resolved. */
+  activeOnly?: boolean;
+}
+
+function activeOnlyClause(activeOnly: boolean | undefined): string {
+  return activeOnly ? ` AND status IN ('draft', 'accepted') AND resolved_at IS NULL` : '';
+}
+
+export function listComments(taskId: string, opts?: ListCommentsOpts): InlineCommentRow[] {
+  const active = activeOnlyClause(opts?.activeOnly);
   if (opts?.file) {
     return getDb()
       .prepare(
         `SELECT * FROM inline_comments
-           WHERE task_id = ? AND file_path = ?
+           WHERE task_id = ? AND file_path = ?${active}
            ORDER BY created_at ASC, id ASC`,
       )
       .all(taskId, opts.file) as InlineCommentRow[];
@@ -106,7 +117,7 @@ export function listComments(taskId: string, opts?: { file?: string }): InlineCo
   return getDb()
     .prepare(
       `SELECT * FROM inline_comments
-         WHERE task_id = ?
+         WHERE task_id = ?${active}
          ORDER BY created_at ASC, id ASC`,
     )
     .all(taskId) as InlineCommentRow[];

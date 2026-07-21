@@ -135,7 +135,11 @@ router.get('/api/tasks/:id/comments', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
 
   const fileFilter = typeof req.query.file === 'string' ? req.query.file : undefined;
-  const rows = listComments(task.id, fileFilter ? { file: fileFilter } : undefined);
+  const activeOnly = req.query.active === '1' || req.query.active === 'true';
+  const rows = listComments(
+    task.id,
+    fileFilter || activeOnly ? { file: fileFilter, activeOnly } : undefined,
+  );
 
   const cwd = taskWorkingDir(task);
   const haveWorktree = !!cwd && fs.existsSync(cwd) && task.run_mode !== 'scratch';
