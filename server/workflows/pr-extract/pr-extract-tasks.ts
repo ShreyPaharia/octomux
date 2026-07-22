@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { insertTask, insertWorktree } from './repositories/index.js';
+import { insertTask, insertWorktree } from '../../repositories/index.js';
 
 export interface PrExtractPromptInput {
   /** Id of THIS extract task — the id passed to `octomux pr-extract emit`. */

@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
-import {
-  createReviewRun,
-  getReviewRun,
-  getCurrentRun,
-  completeRun,
-  failRun,
-} from './review-runs.js';
+import { createReviewRun, getReviewRun, getCurrentRun, completeRun } from './review-runs.js';
 
 vi.mock('../events.js', () => ({ broadcast: vi.fn() }));
 
@@ -58,14 +52,6 @@ describe('review-runs', () => {
     });
   });
 
-  it('failRun records error and marks failed', () => {
-    const run = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
-    failRun(run.id, 'agent crashed');
-    const fresh = getReviewRun(run.id);
-    expect(fresh?.status).toBe('failed');
-    expect(fresh?.error).toBe('agent crashed');
-  });
-
   it('unique index prevents two running runs on the same task+sha', () => {
     createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     expect(() => createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' })).toThrow();
@@ -73,7 +59,7 @@ describe('review-runs', () => {
 
   it('failed run on the same sha can be retried (creates a new running row)', () => {
     const a = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
-    failRun(a.id, 'timeout');
+    db.prepare(`UPDATE review_runs SET status = 'failed' WHERE id = ?`).run(a.id);
     const b = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     expect(b.id).not.toBe(a.id);
     expect(b.status).toBe('running');

@@ -2,12 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
 import {
   getWorktree,
-  getWorktreeByPath,
-  listWorktreesByRepo,
   insertWorktree,
   insertWorktreeInUse,
-  setWorktreeStatus,
-  touchWorktreeUsed,
   releaseWorktree,
   deleteWorktree,
   updateWorktreeOnSetup,
@@ -73,41 +69,9 @@ describe('repositories/worktrees', () => {
     });
   });
 
-  // ─── getWorktreeByPath ────────────────────────────────────────────────────────
+  // ─── releaseWorktree ────────────────────────────────────────────────────────
 
-  describe('getWorktreeByPath', () => {
-    it('finds a worktree by its path', () => {
-      insertWorktree({ id: 'w1', path: '/specific/path', mode: 'new' });
-      const wt = getWorktreeByPath('/specific/path');
-      expect(wt).toBeDefined();
-      expect(wt!.id).toBe('w1');
-    });
-
-    it('returns undefined for unknown path', () => {
-      expect(getWorktreeByPath('/unknown/path')).toBeUndefined();
-    });
-  });
-
-  // ─── setWorktreeStatus ────────────────────────────────────────────────────────
-
-  describe('setWorktreeStatus', () => {
-    it.each(['available', 'in_use'] as const)('sets status to %s', (status) => {
-      const id = insertWorktree({ path: '', mode: 'new', status: 'available' });
-      setWorktreeStatus(id, status);
-      expect(getWorktree(id)!.status).toBe(status);
-    });
-  });
-
-  // ─── touchWorktreeUsed / releaseWorktree ──────────────────────────────────────
-
-  describe('touch and release', () => {
-    it('touchWorktreeUsed updates last_used_at', () => {
-      const id = insertWorktree({ path: '', mode: 'new' });
-      touchWorktreeUsed(id);
-      const wt = getWorktree(id);
-      expect(wt!.last_used_at).not.toBeNull();
-    });
-
+  describe('releaseWorktree', () => {
     it('releaseWorktree sets status=available and last_used_at', () => {
       const id = insertWorktreeInUse({ path: '', mode: 'new' });
       releaseWorktree(id);
@@ -160,19 +124,6 @@ describe('repositories/worktrees', () => {
       const id = insertWorktree({ path: '', mode: 'new' });
       deleteWorktree(id);
       expect(getWorktree(id)).toBeUndefined();
-    });
-  });
-
-  // ─── listWorktreesByRepo ──────────────────────────────────────────────────────
-
-  describe('listWorktreesByRepo', () => {
-    it('returns only worktrees for the given repo', () => {
-      insertWorktree({ id: 'w1', path: '/a', repo_path: '/repo1', mode: 'new' });
-      insertWorktree({ id: 'w2', path: '/b', repo_path: '/repo2', mode: 'new' });
-      insertWorktree({ id: 'w3', path: '/c', repo_path: '/repo1', mode: 'new' });
-      const results = listWorktreesByRepo('/repo1');
-      expect(results.map((w) => w.id)).toEqual(expect.arrayContaining(['w1', 'w3']));
-      expect(results.map((w) => w.id)).not.toContain('w2');
     });
   });
 

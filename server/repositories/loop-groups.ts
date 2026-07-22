@@ -66,12 +66,3 @@ export function recordJudgeResult(
     'loop_group: judged',
   );
 }
-
-export function recordJudgeError(groupId: string, message: string): void {
-  getDb()
-    .prepare(
-      `UPDATE loop_groups SET judge_status = 'error', judge_rationale = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .run(message, groupId);
-  logger.warn({ loop_group_id: groupId, message }, 'loop_group: judge errored');
-}

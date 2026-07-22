@@ -4,7 +4,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { childLogger } from '../../logger.js';
 import { getRemoteOriginUrl, revParseHead } from '../../task-engine/git.js';
-import { listReviewsInbox, getReviewDetail } from '../../reviews-inbox.js';
+import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
 import { taskWorkingDir } from '../../task-paths.js';
 import {
   findExistingReviewTask,
@@ -222,7 +222,7 @@ router.post('/api/tasks/:id/publish-review', async (req: Request, res: Response)
   }
 
   try {
-    const { publishReview } = await import('../../publish-review.js');
+    const { publishReview } = await import('./publish-review.js');
     const result = await publishReview(
       task.id,
       verdict as import('../../types.js').PublishedReviewVerdict,

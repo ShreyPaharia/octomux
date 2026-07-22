@@ -6,7 +6,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import { buildPrExtractPrompt, insertExtractTask } from '../../pr-extract-tasks.js';
+import { buildPrExtractPrompt, insertExtractTask } from './pr-extract-tasks.js';
 import { repoShortName } from '../../review-tasks.js';
 import { getTask, insertRun } from '../../repositories/index.js';
 import { startTask } from '../../task-engine/index.js';

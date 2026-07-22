@@ -1,10 +1,10 @@
-import { listPublishedReviews } from './repositories/published-reviews.js';
-import { getCurrentRun, listRunsForTask } from './repositories/review-runs.js';
-import { listComments, countCommentsByStatus } from './repositories/inline-comments.js';
-import { listReviewTasks, getReviewTask } from './repositories/index.js';
-import { childLogger } from './logger.js';
-import type { Task, ReviewRun, PublishedReview } from './types.js';
-import type { InlineCommentRow } from './repositories/inline-comments.js';
+import { listPublishedReviews } from '../../repositories/published-reviews.js';
+import { getCurrentRun, listRunsForTask } from '../../repositories/review-runs.js';
+import { listComments, countCommentsByStatus } from '../../repositories/inline-comments.js';
+import { listReviewTasks, getReviewTask } from '../../repositories/index.js';
+import { childLogger } from '../../logger.js';
+import type { Task, ReviewRun, PublishedReview } from '../../types.js';
+import type { InlineCommentRow } from '../../repositories/inline-comments.js';
 
 const logger = childLogger('reviews-inbox');
 

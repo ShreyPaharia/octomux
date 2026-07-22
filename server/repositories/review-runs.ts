@@ -99,16 +99,6 @@ export function completeRun(id: string, input: CompleteRunInput = {}): void {
   );
 }
 
-export function failRun(id: string, error: string): void {
-  getDb()
-    .prepare(
-      `UPDATE review_runs
-         SET status = 'failed', error = ?, completed_at = datetime('now')
-       WHERE id = ? AND status = 'running'`,
-    )
-    .run(error, id);
-}
-
 export function setWalkthrough(id: string, walkthroughJson: string): void {
   getDb().prepare(`UPDATE review_runs SET walkthrough = ? WHERE id = ?`).run(walkthroughJson, id);
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createTestDb } from './test-helpers.js';
-import { getDb } from './db.js';
+import { createTestDb } from '../../test-helpers.js';
+import { getDb } from '../../db.js';
 import { buildPrExtractPrompt, insertExtractTask } from './pr-extract-tasks.js';
 
 describe('buildPrExtractPrompt', () => {

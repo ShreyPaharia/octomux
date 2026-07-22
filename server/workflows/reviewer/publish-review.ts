@@ -2,16 +2,16 @@ import {
   listComments,
   markCommentsStaleByIds,
   markCommentsPublishedByIds,
-} from './repositories/inline-comments.js';
-import { isAnchorOutdated } from './inline-comments-outdated.js';
-import { recordPublishedReview } from './repositories/published-reviews.js';
-import { postPullRequestReview } from './github-client.js';
-import { broadcast } from './events.js';
-import { childLogger } from './logger.js';
-import { getTask, inTransaction } from './repositories/index.js';
-import type { PublishedReviewVerdict } from './types.js';
-import type { InlineCommentRow } from './repositories/inline-comments.js';
-import type { PullRequestReviewComment } from './github-client.js';
+} from '../../repositories/inline-comments.js';
+import { isAnchorOutdated } from '../../inline-comments-outdated.js';
+import { recordPublishedReview } from '../../repositories/published-reviews.js';
+import { postPullRequestReview } from '../../github-client.js';
+import { broadcast } from '../../events.js';
+import { childLogger } from '../../logger.js';
+import { getTask, inTransaction } from '../../repositories/index.js';
+import type { PublishedReviewVerdict } from '../../types.js';
+import type { InlineCommentRow } from '../../repositories/inline-comments.js';
+import type { PullRequestReviewComment } from '../../github-client.js';
 
 const logger = childLogger('publish-review');
 

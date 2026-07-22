@@ -26,6 +26,7 @@ import { GlassInput } from '@/components/ui/glass-input';
 import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
+import { getNotificationsEnabled, setNotificationsEnabled } from '@/lib/notification-settings';
 
 function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () => void }) {
   const [showMenu, setShowMenu] = useState(false);
@@ -756,9 +757,7 @@ function HooksSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => vo
 }
 
 function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
-  const [notifications, setNotifications] = useState(
-    () => localStorage.getItem('octomux-notifications') !== 'false',
-  );
+  const [notifications, setNotifications] = useState(getNotificationsEnabled);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem('octomux-sidebar-collapsed') === 'true',
   );
@@ -769,7 +768,7 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
           checked={notifications}
           onChange={(v) => {
             setNotifications(v);
-            localStorage.setItem('octomux-notifications', String(v));
+            setNotificationsEnabled(v);
           }}
         />
       </SettingRow>

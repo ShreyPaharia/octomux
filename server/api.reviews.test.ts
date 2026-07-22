@@ -22,7 +22,7 @@ vi.mock('./tmux-input.js', () => ({
   sendMessageToAgent: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('./publish-review.js', () => ({
+vi.mock('./workflows/reviewer/publish-review.js', () => ({
   publishReview: vi.fn().mockResolvedValue({ github_review_url: 'https://github.com/test' }),
 }));
 
