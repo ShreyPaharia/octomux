@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
+import { installTerminalWheelCoalesce } from '@/lib/terminal-wheel-coalesce';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
 import { CloudOffIcon } from './icons';
@@ -41,6 +42,7 @@ export function TerminalView({
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewportCleanup = useRef<(() => void) | null>(null);
   const mobileTouchCleanup = useRef<(() => void) | null>(null);
+  const wheelCoalesceCleanup = useRef<(() => void) | null>(null);
   const androidImeCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const visibleRef = useRef(visible);
@@ -185,6 +187,8 @@ export function TerminalView({
     viewportCleanup.current = null;
     mobileTouchCleanup.current?.();
     mobileTouchCleanup.current = null;
+    wheelCoalesceCleanup.current?.();
+    wheelCoalesceCleanup.current = null;
     androidImeCleanup.current?.();
     androidImeCleanup.current = null;
 
@@ -234,6 +238,12 @@ export function TerminalView({
 
     if (isMobile && containerRef.current) {
       mobileTouchCleanup.current = installTerminalMobileTouch(containerRef.current);
+    }
+
+    // Coalesce alt-buffer wheel events so a trackpad flick reaches the remote
+    // TUI as a few scroll bursts instead of dozens of repaint-triggering ones.
+    if (!readOnly) {
+      wheelCoalesceCleanup.current = installTerminalWheelCoalesce(containerRef.current, term);
     }
 
     termRef.current = term;
@@ -346,6 +356,8 @@ export function TerminalView({
       viewportCleanup.current = null;
       mobileTouchCleanup.current?.();
       mobileTouchCleanup.current = null;
+      wheelCoalesceCleanup.current?.();
+      wheelCoalesceCleanup.current = null;
       androidImeCleanup.current?.();
       androidImeCleanup.current = null;
     };

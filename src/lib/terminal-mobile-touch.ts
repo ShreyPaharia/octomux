@@ -22,7 +22,16 @@ export interface TerminalMobileTouchOptions {
 const DEFAULT_LINE_PX = 17;
 const WHEEL_TARGET_SELECTORS = ['.xterm-screen', '.xterm-viewport', '.xterm'];
 
-function defaultLinePx(host: HTMLElement): number {
+// Marks wheel events we dispatch ourselves so interceptors (the wheel
+// coalescer) can tell them apart from real user input. `isTrusted` can't be
+// used: it is always false in jsdom tests.
+const SYNTHETIC_WHEEL = Symbol('octomux-synthetic-wheel');
+
+export function isSyntheticWheel(e: WheelEvent): boolean {
+  return SYNTHETIC_WHEEL in e;
+}
+
+export function defaultLinePx(host: HTMLElement): number {
   const row = host.querySelector('.xterm-rows > div');
   if (row) {
     const height = row.getBoundingClientRect().height;
@@ -60,17 +69,17 @@ export function scrollTerminalByWheel(
   const deltaY = Math.sign(lines) * (linePx > 0 ? linePx : DEFAULT_LINE_PX);
 
   for (let i = 0; i < Math.abs(lines); i++) {
-    target.dispatchEvent(
-      new WheelEvent('wheel', {
-        deltaY,
-        deltaMode: 0,
-        clientX,
-        clientY,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-      }),
-    );
+    const event = new WheelEvent('wheel', {
+      deltaY,
+      deltaMode: 0,
+      clientX,
+      clientY,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    (event as unknown as Record<symbol, boolean>)[SYNTHETIC_WHEEL] = true;
+    target.dispatchEvent(event);
   }
 }
 
