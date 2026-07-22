@@ -6,7 +6,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import { buildTriagePrompt, insertTriageTask } from '../../prod-log-triage-tasks.js';
+import { buildTriagePrompt, insertTriageTask } from './prod-log-triage-tasks.js';
 import { repoShortName } from '../../review-tasks.js';
 import { getTask, findFirstActiveAgent, insertRun } from '../../repositories/index.js';
 import { finishRun } from '../../repositories/runs.js';

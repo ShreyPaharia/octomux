@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createTestDb } from './test-helpers.js';
-import { getDb } from './db.js';
+import { createTestDb } from '../../test-helpers.js';
+import { getDb } from '../../db.js';
 import { buildTriagePrompt, insertTriageTask } from './prod-log-triage-tasks.js';
 
 describe('buildTriagePrompt', () => {

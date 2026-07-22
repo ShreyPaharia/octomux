@@ -1,6 +1,6 @@
-import { octomuxSkillRef } from './octomux-plugin.js';
+import { octomuxSkillRef } from '../../octomux-plugin.js';
 import { nanoid } from 'nanoid';
-import { insertTask, insertWorktree } from './repositories/index.js';
+import { insertTask, insertWorktree } from '../../repositories/index.js';
 
 export interface DocDriftPromptInput {
   /** Id of THIS doc-drift task — pinned in the prompt like extract/loop task ids. */

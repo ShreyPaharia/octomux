@@ -16,7 +16,7 @@ const GH_STUB = JSON.stringify({
   html_url: 'https://example.invalid/r/99999',
   comments: [
     { id: 1, path: 'server/github-client.ts', line: 1 },
-    { id: 2, path: 'server/publish-review.ts', line: 1 },
+    { id: 2, path: 'server/workflows/reviewer/publish-review.ts', line: 1 },
   ],
 });
 

@@ -1,22 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb } from './test-helpers.js';
-import { getDb } from './db.js';
+import { createTestDb } from '../../test-helpers.js';
+import { getDb } from '../../db.js';
 
-vi.mock('./github-client.js', () => ({
+vi.mock('../../github-client.js', () => ({
   postPullRequestReview: vi.fn().mockResolvedValue({
     id: 9999,
     html_url: 'https://github.com/o/r/pull/1#pullrequestreview-9999',
   }),
 }));
 
-vi.mock('./inline-comments-outdated.js', () => ({
+vi.mock('../../inline-comments-outdated.js', () => ({
   isAnchorOutdated: vi.fn().mockResolvedValue(false),
   computeOutdated: vi.fn().mockResolvedValue(new Map()),
   splitLines: (s: string) => s.split('\n'),
 }));
 
-const { postPullRequestReview } = await import('./github-client.js');
-const { isAnchorOutdated } = await import('./inline-comments-outdated.js');
+const { postPullRequestReview } = await import('../../github-client.js');
+const { isAnchorOutdated } = await import('../../inline-comments-outdated.js');
 const { publishReview } = await import('./publish-review.js');
 
 function seed() {
