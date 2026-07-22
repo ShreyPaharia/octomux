@@ -3,7 +3,6 @@ import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
   getTask,
-  getTaskByWorktreeId,
   listTasks,
   insertTask,
   updateTaskFields,
@@ -27,7 +26,6 @@ import {
   unlinkWorktree,
   markTaskRunning,
   countTasks,
-  listTasksBySchedule,
 } from './tasks.js';
 import { inTransaction } from './tx.js';
 
@@ -133,24 +131,6 @@ describe('repositories/tasks', () => {
     });
   });
 
-  // ─── getTaskByWorktreeId ─────────────────────────────────────────────────────
-
-  describe('getTaskByWorktreeId', () => {
-    it('returns the task linked to a worktree', () => {
-      db.prepare(
-        `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt1', '', 'new', 'available')`,
-      ).run();
-      const id = insertTask({ title: 'T', description: 'D', worktree_id: 'wt1' });
-      const task = getTaskByWorktreeId('wt1');
-      expect(task).toBeDefined();
-      expect(task!.id).toBe(id);
-    });
-
-    it('returns undefined when no task references the worktree', () => {
-      expect(getTaskByWorktreeId('no-such-wt')).toBeUndefined();
-    });
-  });
-
   // ─── listTasks ───────────────────────────────────────────────────────────────
 
   describe('listTasks', () => {
@@ -210,30 +190,6 @@ describe('repositories/tasks', () => {
     it('includes automated tasks when asked', () => {
       const rows = listTasks({ includeAutomated: true });
       expect(rows.map((t) => t.id).sort()).toEqual(['drift', 'manual']);
-    });
-  });
-
-  // ─── listTasksBySchedule ─────────────────────────────────────────────────────
-
-  describe('listTasksBySchedule', () => {
-    it('returns only tasks stamped with the given schedule_id, newest first', () => {
-      insertTask({ id: 't1', title: 'A', description: '', schedule_id: 'sched-1' });
-      insertTask({ id: 't2', title: 'B', description: '', schedule_id: 'sched-1' });
-      insertTask({ id: 't3', title: 'C', description: '', schedule_id: 'sched-2' });
-
-      const rows = listTasksBySchedule('sched-1');
-      expect(rows.map((t) => t.id).sort()).toEqual(['t1', 't2']);
-    });
-
-    it('excludes soft-deleted tasks', () => {
-      insertTask({ id: 't1', title: 'A', description: '', schedule_id: 'sched-1' });
-      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 't1'`).run();
-
-      expect(listTasksBySchedule('sched-1')).toHaveLength(0);
-    });
-
-    it('returns an empty array for a schedule with no runs', () => {
-      expect(listTasksBySchedule('no-such-schedule')).toEqual([]);
     });
   });
 

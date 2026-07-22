@@ -46,13 +46,6 @@ export function getTask(id: string): Task | undefined {
   return getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-/** Fetch a task by its worktree_id (returns undefined if not found). */
-export function getTaskByWorktreeId(worktreeId: string): Task | undefined {
-  return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? AND t.deleted_at IS NULL`)
-    .get(worktreeId) as Task | undefined;
-}
-
 export interface ListTasksOpts {
   /**
    * When false (default) auto_review tasks are excluded — reviews use the
@@ -185,15 +178,6 @@ export function listTasksByWorktree(worktreeId: string): Task[] {
     .all(worktreeId) as Task[];
 }
 
-/** List runs fired by a given schedule, newest-first (for GET /api/schedules/:id/runs). */
-export function listTasksBySchedule(scheduleId: string): Task[] {
-  return getDb()
-    .prepare(
-      `${SELECT_TASK_SQL} WHERE t.schedule_id = ? AND t.deleted_at IS NULL ORDER BY t.created_at DESC`,
-    )
-    .all(scheduleId) as Task[];
-}
-
 /**
  * Distinct repo paths from worktrees that have non-deleted tasks.
  * Used by the hook registry to discover active repos.
@@ -307,13 +291,6 @@ export function getTaskTmuxSession(id: string): { tmux_session: string | null } 
 export function getTaskRuntimeState(id: string): { runtime_state: string } | undefined {
   return getDb().prepare(`SELECT runtime_state FROM tasks WHERE id = ?`).get(id) as
     | { runtime_state: string }
-    | undefined;
-}
-
-/** Fetch just the model column from a task (for hop inheritance). */
-export function getTaskModel(id: string): { model: string | null } | undefined {
-  return getDb().prepare(`SELECT model FROM tasks WHERE id = ?`).get(id) as
-    | { model: string | null }
     | undefined;
 }
 
@@ -458,16 +435,6 @@ export function setTmuxSession(id: string, session: string): void {
 /** Set the linked worktree_id. */
 export function setWorktreeId(id: string, worktreeId: string | null): void {
   getDb().prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
-}
-
-/** Set pr_url, pr_number, pr_head_sha (called when a PR is opened). */
-export function setPr(id: string, prUrl: string, prNumber: number, prHeadSha: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks SET pr_url = ?, pr_number = ?, pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .run(prUrl, prNumber, prHeadSha, id);
-  logger.info({ task_id: id, pr_number: prNumber, operation: 'setPr' }, 'PR fields set');
 }
 
 /** Update pr_head_sha (called when a PR gets a new commit). */

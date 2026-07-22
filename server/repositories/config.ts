@@ -11,20 +11,7 @@ import { childLogger } from '../logger.js';
 
 const logger = childLogger('repositories/config');
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface ConfigRow {
-  id: number;
-  github_login: string | null;
-  updated_at: string;
-}
-
 // ─── Reads ────────────────────────────────────────────────────────────────────
-
-/** Read the singleton config row (id = 1). Returns undefined when absent. */
-export function getConfig(): ConfigRow | undefined {
-  return getDb().prepare('SELECT * FROM config WHERE id = 1').get() as ConfigRow | undefined;
-}
 
 /** Read just the github_login from the config row. Returns null when absent. */
 export function readGithubLogin(): string | null {
