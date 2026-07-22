@@ -26,6 +26,13 @@ vi.mock('./task-engine/index.js', async () => {
       ).run(task.id);
       db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
     }),
+    softDeleteTask: vi.fn(async (task: any) => {
+      const db = getDb();
+      db.prepare(
+        `UPDATE tasks SET deleted_at = datetime('now'), runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
+      ).run(task.id);
+      db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
+    }),
     deleteTask: vi.fn(),
     resumeTask: vi.fn(),
     addAgent: vi.fn(),
@@ -114,25 +121,25 @@ describe('POST /api/tasks/delete-done', () => {
     expect(second.body).toEqual({ deleted: 0 });
   });
 
-  it('calls closeTask for done tasks that are running before soft-deleting', async () => {
+  it('kills sessions via task-engine softDeleteTask for done tasks that are running', async () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { softDeleteTask } = await import('./task-engine/index.js');
 
     const res = await request(app).post('/api/tasks/delete-done').expect(200);
     expect(res.body).toEqual({ deleted: 1 });
-    expect(closeTask).toHaveBeenCalledTimes(1);
-    expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
+    expect(softDeleteTask).toHaveBeenCalledTimes(1);
+    expect(softDeleteTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
   });
 
-  it('does not call closeTask for done tasks that are idle', async () => {
+  it('kills sessions via task-engine softDeleteTask for done tasks that are idle', async () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { softDeleteTask } = await import('./task-engine/index.js');
 
     await request(app).post('/api/tasks/delete-done').expect(200);
-    expect(closeTask).not.toHaveBeenCalled();
+    expect(softDeleteTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
   });
 });
 
@@ -171,8 +178,18 @@ describe('POST /api/tasks/:id/move to done', () => {
     expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
   });
 
-  it('does not call closeTask when moving an idle task to done', async () => {
+  it('calls closeTask when moving an idle task to done (idle agents still hold sessions)', async () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'idle' });
+
+    const { closeTask } = await import('./task-engine/index.js');
+
+    await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
+
+    expect(closeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
+  });
+
+  it('does not call closeTask when the task is already done (re-move is a no-op)', async () => {
+    insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
 
     const { closeTask } = await import('./task-engine/index.js');
 

@@ -27,7 +27,6 @@ import {
   listDoneTasks,
   setRuntimeState,
   setWorkflowStatus,
-  softDeleteTask as softDeleteTaskRepo,
   restoreTask as restoreTaskRepo,
   hardDeleteTask,
   touchLastViewed,
@@ -131,12 +130,9 @@ router.post('/api/tasks/delete-done', async (req: Request, res: Response) => {
 
   let deletedCount = 0;
   for (const task of doneTasks) {
-    // Close running tasks before soft-deleting
-    if (task.runtime_state === 'running' || task.runtime_state === 'setting_up') {
-      await closeTask(task);
-    }
-
-    softDeleteTaskRepo(task.id);
+    // task-engine softDeleteTask kills the tmux session (and its agent
+    // processes) before soft-deleting — same as single-task delete
+    await softDeleteTask(task);
 
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     deletedCount++;

@@ -36,10 +36,9 @@ router.post('/api/tasks/:id/move', async (req: Request, res: Response) => {
     throw badRequest(`note is required when moving to ${body.workflow_status}`);
   }
 
-  if (
-    body.workflow_status === 'done' &&
-    (task.runtime_state === 'running' || task.runtime_state === 'setting_up')
-  ) {
+  // Close eagerly on every move to done — idle agents still hold a live claude
+  // process (+MCP sidecars); reopening resumes via harness_session_id.
+  if (body.workflow_status === 'done' && task.workflow_status !== 'done') {
     await closeTask(task);
   }
 
