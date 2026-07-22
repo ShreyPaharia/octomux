@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
@@ -212,6 +213,17 @@ export function TerminalView({
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
+
+    // WebGL renderer paints full-screen TUI repaints far faster than the DOM
+    // renderer. Load after open(); on failure or GPU context loss, dispose and
+    // xterm falls back to the DOM renderer automatically.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {
+      // WebGL unavailable (old GPU, jsdom) — DOM renderer remains
+    }
 
     // De-decorate xterm's hidden capture textarea so mobile Safari / Chrome
     // don't draw autofill / suggestion / accessory UI above the soft
