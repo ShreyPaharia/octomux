@@ -43,6 +43,7 @@ export function TerminalView({
   const mobileTouchCleanup = useRef<(() => void) | null>(null);
   const androidImeCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const visibleRef = useRef(visible);
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
   // True while the WebSocket is opening (initial connect or a reconnect) and no
@@ -115,6 +116,11 @@ export function TerminalView({
         // Re-fit now that we know layout is settled (WS connect takes a few ms,
         // guaranteeing the browser has completed layout), then send correct dimensions.
         fitAndSendResize(ws);
+        // Hidden LRU tabs shouldn't stream output nobody can see — pause until
+        // the tab becomes active (server discards + repaints on resume).
+        if (!visibleRef.current) {
+          ws.send(JSON.stringify({ type: 'pause' }));
+        }
         // Belt-and-suspenders: fit again after a frame to catch any late layout shifts
         requestAnimationFrame(() => {
           if (!unmounted.current) fitAndSendResize(ws);
@@ -391,6 +397,17 @@ export function TerminalView({
       viewportCleanup.current = null;
     };
   }, [isMobile, visible, fitAndSendResize]);
+
+  // Pause the server-side stream while this terminal is a hidden LRU tab —
+  // no point paying bandwidth for output nobody can see. Resume triggers a
+  // server-side full repaint so the screen is current when the tab returns.
+  useEffect(() => {
+    visibleRef.current = visible;
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: visible ? 'resume' : 'pause' }));
+    }
+  }, [visible]);
 
   // Fit terminal when it becomes visible (e.g. toggling between agent/editor views).
   // Use double-rAF to ensure the browser has fully reflowed after CSS hidden→flex toggle.
