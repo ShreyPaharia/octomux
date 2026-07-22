@@ -157,7 +157,6 @@ async function prepareFirstAgentLaunch(
 
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-
   await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);

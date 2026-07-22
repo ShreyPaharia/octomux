@@ -97,7 +97,6 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     ),
   });
 
-
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });

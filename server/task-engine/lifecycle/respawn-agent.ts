@@ -50,7 +50,6 @@ export async function respawnAgentFresh(
   });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-
   await harness.installHooks(task.worktree!, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = harness.buildLaunchCommand({

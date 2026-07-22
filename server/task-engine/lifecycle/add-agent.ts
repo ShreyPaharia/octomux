@@ -79,7 +79,6 @@ export async function prepareAddAgentLaunch(
   });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const baseCmd = harness.buildLaunchCommand({
