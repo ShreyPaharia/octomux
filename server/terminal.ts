@@ -15,7 +15,10 @@ const connections = new Map<string, TerminalConnection[]>();
 let wss: WebSocketServer;
 
 export function setupTerminalWebSocket(): void {
-  wss = new WebSocketServer({ noServer: true });
+  // permessage-deflate: TUI redraws (alt-screen full-frame repaints) are highly
+  // repetitive ANSI — compression cuts remote-viewing bandwidth ~10x. ws only
+  // compresses frames above its 1KB threshold, so keystroke echo stays fast.
+  wss = new WebSocketServer({ noServer: true, perMessageDeflate: true });
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
