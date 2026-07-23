@@ -13,6 +13,7 @@ import {
   getLearning,
   supersedeLearning,
   searchForRead,
+  searchShared,
 } from './agent-learnings.js';
 
 describe('agent-learnings', () => {
@@ -115,6 +116,65 @@ describe('agent-learnings', () => {
     const d = listForDigest('/r', '1970-01-01 00:00:00');
     expect(d.superseded.map((l) => l.lesson)).toEqual(['now-false']);
     expect(d.superseded[0].superseded_reason).toBe('contradicted by new evidence');
+  });
+
+  describe('searchShared', () => {
+    it('returns shared-lane matches across all repos when no repo is given', () => {
+      addLearning({
+        repo_path: '/a',
+        lane: SHARED_LANE,
+        trigger: 'retry',
+        lesson: 'hedging retry lives in retry.ts',
+        evidence: 'retry.ts',
+      });
+      addLearning({
+        repo_path: '/b',
+        lane: SHARED_LANE,
+        trigger: 'tests',
+        lesson: 'vitest needs default: mocked',
+        evidence: 'setup.ts',
+      });
+      addLearning({
+        repo_path: '/a',
+        lane: 'loop:tk1',
+        trigger: 'x',
+        lesson: 'private retry note',
+        evidence: 'e',
+      });
+      const hits = searchShared('retry').map((l) => l.lesson);
+      expect(hits).toContain('hedging retry lives in retry.ts');
+      expect(hits).not.toContain('private retry note'); // private lane excluded
+    });
+
+    it('filters by repo when given', () => {
+      addLearning({
+        repo_path: '/a',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'in a',
+        evidence: 'e',
+      });
+      addLearning({
+        repo_path: '/b',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'in b',
+        evidence: 'e',
+      });
+      expect(searchShared('in', { repo: '/a' }).map((l) => l.lesson)).toEqual(['in a']);
+    });
+
+    it('excludes superseded rows', () => {
+      const row = addLearning({
+        repo_path: '/a',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'stale',
+        evidence: 'e',
+      })!;
+      supersedeLearning(row.id, 'obsolete');
+      expect(searchShared('stale').length).toBe(0);
+    });
   });
 
   describe('listBenefit', () => {

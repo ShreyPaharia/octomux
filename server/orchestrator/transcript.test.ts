@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { parseLine, assertTranscriptVersion, tailTranscript } from './transcript.js';
+import { parseLine, assertTranscriptVersion, tailTranscript, isTurnDone } from './transcript.js';
 
 const FIXTURES_DIR = path.join(import.meta.dirname, '__fixtures__');
 const BASIC_FIXTURE = path.join(FIXTURES_DIR, 'transcript-2.1.183-basic-qa.jsonl');
@@ -288,6 +288,22 @@ describe('parseLine with basic-qa fixture', () => {
     const first = assistantMessages[0];
     expect(first!.type).toBe('assistant');
     expect(first!.text).toBe('4');
+  });
+
+  it('isTurnDone fires once per completed turn (the stop_hook_summary lines)', () => {
+    const lines = fs.readFileSync(BASIC_FIXTURE, 'utf-8').split('\n').filter(Boolean);
+    const events = lines.map((l) => parseLine(l)).filter(Boolean) as NonNullable<
+      ReturnType<typeof parseLine>
+    >[];
+    const boundaries = events.filter((e) => isTurnDone(e));
+    // The basic-qa fixture has exactly 4 stop_hook_summary lines = 4 turns.
+    expect(boundaries.length).toBe(4);
+    for (const b of boundaries) {
+      expect(b.type).toBe('system');
+    }
+    // A plain assistant text line must NOT be a turn boundary.
+    const assistant = events.find((e) => e.type === 'assistant');
+    expect(isTurnDone(assistant!)).toBe(false);
   });
 });
 

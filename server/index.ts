@@ -36,6 +36,7 @@ import { ensureGithubLogin } from './github-login.js';
 import { acquireInstanceLock } from './single-instance.js';
 import { childLogger } from './logger.js';
 import { wireReviewerRunFinisher } from './workflows/reviewer/finish-run.js';
+import { startGatewayIfConfigured } from './gateway/boot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
@@ -117,6 +118,9 @@ if (pendingCards.length > 0) {
 
 // Background status + PR polling
 startPolling();
+
+// Telegram gateway — opt-in, only starts if OCTOMUX_GATEWAY_TELEGRAM_TOKEN is set.
+void startGatewayIfConfigured();
 
 // Serve SPA in production
 if (process.env.NODE_ENV === 'production') {

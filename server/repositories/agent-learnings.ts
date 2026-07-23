@@ -118,6 +118,27 @@ export function searchForRead(
     .all(repoPath, SHARED_LANE, ownLane, q, q, opts.limit ?? 8) as AgentLearning[];
 }
 
+export function searchShared(
+  query: string,
+  opts: { repo?: string; limit?: number } = {},
+): AgentLearning[] {
+  const q = `%${query.trim()}%`;
+  const where = ['lane = ?', 'superseded_at IS NULL', '(trigger LIKE ? OR lesson LIKE ?)'];
+  const params: unknown[] = [SHARED_LANE, q, q];
+  if (opts.repo) {
+    where.unshift('repo_path = ?');
+    params.unshift(opts.repo);
+  }
+  params.push(opts.limit ?? 8);
+  return getDb()
+    .prepare(
+      `SELECT * FROM agent_learnings WHERE ${where.join(' AND ')}
+       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC
+       LIMIT ?`,
+    )
+    .all(...params) as AgentLearning[];
+}
+
 export function listForDigest(
   repoPath: string,
   sinceIso: string,

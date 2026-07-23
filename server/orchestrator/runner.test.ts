@@ -27,11 +27,19 @@ let _lastPastedText = '';
  */
 let _windowIndex = '1';
 
+/**
+ * The foreground command `display-message -p '#{pane_current_command}'` reports.
+ * Defaults to 'node' (a live claude conductor is a node process → alive). A test
+ * sets it to a shell name to simulate a crashed conductor (→ not alive → resume).
+ */
+let _paneCommand = 'node';
+
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
     const cb = typeof optsOrCb === 'function' ? (optsOrCb as Function) : (maybeCb as Function);
     if (args.includes('display-message')) {
-      cb(null, { stdout: _windowIndex, stderr: '' });
+      const isPaneCmd = args.some((a) => a.includes('pane_current_command'));
+      cb(null, { stdout: isPaneCmd ? _paneCommand : _windowIndex, stderr: '' });
     } else if (args.includes('list-windows')) {
       cb(null, { stdout: _windowIndex, stderr: '' });
     } else if (args.includes('send-keys') && args.includes('-l')) {
@@ -69,6 +77,7 @@ const mockedExecFile = vi.mocked(execFile);
 import {
   startConversation,
   sendTurn,
+  interruptTurn,
   stopConversation,
   resumeConversation,
   conversationTmuxTarget,
@@ -100,6 +109,7 @@ describe('orchestrator runner', () => {
     mockedExecFile.mockClear();
     _lastPastedText = '';
     _windowIndex = '1';
+    _paneCommand = 'node';
     vi.useFakeTimers();
   });
 
@@ -434,6 +444,73 @@ describe('orchestrator runner', () => {
           stripSocketArgs(c[1] as string[]).includes('-l'),
       );
       expect(pasteCall).toBeDefined();
+    });
+
+    it('interruptTurn sends the TUI interrupt key (Escape) to a live pane', async () => {
+      const convId = createConversation({ title: 'Interrupt' });
+      updateConversation(convId, { tmux_window: 'octomux-orch-int:1' });
+
+      const p = interruptTurn(convId);
+      await vi.advanceTimersByTimeAsync(500);
+      await p;
+
+      const escapeCall = mockedExecFile.mock.calls.find(
+        (c) =>
+          c[0] === 'tmux' &&
+          stripSocketArgs(c[1] as string[]).includes('send-keys') &&
+          stripSocketArgs(c[1] as string[]).includes('Escape'),
+      );
+      expect(escapeCall).toBeDefined();
+    });
+
+    it('serializes two concurrent turns — keystrokes never interleave', async () => {
+      // Both writers target the SAME conversation/pane. Without the FIFO lock the
+      // two pastes would land back-to-back before either Enter, submitting garbled
+      // input. With it, turn A fully completes (paste → Enter) before turn B pastes.
+      const convId = createConversation({ title: 'Concurrent turns' });
+      updateConversation(convId, { tmux_window: 'octomux-orch-conc:1' });
+
+      const p1 = sendTurn(convId, 'AAA');
+      const p2 = sendTurn(convId, 'BBB');
+      await vi.advanceTimersByTimeAsync(2000);
+      await Promise.all([p1, p2]);
+
+      // Reconstruct the ordered send-keys sequence into 'paste:<text>' / 'enter'.
+      const seq: string[] = [];
+      for (const c of mockedExecFile.mock.calls) {
+        if (c[0] !== 'tmux') continue;
+        const args = stripSocketArgs(c[1] as string[]);
+        if (!args.includes('send-keys')) continue;
+        const lIdx = args.indexOf('-l');
+        if (lIdx !== -1) seq.push(`paste:${args[lIdx + 1]}`);
+        else if (args.includes('Enter')) seq.push('enter');
+      }
+
+      // A's paste and Enter must both precede B's paste (no interleave).
+      expect(seq).toEqual(['paste:AAA', 'enter', 'paste:BBB', 'enter']);
+    });
+
+    it('resumes (does not paste blind) when the pane fell back to a shell', async () => {
+      // Session exists but claude crashed — the pane's foreground command is the
+      // holding shell, not node/claude. Liveness must report DEAD so sendTurn
+      // resumes rather than pasting the chat text into a live shell (which would
+      // run it as a command — the security hazard T9 closes).
+      const convId = createConversation({
+        title: 'Crashed conductor',
+        claude_session_id: 'sess-crashed-1',
+      });
+      updateConversation(convId, { tmux_window: 'octomux-orch-crashed:1' });
+      _paneCommand = 'zsh'; // pane fell back to the holding shell
+
+      const promise = sendTurn(convId, 'are you there?');
+      await vi.advanceTimersByTimeAsync(500);
+      await promise;
+
+      // It must have resumed the SAME claude session before delivering.
+      const newSession = findTmuxCall('new-session');
+      expect(newSession).toBeDefined();
+      const cmd = newSession!.find((a) => a.includes('claude'));
+      expect(cmd).toContain('--resume sess-crashed-1');
     });
   });
 });

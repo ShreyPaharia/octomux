@@ -192,6 +192,25 @@ export function parseLine(rawLine: string): ChatEvent | null {
   return null;
 }
 
+// ─── isTurnDone ───────────────────────────────────────────────────────────────
+
+/**
+ * True when a ChatEvent marks the end of an assistant turn.
+ *
+ * Claude Code writes a `stop_hook_summary` system line once per turn when the
+ * Stop hook fires. It is the ONLY reliable "the reply is complete" signal for a
+ * programmatic consumer (a browser watches the pane; a bot cannot). We fire on
+ * the line's PRESENCE regardless of whether the hook itself succeeded — an
+ * errored hook still emits the summary line, and a bot must not hang waiting for
+ * a success it will never see.
+ *
+ * Shared by the gateway (know when to send the reply) and the per-conversation
+ * write lock (know when the pane is idle enough for the next turn).
+ */
+export function isTurnDone(event: ChatEvent): boolean {
+  return event.type === 'system' && event.subtype === 'stop_hook_summary';
+}
+
 // ─── assertTranscriptVersion ──────────────────────────────────────────────────
 
 /**

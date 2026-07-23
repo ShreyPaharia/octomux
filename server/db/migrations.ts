@@ -953,4 +953,21 @@ export function runMigrations(instance: Database.Database): void {
     'superseded_reason TEXT',
     agentLearningsCols,
   );
+
+  // ── Gateway: channel↔conversation map + inbound dedup (2026-07-23) ────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS channel_threads (
+      channel     TEXT NOT NULL,
+      thread_key  TEXT NOT NULL,
+      conv_id     TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (channel, thread_key)
+    );
+    CREATE TABLE IF NOT EXISTS gateway_inbound (
+      channel      TEXT NOT NULL,
+      external_id  TEXT NOT NULL,
+      seen_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (channel, external_id)
+    );
+  `);
 }

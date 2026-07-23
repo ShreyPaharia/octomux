@@ -1,0 +1,151 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createTestDb } from '../test-helpers.js';
+import { createGateway, type GatewayConductor } from './gateway.js';
+import type { ChannelAdapter, InboundMessage } from './adapter.js';
+import type { ChatEvent } from '../orchestrator/transcript.js';
+import { updateConversation } from '../orchestrator/store.js';
+
+/** A fake adapter that records outbound sends / typing indicators. */
+function fakeAdapter() {
+  const sent: Array<{ threadKey: string; text: string }> = [];
+  const typing: string[] = [];
+  const adapter: ChannelAdapter = {
+    id: 'telegram',
+    start: vi.fn().mockResolvedValue(undefined),
+    send: vi.fn(async (threadKey: string, text: string) => {
+      sent.push({ threadKey, text });
+    }),
+    sendTyping: vi.fn(async (threadKey: string) => {
+      typing.push(threadKey);
+    }),
+  };
+  return { adapter, sent, typing };
+}
+
+/**
+ * A fake conductor: no tmux, no real tail. `startConversation` stamps a
+ * transcript path (as the real one does), `registerConsumer` captures the
+ * consumer so the test can feed it ChatEvents, and sendTurn/interruptTurn record.
+ */
+function fakeConductor() {
+  const sendTurn = vi.fn(async (_convId: string, _text: string) => undefined);
+  const interruptTurn = vi.fn(async (_convId: string) => undefined);
+  const consumers = new Map<string, (e: ChatEvent) => void>();
+
+  const conductor: GatewayConductor = {
+    startConversation: vi.fn(async (convId: string) => {
+      updateConversation(convId, { transcript_path: `/fake/${convId}.jsonl` });
+    }),
+    sendTurn,
+    interruptTurn,
+    registerConsumer: vi.fn((convId, _path, consumer) => {
+      consumers.set(convId, consumer);
+      return () => consumers.delete(convId);
+    }),
+  };
+  /** Feed a ChatEvent to the consumer registered for a conversation. */
+  const emit = (convId: string, e: ChatEvent) => consumers.get(convId)!(e);
+  return { conductor, sendTurn, interruptTurn, emit };
+}
+
+const ALLOWED = '555';
+function inbound(over: Partial<InboundMessage> = {}): InboundMessage {
+  return {
+    channel: 'telegram',
+    threadKey: 'chat-1',
+    senderId: ALLOWED,
+    externalId: 'upd-1',
+    text: 'what tasks are running?',
+    ...over,
+  };
+}
+
+describe('gateway glue', () => {
+  beforeEach(() => {
+    createTestDb();
+    process.env.OCTOMUX_GATEWAY_TELEGRAM_ALLOW = ALLOWED;
+  });
+
+  it('drops a message from a non-allowlisted sender (never dispatches)', async () => {
+    const { adapter } = fakeAdapter();
+    const { conductor, sendTurn } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound({ senderId: '999' }));
+
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it('dedupes a redelivered external id (dispatches once)', async () => {
+    const { adapter } = fakeAdapter();
+    const { conductor, sendTurn } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound({ externalId: 'dup' }));
+    await gw.handleInbound(inbound({ externalId: 'dup', text: 'second copy' }));
+
+    expect(sendTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a conversation, sends the turn, and flushes the redacted reply on turn-done', async () => {
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn, emit } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound());
+    expect(sendTurn).toHaveBeenCalledTimes(1);
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    // Conductor replies over two assistant lines, one carrying a secret, then the
+    // stop_hook_summary boundary.
+    emit(convId, { type: 'assistant', text: 'Two tasks running.', uuid: 'a1', timestamp: 't' });
+    emit(convId, {
+      type: 'assistant',
+      text: 'token is ghp_ABCDEFGH12345678',
+      uuid: 'a2',
+      timestamp: 't',
+    });
+    emit(convId, { type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+
+    // Outbound delivery is an async queue — let it flush.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.threadKey).toBe('chat-1');
+    expect(sent[0]!.text).toContain('Two tasks running.');
+    // Secret scrubbed by redactSecrets before it leaves the process.
+    expect(sent[0]!.text).not.toContain('ghp_ABCDEFGH12345678');
+  });
+
+  it('reuses the same conversation for a second message on the same thread', async () => {
+    const { adapter } = fakeAdapter();
+    const { conductor, sendTurn, emit } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound({ externalId: 'm1' }));
+    const convId = sendTurn.mock.calls[0]![0] as string;
+    emit(convId, { type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+
+    await gw.handleInbound(inbound({ externalId: 'm2', text: 'follow up' }));
+
+    expect(sendTurn).toHaveBeenCalledTimes(2);
+    expect(sendTurn.mock.calls[1]![0]).toBe(convId); // same conversation
+    expect(conductor.startConversation).toHaveBeenCalledTimes(1); // created only once
+  });
+
+  it('interrupts a running turn when a new message arrives mid-turn', async () => {
+    const { adapter } = fakeAdapter();
+    const { conductor, sendTurn, interruptTurn } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    // First message → turn in flight (no stop_hook_summary emitted yet).
+    await gw.handleInbound(inbound({ externalId: 'm1' }));
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    // Second message arrives before the first turn finished → interrupt-and-merge.
+    await gw.handleInbound(inbound({ externalId: 'm2', text: 'actually, stop' }));
+
+    expect(interruptTurn).toHaveBeenCalledWith(convId);
+    expect(sendTurn).toHaveBeenCalledTimes(2);
+  });
+});
