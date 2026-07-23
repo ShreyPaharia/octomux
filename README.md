@@ -47,8 +47,9 @@ Each screen is a lens over one managed agent backend:
 - **Monitor grid** — every running agent's terminal tiled into one live wall; spot the stuck one instantly.
 - **Orchestrator view** — watch an agent that dispatches agents: the parent planning, its children coding, who's blocked — the whole tree at once.
 - **Review workstation** — an agent drafts a walkthrough + inline comments (grounded against the real diff, no invented line numbers); nothing hits GitHub until you accept it, then it posts as one batched review. Reject a comment with a reason and it remembers for next time.
-- **Chats, Workspaces, Skill & Agent editors** — detach a quick spike as its own session, manage the reusable worktrees behind your tasks, and author your Claude Code skills and subagents in the browser.
-- **Agent teams** — reusable crews as code in `<repo>/.octomux/team.yaml`; a lead spawns workers (each with its own model) on demand or on a schedule.
+- **Chats, Workspaces, skill & agent editing** — detach a quick spike as its own session, manage the reusable worktrees behind your tasks, and author your Claude Code skills and subagents from **Settings** in the browser.
+- **Loops** — hand a task a prompt plus a verify command and it re-runs itself in fresh context until verify passes; `/loops` shows the iteration ledger, what each pass changed, and the stop controls. Fan out N competing candidates from one prompt when you want options.
+- **Schedules** — run a task on a cron from `/schedules` (nightly triage, a weekly digest) instead of remembering to kick it off.
 - **Worktrees keep agents off each other** — five agents can edit `auth.ts` at once without conflicts on your main tree.
 - **Run it anywhere** — npm CLI, a **macOS desktop app** ([`.dmg`](https://github.com/ShreyPaharia/octomux/releases)), or hosted on a box and reached from your **phone over Tailscale** (the UI is mobile-ready).
 - **Local-only** — no telemetry, no cloud sync. Your `.env` stays on the host.
@@ -92,17 +93,19 @@ octomux is a bet on what that surface should look like: not a chat box bolted on
 <details>
 <summary><b>Full CLI reference</b></summary>
 
-| Command                                  | Description                                                |
-| ---------------------------------------- | ---------------------------------------------------------- |
-| `octomux start`                          | Dashboard at `:7777` (add `--bind 0.0.0.0` for remote)     |
-| `octomux init`                           | Defaults wizard (Jira/Linear, base branch, harness prefs)  |
-| `octomux create-task`                    | New task (`--harness`, `--model`, `--mode`, `--fork-from`) |
-| `octomux list-tasks` / `get-task`        | Inspect tasks                                              |
-| `octomux close-task` / `delete-task`     | Stop or fully remove                                       |
-| `octomux resume-task`                    | Resume a closed task                                       |
-| `octomux add-agent`                      | Another agent window (`--model`, `--notify-agent`)         |
-| `octomux send-message`                   | Message a running agent — course-correct without restart   |
-| `octomux team run` / `schedule` / `list` | Run or schedule an agent crew from `.octomux/team.yaml`    |
+| Command                              | Description                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `octomux start`                      | Dashboard at `:7777` (add `--bind 0.0.0.0` for remote)               |
+| `octomux init`                       | Defaults wizard (Jira/Linear, base branch, harness prefs)            |
+| `octomux create-task`                | New task (`--harness`, `--model`, `--mode`, `--fork-from`)           |
+| `octomux list-tasks` / `get-task`    | Inspect tasks                                                        |
+| `octomux close-task` / `delete-task` | Stop or fully remove                                                 |
+| `octomux resume-task`                | Resume a closed task                                                 |
+| `octomux add-agent`                  | Another agent window (`--model`, `--notify-agent`)                   |
+| `octomux send-message`               | Message a running agent — course-correct without restart             |
+| `octomux loop-start`                 | Loop a task until `--verify` passes (`--prompt`, `--max-iterations`) |
+| `octomux loop-start-group`           | Fan out `--n` competing loop candidates from one prompt              |
+| `octomux learn` / `recall`           | Record and retrieve durable notes for future runs on a repo          |
 
 Full setup, Jira/Linear, and orchestrator skills: **[ONBOARDING.md](./ONBOARDING.md)**.
 
