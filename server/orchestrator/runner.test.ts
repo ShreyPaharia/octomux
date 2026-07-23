@@ -490,6 +490,30 @@ describe('orchestrator runner', () => {
       expect(seq).toEqual(['paste:AAA', 'enter', 'paste:BBB', 'enter']);
     });
 
+    it('waits for a booting session (pane shell→claude) instead of resuming', async () => {
+      // A just-launched conductor: the tmux session exists but claude is still
+      // booting, so the pane briefly runs the launch shell. sendTurn must WAIT
+      // for claude to take the foreground and then paste — it must NOT resume
+      // (which would new-session an existing name → "duplicate session", the bug
+      // that dropped the first real Telegram turn).
+      const convId = createConversation({ title: 'Booting', claude_session_id: 'sess-boot' });
+      updateConversation(convId, { tmux_window: 'octomux-orch-boot:1' });
+      _paneCommand = 'zsh'; // claude still launching
+
+      const p = sendTurn(convId, 'hello there');
+      await vi.advanceTimersByTimeAsync(100); // a couple of alive-polls, still booting
+      _paneCommand = 'node'; // claude took the pane foreground
+      await vi.advanceTimersByTimeAsync(1000);
+      await p;
+
+      // No resume happened — it waited, then pasted.
+      expect(findTmuxCall('new-session')).toBeUndefined();
+      const pasteCall = mockedExecFile.mock.calls.find(
+        (c) => c[0] === 'tmux' && stripSocketArgs(c[1] as string[]).includes('-l'),
+      );
+      expect(pasteCall).toBeDefined();
+    });
+
     it('resumes (does not paste blind) when the pane fell back to a shell', async () => {
       // Session exists but claude crashed — the pane's foreground command is the
       // holding shell, not node/claude. Liveness must report DEAD so sendTurn

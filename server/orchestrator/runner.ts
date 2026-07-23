@@ -58,6 +58,16 @@ const CAPTURE_PANE_POLL_MS = 50;
 const PASTE_TO_ENTER_MIN_DELAY_MS = 50;
 /** Delay after --resume auto-turn before we allow real turns to be sent. */
 export const RESUME_QUIET_WINDOW_MS = process.env.NODE_ENV === 'test' ? 0 : 2000;
+/**
+ * How long `sendTurn` waits for a freshly-launched conductor to become alive
+ * (claude taking the pane foreground) before treating it as dead and resuming.
+ * A cold `claude` start in tmux takes a few seconds during which the pane is
+ * still the launch shell; without this wait, sendTurn would resume a session
+ * that's merely booting and hit "duplicate session".
+ */
+const SESSION_BOOT_WAIT_MS = process.env.NODE_ENV === 'test' ? 300 : 10000;
+/** Poll interval while waiting for a booting session to become alive. */
+const SESSION_ALIVE_POLL_MS = process.env.NODE_ENV === 'test' ? 20 : 150;
 
 // ─── Config dir ───────────────────────────────────────────────────────────────
 
@@ -408,6 +418,15 @@ export async function resumeConversation(
 
   const startupCmd = buildConductorStartupCmd(claudeCmd);
 
+  // Resume RECREATES the session — kill any lingering one with this name first so
+  // `new-session` can't fail with "duplicate session" (a crashed conductor whose
+  // tmux session outlived it, or a racing caller).
+  try {
+    await execTmux(['kill-session', '-t', sessionName]);
+  } catch {
+    // No existing session — expected on a normal resume.
+  }
+
   await execTmux(['new-session', '-d', '-s', sessionName, '-c', cwd, startupCmd]);
   await execTmux(['set-option', '-t', sessionName, 'aggressive-resize', 'on']);
 
@@ -557,16 +576,25 @@ async function deliverTurn(convId: string, text: string): Promise<void> {
   // sending a turn must transparently restart it via `--resume <session_id>`
   // (same session id → same transcript, history intact) before delivering.
   if (!(await isConversationSessionAlive(conv))) {
-    logger.info(
-      { conversation_id: convId, operation: 'sendTurn' },
-      'sendTurn: session not alive — resuming before delivering turn',
-    );
-    await resumeConversation(convId, conv.cwd ?? process.cwd());
-    // Let the --resume continuation settle before injecting the real turn.
-    if (RESUME_QUIET_WINDOW_MS > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, RESUME_QUIET_WINDOW_MS));
+    // A freshly-launched conductor's pane is briefly the launch shell while
+    // claude boots — that reads as "not alive" but must NOT trigger a resume
+    // (which would `new-session` a name that already exists → "duplicate
+    // session"). If the session EXISTS, wait for claude to take the foreground;
+    // only resume when the session is genuinely absent or never comes alive.
+    const exists = await tmuxSessionExists(conv);
+    const becameAlive = exists ? await waitForSessionAlive(conv, SESSION_BOOT_WAIT_MS) : false;
+    if (!becameAlive) {
+      logger.info(
+        { conversation_id: convId, operation: 'sendTurn', session_exists: exists },
+        'sendTurn: session not alive — resuming before delivering turn',
+      );
+      await resumeConversation(convId, conv.cwd ?? process.cwd());
+      // Let the --resume continuation settle before injecting the real turn.
+      if (RESUME_QUIET_WINDOW_MS > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RESUME_QUIET_WINDOW_MS));
+      }
+      conv = getConversation(convId); // reload — resume updated tmux_window
     }
-    conv = getConversation(convId); // reload — resume updated tmux_window
   }
 
   if (!conv?.tmux_window) {
@@ -627,6 +655,37 @@ async function isConversationSessionAlive(conv: OrchestratorConversation): Promi
     return cmd === 'node' || cmd === 'claude';
   } catch {
     return false;
+  }
+}
+
+/** Whether the conversation's tmux session exists at all (booting or alive). */
+async function tmuxSessionExists(conv: OrchestratorConversation): Promise<boolean> {
+  if (!conv.tmux_window) return false;
+  const session = conv.tmux_window.split(':')[0];
+  if (!session) return false;
+  try {
+    await execTmux(['has-session', '-t', session]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Poll until the conductor's claude process takes the pane foreground, or the
+ * timeout elapses. Distinguishes a session that's still BOOTING (claude
+ * launching, pane briefly the shell) from one that's genuinely dead — so
+ * `sendTurn` doesn't resume (and duplicate) a session that just needs a moment.
+ */
+async function waitForSessionAlive(
+  conv: OrchestratorConversation,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await isConversationSessionAlive(conv)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, SESSION_ALIVE_POLL_MS));
   }
 }
 
