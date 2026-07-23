@@ -630,14 +630,36 @@ async function deliverTurn(convId: string, text: string): Promise<void> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
+ * Shell process names that mean the pane is NOT running claude — either the
+ * booting launch shell, or the post-crash holding shell (`; echo CONDUCTOR_EXITED;
+ * read -r _`, where `read` is a builtin so the pane's command is the shell).
+ * Leading-dash forms (`-zsh`) are login shells.
+ */
+const HOLDING_SHELL_COMMANDS = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'dash',
+  'ksh',
+  'tcsh',
+  'csh',
+  '-sh',
+  '-bash',
+  '-zsh',
+  '-fish',
+]);
+
+/**
  * Whether the conductor's `claude` process is currently alive in the pane —
  * NOT merely "the tmux session exists."
  *
  * `has-session` is true even when claude has crashed and the pane fell back to
- * the holding shell. Pasting a chat turn into that shell would run it as a
- * command, so liveness must mean the pane's foreground process is claude
- * (reported as `node` — the CLI is a node process — or `claude`). Anything else
- * (the shell, `read`) means dead → `sendTurn` resumes instead of pasting.
+ * the holding shell; pasting a chat turn into that shell would run it as a
+ * command. So liveness = the pane's foreground command is NOT a shell. We can't
+ * match claude by name — its `pane_current_command` is not `claude`/`node` but a
+ * version-like string (e.g. `2.1.218`) — so we invert: anything that isn't the
+ * booting/holding shell (or empty) is treated as a live conductor.
  *
  * A failed `display-message` (no such session) also means not-alive.
  */
@@ -652,7 +674,8 @@ async function isConversationSessionAlive(conv: OrchestratorConversation): Promi
       '#{pane_current_command}',
     ]);
     const cmd = stdout.trim().toLowerCase();
-    return cmd === 'node' || cmd === 'claude';
+    if (!cmd) return false;
+    return !HOLDING_SHELL_COMMANDS.has(cmd);
   } catch {
     return false;
   }
