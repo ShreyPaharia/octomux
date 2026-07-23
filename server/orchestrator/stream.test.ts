@@ -34,7 +34,9 @@ import {
   chatEventToWsEvent,
   cardRowToWsEvent,
   replayConnectionState,
+  registerTranscriptConsumer,
 } from './stream.js';
+import { tailTranscript } from './transcript.js';
 import type { ActionCard } from './store.js';
 import type { ChatEvent } from './transcript.js';
 import type { IncomingMessage } from 'http';
@@ -357,6 +359,48 @@ describe('dispatchUserTurn', () => {
 
   it('rejects with 404-like error if conversation not found', async () => {
     await expect(dispatchUserTurn('nonexistent', 'Hello', () => {})).rejects.toThrow(/not found/i);
+  });
+});
+
+describe('registerTranscriptConsumer (gateway-owned tail)', () => {
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+  });
+
+  it('a gateway consumer receives assistant lines with zero WS clients connected', async () => {
+    const convId = createConversation({ title: 'Phone DM', tmux_window: 'mock-session:1' });
+
+    // Capture the onEvent the tail is started with, and hand back a stop fn.
+    let emit: ((e: ChatEvent) => void) | null = null;
+    const stop = vi.fn();
+    vi.mocked(tailTranscript).mockImplementationOnce(async (_path, onEvent) => {
+      emit = onEvent;
+      return stop;
+    });
+
+    const received: ChatEvent[] = [];
+    const unregister = registerTranscriptConsumer(convId, '/fake/transcript.jsonl', (e) =>
+      received.push(e),
+    );
+
+    // Let ensureTail's await settle so `emit` is wired up.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(emit).not.toBeNull();
+
+    // The conductor emits an assistant reply and a turn-done boundary.
+    emit!({ type: 'assistant', text: 'Deployed. All green.', uuid: 'a1', timestamp: 't' });
+    emit!({ type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+
+    // Consumer saw both — no browser client needed.
+    expect(received.map((e) => e.type)).toEqual(['assistant', 'system']);
+    // And the assistant message was persisted once (tail-level persist).
+    expect(listMessages(convId)).toHaveLength(1);
+
+    // Unregistering the last consumer stops the tail.
+    unregister();
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });
 

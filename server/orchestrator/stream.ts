@@ -112,7 +112,10 @@ export type WsClientMessage = WsClientTurn | WsClientCardDecision;
 /** Callback type for pushing a serialized ws message to a client. */
 export type PushFn = (message: string) => void;
 
-// ─── Per-conversation client registry ────────────────────────────────────────
+// ─── Per-conversation client + consumer registry ─────────────────────────────
+
+/** A raw-ChatEvent consumer of a conversation's transcript (WS bridge or gateway). */
+export type ChatConsumer = (event: ChatEvent) => void;
 
 /**
  * Map of conversation_id → Set of active push functions.
@@ -120,16 +123,45 @@ export type PushFn = (message: string) => void;
  */
 const convClients = new Map<string, Set<PushFn>>();
 
+/**
+ * conversation_id → raw-ChatEvent consumers. Both the WS bridge and the gateway
+ * register here; the transcript tail is refcounted by this set (starts on the
+ * first consumer, stops on the last) so a phone DM with no dashboard open is
+ * still read by the gateway's consumer.
+ */
+const convConsumers = new Map<string, Set<ChatConsumer>>();
+
 /** Active transcript tail stop functions, keyed by conversation_id. */
 const convTails = new Map<string, StopFn>();
 
-function addClient(convId: string, push: PushFn): void {
+/** In-flight tail-start promises — dedupe concurrent registrations for one conv. */
+const convTailStarting = new Map<string, Promise<void>>();
+
+/** conversation_id → unregister fn for the shared WS-bridge consumer. */
+const convWsUnregister = new Map<string, () => void>();
+
+function addClient(convId: string, push: PushFn, transcriptPath: string | null): void {
   let set = convClients.get(convId);
   if (!set) {
     set = new Set();
     convClients.set(convId, set);
   }
   set.add(push);
+
+  // Register a single shared WS-bridge consumer for this conversation on the
+  // first client — it maps raw ChatEvents to ws events and fans them out to all
+  // connected clients. (One consumer per conv, not per client.)
+  if (transcriptPath && !convWsUnregister.has(convId)) {
+    const bridge: ChatConsumer = (chatEvent) => {
+      const wsEvent = chatEventToWsEvent(chatEvent);
+      if (!wsEvent) return;
+      const clients = convClients.get(convId);
+      if (!clients || clients.size === 0) return;
+      const msg = JSON.stringify(wsEvent);
+      for (const p of clients) p(msg);
+    };
+    convWsUnregister.set(convId, registerTranscriptConsumer(convId, transcriptPath, bridge));
+  }
 }
 
 function removeClient(convId: string, push: PushFn): void {
@@ -138,12 +170,11 @@ function removeClient(convId: string, push: PushFn): void {
   set.delete(push);
   if (set.size === 0) {
     convClients.delete(convId);
-    // Stop the transcript tail when no clients are connected
-    const stop = convTails.get(convId);
-    if (stop) {
-      stop();
-      convTails.delete(convId);
-      logger.debug({ conversation_id: convId }, 'stream: transcript tail stopped (no clients)');
+    // Drop the WS bridge; the tail keeps running iff the gateway still consumes.
+    const unreg = convWsUnregister.get(convId);
+    if (unreg) {
+      unreg();
+      convWsUnregister.delete(convId);
     }
   }
 }
@@ -309,56 +340,114 @@ export function replayConnectionState(convId: string, push: PushFn): void {
   }
 }
 
-// ─── startTranscriptTail ──────────────────────────────────────────────────────
+// ─── Transcript tail (consumer-refcounted) ───────────────────────────────────
 
 /**
- * Start tailing the transcript for a conversation (idempotent — if already
- * tailing, does nothing). Each ChatEvent is normalized and broadcast to all
- * connected ws clients, and message events are persisted to the DB.
+ * Persist a user/assistant text ChatEvent to `orchestrator_messages` — ONCE per
+ * conversation, at the tail level. Consumers (WS bridge, gateway) are
+ * delivery-only, so two of them watching the same conversation never
+ * double-persist. Empty-text lines (pure tool_use / tool_result carriers) are
+ * skipped, matching `chatEventToWsEvent`.
  */
-async function startTranscriptTail(convId: string, transcriptPath: string): Promise<void> {
-  if (convTails.has(convId)) return; // Already tailing
+function persistChatEvent(convId: string, event: ChatEvent): void {
+  if (event.type !== 'user' && event.type !== 'assistant') return;
+  if (!event.text.trim()) return;
+  try {
+    const contentBlocks = [{ type: 'text', text: event.text }];
+    appendMessage({
+      conversation_id: convId,
+      role: event.type,
+      content: JSON.stringify(contentBlocks),
+    });
+  } catch (err) {
+    logger.warn({ conversation_id: convId, err }, 'stream: failed to persist message');
+  }
+}
 
-  logger.info(
-    { conversation_id: convId, transcript_path: transcriptPath },
-    'stream: starting transcript tail',
-  );
+/**
+ * Ensure a transcript tail is running for a conversation (idempotent, and
+ * deduped across concurrent callers). The tail persists message events once and
+ * broadcasts every raw ChatEvent to all registered consumers.
+ */
+async function ensureTail(convId: string, transcriptPath: string): Promise<void> {
+  if (convTails.has(convId)) return;
+  const inflight = convTailStarting.get(convId);
+  if (inflight) return inflight;
 
-  const stop = await tailTranscript(
-    transcriptPath,
-    (chatEvent) => {
-      const wsEvent = chatEventToWsEvent(chatEvent);
-      if (!wsEvent) return;
-
-      // Broadcast to all connected clients
-      const set = convClients.get(convId);
-      if (!set || set.size === 0) return;
-
-      const msg = JSON.stringify(wsEvent);
-
-      // Persist message events
-      if (wsEvent.type === 'message') {
-        try {
-          const contentBlocks = [{ type: 'text', text: wsEvent.text }];
-          appendMessage({
-            conversation_id: convId,
-            role: wsEvent.role,
-            content: JSON.stringify(contentBlocks),
-          });
-        } catch (err) {
-          logger.warn({ conversation_id: convId, err }, 'stream: failed to persist message');
+  const start = (async () => {
+    logger.info(
+      { conversation_id: convId, transcript_path: transcriptPath },
+      'stream: starting transcript tail',
+    );
+    const stop = await tailTranscript(
+      transcriptPath,
+      (chatEvent) => {
+        persistChatEvent(convId, chatEvent);
+        const set = convConsumers.get(convId);
+        if (!set) return;
+        for (const consumer of set) {
+          try {
+            consumer(chatEvent);
+          } catch (err) {
+            logger.warn({ conversation_id: convId, err }, 'stream: transcript consumer threw');
+          }
         }
-      }
+      },
+      { startAtEnd: true },
+    );
+    // All consumers may have unregistered while we awaited — honor teardown.
+    if (convConsumers.get(convId)?.size) {
+      convTails.set(convId, stop);
+      logger.debug({ conversation_id: convId }, 'stream: transcript tail started');
+    } else {
+      stop();
+    }
+  })();
 
-      for (const push of set) {
-        push(msg);
-      }
-    },
-    { startAtEnd: true },
+  convTailStarting.set(convId, start);
+  try {
+    await start;
+  } finally {
+    convTailStarting.delete(convId);
+  }
+}
+
+/**
+ * Register a raw-ChatEvent consumer for a conversation, starting the transcript
+ * tail if it isn't running. Returns an unregister fn; the tail stops when the
+ * last consumer unregisters. This is the gateway's entry point — it lets a
+ * non-WS owner receive assistant lines and turn-done boundaries with no browser
+ * client connected.
+ */
+export function registerTranscriptConsumer(
+  convId: string,
+  transcriptPath: string,
+  consumer: ChatConsumer,
+): () => void {
+  let set = convConsumers.get(convId);
+  if (!set) {
+    set = new Set();
+    convConsumers.set(convId, set);
+  }
+  set.add(consumer);
+  void ensureTail(convId, transcriptPath).catch((err) =>
+    logger.warn({ conversation_id: convId, err }, 'stream: failed to start transcript tail'),
   );
 
-  convTails.set(convId, stop);
-  logger.debug({ conversation_id: convId }, 'stream: transcript tail started');
+  return () => {
+    const s = convConsumers.get(convId);
+    if (!s) return;
+    s.delete(consumer);
+    if (s.size === 0) {
+      convConsumers.delete(convId);
+      const stop = convTails.get(convId);
+      if (stop) {
+        stop();
+        convTails.delete(convId);
+        logger.debug({ conversation_id: convId }, 'stream: transcript tail stopped (no consumers)');
+      }
+    }
+  };
 }
 
 // ─── dispatchUserTurn ─────────────────────────────────────────────────────────
@@ -437,8 +526,6 @@ export function handleOrchestratorUpgrade(
       }
     };
 
-    addClient(convId, push);
-
     // Send conversation history on connect
     const conv = getConversation(convId);
     if (!conv) {
@@ -447,15 +534,11 @@ export function handleOrchestratorUpgrade(
       return;
     }
 
+    // Register the client (and, on the first client, the shared WS bridge + tail).
+    addClient(convId, push, conv.transcript_path);
+
     // Replay persisted messages AND pending cards to the (re)connecting client.
     replayConnectionState(convId, push);
-
-    // Start tailing the transcript if we have a path
-    if (conv.transcript_path) {
-      startTranscriptTail(convId, conv.transcript_path).catch((err) => {
-        logger.warn({ conversation_id: convId, err }, 'stream: failed to start transcript tail');
-      });
-    }
 
     ws.on('message', (data) => {
       let msg: WsClientMessage;
@@ -565,5 +648,8 @@ export function cleanupOrchestratorClients(): void {
     logger.debug({ conversation_id: convId }, 'stream: transcript tail stopped (cleanup)');
   }
   convTails.clear();
+  convTailStarting.clear();
   convClients.clear();
+  convConsumers.clear();
+  convWsUnregister.clear();
 }

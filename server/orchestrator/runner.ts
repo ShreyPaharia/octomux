@@ -138,6 +138,7 @@ function writeOrchestratorsettings(convId: string): string {
         'mcp__octomux__pull_linear_issue',
         'mcp__octomux__recent_repos',
         'mcp__octomux__default_branch',
+        'mcp__octomux__search_learnings',
         // MCP write tools (SHR-142) — execute immediately, no Bash, no gate.
         'mcp__octomux__create_task',
         'mcp__octomux__send_message',
@@ -257,6 +258,23 @@ function orchestratorSessionName(convId: string): string {
   return `octomux-orch-${convId}`;
 }
 
+/**
+ * Build the shell command tmux runs to launch the conductor.
+ *
+ * On claude exit we DO NOT drop to an interactive shell (`exec $SHELL -i`): a
+ * crashed conductor would then execute any `send-keys` chat text as a shell
+ * command (the security review's "chat text run as bash" hazard). Instead we
+ * hold non-interactively — `read -r _` blocks consuming input as data, never a
+ * command — so a dead pane can never run keystrokes. Liveness
+ * (`isConversationSessionAlive`) then sees the shell (not `node`/`claude`) and
+ * `sendTurn` resumes rather than pasting into a corpse.
+ */
+function buildConductorStartupCmd(claudeCmd: string): string {
+  const shell = process.env.SHELL || '/bin/sh';
+  const script = `${claudeCmd}; echo CONDUCTOR_EXITED; read -r _`;
+  return `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -305,9 +323,7 @@ export async function startConversation(
   });
 
   const claudeCmd = harness.buildLaunchCommand({ sessionId, flags });
-  const shell = process.env.SHELL || '/bin/sh';
-  const script = `${claudeCmd}; exec ${shell} -i`;
-  const startupCmd = `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
+  const startupCmd = buildConductorStartupCmd(claudeCmd);
 
   await execTmux(['new-session', '-d', '-s', sessionName, '-c', cwd, startupCmd]);
   await execTmux(['set-option', '-t', sessionName, 'aggressive-resize', 'on']);
@@ -390,9 +406,7 @@ export async function resumeConversation(
     });
   }
 
-  const shell = process.env.SHELL || '/bin/sh';
-  const script = `${claudeCmd}; exec ${shell} -i`;
-  const startupCmd = `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
+  const startupCmd = buildConductorStartupCmd(claudeCmd);
 
   await execTmux(['new-session', '-d', '-s', sessionName, '-c', cwd, startupCmd]);
   await execTmux(['set-option', '-t', sessionName, 'aggressive-resize', 'on']);
@@ -470,6 +484,53 @@ export async function stopConversation(convId: string): Promise<void> {
   updateConversation(convId, { status: 'stopped', tmux_window: null });
 }
 
+// ─── Single-writer FIFO per conversation ────────────────────────────────────
+
+/**
+ * Per-conversation write chain. Every writer into the pane (a web user turn, a
+ * gateway/Telegram turn) goes through `sendTurn`, which serializes on this chain
+ * so two turns can never interleave their paste/Enter keystrokes into one pane
+ * (which would submit garbled input). One conversation = one pane = one writer
+ * at a time; distinct conversations run concurrently.
+ */
+const convWriteChains = new Map<string, Promise<void>>();
+
+function withConvWriteLock<T>(convId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = convWriteChains.get(convId) ?? Promise.resolve();
+  const run = prev.catch(() => undefined).then(fn);
+  // The next writer waits for this one regardless of success/failure.
+  convWriteChains.set(
+    convId,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+/**
+ * Interrupt the conductor's in-flight turn by sending the TUI interrupt key
+ * (Escape) to the pane. Used by the gateway turn policy to stop-and-merge when a
+ * new inbound message arrives mid-turn (the user asked for "stop and push the
+ * new message if not idle"). No-op if the session isn't alive.
+ *
+ * Serialized on the same write chain as `sendTurn`, so an interrupt can't race a
+ * paste into the same pane.
+ */
+export async function interruptTurn(convId: string): Promise<void> {
+  const conv = getConversation(convId);
+  if (!conv || !(await isConversationSessionAlive(conv)) || !conv.tmux_window) return;
+  const target = conv.tmux_window;
+  await withConvWriteLock(convId, async () => {
+    await execTmux(['send-keys', '-t', target, 'Escape']);
+    logger.debug(
+      { conversation_id: convId, operation: 'interruptTurn' },
+      'interruptTurn: Escape sent',
+    );
+  });
+}
+
 /**
  * Send a user turn into a live orchestrator conversation via hardened send-keys.
  *
@@ -478,9 +539,14 @@ export async function stopConversation(convId: string): Promise<void> {
  *  2. Poll `capture-pane` until the text appears in the pane buffer (or timeout).
  *  3. Send `Enter` to submit.
  *
- * This replaces the blind fixed-50ms sleep from the original `sendMessageToAgent`.
+ * The whole operation (including a transparent resume of a dead session) runs
+ * under the per-conversation write lock so concurrent turns serialize.
  */
 export async function sendTurn(convId: string, text: string): Promise<void> {
+  return withConvWriteLock(convId, () => deliverTurn(convId, text));
+}
+
+async function deliverTurn(convId: string, text: string): Promise<void> {
   let conv = getConversation(convId);
   if (!conv) {
     throw new Error(`orchestrator runner: conversation ${convId} not found`);
@@ -536,17 +602,29 @@ export async function sendTurn(convId: string, text: string): Promise<void> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Whether the conversation's tmux session is currently alive. False when there's
- * no recorded window, or `tmux has-session` reports the session is gone (the
- * server restarted, the session was killed, or claude exited).
+ * Whether the conductor's `claude` process is currently alive in the pane —
+ * NOT merely "the tmux session exists."
+ *
+ * `has-session` is true even when claude has crashed and the pane fell back to
+ * the holding shell. Pasting a chat turn into that shell would run it as a
+ * command, so liveness must mean the pane's foreground process is claude
+ * (reported as `node` — the CLI is a node process — or `claude`). Anything else
+ * (the shell, `read`) means dead → `sendTurn` resumes instead of pasting.
+ *
+ * A failed `display-message` (no such session) also means not-alive.
  */
 async function isConversationSessionAlive(conv: OrchestratorConversation): Promise<boolean> {
   if (!conv.tmux_window) return false;
-  const session = conv.tmux_window.split(':')[0];
-  if (!session) return false;
   try {
-    await execTmux(['has-session', '-t', session]);
-    return true;
+    const { stdout } = await execTmux([
+      'display-message',
+      '-t',
+      conv.tmux_window,
+      '-p',
+      '#{pane_current_command}',
+    ]);
+    const cmd = stdout.trim().toLowerCase();
+    return cmd === 'node' || cmd === 'claude';
   } catch {
     return false;
   }
