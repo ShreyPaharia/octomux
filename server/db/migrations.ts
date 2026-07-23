@@ -592,17 +592,6 @@ export function runMigrations(instance: Database.Database): void {
       published_at TIMESTAMP NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_published_reviews_task ON published_reviews(task_id);
-
-    CREATE TABLE IF NOT EXISTS review_learnings (
-      id TEXT PRIMARY KEY,
-      repo_path TEXT NOT NULL,
-      why TEXT NOT NULL,
-      created_from_comment_id TEXT REFERENCES inline_comments(id) ON DELETE SET NULL,
-      usage_count INTEGER NOT NULL DEFAULT 0,
-      last_used_at TIMESTAMP,
-      created_at TIMESTAMP NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_review_learnings_repo ON review_learnings(repo_path);
   `);
 
   const reviewRunCols = columnsOf(instance, 'review_runs');
@@ -923,4 +912,45 @@ export function runMigrations(instance: Database.Database): void {
   // ── Link scheduled runs back to their schedule (2026-07-18, P5) ──────────
   const taskColsForSchedule = columnsOf(instance, 'tasks');
   addColumn(instance, 'tasks', 'schedule_id', 'schedule_id TEXT', taskColsForSchedule);
+
+  // ── Agent learnings store (2026-07-23, §12 P2) ───────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS agent_learnings (
+      id            TEXT PRIMARY KEY,
+      repo_path     TEXT NOT NULL,
+      lane          TEXT NOT NULL,          -- 'shared' | 'loop:<task-id>' | 'schedule:<id>'
+      trigger       TEXT NOT NULL,
+      lesson        TEXT NOT NULL,
+      evidence      TEXT,
+      source_run_id TEXT,
+      source_commit TEXT,
+      usage_count   INTEGER NOT NULL DEFAULT 0,
+      last_used_at  TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_learnings_read ON agent_learnings(repo_path, lane);
+  `);
+  const loopIterCols = columnsOf(instance, 'loop_iterations');
+  addColumn(
+    instance,
+    'loop_iterations',
+    'learnings_seeded',
+    'learnings_seeded INTEGER',
+    loopIterCols,
+  );
+
+  // ── Fold review_learnings into agent_learnings (2026-07-23, review lane) ─
+  // PR-review learnings now live in agent_learnings (lane='review'). Forward-only drop.
+  instance.exec('DROP TABLE IF EXISTS review_learnings;');
+
+  // ── Soft-supersede for agent_learnings (2026-07-23, §12 P2 Task 10) ──────
+  const agentLearningsCols = columnsOf(instance, 'agent_learnings');
+  addColumn(instance, 'agent_learnings', 'superseded_at', 'superseded_at TEXT', agentLearningsCols);
+  addColumn(
+    instance,
+    'agent_learnings',
+    'superseded_reason',
+    'superseded_reason TEXT',
+    agentLearningsCols,
+  );
 }

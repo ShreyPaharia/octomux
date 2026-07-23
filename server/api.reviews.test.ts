@@ -221,8 +221,8 @@ describe('GET /api/repos/:repoPath/learnings', () => {
     app = createApp();
     const db = getDb();
     db.prepare(
-      `INSERT INTO review_learnings (id, repo_path, why)
-       VALUES ('l1', '/repos/foo', 'avoid bare exceptions')`,
+      `INSERT INTO agent_learnings (id, repo_path, lane, trigger, lesson, evidence)
+       VALUES ('l1', '/repos/foo', 'review', 'PR review learning', 'avoid bare exceptions', 'c1')`,
     ).run();
   });
 
@@ -231,6 +231,7 @@ describe('GET /api/repos/:repoPath/learnings', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].why).toBe('avoid bare exceptions');
+    expect(res.body[0].created_from_comment_id).toBe('c1');
   });
 
   it('returns empty array for unknown repo', async () => {
@@ -248,15 +249,15 @@ describe('DELETE /api/learnings/:id', () => {
     app = createApp();
     const db = getDb();
     db.prepare(
-      `INSERT INTO review_learnings (id, repo_path, why)
-       VALUES ('l1', '/repos/foo', 'avoid bare exceptions')`,
+      `INSERT INTO agent_learnings (id, repo_path, lane, trigger, lesson, evidence)
+       VALUES ('l1', '/repos/foo', 'review', 'PR review learning', 'avoid bare exceptions', 'review')`,
     ).run();
   });
 
   it('deletes a learning and returns 204', async () => {
     const res = await request(app).delete('/api/learnings/l1');
     expect(res.status).toBe(204);
-    const remaining = getDb().prepare(`SELECT * FROM review_learnings WHERE id = 'l1'`).all();
+    const remaining = getDb().prepare(`SELECT * FROM agent_learnings WHERE id = 'l1'`).all();
     expect(remaining).toHaveLength(0);
   });
 

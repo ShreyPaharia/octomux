@@ -129,6 +129,17 @@ describe('repositories/tasks', () => {
       >;
       expect(row.schedule_id).toBeNull();
     });
+
+    // Regression: SELECT_TASK_SQL used to omit t.schedule_id, so every reader of
+    // a getTask()-shaped Task (laneFor in agent-learnings.ts, respawn-agent.ts,
+    // start-task.ts, etc.) saw `schedule_id: undefined` even for a task the
+    // schedule poller stamped — silently routing scheduled agents' learnings
+    // into a fresh loop:<task-id> lane every cron firing instead of the shared
+    // schedule:<id> lane (see plans/2026-07-22-agent-learnings-store.md Task 5).
+    it('getTask surfaces schedule_id on the returned Task', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      expect(getTask(id)!.schedule_id).toBe('sched-1');
+    });
   });
 
   // ─── listTasks ───────────────────────────────────────────────────────────────

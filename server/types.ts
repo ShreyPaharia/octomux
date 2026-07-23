@@ -86,6 +86,9 @@ export interface PublishedReview {
   published_at: string;
 }
 
+// Wire shape returned by GET /api/repos/:repoPath/learnings (frontend Settings > Reviews panel).
+// No longer backed by its own table — server/routes/learnings.ts maps it from the
+// agent_learnings 'review' lane (see spec/agent-learnings-store.md Task 9).
 export interface ReviewLearning {
   id: string;
   repo_path: string;
@@ -94,6 +97,22 @@ export interface ReviewLearning {
   usage_count: number;
   last_used_at: string | null;
   created_at: string;
+}
+
+export interface AgentLearning {
+  id: string;
+  repo_path: string;
+  lane: string;
+  trigger: string;
+  lesson: string;
+  evidence: string | null;
+  source_run_id: string | null;
+  source_commit: string | null;
+  usage_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  superseded_at: string | null;
+  superseded_reason: string | null;
 }
 
 export type CommentStatus = 'draft' | 'accepted' | 'rejected' | 'published' | 'stale';
