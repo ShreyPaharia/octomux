@@ -160,6 +160,7 @@ function writeOrchestratorsettings(convId: string): string {
         'mcp__octomux__get_task',
         'mcp__octomux__monitor_status',
         'mcp__octomux__get_task_output',
+        'mcp__octomux__get_agent_output',
         'mcp__octomux__pull_linear_issue',
         'mcp__octomux__recent_repos',
         'mcp__octomux__default_branch',

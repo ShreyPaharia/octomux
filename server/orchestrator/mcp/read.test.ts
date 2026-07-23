@@ -8,19 +8,35 @@
  *
  * Tests call the handler functions directly; no MCP transport is exercised here.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb, insertTask, insertAgent } from '../../test-helpers.js';
 import { getDb } from '../../db.js';
+
+// Controllable tmux mock for get_agent_output (hoisted so the factory can close over it).
+const tmuxState = vi.hoisted(() => ({ hasSession: true, capture: '' }));
+vi.mock('../../tmux-bin.js', () => ({
+  execTmux: vi.fn(async (args: string[]) => {
+    if (args.includes('has-session')) {
+      if (!tmuxState.hasSession) throw new Error("can't find session");
+      return { stdout: '', stderr: '' };
+    }
+    if (args.includes('capture-pane')) return { stdout: tmuxState.capture, stderr: '' };
+    return { stdout: '', stderr: '' };
+  }),
+}));
+
 import {
   handleListTasks,
   handleGetTask,
   handleMonitorStatus,
   handleGetTaskOutput,
+  handleGetAgentOutput,
   handleRecentRepos,
   handleDefaultBranch,
   handleSearchLearnings,
 } from './read.js';
 import { upsertManagedTask } from '../store.js';
+import { setCurrentSummary } from '../../repositories/index.js';
 import { addLearning, SHARED_LANE } from '../../repositories/agent-learnings.js';
 import { POLICY_ONLY_COMMANDS } from '../command-registry.js';
 
@@ -135,6 +151,79 @@ describe('orchestrator mcp read tools', () => {
       expect(result!.agent_count).toBe(2);
       // Must not include full agent rows
       expect(result).not.toHaveProperty('agents');
+    });
+
+    it('surfaces the managed phase (distinguishes paused-at-gate from working)', () => {
+      const db = getDb();
+      insertTask(db, { id: 'task-gt-03', title: 'Gated task', runtime_state: 'running' });
+      db.prepare(
+        `INSERT INTO orchestrator_conversations (id, title) VALUES ('conv-gt', 'c')`,
+      ).run();
+      upsertManagedTask({
+        conversation_id: 'conv-gt',
+        task_id: 'task-gt-03',
+        phase: 'awaiting_approval',
+      });
+
+      const result = handleGetTask({ task_id: 'task-gt-03' });
+      // runtime_state says 'running', but phase reveals it's paused for approval.
+      expect(result!.runtime_state).toBe('running');
+      expect(result!.phase).toBe('awaiting_approval');
+    });
+
+    it('phase is null for a non-managed task and includes current_summary', () => {
+      const db = getDb();
+      insertTask(db, { id: 'task-gt-04', title: 'Plain task' });
+      setCurrentSummary('task-gt-04', 'Editing auth.ts');
+
+      const result = handleGetTask({ task_id: 'task-gt-04' });
+      expect(result!.phase).toBeNull();
+      expect(result!.current_summary).toBe('Editing auth.ts');
+      expect(result!.current_summary_updated_at).not.toBeNull();
+    });
+  });
+
+  // ─── get_agent_output ──────────────────────────────────────────────────────
+  describe('handleGetAgentOutput', () => {
+    beforeEach(() => {
+      tmuxState.hasSession = true;
+      tmuxState.capture = '';
+    });
+
+    it('returns the tail of the live agent terminal', async () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-ao-01',
+        title: 'Live task',
+        tmux_session: 'octomux-agent-task-ao-01',
+      });
+      insertAgent(db, { id: 'agent-ao-01', task_id: 'task-ao-01' });
+      tmuxState.hasSession = true;
+      tmuxState.capture = 'building...\n\nawaiting plan approval to implement\n';
+
+      const result = await handleGetAgentOutput({ task_id: 'task-ao-01' });
+      expect(result.live).toBe(true);
+      expect(result.agent_count).toBe(1);
+      expect(result.output).toContain('awaiting plan approval to implement');
+      // blank lines are dropped
+      expect(result.output).not.toMatch(/\n\n/);
+    });
+
+    it('reports not-live when the agent session is gone (stopped)', async () => {
+      const db = getDb();
+      insertTask(db, { id: 'task-ao-02', title: 'Stopped task' });
+      tmuxState.hasSession = false;
+
+      const result = await handleGetAgentOutput({ task_id: 'task-ao-02' });
+      expect(result.live).toBe(false);
+      expect(result.output).toBe('');
+      expect(result.note).toMatch(/stopped|not started/i);
+    });
+
+    it('returns a note for an unknown task', async () => {
+      const result = await handleGetAgentOutput({ task_id: 'nope' });
+      expect(result.live).toBe(false);
+      expect(result.note).toMatch(/not found/i);
     });
   });
 
