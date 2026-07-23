@@ -119,6 +119,7 @@ export const POLICY_ONLY_COMMANDS: PolicyOnlyCommand[] = [
   { mcpName: 'monitor_status', tier: 'auto' },
   { mcpName: 'get_task_output', tier: 'auto' },
   { mcpName: 'pull_linear_issue', tier: 'auto' },
+  { mcpName: 'search_learnings', tier: 'auto' },
   { cliSubcommand: 'recent-repos', tier: 'auto' },
   { cliSubcommand: 'default-branch', tier: 'auto' },
   { cliSubcommand: 'list-skills', tier: 'auto' },

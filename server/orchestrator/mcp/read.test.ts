@@ -18,8 +18,11 @@ import {
   handleGetTaskOutput,
   handleRecentRepos,
   handleDefaultBranch,
+  handleSearchLearnings,
 } from './read.js';
 import { upsertManagedTask } from '../store.js';
+import { addLearning, SHARED_LANE } from '../../repositories/agent-learnings.js';
+import { POLICY_ONLY_COMMANDS } from '../command-registry.js';
 
 describe('orchestrator mcp read tools', () => {
   beforeEach(() => {
@@ -462,6 +465,70 @@ describe('orchestrator mcp read tools', () => {
       // A directory that exists but is not a git repo
       const result = await handleDefaultBranch({ repo_path: '/tmp' });
       expect(result).toEqual({ branch: 'main' });
+    });
+  });
+
+  // ─── search_learnings ──────────────────────────────────────────────────────
+
+  describe('handleSearchLearnings', () => {
+    it('returns matching shared-lane rows as lean summaries', () => {
+      addLearning({
+        repo_path: '/tmp/repo-a',
+        lane: SHARED_LANE,
+        trigger: 'retry',
+        lesson: 'hedging retry lives in retry.ts',
+        evidence: 'retry.ts',
+      });
+      addLearning({
+        repo_path: '/tmp/repo-b',
+        lane: SHARED_LANE,
+        trigger: 'tests',
+        lesson: 'vitest needs default: mocked',
+        evidence: 'setup.ts',
+      });
+
+      const result = handleSearchLearnings({ query: 'retry' });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({
+        trigger: 'retry',
+        lesson: 'hedging retry lives in retry.ts',
+        evidence: 'retry.ts',
+        repo_path: '/tmp/repo-a',
+      });
+      // Lean shape only — no id, usage_count, or other internal fields.
+      expect(result[0]).not.toHaveProperty('id');
+      expect(result[0]).not.toHaveProperty('usage_count');
+    });
+
+    it('filters by repo when given', () => {
+      addLearning({
+        repo_path: '/tmp/repo-a',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'in a',
+        evidence: null,
+      });
+      addLearning({
+        repo_path: '/tmp/repo-b',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'in b',
+        evidence: null,
+      });
+
+      const result = handleSearchLearnings({ query: 'in', repo: '/tmp/repo-a' });
+      expect(result.map((r) => r.lesson)).toEqual(['in a']);
+    });
+
+    it('returns empty array when nothing matches', () => {
+      const result = handleSearchLearnings({ query: 'nonexistent-keyword' });
+      expect(result).toEqual([]);
+    });
+
+    it('is registered as an auto-approved (policy-only) tool', () => {
+      const entry = POLICY_ONLY_COMMANDS.find((c) => c.mcpName === 'search_learnings');
+      expect(entry).toBeDefined();
+      expect(entry!.tier).toBe('auto');
     });
   });
 });

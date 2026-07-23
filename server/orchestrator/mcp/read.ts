@@ -7,11 +7,12 @@
  * **lean summaries and pointers only** — never full row dumps, file bodies,
  * or diff contents. The orchestrator must hold pointers, not contents (§1, §8).
  *
- * Four tools:
- *   list_tasks      — paginated/filtered task list (id, title, statuses only)
- *   get_task        — lean task summary + agent_count pointer
- *   monitor_status  — cross-task rollup: counts + needs_attention list
- *   get_task_output — artifact pointers from managed_tasks.artifacts JSON
+ * Tools:
+ *   list_tasks       — paginated/filtered task list (id, title, statuses only)
+ *   get_task         — lean task summary + agent_count pointer
+ *   monitor_status   — cross-task rollup: counts + needs_attention list
+ *   get_task_output  — artifact pointers from managed_tasks.artifacts JSON
+ *   search_learnings — shared-lane agent_learnings recall (lean rows only)
  *
  * These handlers are called both by the MCP server (server.ts) and by tests
  * directly so they are exported as plain functions (no transport coupling).
@@ -28,6 +29,7 @@ import {
   listPendingPromptsByTasks,
   listRecentRepoPaths,
 } from '../../repositories/index.js';
+import { searchShared } from '../../repositories/agent-learnings.js';
 import { getManagedTask, countManagedTasksByPhase, eventsSince } from '../store.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';
@@ -368,4 +370,39 @@ export async function handleDefaultBranch(input: DefaultBranchInput): Promise<De
     logger.debug({ operation: 'default_branch', repo_path }, 'default_branch fallback to main');
     return { branch: 'main' };
   }
+}
+
+// ─── search_learnings ─────────────────────────────────────────────────────────
+
+export interface SearchLearningsInput {
+  query: string;
+  repo?: string;
+}
+
+/** Lean learning row — pointers only, never the full agent_learnings row. */
+export interface LearningSummary {
+  trigger: string;
+  lesson: string;
+  evidence: string | null;
+  repo_path: string;
+}
+
+/**
+ * Search the shared-lane agent_learnings store for a recall query (spec §12
+ * agent-learnings; gateway Task 2). Cross-repo unless `repo` is given.
+ * Returns lean summaries only — never the full row (usage_count, ids, etc.).
+ */
+export function handleSearchLearnings(input: SearchLearningsInput): LearningSummary[] {
+  const { query, repo } = input;
+
+  logger.debug({ operation: 'search_learnings', query, repo }, 'search_learnings called');
+
+  const rows = searchShared(query, repo ? { repo } : {});
+
+  return rows.map((r) => ({
+    trigger: r.trigger,
+    lesson: r.lesson,
+    evidence: r.evidence,
+    repo_path: r.repo_path,
+  }));
 }

@@ -9,6 +9,7 @@
  *   monitor_status     — cross-task rollup + needs_attention list
  *   get_task_output    — artifact pointers from managed_tasks (plan/diff_url/tests)
  *   pull_linear_issue  — lean Linear issue summary (pointer to ticket; seed §12 Phase 4)
+ *   search_learnings   — shared-lane agent_learnings recall (lean rows; gateway Task 2)
  *
  * All tools are **read-only**. Write actions go through the Bash tool +
  * PreToolUse gate (§5 of the spec). The server runs over stdio so it can be
@@ -30,6 +31,7 @@ import {
   handleGetTaskOutput,
   handleRecentRepos,
   handleDefaultBranch,
+  handleSearchLearnings,
 } from './read.js';
 import { handlePullLinearIssue } from './seed.js';
 import {
@@ -242,6 +244,33 @@ export function createOctomuxMcpServer(): McpServer {
         'MCP default_branch invoked',
       );
       const result = await handleDefaultBranch(args);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── search_learnings ────────────────────────────────────────────────────────
+  server.registerTool(
+    'search_learnings',
+    {
+      description:
+        'Search past agent learnings (shared lane) by trigger/lesson keyword. ' +
+        'Cross-repo unless repo is given. ' +
+        'Returns lean rows [{trigger, lesson, evidence, repo_path}] — never full learning rows.',
+      inputSchema: {
+        query: z.string().describe('Keyword to match against trigger/lesson (LIKE search)'),
+        repo: z.string().optional().describe('Restrict to this repo_path (default: all repos)'),
+      },
+    },
+    (args) => {
+      logger.debug({ operation: 'search_learnings', args }, 'MCP search_learnings invoked');
+      const result = handleSearchLearnings(args);
       return {
         content: [
           {

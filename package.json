@@ -102,6 +102,7 @@
     "croner": "^10.0.1",
     "express": "^5.0.1",
     "fix-path": "^4.0.0",
+    "grammy": "^1.45.1",
     "js-yaml": "^4.2.0",
     "monaco-editor": "^0.55.1",
     "nanoid": "^5.0.9",
