@@ -100,6 +100,7 @@
     "commander": "^14.0.3",
     "compression": "^1.8.1",
     "croner": "^10.0.1",
+    "dotenv": "^17.4.2",
     "express": "^5.0.1",
     "fix-path": "^4.0.0",
     "grammy": "^1.45.1",

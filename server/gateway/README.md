@@ -31,17 +31,17 @@ DM [@userinfobot](https://t.me/userinfobot) (or similar) — it replies with you
 
 ## 3. Configure env and start
 
-```bash
-export OCTOMUX_GATEWAY_TELEGRAM_TOKEN="123456789:AAE...your-bot-token"
-export OCTOMUX_GATEWAY_TELEGRAM_ALLOW="555123456"   # CSV of allowed numeric ids
-# Optional: the repo the assistant's conductor operates from (defaults to cwd)
-export OCTOMUX_GATEWAY_CWD="/path/to/your/repo"
+Put these in a `.env` in the directory you launch octomux from (it's auto-loaded at boot), or
+export them into the environment:
 
-octomux start
+```bash
+OCTOMUX_GATEWAY_TELEGRAM_TOKEN=123456789:AAE...your-bot-token
+OCTOMUX_GATEWAY_TELEGRAM_ALLOW=555123456   # CSV of allowed numeric ids
+OCTOMUX_GATEWAY_CWD=/path/to/your/repo     # optional: conductor's working repo (defaults to cwd)
 ```
 
-On boot you'll see `gateway: Telegram gateway started` in the logs. No token → the gateway stays
-off and octomux runs normally.
+Then `octomux start`. On boot you'll see `gateway: Telegram gateway started` in the logs. No token →
+the gateway stays off and octomux runs normally. (Real exported env vars win over `.env`.)
 
 The allowlist can also live in `~/.octomux/gateway-allowlist.json`:
 
