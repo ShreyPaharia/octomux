@@ -268,6 +268,29 @@ export function OrchestratorIcon({ color }: { color: string }) {
   );
 }
 
+export function AgentsIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <rect x="3" y="8" width="18" height="12" rx="2" />
+      <path d="M12 8V4M8 4h8" />
+      <circle cx="8.5" cy="14" r="1" fill={color} stroke="none" />
+      <circle cx="15.5" cy="14" r="1" fill={color} stroke="none" />
+      <path d="M9 18h6" />
+    </svg>
+  );
+}
+
 export function LoopsIcon({ color }: { color: string }) {
   return (
     <svg

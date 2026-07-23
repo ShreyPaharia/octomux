@@ -316,6 +316,13 @@ export interface StartConversationOpts {
   claudeSessionId?: string;
   /** Additional claude CLI flags. */
   extraFlags?: string;
+  /**
+   * Overrides the default `ORCHESTRATOR_SYSTEM_PROMPT` for this conversation's
+   * conductor session. Used by the Agents feature: an `agent_id`-tagged
+   * conversation is launched with its agent's configured system prompt.
+   * Omitting it keeps today's orchestrator behaviour unchanged.
+   */
+  systemPrompt?: string;
 }
 
 /**
@@ -346,6 +353,7 @@ export async function startConversation(
     settingsPath,
     mcpConfigPath,
     extraFlags: opts.extraFlags,
+    systemPrompt: opts.systemPrompt,
   });
 
   const claudeCmd = harness.buildLaunchCommand({ sessionId, flags });
@@ -415,6 +423,7 @@ export async function resumeConversation(
     settingsPath,
     mcpConfigPath,
     extraFlags: opts.extraFlags,
+    systemPrompt: opts.systemPrompt,
   });
 
   const claudeSessionId = opts.claudeSessionId ?? conv.claude_session_id;
@@ -691,8 +700,12 @@ const HOLDING_SHELL_COMMANDS = new Set([
  * booting/holding shell (or empty) is treated as a live conductor.
  *
  * A failed `display-message` (no such session) also means not-alive.
+ *
+ * Exported so callers outside this module (e.g. the Agents-feature status
+ * helper in `routes/agents-crud.ts`) reuse this one tmux probe instead of
+ * re-implementing pane-liveness detection.
  */
-async function isConversationSessionAlive(conv: OrchestratorConversation): Promise<boolean> {
+export async function isConversationSessionAlive(conv: OrchestratorConversation): Promise<boolean> {
   if (!conv.tmux_window) return false;
   try {
     const { stdout } = await execTmux([

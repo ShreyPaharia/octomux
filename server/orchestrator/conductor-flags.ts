@@ -38,6 +38,13 @@ export interface OrchestratorConductorFlagsOpts {
   /** Path to the conductor mcp-config.json (octomux read tools), or null. */
   mcpConfigPath?: string | null;
   extraFlags?: string;
+  /**
+   * Overrides `ORCHESTRATOR_SYSTEM_PROMPT` in `--append-system-prompt`. Used
+   * by the Agents feature so a long-running agent's session runs with its own
+   * configured prompt. Defaults to `ORCHESTRATOR_SYSTEM_PROMPT` — omitting
+   * this must produce byte-identical flags for existing orchestrator conversations.
+   */
+  systemPrompt?: string;
 }
 
 /**
@@ -52,12 +59,13 @@ export function buildOrchestratorConductorFlags({
   settingsPath,
   mcpConfigPath,
   extraFlags = '',
+  systemPrompt = ORCHESTRATOR_SYSTEM_PROMPT,
 }: OrchestratorConductorFlagsOpts): string {
   let flags = ` --settings ${shellQuoteSingle(settingsPath)}`;
   if (mcpConfigPath) {
     flags += ` --mcp-config ${shellQuoteSingle(mcpConfigPath)} --strict-mcp-config`;
   }
-  flags += ` --append-system-prompt ${shellQuoteSingle(ORCHESTRATOR_SYSTEM_PROMPT)}`;
+  flags += ` --append-system-prompt ${shellQuoteSingle(systemPrompt)}`;
   if (extraFlags) {
     flags += extraFlags.startsWith(' ') ? extraFlags : ` ${extraFlags}`;
   }

@@ -24,6 +24,8 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
+const AgentsPage = lazy(() => import('./pages/AgentsPage'));
+const AgentDetailPage = lazy(() => import('./pages/AgentDetailPage'));
 const WorkflowDetailRoute = lazy(() => import('./workflows/WorkflowDetailRoute'));
 const LoopsPage = lazy(() => import('./pages/LoopsPage'));
 const LoopGroupDetailPage = lazy(() => import('./pages/LoopGroupDetailPage'));
@@ -120,6 +122,8 @@ export function AppShell() {
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/setup" element={<SetupPage />} />
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/agents/:id" element={<AgentDetailPage />} />
                 <Route path="/w/:kind/:id" element={<WorkflowDetailRoute />} />
                 <Route path="/loops" element={<LoopsPage />} />
                 <Route path="/loops/:id" element={<LoopsRedirect />} />

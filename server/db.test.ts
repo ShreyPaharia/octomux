@@ -664,3 +664,38 @@ describe('claude_session_id rename', () => {
     expect(indexes.map((i) => i.name)).not.toContain('idx_agents_claude_session_id');
   });
 });
+
+describe('agents feature: agent_configs table + orchestrator_conversations.agent_id', () => {
+  it('creates the agent_configs table on a fresh DB', () => {
+    const db = createTestDb();
+    const tables = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name)).toContain('agent_configs');
+
+    const cols = db.pragma('table_info(agent_configs)') as Array<{ name: string }>;
+    const names = cols.map((c) => c.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'id',
+        'name',
+        'system_prompt',
+        'channel',
+        'channel_config',
+        'created_at',
+        'updated_at',
+      ]),
+    );
+  });
+
+  it('adds a nullable agent_id column to orchestrator_conversations', () => {
+    const db = createTestDb();
+    const cols = db.pragma('table_info(orchestrator_conversations)') as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    const agentIdCol = cols.find((c) => c.name === 'agent_id');
+    expect(agentIdCol).toBeDefined();
+    expect(agentIdCol!.notnull).toBe(0);
+  });
+});

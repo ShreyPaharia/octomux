@@ -6,6 +6,7 @@ import {
   MonitorIcon,
   WorkspacesIcon,
   OrchestratorIcon,
+  AgentsIcon,
   SchedulesIcon,
   WorkflowsIcon,
   SettingsIcon,
@@ -35,6 +36,7 @@ export const MORE_ITEMS = [
   { key: 'monitor', label: 'Monitor', to: '/monitor', Icon: MonitorIcon },
   { key: 'workspaces', label: 'Workspaces', to: '/workspaces', Icon: WorkspacesIcon },
   { key: 'orchestrator', label: 'Orchestrator', to: '/orchestrator', Icon: OrchestratorIcon },
+  { key: 'agents', label: 'Agents', to: '/agents', Icon: AgentsIcon },
   { key: 'schedules', label: 'Schedules', to: '/schedules', Icon: SchedulesIcon },
 ] as const;
 

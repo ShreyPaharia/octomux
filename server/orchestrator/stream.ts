@@ -140,6 +140,43 @@ const convTailStarting = new Map<string, Promise<void>>();
 /** conversation_id → unregister fn for the shared WS-bridge consumer. */
 const convWsUnregister = new Map<string, () => void>();
 
+/**
+ * conversation_id → listeners notified whenever `pushToConversation` fires a
+ * `message` or `card` event (SHR agents-feature Task 6). This is a SEPARATE
+ * registry from `convConsumers`: those carry raw ChatEvents off the live
+ * transcript tail (the conductor's own turn); this one carries supervisor-
+ * injected notes/cards, which are synthesized at the app layer and never
+ * written into the transcript JSONL, so the two never double-deliver the same
+ * event. The gateway is the intended consumer — it lets a worker's
+ * `task:phase_complete` report (relayed via `pushToConversation`) reach a
+ * bound channel, not just connected WS clients.
+ */
+const convMessageListeners = new Map<string, Set<(event: OrchestratorWsEvent) => void>>();
+
+/**
+ * Register a listener notified of every `message`/`card` event pushed to a
+ * conversation via `pushToConversation` (additive to, and independent of, the
+ * WS client fan-out below). Returns an unregister fn.
+ */
+export function registerConversationMessageListener(
+  convId: string,
+  listener: (event: OrchestratorWsEvent) => void,
+): () => void {
+  let set = convMessageListeners.get(convId);
+  if (!set) {
+    set = new Set();
+    convMessageListeners.set(convId, set);
+  }
+  set.add(listener);
+
+  return () => {
+    const s = convMessageListeners.get(convId);
+    if (!s) return;
+    s.delete(listener);
+    if (s.size === 0) convMessageListeners.delete(convId);
+  };
+}
+
 function addClient(convId: string, push: PushFn, transcriptPath: string | null): void {
   let set = convClients.get(convId);
   if (!set) {
@@ -610,30 +647,55 @@ export function getOrchestratorClientCount(convId: string): number {
 /**
  * Push a serialized ws message to all connected clients for a conversation.
  * Used by the supervisor to inject concise notes without going through the
- * transcript tail. Also persists message-type events to orchestrator_messages.
+ * transcript tail. Also persists message-type events to orchestrator_messages,
+ * and notifies any registered conversation-message listeners (the gateway) —
+ * this is what lets a worker's report reach a bound channel, not just the web
+ * dashboard's WS clients.
  *
  * The `message` parameter must be a serialized JSON string (OrchestratorWsEvent).
  */
 export function pushToConversation(convId: string, message: string): void {
-  // Persist if it's a message-type event
+  let event: OrchestratorWsEvent | undefined;
   try {
-    const event = JSON.parse(message) as OrchestratorWsEvent;
-    if (event.type === 'message') {
-      const contentBlocks = [{ type: 'text', text: event.text }];
-      appendMessage({
-        conversation_id: convId,
-        role: event.role,
-        content: JSON.stringify(contentBlocks),
-      });
-    }
+    event = JSON.parse(message) as OrchestratorWsEvent;
   } catch {
-    // ignore parse errors — still push to clients
+    // ignore parse errors — still push to WS clients below
   }
 
-  const set = convClients.get(convId);
-  if (!set || set.size === 0) return;
-  for (const push of set) {
-    push(message);
+  // Persist if it's a message-type event
+  if (event?.type === 'message') {
+    const contentBlocks = [{ type: 'text', text: event.text }];
+    appendMessage({
+      conversation_id: convId,
+      role: event.role,
+      content: JSON.stringify(contentBlocks),
+    });
+  }
+
+  const clients = convClients.get(convId);
+  if (clients && clients.size > 0) {
+    for (const push of clients) {
+      push(message);
+    }
+  }
+
+  // Additive: notify any registered conversation-message listeners (e.g. the
+  // gateway) so a bound channel also sees message/card events, independent of
+  // whether any WS client is connected.
+  if (event && (event.type === 'message' || event.type === 'card')) {
+    const listeners = convMessageListeners.get(convId);
+    if (listeners) {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          logger.warn(
+            { conversation_id: convId, err },
+            'stream: conversation message listener threw',
+          );
+        }
+      }
+    }
   }
 }
 
@@ -652,4 +714,5 @@ export function cleanupOrchestratorClients(): void {
   convClients.clear();
   convConsumers.clear();
   convWsUnregister.clear();
+  convMessageListeners.clear();
 }

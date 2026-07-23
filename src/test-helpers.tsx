@@ -84,6 +84,7 @@ type ApiMock = ReturnType<typeof mockTaskApi> &
   ReturnType<typeof mockLoopGroupApi> &
   ReturnType<typeof mockSchedulesApi> &
   ReturnType<typeof mockWorkflowsApi> &
+  ReturnType<typeof mockAgentsApi> &
   Record<string, unknown>;
 
 export function setupApiMock(overrides: Record<string, unknown> = {}) {
@@ -95,6 +96,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
   const loopGroupApiMock = mockLoopGroupApi(overrides);
   const schedulesApiMock = mockSchedulesApi(overrides);
   const workflowsApiMock = mockWorkflowsApi(overrides);
+  const agentsApiMock = mockAgentsApi(overrides);
   const taskApiProxy = new Proxy(
     {},
     { get: (_target, prop: string) => taskApiMock[prop as keyof typeof taskApiMock] },
@@ -127,6 +129,10 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     {},
     { get: (_target, prop: string) => workflowsApiMock[prop as keyof typeof workflowsApiMock] },
   );
+  const agentsApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => agentsApiMock[prop as keyof typeof agentsApiMock] },
+  );
   const apiMock = new Proxy(
     {},
     {
@@ -142,6 +148,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           return schedulesApiMock[prop as keyof typeof schedulesApiMock];
         if (prop in workflowsApiMock)
           return workflowsApiMock[prop as keyof typeof workflowsApiMock];
+        if (prop in agentsApiMock) return agentsApiMock[prop as keyof typeof agentsApiMock];
         return overrides[prop];
       },
       set: (_target, prop: string, value) => {
@@ -177,6 +184,10 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           (workflowsApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
+        if (prop in agentsApiMock) {
+          (agentsApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
         overrides[prop] = value;
         return true;
       },
@@ -195,6 +206,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     loopGroupApiMock,
     schedulesApiMock,
     workflowsApiMock,
+    agentsApiMock,
     taskApiProxy,
     reviewApiProxy,
     configApiProxy,
@@ -203,6 +215,7 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     loopGroupApiProxy,
     schedulesApiProxy,
     workflowsApiProxy,
+    agentsApiProxy,
     apiMock,
     apiProxy,
   };
@@ -525,6 +538,59 @@ export function mockWorkflowsApi(overrides: Record<string, unknown> = {}) {
   return { ...defaults, ...overrides };
 }
 
+export function mockAgentsApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn().mockResolvedValue({
+      id: 'agent-1',
+      name: 'test-agent',
+      system_prompt: 'You are a helpful agent.',
+      channel: null,
+      channel_config: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+      status: 'stopped',
+      session_id: null,
+    }),
+    get: vi.fn().mockResolvedValue({
+      id: 'agent-1',
+      name: 'test-agent',
+      system_prompt: 'You are a helpful agent.',
+      channel: null,
+      channel_config: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+      status: 'stopped',
+      session_id: null,
+    }),
+    update: vi.fn().mockResolvedValue({
+      id: 'agent-1',
+      name: 'test-agent',
+      system_prompt: 'You are a helpful agent.',
+      channel: null,
+      channel_config: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+      status: 'stopped',
+      session_id: null,
+    }),
+    remove: vi.fn().mockResolvedValue(undefined),
+    ensureSession: vi.fn().mockResolvedValue({
+      id: 'conv-1',
+      title: 'test-agent',
+      tmux_window: null,
+      claude_session_id: null,
+      transcript_path: null,
+      status: 'running',
+      is_global_monitor: 0,
+      agent_id: 'agent-1',
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+    }),
+  };
+  return { ...defaults, ...overrides };
+}
+
 export function mockApi(overrides: Record<string, unknown> = {}) {
   return {
     ...mockTaskApi(),
@@ -535,6 +601,7 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     ...mockLoopGroupApi(),
     ...mockSchedulesApi(),
     ...mockWorkflowsApi(),
+    ...mockAgentsApi(),
     ...overrides,
   };
 }
