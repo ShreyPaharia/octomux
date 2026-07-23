@@ -118,6 +118,7 @@ export const POLICY_ONLY_COMMANDS: PolicyOnlyCommand[] = [
   { mcpName: 'get_task', cliSubcommand: 'get-task', tier: 'auto' },
   { mcpName: 'monitor_status', tier: 'auto' },
   { mcpName: 'get_task_output', tier: 'auto' },
+  { mcpName: 'get_agent_output', tier: 'auto' },
   { mcpName: 'pull_linear_issue', tier: 'auto' },
   { mcpName: 'search_learnings', tier: 'auto' },
   { cliSubcommand: 'recent-repos', tier: 'auto' },

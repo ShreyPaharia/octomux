@@ -29,6 +29,7 @@ import {
   handleGetTask,
   handleMonitorStatus,
   handleGetTaskOutput,
+  handleGetAgentOutput,
   handleRecentRepos,
   handleDefaultBranch,
   handleSearchLearnings,
@@ -97,7 +98,10 @@ export function createOctomuxMcpServer(): McpServer {
     {
       description:
         'Get a lean summary of a specific task by id. ' +
-        'Returns id, title, statuses, timestamps, and agent_count (not agent rows). ' +
+        'Returns id, title, statuses, timestamps, agent_count, the managed `phase` ' +
+        '(planning/awaiting_approval/implementing/reviewing/done — use this to tell ' +
+        '"working" from "paused at a review gate", which runtime_state cannot), and ' +
+        'current_summary (+ its updated_at) for the last self-reported progress. ' +
         'Returns null if task not found.',
       inputSchema: {
         task_id: z.string().describe('The octomux task id'),
@@ -164,6 +168,37 @@ export function createOctomuxMcpServer(): McpServer {
           {
             type: 'text' as const,
             text: JSON.stringify(pointers, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── get_agent_output ──────────────────────────────────────────────────────────
+  server.registerTool(
+    'get_agent_output',
+    {
+      description:
+        "Read the TAIL of an agent's live terminal for a task — what the agent is " +
+        'actually doing/saying right now (the same view as the dashboard terminal). ' +
+        "Use this when you need the agent's recent output/last message, which get_task " +
+        'and get_task_output do NOT provide (they return status + artifact pointers only). ' +
+        'Returns {live, agent_count, output, note?}; live:false means the agent has stopped.',
+      inputSchema: {
+        task_id: z.string().describe('The octomux task id'),
+      },
+    },
+    async (args) => {
+      logger.debug(
+        { operation: 'get_agent_output', task_id: args.task_id },
+        'MCP get_agent_output invoked',
+      );
+      const result = await handleGetAgentOutput(args);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
           },
         ],
       };

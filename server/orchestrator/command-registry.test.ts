@@ -171,6 +171,7 @@ describe('buildPolicySets', () => {
 
     expect([...AUTO_TOOLS].sort()).toEqual(
       [
+        'get_agent_output',
         'get_task',
         'get_task_output',
         'list_tasks',
