@@ -56,6 +56,14 @@ const CAPTURE_PANE_MAX_WAIT_MS = 3000;
 const CAPTURE_PANE_POLL_MS = 50;
 /** Delay between the paste send-keys and Enter, if capture-pane confirm succeeds quickly. */
 const PASTE_TO_ENTER_MIN_DELAY_MS = 50;
+/** How many times to (re)paste a turn if the pane confirm doesn't see it land. */
+const PASTE_ATTEMPTS = 3;
+/** Backoff between paste retries. */
+const PASTE_RETRY_DELAY_MS = process.env.NODE_ENV === 'test' ? 0 : 500;
+/** Max wait for the conductor TUI composer to become input-ready before pasting. */
+const CONDUCTOR_READY_WAIT_MS = process.env.NODE_ENV === 'test' ? 0 : 15000;
+/** Poll interval while waiting for the composer to be ready. */
+const CONDUCTOR_READY_POLL_MS = process.env.NODE_ENV === 'test' ? 10 : 300;
 /** Delay after --resume auto-turn before we allow real turns to be sent. */
 export const RESUME_QUIET_WINDOW_MS = process.env.NODE_ENV === 'test' ? 0 : 2000;
 /**
@@ -120,6 +128,13 @@ function writeOrchestratorsettings(convId: string): string {
     // onboarding already done), and an object `tui` value is rejected by claude
     // ("Invalid value. Expected one of: default, fullscreen") which blocks the
     // session on a settings-error dialog.
+    //
+    // Force NON-vim keybindings for the conductor. We drive the TUI with tmux
+    // `send-keys Enter` to submit each turn; if the operator's global config has
+    // `editorMode: vim`, the pane starts in vim INSERT mode where Enter inserts a
+    // newline instead of submitting — so pasted turns sit unsent forever. The
+    // conductor is non-interactive, so emacs (default) keybindings are correct.
+    editorMode: 'emacs',
     permissions: {
       // CONDUCTOR IS NON-INTERACTIVE — nobody is at its tmux TUI (the user talks
       // to it via the web chat). A permission prompt there hangs the session
@@ -608,23 +623,36 @@ async function deliverTurn(convId: string, text: string): Promise<void> {
     'sendTurn: pasting text',
   );
 
-  // Step 1: paste the text (bracketed paste — preserves newlines)
-  await execTmux(['send-keys', '-t', target, '-l', text]);
+  // Step 0: wait for the TUI composer to be interactive. `waitForSessionAlive`
+  // only proves the claude PROCESS is up — its TUI takes a moment more to render
+  // an input-ready composer. Pasting before then silently drops the keystrokes
+  // (the cold-start race that left turns unsubmitted), so wait for the prompt.
+  await waitForConductorReady(target);
 
-  // Step 2: capture-pane confirm — wait until the pasted text appears in the buffer
-  const confirmed = await waitForPaneContent(target, text);
-  if (!confirmed) {
-    logger.warn(
-      { conversation_id: convId, operation: 'sendTurn', target },
-      'sendTurn: capture-pane confirm timed out; sending Enter anyway',
-    );
+  // Steps 1–2: paste, then confirm the text landed in the composer — retrying the
+  // paste (not just the Enter) if it didn't, since a dropped paste is why a turn
+  // never submits. Only send Enter once the paste is confirmed present.
+  let confirmed = false;
+  for (let attempt = 1; attempt <= PASTE_ATTEMPTS && !confirmed; attempt++) {
+    await execTmux(['send-keys', '-t', target, '-l', text]);
+    confirmed = await waitForPaneContent(target, text);
+    if (!confirmed) {
+      logger.warn(
+        { conversation_id: convId, operation: 'sendTurn', target, attempt },
+        'sendTurn: paste not confirmed in pane; retrying',
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, PASTE_RETRY_DELAY_MS));
+    }
   }
 
-  // Step 3: brief minimum delay then Enter
+  // Step 3: brief minimum delay then Enter to submit.
   await new Promise<void>((resolve) => setTimeout(resolve, PASTE_TO_ENTER_MIN_DELAY_MS));
   await execTmux(['send-keys', '-t', target, 'Enter']);
 
-  logger.debug({ conversation_id: convId, operation: 'sendTurn' }, 'sendTurn: Enter sent');
+  logger.debug(
+    { conversation_id: convId, operation: 'sendTurn', paste_confirmed: confirmed },
+    'sendTurn: Enter sent',
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -678,6 +706,27 @@ async function isConversationSessionAlive(conv: OrchestratorConversation): Promi
     return !HOLDING_SHELL_COMMANDS.has(cmd);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Wait for the conductor's TUI composer to be input-ready before pasting a turn.
+ * `claude` prints its prompt marker (`❯`) once the composer is interactive; until
+ * then keystrokes are dropped. Returns true once the marker appears, false on
+ * timeout (caller pastes anyway as a best effort).
+ */
+async function waitForConductorReady(target: string): Promise<boolean> {
+  const deadline = Date.now() + CONDUCTOR_READY_WAIT_MS;
+  for (;;) {
+    try {
+      const { stdout } = await execTmux(['capture-pane', '-t', target, '-p']);
+      // `❯` = composer prompt; the shortcuts hint also only shows once ready.
+      if (stdout.includes('❯') || /for shortcuts/i.test(stdout)) return true;
+    } catch {
+      // ignore — retry until deadline
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, CONDUCTOR_READY_POLL_MS));
   }
 }
 
