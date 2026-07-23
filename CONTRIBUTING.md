@@ -20,13 +20,19 @@ bun run dev      # starts Express (port 7777) + Vite dev server concurrently
 
 ```
 server/           Express backend (API, terminal streaming, task lifecycle, DB)
-  api.ts          REST routes mounted on Express app
+  api.ts          mounts the routers in server/routes/ onto the Express app
   app.ts          extracted createApp() for testability
-  task-runner.ts  worktree + tmux + claude lifecycle (closeTask, deleteTask)
+  routes/         one module per REST surface (tasks, diffs, reviews, loops, …)
+  task-engine/    worktree + tmux + harness lifecycle (cleanup.ts: closeTask, deleteTask)
+  harnesses/      pluggable agent backends (claude-code.ts, cursor.ts)
+  poller/         background pollers (PR detection, merged-PR close, hooks, schedules)
   db.ts           SQLite singleton with getDb() / setDb() / initDb()
-  types.ts        shared types (Task, Agent, TaskStatus, AgentStatus)
+  db/             schema.ts + forward-only migrations.ts
+  types.ts        re-exports @octomux/types + review-orchestrator types
 src/              React SPA (pages, components, lib/api.ts)
 cli/              CLI tool for task management
+packages/         bun workspaces: types, diff-engine, api-client, test-fixtures
+electron/         macOS desktop shell
 e2e/              Playwright E2E tests
 ```
 
@@ -56,7 +62,7 @@ bun run test:e2e:ui    # Playwright interactive UI mode
 - Table-driven tests using `it.each()` — prefer over individual test cases
 - Shared test harness: `server/test-helpers.ts` (DEFAULTS fixtures, insert/get helpers, shell mock assertion helpers via `findExecCall`/`countExecCalls`)
 - DB tests use in-memory SQLite via `createTestDb()` → calls `setDb()` for isolation
-- task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
+- task-engine tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
 - Frontend test helpers in `src/test-helpers.tsx`: `makeTask()`, `renderWithRouter()`, `mockApi()`
 
@@ -75,8 +81,8 @@ bun run lint           # ESLint 9 flat config
 bun run lint:fix       # auto-fix lint issues
 bun run format         # Prettier
 bun run format:check   # check formatting
-bun run typecheck      # tsc --noEmit
-bun run build          # Vite build + tsc server
+bun run typecheck      # tsc -b across all tsconfig projects
+bun run build          # workspace packages + Vite build + tsup server bundle + CLI
 ```
 
 - Prettier: single quotes, trailing commas, 100 char width, semicolons

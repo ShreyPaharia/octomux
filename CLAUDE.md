@@ -23,19 +23,25 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
 - `bun run test:e2e:ui` — Playwright interactive UI mode
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
-- `bun run typecheck` — tsc --noEmit
-- `bun run build` — Vite build + tsc server
+- `bun run typecheck` — `tsc -b` across all tsconfig projects
+- `bun run build` — workspace packages (tsc -b) + Vite build + tsup server bundle + CLI build
+- `bun run dist:electron` — full build + electron-builder (macOS desktop app)
 
 ## Architecture
 
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
-  - `api.ts` — REST routes mounted on Express app
+  - `api.ts` — mounts the routers in `server/routes/` onto the Express app
+  - `routes/` — one module per REST surface (tasks, task-agents, diffs, reviews, loops, …)
   - `app.ts` — extracted `createApp()` for testability
-  - `task-runner.ts` — worktree + tmux + harness lifecycle (closeTask, deleteTask)
-  - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
+  - `task-engine/` — worktree + tmux + harness lifecycle (`cleanup.ts` has closeTask/deleteTask;
+    also `git.ts`, `launch.ts`, `lifecycle/`, `setup/`, `loop/`, `terminals.ts`)
+  - `poller/` — background pollers (PR detection, merged-PR close, hooks, team schedules)
+  - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`; schema and
+    forward-only migrations live in `db/schema.ts` and `db/migrations.ts`
   - `logger.ts` — pino root + `childLogger('<module>')` helper
-  - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
-  - `harnesses/` — pluggable harness implementations (Claude Code today; Cursor planned).
+  - `types.ts` — re-exports `@octomux/types` (Task, Agent, TaskStatus, AgentStatus) and adds
+    the review-orchestrator types
+  - `harnesses/` — pluggable harness implementations (`claude-code.ts`, `cursor.ts`).
     Each `Harness` exports `id`, `displayName`, `sessionIdMode`, command builders,
     `installHooks`, `syncAgents`, `resolveFlags`, `validateSettings`. Spec at
     `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
@@ -44,10 +50,13 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
     `listTeamSchedules`, `isCronDue`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
 - `src/` — React SPA (pages, components, lib/api.ts)
 - `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
+- `packages/` — bun workspaces consumed by both sides: `@octomux/types`, `@octomux/diff-engine`,
+  `@octomux/api-client`, `@octomux/test-fixtures` (plus the prebuilt `tmux-*` binaries)
+- `electron/` — macOS desktop shell (`bun run dist:electron`)
 - `e2e/` — Playwright E2E tests
 
-DB migrations are forward-only. Back up `~/.octomux/octomux.sqlite` (prod) or
-`./data/octomux.sqlite` (dev) before upgrading across the harness-abstraction
+DB migrations are forward-only. Back up `~/.octomux/data/tasks.db` (prod) or
+`./data/tasks.db` (dev) before upgrading across the harness-abstraction
 migration (renames `agents.claude_session_id` → `harness_session_id`, adds
 `tasks.harness_id` / `agents.harness_id` / `agents.hook_token`, relaxes
 `permission_prompts.session_id` to nullable).
@@ -146,6 +155,35 @@ team_runs      (id PK, team, lead_task_id → tasks.id, started_at, status)
 
 Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/15`, `1-5`, `mon-fri`). Schedules are evaluated in UTC.
 
+## Loops (Ralph loops)
+
+A loop re-runs a task's agent in **fresh context** until a verify command passes. Engine lives in
+`server/task-engine/loop/` (`engine.ts` policy + `verify.ts` runner); each iteration respawns the
+active agent via `lifecycle/respawn-agent.ts`, so the loop is exempt from the normal idle poller.
+
+```
+octomux loop-start --task <id> --prompt <text|@file> --verify '<cmd>' --max-iterations <n> \
+                   [--budget-tokens <n>] [--stall-after <n>]
+octomux emit --run <loop-run-id> --status done|blocked|needs_human --reason "<why>"
+```
+
+- `emit` is how the agent inside the loop reports its own completion back to octomux.
+- Termination is layered — stops on any of: `done` + verify passed, `blocked`, `needs_human`,
+  `max_iterations`, `budget` (tokens/time), or `no_progress` (`--stall-after` N no-op iterations).
+- Each iteration appends to a curated playbook in the worktree so the next fresh context sees
+  what the previous ones tried.
+- UI at `/loops` and `/loops/:id`; REST under `server/routes/loops.ts`.
+- Spec: `spec/workflow-framework.md`; plans: `plans/2026-07-12-loop-harness-*.md`.
+
+### DB tables
+
+```sql
+loop_runs       (id PK, task_id → tasks.id, spec_json, status, iteration, max_iterations,
+                 budget_json, termination_reason, created_at, updated_at)
+loop_iterations (id PK, loop_run_id → loop_runs.id, n, sha_from, sha_to, verify_passed,
+                 tokens, emit_status, emit_reason, created_at)
+```
+
 ## Testing Patterns
 
 - vitest with `NODE_ENV=test` (set in vitest.config.ts)
@@ -153,7 +191,7 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 - Shared test harness: `server/test-helpers.ts` (DEFAULTS fixtures, insert/get helpers,
   shell mock assertion helpers via `findExecCall`/`countExecCalls`)
 - DB tests use in-memory SQLite via `createTestDb()` → calls `setDb()` for isolation
-- task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
+- task-engine tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
 - `CLAUDE_INIT_DELAY` is 0 in test env to avoid 3s sleeps
 - `OCTOMUX_AI_TASK_NAMING=1` (or `true`) — optional: on task create with `initial_prompt`, run Claude CLI to polish omitted title/description; off by default so POST `/api/tasks` returns immediately without that subprocess
@@ -174,7 +212,7 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 ## Gotchas
 
 - SQLite `datetime('now')` needs single-quoted `'now'` — use template literals, not regular strings
-- `fs` mock for task-runner needs `default: mocked` in vi.mock return (default import)
+- `fs` mock for task-engine needs `default: mocked` in vi.mock return (default import)
 - Express 5 uses `req.params` differently — use `as Record<string, string>` if needed
 - better-sqlite3 is synchronous — no await needed for DB calls
 - node-pty `spawn-helper` may lack +x after install — postinstall script fixes this
