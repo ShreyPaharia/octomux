@@ -32,7 +32,9 @@ let _windowIndex = '1';
  * Defaults to 'node' (a live claude conductor is a node process → alive). A test
  * sets it to a shell name to simulate a crashed conductor (→ not alive → resume).
  */
-let _paneCommand = 'node';
+// A live claude reports a VERSION-like pane_current_command (e.g. '2.1.218'),
+// NOT 'node'/'claude' — liveness must treat that as alive. Tests default to it.
+let _paneCommand = '2.1.218';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
@@ -109,7 +111,7 @@ describe('orchestrator runner', () => {
     mockedExecFile.mockClear();
     _lastPastedText = '';
     _windowIndex = '1';
-    _paneCommand = 'node';
+    _paneCommand = '2.1.218';
     vi.useFakeTimers();
   });
 
