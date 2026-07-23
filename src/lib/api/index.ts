@@ -16,6 +16,7 @@ export * from './reviewApi';
 export * from './configApi';
 export * from './loopApi';
 export * from './schedulesApi';
+export * from './agentsApi';
 
 // Re-export the orchestrator REST + WebSocket client. It stays a separate,
 // incompatibly-shaped surface (its `/ws/orchestrator/:id` socket is not folded

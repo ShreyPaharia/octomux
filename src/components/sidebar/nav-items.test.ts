@@ -4,7 +4,7 @@ import { MORE_ITEMS, NAV_ITEMS, deriveActiveNav } from './nav-items';
 describe('MORE_ITEMS', () => {
   it('is the static list — no per-workflow-kind rows', () => {
     const keys = MORE_ITEMS.map((item) => item.key);
-    expect(keys).toEqual(['monitor', 'workspaces', 'orchestrator', 'schedules']);
+    expect(keys).toEqual(['monitor', 'workspaces', 'orchestrator', 'agents', 'schedules']);
   });
 
   it('does not list a workflow kind twice', () => {
