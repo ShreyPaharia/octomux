@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import { childLogger } from '../../logger.js';
 import { getTask, setRuntimeState } from '../../repositories/tasks.js';
 import { getAgent, findFirstActiveAgent } from '../../repositories/agent-runtime.js';
@@ -10,14 +8,16 @@ import {
   listIterationsForRun,
   terminateLoopRun,
   resumeLoopRun,
+  setLearningsSeeded,
 } from '../../repositories/loop-runs.js';
-import { revParseHead, commitAll, diffNameOnly } from '../git.js';
+import { revParseHead, commitAll } from '../git.js';
 import { runVerify } from './verify.js';
 import { writeLoopStatusFile } from './status-file.js';
 import { respawnAgentFresh } from '../lifecycle/respawn-agent.js';
 import { broadcast } from '../../events.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { finishRun } from '../../repositories/runs.js';
+import { LEARN_INSTRUCTION, fencedLearnings, seedLearnings } from './learn-prompt.js';
 import type {
   LoopRun,
   LoopIteration,
@@ -41,22 +41,18 @@ function loopRunIdLines(loopRunId: string): string[] {
   return [
     `Loop run id: ${loopRunId}`,
     `When your turn ends, report status: octomux emit --run ${loopRunId} --status <done|blocked|needs_human> --reason "<why>"`,
+    LEARN_INSTRUCTION,
   ];
 }
-
-const PLAYBOOK_REL_PATH = path.join('.octomux', 'loop-playbook.md');
-const PLAYBOOK_MAX_CHANGED_FILES = 15;
-const PLAYBOOK_MAX_VERIFY_OUTPUT = 1500;
-const PLAYBOOK_READ_INSTRUCTION =
-  'Prior iterations and what failed are recorded in .octomux/loop-playbook.md — read it first and do not repeat approaches that already failed.';
 
 /** Build the prompt for a loop iteration, pinning the loop run id (mirrors reviewTaskIdLines in review-tasks.ts). */
 export function buildLoopPrompt(
   spec: LoopSpec,
   loopRunId: string,
   verifyFailureOutput?: string | null,
+  learnings: string[] = [],
 ): string {
-  const lines = [spec.prompt, '', PLAYBOOK_READ_INSTRUCTION, '', ...loopRunIdLines(loopRunId)];
+  const lines = [spec.prompt, '', ...fencedLearnings(learnings), '', ...loopRunIdLines(loopRunId)];
   if (verifyFailureOutput) {
     lines.push(
       '',
@@ -121,29 +117,6 @@ export function evaluateTermination(ctx: TerminationCtx): TerminationReason | nu
     return 'no_progress';
   }
   return null;
-}
-
-/** Append one bounded, human-readable entry to the per-loop playbook file in the worktree. */
-function appendPlaybookEntry(
-  worktree: string,
-  n: number,
-  verifyPassed: boolean,
-  changedFiles: string[],
-  verifyOutput: string,
-): void {
-  const dir = path.join(worktree, '.octomux');
-  fs.mkdirSync(dir, { recursive: true });
-
-  const shown = changedFiles.slice(0, PLAYBOOK_MAX_CHANGED_FILES).join(', ') || '(none)';
-  const lines = [
-    `## Iteration ${n} — verify ${verifyPassed ? 'PASS' : 'FAIL'}`,
-    `- changed: ${shown}`,
-  ];
-  if (!verifyPassed) {
-    lines.push(`- verify output: ${verifyOutput.trim().slice(-PLAYBOOK_MAX_VERIFY_OUTPUT)}`);
-  }
-
-  fs.appendFileSync(path.join(worktree, PLAYBOOK_REL_PATH), lines.join('\n') + '\n\n');
 }
 
 function loopAgentEnv(taskId: string, hookToken: string): Record<string, string> {
@@ -221,8 +194,9 @@ export async function startLoop(
     updatedAt: new Date().toISOString(),
   });
 
+  const seeded = seedLearnings(task);
   await respawnAgentFresh(task, agent, {
-    prompt: buildLoopPrompt(spec, run.id),
+    prompt: buildLoopPrompt(spec, run.id, null, seeded),
     env: loopAgentEnv(taskId, agent.hook_token),
   });
 
@@ -265,8 +239,8 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
     verify_passed: verify.passed ? 1 : 0,
   });
 
-  const changedFiles = await diffNameOnly(worktree, shaFrom, shaTo);
-  appendPlaybookEntry(worktree, iteration.n, verify.passed, changedFiles, verify.output);
+  const seeded = seedLearnings(task);
+  setLearningsSeeded(iteration.id, seeded.length);
 
   const iterations = listIterationsForRun(run.id);
   const reason = evaluateTermination({
@@ -340,7 +314,7 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
     updatedAt: new Date().toISOString(),
   });
   await respawnAgentFresh(task, agent, {
-    prompt: buildLoopPrompt(spec, run.id, verify.passed ? null : verify.output),
+    prompt: buildLoopPrompt(spec, run.id, verify.passed ? null : verify.output, seeded),
     env: loopAgentEnv(taskId, agent.hook_token),
   });
 }
@@ -384,9 +358,10 @@ export async function resumeLoopOnStartup(task: Task): Promise<void> {
   }
 
   const spec = JSON.parse(run.spec_json) as LoopSpec;
+  const seeded = seedLearnings(task);
 
   await respawnAgentFresh(task, agent, {
-    prompt: buildLoopPrompt(spec, run.id),
+    prompt: buildLoopPrompt(spec, run.id, null, seeded),
     env: loopAgentEnv(task.id, agent.hook_token),
     fresh: true,
   });

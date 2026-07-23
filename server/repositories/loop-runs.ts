@@ -89,6 +89,13 @@ export function appendIteration(loopRunId: string, row: AppendIterationInput): L
   return db.prepare(`SELECT * FROM loop_iterations WHERE id = ?`).get(id) as LoopIteration;
 }
 
+/** Records how many past-run learnings were seeded into the prompt for this iteration (benefit metric). */
+export function setLearningsSeeded(iterationId: string, count: number): void {
+  getDb()
+    .prepare(`UPDATE loop_iterations SET learnings_seeded = ? WHERE id = ?`)
+    .run(count, iterationId);
+}
+
 export interface RecordEmitInput {
   status: LoopEmitStatus;
   reason: string;

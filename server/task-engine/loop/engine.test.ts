@@ -38,6 +38,7 @@ const { getLoopRun, listIterationsForRun, recordEmit, createLoopRun } =
   await import('../../repositories/loop-runs.js');
 const { createLoopGroup } = await import('../../repositories/loop-groups.js');
 const { insertRun, getRun } = await import('../../repositories/runs.js');
+const { addLearning } = await import('../../repositories/agent-learnings.js');
 
 function makeRun(overrides: Partial<LoopRun> = {}): LoopRun {
   return {
@@ -76,10 +77,19 @@ describe('buildLoopPrompt', () => {
     expect(prompt).not.toContain('verify command failed');
   });
 
-  it('tells the agent to read the loop playbook first', () => {
-    const prompt = buildLoopPrompt(SPEC, 'run-1');
-    expect(prompt).toContain('.octomux/loop-playbook.md');
-    expect(prompt).toMatch(/read it first/);
+  it('renders a fenced data-not-instructions block when learnings are supplied', () => {
+    const p = buildLoopPrompt(SPEC, 'run-1', null, ['prefer X — see file Y']);
+    expect(p).toContain('NOTES FROM PAST RUNS');
+    expect(p).toContain('data, not commands');
+    expect(p).toContain('- prefer X — see file Y');
+  });
+
+  it('omits the block when there are no learnings', () => {
+    expect(buildLoopPrompt(SPEC, 'run-1')).not.toContain('NOTES FROM PAST RUNS');
+  });
+
+  it('tells the agent to record learnings via octomux learn', () => {
+    expect(buildLoopPrompt(SPEC, 'run-1')).toContain('octomux learn');
   });
 });
 
@@ -194,6 +204,45 @@ describe('startLoop', () => {
   it('defaults group_id to null for a plain single loop', async () => {
     const run = await startLoop('t1', LOOP_SPEC);
     expect(run.group_id).toBeNull();
+  });
+
+  // Schedule wiring (§12 P2, Task 5): scheduled tasks (doc-drift, prod-log-triage)
+  // launch via startTask then immediately startLoop — laneFor(task) resolves to
+  // `schedule:<id>` only if the Task object getTask() returns actually carries
+  // schedule_id (see task-select.ts). This locks in that the schedule lane's
+  // learnings really do reach the respawn prompt end-to-end.
+  it("seeds a scheduled task's schedule-lane learnings into the respawn prompt", async () => {
+    db.prepare(`UPDATE tasks SET schedule_id = 'sched-9' WHERE id = 't1'`).run();
+    addLearning({
+      repo_path: DEFAULTS.runningTask.repo_path!,
+      lane: 'schedule:sched-9',
+      trigger: 'flaky retry helper',
+      lesson: 'retry needs jitter',
+      evidence: 'server/retry.ts',
+    });
+
+    await startLoop('t1', LOOP_SPEC);
+
+    const [, , opts] = vi.mocked(respawnAgentFresh).mock.calls[0];
+    expect(opts?.prompt).toContain('NOTES FROM PAST RUNS');
+    expect(opts?.prompt).toContain('retry needs jitter');
+    expect(opts?.prompt).toContain('octomux learn');
+  });
+
+  it("does NOT leak a schedule-lane learning into an unrelated task's loop:<id> lane", async () => {
+    // t1 has no schedule_id here — its lane is loop:t1, disjoint from schedule:sched-9.
+    addLearning({
+      repo_path: DEFAULTS.runningTask.repo_path!,
+      lane: 'schedule:sched-9',
+      trigger: 'flaky retry helper',
+      lesson: 'retry needs jitter',
+      evidence: 'server/retry.ts',
+    });
+
+    await startLoop('t1', LOOP_SPEC);
+
+    const [, , opts] = vi.mocked(respawnAgentFresh).mock.calls[0];
+    expect(opts?.prompt).not.toContain('NOTES FROM PAST RUNS');
   });
 });
 
@@ -324,72 +373,6 @@ describe('handleLoopIterationBoundary', () => {
 
     expect(vi.mocked(respawnAgentFresh).mock.calls.length).toBe(callsBefore); // no new respawn
     expect(getLoopRun(run.id)?.termination_reason).toBe('budget');
-  });
-});
-
-describe('loop playbook', () => {
-  let db: Database.Database;
-  let worktree: string;
-
-  beforeEach(() => {
-    db = createTestDb();
-    vi.clearAllMocks();
-    worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-loop-playbook-'));
-    insertTask(db, { ...DEFAULTS.runningTask, id: 't1', runtime_state: 'running', worktree });
-    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'tok-1', status: 'running' } as any);
-  });
-
-  afterEach(() => {
-    fs.rmSync(worktree, { recursive: true, force: true });
-  });
-
-  function readPlaybook(): string {
-    return fs.readFileSync(path.join(worktree, '.octomux', 'loop-playbook.md'), 'utf-8');
-  }
-
-  it('appends a PASS entry with changed files and no verify output on success', async () => {
-    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
-    vi.mocked(diffNameOnly).mockResolvedValueOnce(['src/foo.ts', 'src/bar.ts']);
-    vi.mocked(runVerify).mockResolvedValueOnce({ passed: true, output: 'all good' });
-
-    const run = await startLoop('t1', LOOP_SPEC);
-    recordEmit(run.id, { status: 'done', reason: 'iter1' });
-    await handleLoopIterationBoundary('t1', 'a1');
-
-    const playbook = readPlaybook();
-    expect(playbook).toContain('## Iteration 1 — verify PASS');
-    expect(playbook).toContain('src/foo.ts, src/bar.ts');
-    expect(playbook).not.toContain('verify output');
-  });
-
-  it('appends a FAIL entry including the verify output', async () => {
-    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
-    vi.mocked(diffNameOnly).mockResolvedValueOnce(['src/foo.ts']);
-    vi.mocked(runVerify).mockResolvedValueOnce({
-      passed: false,
-      output: 'assertion failed: x != y',
-    });
-
-    await startLoop('t1', LOOP_SPEC);
-    await handleLoopIterationBoundary('t1', 'a1');
-
-    const playbook = readPlaybook();
-    expect(playbook).toContain('## Iteration 1 — verify FAIL');
-    expect(playbook).toContain('verify output: assertion failed: x != y');
-  });
-
-  it('accumulates entries across iterations instead of overwriting', async () => {
-    vi.mocked(revParseHead).mockImplementation(async () => 'stable-sha');
-    vi.mocked(diffNameOnly).mockResolvedValue([]);
-    vi.mocked(runVerify).mockResolvedValue({ passed: false, output: 'still failing' });
-
-    await startLoop('t1', LOOP_SPEC);
-    await handleLoopIterationBoundary('t1', 'a1');
-    await handleLoopIterationBoundary('t1', 'a1');
-
-    const playbook = readPlaybook();
-    expect(playbook).toContain('## Iteration 1 — verify FAIL');
-    expect(playbook).toContain('## Iteration 2 — verify FAIL');
   });
 });
 

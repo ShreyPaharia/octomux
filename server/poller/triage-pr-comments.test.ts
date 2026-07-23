@@ -29,7 +29,13 @@ describe('checkTriagePrComments', () => {
     await checkTriagePrComments();
 
     expect(mockIngest).toHaveBeenCalledTimes(1);
-    expect(mockIngest).toHaveBeenCalledWith({ repoPath: '/repo/triage', prNumber: 42 });
+    expect(mockIngest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoPath: '/repo/triage',
+        prNumber: 42,
+        task: expect.objectContaining({ id: 'triage-1' }),
+      }),
+    );
   });
 
   it('does not call ingest for tasks with no PR yet, or non-triage sources', async () => {

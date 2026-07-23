@@ -16,7 +16,7 @@ import {
   updateCommentFields,
 } from '../repositories/inline-comments.js';
 import { computeOutdated } from '../inline-comments-outdated.js';
-import { addLearning } from '../repositories/review-learnings.js';
+import { addLearning } from '../repositories/agent-learnings.js';
 import { createInlineComment } from '../services/comment-service.js';
 import { loadTaskOrFail } from './_shared.js';
 import { badRequest, conflict, notFound } from '../services/errors.js';
@@ -253,8 +253,11 @@ router.patch('/api/tasks/:id/comments/:cid', (req: Request, res: Response) => {
     if (repoPath) {
       addLearning({
         repo_path: repoPath,
-        why: body.rejection_why.trim(),
-        created_from_comment_id: cid,
+        lane: 'review',
+        trigger: 'PR review learning',
+        lesson: body.rejection_why.trim(),
+        evidence: cid,
+        source_run_id: cid,
       });
     }
   }

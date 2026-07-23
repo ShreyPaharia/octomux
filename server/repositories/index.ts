@@ -8,7 +8,6 @@ export * from './tx.js';
 export * from './review-runs.js';
 export * from './inline-comments.js';
 export * from './published-reviews.js';
-export * from './review-learnings.js';
 export * from './file-review-state.js';
 export * from './loop-runs.js';
 export * from './schedules.js';
