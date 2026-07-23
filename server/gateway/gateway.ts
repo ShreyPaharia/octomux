@@ -20,9 +20,19 @@ import { redactSecrets } from './redact.js';
 import { OutboundQueue } from './outbound.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
 import { getThreadConv, setThreadConv, seenInbound, markInbound } from '../repositories/gateway.js';
-import { createConversation, getConversation } from '../orchestrator/store.js';
+import {
+  createConversation,
+  getConversation,
+  getPrimaryAgentConversation,
+} from '../orchestrator/store.js';
+import { getAgentByChannel } from '../repositories/agents-config.js';
 import { startConversation, sendTurn, interruptTurn } from '../orchestrator/runner.js';
-import { registerTranscriptConsumer } from '../orchestrator/stream.js';
+import type { StartConversationOpts } from '../orchestrator/runner.js';
+import {
+  registerTranscriptConsumer,
+  registerConversationMessageListener,
+} from '../orchestrator/stream.js';
+import type { OrchestratorWsEvent } from '../orchestrator/stream.js';
 import { isTurnDone, type ChatEvent } from '../orchestrator/transcript.js';
 
 const logger = childLogger('gateway');
@@ -41,6 +51,8 @@ interface ThreadState {
   /** True between sending a turn and its stop_hook_summary boundary. */
   inFlight: boolean;
   unregister: () => void;
+  /** Unregisters the conversation-message listener (worker reports; Task 6). */
+  unregisterMessages: () => void;
 }
 
 /**
@@ -50,7 +62,7 @@ interface ThreadState {
  * real. Production uses `realConductor` (the module functions above).
  */
 export interface GatewayConductor {
-  startConversation(convId: string, cwd: string): Promise<void>;
+  startConversation(convId: string, cwd: string, opts?: StartConversationOpts): Promise<void>;
   sendTurn(convId: string, text: string): Promise<void>;
   interruptTurn(convId: string): Promise<void>;
   registerConsumer(
@@ -61,7 +73,7 @@ export interface GatewayConductor {
 }
 
 const realConductor: GatewayConductor = {
-  startConversation: (convId, cwd) => startConversation(convId, cwd),
+  startConversation: (convId, cwd, opts) => startConversation(convId, cwd, opts),
   sendTurn,
   interruptTurn,
   registerConsumer: registerTranscriptConsumer,
@@ -97,17 +109,79 @@ export function createGateway(
     };
   }
 
+  /**
+   * Format a supervisor-pushed `card` event as plain text with a tappable
+   * artifact link, for channels (Telegram) that have no card UI.
+   */
+  function formatCardEvent(event: Extract<OrchestratorWsEvent, { type: 'card' }>): string {
+    const args = event.args;
+    const taskId = typeof args.task_id === 'string' ? args.task_id : undefined;
+    const artifactUrl = typeof args.artifact_url === 'string' ? args.artifact_url : undefined;
+    const label =
+      event.command === 'approve-plan'
+        ? 'plan ready for review'
+        : event.command === 'view-spec'
+          ? 'spec ready for review'
+          : event.command;
+    const prefix = taskId ? `[${taskId}] ` : '';
+    return artifactUrl ? `${prefix}${label}: ${artifactUrl}` : `${prefix}${label}`;
+  }
+
+  /**
+   * Worker reports reach the owning agent (Task 6): the supervisor relays a
+   * worker's `task:phase_complete` (and other notes) via `pushToConversation`,
+   * which only reached WS clients before. This listener is the gateway's other
+   * ear on that same conversation, so a bound channel gets the report too —
+   * with the artifact URL as a tappable link. It's a distinct source from the
+   * live transcript tail (`makeConsumer` above), so nothing here is
+   * double-delivered by the transcript path.
+   */
+  function makeMessageListener(state: ThreadState): (event: OrchestratorWsEvent) => void {
+    return (event) => {
+      if (event.type === 'message') {
+        if (event.role !== 'assistant') return;
+        const text = redactSecrets(event.text.trim());
+        if (text) outbound.enqueue(state.threadKey, text);
+        return;
+      }
+      if (event.type === 'card') {
+        const text = redactSecrets(formatCardEvent(event));
+        if (text) outbound.enqueue(state.threadKey, text);
+      }
+    };
+  }
+
   async function ensureThread(msg: InboundMessage): Promise<ThreadState> {
     const k = key(msg.channel, msg.threadKey);
     const existing = threads.get(k);
     if (existing) return existing;
 
-    // Reconnect to a mapped conversation across restarts, or create a new one.
-    let convId = getThreadConv(msg.channel, msg.threadKey);
-    if (!convId || !getConversation(convId)) {
-      convId = createConversation({ title: `${msg.channel}:${msg.threadKey}` });
-      await conductor.startConversation(convId, gatewayCwd());
-      setThreadConv(msg.channel, msg.threadKey, convId);
+    // Agents feature: if this (channel, threadKey) is bound to an agent, route
+    // to that agent's ONE persistent session — reused across every message and
+    // every thread bound to it, and across restarts (found again next time via
+    // getPrimaryAgentConversation, no thread-map row needed). Falls through to
+    // today's throwaway-conversation behaviour when unbound.
+    const agent = getAgentByChannel(msg.channel, msg.threadKey);
+
+    let convId: string;
+    if (agent) {
+      const existingConv = getPrimaryAgentConversation(agent.id);
+      if (existingConv) {
+        convId = existingConv.id;
+      } else {
+        convId = createConversation({ title: agent.name, agent_id: agent.id });
+        await conductor.startConversation(convId, gatewayCwd(), {
+          systemPrompt: agent.system_prompt,
+        });
+      }
+    } else {
+      // Reconnect to a mapped conversation across restarts, or create a new one.
+      convId = getThreadConv(msg.channel, msg.threadKey) ?? '';
+      if (!convId || !getConversation(convId)) {
+        convId = createConversation({ title: `${msg.channel}:${msg.threadKey}` });
+        await conductor.startConversation(convId, gatewayCwd());
+        setThreadConv(msg.channel, msg.threadKey, convId);
+      }
     }
 
     const transcriptPath = getConversation(convId)?.transcript_path;
@@ -122,8 +196,16 @@ export function createGateway(
       buffer: [],
       inFlight: false,
       unregister: () => {},
+      unregisterMessages: () => {},
     };
     state.unregister = conductor.registerConsumer(convId, transcriptPath, makeConsumer(state));
+    // Not part of the conductor injection seam — it touches no tmux/transcript,
+    // just an in-process listener registry (see stream.ts), so it runs for real
+    // in tests too.
+    state.unregisterMessages = registerConversationMessageListener(
+      convId,
+      makeMessageListener(state),
+    );
     threads.set(k, state);
     return state;
   }
