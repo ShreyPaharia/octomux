@@ -17,20 +17,6 @@ export function getWorktree(id: string): Worktree | undefined {
   return getDb().prepare('SELECT * FROM worktrees WHERE id = ?').get(id) as Worktree | undefined;
 }
 
-/** Fetch a worktree by its filesystem path. */
-export function getWorktreeByPath(path: string): Worktree | undefined {
-  return getDb().prepare('SELECT * FROM worktrees WHERE path = ?').get(path) as
-    | Worktree
-    | undefined;
-}
-
-/** List all worktrees for a given repo_path. */
-export function listWorktreesByRepo(repoPath: string): Worktree[] {
-  return getDb()
-    .prepare('SELECT * FROM worktrees WHERE repo_path = ? ORDER BY created_at DESC')
-    .all(repoPath) as Worktree[];
-}
-
 /** List all distinct repo_paths tracked by worktrees. */
 export function listTrackedRepoPaths(): Array<{ repo_path: string }> {
   return getDb()
@@ -193,20 +179,6 @@ export function insertWorktreeInUse(input: InsertWorktreeInput): string {
     'worktree inserted as in_use',
   );
   return id;
-}
-
-/** Set the status of a worktree. */
-export function setWorktreeStatus(id: string, status: WorktreeStatus): void {
-  getDb().prepare('UPDATE worktrees SET status = ? WHERE id = ?').run(status, id);
-  logger.info(
-    { worktree_id: id, status, operation: 'setWorktreeStatus' },
-    'worktree status updated',
-  );
-}
-
-/** Touch last_used_at to now. */
-export function touchWorktreeUsed(id: string): void {
-  getDb().prepare(`UPDATE worktrees SET last_used_at = datetime('now') WHERE id = ?`).run(id);
 }
 
 /**

@@ -58,6 +58,19 @@ export interface LoopRunResult {
   updated_at: string;
 }
 
+export interface LoopGroupResult {
+  id: string;
+  n: number;
+  repo_path: string;
+  base_branch: string;
+  judge_status: string;
+  winner_loop_run_id: string | null;
+  judge_rationale: string | null;
+  created_at: string;
+  updated_at: string;
+  loopRuns: LoopRunResult[];
+}
+
 export interface IntegrationRow {
   id: string;
   kind: string;
@@ -89,11 +102,15 @@ export interface OctomuxClient {
   ): Promise<Agent>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<LoopRunResult>;
+  startLoopGroup(data: {
+    repoPath: string;
+    baseBranch: string;
+    spec: LoopSpecInput;
+    n: number;
+  }): Promise<LoopGroupResult>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
-  createSkill(data: { name: string; content: string }): Promise<{ name: string; content: string }>;
-  deleteSkill(name: string): Promise<void>;
   recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
   defaultBranch(repoPath: string): Promise<{ branch: string }>;
   getRepoConfig(repoPath: string): Promise<{
@@ -165,7 +182,11 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
     listTasks(params) {
-      return request<Task[]>(`/tasks${qs({ repo_path: params?.repo_path })}`);
+      // The dashboard board hides automated tasks (doc-drift, prod-log-triage, …) by default;
+      // the CLI is an operator surface and must keep showing every task, as it always has.
+      return request<Task[]>(
+        `/tasks${qs({ repo_path: params?.repo_path, includeAutomated: 'true' })}`,
+      );
     },
     getTask(id) {
       return request<Task>(`/tasks/${encodeURIComponent(id)}`);
@@ -194,6 +215,12 @@ export function createClient(serverUrl: string): OctomuxClient {
     startLoop(data) {
       return request<LoopRunResult>('/loops', { method: 'POST', body: JSON.stringify(data) });
     },
+    startLoopGroup(data) {
+      return request<LoopGroupResult>('/loop-groups', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(
         `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/message`,
@@ -205,15 +232,6 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     getSkill(name) {
       return request<{ name: string; content: string }>(`/skills/${encodeURIComponent(name)}`);
-    },
-    createSkill(data) {
-      return request<{ name: string; content: string }>('/skills', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    deleteSkill(name) {
-      return request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
     },
     recentRepos() {
       return request<{ repo_path: string; last_used: string }[]>('/recent-repos');

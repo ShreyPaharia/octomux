@@ -168,9 +168,6 @@ vi.mock('child_process', () => ({
 vi.mock('./skills.js', () => ({
   listSkills: vi.fn(),
   getSkill: vi.fn(),
-  createSkill: vi.fn(),
-  updateSkill: vi.fn(),
-  deleteSkill: vi.fn(),
 }));
 
 vi.mock('./settings.js', () => ({
@@ -233,7 +230,7 @@ const {
   createShellTerminal,
   closeShellTerminal,
 } = await import('./task-engine/index.js');
-const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
+const { listSkills, getSkill } = await import('./skills.js');
 const { updateSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -367,6 +364,24 @@ describe('GET /api/tasks', () => {
     const res = await request(app).get('/api/tasks');
     expect(res.status).toBe(200);
     expect(res.body.map((t: Task) => t.id)).toEqual(['regular']);
+  });
+
+  it('excludes automated (non-null source) tasks from the list by default', async () => {
+    insertTask(db, { id: 'manual', source: null });
+    insertTask(db, { id: 'drift', source: 'doc_drift' });
+
+    const res = await request(app).get('/api/tasks');
+    expect(res.status).toBe(200);
+    expect(res.body.map((t: Task) => t.id)).toEqual(['manual']);
+  });
+
+  it('includes automated tasks when includeAutomated=true', async () => {
+    insertTask(db, { id: 'manual', source: null });
+    insertTask(db, { id: 'drift', source: 'doc_drift' });
+
+    const res = await request(app).get('/api/tasks?includeAutomated=true');
+    expect(res.status).toBe(200);
+    expect(res.body.map((t: Task) => t.id).sort()).toEqual(['drift', 'manual']);
   });
 });
 
@@ -1921,54 +1936,6 @@ describe('Skills API', () => {
   it('GET /api/skills/:name returns 404 for missing', async () => {
     vi.mocked(getSkill).mockRejectedValue(new Error('Skill not found: missing'));
     const res = await request(app).get('/api/skills/missing');
-    expect(res.status).toBe(404);
-    expect(res.body.error).toContain('not found');
-  });
-
-  it('POST /api/skills creates skill (201)', async () => {
-    vi.mocked(createSkill).mockResolvedValue({ name: 'new-skill', content: '# New' });
-    const res = await request(app)
-      .post('/api/skills')
-      .send({ name: 'new-skill', content: '# New' });
-    expect(res.status).toBe(201);
-    expect(res.body).toEqual({ name: 'new-skill', content: '# New' });
-  });
-
-  it('POST /api/skills returns 400 when name missing', async () => {
-    const res = await request(app).post('/api/skills').send({ content: '# No name' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('name is required');
-  });
-
-  it('POST /api/skills returns 409 when exists', async () => {
-    vi.mocked(createSkill).mockRejectedValue(new Error('Skill already exists: dupe'));
-    const res = await request(app).post('/api/skills').send({ name: 'dupe', content: '# Dupe' });
-    expect(res.status).toBe(409);
-    expect(res.body.error).toContain('already exists');
-  });
-
-  it('PUT /api/skills/:name updates content', async () => {
-    vi.mocked(updateSkill).mockResolvedValue({ name: 'my-skill', content: '# Updated' });
-    const res = await request(app).put('/api/skills/my-skill').send({ content: '# Updated' });
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ name: 'my-skill', content: '# Updated' });
-  });
-
-  it('PUT /api/skills/:name returns 400 when content missing', async () => {
-    const res = await request(app).put('/api/skills/my-skill').send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('content is required');
-  });
-
-  it('DELETE /api/skills/:name removes skill (204)', async () => {
-    vi.mocked(deleteSkill).mockResolvedValue(undefined);
-    const res = await request(app).delete('/api/skills/my-skill');
-    expect(res.status).toBe(204);
-  });
-
-  it('DELETE /api/skills/:name returns 404 for missing', async () => {
-    vi.mocked(deleteSkill).mockRejectedValue(new Error('Skill not found: missing'));
-    const res = await request(app).delete('/api/skills/missing');
     expect(res.status).toBe(404);
     expect(res.body.error).toContain('not found');
   });

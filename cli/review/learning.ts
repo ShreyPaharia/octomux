@@ -1,5 +1,7 @@
 import { parseArgs } from 'node:util';
-import { addLearning, touchLearning } from '../../server/repositories/review-learnings.js';
+import { addLearning, touchLearning } from '../../server/repositories/agent-learnings.js';
+
+const REVIEW_LANE = 'review';
 
 export async function runLearning(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;
@@ -17,12 +19,16 @@ export async function runLearning(argv: string[]): Promise<void> {
       process.stderr.write(`--repo-path and --why are required\n`);
       process.exit(2);
     }
+    const fromComment = (values['from-comment'] as string) || null;
     const row = addLearning({
       repo_path: values['repo-path'] as string,
-      why: values.why as string,
-      created_from_comment_id: (values['from-comment'] as string) ?? null,
+      lane: REVIEW_LANE,
+      trigger: 'PR review learning',
+      lesson: values.why as string,
+      evidence: fromComment ?? REVIEW_LANE,
+      source_run_id: fromComment,
     });
-    process.stdout.write(JSON.stringify({ id: row.id }) + '\n');
+    process.stdout.write(JSON.stringify({ id: row ? row.id : null, deduped: row === null }) + '\n');
     return;
   }
   if (sub === 'touch') {

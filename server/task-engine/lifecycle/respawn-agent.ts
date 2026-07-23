@@ -1,7 +1,7 @@
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
 import { execTmux } from '../../tmux-bin.js';
@@ -43,11 +43,13 @@ export async function respawnAgentFresh(
   );
 
   const harness = getHarness(agent.harness_id);
-  const flags = harness.resolveFlags(await getSettings());
+  const flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.syncAgents(task.worktree!);
-  await syncSkills(task.worktree!);
   await harness.installHooks(task.worktree!, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = harness.buildLaunchCommand({

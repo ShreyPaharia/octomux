@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     initial_prompt               TEXT,
     last_viewed_at               TEXT,
     source                       TEXT,
+    schedule_id                  TEXT,
     error                        TEXT,
     current_summary              TEXT,
     current_summary_updated_at   TEXT,
@@ -164,26 +165,43 @@ CREATE TABLE IF NOT EXISTS hook_settings (
   PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE IF NOT EXISTS team_schedules (
-  name        TEXT PRIMARY KEY,
-  repo_path   TEXT NOT NULL,
-  config_path TEXT NOT NULL,
-  cron        TEXT NOT NULL,
-  enabled     INTEGER NOT NULL DEFAULT 1,
-  last_run_at TEXT,
+CREATE TABLE IF NOT EXISTS schedules (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL,
+  repo_path     TEXT NOT NULL,
+  cron          TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  last_run_at   TEXT,
+  config_json   TEXT,
+  prompt        TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(kind, repo_path)
+);
+
+CREATE TABLE IF NOT EXISTS schedule_skills (
+  kind        TEXT PRIMARY KEY,
+  content     TEXT NOT NULL,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS team_runs (
-  id           TEXT PRIMARY KEY,
-  team         TEXT NOT NULL,
-  lead_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE SET NULL,
-  started_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  status       TEXT NOT NULL DEFAULT 'running'
+CREATE TABLE IF NOT EXISTS runs (
+  id            TEXT PRIMARY KEY,
+  workflow_kind TEXT NOT NULL,
+  trigger       TEXT NOT NULL,
+  schedule_id   TEXT,
+  task_id       TEXT,
+  chat_id       TEXT,
+  loop_run_id   TEXT,
+  status        TEXT NOT NULL DEFAULT 'running',
+  result_json   TEXT,
+  error         TEXT,
+  started_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at      TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_team_runs_team ON team_runs(team);
-CREATE INDEX IF NOT EXISTS idx_team_runs_status ON team_runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_workflow_kind ON runs(workflow_kind);
+CREATE INDEX IF NOT EXISTS idx_runs_schedule_id ON runs(schedule_id);
 
 `;
 

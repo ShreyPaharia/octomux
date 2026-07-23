@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
-type NavKey = 'home' | 'tasks' | 'reviews' | 'settings';
+type NavKey = 'home' | 'tasks' | 'runs' | 'reviews' | 'settings';
 
 const NAV_ITEMS: ReadonlyArray<{
   key: NavKey;
@@ -24,6 +24,13 @@ const NAV_ITEMS: ReadonlyArray<{
     to: '/tasks',
     match: (pathname) => pathname === '/tasks' || pathname.startsWith('/tasks/'),
     Icon: TasksIcon,
+  },
+  {
+    key: 'runs',
+    label: 'Runs',
+    to: '/runs',
+    match: (pathname) => pathname === '/runs',
+    Icon: RunsIcon,
   },
   {
     key: 'reviews',
@@ -64,6 +71,18 @@ function TasksIcon({ active }: { active: boolean }) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke={color} strokeWidth="2" />
+    </svg>
+  );
+}
+
+function RunsIcon({ active }: { active: boolean }) {
+  const color = iconStroke(active);
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="5" cy="6" r="2.5" stroke={color} strokeWidth="2" />
+      <circle cx="5" cy="18" r="2.5" stroke={color} strokeWidth="2" />
+      <circle cx="19" cy="12" r="2.5" stroke={color} strokeWidth="2" />
+      <path d="M8 6h5a4 4 0 0 1 4 4M8 18h5a4 4 0 0 0 4-4" stroke={color} strokeWidth="2" />
     </svg>
   );
 }

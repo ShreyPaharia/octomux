@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import HomePage from './pages/HomePage';
@@ -17,8 +17,6 @@ import { SetupBanner } from './components/SetupBanner';
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const GridMonitor = lazy(() => import('./pages/GridMonitor'));
-const SkillEditor = lazy(() => import('./pages/SkillEditor'));
-const AgentEditor = lazy(() => import('./pages/AgentEditor'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'));
@@ -26,8 +24,18 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
+const WorkflowDetailRoute = lazy(() => import('./workflows/WorkflowDetailRoute'));
 const LoopsPage = lazy(() => import('./pages/LoopsPage'));
-const LoopDetailPage = lazy(() => import('./pages/LoopDetailPage'));
+const LoopGroupDetailPage = lazy(() => import('./pages/LoopGroupDetailPage'));
+const SchedulesPage = lazy(() => import('./pages/SchedulesPage'));
+const RunsPage = lazy(() => import('./pages/RunsPage'));
+
+/** `/loops/:id` predates the generic registry; redirect it to the equivalent `/w/loops/:id`
+ * rather than dropping support for old bookmarks/links. */
+function LoopsRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/w/loops/${id}`} replace />;
+}
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -106,16 +114,19 @@ export function AppShell() {
                 <Route path="/reviews/:id" element={<ReviewDetailPage />} />
                 <Route path="/monitor" element={<GridMonitor />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/skills/:name" element={<SkillEditor />} />
-                <Route path="/agents/:name" element={<AgentEditor />} />
                 <Route path="/chats/:id" element={<ChatPage />} />
                 <Route path="/workspaces" element={<WorkspacesPage />} />
                 <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/setup" element={<SetupPage />} />
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
+                <Route path="/w/:kind/:id" element={<WorkflowDetailRoute />} />
                 <Route path="/loops" element={<LoopsPage />} />
-                <Route path="/loops/:id" element={<LoopDetailPage />} />
+                <Route path="/loops/:id" element={<LoopsRedirect />} />
+                <Route path="/extracts" element={<Navigate to="/runs?kind=pr-extract" replace />} />
+                <Route path="/loop-groups/:id" element={<LoopGroupDetailPage />} />
+                <Route path="/schedules" element={<SchedulesPage />} />
+                <Route path="/runs" element={<RunsPage />} />
               </Routes>
             </Suspense>
           </div>

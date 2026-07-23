@@ -6,6 +6,7 @@ import {
   TASKS_TABLE_COLUMNS,
   AGENTS_TABLE_COLUMNS,
   WORKTREES_TABLE_COLUMNS,
+  PR_EXTRACTS_TABLE_COLUMNS,
 } from '../test-helpers.js';
 
 describe('runMigrations (isolated)', () => {
@@ -56,6 +57,22 @@ describe('runMigrations (isolated)', () => {
         .all() as Array<{ name: string }>
     ).map((i) => i.name);
     expect(indexes).toContain('idx_tasks_active_worktree');
+
+    expect(tables).not.toContain('team_schedules');
+    expect(tables).not.toContain('team_runs');
+
+    expect(tables).toContain('pr_extracts');
+    const extractCols = (db.pragma('table_info(pr_extracts)') as Array<{ name: string }>).map(
+      (c) => c.name,
+    );
+    expect(extractCols).toEqual(PR_EXTRACTS_TABLE_COLUMNS);
+    const extractIndexes = (
+      db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='pr_extracts'`)
+        .all() as Array<{ name: string }>
+    ).map((i) => i.name);
+    expect(extractIndexes).toContain('idx_pr_extracts_task');
+    expect(extractIndexes).toContain('idx_pr_extracts_pr');
   });
 
   it('is idempotent when run twice on the same database', () => {

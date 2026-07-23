@@ -142,4 +142,27 @@ describe('claudeCodeHarness.installHooks', () => {
       'http://127.0.0.1:7777/api/hooks/stop?token=tok%26special%3Dvalue',
     );
   });
+
+  it('forces editorMode: emacs so send-keys Enter submits (defeats global vim mode)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok');
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(written.editorMode).toBe('emacs');
+  });
+
+  it('preserves an explicit worktree editorMode', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, '.claude', 'settings.local.json'),
+      JSON.stringify({ editorMode: 'vim' }),
+    );
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok');
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(written.editorMode).toBe('vim');
+  });
 });

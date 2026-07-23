@@ -501,7 +501,7 @@ describe('permission_prompts.session_id nullability', () => {
 });
 
 describe('review orchestrator migration', () => {
-  it('creates review_runs, published_reviews, review_learnings tables', () => {
+  it('creates review_runs, published_reviews tables (review_learnings folded into agent_learnings)', () => {
     const db = createTestDb();
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
       name: string;
@@ -509,7 +509,8 @@ describe('review orchestrator migration', () => {
     const names = tables.map((t) => t.name);
     expect(names).toContain('review_runs');
     expect(names).toContain('published_reviews');
-    expect(names).toContain('review_learnings');
+    expect(names).toContain('agent_learnings');
+    expect(names).not.toContain('review_learnings');
   });
 
   it('adds 14 new columns to inline_comments', () => {

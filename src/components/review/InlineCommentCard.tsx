@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -9,6 +9,9 @@ interface InlineCommentCardProps {
   comment: InlineCommentDTO;
   taskId: string;
   onUpdated: () => void;
+  onError?: (message: string) => void;
+  /** Register imperative accept/reject/edit handlers for keyboard shortcuts. */
+  registerActions?: (actions: { accept: () => void; reject: () => void; edit: () => void }) => void;
 }
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -34,6 +37,8 @@ export function InlineCommentCard({
   comment: initialComment,
   taskId,
   onUpdated,
+  onError,
+  registerActions,
 }: InlineCommentCardProps) {
   const [comment, setComment] = useState(initialComment);
   const [editing, setEditing] = useState(false);
@@ -43,14 +48,40 @@ export function InlineCommentCard({
   const [saving, setSaving] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
+  useEffect(() => {
+    setComment(initialComment);
+    setEditBody(initialComment.body);
+    setEditExisting(initialComment.existing_code ?? '');
+    setEditSuggested(initialComment.suggested_code ?? '');
+    setEditing(false);
+  }, [initialComment]);
+
+  const startEditing = useCallback(() => {
+    setEditBody(comment.body);
+    setEditExisting(comment.existing_code ?? '');
+    setEditSuggested(comment.suggested_code ?? '');
+    setEditing(true);
+  }, [comment.body, comment.existing_code, comment.suggested_code]);
+
+  useEffect(() => {
+    if (!registerActions) return;
+    registerActions({
+      accept: () => {
+        void handleAccept();
+      },
+      reject: () => setRejectOpen(true),
+      edit: startEditing,
+    });
+  });
+
   async function patch(data: Parameters<typeof reviewApi.patchComment>[2]) {
     setSaving(true);
     try {
       const updated = await reviewApi.patchComment(taskId, comment.id, data);
       setComment(updated);
       onUpdated();
-    } catch {
-      // ignore
+    } catch (err) {
+      onError?.((err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -203,16 +234,7 @@ export function InlineCommentCard({
                 Reject
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                setEditBody(comment.body);
-                setEditExisting(comment.existing_code ?? '');
-                setEditSuggested(comment.suggested_code ?? '');
-                setEditing(true);
-              }}
-            >
+            <Button variant="ghost" size="xs" onClick={startEditing}>
               Edit
             </Button>
           </div>

@@ -31,15 +31,16 @@ const mockExecFile = vi.fn(
       if (execFileShouldFail) {
         process.nextTick(() => callback(new Error('tmux failed'), '', ''));
       } else {
-        process.nextTick(() => callback(null, '', ''));
+        const stdout = _args?.includes('list-clients') ? '/dev/ttys001\n' : '';
+        process.nextTick(() => callback(null, stdout, ''));
       }
     }
     return { on: vi.fn() };
   },
 );
 
-vi.mock('child_process', () => ({
-  execFile: (...args: any[]) => {
+vi.mock('child_process', () => {
+  const execFile = (...args: any[]) => {
     // promisify passes options as 3rd arg and callback as 4th; find callback from end
     let cb: ((...a: any[]) => void) | undefined;
     for (let i = args.length - 1; i >= 0; i--) {
@@ -49,10 +50,24 @@ vi.mock('child_process', () => ({
       }
     }
     return mockExecFile(args[0], args[1], cb);
-  },
-}));
+  };
+  // The real execFile resolves { stdout, stderr } under util.promisify; without
+  // this a plain mock resolves the bare stdout string, breaking execTmux
+  // callers that destructure { stdout }.
+  (execFile as any)[Symbol.for('nodejs.util.promisify.custom')] = (
+    cmd: string,
+    cmdArgs: string[],
+  ) =>
+    new Promise((resolve, reject) => {
+      mockExecFile(cmd, cmdArgs, (err: Error | null, stdout: string, stderr: string) =>
+        err ? reject(err) : resolve({ stdout, stderr }),
+      );
+    });
+  return { execFile };
+});
 
-const { setupTerminalWebSocket, handleTerminalUpgrade } = await import('./terminal.js');
+const { setupTerminalWebSocket, handleTerminalUpgrade, getActiveConnections } =
+  await import('./terminal.js');
 const nodePty = await import('node-pty');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -244,6 +259,78 @@ describe('terminal WebSocket', () => {
     onDataCb('hello terminal');
 
     expect(await received).toBe('hello terminal');
+    ws.close();
+  });
+
+  it('coalesces PTY output into one frame while the socket is congested', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const serverWs = getActiveConnections().get(`${DEFAULTS.task.id}:0`)![0].ws;
+    // Simulate a congested slow link: bufferedAmount above the backpressure limit
+    let buffered = 1024 * 1024;
+    Object.defineProperty(serverWs, 'bufferedAmount', {
+      get: () => buffered,
+      configurable: true,
+    });
+
+    const messages: string[] = [];
+    ws.on('message', (data) => messages.push(data.toString()));
+
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+    onDataCb('repaint-1');
+    await new Promise((r) => setTimeout(r, 50));
+    onDataCb('repaint-2');
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Nothing sent while congested
+    expect(messages).toEqual([]);
+
+    // Link drains → both chunks arrive merged as a single frame
+    buffered = 0;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(messages).toEqual(['repaint-1repaint-2']);
+
+    ws.close();
+  });
+
+  it('discards output while paused and repaints on resume', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const messages: string[] = [];
+    ws.on('message', (data) => messages.push(data.toString()));
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+
+    ws.send(JSON.stringify({ type: 'pause' }));
+    await new Promise((r) => setTimeout(r, 50));
+    onDataCb('hidden output');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(messages).toEqual([]);
+    // Control messages are not forwarded to the PTY as input
+    expect(mockPty.write).not.toHaveBeenCalled();
+
+    ws.send(JSON.stringify({ type: 'resume' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resume forces a full repaint of this viewer's tmux client
+    expect(mockExecFile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining(['refresh-client', '-t', '/dev/ttys001']),
+      expect.any(Function),
+    );
+
+    onDataCb('visible again');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(messages).toEqual(['visible again']);
+
     ws.close();
   });
 

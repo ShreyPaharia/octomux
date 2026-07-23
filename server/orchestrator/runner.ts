@@ -56,8 +56,26 @@ const CAPTURE_PANE_MAX_WAIT_MS = 3000;
 const CAPTURE_PANE_POLL_MS = 50;
 /** Delay between the paste send-keys and Enter, if capture-pane confirm succeeds quickly. */
 const PASTE_TO_ENTER_MIN_DELAY_MS = 50;
+/** How many times to (re)paste a turn if the pane confirm doesn't see it land. */
+const PASTE_ATTEMPTS = 3;
+/** Backoff between paste retries. */
+const PASTE_RETRY_DELAY_MS = process.env.NODE_ENV === 'test' ? 0 : 500;
+/** Max wait for the conductor TUI composer to become input-ready before pasting. */
+const CONDUCTOR_READY_WAIT_MS = process.env.NODE_ENV === 'test' ? 0 : 15000;
+/** Poll interval while waiting for the composer to be ready. */
+const CONDUCTOR_READY_POLL_MS = process.env.NODE_ENV === 'test' ? 10 : 300;
 /** Delay after --resume auto-turn before we allow real turns to be sent. */
 export const RESUME_QUIET_WINDOW_MS = process.env.NODE_ENV === 'test' ? 0 : 2000;
+/**
+ * How long `sendTurn` waits for a freshly-launched conductor to become alive
+ * (claude taking the pane foreground) before treating it as dead and resuming.
+ * A cold `claude` start in tmux takes a few seconds during which the pane is
+ * still the launch shell; without this wait, sendTurn would resume a session
+ * that's merely booting and hit "duplicate session".
+ */
+const SESSION_BOOT_WAIT_MS = process.env.NODE_ENV === 'test' ? 300 : 10000;
+/** Poll interval while waiting for a booting session to become alive. */
+const SESSION_ALIVE_POLL_MS = process.env.NODE_ENV === 'test' ? 20 : 150;
 
 // ─── Config dir ───────────────────────────────────────────────────────────────
 
@@ -110,6 +128,13 @@ function writeOrchestratorsettings(convId: string): string {
     // onboarding already done), and an object `tui` value is rejected by claude
     // ("Invalid value. Expected one of: default, fullscreen") which blocks the
     // session on a settings-error dialog.
+    //
+    // Force NON-vim keybindings for the conductor. We drive the TUI with tmux
+    // `send-keys Enter` to submit each turn; if the operator's global config has
+    // `editorMode: vim`, the pane starts in vim INSERT mode where Enter inserts a
+    // newline instead of submitting — so pasted turns sit unsent forever. The
+    // conductor is non-interactive, so emacs (default) keybindings are correct.
+    editorMode: 'emacs',
     permissions: {
       // CONDUCTOR IS NON-INTERACTIVE — nobody is at its tmux TUI (the user talks
       // to it via the web chat). A permission prompt there hangs the session
@@ -135,9 +160,11 @@ function writeOrchestratorsettings(convId: string): string {
         'mcp__octomux__get_task',
         'mcp__octomux__monitor_status',
         'mcp__octomux__get_task_output',
+        'mcp__octomux__get_agent_output',
         'mcp__octomux__pull_linear_issue',
         'mcp__octomux__recent_repos',
         'mcp__octomux__default_branch',
+        'mcp__octomux__search_learnings',
         // MCP write tools (SHR-142) — execute immediately, no Bash, no gate.
         'mcp__octomux__create_task',
         'mcp__octomux__send_message',
@@ -257,6 +284,23 @@ function orchestratorSessionName(convId: string): string {
   return `octomux-orch-${convId}`;
 }
 
+/**
+ * Build the shell command tmux runs to launch the conductor.
+ *
+ * On claude exit we DO NOT drop to an interactive shell (`exec $SHELL -i`): a
+ * crashed conductor would then execute any `send-keys` chat text as a shell
+ * command (the security review's "chat text run as bash" hazard). Instead we
+ * hold non-interactively — `read -r _` blocks consuming input as data, never a
+ * command — so a dead pane can never run keystrokes. Liveness
+ * (`isConversationSessionAlive`) then sees the shell (not `node`/`claude`) and
+ * `sendTurn` resumes rather than pasting into a corpse.
+ */
+function buildConductorStartupCmd(claudeCmd: string): string {
+  const shell = process.env.SHELL || '/bin/sh';
+  const script = `${claudeCmd}; echo CONDUCTOR_EXITED; read -r _`;
+  return `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -305,9 +349,7 @@ export async function startConversation(
   });
 
   const claudeCmd = harness.buildLaunchCommand({ sessionId, flags });
-  const shell = process.env.SHELL || '/bin/sh';
-  const script = `${claudeCmd}; exec ${shell} -i`;
-  const startupCmd = `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
+  const startupCmd = buildConductorStartupCmd(claudeCmd);
 
   await execTmux(['new-session', '-d', '-s', sessionName, '-c', cwd, startupCmd]);
   await execTmux(['set-option', '-t', sessionName, 'aggressive-resize', 'on']);
@@ -390,9 +432,16 @@ export async function resumeConversation(
     });
   }
 
-  const shell = process.env.SHELL || '/bin/sh';
-  const script = `${claudeCmd}; exec ${shell} -i`;
-  const startupCmd = `${shell} -ic '${script.replace(/'/g, "'\\''")}'`;
+  const startupCmd = buildConductorStartupCmd(claudeCmd);
+
+  // Resume RECREATES the session — kill any lingering one with this name first so
+  // `new-session` can't fail with "duplicate session" (a crashed conductor whose
+  // tmux session outlived it, or a racing caller).
+  try {
+    await execTmux(['kill-session', '-t', sessionName]);
+  } catch {
+    // No existing session — expected on a normal resume.
+  }
 
   await execTmux(['new-session', '-d', '-s', sessionName, '-c', cwd, startupCmd]);
   await execTmux(['set-option', '-t', sessionName, 'aggressive-resize', 'on']);
@@ -470,6 +519,53 @@ export async function stopConversation(convId: string): Promise<void> {
   updateConversation(convId, { status: 'stopped', tmux_window: null });
 }
 
+// ─── Single-writer FIFO per conversation ────────────────────────────────────
+
+/**
+ * Per-conversation write chain. Every writer into the pane (a web user turn, a
+ * gateway/Telegram turn) goes through `sendTurn`, which serializes on this chain
+ * so two turns can never interleave their paste/Enter keystrokes into one pane
+ * (which would submit garbled input). One conversation = one pane = one writer
+ * at a time; distinct conversations run concurrently.
+ */
+const convWriteChains = new Map<string, Promise<void>>();
+
+function withConvWriteLock<T>(convId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = convWriteChains.get(convId) ?? Promise.resolve();
+  const run = prev.catch(() => undefined).then(fn);
+  // The next writer waits for this one regardless of success/failure.
+  convWriteChains.set(
+    convId,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+/**
+ * Interrupt the conductor's in-flight turn by sending the TUI interrupt key
+ * (Escape) to the pane. Used by the gateway turn policy to stop-and-merge when a
+ * new inbound message arrives mid-turn (the user asked for "stop and push the
+ * new message if not idle"). No-op if the session isn't alive.
+ *
+ * Serialized on the same write chain as `sendTurn`, so an interrupt can't race a
+ * paste into the same pane.
+ */
+export async function interruptTurn(convId: string): Promise<void> {
+  const conv = getConversation(convId);
+  if (!conv || !(await isConversationSessionAlive(conv)) || !conv.tmux_window) return;
+  const target = conv.tmux_window;
+  await withConvWriteLock(convId, async () => {
+    await execTmux(['send-keys', '-t', target, 'Escape']);
+    logger.debug(
+      { conversation_id: convId, operation: 'interruptTurn' },
+      'interruptTurn: Escape sent',
+    );
+  });
+}
+
 /**
  * Send a user turn into a live orchestrator conversation via hardened send-keys.
  *
@@ -478,9 +574,14 @@ export async function stopConversation(convId: string): Promise<void> {
  *  2. Poll `capture-pane` until the text appears in the pane buffer (or timeout).
  *  3. Send `Enter` to submit.
  *
- * This replaces the blind fixed-50ms sleep from the original `sendMessageToAgent`.
+ * The whole operation (including a transparent resume of a dead session) runs
+ * under the per-conversation write lock so concurrent turns serialize.
  */
 export async function sendTurn(convId: string, text: string): Promise<void> {
+  return withConvWriteLock(convId, () => deliverTurn(convId, text));
+}
+
+async function deliverTurn(convId: string, text: string): Promise<void> {
   let conv = getConversation(convId);
   if (!conv) {
     throw new Error(`orchestrator runner: conversation ${convId} not found`);
@@ -491,16 +592,25 @@ export async function sendTurn(convId: string, text: string): Promise<void> {
   // sending a turn must transparently restart it via `--resume <session_id>`
   // (same session id → same transcript, history intact) before delivering.
   if (!(await isConversationSessionAlive(conv))) {
-    logger.info(
-      { conversation_id: convId, operation: 'sendTurn' },
-      'sendTurn: session not alive — resuming before delivering turn',
-    );
-    await resumeConversation(convId, conv.cwd ?? process.cwd());
-    // Let the --resume continuation settle before injecting the real turn.
-    if (RESUME_QUIET_WINDOW_MS > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, RESUME_QUIET_WINDOW_MS));
+    // A freshly-launched conductor's pane is briefly the launch shell while
+    // claude boots — that reads as "not alive" but must NOT trigger a resume
+    // (which would `new-session` a name that already exists → "duplicate
+    // session"). If the session EXISTS, wait for claude to take the foreground;
+    // only resume when the session is genuinely absent or never comes alive.
+    const exists = await tmuxSessionExists(conv);
+    const becameAlive = exists ? await waitForSessionAlive(conv, SESSION_BOOT_WAIT_MS) : false;
+    if (!becameAlive) {
+      logger.info(
+        { conversation_id: convId, operation: 'sendTurn', session_exists: exists },
+        'sendTurn: session not alive — resuming before delivering turn',
+      );
+      await resumeConversation(convId, conv.cwd ?? process.cwd());
+      // Let the --resume continuation settle before injecting the real turn.
+      if (RESUME_QUIET_WINDOW_MS > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RESUME_QUIET_WINDOW_MS));
+      }
+      conv = getConversation(convId); // reload — resume updated tmux_window
     }
-    conv = getConversation(convId); // reload — resume updated tmux_window
   }
 
   if (!conv?.tmux_window) {
@@ -514,33 +624,115 @@ export async function sendTurn(convId: string, text: string): Promise<void> {
     'sendTurn: pasting text',
   );
 
-  // Step 1: paste the text (bracketed paste — preserves newlines)
-  await execTmux(['send-keys', '-t', target, '-l', text]);
+  // Step 0: wait for the TUI composer to be interactive. `waitForSessionAlive`
+  // only proves the claude PROCESS is up — its TUI takes a moment more to render
+  // an input-ready composer. Pasting before then silently drops the keystrokes
+  // (the cold-start race that left turns unsubmitted), so wait for the prompt.
+  await waitForConductorReady(target);
 
-  // Step 2: capture-pane confirm — wait until the pasted text appears in the buffer
-  const confirmed = await waitForPaneContent(target, text);
-  if (!confirmed) {
-    logger.warn(
-      { conversation_id: convId, operation: 'sendTurn', target },
-      'sendTurn: capture-pane confirm timed out; sending Enter anyway',
-    );
+  // Steps 1–2: paste, then confirm the text landed in the composer — retrying the
+  // paste (not just the Enter) if it didn't, since a dropped paste is why a turn
+  // never submits. Only send Enter once the paste is confirmed present.
+  let confirmed = false;
+  for (let attempt = 1; attempt <= PASTE_ATTEMPTS && !confirmed; attempt++) {
+    await execTmux(['send-keys', '-t', target, '-l', text]);
+    confirmed = await waitForPaneContent(target, text);
+    if (!confirmed) {
+      logger.warn(
+        { conversation_id: convId, operation: 'sendTurn', target, attempt },
+        'sendTurn: paste not confirmed in pane; retrying',
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, PASTE_RETRY_DELAY_MS));
+    }
   }
 
-  // Step 3: brief minimum delay then Enter
+  // Step 3: brief minimum delay then Enter to submit.
   await new Promise<void>((resolve) => setTimeout(resolve, PASTE_TO_ENTER_MIN_DELAY_MS));
   await execTmux(['send-keys', '-t', target, 'Enter']);
 
-  logger.debug({ conversation_id: convId, operation: 'sendTurn' }, 'sendTurn: Enter sent');
+  logger.debug(
+    { conversation_id: convId, operation: 'sendTurn', paste_confirmed: confirmed },
+    'sendTurn: Enter sent',
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Whether the conversation's tmux session is currently alive. False when there's
- * no recorded window, or `tmux has-session` reports the session is gone (the
- * server restarted, the session was killed, or claude exited).
+ * Shell process names that mean the pane is NOT running claude — either the
+ * booting launch shell, or the post-crash holding shell (`; echo CONDUCTOR_EXITED;
+ * read -r _`, where `read` is a builtin so the pane's command is the shell).
+ * Leading-dash forms (`-zsh`) are login shells.
+ */
+const HOLDING_SHELL_COMMANDS = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'dash',
+  'ksh',
+  'tcsh',
+  'csh',
+  '-sh',
+  '-bash',
+  '-zsh',
+  '-fish',
+]);
+
+/**
+ * Whether the conductor's `claude` process is currently alive in the pane —
+ * NOT merely "the tmux session exists."
+ *
+ * `has-session` is true even when claude has crashed and the pane fell back to
+ * the holding shell; pasting a chat turn into that shell would run it as a
+ * command. So liveness = the pane's foreground command is NOT a shell. We can't
+ * match claude by name — its `pane_current_command` is not `claude`/`node` but a
+ * version-like string (e.g. `2.1.218`) — so we invert: anything that isn't the
+ * booting/holding shell (or empty) is treated as a live conductor.
+ *
+ * A failed `display-message` (no such session) also means not-alive.
  */
 async function isConversationSessionAlive(conv: OrchestratorConversation): Promise<boolean> {
+  if (!conv.tmux_window) return false;
+  try {
+    const { stdout } = await execTmux([
+      'display-message',
+      '-t',
+      conv.tmux_window,
+      '-p',
+      '#{pane_current_command}',
+    ]);
+    const cmd = stdout.trim().toLowerCase();
+    if (!cmd) return false;
+    return !HOLDING_SHELL_COMMANDS.has(cmd);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wait for the conductor's TUI composer to be input-ready before pasting a turn.
+ * `claude` prints its prompt marker (`❯`) once the composer is interactive; until
+ * then keystrokes are dropped. Returns true once the marker appears, false on
+ * timeout (caller pastes anyway as a best effort).
+ */
+async function waitForConductorReady(target: string): Promise<boolean> {
+  const deadline = Date.now() + CONDUCTOR_READY_WAIT_MS;
+  for (;;) {
+    try {
+      const { stdout } = await execTmux(['capture-pane', '-t', target, '-p']);
+      // `❯` = composer prompt; the shortcuts hint also only shows once ready.
+      if (stdout.includes('❯') || /for shortcuts/i.test(stdout)) return true;
+    } catch {
+      // ignore — retry until deadline
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, CONDUCTOR_READY_POLL_MS));
+  }
+}
+
+/** Whether the conversation's tmux session exists at all (booting or alive). */
+async function tmuxSessionExists(conv: OrchestratorConversation): Promise<boolean> {
   if (!conv.tmux_window) return false;
   const session = conv.tmux_window.split(':')[0];
   if (!session) return false;
@@ -549,6 +741,24 @@ async function isConversationSessionAlive(conv: OrchestratorConversation): Promi
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Poll until the conductor's claude process takes the pane foreground, or the
+ * timeout elapses. Distinguishes a session that's still BOOTING (claude
+ * launching, pane briefly the shell) from one that's genuinely dead — so
+ * `sendTurn` doesn't resume (and duplicate) a session that just needs a moment.
+ */
+async function waitForSessionAlive(
+  conv: OrchestratorConversation,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await isConversationSessionAlive(conv)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, SESSION_ALIVE_POLL_MS));
   }
 }
 

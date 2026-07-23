@@ -1,6 +1,7 @@
 import path from 'path';
 import { nanoid } from 'nanoid';
 import { insertTask, insertWorktree } from './repositories/index.js';
+import { octomuxSkillRef } from './octomux-plugin.js';
 
 /** Lowercased, dashed `basename(repoPath)` — safe for use in branch names. */
 export function repoShortName(repoPath: string): string {
@@ -40,7 +41,7 @@ function reviewTaskIdLines(reviewTaskId: string): string[] {
 export function buildPrReviewPrompt(input: PrReviewPromptInput): string {
   const author = input.author ?? 'unknown';
   return [
-    `/review-walkthrough`,
+    octomuxSkillRef('review-walkthrough'),
     '',
     ...reviewTaskIdLines(input.reviewTaskId),
     '',
@@ -70,7 +71,7 @@ export interface ManualReviewPromptInput {
 /** Prompt used when the source task has no PR yet — manual pre-PR review. */
 export function buildManualReviewPrompt(input: ManualReviewPromptInput): string {
   return [
-    `/review-walkthrough`,
+    octomuxSkillRef('review-walkthrough'),
     '',
     ...reviewTaskIdLines(input.reviewTaskId),
     '',
@@ -94,7 +95,7 @@ export interface DeepReviewPromptInput {
 /** Prompt for the auto-chained deep-review agent (phase 2). */
 export function buildDeepReviewPrompt(input: DeepReviewPromptInput): string {
   return [
-    `/review-deep`,
+    octomuxSkillRef('review-deep'),
     '',
     ...reviewTaskIdLines(input.reviewTaskId),
     '',

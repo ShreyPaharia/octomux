@@ -1,3 +1,8 @@
+// Load .env from the launch cwd BEFORE any other module reads process.env. Kept
+// as the first import so dotenv runs before the imports below are evaluated.
+// Real environment variables always win — dotenv never overrides an already-set
+// var, so `export FOO=…; octomux start` still takes precedence over .env.
+import 'dotenv/config';
 import { createServer, type IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import path from 'path';
@@ -32,12 +37,19 @@ import {
   recoverTasks,
 } from './task-engine/index.js';
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
-import { syncAgents } from './agents.js';
 import { ensureGithubLogin } from './github-login.js';
+import { acquireInstanceLock } from './single-instance.js';
 import { childLogger } from './logger.js';
+import { wireReviewerRunFinisher } from './workflows/reviewer/finish-run.js';
+import { startGatewayIfConfigured } from './gateway/boot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
+
+// Refuse to boot a second server against the same database (see incident: a
+// stale dev build kept re-closing a resumed task via the merged-PR poller).
+acquireInstanceLock();
+
 const app = createApp();
 const server = createServer(app);
 const PORT = process.env.OCTOMUX_PORT || process.env.PORT || 7777;
@@ -66,15 +78,13 @@ await recoverTasks();
 await cleanupOrphanedViewerSessions();
 await gcScratchDirs();
 
-// Sync built-in agent definitions to .claude/agents/
-await syncAgents().catch((err: unknown) => {
-  logger.error({ err }, 'Failed to sync agents');
-});
-
 // Resolve owner's GitHub login for reviewer-request polling (non-blocking)
 ensureGithubLogin().catch((err) => {
   logger.warn({ err }, 'ensureGithubLogin failed — reviewer polling disabled');
 });
+
+// Finish reviewer workflow runs when drafting completes (not on publish).
+wireReviewerRunFinisher();
 
 // ─── Orchestrator supervisor ───────────────────────────────────────────────
 // The supervisor is the single in-process subscriber to the durable events log.
@@ -113,6 +123,9 @@ if (pendingCards.length > 0) {
 
 // Background status + PR polling
 startPolling();
+
+// Telegram gateway — opt-in, only starts if OCTOMUX_GATEWAY_TELEGRAM_TOKEN is set.
+void startGatewayIfConfigured();
 
 // Serve SPA in production
 if (process.env.NODE_ENV === 'production') {

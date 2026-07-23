@@ -15,7 +15,10 @@ const connections = new Map<string, TerminalConnection[]>();
 let wss: WebSocketServer;
 
 export function setupTerminalWebSocket(): void {
-  wss = new WebSocketServer({ noServer: true });
+  // permessage-deflate: TUI redraws (alt-screen full-frame repaints) are highly
+  // repetitive ANSI — compression cuts remote-viewing bandwidth ~10x. ws only
+  // compresses frames above its 1KB threshold, so keystroke echo stays fast.
+  wss = new WebSocketServer({ noServer: true, perMessageDeflate: true });
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
@@ -69,23 +72,57 @@ function attachToTmuxSession(
   }
   connections.get(connKey)!.push({ ws, pty });
 
-  // PTY → WebSocket (microtask batching)
+  // PTY → WebSocket (microtask batching + backpressure coalescing)
   // Collect chunks arriving in the same event loop tick and send as one frame.
+  // While the socket is congested (slow remote link), keep merging chunks
+  // instead of queueing frames: consecutive TUI repaints are near-identical,
+  // so the merged frame deflates to almost nothing and the client jumps to
+  // the latest state instead of replaying stale repaints one by one.
+  // ponytail: pendingOutput is unbounded during a long stall; add a cap +
+  // capture-pane resync if it ever matters.
+  const BACKPRESSURE_LIMIT = 64 * 1024;
+  const BACKPRESSURE_RETRY_MS = 16;
   let pendingOutput = '';
   let outputScheduled = false;
+  let retryTimer: NodeJS.Timeout | null = null;
+  // Hidden viewers (inactive tabs in the terminal LRU) send {type:'pause'} —
+  // output is discarded rather than streamed to a terminal nobody can see.
+  // On resume, refresh-client forces a full repaint so the screen is current.
+  // Discarding (vs pty.pause()) means a stalled viewer can never backpressure
+  // tmux and stall the agent's pane.
+  let paused = false;
+
+  const forceRepaint = () => {
+    execTmux(['list-clients', '-t', tmuxTarget, '-F', '#{client_name}'])
+      .then(({ stdout }) => {
+        const client = stdout.trim().split('\n')[0];
+        if (client) return execTmux(['refresh-client', '-t', client]);
+      })
+      .catch(() => {});
+  };
+
+  const flushOutput = () => {
+    retryTimer = null;
+    if (ws.readyState !== WebSocket.OPEN || !pendingOutput) {
+      pendingOutput = '';
+      outputScheduled = false;
+      return;
+    }
+    if (ws.bufferedAmount > BACKPRESSURE_LIMIT) {
+      retryTimer = setTimeout(flushOutput, BACKPRESSURE_RETRY_MS);
+      return;
+    }
+    ws.send(pendingOutput);
+    pendingOutput = '';
+    outputScheduled = false;
+  };
 
   pty.onData((data: string) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (paused || ws.readyState !== WebSocket.OPEN) return;
     pendingOutput += data;
     if (!outputScheduled) {
       outputScheduled = true;
-      queueMicrotask(() => {
-        if (ws.readyState === WebSocket.OPEN && pendingOutput) {
-          ws.send(pendingOutput);
-        }
-        pendingOutput = '';
-        outputScheduled = false;
-      });
+      queueMicrotask(flushOutput);
     }
   });
 
@@ -101,6 +138,18 @@ function attachToTmuxSession(
         const parsed = JSON.parse(msg);
         if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
           pty.resize(parsed.cols, parsed.rows);
+          return;
+        }
+        if (parsed.type === 'pause') {
+          paused = true;
+          pendingOutput = '';
+          return;
+        }
+        if (parsed.type === 'resume') {
+          if (paused) {
+            paused = false;
+            forceRepaint();
+          }
           return;
         }
       } catch {
@@ -134,6 +183,7 @@ function attachToTmuxSession(
 
   // Cleanup on WebSocket close
   ws.on('close', () => {
+    if (retryTimer) clearTimeout(retryTimer);
     if (!ptyExited) {
       pty.kill();
     }

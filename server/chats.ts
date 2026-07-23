@@ -12,9 +12,9 @@ import {
   stopChatAgent,
   deleteAgentRow,
 } from './repositories/index.js';
-import { getSettings } from './settings.js';
 import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
+import { resolveHarnessFlags } from './harness-flags.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
 import { shellQuoteSingle } from './shell-quote.js';
@@ -64,7 +64,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   const harness = getHarness(opts.harnessId ?? null);
   const agentId = id; // for standalone chats, agent row id == chat id
   const hookToken = crypto.randomBytes(32).toString('hex');
-  const flags = harness.resolveFlags(await getSettings());
+  const flags = await resolveHarnessFlags(harness);
 
   let sessionIdForDb: string | null;
   let sessionIdForLaunch: string;
@@ -88,7 +88,6 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   });
 
   try {
-    await harness.syncAgents(cwd);
     await harness.installHooks(cwd, hookBaseUrl(), hookToken);
 
     await execTmux(['new-session', '-d', '-s', session, '-c', cwd]);

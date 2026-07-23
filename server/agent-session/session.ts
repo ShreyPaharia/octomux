@@ -5,8 +5,10 @@
  *   - a ProcessSubstrate (pty headless or tmux reattachable) for launching the agent,
  *   - a CaptureStrategy (default: MCP submit_result) for receiving the structured result.
  *
- * DB-free: only type-only import of Harness; no task-engine / repositories /
- * orchestrator / task-runner imports.
+ * DB-free by default: only type-only import of Harness; no task-engine /
+ * repositories / orchestrator / task-runner imports at load time. Passing
+ * `opts.run` opts a single call into `runs` persistence via a dynamic
+ * `repositories/runs.js` import, so the no-run path stays untouched.
  */
 
 import fs from 'fs';
@@ -18,6 +20,7 @@ import { shellQuoteSingle } from '../shell-quote.js';
 import { writeSubmitResultMcpConfig } from './mcp/config.js';
 import type { ProcessSubstrate } from './substrate.js';
 import type { Harness } from '../harnesses/types.js';
+import { appendOctomuxPluginFlags } from '../octomux-plugin.js';
 
 const logger = childLogger('agent-session/session');
 
@@ -65,6 +68,11 @@ export interface RunAgentSessionOptions<T = unknown> {
    * Default: a fresh os.tmpdir() subdirectory.
    */
   resultDir?: string;
+  /**
+   * When set, persists a `runs` row for this session (insertRun before spawn,
+   * finishRun on settle). Omit to keep this call DB-free, as today.
+   */
+  run?: { workflowKind: string; trigger: string; scheduleId?: string };
 }
 
 // ─── Default capture: MCP submit_result ──────────────────────────────────────
@@ -246,6 +254,20 @@ export async function runAgentSession<T = unknown>(
 
   const resultDir = opts.resultDir ?? path.join(os.tmpdir(), `octomux-as-${nanoid(8)}`);
 
+  // Optional run-record persistence: dynamic import so the module stays
+  // DB-free at load time when `run` is omitted (the default, unchanged path).
+  let runRec: { id: string } | undefined;
+  let finishRunFn: (typeof import('../repositories/runs.js'))['finishRun'] | undefined;
+  if (opts.run) {
+    const { insertRun, finishRun } = await import('../repositories/runs.js');
+    finishRunFn = finishRun;
+    runRec = insertRun({
+      workflowKind: opts.run.workflowKind,
+      trigger: opts.run.trigger,
+      scheduleId: opts.run.scheduleId ?? null,
+    });
+  }
+
   const capture: CaptureStrategy<T> =
     opts.capture ?? mcpSubmitResultCapture<T>(outputSchema, { resultDir });
 
@@ -265,7 +287,7 @@ export async function runAgentSession<T = unknown>(
   const baseCmd = harness.buildLaunchCommand({
     sessionId,
     agent: null,
-    flags: extraArgs.trim(),
+    flags: appendOctomuxPluginFlags(`--dangerously-skip-permissions ${extraArgs}`.trim()),
     model,
     workspacePath: workspaceDir,
   });
@@ -287,15 +309,23 @@ export async function runAgentSession<T = unknown>(
     env: captureEnv,
   });
 
-  // 6. Race: result vs early exit vs timeout
+  // 6. Race: result vs early exit vs timeout.
+  // The agent legitimately writes result.json and *then* exits. `onExit` must
+  // NOT immediately win the race against the result-poll (100ms), or a successful
+  // submit-then-exit is misreported as "exited before submitting result". Give the
+  // capture a short grace period after exit to read a just-written result; if
+  // `waitForResult` resolves during the grace, this delayed rejection is ignored.
+  const EXIT_GRACE_MS = 1_500;
   const exitPromise = new Promise<never>((_resolve, reject) => {
     handle.onExit(({ code }) => {
-      reject(
-        new Error(
-          `Agent exited before submitting result (exit code ${code}). ` +
-            'Ensure the agent calls submit_result before exiting.',
-        ),
-      );
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Agent exited before submitting result (exit code ${code}). ` +
+              'Ensure the agent calls submit_result before exiting.',
+          ),
+        );
+      }, EXIT_GRACE_MS);
     });
   });
 
@@ -309,7 +339,11 @@ export async function runAgentSession<T = unknown>(
   try {
     const result = await Promise.race([capture.waitForResult(), exitPromise, timeoutPromise]);
     logger.info({ workspaceDir, sessionId }, 'runAgentSession: result received');
+    if (runRec) finishRunFn?.(runRec.id, { status: 'done', result });
     return { result };
+  } catch (err) {
+    if (runRec) finishRunFn?.(runRec.id, { status: 'failed', error: (err as Error).message });
+    throw err;
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
     handle.dispose();

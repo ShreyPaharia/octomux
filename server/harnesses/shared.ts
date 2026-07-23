@@ -71,6 +71,14 @@ export function validateSettingsObject(
   return out;
 }
 
+/** Normalize resolved flags to a single leading-space-separated string (or ''),
+ *  so callers can't accidentally glue flags onto the preceding token (e.g. the
+ *  session id) by passing flags without/with-stray leading whitespace. */
+function flagsSuffix(flags: string, model: string | null | undefined): string {
+  const resolved = applyModel(flags, model).trim();
+  return resolved ? ` ${resolved}` : '';
+}
+
 export function buildClaudeLaunchCommand({
   sessionId,
   agent,
@@ -78,8 +86,7 @@ export function buildClaudeLaunchCommand({
   model,
 }: HarnessLaunchOpts): string {
   const agentPart = agent ? ` --agent ${validateAgentName(agent)}` : '';
-  const resolvedFlags = applyModel(flags, model);
-  return `claude${agentPart} --session-id ${sessionId}${resolvedFlags}`;
+  return `claude${agentPart} --session-id ${sessionId}${flagsSuffix(flags, model)}`;
 }
 
 export function buildClaudeResumeCommand({
@@ -87,8 +94,7 @@ export function buildClaudeResumeCommand({
   flags = '',
   model,
 }: HarnessResumeOpts): string {
-  const resolvedFlags = applyModel(flags, model);
-  return `claude --resume ${sessionId}${resolvedFlags}`;
+  return `claude --resume ${sessionId}${flagsSuffix(flags, model)}`;
 }
 
 export function buildClaudeContinueCommand({
@@ -96,6 +102,5 @@ export function buildClaudeContinueCommand({
   flags = '',
   model,
 }: HarnessResumeOpts): string {
-  const resolvedFlags = applyModel(flags, model);
-  return `claude --continue --session-id ${sessionId}${resolvedFlags}`;
+  return `claude --continue --session-id ${sessionId}${flagsSuffix(flags, model)}`;
 }

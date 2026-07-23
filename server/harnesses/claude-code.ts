@@ -76,20 +76,20 @@ export const claudeCodeHarness: Harness = {
     const mergedDeny = [...new Set([...DENIED_TOOLS, ...existingDeny])];
     const mergedPermissions = { ...existingPerms, allow: mergedAllow, deny: mergedDeny };
 
-    const merged = { ...existing, permissions: mergedPermissions, hooks: mergedHooks };
+    // Force NON-vim keybindings unless the worktree explicitly chose one. octomux
+    // drives agents with tmux `send-keys` (paste → Enter to submit). If the
+    // operator's global config has `editorMode: vim`, the agent's TUI starts in
+    // vim INSERT mode where Enter's submit behavior is mode-dependent and
+    // unreliable — turns (incl. plan approvals) get pasted but never submitted.
+    // emacs keybindings make `send-keys Enter` submit deterministically.
+    const editorMode = typeof existing.editorMode === 'string' ? existing.editorMode : 'emacs';
+
+    const merged = { ...existing, editorMode, permissions: mergedPermissions, hooks: mergedHooks };
     writeJsonConfig(settingsPath, merged);
   },
 
-  async syncAgents(worktreePath: string) {
-    const { listAgents, getAgent } = await import('../agents.js');
-    const targetDir = path.join(worktreePath, '.claude', 'agents');
-    await fs.promises.mkdir(targetDir, { recursive: true });
-
-    const agents = await listAgents(worktreePath);
-    for (const def of agents) {
-      const agent = await getAgent(def.name, worktreePath);
-      await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
-    }
+  async syncAgents(_worktreePath: string) {
+    // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
   },
 
   resolveFlags(settings: OctomuxSettings): string {

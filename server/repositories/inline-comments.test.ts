@@ -101,6 +101,42 @@ describe('inline_comments DAO', () => {
       const rows = listComments('task1', { file: 'b.ts' });
       expect(rows.map((r) => r.body)).toEqual(['B']);
     });
+
+    it('activeOnly returns draft/accepted without resolved_at', () => {
+      const draft = addComment({
+        task_id: 'task1',
+        file_path: 'a.ts',
+        line: 1,
+        side: 'new',
+        original_commit_sha: 's',
+        body: 'draft',
+      });
+      addComment({
+        task_id: 'task1',
+        file_path: 'a.ts',
+        line: 2,
+        side: 'new',
+        original_commit_sha: 's',
+        body: 'rejected',
+      });
+      getDb()
+        .prepare(`UPDATE inline_comments SET status = 'rejected' WHERE body = 'rejected'`)
+        .run();
+      getDb().prepare(`UPDATE inline_comments SET status = 'accepted' WHERE id = ?`).run(draft.id);
+      addComment({
+        task_id: 'task1',
+        file_path: 'a.ts',
+        line: 3,
+        side: 'new',
+        original_commit_sha: 's',
+        body: 'published',
+      });
+      getDb()
+        .prepare(`UPDATE inline_comments SET status = 'published' WHERE body = 'published'`)
+        .run();
+      const active = listComments('task1', { activeOnly: true });
+      expect(active.map((r) => r.body)).toEqual(['draft']);
+    });
   });
 
   describe('resolve / unresolve', () => {

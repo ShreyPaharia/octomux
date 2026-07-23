@@ -2,14 +2,14 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { getOrCreateRepoConfig } from '../../repositories/repo-config.js';
 import { inferRefs } from '../../ref-inference.js';
 import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import type { RepoConfig } from '../../repositories/repo-config.js';
 import type { Task, RunMode } from '../../types.js';
 import {
@@ -149,12 +149,14 @@ async function prepareFirstAgentLaunch(
   const agentId = nanoid(12);
   const agentName = task.agent ?? null;
   const hookToken = crypto.randomBytes(32).toString('hex');
-  let flags = harness.resolveFlags(await getSettings());
+  let flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
 
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.syncAgents(setup.worktreePath);
-  await syncSkills(setup.worktreePath);
   await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);

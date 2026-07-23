@@ -592,17 +592,6 @@ export function runMigrations(instance: Database.Database): void {
       published_at TIMESTAMP NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_published_reviews_task ON published_reviews(task_id);
-
-    CREATE TABLE IF NOT EXISTS review_learnings (
-      id TEXT PRIMARY KEY,
-      repo_path TEXT NOT NULL,
-      why TEXT NOT NULL,
-      created_from_comment_id TEXT REFERENCES inline_comments(id) ON DELETE SET NULL,
-      usage_count INTEGER NOT NULL DEFAULT 0,
-      last_used_at TIMESTAMP,
-      created_at TIMESTAMP NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_review_learnings_repo ON review_learnings(repo_path);
   `);
 
   const reviewRunCols = columnsOf(instance, 'review_runs');
@@ -864,5 +853,121 @@ export function runMigrations(instance: Database.Database): void {
       created_at     TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_loop_iterations_run ON loop_iterations(loop_run_id, n);
+  `);
+
+  // ── PR-extract workflow persistence (2026-07-13, P3) ────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS pr_extracts (
+      id             TEXT PRIMARY KEY,
+      task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      repo_path      TEXT NOT NULL,
+      pr_number      INTEGER NOT NULL,
+      pr_head_sha    TEXT NOT NULL,
+      area           TEXT NOT NULL,
+      risk           TEXT NOT NULL,
+      has_migration  INTEGER NOT NULL,
+      surface        TEXT NOT NULL,
+      loc            INTEGER NOT NULL,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pr_extracts_task ON pr_extracts(task_id);
+    CREATE INDEX IF NOT EXISTS idx_pr_extracts_pr ON pr_extracts(repo_path, pr_number);
+  `);
+
+  // ── Best-of-N loop groups (2026-07-13, P4) ──────────────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS loop_groups (
+      id                  TEXT PRIMARY KEY,
+      spec_json           TEXT NOT NULL,
+      n                   INTEGER NOT NULL,
+      repo_path           TEXT NOT NULL,
+      base_branch         TEXT NOT NULL,
+      judge_status        TEXT NOT NULL DEFAULT 'not_run',
+      winner_loop_run_id  TEXT REFERENCES loop_runs(id),
+      judge_rationale     TEXT,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  const loopRunsColsForGroup = columnsOf(instance, 'loop_runs');
+  addColumn(
+    instance,
+    'loop_runs',
+    'group_id',
+    'group_id TEXT REFERENCES loop_groups(id)',
+    loopRunsColsForGroup,
+  );
+  instance.exec(`CREATE INDEX IF NOT EXISTS idx_loop_runs_group ON loop_runs(group_id);`);
+
+  // ── Remove the Teams feature (2026-07-18, P0) ────────────────────────────
+  // Forward-only drop: team_schedules/team_runs are no longer read or written.
+  instance.exec('DROP TABLE IF EXISTS team_runs;');
+  instance.exec('DROP TABLE IF EXISTS team_schedules;');
+
+  // ── Per-schedule config overrides (2026-07-18, P4) ───────────────────────
+  const scheduleCols = columnsOf(instance, 'schedules');
+  addColumn(instance, 'schedules', 'config_json', 'config_json TEXT', scheduleCols);
+  addColumn(instance, 'schedules', 'prompt', 'prompt TEXT', scheduleCols);
+
+  // ── Link scheduled runs back to their schedule (2026-07-18, P5) ──────────
+  const taskColsForSchedule = columnsOf(instance, 'tasks');
+  addColumn(instance, 'tasks', 'schedule_id', 'schedule_id TEXT', taskColsForSchedule);
+
+  // ── Agent learnings store (2026-07-23, §12 P2) ───────────────────────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS agent_learnings (
+      id            TEXT PRIMARY KEY,
+      repo_path     TEXT NOT NULL,
+      lane          TEXT NOT NULL,          -- 'shared' | 'loop:<task-id>' | 'schedule:<id>'
+      trigger       TEXT NOT NULL,
+      lesson        TEXT NOT NULL,
+      evidence      TEXT,
+      source_run_id TEXT,
+      source_commit TEXT,
+      usage_count   INTEGER NOT NULL DEFAULT 0,
+      last_used_at  TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_learnings_read ON agent_learnings(repo_path, lane);
+  `);
+  const loopIterCols = columnsOf(instance, 'loop_iterations');
+  addColumn(
+    instance,
+    'loop_iterations',
+    'learnings_seeded',
+    'learnings_seeded INTEGER',
+    loopIterCols,
+  );
+
+  // ── Fold review_learnings into agent_learnings (2026-07-23, review lane) ─
+  // PR-review learnings now live in agent_learnings (lane='review'). Forward-only drop.
+  instance.exec('DROP TABLE IF EXISTS review_learnings;');
+
+  // ── Soft-supersede for agent_learnings (2026-07-23, §12 P2 Task 10) ──────
+  const agentLearningsCols = columnsOf(instance, 'agent_learnings');
+  addColumn(instance, 'agent_learnings', 'superseded_at', 'superseded_at TEXT', agentLearningsCols);
+  addColumn(
+    instance,
+    'agent_learnings',
+    'superseded_reason',
+    'superseded_reason TEXT',
+    agentLearningsCols,
+  );
+
+  // ── Gateway: channel↔conversation map + inbound dedup (2026-07-23) ────────
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS channel_threads (
+      channel     TEXT NOT NULL,
+      thread_key  TEXT NOT NULL,
+      conv_id     TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (channel, thread_key)
+    );
+    CREATE TABLE IF NOT EXISTS gateway_inbound (
+      channel      TEXT NOT NULL,
+      external_id  TEXT NOT NULL,
+      seen_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (channel, external_id)
+    );
   `);
 }

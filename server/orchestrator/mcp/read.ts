@@ -7,11 +7,12 @@
  * **lean summaries and pointers only** — never full row dumps, file bodies,
  * or diff contents. The orchestrator must hold pointers, not contents (§1, §8).
  *
- * Four tools:
- *   list_tasks      — paginated/filtered task list (id, title, statuses only)
- *   get_task        — lean task summary + agent_count pointer
- *   monitor_status  — cross-task rollup: counts + needs_attention list
- *   get_task_output — artifact pointers from managed_tasks.artifacts JSON
+ * Tools:
+ *   list_tasks       — paginated/filtered task list (id, title, statuses only)
+ *   get_task         — lean task summary + agent_count pointer
+ *   monitor_status   — cross-task rollup: counts + needs_attention list
+ *   get_task_output  — artifact pointers from managed_tasks.artifacts JSON
+ *   search_learnings — shared-lane agent_learnings recall (lean rows only)
  *
  * These handlers are called both by the MCP server (server.ts) and by tests
  * directly so they are exported as plain functions (no transport coupling).
@@ -19,6 +20,7 @@
 
 import { promisify } from 'util';
 import { execFile as execFileCb } from 'child_process';
+import { execTmux } from '../../tmux-bin.js';
 import {
   getTask,
   listTasks,
@@ -28,6 +30,7 @@ import {
   listPendingPromptsByTasks,
   listRecentRepoPaths,
 } from '../../repositories/index.js';
+import { searchShared } from '../../repositories/agent-learnings.js';
 import { getManagedTask, countManagedTasksByPhase, eventsSince } from '../store.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';
@@ -70,6 +73,18 @@ export interface TaskSummary {
 export interface TaskDetail extends TaskSummary {
   /** Number of agents on this task (pointer, not agent rows). */
   agent_count: number;
+  /**
+   * Managed workflow phase — 'planning' | 'speccing' | 'awaiting_approval' |
+   * 'implementing' | 'reviewing' | 'done'. This is what distinguishes a task
+   * that's actively WORKING ('implementing') from one PAUSED at a review gate
+   * ('awaiting_approval') — `runtime_state: running` only means the tmux session
+   * is alive and can't tell those apart. Null for non-managed tasks.
+   */
+  phase: string | null;
+  /** The agent's most recent self-reported progress line (last action). */
+  current_summary: string | null;
+  /** When current_summary was last updated — the real freshness of activity. */
+  current_summary_updated_at: string | null;
 }
 
 export interface MonitorStatusResult {
@@ -106,9 +121,11 @@ export function handleListTasks(input: ListTasksInput): TaskSummary[] {
 
   logger.debug({ operation: 'list_tasks', workflow_status, limit }, 'list_tasks called');
 
-  // Fetch all non-deleted tasks (including auto_review), ordered newest-updated first.
+  // Fetch all non-deleted tasks (including auto_review and automated workflow sources),
+  // ordered newest-updated first. The dashboard board hides automated tasks; the orchestrator
+  // must still see them.
   // listTasks orders by created_at; we replicate the original updated_at ordering in JS.
-  let rows = listTasks({ includeAutoReview: true });
+  let rows = listTasks({ includeAutoReview: true, includeAutomated: true });
 
   // Apply workflow_status filter if provided
   if (workflow_status) {
@@ -151,6 +168,7 @@ export function handleGetTask(input: GetTaskInput): TaskDetail | null {
   }
 
   const agent_count = countAgentsForTask(task_id);
+  const phase = getManagedTask(task_id)?.phase ?? null;
 
   return {
     id: task.id,
@@ -160,6 +178,9 @@ export function handleGetTask(input: GetTaskInput): TaskDetail | null {
     created_at: task.created_at,
     updated_at: task.updated_at,
     agent_count,
+    phase,
+    current_summary: task.current_summary,
+    current_summary_updated_at: task.current_summary_updated_at,
   };
 }
 
@@ -178,8 +199,9 @@ export function handleMonitorStatus(_input: MonitorStatusInput): MonitorStatusRe
   // Total active (non-deleted) tasks
   const total = countTasks();
 
-  // All non-deleted tasks (including auto_review) for rollup computation
-  const allTasks = listTasks({ includeAutoReview: true });
+  // All non-deleted tasks for rollup computation. Must match countTasks()'s scope — it counts
+  // every task, so excluding automated sources here would desync `total` from the breakdown.
+  const allTasks = listTasks({ includeAutoReview: true, includeAutomated: true });
   const taskIds = allTasks.map((t) => t.id);
   const taskMap = new Map<string, Task>(allTasks.map((t) => [t.id, t]));
 
@@ -316,6 +338,75 @@ export function handleGetTaskOutput(input: GetTaskOutputInput): TaskOutputPointe
   return pointers;
 }
 
+// ─── get_agent_output ─────────────────────────────────────────────────────────
+
+export interface GetAgentOutputInput {
+  task_id: string;
+}
+
+export interface AgentOutputResult {
+  /** Whether a live agent tmux session exists (false = stopped / not started). */
+  live: boolean;
+  /** Number of agents on the task. */
+  agent_count: number;
+  /** The tail of the agent's live terminal — its actual recent output. */
+  output: string;
+  /** Human note when there's nothing to read. */
+  note?: string;
+}
+
+/** Lines of the agent pane to return. */
+const AGENT_OUTPUT_LINES = 40;
+/** Cap the returned text so the conductor holds a tail, not a dump. */
+const AGENT_OUTPUT_MAX_CHARS = 4000;
+
+/**
+ * Return the tail of an agent's LIVE terminal — the one thing the status/pointer
+ * tools can't give: what the agent is actually doing/saying right now. Reads the
+ * task's tmux session via `capture-pane` (the same content the dashboard shows).
+ *
+ * Returns `live: false` with a note when the session is gone (agent stopped) —
+ * which, paired with `get_task`'s `phase`, lets the conductor tell "finished" and
+ * "paused at a gate" apart from "actively working" instead of guessing from
+ * `runtime_state`.
+ */
+export async function handleGetAgentOutput(input: GetAgentOutputInput): Promise<AgentOutputResult> {
+  const { task_id } = input;
+  logger.debug({ operation: 'get_agent_output', task_id }, 'get_agent_output called');
+
+  const task = getTask(task_id);
+  if (!task || task.deleted_at) {
+    return { live: false, agent_count: 0, output: '', note: 'task not found' };
+  }
+
+  const agent_count = countAgentsForTask(task_id);
+  const session = task.tmux_session ?? `octomux-agent-${task_id}`;
+
+  try {
+    await execTmux(['has-session', '-t', session]);
+  } catch {
+    return {
+      live: false,
+      agent_count,
+      output: '',
+      note: 'no live agent session — the agent has stopped or has not started',
+    };
+  }
+
+  try {
+    const { stdout } = await execTmux(['capture-pane', '-t', session, '-p']);
+    const lines = stdout.split('\n').filter((l) => l.trim());
+    let output = lines.slice(-AGENT_OUTPUT_LINES).join('\n');
+    if (output.length > AGENT_OUTPUT_MAX_CHARS) {
+      output = output.slice(output.length - AGENT_OUTPUT_MAX_CHARS);
+    }
+    return { live: true, agent_count, output };
+  } catch (err) {
+    logger.warn({ task_id, session, err }, 'get_agent_output: capture-pane failed');
+    return { live: false, agent_count, output: '', note: 'failed to read agent terminal' };
+  }
+}
+
 // ─── recent_repos ─────────────────────────────────────────────────────────────
 
 export interface RecentRepoRow {
@@ -365,4 +456,39 @@ export async function handleDefaultBranch(input: DefaultBranchInput): Promise<De
     logger.debug({ operation: 'default_branch', repo_path }, 'default_branch fallback to main');
     return { branch: 'main' };
   }
+}
+
+// ─── search_learnings ─────────────────────────────────────────────────────────
+
+export interface SearchLearningsInput {
+  query: string;
+  repo?: string;
+}
+
+/** Lean learning row — pointers only, never the full agent_learnings row. */
+export interface LearningSummary {
+  trigger: string;
+  lesson: string;
+  evidence: string | null;
+  repo_path: string;
+}
+
+/**
+ * Search the shared-lane agent_learnings store for a recall query (spec §12
+ * agent-learnings; gateway Task 2). Cross-repo unless `repo` is given.
+ * Returns lean summaries only — never the full row (usage_count, ids, etc.).
+ */
+export function handleSearchLearnings(input: SearchLearningsInput): LearningSummary[] {
+  const { query, repo } = input;
+
+  logger.debug({ operation: 'search_learnings', query, repo }, 'search_learnings called');
+
+  const rows = searchShared(query, repo ? { repo } : {});
+
+  return rows.map((r) => ({
+    trigger: r.trigger,
+    lesson: r.lesson,
+    evidence: r.evidence,
+    repo_path: r.repo_path,
+  }));
 }

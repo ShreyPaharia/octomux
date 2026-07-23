@@ -33,6 +33,7 @@ function makeRun(overrides: Partial<LoopRun> = {}): LoopRun {
     max_iterations: 10,
     budget_json: null,
     termination_reason: null,
+    group_id: null,
     created_at: '2026-01-01 00:00:00',
     updated_at: '2026-01-01 00:00:00',
     ...overrides,
@@ -81,5 +82,13 @@ describe('LoopsPage', () => {
     const row = await screen.findByTestId('loop-row-loop-42');
     await user.click(row);
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/loops/loop-42'));
+  });
+
+  it('opens the best-of-N dialog from the "Best of N" button', async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<LoopsPage />);
+
+    await user.click(await screen.findByText('Best of N'));
+    expect(await screen.findByTestId('new-loop-group-dialog')).toBeInTheDocument();
   });
 });

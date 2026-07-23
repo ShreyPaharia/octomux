@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   DndContext,
   PointerSensor,
@@ -19,6 +19,7 @@ import { showToast } from './CustomToast';
 const NOTE_REQUIRED_COLUMNS = new Set<WorkflowStatus>(['planned', 'human_review']);
 
 const SHOW_TRASH_KEY = 'octomux-board-show-trash';
+const SHOW_AUTOMATED_KEY = 'octomux-board-show-automated';
 
 // Default visible columns (trash excluded by default)
 const DEFAULT_VISIBLE_COLUMNS = new Set<WorkflowStatus>([
@@ -69,6 +70,52 @@ export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardPro
     });
   }, []);
 
+  // Show/hide automated (source != null) tasks — the board defaults to manual work only
+  // (GET /api/tasks hides them server-side), so this toggle does its own opt-in fetch
+  // rather than filtering data that was never sent to the client.
+  const [showAutomated, setShowAutomated] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SHOW_AUTOMATED_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [automatedExtra, setAutomatedExtra] = useState<Task[]>([]);
+
+  const toggleShowAutomated = useCallback(() => {
+    setShowAutomated((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SHOW_AUTOMATED_KEY, String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!showAutomated) {
+      setAutomatedExtra([]);
+      return;
+    }
+    let cancelled = false;
+    taskApi
+      .listTasks({ includeAutomated: true })
+      .then((all) => {
+        if (cancelled) return;
+        const seen = new Set(tasks.map((t) => t.id));
+        setAutomatedExtra(all.filter((t) => !seen.has(t.id)));
+      })
+      .catch((err: Error) => {
+        if (!cancelled) showToast('error', 'Failed to load automated tasks', err.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on toggle only, not every task-list tick
+  }, [showAutomated]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, {
@@ -76,14 +123,15 @@ export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardPro
     }),
   );
 
-  // Build task map with optimistic overrides applied
+  // Build task map with optimistic overrides applied, plus any opted-in automated tasks
   const tasksWithOverrides = useMemo<Task[]>(() => {
-    if (optimisticMoves.size === 0) return tasks;
-    return tasks.map((t) => {
+    const combined = automatedExtra.length ? [...tasks, ...automatedExtra] : tasks;
+    if (optimisticMoves.size === 0) return combined;
+    return combined.map((t) => {
       const override = optimisticMoves.get(t.id);
       return override ? { ...t, workflow_status: override } : t;
     });
-  }, [tasks, optimisticMoves]);
+  }, [tasks, automatedExtra, optimisticMoves]);
 
   // Group tasks by column — trashed tasks go to 'trash' regardless of workflow_status
   const columnTasks = useMemo<Record<BoardColumnId, Task[]>>(() => {
@@ -220,7 +268,15 @@ export function TaskBoard({ tasks, onTasksChange, graceHours = 6 }: TaskBoardPro
 
   return (
     <>
-      <div className="mb-2 flex items-center justify-end px-1">
+      <div className="mb-2 flex items-center justify-end gap-3 px-1">
+        <button
+          type="button"
+          data-testid="show-automated-toggle"
+          onClick={toggleShowAutomated}
+          className={`text-[11px] transition-colors ${showAutomated ? 'text-foreground' : 'text-[#6a6a6a] hover:text-[#8a8a8a]'}`}
+        >
+          {showAutomated ? 'Hide automated' : 'Show automated'}
+        </button>
         <button
           type="button"
           data-testid="show-trash-toggle"

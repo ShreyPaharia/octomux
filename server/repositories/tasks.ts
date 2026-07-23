@@ -46,19 +46,19 @@ export function getTask(id: string): Task | undefined {
   return getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-/** Fetch a task by its worktree_id (returns undefined if not found). */
-export function getTaskByWorktreeId(worktreeId: string): Task | undefined {
-  return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? AND t.deleted_at IS NULL`)
-    .get(worktreeId) as Task | undefined;
-}
-
 export interface ListTasksOpts {
   /**
    * When false (default) auto_review tasks are excluded — reviews use the
    * /api/reviews endpoint.  Pass true to include them.
    */
   includeAutoReview?: boolean;
+  /**
+   * When false (default) tasks created by an automated workflow (any non-null
+   * `source` other than 'auto_review', which has its own `includeAutoReview`
+   * flag) are excluded — the Tasks board shows manual work only, automated
+   * runs live on /runs. Pass true to include them (CLI, orchestrator, pollers).
+   */
+  includeAutomated?: boolean;
   /** When true, include soft-deleted tasks only (trash view). */
   trash?: boolean;
   /** Filter by exact repo_path. */
@@ -68,23 +68,27 @@ export interface ListTasksOpts {
 /** List tasks with optional filtering. Results ordered newest-first by created_at (or deleted_at for trash). */
 export function listTasks(opts: ListTasksOpts = {}): Task[] {
   const db = getDb();
-  const { includeAutoReview = false, trash = false, repoPath } = opts;
+  const { includeAutoReview = false, includeAutomated = false, trash = false, repoPath } = opts;
 
   const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
   const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
   const autoReviewClause = includeAutoReview ? '' : `AND ${SQL_EXCLUDE_AUTO_REVIEW}`;
+  const automatedFlag = includeAutomated ? 1 : 0;
 
   if (repoPath) {
     return db
       .prepare(
-        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND w.repo_path = ? ${orderBy}`,
+        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause}
+                              AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') AND w.repo_path = ? ${orderBy}`,
       )
-      .all(repoPath) as Task[];
+      .all(automatedFlag, repoPath) as Task[];
   }
 
   return db
-    .prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} ${orderBy}`)
-    .all() as Task[];
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') ${orderBy}`,
+    )
+    .all(automatedFlag) as Task[];
 }
 
 /** List soft-deleted tasks that have passed their grace window. */
@@ -290,13 +294,6 @@ export function getTaskRuntimeState(id: string): { runtime_state: string } | und
     | undefined;
 }
 
-/** Fetch just the model column from a task (for hop inheritance). */
-export function getTaskModel(id: string): { model: string | null } | undefined {
-  return getDb().prepare(`SELECT model FROM tasks WHERE id = ?`).get(id) as
-    | { model: string | null }
-    | undefined;
-}
-
 /**
  * List tasks for scratch GC: idle/setting_up/running scratch tasks (not deleted)
  * so the GC knows which scratch dirs are still alive.
@@ -332,6 +329,8 @@ export interface InsertTaskInput {
   pr_head_sha?: string | null;
   /** Used by review tasks. */
   review_of_task_id?: string | null;
+  /** Set on scheduled runs — links back to the `schedules` row that fired them. */
+  schedule_id?: string | null;
 }
 
 /** Insert a new task row. Returns the generated id. */
@@ -340,8 +339,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -360,6 +359,7 @@ export function insertTask(input: InsertTaskInput): string {
       input.pr_number ?? null,
       input.pr_head_sha ?? null,
       input.review_of_task_id ?? null,
+      input.schedule_id ?? null,
     );
   logger.info({ task_id: id, operation: 'insertTask' }, 'task inserted');
   return id;
@@ -435,16 +435,6 @@ export function setTmuxSession(id: string, session: string): void {
 /** Set the linked worktree_id. */
 export function setWorktreeId(id: string, worktreeId: string | null): void {
   getDb().prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
-}
-
-/** Set pr_url, pr_number, pr_head_sha (called when a PR is opened). */
-export function setPr(id: string, prUrl: string, prNumber: number, prHeadSha: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks SET pr_url = ?, pr_number = ?, pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .run(prUrl, prNumber, prHeadSha, id);
-  logger.info({ task_id: id, pr_number: prNumber, operation: 'setPr' }, 'PR fields set');
 }
 
 /** Update pr_head_sha (called when a PR gets a new commit). */
@@ -775,7 +765,9 @@ export function listAutoReviewDrafts(
  */
 export function listRunningTasksWithPr(): Task[] {
   return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL AND t.workflow_status != 'done'`,
+    )
     .all() as Task[];
 }
 

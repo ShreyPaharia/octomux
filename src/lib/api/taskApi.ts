@@ -196,8 +196,13 @@ export const taskApi = {
     request<string[]>(`/branches?repo_path=${encodeURIComponent(repoPath)}`),
   getDefaultBranch: (repoPath: string) =>
     request<{ branch: string }>(`/default-branch?repo_path=${encodeURIComponent(repoPath)}`),
-  listTasks: (opts?: { trash?: boolean }) =>
-    request<Task[]>(opts?.trash ? '/tasks?trash=true' : '/tasks'),
+  listTasks: (opts?: { trash?: boolean; includeAutomated?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.trash) params.set('trash', 'true');
+    if (opts?.includeAutomated) params.set('includeAutomated', 'true');
+    const qs = params.toString();
+    return request<Task[]>(qs ? `/tasks?${qs}` : '/tasks');
+  },
   getTask: (id: string) => request<Task>(`/tasks/${id}`),
   createTask: (data: CreateTaskRequest) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),

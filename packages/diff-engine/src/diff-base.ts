@@ -52,7 +52,7 @@ function isMissingRemoteRef(err: unknown): boolean {
 }
 
 const CACHE_TTL_MS = 30_000;
-const ATTEMPT_TIMEOUT_MS = 5_000;
+const ATTEMPT_TIMEOUT_MS = Number(process.env.OCTOMUX_DIFF_TIMEOUT_MS) || 5_000;
 const ATTEMPT_INTERNAL_MS = ATTEMPT_TIMEOUT_MS - 250;
 const RETRY_ATTEMPTS = 2;
 const RETRY_BACKOFF_MS = 200;

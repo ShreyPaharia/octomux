@@ -8,7 +8,9 @@ import {
   listRunningTasksWithPr,
   addTaskUpdate,
   setWorkflowStatusDone,
+  findExistingPrTask,
 } from '../repositories/tasks.js';
+import { getWorkflow } from '../workflows/registry.js';
 import type { Task } from '../types.js';
 import { repoNameWithOwner } from './github-repo.js';
 
@@ -74,6 +76,35 @@ export async function checkMergedPRs(): Promise<void> {
           data: { from: prevWorkflow, to: 'done', note: 'auto: PR merged' },
         });
         broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+
+        if (task.repo_path && task.pr_number != null && task.pr_head_sha) {
+          const existingExtract = findExistingPrTask(task.repo_path, task.pr_number);
+          const alreadyExtracted =
+            existingExtract?.source === 'pr_extract' &&
+            existingExtract.pr_head_sha === task.pr_head_sha;
+          if (!alreadyExtracted) {
+            const wf = getWorkflow('pr-extract');
+            await wf
+              ?.run?.({
+                repoPath: task.repo_path,
+                config: {},
+                event: {
+                  branch: task.base_branch ?? 'main',
+                  base_branch: task.base_branch ?? 'main',
+                  pr_number: task.pr_number,
+                  pr_url: task.pr_url,
+                  pr_head_sha: task.pr_head_sha,
+                  title: task.title,
+                },
+              })
+              .catch((err) => {
+                logger.error(
+                  { task_id: task.id, err: (err as Error).message },
+                  'failed to create pr-extract task for merged PR',
+                );
+              });
+          }
+        }
       } catch {
         // closeTask failure shouldn't stop processing other tasks
       }

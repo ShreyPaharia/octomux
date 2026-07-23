@@ -1,12 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
-import {
-  createReviewRun,
-  getReviewRun,
-  getCurrentRun,
-  completeRun,
-  failRun,
-} from './review-runs.js';
+import { createReviewRun, getReviewRun, getCurrentRun, completeRun } from './review-runs.js';
+
+vi.mock('../events.js', () => ({ broadcast: vi.fn() }));
+
+import { broadcast } from '../events.js';
 
 const TASK_ID = 't_task1';
 
@@ -23,6 +21,7 @@ describe('review-runs', () => {
   beforeEach(() => {
     db = createTestDb();
     insertTask(db);
+    vi.mocked(broadcast).mockClear();
   });
 
   it('createReviewRun inserts a row with status=running', () => {
@@ -40,21 +39,17 @@ describe('review-runs', () => {
     expect(current?.id).toBe(newer.id);
   });
 
-  it('completeRun stores walkthrough JSON and marks completed', () => {
+  it('completeRun stores walkthrough JSON, marks completed, and broadcasts drafts-ready', () => {
     const run = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     completeRun(run.id, { walkthrough: '{"global":{}}' });
     const fresh = getReviewRun(run.id);
     expect(fresh?.status).toBe('completed');
     expect(fresh?.walkthrough).toBe('{"global":{}}');
     expect(fresh?.completed_at).not.toBeNull();
-  });
-
-  it('failRun records error and marks failed', () => {
-    const run = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
-    failRun(run.id, 'agent crashed');
-    const fresh = getReviewRun(run.id);
-    expect(fresh?.status).toBe('failed');
-    expect(fresh?.error).toBe('agent crashed');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'review:drafts-ready',
+      payload: { taskId: TASK_ID, reviewRunId: run.id },
+    });
   });
 
   it('unique index prevents two running runs on the same task+sha', () => {
@@ -64,7 +59,7 @@ describe('review-runs', () => {
 
   it('failed run on the same sha can be retried (creates a new running row)', () => {
     const a = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
-    failRun(a.id, 'timeout');
+    db.prepare(`UPDATE review_runs SET status = 'failed' WHERE id = ?`).run(a.id);
     const b = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     expect(b.id).not.toBe(a.id);
     expect(b.status).toBe('running');

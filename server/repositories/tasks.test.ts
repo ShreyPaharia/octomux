@@ -3,7 +3,6 @@ import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
   getTask,
-  getTaskByWorktreeId,
   listTasks,
   insertTask,
   updateTaskFields,
@@ -112,23 +111,34 @@ describe('repositories/tasks', () => {
       expect(row.pr_number).toBe(42);
       expect(row.pr_head_sha).toBe('abc123');
     });
-  });
 
-  // ─── getTaskByWorktreeId ─────────────────────────────────────────────────────
-
-  describe('getTaskByWorktreeId', () => {
-    it('returns the task linked to a worktree', () => {
-      db.prepare(
-        `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt1', '', 'new', 'available')`,
-      ).run();
-      const id = insertTask({ title: 'T', description: 'D', worktree_id: 'wt1' });
-      const task = getTaskByWorktreeId('wt1');
-      expect(task).toBeDefined();
-      expect(task!.id).toBe(id);
+    it('accepts an optional schedule_id at insert', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBe('sched-1');
     });
 
-    it('returns undefined when no task references the worktree', () => {
-      expect(getTaskByWorktreeId('no-such-wt')).toBeUndefined();
+    it('leaves schedule_id null when not provided', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBeNull();
+    });
+
+    // Regression: SELECT_TASK_SQL used to omit t.schedule_id, so every reader of
+    // a getTask()-shaped Task (laneFor in agent-learnings.ts, respawn-agent.ts,
+    // start-task.ts, etc.) saw `schedule_id: undefined` even for a task the
+    // schedule poller stamped — silently routing scheduled agents' learnings
+    // into a fresh loop:<task-id> lane every cron firing instead of the shared
+    // schedule:<id> lane (see plans/2026-07-22-agent-learnings-store.md Task 5).
+    it('getTask surfaces schedule_id on the returned Task', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      expect(getTask(id)!.schedule_id).toBe('sched-1');
     });
   });
 
@@ -168,6 +178,29 @@ describe('repositories/tasks', () => {
       const tasks = listTasks({ trash: true });
       expect(tasks.map((t) => t.id)).toContain('t1');
       expect(tasks.map((t) => t.id)).not.toContain('t2');
+    });
+  });
+
+  describe('listTasks automated filtering', () => {
+    beforeEach(() => {
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('manual', 'manual', '', 'idle', 'backlog', NULL)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('drift', 'drift', '', 'idle', 'backlog', 'doc_drift')`,
+      ).run();
+    });
+
+    it('hides tasks with a non-null source by default', () => {
+      const rows = listTasks();
+      expect(rows.map((t) => t.id)).toEqual(['manual']);
+    });
+
+    it('includes automated tasks when asked', () => {
+      const rows = listTasks({ includeAutomated: true });
+      expect(rows.map((t) => t.id).sort()).toEqual(['drift', 'manual']);
     });
   });
 

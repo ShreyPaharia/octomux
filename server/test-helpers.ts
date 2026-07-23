@@ -365,6 +365,20 @@ export const PERMISSION_PROMPTS_TABLE_COLUMNS = [
   'resolved_at',
 ];
 
+export const PR_EXTRACTS_TABLE_COLUMNS = [
+  'id',
+  'task_id',
+  'repo_path',
+  'pr_number',
+  'pr_head_sha',
+  'area',
+  'risk',
+  'has_migration',
+  'surface',
+  'loc',
+  'created_at',
+];
+
 export const USER_TERMINALS_TABLE_COLUMNS = [
   'id',
   'task_id',

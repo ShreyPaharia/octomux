@@ -32,9 +32,9 @@ export function homeAgentsDir(): string {
 }
 
 export function builtInSkillsDir(): string {
-  return path.resolve(__dirname, '..', 'skills');
+  return path.resolve(__dirname, '..', 'plugin', 'skills');
 }
 
 export function builtInAgentsDir(): string {
-  return path.resolve(__dirname, '..', 'agents');
+  return path.resolve(__dirname, '..', 'plugin', 'agents');
 }

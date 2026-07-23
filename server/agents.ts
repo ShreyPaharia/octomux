@@ -35,10 +35,6 @@ function parseFrontmatter(content: string): { name: string; description: string 
   };
 }
 
-export function isBuiltInAgent(name: string): boolean {
-  return fs.existsSync(path.join(builtInDir(), `${name}.md`));
-}
-
 async function exists(p: string): Promise<boolean> {
   try {
     await fs.promises.access(p);
@@ -105,53 +101,4 @@ export async function getAgent(name: string, repoPath?: string): Promise<AgentDe
     defaultContent,
     isCustom: hasRepo || hasHome,
   };
-}
-
-function writeAgentsDir(repoPath?: string): string {
-  return repoPath ? repoAgentsDir(repoPath) : customDir();
-}
-
-export async function saveAgent(name: string, content: string, repoPath?: string): Promise<void> {
-  const dir = writeAgentsDir(repoPath);
-  await fs.promises.mkdir(dir, { recursive: true });
-  await fs.promises.writeFile(path.join(dir, `${name}.md`), content, 'utf-8');
-}
-
-export async function resetAgent(name: string, repoPath?: string): Promise<void> {
-  const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
-  try {
-    await fs.promises.unlink(customPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw err;
-  }
-}
-
-export async function createAgent(name: string, content: string, repoPath?: string): Promise<void> {
-  const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
-  if (await exists(customPath)) {
-    throw new Error(`Agent already exists: ${name}`);
-  }
-  await saveAgent(name, content, repoPath);
-}
-
-/**
- * Sync effective agent files (repo → home → built-in) to
- * `.claude/agents/` in `cwd` (defaults to process.cwd) so `claude --agent <name>`
- * resolves them when launched in that directory.
- */
-export async function syncAgents(cwd?: string): Promise<void> {
-  const { claudeCodeHarness } = await import('./harnesses/claude-code.js');
-  await claudeCodeHarness.syncAgents(cwd ?? process.cwd());
-}
-
-export async function deleteAgent(name: string, repoPath?: string): Promise<void> {
-  if (!repoPath && (await exists(path.join(builtInDir(), `${name}.md`)))) {
-    throw new Error(`Cannot delete built-in agent: ${name}. Use reset to restore defaults.`);
-  }
-  const customPath = path.join(writeAgentsDir(repoPath), `${name}.md`);
-  if (!(await exists(customPath))) {
-    throw new Error(`Agent not found: ${name}`);
-  }
-  await fs.promises.unlink(customPath);
 }

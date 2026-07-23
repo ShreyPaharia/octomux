@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../ui/button';
+import { Textarea } from '../ui/textarea';
 import { reviewApi, type PublishedReviewVerdict } from '@/lib/api/reviewApi';
 import { taskApi } from '@/lib/api/taskApi';
 import { displayReviewTitle } from '@/lib/review-display';
@@ -19,13 +20,12 @@ interface PublishBarProps {
   staleCount: number;
   reviewedDone: number;
   reviewedTotal: number;
-  totalCommentsCount: number;
-  showCommentsPanel: boolean;
-  onToggleCommentsPanel: () => void;
   isRunning: boolean;
   onPublished: () => void;
   onReRun: () => void;
   onDeleted?: () => void;
+  /** Register an imperative publish trigger (for the ⌘/Ctrl+↵ shortcut). */
+  registerPublish?: (fn: () => void) => void;
 }
 
 const VERDICT_OPTIONS: Array<{ value: PublishedReviewVerdict; label: string }> = [
@@ -44,26 +44,38 @@ export function PublishBar({
   staleCount,
   reviewedDone,
   reviewedTotal,
-  totalCommentsCount,
-  showCommentsPanel,
-  onToggleCommentsPanel,
   isRunning,
   onPublished,
   onReRun,
   onDeleted,
+  registerPublish,
 }: PublishBarProps) {
   const [verdict, setVerdict] = useState<PublishedReviewVerdict>('COMMENT');
+  const [summary, setSummary] = useState('');
+  const [showSummary, setShowSummary] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [reRunning, setReRunning] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const title = displayReviewTitle(prTitle);
 
+  const publishRef = useRef<() => void>(() => {});
+  publishRef.current = () => {
+    if (acceptedCount === 0 || publishing) return;
+    void handlePublish();
+  };
+  useEffect(() => {
+    registerPublish?.(() => publishRef.current());
+  }, [registerPublish]);
+
   async function handlePublish() {
     if (acceptedCount === 0) return;
     setPublishing(true);
     try {
-      await reviewApi.publishReview(taskId, { verdict });
+      await reviewApi.publishReview(taskId, {
+        verdict,
+        ...(summary.trim() ? { body: summary.trim() } : {}),
+      });
       toast.success('Review published to GitHub');
       onPublished();
     } catch (e) {
@@ -139,14 +151,10 @@ export function PublishBar({
           <Button
             variant="outline"
             size="sm"
-            data-testid="comments-toggle"
-            data-active={showCommentsPanel ? 'true' : undefined}
-            className={
-              showCommentsPanel ? 'border-primary/40 bg-primary/15 text-primary' : undefined
-            }
-            onClick={onToggleCommentsPanel}
+            data-testid="publish-summary-toggle"
+            onClick={() => setShowSummary((v) => !v)}
           >
-            Comments ({totalCommentsCount})
+            {showSummary ? 'Hide summary' : 'Add summary'}
           </Button>
 
           <Button
@@ -186,6 +194,19 @@ export function PublishBar({
           </Button>
         </div>
       </div>
+
+      {showSummary ? (
+        <div className="border-t border-glass-edge/50 px-4 py-2 sm:px-6">
+          <Textarea
+            data-testid="publish-summary-input"
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            placeholder="Optional review summary for GitHub…"
+            rows={2}
+            className="text-sm"
+          />
+        </div>
+      ) : null}
 
       <ConfirmDeleteReviewDialog
         open={deleteOpen}

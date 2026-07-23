@@ -77,6 +77,7 @@ const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
 const { getSettings } = await import('./settings.js');
+await import('./workflows/index.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -592,6 +593,20 @@ describe('checkMergedPRs', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
+  it('does not re-close a task already marked done (resumed after auto-close)', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+      workflow_status: 'done',
+    });
+    mockPrStates({ pr0: 'MERGED' });
+
+    await checkMergedPRs();
+
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+
   it('skips tasks without pr_number', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
@@ -654,6 +669,60 @@ describe('checkMergedPRs', () => {
     await checkMergedPRs();
 
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  describe('pr-extract trigger', () => {
+    it('creates a pr_extract task when a tracked PR merges', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: 'sha-merged',
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+
+      const extractTask = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .get(42);
+      expect(extractTask).toBeTruthy();
+    });
+
+    it('does not create a pr_extract task when the merged task has no pr_head_sha', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: null,
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+
+      const extractTask = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .get(42);
+      expect(extractTask).toBeFalsy();
+    });
+
+    it('does not create a second pr_extract task on a repeat poll (same head sha)', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: 'sha-merged',
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+      await checkMergedPRs();
+
+      const rows = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .all(42);
+      expect(rows).toHaveLength(1);
+    });
   });
 });
 
@@ -836,7 +905,9 @@ describe('pollReviewerRequests', () => {
     expect((created!.branch as string).startsWith('review/')).toBe(true);
     expect(created!.branch).toContain('pr-42');
     expect(created!.title).toContain('#42');
-    expect((created!.initial_prompt as string).startsWith('/review-walkthrough')).toBe(true);
+    expect((created!.initial_prompt as string).startsWith('/octomux:review-walkthrough')).toBe(
+      true,
+    );
     expect(created!.initial_prompt).toContain('https://github.com');
     // Prompt pins the new review task's own id for the review CLI.
     expect(created!.initial_prompt).toContain(`Review task id: ${created!.id}`);

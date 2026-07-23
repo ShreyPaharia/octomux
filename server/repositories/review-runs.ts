@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
+import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';
 import type { ReviewRun } from '../types.js';
 
@@ -75,6 +76,9 @@ export interface CompleteRunInput {
 }
 
 export function completeRun(id: string, input: CompleteRunInput = {}): void {
+  const existing = getReviewRun(id);
+  if (!existing || existing.status !== 'running') return;
+
   getDb()
     .prepare(
       `UPDATE review_runs
@@ -84,16 +88,15 @@ export function completeRun(id: string, input: CompleteRunInput = {}): void {
        WHERE id = ? AND status = 'running'`,
     )
     .run(input.walkthrough ?? null, id);
-}
 
-export function failRun(id: string, error: string): void {
-  getDb()
-    .prepare(
-      `UPDATE review_runs
-         SET status = 'failed', error = ?, completed_at = datetime('now')
-       WHERE id = ? AND status = 'running'`,
-    )
-    .run(error, id);
+  broadcast({
+    type: 'review:drafts-ready',
+    payload: { taskId: existing.task_id, reviewRunId: id },
+  });
+  logger.info(
+    { task_id: existing.task_id, review_run_id: id },
+    'review_run completed — drafts ready',
+  );
 }
 
 export function setWalkthrough(id: string, walkthroughJson: string): void {

@@ -7,6 +7,8 @@ import { runAgentSession, mcpSubmitResultCapture } from './session.js';
 import type { CaptureStrategy, RunAgentSessionOptions } from './session.js';
 import type { ProcessHandle, ProcessSubstrate } from './substrate.js';
 import type { Harness } from '../harnesses/types.js';
+import { createTestDb } from '../test-helpers.js';
+import { getRun, listRunsForWorkflow } from '../repositories/runs.js';
 
 // ─── Stub factories ──────────────────────────────────────────────────────────
 
@@ -239,6 +241,102 @@ describe('runAgentSession', () => {
     } finally {
       fs.rmSync(resultDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runAgentSession — optional run-record persistence', () => {
+  let workspaceDir: string;
+  let resultDir: string;
+
+  beforeEach(() => {
+    createTestDb();
+    workspaceDir = path.join(os.tmpdir(), `octomux-test-${nanoid(8)}`);
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    resultDir = path.join(os.tmpdir(), `octomux-test-rd-${nanoid(8)}`);
+    fs.mkdirSync(resultDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(resultDir, { recursive: true, force: true });
+  });
+
+  it('with run set, records running -> done with result_json on success', async () => {
+    const expectedResult = { reply: 'ok' };
+    const handle = makeStubHandle();
+    const substrate = makeStubSubstrate(handle);
+    const capture = makeStubCapture(expectedResult);
+    const harness = makeStubHarness();
+
+    const { result } = await runAgentSession({
+      workspaceDir,
+      harness,
+      input: 'hello',
+      substrate,
+      outputSchema: { type: 'object' },
+      capture,
+      resultDir,
+      run: { workflowKind: 'headless-test', trigger: 'manual' },
+    });
+
+    expect(result).toEqual(expectedResult);
+
+    const rows = listRunsForWorkflow('headless-test');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('done');
+    expect(rows[0].result_json).toBe(JSON.stringify(expectedResult));
+    expect(rows[0].ended_at).not.toBeNull();
+  });
+
+  it('with run set, records running -> failed with error when capture rejects', async () => {
+    const handle = makeStubHandle();
+    const substrate = makeStubSubstrate(handle);
+    const harness = makeStubHarness();
+
+    const failingCapture: CaptureStrategy<never> = {
+      setup: vi.fn().mockResolvedValue({ extraArgs: '' }),
+      waitForResult: () => Promise.reject(new Error('capture blew up')),
+      dispose: vi.fn(),
+    };
+
+    await expect(
+      runAgentSession({
+        workspaceDir,
+        harness,
+        input: 'hello',
+        substrate,
+        outputSchema: { type: 'object' },
+        capture: failingCapture,
+        resultDir,
+        run: { workflowKind: 'headless-test-fail', trigger: 'manual' },
+      }),
+    ).rejects.toThrow('capture blew up');
+
+    const rows = listRunsForWorkflow('headless-test-fail');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].error).toBe('capture blew up');
+  });
+
+  it('with run absent, does not touch the runs table', async () => {
+    const expectedResult = { reply: 'ok' };
+    const handle = makeStubHandle();
+    const substrate = makeStubSubstrate(handle);
+    const capture = makeStubCapture(expectedResult);
+    const harness = makeStubHarness();
+
+    await runAgentSession({
+      workspaceDir,
+      harness,
+      input: 'hello',
+      substrate,
+      outputSchema: { type: 'object' },
+      capture,
+      resultDir,
+    });
+
+    expect(listRunsForWorkflow('headless-test')).toHaveLength(0);
+    expect(getRun('nonexistent')).toBeUndefined();
   });
 });
 

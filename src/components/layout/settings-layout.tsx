@@ -7,26 +7,24 @@ import { cn } from '@/lib/utils';
 
 export type SettingsScrollSection =
   | 'general'
-  | 'agents'
-  | 'skills'
   | 'hooks'
   | 'repositories'
   | 'reviews'
   | 'editor'
   | 'coding-agent'
   | 'agent-launch'
+  | 'schedule-skills'
   | 'advanced';
 
 export const SETTINGS_SCROLL_NAV: { id: SettingsScrollSection; label: string }[] = [
   { id: 'general', label: 'General' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'skills', label: 'Skills' },
   { id: 'hooks', label: 'Hooks' },
   { id: 'repositories', label: 'Repositories' },
   { id: 'reviews', label: 'Reviews' },
   { id: 'editor', label: 'Editor' },
   { id: 'coding-agent', label: 'Coding agent' },
   { id: 'agent-launch', label: 'Agent launch' },
+  { id: 'schedule-skills', label: 'Schedule skills' },
   { id: 'advanced', label: 'Advanced' },
 ];
 

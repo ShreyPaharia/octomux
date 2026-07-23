@@ -50,6 +50,8 @@ interface Props {
   groups?: RenderGroup[];
   /** Render diffs side-by-side (split) when true, unified/inline when false. */
   sideBySide?: boolean;
+  /** Hide per-file walkthrough explainers above each diff row. */
+  hideExplainers?: boolean;
 }
 
 function readHashPath(): string | null {
@@ -76,6 +78,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     enableComments = false,
     groups,
     sideBySide = true,
+    hideExplainers = false,
   },
   ref,
 ) {
@@ -571,7 +574,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
               agents={agents}
               rangeIsBase={rangeIsBase}
               enableComments={enableComments}
-              explainer={fileSummaries.get(path)}
+              explainer={hideExplainers ? undefined : fileSummaries.get(path)}
               sideBySide={sideBySide}
             />
           </div>

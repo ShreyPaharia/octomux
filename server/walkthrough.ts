@@ -33,6 +33,39 @@ export function validateWalkthrough(input: unknown, diffFiles: string[]): Valida
     return { ok: false, errors: ['walkthrough must be an object'], orphans: [] };
   }
   const wt = input as Walkthrough;
+  const diffSet = new Set(diffFiles);
+
+  if (typeof wt.verdict !== 'string' || wt.verdict.trim() === '') {
+    errors.push('verdict must be a non-empty one-line string');
+  }
+
+  if (!Array.isArray(wt.highlights)) {
+    errors.push('highlights must be an array');
+  } else {
+    if (wt.highlights.length > 5) {
+      errors.push(
+        `highlights must have at most 5 entries (got ${wt.highlights.length}) — rank and cut`,
+      );
+    }
+    for (let hi = 0; hi < wt.highlights.length; hi++) {
+      const h = wt.highlights[hi];
+      if (
+        !h ||
+        typeof h.title !== 'string' ||
+        h.title.trim() === '' ||
+        typeof h.file !== 'string'
+      ) {
+        errors.push(`highlights[${hi}] must have a non-empty title and a file path`);
+        continue;
+      }
+      if (!diffSet.has(h.file)) {
+        errors.push(`hallucinated highlight file path: ${h.file} (highlights[${hi}])`);
+      }
+      if (h.side !== undefined && h.side !== 'old' && h.side !== 'new') {
+        errors.push(`highlights[${hi}].side must be 'old' or 'new'`);
+      }
+    }
+  }
 
   if (!wt.global || typeof wt.global !== 'object') {
     errors.push('global is required');
@@ -58,9 +91,6 @@ export function validateWalkthrough(input: unknown, diffFiles: string[]): Valida
     if (typeof wt.global.summary !== 'string') {
       errors.push('global.summary must be a string');
     }
-    if (!Array.isArray(wt.global.key_review_points)) {
-      errors.push('global.key_review_points must be an array of strings');
-    }
   }
 
   if (!Array.isArray(wt.groups)) {
@@ -68,7 +98,6 @@ export function validateWalkthrough(input: unknown, diffFiles: string[]): Valida
   }
 
   const allListedPaths = new Set<string>();
-  const diffSet = new Set(diffFiles);
   const groups = Array.isArray(wt.groups) ? wt.groups : [];
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];

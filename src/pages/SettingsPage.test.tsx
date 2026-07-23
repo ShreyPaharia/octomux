@@ -27,14 +27,19 @@ const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async 
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+vi.mock('@/lib/api/schedulesApi', () => ({
+  scheduleSkillsApi: {
+    listScheduleSkills: vi.fn().mockResolvedValue([]),
+    updateScheduleSkill: vi.fn().mockResolvedValue({ kind: 'doc-drift', content: '' }),
+    resetScheduleSkill: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 vi.mock('../lib/hooks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    useSkills: () => ({ skills: [], loading: false, error: null, refresh: vi.fn() }),
     useRepoConfigs: () => ({ configs: [], loading: false, error: null, refresh: vi.fn() }),
-    useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
   };
 });
 
@@ -52,15 +57,7 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('settings-nav-general')).toBeInTheDocument();
     });
-    for (const id of [
-      'general',
-      'agents',
-      'skills',
-      'hooks',
-      'repositories',
-      'editor',
-      'agent-launch',
-    ]) {
+    for (const id of ['general', 'hooks', 'repositories', 'editor', 'agent-launch']) {
       expect(screen.getByTestId(`settings-nav-${id}`)).toBeInTheDocument();
     }
     expect(screen.queryByTestId('settings-nav-orchestrator')).not.toBeInTheDocument();
@@ -83,13 +80,13 @@ describe('SettingsPage', () => {
     const user = userEvent.setup();
     renderWithRouter(<SettingsPage />);
 
-    const skillsNav = await screen.findByTestId('settings-nav-skills');
-    await user.click(skillsNav);
+    const hooksNav = await screen.findByTestId('settings-nav-hooks');
+    await user.click(hooksNav);
 
     expect(scrollSpy).toHaveBeenCalled();
-    expect(skillsNav).toHaveAttribute('data-active', 'true');
-    expect(skillsNav.className).toContain('text-primary');
-    expect(skillsNav.className).toContain('border-primary');
+    expect(hooksNav).toHaveAttribute('data-active', 'true');
+    expect(hooksNav.className).toContain('text-primary');
+    expect(hooksNav.className).toContain('border-primary');
 
     // The previously-active general item is no longer active.
     const generalNav = screen.getByTestId('settings-nav-general');

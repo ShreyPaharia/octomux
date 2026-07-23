@@ -1,11 +1,11 @@
 import fs from 'fs';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { childLogger } from '../../logger.js';
 import { tmuxWindowSubstrate } from '../../agent-session/substrate-tmux-windowed.js';
 import { execTmux } from '../../tmux-bin.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import type { Task, RunMode } from '../../types.js';
 import {
   setRuntimeState,
@@ -70,8 +70,6 @@ export async function bootstrapResumeHooks(
 
   if (agents.length > 0) {
     const bootstrapHarness = getHarness(agents[0]!.harness_id);
-    await bootstrapHarness.syncAgents(cwd);
-    await syncSkills(cwd);
     await bootstrapHarness.installHooks(cwd, hookBaseUrl(), agents[0]!.hook_token);
   } else {
     await tmuxWindowSubstrate.createEmptySession({ session, cwd });
@@ -89,7 +87,11 @@ export async function relaunchStoppedAgents(
 
   for (const agent of agents) {
     const harness = getHarness(agent.harness_id);
-    const flags = harness.resolveFlags(await getSettings());
+    const flags = await resolveHarnessFlags(harness, {
+      skillContentOverrides: await skillContentOverridesForScheduleId(
+        (task as { schedule_id?: string | null }).schedule_id,
+      ),
+    });
     const taskModel = (task as any).model ?? null;
     const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: taskModel, cwd });
     const startupCmd = buildAgentStartupCommand({ baseCmd });

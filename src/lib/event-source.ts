@@ -24,7 +24,10 @@ export type ServerEventType =
   | 'review:run-failed'
   | 'review:published'
   | 'review:head-advanced'
-  | 'loop:emit';
+  | 'loop:emit'
+  | 'pr_extract:created'
+  | 'loop_group:judging'
+  | 'loop_group:judged';
 
 /**
  * A real-time event delivered over `/ws/events`. The payload is intentionally a
@@ -44,6 +47,7 @@ export interface ServerEvent {
     reason?: string;
     loopRunId?: string;
     status?: string;
+    extractId?: string;
     [key: string]: unknown;
   };
 }
