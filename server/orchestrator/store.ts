@@ -16,6 +16,8 @@ export interface OrchestratorConversation {
   hook_token: string | null;
   /** The cwd the conductor session was launched from (used to resume a dead session). */
   cwd: string | null;
+  /** Agents feature: the `agent_configs` row this session belongs to, or null for an orchestrator-page conversation. */
+  agent_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -67,6 +69,8 @@ export interface CreateConversationInput {
   tmux_window?: string;
   claude_session_id?: string;
   transcript_path?: string;
+  /** Agents feature: tag this conversation as the persistent session of an `agent_configs` row. */
+  agent_id?: string;
 }
 
 /** Create a new orchestrator conversation. Returns the new id. */
@@ -74,8 +78,8 @@ export function createConversation(input: CreateConversationInput): string {
   const id = nanoid(12);
   getDb()
     .prepare(
-      `INSERT INTO orchestrator_conversations (id, title, tmux_window, claude_session_id, transcript_path)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO orchestrator_conversations (id, title, tmux_window, claude_session_id, transcript_path, agent_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -83,6 +87,7 @@ export function createConversation(input: CreateConversationInput): string {
       input.tmux_window ?? null,
       input.claude_session_id ?? null,
       input.transcript_path ?? null,
+      input.agent_id ?? null,
     );
   return id;
 }
@@ -116,6 +121,29 @@ export function listConversations(): OrchestratorConversation[] {
       `SELECT * FROM orchestrator_conversations WHERE status != 'deleted' ORDER BY updated_at DESC`,
     )
     .all() as OrchestratorConversation[];
+}
+
+/**
+ * List all (non-deleted) conversations tagged with a given agent, most recently
+ * updated first. Agents feature: an agent's conversations are the sessions
+ * launched with its `agent_id` (see `getPrimaryAgentConversation` for the single
+ * persistent one).
+ */
+export function listConversationsByAgent(agentId: string): OrchestratorConversation[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM orchestrator_conversations WHERE agent_id = ? AND status != 'deleted' ORDER BY updated_at DESC`,
+    )
+    .all(agentId) as OrchestratorConversation[];
+}
+
+/**
+ * The agent's single persistent conductor session — the most recently updated
+ * conversation tagged with this `agent_id`, or undefined if the agent has never
+ * had one started.
+ */
+export function getPrimaryAgentConversation(agentId: string): OrchestratorConversation | undefined {
+  return listConversationsByAgent(agentId)[0];
 }
 
 /** Update conversation fields (partial). */

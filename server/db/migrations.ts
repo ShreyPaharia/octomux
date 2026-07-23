@@ -970,4 +970,29 @@ export function runMigrations(instance: Database.Database): void {
       PRIMARY KEY (channel, external_id)
     );
   `);
+
+  // ── Agents feature: long-running agent config + owning conversation link
+  // (2026-07-24) ─────────────────────────────────────────────────────────────
+  // Named `agent_configs` (not `agents`) — the `agents` table already exists
+  // and means something different (a per-task tmux-window worker). An agent's
+  // live session is an `orchestrator_conversations` row tagged with agent_id.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS agent_configs (
+      id             TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      system_prompt  TEXT NOT NULL,
+      channel        TEXT,
+      channel_config TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  const orchConvColsForAgent = columnsOf(instance, 'orchestrator_conversations');
+  addColumn(
+    instance,
+    'orchestrator_conversations',
+    'agent_id',
+    'agent_id TEXT REFERENCES agent_configs(id) ON DELETE SET NULL',
+    orchConvColsForAgent,
+  );
 }

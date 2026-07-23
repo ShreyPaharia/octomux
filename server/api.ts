@@ -26,6 +26,7 @@ import { router as worktreesRouter } from './routes/worktrees.js';
 import { router as schedulesRouter } from './routes/schedules.js';
 import { router as scheduleSkillsRouter } from './routes/schedule-skills.js';
 import { router as workflowRunsRouter } from './routes/workflow-runs.js';
+import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { listWorkflows } from './workflows/registry.js';
 
 import { insertWorktreeIfAbsent, insertTaskIfAbsent, inTransaction } from './repositories/index.js';
@@ -59,6 +60,7 @@ export function setupRoutes(app: Express): void {
   app.use(schedulesRouter);
   app.use(scheduleSkillsRouter);
   app.use(workflowRunsRouter);
+  app.use(agentsCrudRouter);
 
   // ─── Test-only seed endpoint ─────────────────────────────────────────────────
   // Gated strictly on NODE_ENV=test. Never exposed in production.

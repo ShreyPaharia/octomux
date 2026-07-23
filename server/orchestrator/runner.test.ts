@@ -85,6 +85,7 @@ import {
   conversationTmuxTarget,
 } from './runner.js';
 import { createConversation, getConversation, updateConversation } from './store.js';
+import { ORCHESTRATOR_SYSTEM_PROMPT } from './conductor-flags.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -286,6 +287,28 @@ describe('orchestrator runner', () => {
       expect(cwdIndex).toBeGreaterThan(-1);
       expect(newSession![cwdIndex + 1]).toBe('/tmp/test-repo');
     });
+
+    it('defaults to the orchestrator system prompt when opts.systemPrompt is omitted', async () => {
+      const convId = createConversation({ title: 'Default prompt test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const newSession = findTmuxCall('new-session');
+      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(startupCmdArg!).toContain('--append-system-prompt');
+      expect(startupCmdArg!).toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
+    });
+
+    it('uses opts.systemPrompt for --append-system-prompt when given (Agents feature)', async () => {
+      const convId = createConversation({ title: 'Agent prompt test' });
+      await startConversation(convId, '/tmp/test-repo', {
+        systemPrompt: 'You are Agent One. Only do X.',
+      });
+
+      const newSession = findTmuxCall('new-session');
+      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(startupCmdArg!).toContain('You are Agent One. Only do X.');
+      expect(startupCmdArg!).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
+    });
   });
 
   // ── resumeConversation ─────────────────────────────────────────────────────
@@ -318,6 +341,18 @@ describe('orchestrator runner', () => {
       expect(cmdArg).toBeDefined();
       // Should launch a new session (no --resume) since no session_id
       expect(cmdArg!).not.toContain('--resume');
+    });
+
+    it('uses opts.systemPrompt for --append-system-prompt when given (Agents feature)', async () => {
+      const convId = createConversation({ title: 'Resume with agent prompt' });
+      await resumeConversation(convId, '/tmp/test-repo', {
+        systemPrompt: 'You are Agent One. Only do X.',
+      });
+
+      const newSession = findTmuxCall('new-session');
+      const cmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(cmdArg!).toContain('You are Agent One. Only do X.');
+      expect(cmdArg!).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
     });
   });
 
