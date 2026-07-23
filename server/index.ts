@@ -1,3 +1,8 @@
+// Load .env from the launch cwd BEFORE any other module reads process.env. Kept
+// as the first import so dotenv runs before the imports below are evaluated.
+// Real environment variables always win — dotenv never overrides an already-set
+// var, so `export FOO=…; octomux start` still takes precedence over .env.
+import 'dotenv/config';
 import { createServer, type IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import path from 'path';
