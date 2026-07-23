@@ -33,7 +33,7 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
   - `api.ts` — mounts the routers from `routes/` onto the Express app
   - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, reviews,
-    review-runs, comments, chats, loops, skills, teams, settings, orchestrator, …)
+    review-runs, comments, chats, loops, skills, schedules, settings, orchestrator, …)
   - `app.ts` — extracted `createApp()` for testability
   - `task-engine/` — worktree + tmux + harness lifecycle. `cleanup.ts` holds `closeTask` /
     `deleteTask`; also `launch.ts`, `git.ts`, `sessions.ts`, `terminals.ts`, `reconcile.ts`,
@@ -47,12 +47,13 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
     `installHooks`, `syncAgents`, `resolveFlags`, `validateSettings`. Spec at
     `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
   - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
-  - `teams.ts` — team feature: `parseTeamConfig`, `validateTeamConfig`, `runTeam`, `upsertTeamSchedule`,
-    `listTeamSchedules`, `isCronDue`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
+  - `schedules/cron.ts` — `isCronDue()`, the 5-field cron evaluator (`croner`, UTC) behind
+    scheduled runs. Rows live in the `schedules` table; `poller/schedule-cron.ts` fires them.
 - `src/` — React SPA (pages, components, lib/api.ts)
 - `cli/` — CLI tool; one file per subcommand in `cli/src/commands/` (create-task, list-tasks,
   get-task, close-task, resume-task, delete-task, add-agent, send-message, stop-agent, init,
-  team, emit, loop-start, post-review, task-move/note/summary/updates, skills, files, …)
+  emit, loop-start, loop-start-group, learn/recall/unlearn, post-review,
+  task-move/note/summary/updates, skills, files, …)
 - `packages/` — bun workspaces: `types`, `diff-engine`, `api-client`, `test-fixtures`, plus
   the prebuilt `tmux-{darwin,linux}-{arm64,x64}` binaries
 - `electron/` — macOS desktop app wrapper (`build:electron` / `dist:electron`)
@@ -98,6 +99,42 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 - `POST /api/tasks/:id/agents` body: `{ model: ... }` → stored on agent launch
 - `octomux create-task --model <id>` and `octomux add-agent --model <id>`
 - Harness: `applyModel(flags, model)` strips any existing `--model` then appends the per-task one
+
+## Loops (Ralph loops)
+
+A loop re-runs a task's agent in **fresh context** until a verify command exits 0. Engine in
+`server/task-engine/loop/` (`engine.ts` policy + `verify.ts` runner); each iteration respawns the
+active agent via `lifecycle/respawn-agent.ts`, so loop tasks are exempt from the idle poller.
+
+```
+octomux loop-start --task <id> --prompt <text|@file> --verify '<cmd>' --max-iterations <n> \
+                   [--budget-tokens <n>] [--stall-after <n>]
+octomux loop-start-group --repo <path> --base-branch <b> --prompt … --verify … \
+                   --max-iterations <n> [--n <candidates>]   # fan out N competing candidates
+octomux emit --run <loop-run-id> --status done|blocked|needs_human --reason "<why>"
+```
+
+- `emit` is how the agent inside the loop reports its own completion back to octomux.
+- Termination is layered — stops on any of: `done` + verify passed, `blocked`, `needs_human`,
+  `max_iterations`, `budget` (tokens/time), `no_progress` (`--stall-after` N no-op iterations).
+- Each iteration appends to a curated playbook in the worktree so the next fresh context sees
+  what earlier ones tried.
+- UI at `/loops`, `/loops/:id`; REST in `server/routes/loops.ts`.
+- Spec: `spec/workflow-framework.md`; plans: `plans/2026-07-12-loop-harness-*.md`.
+
+### Learnings
+
+`octomux learn --trigger … --lesson … --evidence … [--private]` and `octomux recall --query …`
+persist and retrieve durable notes per repo (`unlearn` / `learn-forget` retire them). Backed by
+the `agent_learnings` table and `server/routes/learnings.ts`.
+
+## Schedules
+
+Cron-triggered runs replaced the old `octomux team` command (deleted in `90cf49e`). A `schedules`
+row is `(kind, repo_path)`-unique with a 5-field cron; `poller/schedule-cron.ts` calls
+`isCronDue()` (`server/schedules/cron.ts`, `croner`, evaluated in UTC) and hands due rows to
+`poller/execute-schedule-run.ts`. Managed from `/schedules` in the UI and
+`server/routes/schedules.ts` (`GET/POST /api/schedules`, `POST /api/schedules/:id/run`).
 
 ## Testing Patterns
 
