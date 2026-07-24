@@ -97,7 +97,8 @@ missing or the exact error string in `summary`, and stop.
      (plain text — drop the `*bold*` markers for Telegram).
    - `slack`: resolve the channel — `{{digestChannel}}` if non-empty, otherwise
      `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{digestUserId}}"`
-     and take `.channel.id` — then one `chat.postMessage` with the digest as `text`.
+     and take `.channel.id` — then one
+     `curl -s -X POST https://slack.com/api/chat.postMessage -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "channel=<channel id>" --data-urlencode "text=<digest>"`.
 
    **Zero items → send nothing.** Silence is the correct output for a quiet window.
 
