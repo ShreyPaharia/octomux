@@ -87,8 +87,15 @@ message).
 
 ### 1. Create a Slack app
 
-Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → From scratch. Pick a
-name and workspace.
+Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App**. Fastest path: **From an
+app manifest** → pick your workspace → paste [`slack-app-manifest.yaml`](./slack-app-manifest.yaml)
+(it pre-fills Socket Mode, bot scopes, and the message events, so you can skip steps 2–3's clicking).
+Otherwise pick **From scratch** and do steps 2–3 by hand.
+
+> No workspace admin? App creation and the `xapp-` token need none, but **installing** the bot
+> (step 4, which mints the `xoxb-` token) can require admin approval on a corporate workspace. A free
+> [developer sandbox](https://api.slack.com/developer-program) or your own free workspace makes you
+> admin — create/install the app there and DM the bot from that workspace.
 
 ### 2. Enable Socket Mode and create the app-level token
 
@@ -112,6 +119,10 @@ give it the **`connections:write`** scope. Copy the token (starts with `xapp-`).
 
 **Settings → Install App** → Install to Workspace → authorize. Copy the **Bot User OAuth Token**
 (starts with `xoxb-`) from the same page.
+
+Also enable DMs: **Features → App Home → Show Tabs → Messages Tab** on, and check **"Allow users to
+send Slash commands and messages from the messages tab."** Without this, Slack does not deliver
+`message.im` events even with the right scopes.
 
 ### 5. Find your Slack member id
 
