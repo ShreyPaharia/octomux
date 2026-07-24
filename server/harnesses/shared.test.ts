@@ -76,16 +76,48 @@ describe('formatHarnessFlags', () => {
 });
 
 describe('applyModel', () => {
-  it('appends model when absent from flags', () => {
-    expect(applyModel('', 'sonnet')).toBe(' --model sonnet');
+  it('appends model when absent from flags — value is single-quoted', () => {
+    expect(applyModel('', 'claude-opus-4-8')).toBe(" --model 'claude-opus-4-8'");
   });
 
-  it('replaces existing --model token', () => {
-    expect(applyModel(' --model opus', 'sonnet')).toBe(' --model sonnet');
+  it('replaces existing --model token — new value is single-quoted', () => {
+    expect(applyModel(' --model opus', 'sonnet')).toBe(" --model 'sonnet'");
   });
 
   it('returns flags unchanged when model is unset', () => {
     expect(applyModel(' --verbose', null)).toBe(' --verbose');
+  });
+
+  it('returns flags unchanged when model is undefined', () => {
+    expect(applyModel(' --verbose', undefined)).toBe(' --verbose');
+  });
+
+  it('returns flags unchanged when model is empty string', () => {
+    expect(applyModel(' --verbose', '')).toBe(' --verbose');
+  });
+
+  it('single-quotes model containing semicolon — metacharacter cannot escape', () => {
+    // ';rm -rf /' must not execute as a second shell command
+    const result = applyModel('', 'bad;rm -rf /');
+    expect(result).toBe(" --model 'bad;rm -rf /'");
+    // The semicolon is inside single quotes — it is not an unquoted shell metacharacter
+    expect(result).toContain("'bad;rm -rf /'");
+  });
+
+  it('single-quotes model containing spaces', () => {
+    expect(applyModel('', 'my model name')).toBe(" --model 'my model name'");
+  });
+
+  it('single-quotes model containing $(...) — command substitution cannot run', () => {
+    const result = applyModel('', '$(evil-cmd)');
+    expect(result).toBe(" --model '$(evil-cmd)'");
+    // The $( is wrapped in single quotes — it will not be interpolated by the shell.
+    // The raw (unquoted) sequence $( must not appear outside of single quotes.
+    expect(result).not.toMatch(/(?<!')\$\(/);
+  });
+
+  it('simple model id round-trips as single-quoted form', () => {
+    expect(applyModel('', 'claude-opus-4-8')).toBe(" --model 'claude-opus-4-8'");
   });
 });
 

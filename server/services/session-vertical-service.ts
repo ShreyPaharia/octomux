@@ -17,6 +17,7 @@ export interface RunSessionVerticalInput {
   input: string;
   outputSchema: object;
   model?: string | null;
+  timeoutMs?: number | null;
   trigger?: 'cron' | 'manual';
 }
 
@@ -30,6 +31,7 @@ export async function runSessionVertical<T = unknown>(
     substrate: ptySubstrate,
     outputSchema: i.outputSchema,
     model: i.model ?? null,
+    timeoutMs: i.timeoutMs ?? undefined,
     run: {
       workflowKind: i.kind,
       trigger: i.trigger ?? 'cron',
