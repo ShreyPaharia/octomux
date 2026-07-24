@@ -1,14 +1,21 @@
 /**
  * Resolve workflow prompts for cron schedules. The DB `schedule_skills` table
  * is the single source of truth: one editable body per cron kind, lazily
- * seeded once from the shipped SKILL.md the first time a kind is read. There is
- * no per-schedule override and no SKILL.md runtime fallback. Task-backed kinds
- * pass the DB body into harness plugin flags via an ephemeral overlay plugin
- * at launch (`appendOctomuxPluginFlags`).
+ * seeded once from the shipped SKILL.md the first time a kind is read.
+ *
+ * Resolution precedence (§4.1):
+ *   1. `schedules.prompt` for the given `scheduleId` — if non-empty, use it.
+ *   2. `schedule_skills[kind]` — lazily seeded from shipped SKILL.md (unchanged).
+ *
+ * Task-backed kinds pass the resolved body into harness plugin flags via an
+ * ephemeral overlay plugin at launch (`appendOctomuxPluginFlags`).
  */
 import { getSkill } from './skills.js';
 import { getSchedule } from './repositories/schedules.js';
 import { getScheduleSkillRow, upsertScheduleSkill } from './repositories/schedule-skills.js';
+import { childLogger } from './logger.js';
+
+const logger = childLogger('schedule-prompt');
 
 export const CRON_PROMPT_KINDS = [
   'doc-drift',
@@ -48,13 +55,45 @@ export async function resolveScheduleSkillContent(kind: string): Promise<string>
   return seed;
 }
 
-/** The workflow prompt for a scheduled run — always the DB body for the kind. */
+/**
+ * Resolve the workflow prompt for a scheduled run, returning both the content
+ * and its source so callers can log or expose the resolution path.
+ *
+ * Precedence:
+ *   1. schedules.prompt (non-empty) → source: 'override'
+ *   2. schedule_skills[kind] (lazy-seeded from SKILL.md) → source: 'kind_skill'
+ */
+export async function resolveSchedulePromptWithSource(input: {
+  scheduleId?: string | null;
+  kind: string;
+}): Promise<{ content: string; source: 'override' | 'kind_skill' }> {
+  if (input.scheduleId) {
+    const schedule = getSchedule(input.scheduleId);
+    if (schedule && schedule.prompt) {
+      logger.debug(
+        { schedule_id: input.scheduleId, kind: input.kind, prompt_source: 'override' },
+        'resolved schedule prompt',
+      );
+      return { content: schedule.prompt, source: 'override' };
+    }
+  }
+
+  const content = await resolveScheduleSkillContent(input.kind);
+  logger.debug(
+    { schedule_id: input.scheduleId ?? null, kind: input.kind, prompt_source: 'kind_skill' },
+    'resolved schedule prompt',
+  );
+  return { content, source: 'kind_skill' };
+}
+
+/** The workflow prompt for a scheduled run — respects per-schedule override. */
 export async function resolveSchedulePrompt(input: {
   scheduleId?: string | null;
   kind: string;
   repoPath?: string;
 }): Promise<string> {
-  return resolveScheduleSkillContent(input.kind);
+  const { content } = await resolveSchedulePromptWithSource(input);
+  return content;
 }
 
 /**
@@ -62,6 +101,9 @@ export async function resolveSchedulePrompt(input: {
  * the agent reads the DB skill body via an ephemeral overlay plugin. Always
  * injects the DB body for doc-drift / prod-log-triage; undefined for every
  * other kind.
+ *
+ * When `schedule.prompt` is non-empty the override wins; otherwise falls back
+ * to the kind skill body as today.
  */
 export async function skillContentOverridesForScheduleId(
   scheduleId: string | null | undefined,
@@ -69,5 +111,22 @@ export async function skillContentOverridesForScheduleId(
   if (!scheduleId) return undefined;
   const schedule = getSchedule(scheduleId);
   if (!schedule || !TASK_BACKED_KINDS.has(schedule.kind)) return undefined;
+
+  if (schedule.prompt) {
+    logger.debug(
+      {
+        schedule_id: scheduleId,
+        kind: schedule.kind,
+        prompt_source: 'schedule_override',
+      },
+      'skillContentOverrides: using schedule prompt override',
+    );
+    return { [schedule.kind]: schedule.prompt };
+  }
+
+  logger.debug(
+    { schedule_id: scheduleId, kind: schedule.kind, prompt_source: 'kind_skill' },
+    'skillContentOverrides: using kind skill body',
+  );
   return { [schedule.kind]: await resolveScheduleSkillContent(schedule.kind) };
 }
