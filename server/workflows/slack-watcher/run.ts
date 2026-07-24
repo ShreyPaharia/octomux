@@ -6,8 +6,9 @@
  * spec/slack-watcher.md §Slack app tokens.
  */
 import { resolveSchedulePrompt } from '../../schedule-prompt.js';
-import { listRunsForWorkflow } from '../../repositories/runs.js';
+import { listRunsForWorkflow, listRunsForSchedule } from '../../repositories/runs.js';
 import { runSessionVertical } from '../../services/session-vertical-service.js';
+import { interpolatePrompt } from '../../prompt-interpolate.js';
 import { SLACK_WATCHER_SCHEMA } from './schema.js';
 
 export interface RunSlackWatcherInput {
@@ -24,6 +25,8 @@ export interface RunSlackWatcherInput {
   lookbackMinutes: number;
   digestChannel: string;
   trigger?: 'cron' | 'manual';
+  model?: string | null;
+  timeoutMs?: number | null;
 }
 
 export interface SlackWatcherItem {
@@ -45,11 +48,17 @@ export interface SlackWatcherResult {
   items: SlackWatcherItem[];
 }
 
-/** Items from the most recent finished run — injected as the skill's dedup memory. */
-export function previousItemsJson(): string {
-  const last = listRunsForWorkflow('slack-watcher').find(
-    (r) => r.status === 'done' && r.result_json,
-  );
+/**
+ * Items from the most recent finished run for the given schedule — injected
+ * as the skill's dedup memory. When scheduleId is provided, filters by
+ * `runs.schedule_id` so that two watcher schedules do not cross-contaminate
+ * each other's dedup memory. When null/undefined, falls back to the global
+ * kind-level list (legacy behaviour for callers without a scheduleId).
+ */
+export function previousItemsJson(scheduleId?: string | null): string {
+  const runs =
+    scheduleId != null ? listRunsForSchedule(scheduleId) : listRunsForWorkflow('slack-watcher');
+  const last = runs.find((r) => r.status === 'done' && r.result_json);
   if (!last) return '[]';
   try {
     const result = JSON.parse(last.result_json!) as { items?: unknown };
@@ -66,14 +75,17 @@ export async function runSlackWatcher(
     scheduleId: input.scheduleId,
     kind: 'slack-watcher',
   });
-  const prompt = skillContent
-    .replace(/\{\{slackUserId\}\}/g, input.slackUserId)
-    .replace(/\{\{digestTarget\}\}/g, input.digestTarget)
-    .replace(/\{\{telegramChatId\}\}/g, input.telegramChatId)
-    .replace(/\{\{digestUserId\}\}/g, input.digestUserId)
-    .replace(/\{\{lookbackMinutes\}\}/g, String(input.lookbackMinutes))
-    .replace(/\{\{digestChannel\}\}/g, input.digestChannel)
-    .replace(/\{\{previousItems\}\}/g, previousItemsJson());
+  const prompt = interpolatePrompt(skillContent, {
+    slackUserId: input.slackUserId,
+    digestTarget: input.digestTarget,
+    telegramChatId: input.telegramChatId,
+    digestUserId: input.digestUserId,
+    lookbackMinutes: input.lookbackMinutes,
+    digestChannel: input.digestChannel,
+    // previousItems is pre-stringified JSON — passed as a string scalar so it
+    // lands verbatim (interpolatePrompt calls String() on scalars).
+    previousItems: previousItemsJson(input.scheduleId),
+  });
 
   return runSessionVertical<SlackWatcherResult>({
     kind: 'slack-watcher',
@@ -82,5 +94,7 @@ export async function runSlackWatcher(
     input: prompt,
     outputSchema: SLACK_WATCHER_SCHEMA,
     trigger: input.trigger ?? 'cron',
+    model: input.model,
+    timeoutMs: input.timeoutMs,
   });
 }

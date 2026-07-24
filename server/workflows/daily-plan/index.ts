@@ -6,9 +6,14 @@ export const dailyPlanWorkflow: WorkflowType = {
   kind: 'daily-plan',
   displayName: 'Daily Plan',
   surfaces: ['session'],
+  execution: 'chat',
   trigger: { kind: 'cron' },
   run: (ctx: RunContext) =>
-    runDailyPlanFromSchedule({ scheduleId: ctx.scheduleId!, trigger: ctx.trigger }),
+    runDailyPlanFromSchedule({
+      scheduleId: ctx.scheduleId!,
+      trigger: ctx.trigger,
+      model: ctx.model,
+    }),
 };
 
 registerWorkflow(dailyPlanWorkflow);

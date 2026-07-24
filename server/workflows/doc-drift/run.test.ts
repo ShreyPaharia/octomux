@@ -33,6 +33,14 @@ function insertActiveAgent(taskId: string): void {
     .run(`${taskId}-agent`, taskId);
 }
 
+const DEFAULT_INPUT = {
+  repoPath: '/repo',
+  verify: 'test -n "$(git diff --name-only origin/HEAD... -- \'*.md\')" && bun run build',
+  maxIterations: 4,
+  baseBranch: 'main',
+  branchPrefix: 'doc-drift',
+};
+
 describe('createDocDriftTaskFromSchedule', () => {
   beforeEach(() => {
     createTestDb();
@@ -49,11 +57,7 @@ describe('createDocDriftTaskFromSchedule', () => {
       insertActiveAgent(task.id);
     });
 
-    const result = await createDocDriftTaskFromSchedule({
-      repoPath: '/repo',
-      verify: 'test -n "$(git diff --name-only origin/HEAD... -- \'*.md\')" && bun run build',
-      maxIterations: 4,
-    });
+    const result = await createDocDriftTaskFromSchedule(DEFAULT_INPUT);
 
     expect(result.task.source).toBe('doc_drift');
     expect(mockStartTask).toHaveBeenCalledTimes(1);
@@ -76,9 +80,7 @@ describe('createDocDriftTaskFromSchedule', () => {
     });
 
     const result = await createDocDriftTaskFromSchedule({
-      repoPath: '/repo',
-      verify: 'bun run build',
-      maxIterations: 4,
+      ...DEFAULT_INPUT,
       scheduleId: 'sched-1',
     });
 
@@ -92,9 +94,7 @@ describe('createDocDriftTaskFromSchedule', () => {
     });
 
     const result = await createDocDriftTaskFromSchedule({
-      repoPath: '/repo',
-      verify: 'bun run build',
-      maxIterations: 4,
+      ...DEFAULT_INPUT,
       scheduleId: 'sched-1',
     });
 
@@ -106,16 +106,61 @@ describe('createDocDriftTaskFromSchedule', () => {
     expect(rows[0].loop_run_id).toEqual(expect.any(String));
   });
 
+  it('branch name uses branchPrefix and baseBranch from input', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      insertActiveAgent(task.id);
+    });
+
+    const result = await createDocDriftTaskFromSchedule({
+      ...DEFAULT_INPUT,
+      branchPrefix: 'docs/fix',
+      baseBranch: 'develop',
+    });
+
+    const row = getDb()
+      .prepare(
+        'SELECT wt.branch, wt.base_branch FROM tasks t JOIN worktrees wt ON wt.id = t.worktree_id WHERE t.id = ?',
+      )
+      .get(result.id) as { branch: string; base_branch: string };
+    expect(row.branch).toMatch(/^docs\/fix\//);
+    expect(row.base_branch).toBe('develop');
+  });
+
+  it('stamps model on the task row when model is provided', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      insertActiveAgent(task.id);
+    });
+
+    const result = await createDocDriftTaskFromSchedule({
+      ...DEFAULT_INPUT,
+      model: 'claude-opus-4-8',
+    });
+
+    const row = getDb().prepare('SELECT model FROM tasks WHERE id = ?').get(result.id) as {
+      model: string | null;
+    };
+    expect(row.model).toBe('claude-opus-4-8');
+  });
+
+  it('leaves model null when no model is provided', async () => {
+    mockStartTask.mockImplementation(async (task: { id: string }) => {
+      insertActiveAgent(task.id);
+    });
+
+    const result = await createDocDriftTaskFromSchedule(DEFAULT_INPUT);
+
+    const row = getDb().prepare('SELECT model FROM tasks WHERE id = ?').get(result.id) as {
+      model: string | null;
+    };
+    expect(row.model).toBeNull();
+  });
+
   it('does NOT call startLoop when startTask leaves the task in runtime_state=error, and finishes the run as failed', async () => {
     mockStartTask.mockImplementation(async (task: { id: string }) => {
       setRuntimeState(task.id, 'error', 'setup failed');
     });
 
-    const result = await createDocDriftTaskFromSchedule({
-      repoPath: '/repo',
-      verify: 'bun run build',
-      maxIterations: 4,
-    });
+    const result = await createDocDriftTaskFromSchedule(DEFAULT_INPUT);
 
     expect(mockStartTask).toHaveBeenCalledTimes(1);
     expect(mockStartLoop).not.toHaveBeenCalled();
@@ -132,11 +177,7 @@ describe('createDocDriftTaskFromSchedule', () => {
   it('does NOT call startLoop when startTask resolves but no active agent exists, and finishes the run as failed', async () => {
     mockStartTask.mockResolvedValue(undefined); // resolves, no agent row inserted, no error state
 
-    const result = await createDocDriftTaskFromSchedule({
-      repoPath: '/repo',
-      verify: 'bun run build',
-      maxIterations: 4,
-    });
+    const result = await createDocDriftTaskFromSchedule(DEFAULT_INPUT);
 
     expect(mockStartTask).toHaveBeenCalledTimes(1);
     expect(mockStartLoop).not.toHaveBeenCalled();

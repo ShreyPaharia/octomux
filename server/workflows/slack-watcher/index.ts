@@ -10,6 +10,7 @@ export const slackWatcherWorkflow: WorkflowType = {
   kind: 'slack-watcher',
   displayName: 'Slack Watcher',
   surfaces: ['artifact'],
+  execution: 'session',
   config: SLACK_WATCHER_CONFIG_SCHEMA,
   output: SLACK_WATCHER_SCHEMA,
   trigger: { kind: 'cron' },
@@ -38,6 +39,8 @@ export const slackWatcherWorkflow: WorkflowType = {
       lookbackMinutes: cfg.lookbackMinutes,
       digestChannel: cfg.digestChannel,
       trigger: ctx.trigger,
+      model: ctx.model,
+      timeoutMs: ctx.timeoutMs,
     }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },

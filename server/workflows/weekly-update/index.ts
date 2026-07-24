@@ -10,6 +10,7 @@ export const weeklyUpdateWorkflow: WorkflowType = {
   kind: 'weekly-update',
   displayName: 'Weekly Update',
   surfaces: ['artifact'],
+  execution: 'session',
   output: WEEKLY_UPDATE_SCHEMA,
   trigger: { kind: 'cron' },
   run: (ctx: RunContext) => {
@@ -22,6 +23,8 @@ export const weeklyUpdateWorkflow: WorkflowType = {
       repoPath: ctx.repoPath,
       scheduleId: ctx.scheduleId,
       trigger: ctx.trigger,
+      model: ctx.model,
+      timeoutMs: ctx.timeoutMs,
     }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },

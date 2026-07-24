@@ -16,6 +16,20 @@ export const DOC_DRIFT_CONFIG_SCHEMA = {
       minimum: 1,
       default: 4,
     },
+    baseBranch: {
+      type: 'string',
+      title: 'Base branch',
+      default: 'main',
+      format: 'single-line',
+      pattern: '^[a-zA-Z0-9._/-]{1,80}$',
+    },
+    branchPrefix: {
+      type: 'string',
+      title: 'Branch prefix',
+      default: 'doc-drift',
+      format: 'single-line',
+      pattern: '^[a-zA-Z0-9._/-]{1,80}$',
+    },
   },
   additionalProperties: false,
 };

@@ -22,6 +22,12 @@ export interface CreateDocDriftTaskFromScheduleInput {
   repoPath: string;
   verify: string;
   maxIterations: number;
+  /** Override the base branch that the worktree branches off of. Defaults to 'main'. */
+  baseBranch: string;
+  /** Prefix for the feature branch name. Defaults to 'doc-drift'. */
+  branchPrefix: string;
+  /** Per-schedule model override; null/undefined means harness default. */
+  model?: string | null;
   /** Set when this run was fired by a schedule — stamps tasks.schedule_id. */
   scheduleId?: string;
   trigger?: 'cron' | 'manual';
@@ -38,7 +44,7 @@ export async function createDocDriftTaskFromSchedule(
   const id = nanoid(12);
   const short = repoShortName(input.repoPath);
   const dateStamp = new Date().toISOString().slice(0, 10);
-  const branch = `doc-drift/${short}-${dateStamp}`;
+  const branch = `${input.branchPrefix}/${short}-${dateStamp}`;
 
   const initialPrompt = buildDocDriftPrompt({
     docDriftTaskId: id,
@@ -49,11 +55,12 @@ export async function createDocDriftTaskFromSchedule(
     id,
     repoPath: input.repoPath,
     branch,
-    baseBranch: 'main',
+    baseBranch: input.baseBranch,
     title: `Doc drift: ${short} (${dateStamp})`,
     description: `Scheduled doc-drift run for ${short}`,
     initialPrompt,
     scheduleId: input.scheduleId,
+    model: input.model,
   });
 
   broadcast({ type: 'task:created', payload: { taskId: id } });

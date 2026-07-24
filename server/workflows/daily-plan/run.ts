@@ -14,6 +14,7 @@ const logger = childLogger('workflows/daily-plan');
 export interface RunDailyPlanFromScheduleInput {
   scheduleId: string;
   trigger?: 'cron' | 'manual';
+  model?: string | null;
 }
 
 export async function runDailyPlanFromSchedule(
@@ -23,7 +24,7 @@ export async function runDailyPlanFromSchedule(
     scheduleId: input.scheduleId,
     kind: 'daily-plan',
   });
-  const agent = await createChat({ prompt });
+  const agent = await createChat({ prompt, model: input.model });
   const trigger = input.trigger ?? 'cron';
 
   insertRun({

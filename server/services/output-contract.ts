@@ -11,6 +11,9 @@ export interface ValidationResult {
 }
 
 const ajv = new Ajv({ allErrors: true, strict: true });
+// 'single-line' is a UI rendering hint on workflow config schemas, not a
+// validation format — register it as always-valid so strict mode accepts it.
+ajv.addFormat('single-line', true);
 const compiled = new Map<string, ValidateFunction>();
 
 /**

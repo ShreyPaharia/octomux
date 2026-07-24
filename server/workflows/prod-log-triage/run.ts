@@ -23,6 +23,12 @@ export interface CreateTriageTaskFromScheduleInput {
   logCommand: string;
   verify: string;
   maxIterations: number;
+  /** Override the base branch that the worktree branches off of. Defaults to 'main'. */
+  baseBranch: string;
+  /** Prefix for the feature branch name. Defaults to 'triage'. */
+  branchPrefix: string;
+  /** Per-schedule model override; null/undefined means harness default. */
+  model?: string | null;
   /** Set when this run was fired by a schedule — stamps tasks.schedule_id. */
   scheduleId?: string;
   trigger?: 'cron' | 'manual';
@@ -39,7 +45,7 @@ export async function createTriageTaskFromSchedule(
   const id = nanoid(12);
   const short = repoShortName(input.repoPath);
   const dateStamp = new Date().toISOString().slice(0, 10);
-  const branch = `triage/${short}-${dateStamp}`;
+  const branch = `${input.branchPrefix}/${short}-${dateStamp}`;
 
   const initialPrompt = buildTriagePrompt({
     triageTaskId: id,
@@ -51,11 +57,12 @@ export async function createTriageTaskFromSchedule(
     id,
     repoPath: input.repoPath,
     branch,
-    baseBranch: 'main',
+    baseBranch: input.baseBranch,
     title: `Prod log triage: ${short} (${dateStamp})`,
     description: `Scheduled prod-log-triage run for ${short}`,
     initialPrompt,
     scheduleId: input.scheduleId,
+    model: input.model,
   });
 
   broadcast({ type: 'task:created', payload: { taskId: id } });

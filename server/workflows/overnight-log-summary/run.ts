@@ -6,6 +6,7 @@
 import { resolveSchedulePrompt } from '../../schedule-prompt.js';
 import { repoShortName } from '../../review-tasks.js';
 import { runSessionVertical } from '../../services/session-vertical-service.js';
+import { interpolatePrompt } from '../../prompt-interpolate.js';
 import { OVERNIGHT_LOG_SUMMARY_SCHEMA } from './schema.js';
 
 export interface RunOvernightLogSummaryInput {
@@ -13,6 +14,8 @@ export interface RunOvernightLogSummaryInput {
   scheduleId?: string | null;
   logCommand: string;
   trigger?: 'cron' | 'manual';
+  model?: string | null;
+  timeoutMs?: number | null;
 }
 
 export interface OvernightLogSummaryResult {
@@ -30,9 +33,10 @@ export async function runOvernightLogSummary(
     kind: 'overnight-log-summary',
     repoPath: input.repoPath,
   });
-  const prompt = skillContent
-    .replace(/\{\{logCommand\}\}/g, input.logCommand)
-    .replace(/\{\{repoShort\}\}/g, repoShortName(input.repoPath));
+  const prompt = interpolatePrompt(skillContent, {
+    logCommand: input.logCommand,
+    repoShort: repoShortName(input.repoPath),
+  });
 
   return runSessionVertical<OvernightLogSummaryResult>({
     kind: 'overnight-log-summary',
@@ -41,5 +45,7 @@ export async function runOvernightLogSummary(
     input: prompt,
     outputSchema: OVERNIGHT_LOG_SUMMARY_SCHEMA,
     trigger: input.trigger ?? 'cron',
+    model: input.model,
+    timeoutMs: input.timeoutMs,
   });
 }

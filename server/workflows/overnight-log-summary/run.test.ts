@@ -48,4 +48,59 @@ describe('runOvernightLogSummary', () => {
     expect(call.input).toBe('Run gh run list --limit 30 for my-app.');
     expect(call.outputSchema).toBe(OVERNIGHT_LOG_SUMMARY_SCHEMA);
   });
+
+  it('leaves unknown {{tokens}} intact in the interpolated prompt', async () => {
+    mockGetSkill.mockResolvedValue({
+      name: 'overnight-log-summary',
+      content: 'Run {{logCommand}} {{unknownToken}} for {{repoShort}}.',
+    });
+    mockRunSessionVertical.mockResolvedValue({ result: { summary: 'ok' } });
+
+    await runOvernightLogSummary({
+      repoPath: '/repos/My App',
+      scheduleId: 'sched-2',
+      logCommand: 'gh run list',
+    });
+
+    const call = mockRunSessionVertical.mock.calls[0][0];
+    expect(call.input).toBe('Run gh run list {{unknownToken}} for my-app.');
+  });
+
+  it('passes model and timeoutMs through to runSessionVertical', async () => {
+    mockGetSkill.mockResolvedValue({
+      name: 'overnight-log-summary',
+      content: 'Run {{logCommand}} for {{repoShort}}.',
+    });
+    mockRunSessionVertical.mockResolvedValue({ result: { summary: 'ok' } });
+
+    await runOvernightLogSummary({
+      repoPath: '/repos/My App',
+      scheduleId: 'sched-3',
+      logCommand: 'gh run list --limit 30',
+      model: 'claude-haiku-4-5-20251001',
+      timeoutMs: 600000,
+    });
+
+    const call = mockRunSessionVertical.mock.calls[0][0];
+    expect(call.model).toBe('claude-haiku-4-5-20251001');
+    expect(call.timeoutMs).toBe(600000);
+  });
+
+  it('passes undefined model/timeoutMs when not specified', async () => {
+    mockGetSkill.mockResolvedValue({
+      name: 'overnight-log-summary',
+      content: 'Run {{logCommand}} for {{repoShort}}.',
+    });
+    mockRunSessionVertical.mockResolvedValue({ result: { summary: 'ok' } });
+
+    await runOvernightLogSummary({
+      repoPath: '/repos/My App',
+      scheduleId: 'sched-4',
+      logCommand: 'gh run list --limit 30',
+    });
+
+    const call = mockRunSessionVertical.mock.calls[0][0];
+    expect(call.model).toBeUndefined();
+    expect(call.timeoutMs).toBeUndefined();
+  });
 });

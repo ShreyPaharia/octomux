@@ -35,7 +35,7 @@ describe('runDailyPlanFromSchedule', () => {
       scheduleId: 'sched-1',
       kind: 'daily-plan',
     });
-    expect(mockCreateChat).toHaveBeenCalledWith({ prompt: 'Prep the day.' });
+    expect(mockCreateChat).toHaveBeenCalledWith({ prompt: 'Prep the day.', model: undefined });
 
     const rows = getDb()
       .prepare(`SELECT * FROM runs WHERE workflow_kind = 'daily-plan'`)
@@ -44,6 +44,38 @@ describe('runDailyPlanFromSchedule', () => {
     expect(rows[0].chat_id).toBe('chat-1');
     expect(rows[0].schedule_id).toBe('sched-1');
     expect(rows[0].trigger).toBe('manual');
+  });
+
+  it('passes model to createChat when provided', async () => {
+    mockResolveSchedulePrompt.mockResolvedValue('Prep the day.');
+    mockCreateChat.mockResolvedValue({ id: 'chat-2' });
+
+    await runDailyPlanFromSchedule({
+      scheduleId: 'sched-2',
+      trigger: 'cron',
+      model: 'claude-haiku-4-5-20251001',
+    });
+
+    expect(mockCreateChat).toHaveBeenCalledWith({
+      prompt: 'Prep the day.',
+      model: 'claude-haiku-4-5-20251001',
+    });
+  });
+
+  it('passes null model to createChat when model is null', async () => {
+    mockResolveSchedulePrompt.mockResolvedValue('Prep the day.');
+    mockCreateChat.mockResolvedValue({ id: 'chat-3' });
+
+    await runDailyPlanFromSchedule({
+      scheduleId: 'sched-3',
+      trigger: 'cron',
+      model: null,
+    });
+
+    expect(mockCreateChat).toHaveBeenCalledWith({
+      prompt: 'Prep the day.',
+      model: null,
+    });
   });
 });
 

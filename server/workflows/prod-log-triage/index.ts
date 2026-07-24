@@ -10,6 +10,7 @@ export const prodLogTriageWorkflow: WorkflowType = {
   kind: 'prod-log-triage',
   displayName: 'Prod Log Triage',
   surfaces: ['feed', 'artifact'],
+  execution: 'task',
   config: PROD_LOG_TRIAGE_CONFIG_SCHEMA,
   trigger: { kind: 'cron' },
   run: async (ctx: RunContext) => {
@@ -17,12 +18,21 @@ export const prodLogTriageWorkflow: WorkflowType = {
       { repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },
       'prod-log-triage: schedule fired',
     );
-    const cfg = ctx.config as { logCommand: string; verify: string; maxIterations: number };
+    const cfg = ctx.config as {
+      logCommand: string;
+      verify: string;
+      maxIterations: number;
+      baseBranch: string;
+      branchPrefix: string;
+    };
     await createTriageTaskFromSchedule({
       repoPath: ctx.repoPath,
       logCommand: cfg.logCommand,
       verify: cfg.verify,
       maxIterations: cfg.maxIterations,
+      baseBranch: cfg.baseBranch,
+      branchPrefix: cfg.branchPrefix,
+      model: ctx.model,
       scheduleId: ctx.scheduleId,
       trigger: ctx.trigger,
     });

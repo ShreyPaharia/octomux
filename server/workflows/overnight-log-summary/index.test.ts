@@ -16,10 +16,15 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     id: 'sched1',
     kind: 'overnight-log-summary',
     repo_path: '/repo',
+    name: null,
     cron: '0 6 * * *',
+    timezone: null,
     enabled: 1,
+    model: null,
+    timeout_ms: null,
     last_run_at: null,
     config_json: null,
+    prompt: null,
     ...overrides,
   };
 }
@@ -73,5 +78,35 @@ describe('overnight-log-summary workflow registration', () => {
 
     const call = mockRunOvernightLogSummary.mock.calls[0][0];
     expect(call.logCommand).toBe('flyctl logs -a my-app');
+  });
+
+  it('threads ctx.model and ctx.timeoutMs into runOvernightLogSummary', async () => {
+    const wf = getWorkflow('overnight-log-summary')!;
+    const row = makeRow({ id: 'sched-99' });
+    await wf.run!({
+      repoPath: row.repo_path,
+      config: resolveWorkflowConfig(wf, row.config_json),
+      scheduleId: row.id,
+      model: 'claude-sonnet-4-6',
+      timeoutMs: 450000,
+    });
+
+    const call = mockRunOvernightLogSummary.mock.calls[0][0];
+    expect(call.model).toBe('claude-sonnet-4-6');
+    expect(call.timeoutMs).toBe(450000);
+  });
+
+  it('passes undefined model/timeoutMs when ctx has none', async () => {
+    const wf = getWorkflow('overnight-log-summary')!;
+    const row = makeRow({ id: 'sched-100' });
+    await wf.run!({
+      repoPath: row.repo_path,
+      config: resolveWorkflowConfig(wf, row.config_json),
+      scheduleId: row.id,
+    });
+
+    const call = mockRunOvernightLogSummary.mock.calls[0][0];
+    expect(call.model).toBeUndefined();
+    expect(call.timeoutMs).toBeUndefined();
   });
 });

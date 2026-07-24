@@ -16,10 +16,15 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     id: 'sched1',
     kind: 'slack-watcher',
     repo_path: '/repo',
+    name: null,
     cron: '*/30 3-18 * * *',
+    timezone: null,
     enabled: 1,
+    model: null,
+    timeout_ms: null,
     last_run_at: null,
     config_json: null,
+    prompt: null,
     ...overrides,
   };
 }
@@ -91,5 +96,35 @@ describe('slack-watcher workflow registration', () => {
     expect(call.digestUserId).toBe('U0PERSONAL');
     expect(call.lookbackMinutes).toBe(20);
     expect(call.digestChannel).toBe('C9');
+  });
+
+  it('threads ctx.model and ctx.timeoutMs into runSlackWatcher', async () => {
+    const wf = getWorkflow('slack-watcher')!;
+    const row = makeRow({ config_json: JSON.stringify({ slackUserId: 'U07X' }) });
+    await wf.run!({
+      repoPath: row.repo_path,
+      config: resolveWorkflowConfig(wf, row.config_json),
+      scheduleId: row.id,
+      model: 'claude-haiku-4-5-20251001',
+      timeoutMs: 60000,
+    });
+
+    const call = mockRunSlackWatcher.mock.calls[0][0];
+    expect(call.model).toBe('claude-haiku-4-5-20251001');
+    expect(call.timeoutMs).toBe(60000);
+  });
+
+  it('passes null model/timeoutMs through when ctx has none', async () => {
+    const wf = getWorkflow('slack-watcher')!;
+    const row = makeRow({ config_json: JSON.stringify({ slackUserId: 'U07X' }) });
+    await wf.run!({
+      repoPath: row.repo_path,
+      config: resolveWorkflowConfig(wf, row.config_json),
+      scheduleId: row.id,
+    });
+
+    const call = mockRunSlackWatcher.mock.calls[0][0];
+    expect(call.model).toBeUndefined();
+    expect(call.timeoutMs).toBeUndefined();
   });
 });

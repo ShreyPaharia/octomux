@@ -32,6 +32,8 @@ export interface InsertTriageTaskParams {
   initialPrompt: string;
   /** Set when this task was fired by a schedule — stamps tasks.schedule_id. */
   scheduleId?: string;
+  /** Per-schedule model override — stamps tasks.model. */
+  model?: string | null;
 }
 
 /**
@@ -63,6 +65,7 @@ export function insertTriageTask(params: InsertTriageTaskParams): string {
     source: 'prod_log_triage',
     worktree_id: worktreeId,
     schedule_id: params.scheduleId ?? null,
+    model: params.model ?? null,
   });
 
   return id;
