@@ -158,6 +158,8 @@ row is `(kind, repo_path)`-unique with a 5-field cron; `poller/schedule-cron.ts`
 - ESLint: `@typescript-eslint/no-explicit-any` is warn (off in test files)
 - Conventional commits enforced: `feat(scope): message`, `fix(scope): message`, etc.
 - Kebab-case scopes, 100 char header max
+- Never add any AI attribution to commits or PRs — no `Co-Authored-By: Claude …` trailers,
+  no "Generated with Claude Code" footers, nothing of the kind
 - Use template literals for SQL with `datetime('now')` — single quotes inside backticks
 
 ## Gotchas
