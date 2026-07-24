@@ -23,7 +23,7 @@ built as a standard workflow kind rather than gateway-internal code.
 ## Non-goals (v1)
 
 - Sending replies as the owner (no user-scoped `chat:write`; "reply-as-me with gateway
-  confirmation" is v2).
+  confirmation" is v2 — **now specified below, §v2: click-to-send reply buttons**).
 - Multi-user / multi-workspace. One owner, one workspace — same as the gateway.
 - Real-time event push. 30-minute polling is the design point; the gateway remains the
   real-time reactive surface.
@@ -209,3 +209,34 @@ Follow the per-workflow layout (`overnight-log-summary` as the template):
 - `registry.test.ts` untouched; `schedule-prompt` seed test extended for the new kind.
 - Slack Web API is never called in tests; the skill's behavior is prompt-side and the
   live smoke test (§Live setup) covers the integration.
+
+## v2: copyable replies + self-DM digest (buttons dropped)
+
+v2 was first designed as click-to-send Block Kit buttons (see git history of this
+section). During preflight the owner dropped the buttons in favour of copy-paste:
+suggested replies are the owner's to send, copying is one tap, and no attribution
+badge appears on anything colleagues see. Ad-hoc agent sends remain possible by asking
+any connector-equipped Claude session directly (those show "Sent using @Claude" —
+acceptable when explicitly requested).
+
+What v2 ships instead:
+
+- **`digestTarget: 'self-dm'`** — the digest goes to the owner's own self-DM in the
+  **watched** workspace via the connector's `slack_send_message` (`channel_id` =
+  `slackUserId`). This is the one sanctioned exception to the skill's no-connector-send
+  rule: a single digest message, to the owner themselves, only. Digest and the threads
+  it references live in the same workspace — copy, jump via permalink, paste, send.
+- **One-tap-copyable replies** — every suggested reply is rendered in code formatting:
+  inline code on Slack, `<code>` + `parse_mode=HTML` on Telegram (tap-to-copy on both).
+- **Item bookkeeping** — items carry optional `replyChannel`/`replyTs` (dedup context
+  and future use).
+- **Dormant send vertical** — `slack-watcher-reply` (`send-reply.ts`: verbatim-send via
+  the connector, feed-only kind, never cron-schedulable) is built and tested but has no
+  caller. It becomes the send path if one-click ever returns — ideally re-pointed at an
+  Ostium user-token app (badge-free) when app installs are approved there.
+
+Verified during preflight: headless sessions CAN send via the connector (test message
+landed cross-workspace from a headless run), and Block Kit buttons render fine — the
+drop was a product choice, not a technical one. The gateway interactive listener and
+click handler were never built; the Interactivity toggle on the conductor app is on but
+unused (harmless).

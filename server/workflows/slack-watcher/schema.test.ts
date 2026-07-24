@@ -27,6 +27,8 @@ describe('SLACK_WATCHER_SCHEMA', () => {
             urgency: 'high',
             suggestedReply: 'Use the staging override for now.',
             permalink: 'https://slack.com/archives/C1/p1',
+            replyChannel: 'D0ASZE1MVJS',
+            replyTs: '1784893312.104219',
           },
         ],
       }),
@@ -37,6 +39,19 @@ describe('SLACK_WATCHER_SCHEMA', () => {
         items: [{ channel: '#x', from: 'a', about: 'b', urgency: 'urgent' }],
       }),
     ).toBe(false);
+  });
+
+  it('accepts items without reply targeting fields', () => {
+    const validate = new Ajv().compile(SLACK_WATCHER_SCHEMA);
+    expect(
+      validate({
+        outcome: 'done',
+        window: '40m',
+        summary: '1 item',
+        digestSent: true,
+        items: [{ channel: '#x', from: 'a', about: 'b', urgency: 'low' }],
+      }),
+    ).toBe(true);
   });
 
   it('applies config defaults for digestTarget, telegramChatId, digestUserId, lookbackMinutes, and digestChannel', () => {
@@ -51,8 +66,9 @@ describe('SLACK_WATCHER_SCHEMA', () => {
     expect(cfg.digestChannel).toBe('');
   });
 
-  it('rejects an unknown digestTarget', () => {
+  it('rejects an unknown digestTarget and accepts self-dm', () => {
     const validate = new Ajv().compile(SLACK_WATCHER_CONFIG_SCHEMA);
     expect(validate({ slackUserId: 'U01ABCDEF', digestTarget: 'email' })).toBe(false);
+    expect(validate({ slackUserId: 'U01ABCDEF', digestTarget: 'self-dm' })).toBe(true);
   });
 });

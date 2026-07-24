@@ -33,6 +33,8 @@ export interface SlackWatcherItem {
   urgency: 'low' | 'medium' | 'high';
   suggestedReply?: string;
   permalink?: string;
+  replyChannel?: string;
+  replyTs?: string;
 }
 
 export interface SlackWatcherResult {
