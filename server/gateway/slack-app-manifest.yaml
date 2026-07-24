@@ -1,0 +1,32 @@
+# Slack app manifest for the octomux conductor gateway (Socket Mode).
+#
+# Use it: https://api.slack.com/apps → Create New App → From an app manifest →
+# pick your workspace → paste this YAML → Create.
+#
+# It configures everything the gateway needs — Socket Mode, bot scopes, and the
+# DM/channel message events — so you don't click through each setting by hand.
+# See server/gateway/README.md for the full walkthrough and the two tokens you
+# still generate afterward (the xapp- app-level token and the xoxb- bot token).
+display_information:
+  name: octomux conductor
+  description: Chat with the octomux conductor (assistant brain) over Slack.
+  background_color: '#1a1a1a'
+features:
+  bot_user:
+    display_name: octomux
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write # post the conductor's replies
+      - im:history # read the DMs sent to the bot
+      - channels:history # optional: read messages in channels the bot is in
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.im # DMs to the bot
+      - message.channels # optional: messages in channels the bot is in
+  # Socket Mode: an outbound websocket, so no request_url / public webhook here.
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false
