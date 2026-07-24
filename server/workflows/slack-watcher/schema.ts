@@ -13,6 +13,20 @@ export const SLACK_WATCHER_CONFIG_SCHEMA = {
         "The owner's member id in the watched workspace (e.g. U01ABCDEF) — whose inbox to search.",
       default: '',
     },
+    digestTarget: {
+      type: 'string',
+      enum: ['slack', 'telegram'],
+      title: 'Digest destination',
+      description: 'Where the digest goes: a Slack DM/channel via the bot, or Telegram.',
+      default: 'slack',
+    },
+    telegramChatId: {
+      type: 'string',
+      title: 'Telegram chat id',
+      description:
+        "Numeric Telegram chat id (the gateway allowlist id). Required for the 'telegram' target.",
+      default: '',
+    },
     digestUserId: {
       type: 'string',
       title: 'Digest member id',

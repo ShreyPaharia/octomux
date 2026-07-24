@@ -39,13 +39,20 @@ describe('SLACK_WATCHER_SCHEMA', () => {
     ).toBe(false);
   });
 
-  it('applies config defaults for digestUserId, lookbackMinutes, and digestChannel', () => {
+  it('applies config defaults for digestTarget, telegramChatId, digestUserId, lookbackMinutes, and digestChannel', () => {
     const validate = new Ajv({ useDefaults: true }).compile(SLACK_WATCHER_CONFIG_SCHEMA);
     const cfg: Record<string, unknown> = { slackUserId: 'U01ABCDEF' };
 
     expect(validate(cfg)).toBe(true);
+    expect(cfg.digestTarget).toBe('slack');
+    expect(cfg.telegramChatId).toBe('');
     expect(cfg.digestUserId).toBe('');
     expect(cfg.lookbackMinutes).toBe(40);
     expect(cfg.digestChannel).toBe('');
+  });
+
+  it('rejects an unknown digestTarget', () => {
+    const validate = new Ajv().compile(SLACK_WATCHER_CONFIG_SCHEMA);
+    expect(validate({ slackUserId: 'U01ABCDEF', digestTarget: 'email' })).toBe(false);
   });
 });
