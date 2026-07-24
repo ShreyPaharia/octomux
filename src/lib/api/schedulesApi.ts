@@ -12,10 +12,15 @@ export interface ScheduleRow {
   id: string;
   kind: string;
   repo_path: string;
+  name: string | null;
   cron: string;
+  timezone: string | null;
   enabled: number;
+  model: string | null;
+  timeout_ms: number | null;
   last_run_at: string | null;
   config_json: string | null;
+  prompt: string | null;
 }
 
 export interface ScheduleSkill {
@@ -27,6 +32,9 @@ export interface ScheduleKindInfo {
   kind: string;
   displayName: string;
   configSchema: Record<string, unknown> | null;
+  execution: 'session' | 'task' | 'chat';
+  promptRequired: boolean;
+  supportsTimeout: boolean;
 }
 
 export interface CreateScheduleInput {
@@ -35,12 +43,23 @@ export interface CreateScheduleInput {
   cron: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
+  name?: string;
+  timezone?: string;
+  model?: string;
+  timeoutMs?: number;
+  prompt?: string;
 }
 
 export interface UpdateScheduleInput {
   cron?: string;
   enabled?: boolean;
   config?: Record<string, unknown>;
+  name?: string | null;
+  repoPath?: string;
+  timezone?: string | null;
+  model?: string | null;
+  timeoutMs?: number | null;
+  prompt?: string | null;
 }
 
 export const schedulesApi = {
@@ -54,6 +73,10 @@ export const schedulesApi = {
   runScheduleNow: (id: string) =>
     request<{ ok: boolean }>(`/schedules/${id}/run`, { method: 'POST' }),
   getScheduleRuns: (id: string) => request<{ runs: WorkflowRunRow[] }>(`/schedules/${id}/runs`),
+  getEffectivePrompt: (id: string) =>
+    request<{ content: string; source: 'override' | 'kind_skill' }>(
+      `/schedules/${id}/effective-prompt`,
+    ),
 };
 
 export const scheduleSkillsApi = {
