@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A cron-scheduled headless workflow (`slack-watcher`) that reads the owner's Slack inbox with a read-only user token and has the gateway bot DM a concise digest with suggested replies — only when something needs the owner.
+**Goal:** A cron-scheduled headless workflow (`slack-watcher`) that reads the owner's inbox in the watched (company) workspace via the claude.ai Slack MCP connector and has the gateway bot — in the owner's personal workspace — DM a concise digest with suggested replies, only when something needs the owner.
 
-**Architecture:** New workflow kind modeled exactly on `overnight-log-summary`: `schema.ts` (config + output JSON Schemas), `run.ts` (skill-body interpolation + `runSessionVertical`), `index.ts` (registry entry), shipped skill at `plugin/skills/slack-watcher/SKILL.md` seeded into the `schedule_skills` DB table on first read. The skill drives the Slack Web API via `curl` using tokens inherited from the server's env. Spec: `spec/slack-watcher.md`.
+**Architecture:** New workflow kind modeled exactly on `overnight-log-summary`: `schema.ts` (config + output JSON Schemas), `run.ts` (skill-body interpolation + `runSessionVertical`), `index.ts` (registry entry), shipped skill at `plugin/skills/slack-watcher/SKILL.md` seeded into the `schedule_skills` DB table on first read. The skill reads via the Slack MCP connector tools and posts via `curl` with the gateway bot token inherited from the server's env. Spec: `spec/slack-watcher.md`.
 
 **Tech Stack:** TypeScript (Express 5 server), vitest, better-sqlite3 test DB via `createTestDb()`, Ajv for schema tests, Slack Web API over curl (no new npm deps).
 
@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `SLACK_WATCHER_CONFIG_SCHEMA` (object schema with `slackUserId: string` default `''`, `lookbackMinutes: number` default `40`, `digestChannel: string` default `''`) and `SLACK_WATCHER_SCHEMA` (submit_result payload: required `outcome`, `window`, `summary`, `digestSent`, `items`; optional `links`). Item shape: `{ channel, from, about, urgency: 'low'|'medium'|'high', suggestedReply?, permalink? }`.
+- Produces: `SLACK_WATCHER_CONFIG_SCHEMA` (object schema with `slackUserId: string` default `''` — member id in the **watched** workspace, `digestUserId: string` default `''` — member id in the **bot's** workspace, `lookbackMinutes: number` default `40`, `digestChannel: string` default `''`) and `SLACK_WATCHER_SCHEMA` (submit_result payload: required `outcome`, `window`, `summary`, `digestSent`, `items`; optional `links`). Item shape: `{ channel, from, about, urgency: 'low'|'medium'|'high', suggestedReply?, permalink? }`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -76,11 +76,12 @@ describe('SLACK_WATCHER_SCHEMA', () => {
     ).toBe(false);
   });
 
-  it('applies config defaults for lookbackMinutes and digestChannel', () => {
+  it('applies config defaults for digestUserId, lookbackMinutes, and digestChannel', () => {
     const validate = new Ajv({ useDefaults: true }).compile(SLACK_WATCHER_CONFIG_SCHEMA);
     const cfg: Record<string, unknown> = { slackUserId: 'U01ABCDEF' };
 
     expect(validate(cfg)).toBe(true);
+    expect(cfg.digestUserId).toBe('');
     expect(cfg.lookbackMinutes).toBe(40);
     expect(cfg.digestChannel).toBe('');
   });
@@ -107,8 +108,16 @@ export const SLACK_WATCHER_CONFIG_SCHEMA = {
   properties: {
     slackUserId: {
       type: 'string',
-      title: 'Slack member id',
-      description: "The owner's Slack member id (e.g. U01ABCDEF) — whose inbox to watch.",
+      title: 'Watched member id',
+      description:
+        "The owner's member id in the watched workspace (e.g. U01ABCDEF) — whose inbox to search.",
+      default: '',
+    },
+    digestUserId: {
+      type: 'string',
+      title: 'Digest member id',
+      description:
+        "The owner's member id in the bot's workspace — whom the bot DMs. Same as the watched id when both halves share a workspace.",
       default: '',
     },
     lookbackMinutes: {
@@ -188,7 +197,7 @@ git commit -m "feat(workflows): slack-watcher config and output schemas"
 
 **Interfaces:**
 - Consumes: `SLACK_WATCHER_SCHEMA` from Task 1; existing `resolveSchedulePrompt({ scheduleId, kind })`, `runSessionVertical(input)`, `listRunsForWorkflow(kind)`, `insertRun` / `finishRun` (tests only).
-- Produces: `runSlackWatcher(input: RunSlackWatcherInput): Promise<{ result: SlackWatcherResult }>` with `RunSlackWatcherInput = { repoPath: string; scheduleId?: string | null; slackUserId: string; lookbackMinutes: number; digestChannel: string; trigger?: 'cron' | 'manual' }`, plus exported `SlackWatcherResult` / `SlackWatcherItem` types and `previousItemsJson(): string`.
+- Produces: `runSlackWatcher(input: RunSlackWatcherInput): Promise<{ result: SlackWatcherResult }>` with `RunSlackWatcherInput = { repoPath: string; scheduleId?: string | null; slackUserId: string; digestUserId: string; lookbackMinutes: number; digestChannel: string; trigger?: 'cron' | 'manual' }`, plus exported `SlackWatcherResult` / `SlackWatcherItem` types and `previousItemsJson(): string`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -215,7 +224,7 @@ import { runSlackWatcher, previousItemsJson } from './run.js';
 import { SLACK_WATCHER_SCHEMA } from './schema.js';
 
 const SKILL_BODY =
-  'Watch {{slackUserId}} back {{lookbackMinutes}}m, post to "{{digestChannel}}", skip {{previousItems}}.';
+  'Watch {{slackUserId}} back {{lookbackMinutes}}m, DM {{digestUserId}} at "{{digestChannel}}", skip {{previousItems}}.';
 
 describe('runSlackWatcher', () => {
   beforeEach(() => {
@@ -231,6 +240,7 @@ describe('runSlackWatcher', () => {
       repoPath: '/repos/octomux',
       scheduleId: 'sched-1',
       slackUserId: 'U01ABCDEF',
+      digestUserId: 'U0PERSONAL',
       lookbackMinutes: 40,
       digestChannel: '',
     });
@@ -241,7 +251,7 @@ describe('runSlackWatcher', () => {
     expect(call.kind).toBe('slack-watcher');
     expect(call.scheduleId).toBe('sched-1');
     expect(call.workspaceDir).toBe('/repos/octomux');
-    expect(call.input).toBe('Watch U01ABCDEF back 40m, post to "", skip [].');
+    expect(call.input).toBe('Watch U01ABCDEF back 40m, DM U0PERSONAL at "", skip [].');
     expect(call.outputSchema).toBe(SLACK_WATCHER_SCHEMA);
   });
 
@@ -258,12 +268,13 @@ describe('runSlackWatcher', () => {
     await runSlackWatcher({
       repoPath: '/repos/octomux',
       slackUserId: 'U01ABCDEF',
+      digestUserId: 'U0PERSONAL',
       lookbackMinutes: 40,
       digestChannel: 'C123',
     });
     const call = mockRunSessionVertical.mock.calls[0][0];
     expect(call.input).toContain(JSON.stringify(items));
-    expect(call.input).toContain('post to "C123"');
+    expect(call.input).toContain('DM U0PERSONAL at "C123"');
   });
 
   it('falls back to [] for missing, unfinished, or malformed previous runs', () => {
@@ -320,7 +331,10 @@ import { SLACK_WATCHER_SCHEMA } from './schema.js';
 export interface RunSlackWatcherInput {
   repoPath: string;
   scheduleId?: string | null;
+  /** Owner's member id in the watched workspace — whose inbox to search. */
   slackUserId: string;
+  /** Owner's member id in the bot's workspace — whom the bot DMs. */
+  digestUserId: string;
   lookbackMinutes: number;
   digestChannel: string;
   trigger?: 'cron' | 'manual';
@@ -366,6 +380,7 @@ export async function runSlackWatcher(
   });
   const prompt = skillContent
     .replace(/\{\{slackUserId\}\}/g, input.slackUserId)
+    .replace(/\{\{digestUserId\}\}/g, input.digestUserId)
     .replace(/\{\{lookbackMinutes\}\}/g, String(input.lookbackMinutes))
     .replace(/\{\{digestChannel\}\}/g, input.digestChannel)
     .replace(/\{\{previousItems\}\}/g, previousItemsJson());
@@ -401,7 +416,7 @@ git commit -m "feat(workflows): slack-watcher run service with previous-run dedu
 - Create: `plugin/skills/slack-watcher/SKILL.md`
 
 **Interfaces:**
-- Consumes: placeholders `{{slackUserId}}`, `{{lookbackMinutes}}`, `{{digestChannel}}`, `{{previousItems}}` (interpolated by Task 2) and env vars `OCTOMUX_SLACK_USER_TOKEN` / `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` (inherited from the server process).
+- Consumes: placeholders `{{slackUserId}}`, `{{digestUserId}}`, `{{lookbackMinutes}}`, `{{digestChannel}}`, `{{previousItems}}` (interpolated by Task 2), the Slack MCP connector tools for reads, and `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` (inherited from the server process) for posting.
 - Produces: the prompt body that `getSkill('slack-watcher')` returns and `resolveScheduleSkillContent` seeds into the `schedule_skills` table. Its `submit_result` payload must match `SLACK_WATCHER_SCHEMA` from Task 1.
 
 - [ ] **Step 1: Write the skill**
@@ -419,36 +434,43 @@ description: Use when running a scheduled slack-watcher session — scan the own
 Scan the owner's Slack inbox for the last {{lookbackMinutes}} minutes and, only if
 something needs them, send one concise digest DM through the octomux bot. This is a
 headless, unattended session — you do not edit files, commit, or open PRs. Your only
-side effects are Slack Web API reads, at most one `chat.postMessage`, and one
+side effects are Slack MCP reads, at most one bot-token `chat.postMessage`, and one
 `submit_result` call.
 
-The owner's Slack member id is `{{slackUserId}}`.
+The owner's member id in the **watched** workspace is `{{slackUserId}}` (use it for all
+inbox searches). Their member id in the **bot's** workspace is `{{digestUserId}}` (use
+it only to open the digest DM) — the two workspaces may differ, so never mix the ids up.
 
-## Tokens
+## Slack access
 
-Two env vars, both inherited from the server:
+Reads and writes use **different credentials in different workspaces** — never mix them:
 
-- `OCTOMUX_SLACK_USER_TOKEN` (xoxp-, read-only) — all inbox **reads**.
-- `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` (xoxb-) — **posting** the digest only.
+- **Inbox reads (watched workspace):** your Slack MCP connector tools —
+  `slack_search_public_and_private`, `slack_read_thread`, `slack_read_channel`,
+  `slack_search_users`. You must never call the connector's send/draft/canvas tools.
+- **Posting the digest (bot's workspace):** `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` (xoxb-,
+  inherited from the server env) via `curl` — this is the only send you ever perform.
 
-If either is missing or a Slack call returns `"ok": false` with an auth error, do not
-retry endlessly: call `submit_result` with `outcome: "blocked"` and the exact Slack
-error string in `summary`, then stop.
+Before anything else, confirm the Slack MCP tools are available. If they are not, or the
+bot token is missing, or a Slack call fails with an auth error: do not retry endlessly —
+call `submit_result` with `outcome: "blocked"`, name exactly what was missing or the
+exact Slack error string in `summary`, and stop.
 
 ## Steps
 
 1. **Compute the window.** `SINCE=$(date -d "-{{lookbackMinutes}} minutes" +%s)` —
    only messages with `ts >= $SINCE` count.
 
-2. **Collect candidates** with the user token (add
-   `-H "Authorization: Bearer $OCTOMUX_SLACK_USER_TOKEN"` to every read):
+2. **Collect candidates** with the Slack MCP tools (watched workspace):
 
-   - Mentions: `curl -s -G https://slack.com/api/search.messages --data-urlencode "query=<@{{slackUserId}}>" --data-urlencode "sort=timestamp" --data-urlencode "sort_dir=desc" --data-urlencode "count=50"`
-   - DMs to the owner: same endpoint with `--data-urlencode "query=is:dm"`.
-   - For each hit inside the window, pull thread context with
-     `conversations.replies` (params `channel`, `ts`) or nearby history with
-     `conversations.history` (params `channel`, `oldest=$SINCE`) so you understand
-     what is actually being asked.
+   - Mentions: `slack_search_public_and_private` with a query for `<@{{slackUserId}}>`,
+     newest first.
+   - DMs to the owner: the same search tool with an `is:dm` query (and `is:mpim` for
+     group DMs).
+   - Keep only hits inside the window, then pull thread context with
+     `slack_read_thread` (or nearby channel history with `slack_read_channel`) so you
+     understand what is actually being asked. Use `slack_search_users` to resolve
+     display names when a hit only gives you a user id.
 
 3. **Filter ruthlessly.** Drop: messages authored by `{{slackUserId}}`; bot and app
    messages; joins/leaves and other channel noise; FYI-only chatter with no question
@@ -479,7 +501,7 @@ error string in `summary`, then stop.
 
 5. **Send it** with the bot token — only if at least one item survived filtering.
    Resolve the channel: use `{{digestChannel}}` if non-empty, otherwise
-   `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{slackUserId}}"`
+   `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{digestUserId}}"`
    and take `.channel.id`. Then one
    `chat.postMessage` with the digest as `text`. **Zero items → send nothing.**
    Silence is the correct output for a quiet window.
@@ -515,7 +537,8 @@ error string in `summary`, then stop.
 - Be conservative — this runs unattended. When unsure whether something needs the
   owner, prefer including it at `low` urgency over silently dropping it.
 - Never send any message other than the single digest, and never post as the owner —
-  the user token has no write scopes by design; do not look for workarounds.
+  reads happen through the connector, but its send/draft tools are off-limits; the only
+  send you perform is the one bot-token `chat.postMessage`. Do not look for workarounds.
 - Suggested replies are suggestions. The owner sends them; you never do.
 ````
 
@@ -611,14 +634,20 @@ describe('slack-watcher workflow registration', () => {
     expect(call.repoPath).toBe('/repo');
     expect(call.scheduleId).toBe('sched-42');
     expect(call.slackUserId).toBe('U07X');
+    expect(call.digestUserId).toBe('');
     expect(call.lookbackMinutes).toBe(40);
     expect(call.digestChannel).toBe('');
   });
 
-  it('passes through config overrides for lookback and digest channel', async () => {
+  it('passes through config overrides for digest user, lookback, and digest channel', async () => {
     const wf = getWorkflow('slack-watcher')!;
     const row = makeRow({
-      config_json: JSON.stringify({ slackUserId: 'U07X', lookbackMinutes: 20, digestChannel: 'C9' }),
+      config_json: JSON.stringify({
+        slackUserId: 'U07X',
+        digestUserId: 'U0PERSONAL',
+        lookbackMinutes: 20,
+        digestChannel: 'C9',
+      }),
     });
     await wf.run!({
       repoPath: row.repo_path,
@@ -627,6 +656,7 @@ describe('slack-watcher workflow registration', () => {
     });
 
     const call = mockRunSlackWatcher.mock.calls[0][0];
+    expect(call.digestUserId).toBe('U0PERSONAL');
     expect(call.lookbackMinutes).toBe(20);
     expect(call.digestChannel).toBe('C9');
   });
@@ -710,38 +740,16 @@ git commit -m "feat(workflows): register slack-watcher cron workflow kind"
 
 ---
 
-### Task 5: Slack app manifest user scopes + gateway README
+### Task 5: Gateway README — watcher setup docs
 
 **Files:**
-- Modify: `server/gateway/slack-app-manifest.yaml:18-23`
-- Modify: `server/gateway/README.md` (Slack section + "Not in v1" footer)
+- Modify: `server/gateway/README.md` (new section after the Slack smoke test + "Not in v1" footer). The conductor manifest is untouched — v1 reads via the claude.ai Slack MCP connector, not a user token.
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: the manifest the owner re-applies to mint the `xoxp-` user token; docs for `OCTOMUX_SLACK_USER_TOKEN`.
+- Produces: operator docs for the two-workspace model and the v1.1 reader-app hardening path.
 
-- [ ] **Step 1: Add user scopes to the manifest**
-
-In `server/gateway/slack-app-manifest.yaml`, extend `oauth_config.scopes`:
-
-```yaml
-oauth_config:
-  scopes:
-    bot:
-      - chat:write # post the conductor's replies
-      - im:history # read the DMs sent to the bot
-      - channels:history # optional: read messages in channels the bot is in
-    user:
-      # Read-only inbox scopes for the slack-watcher workflow (spec/slack-watcher.md).
-      # Reinstalling the app after adding these mints an xoxp- user token.
-      - search:read # search the owner's messages (mentions, DMs)
-      - im:history # DM context
-      - mpim:history # group-DM context
-      - channels:history # public-channel thread context
-      - groups:history # private-channel thread context
-```
-
-- [ ] **Step 2: Document the watcher in the README**
+- [ ] **Step 1: Document the watcher in the README**
 
 In `server/gateway/README.md`:
 
@@ -752,19 +760,23 @@ a. After the Slack "§7 smoke test" section, add:
 
 The `slack-watcher` scheduled workflow (spec: [`spec/slack-watcher.md`](../../spec/slack-watcher.md))
 scans the **owner's** inbox on a cron and has this same bot DM a concise digest with
-suggested replies. It needs one extra token beyond the gateway's:
+suggested replies. Reads and writes are split across workspaces:
 
-```bash
-OCTOMUX_SLACK_USER_TOKEN=xoxp-your-user-token   # read-only user token; watcher inbox reads
-```
+- **Inbox reads** happen in the *watched* workspace through the claude.ai Slack MCP
+  connector the headless session inherits — no app install in that workspace. If the
+  connector is unavailable in headless runs, watcher runs land as `blocked` on the
+  /runs feed naming the missing tools.
+- **Digest posting** uses this gateway's bot (`OCTOMUX_GATEWAY_SLACK_BOT_TOKEN`) in the
+  bot's own workspace — no extra env vars.
 
-The manifest above already includes the read-only **user** scopes (`search:read`,
-`im:history`, `mpim:history`, `channels:history`, `groups:history`). Reinstall the app
-after applying them (**Settings → Install App → Reinstall**) and copy the **User OAuth
-Token** (`xoxp-`) from the same page. The user token has no write scopes — the watcher
-reads with it and posts only via the bot token. Create the schedule at `/schedules`
-(kind **Slack Watcher**, cron e.g. `*/30 3-18 * * *` — cron is UTC) with your member id
-in the config.
+Create the schedule at `/schedules` (kind **Slack Watcher**, cron e.g.
+`*/30 3-18 * * *` — cron is UTC) with two member ids in the config: `slackUserId`
+(watched workspace — whose inbox) and `digestUserId` (bot's workspace — whom to DM).
+
+Hardening (v1.1, once the watched workspace allows an app install): a minimal
+user-scopes-only reader app (`search:read`, `im:history`, `mpim:history`,
+`channels:history`, `groups:history`) minting a read-only `xoxp-` token in
+`OCTOMUX_SLACK_USER_TOKEN` replaces the MCP dependency.
 ```
 
 b. In the final "## Not in v1" section, remove "proactive nudges (fast-follow)" and note it:
@@ -774,16 +786,11 @@ The per-action approval button (v2) · full streaming/rich rendering (v1.1). Pro
 nudges shipped as the `slack-watcher` scheduled workflow — see above.
 ```
 
-- [ ] **Step 3: Verify YAML parses**
-
-Run: `bun -e "const y=require('yaml');const fs=require('fs');console.log(Object.keys(y.parse(fs.readFileSync('server/gateway/slack-app-manifest.yaml','utf8')).oauth_config.scopes))"`
-Expected: `[ "bot", "user" ]` (if the `yaml` package is unavailable, paste the manifest into api.slack.com's manifest validator during live setup instead).
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-git add server/gateway/slack-app-manifest.yaml server/gateway/README.md
-git commit -m "docs(gateway): user-token scopes and setup for the slack-watcher digest"
+git add server/gateway/README.md
+git commit -m "docs(gateway): slack-watcher digest setup and two-workspace model"
 ```
 
 ---
@@ -812,8 +819,8 @@ Push the branch and open a PR against `next` titled `feat(workflows): slack-watc
 
 This task is checklist-style, not TDD — it configures the live instance at `~/.octomux/`.
 
-- [ ] **Step 1: Slack app update.** Send the owner (Slack self-DM, per user rules) the link to api.slack.com/apps with instructions: apply the updated manifest to the existing *octomux conductor* app, reinstall, and hand back the `xoxp-` (new) token; confirm `xoxb-`/`xapp-` unchanged.
-- [ ] **Step 2: Env.** Add to the `.env` octomux boots from: `OCTOMUX_SLACK_USER_TOKEN`, and confirm `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN`, `OCTOMUX_GATEWAY_SLACK_APP_TOKEN`, `OCTOMUX_GATEWAY_SLACK_ALLOW=<owner member id>` are present. Restart octomux; verify `gateway: Slack gateway started` in `~/.octomux/logs/octomux.log`.
+- [ ] **Step 1: Conductor app in the personal workspace.** Only the Telegram gateway is live today. Send the owner (Slack self-DM, per user rules) the api.slack.com/apps link + the conductor manifest with instructions: create the app **in their personal workspace** from `server/gateway/slack-app-manifest.yaml`, enable Socket Mode, install, and hand back the `xoxb-` + `xapp-` tokens and their personal-workspace member id (profile → ⋯ → Copy member ID).
+- [ ] **Step 2: Env.** Add to the `.env` octomux boots from: `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN`, `OCTOMUX_GATEWAY_SLACK_APP_TOKEN`, `OCTOMUX_GATEWAY_SLACK_ALLOW=<personal-workspace member id>`. Restart octomux; verify `gateway: Slack gateway started` in `~/.octomux/logs/octomux.log`. No watcher-specific env vars — inbox reads use the claude.ai Slack connector.
 - [ ] **Step 3: Stop hook.** Verify the no-op Stop hook exists in `~/.claude/settings.json` (known requirement: without it, gateway replies buffer forever).
-- [ ] **Step 4: Create the schedule.** `POST /api/schedules` (or /schedules UI): kind `slack-watcher`, repo path = the octomux repo, cron `*/30 3-18 * * *`, config `{ "slackUserId": "<owner member id>" }`.
-- [ ] **Step 5: Smoke test.** `POST /api/schedules/:id/run` → watch the run on the /runs feed → digest DM arrives (or a clean `digestSent: false` result on a quiet window) → reply to the digest DM and confirm the gateway conductor responds → check `grep slack-watcher ~/.octomux/logs/octomux.log` for a clean run. Record the result in the README smoke-test table.
+- [ ] **Step 4: Create the schedule.** `POST /api/schedules` (or /schedules UI): kind `slack-watcher`, repo path = the octomux repo, cron `*/30 3-18 * * *`, config `{ "slackUserId": "<watched-workspace member id>", "digestUserId": "<personal-workspace member id>" }`.
+- [ ] **Step 5: Smoke test.** `POST /api/schedules/:id/run` → watch the run on the /runs feed. This first run doubles as the **MCP-in-headless check**: a `blocked` result naming missing Slack tools means the claude.ai connector isn't reachable headless, and the v1.1 reader app becomes the unblocker. Otherwise: digest DM arrives (or a clean `digestSent: false` result on a quiet window) → reply to the digest DM and confirm the gateway conductor responds → check `grep slack-watcher ~/.octomux/logs/octomux.log` for a clean run. Record the result in the README smoke-test table.

@@ -31,7 +31,12 @@ built as a standard workflow kind rather than gateway-internal code.
 
 ## Architecture
 
-Two halves sharing one Slack app:
+Two halves. Slack credentials are **workspace-scoped**, and the watched workspace (the
+company workspace where the owner's inbox lives) differs from the workspace the gateway
+bot lives in (the owner's personal workspace). Installing a reader app on the company
+workspace is not currently possible (admin approval), so v1 reads through the
+**claude.ai Slack MCP connector**, which is already authorized on the watched workspace;
+the conductor bot app in the personal workspace handles posting and the gateway.
 
 1. **Proactive (new):** workflow kind `slack-watcher`, modeled on `overnight-log-summary`
    (headless session vertical, `surfaces: ['artifact']`, cron trigger, config + output
@@ -41,30 +46,30 @@ Two halves sharing one Slack app:
    owner's DM with the bot, which is exactly the conversation the gateway routes to the
    conductor.
 
-### Slack app tokens
+### Slack access
 
-| Token | Holder | Used for |
-| ----- | ------ | -------- |
-| `xoxb-` bot token (exists) | gateway + watcher | Posting the digest DM (`chat.postMessage`), opening the DM (`conversations.open`) |
-| `xapp-` app token (exists) | gateway | Socket Mode |
-| `xoxp-` user token (**new**) | watcher only | Reading the owner's inbox |
+| Credential | Workspace | Used for |
+| ---------- | --------- | -------- |
+| claude.ai Slack MCP connector (exists) | **watched** (company) | All inbox reads: `slack_search_public_and_private`, `slack_read_thread`, `slack_read_channel` |
+| `xoxb-` bot token (conductor app) | **digest** (personal) | Posting the digest DM (`chat.postMessage`), opening the DM (`conversations.open`) |
+| `xapp-` app token (conductor app) | digest (personal) | Socket Mode (gateway) |
 
-New **user** scopes added to `server/gateway/slack-app-manifest.yaml` under
-`oauth_config.scopes.user`: `search:read`, `im:history`, `mpim:history`,
-`channels:history`, `groups:history`. All read-only — the user token cannot post.
-Reinstalling the app mints the `xoxp-` token.
+**Known risk:** the claude.ai connector is interactively authenticated; its availability
+inside headless cron sessions on this host is unverified. The skill must check for the
+Slack MCP tools first and submit `outcome: 'blocked'` (with which tools were missing)
+when absent — a blocked run on the feed is the signal, never a silent no-digest.
 
-New env vars (loaded like the gateway's, documented in `server/gateway/README.md`):
+**Hardening path (v1.1, when installable):** a minimal reader app on the watched
+workspace with read-only user scopes (`search:read`, `im:history`, `mpim:history`,
+`channels:history`, `groups:history`) minting an `xoxp-` token in
+`OCTOMUX_SLACK_USER_TOKEN`; the skill then reads via `curl` instead of MCP. Nothing else
+in the design changes.
 
-```bash
-OCTOMUX_SLACK_USER_TOKEN=xoxp-...   # read-only user token; watcher inbox reads
-```
-
-The watcher reuses `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` for posting. The headless session
-inherits the octomux server's environment (`runSessionVertical` does no env plumbing), so
-both tokens are visible to the skill, which calls the Slack Web API with `curl`. If either
-token is missing, the run submits `outcome: 'blocked'` with a reason instead of failing
-silently.
+No new env vars in v1. The watcher reuses `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` for posting:
+the headless session inherits the octomux server's environment (`runSessionVertical`
+does no env plumbing), so the token is visible to the skill, which posts with `curl`.
+Missing bot token or missing Slack MCP tools → the run submits `outcome: 'blocked'` with
+a reason instead of failing silently.
 
 ## Components
 
@@ -79,10 +84,13 @@ Registers the kind. Shape mirrors `overnight-log-summary/index.ts`: `surfaces:
 
 ```
 SLACK_WATCHER_CONFIG_SCHEMA (drives the /schedules form):
-  slackUserId      string  — owner's member id (e.g. U0A798PTVD1); whose inbox to watch
+  slackUserId      string  — owner's member id in the WATCHED workspace; whose inbox to
+                             search (member ids differ per workspace)
+  digestUserId     string  — owner's member id in the DIGEST (bot's) workspace; whom the
+                             bot DMs. Same value as slackUserId in single-workspace setups
   lookbackMinutes  number  — default 40 (cron interval + overlap so gaps can't drop messages)
   digestChannel    string  — optional; channel id for the digest. Default '' = open a DM
-                             with slackUserId via conversations.open
+                             with digestUserId via conversations.open
 
 SLACK_WATCHER_SCHEMA (submit_result payload; envelope per spec/workflow-consolidation.md §5):
   outcome     'done' | 'blocked' | 'failed'
@@ -99,7 +107,8 @@ SLACK_WATCHER_SCHEMA (submit_result payload; envelope per spec/workflow-consolid
 Mirrors `overnight-log-summary/run.ts`:
 
 1. `resolveSchedulePrompt({ scheduleId, kind: 'slack-watcher' })` → DB skill body.
-2. Interpolates `{{slackUserId}}`, `{{lookbackMinutes}}`, `{{digestChannel}}`, and
+2. Interpolates `{{slackUserId}}`, `{{digestUserId}}`, `{{lookbackMinutes}}`,
+   `{{digestChannel}}`, and
    `{{previousItems}}` — the `items` JSON from the most recent `done` run of this kind
    (via `listRunsForWorkflow('slack-watcher')`), `'[]'` when none. This is the dedup
    memory: the skill must not re-digest a thread already covered unless there are new
@@ -110,12 +119,14 @@ Mirrors `overnight-log-summary/run.ts`:
 
 ### `plugin/skills/slack-watcher/SKILL.md`
 
-Headless, unattended session; only side effects are Slack Web API reads and (at most) one
-`chat.postMessage`. Steps:
+Headless, unattended session; only side effects are Slack MCP reads and (at most) one
+bot-token `chat.postMessage`. Steps:
 
-1. **Collect** (user token): `search.messages` for `to:@{{slackUserId}}`-style DM search and
-   `@`-mention search within the last `{{lookbackMinutes}}` minutes; `conversations.history`
-   / `conversations.replies` for context on hits. Skip messages authored by the owner, bot
+1. **Collect** (Slack MCP, watched workspace): first verify the Slack MCP tools are
+   available — if not, submit `outcome: 'blocked'` naming the missing tools and stop.
+   Then `slack_search_public_and_private` for `@`-mentions of `{{slackUserId}}` and DMs
+   within the last `{{lookbackMinutes}}` minutes; `slack_read_thread` /
+   `slack_read_channel` for context on hits. Skip messages authored by the owner, bot
    noise, and joins/leaves.
 2. **Filter against `{{previousItems}}`** — drop threads already digested with no new
    messages since.
@@ -124,7 +135,7 @@ Headless, unattended session; only side effects are Slack Web API reads and (at 
    direct, no corporate filler. Order by urgency. Hard cap: digest ≤ 10 items, each ≤ 3
    lines + reply.
 4. **Send** (bot token): resolve the digest channel (`{{digestChannel}}` or
-   `conversations.open` with `{{slackUserId}}`), one `chat.postMessage` with the digest.
+   `conversations.open` with `{{digestUserId}}`), one `chat.postMessage` with the digest.
    **If no items survive filtering, send nothing.**
 5. **`submit_result`** matching `SLACK_WATCHER_SCHEMA`. Blocked tokens/API errors →
    `outcome: 'blocked'` with the reason in `summary`.
@@ -134,14 +145,17 @@ Headless, unattended session; only side effects are Slack Web API reads and (at 
 - `server/workflows/index.ts`: import `./slack-watcher/index.js`.
 - `server/schedule-prompt.ts`: add `'slack-watcher'` to `CRON_PROMPT_KINDS` (not
   task-backed).
-- `server/gateway/slack-app-manifest.yaml`: user scopes block.
-- `server/gateway/README.md`: user-token setup + `OCTOMUX_SLACK_USER_TOKEN`, and move
-  "proactive nudges" out of "Not in v1".
+- `server/gateway/README.md`: the two-workspace model (MCP reads on the watched
+  workspace, conductor bot posts on the personal one), the v1.1 reader-app hardening
+  path, and move "proactive nudges" out of "Not in v1". The conductor manifest is
+  untouched.
 
 ## Security
 
-- User token is **read-only by scope** — consistent with the gateway's "read-only by
-  credential, not code gate" model. No user-scoped `chat:write` anywhere.
+- Nothing in the watcher can write as the owner: reads go through the claude.ai Slack
+  connector, posting only through the bot token in the personal workspace — consistent
+  with the gateway's "read-only by credential, not code gate" model. The skill is
+  additionally instructed to never call the connector's send/draft tools.
 - The digest is posted by the skill itself (curl), so the gateway's server-side
   `redactSecrets` (`server/gateway/redact.ts`) cannot intercept it. The skill instead
   carries an explicit instruction: the digest must never contain token values, keys,
@@ -150,15 +164,20 @@ Headless, unattended session; only side effects are Slack Web API reads and (at 
 
 ## Live setup (this devbox, after merge)
 
-1. Update the Slack app from the amended manifest; reinstall → mints `xoxp-`, keeps
-   `xoxb-`/`xapp-`.
-2. Env: existing gateway vars + `OCTOMUX_GATEWAY_SLACK_ALLOW=<owner member id>` +
-   `OCTOMUX_SLACK_USER_TOKEN`.
-3. Verify the no-op Stop hook in `~/.claude/settings.json` (known gateway requirement —
+1. Create the conductor app in the owner's **personal** workspace from
+   `slack-app-manifest.yaml` per the gateway README → `xoxb-` + `xapp-` tokens (only the
+   Telegram gateway is live today).
+2. Env: `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN`, `OCTOMUX_GATEWAY_SLACK_APP_TOKEN`,
+   `OCTOMUX_GATEWAY_SLACK_ALLOW=<owner member id in the personal workspace>`.
+3. Verify the claude.ai Slack connector (watched workspace) is reachable from a headless
+   session on this host — the first manual run doubles as this check; a `blocked` result
+   naming missing tools means it is not, and the v1.1 reader app becomes the unblocker.
+4. Verify the no-op Stop hook in `~/.claude/settings.json` (known gateway requirement —
    without it gateway replies buffer forever).
-4. Create the schedule: kind `slack-watcher`, repo path, cron `*/30 3-18 * * *` (UTC ≈
-   08:30–23:30 IST), config `{ slackUserId: <owner id> }`.
-5. Smoke: `POST /api/schedules/:id/run`, confirm digest DM arrives, reply to it, confirm the
+5. Create the schedule: kind `slack-watcher`, repo path, cron `*/30 3-18 * * *` (UTC ≈
+   08:30–23:30 IST), config `{ slackUserId: <watched-workspace id>, digestUserId:
+   <personal-workspace id> }`.
+6. Smoke: `POST /api/schedules/:id/run`, confirm digest DM arrives, reply to it, confirm the
    gateway conductor answers.
 
 ## Testing
@@ -167,8 +186,8 @@ Follow the per-workflow layout (`overnight-log-summary` as the template):
 
 - `schema.test.ts` — config defaults applied; output schema accepts a full and a minimal
   (`digestSent: false`) payload.
-- `run.test.ts` — mocks `runSessionVertical`: prompt interpolation (all four placeholders),
-  previous-run items threading, token env injection, blocked path when tokens missing.
+- `run.test.ts` — mocks `runSessionVertical`: prompt interpolation (all five placeholders)
+  and previous-run items threading.
 - `index.test.ts` — kind registered, cron-triggerable (`listCronWorkflowKinds` includes it).
 - `registry.test.ts` untouched; `schedule-prompt` seed test extended for the new kind.
 - Slack Web API is never called in tests; the skill's behavior is prompt-side and the
