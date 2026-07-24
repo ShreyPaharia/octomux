@@ -66,17 +66,18 @@ missing or the exact error string in `summary`, and stop.
 
 4. **Compose the digest** — natural, human, concise. For each item (max 10, ordered
    by urgency): who and where, what it's about in plain language, and a suggested
-   reply the owner can copy with one tap — so the reply always goes in **code
-   formatting** (inline code on Slack, `<code>` on Telegram), never quotation marks.
-   Format (Slack mrkdwn shown):
+   reply the owner can copy with one tap. On Slack that means each reply sits alone
+   inside a **fenced triple-backtick code block** (Slack's copy button appears only
+   on fenced blocks — inline single-backtick code has none); on Telegram, `<code>`.
+   Never quotation marks. Format (Slack mrkdwn shown):
 
-   ```
+   ````
    *Slack digest — <n> things need you*
 
    1. *Priya · #deploys* — blocked on the staging deploy config, asking if she
       should wait for your chart fix.
-      ↳ `use the staging override for now, I'll land the chart fix tomorrow morning`
-   ```
+   ```use the staging override for now, I'll land the chart fix tomorrow morning```
+   ````
 
    **Suggested replies must sound like the owner dashed them off, not like an
    assistant wrote them.** Rules:
@@ -101,9 +102,9 @@ missing or the exact error string in `summary`, and stop.
    `{{digestTarget}}` destination:
    - `self-dm`: one `slack_send_message` connector call with
      `channel_id: {{slackUserId}}` (a member id as channel = that user's self-DM).
-     Use standard markdown; keep each suggested reply in inline code so it is
-     one-tap copyable. Include each item's `permalink` so the owner can jump
-     straight to the thread they're replying to.
+     Use standard markdown; keep each suggested reply alone in a fenced
+     triple-backtick code block so it gets Slack's copy button. Include each item's
+     `permalink` so the owner can jump straight to the thread they're replying to.
    - `telegram`: one
      `curl -s -X POST "https://api.telegram.org/bot$OCTOMUX_GATEWAY_TELEGRAM_TOKEN/sendMessage" -d "chat_id={{telegramChatId}}" -d "parse_mode=HTML" --data-urlencode "text=<digest>"`
      — HTML-escape the digest (`&`, `<`, `>`), bold with `<b>…</b>`, and wrap each
@@ -112,7 +113,7 @@ missing or the exact error string in `summary`, and stop.
      `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{digestUserId}}"`
      and take `.channel.id` — then one
      `curl -s -X POST https://slack.com/api/chat.postMessage -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "channel=<channel id>" --data-urlencode "text=<digest>"`
-     (mrkdwn as composed — replies stay in inline code).
+     (mrkdwn as composed — each reply alone in its fenced triple-backtick block).
 
    **Zero items → send nothing.** Silence is the correct output for a quiet window.
 
