@@ -165,6 +165,34 @@ Record the result here once run:
 | ---- | -------------------- | --------------------------- | ----- |
 |      |                      |                             |       |
 
+## Slack watcher (proactive digest)
+
+The `slack-watcher` scheduled workflow (spec: [`spec/slack-watcher.md`](../../spec/slack-watcher.md))
+scans the **owner's** inbox on a cron and has this same bot DM a concise digest with
+suggested replies. Reads and writes are split across workspaces:
+
+- **Inbox reads** happen in the _watched_ workspace through the claude.ai Slack MCP
+  connector the headless session inherits — no app install in that workspace. If the
+  connector is unavailable in headless runs, watcher runs land as `blocked` on the
+  /runs feed naming the missing tools.
+- **Digest posting** goes to the destination picked in the schedule config
+  (`digestTarget`): the owner's **Telegram** chat via `OCTOMUX_GATEWAY_TELEGRAM_TOKEN`,
+  or a **Slack DM/channel** in the bot's own workspace via
+  `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` — no extra env vars either way. Telegram and
+  Slack-DM digests land in a gateway conversation, so replying to the digest reaches
+  the conductor.
+
+Create the schedule at `/schedules` (kind **Slack Watcher**, cron e.g.
+`*/30 3-18 * * *` — cron is UTC). All knobs are in the schedule form: `slackUserId`
+(watched workspace — whose inbox), `digestTarget` + `telegramChatId` or
+`digestUserId`/`digestChannel` (where the digest goes). The prompt itself is editable
+per kind in the UI (schedule skills — the shipped SKILL.md is only the seed).
+
+Hardening (v1.1, once the watched workspace allows an app install): a minimal
+user-scopes-only reader app (`search:read`, `im:history`, `mpim:history`,
+`channels:history`, `groups:history`) minting a read-only `xoxp-` token in
+`OCTOMUX_SLACK_USER_TOKEN` replaces the MCP dependency.
+
 ## (Optional) Read-only outward MCP servers
 
 To let the assistant **read** GitHub / Linear / etc., attach those MCP servers with **read-scoped
@@ -182,5 +210,5 @@ Keep write-capable tokens out of the gateway conductor's environment entirely.
 
 ## Not in v1
 
-The per-action approval button (v2) · proactive nudges (fast-follow) · full streaming/rich
-rendering (v1.1).
+The per-action approval button (v2) · full streaming/rich rendering (v1.1). Proactive
+nudges shipped as the `slack-watcher` scheduled workflow — see above.

@@ -16,6 +16,7 @@ export const CRON_PROMPT_KINDS = [
   'weekly-update',
   'overnight-log-summary',
   'daily-plan',
+  'slack-watcher',
 ] as const;
 
 export type CronPromptKind = (typeof CRON_PROMPT_KINDS)[number];
