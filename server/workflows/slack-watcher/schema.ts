@@ -20,9 +20,10 @@ export const SLACK_WATCHER_CONFIG_SCHEMA = {
     },
     digestTarget: {
       type: 'string',
-      enum: ['slack', 'telegram'],
+      enum: ['slack', 'telegram', 'self-dm'],
       title: 'Digest destination',
-      description: 'Where the digest goes: a Slack DM/channel via the bot, or Telegram.',
+      description:
+        "Where the digest goes: a Slack DM/channel via the bot, Telegram, or the owner's own self-DM in the watched workspace (via the connector).",
       default: 'slack',
     },
     telegramChatId: {

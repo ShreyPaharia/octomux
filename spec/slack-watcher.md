@@ -210,67 +210,33 @@ Follow the per-workflow layout (`overnight-log-summary` as the template):
 - Slack Web API is never called in tests; the skill's behavior is prompt-side and the
   live smoke test (§Live setup) covers the integration.
 
-## v2: click-to-send reply buttons
+## v2: copyable replies + self-DM digest (buttons dropped)
 
-When `digestTarget: 'slack'`, each digest item carries a **Send reply** button. Clicking
-it sends the suggested reply, verbatim, into the original watched-workspace thread. The
-click is the human approval gate; the owner accepted that connector-sent messages show a
-"Sent using @Claude" attribution to recipients.
+v2 was first designed as click-to-send Block Kit buttons (see git history of this
+section). During preflight the owner dropped the buttons in favour of copy-paste:
+suggested replies are the owner's to send, copying is one tap, and no attribution
+badge appears on anything colleagues see. Ad-hoc agent sends remain possible by asking
+any connector-equipped Claude session directly (those show "Sent using @Claude" —
+acceptable when explicitly requested).
 
-### Send path
+What v2 ships instead:
 
-The conductor cannot send: it runs under `--strict-mcp-config` with only the octomux MCP
-server (`server/orchestrator/runner.ts` — deliberate). Headless **session verticals**
-inherit the user-level MCP config, and the v1 watcher proved the claude.ai Slack
-connector works there. So a click spawns a one-shot vertical:
+- **`digestTarget: 'self-dm'`** — the digest goes to the owner's own self-DM in the
+  **watched** workspace via the connector's `slack_send_message` (`channel_id` =
+  `slackUserId`). This is the one sanctioned exception to the skill's no-connector-send
+  rule: a single digest message, to the owner themselves, only. Digest and the threads
+  it references live in the same workspace — copy, jump via permalink, paste, send.
+- **One-tap-copyable replies** — every suggested reply is rendered in code formatting:
+  inline code on Slack, `<code>` + `parse_mode=HTML` on Telegram (tap-to-copy on both).
+- **Item bookkeeping** — items carry optional `replyChannel`/`replyTs` (dedup context
+  and future use).
+- **Dormant send vertical** — `slack-watcher-reply` (`send-reply.ts`: verbatim-send via
+  the connector, feed-only kind, never cron-schedulable) is built and tested but has no
+  caller. It becomes the send path if one-click ever returns — ideally re-pointed at an
+  Ostium user-token app (badge-free) when app installs are approved there.
 
-```
-button click (Socket Mode `interactive` event)
-  → slack adapter parses block_actions, allowlist + dedup
-  → gateway handleAction(): chat.update digest item → "⏳ sending…"
-  → runSessionVertical({ kind: 'slack-watcher-reply', input: <verbatim-send prompt> })
-      — session uses the Slack connector's send tool to post into the watched thread
-  → on result: chat.update → "✅ sent" | "⚠️ failed: <reason>"
-```
-
-Latency is one headless session spin-up (~30–60 s); the ⏳ state covers it. The
-`slack-watcher-reply` prompt is inline in code (not a schedule skill): it is a fixed
-"send exactly this text to exactly this target, then submit_result" instruction —
-composition is forbidden, so there is nothing for the user to customize.
-
-### Pieces
-
-- **Item schema:** items gain optional `replyChannel` + `replyTs` (watched-workspace
-  channel id and thread ts). The skill fills them from the search hits it already reads.
-- **Digest (slack target):** posted as Block Kit — per item, a section block (who/where/
-  why + suggested reply as a quote) and an actions block with one button:
-  `action_id: 'slack_watcher_send_reply'`, `value: JSON {c: replyChannel, t: replyTs,
-  r: reply}` (self-contained — no server-side lookup; Slack caps value at 2000 chars,
-  replies are 1–2 sentences). Plain-text `text` fallback retained for notifications.
-- **Adapter:** `ChannelAdapter.start()` gains an optional `onAction` callback;
-  `slack.ts` adds `socket.on('interactive', …)` — ack, filter `block_actions` +
-  `action_id`, then `onAction({ channel: 'slack', threadKey, senderId, externalId:
-  envelope_id, action: parsed value, messageTs, blocks })`.
-- **Gateway:** new `handleAction()` — same allowlist + dedup as `handleInbound`, then
-  the send-vertical dispatch and the two `chat.update` transitions (replace the item's
-  actions block with a context block; never touch other items' buttons).
-- **Reply vertical:** `workflowKind: 'slack-watcher-reply'` runs-row per send (feed
-  visibility); tiny output schema `{ outcome, sentTs? , error? }`. Blocked/failed →
-  "⚠️" update names the reason.
-- **Telegram digests** are unchanged (no buttons); the schedule flips to
-  `digestTarget: 'slack'` with `digestChannel` set to the bot DM id directly
-  (the bot token lacks `im:write`, so `conversations.open` is unavailable — pass the
-  known DM channel id instead).
-
-### Setup (one user action)
-
-Enable **Interactivity & Shortcuts** on the `ostiumoctomux` app (api.slack.com/apps —
-with Socket Mode there is no Request URL). Without it Slack renders the buttons but
-delivers no click events.
-
-### Security
-
-- Allowlist: only clicks from `OCTOMUX_GATEWAY_SLACK_ALLOW` member ids dispatch a send.
-- The send prompt forbids composition: exact text, exact target, nothing else; the
-  vertical has no write access beyond the connector's send tool.
-- Button `value` is parsed defensively (malformed JSON → "⚠️ failed", no send).
+Verified during preflight: headless sessions CAN send via the connector (test message
+landed cross-workspace from a headless run), and Block Kit buttons render fine — the
+drop was a product choice, not a technical one. The gateway interactive listener and
+click handler were never built; the Interactivity toggle on the conductor app is on but
+unused (harmless).

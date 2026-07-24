@@ -66,8 +66,9 @@ describe('SLACK_WATCHER_SCHEMA', () => {
     expect(cfg.digestChannel).toBe('');
   });
 
-  it('rejects an unknown digestTarget', () => {
+  it('rejects an unknown digestTarget and accepts self-dm', () => {
     const validate = new Ajv().compile(SLACK_WATCHER_CONFIG_SCHEMA);
     expect(validate({ slackUserId: 'U01ABCDEF', digestTarget: 'email' })).toBe(false);
+    expect(validate({ slackUserId: 'U01ABCDEF', digestTarget: 'self-dm' })).toBe(true);
   });
 });

@@ -1,5 +1,11 @@
 # Slack Watcher Reply Buttons Implementation Plan
 
+> **STATUS: partially shipped, remainder CANCELLED (2026-07-24).** Tasks 1–2 landed
+> (item reply fields, send vertical — kept dormant). Tasks 3–6 (interactive listener,
+> gateway click handler, buttons setup) are cancelled: the owner chose copy-paste
+> replies over click-to-send. See spec/slack-watcher.md §"v2: copyable replies +
+> self-DM digest" for what shipped instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Each digest item posted to Slack carries a **Send reply** button; clicking it sends the suggested reply verbatim into the original watched-workspace thread via a one-shot headless session vertical (the click is the human approval gate).
