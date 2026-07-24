@@ -48,6 +48,9 @@ missing or the exact error string in `summary`, and stop.
      `slack_read_thread` (or nearby channel history with `slack_read_channel`) so you
      understand what is actually being asked. Use `slack_search_users` to resolve
      display names when a hit only gives you a user id.
+   - For every candidate you keep, record where a reply would go: the watched-workspace
+     channel id and the thread ts (the root message's ts for a thread, the message's own
+     ts otherwise). These become the item's `replyChannel` / `replyTs`.
 
 3. **Filter ruthlessly.** Drop: messages authored by `{{slackUserId}}`; bot and app
    messages; joins/leaves and other channel noise; FYI-only chatter with no question
@@ -96,10 +99,33 @@ missing or the exact error string in `summary`, and stop.
    - `telegram`: one
      `curl -s -X POST "https://api.telegram.org/bot$OCTOMUX_GATEWAY_TELEGRAM_TOKEN/sendMessage" -d "chat_id={{telegramChatId}}" --data-urlencode "text=<digest>"`
      (plain text — drop the `*bold*` markers for Telegram).
-   - `slack`: resolve the channel — `{{digestChannel}}` if non-empty, otherwise
+   - `slack`: resolve the digest channel — `{{digestChannel}}` if non-empty, otherwise
      `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{digestUserId}}"`
-     and take `.channel.id` — then one
-     `curl -s -X POST https://slack.com/api/chat.postMessage -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "channel=<channel id>" --data-urlencode "text=<digest>"`.
+     and take `.channel.id`. Then post the digest as **Block Kit** with one
+     `chat.postMessage` call: `-H "Content-Type: application/json"` with a JSON body
+     `{"channel": "<digest channel>", "text": "<plain-text digest fallback>", "blocks": [...]}`.
+     Blocks: one `header` block (`Slack digest — <n> things need you`), then per item a
+     `section` block (mrkdwn: `*<n>. <from> · <channel>* — <about>\n↳ suggested: "<reply>"`)
+     followed — **only when the item has `replyChannel`, `replyTs`, and
+     `suggestedReply`** — by an `actions` block:
+
+     ```json
+     {
+       "type": "actions",
+       "block_id": "swr_<item index>",
+       "elements": [
+         {
+           "type": "button",
+           "text": { "type": "plain_text", "text": "Send reply <n>" },
+           "action_id": "slack_watcher_send_reply",
+           "value": "{\"i\":<item index>,\"c\":\"<replyChannel>\",\"t\":\"<replyTs>\",\"r\":\"<suggestedReply, JSON-escaped>\"}"
+         }
+       ]
+     }
+     ```
+
+     Keep each button's `value` under 2000 characters (replies are 1–2 sentences, so
+     this only matters if you quoted too much — trim the reply, not the JSON keys).
 
    **Zero items → send nothing.** Silence is the correct output for a quiet window.
 
@@ -118,7 +144,9 @@ missing or the exact error string in `summary`, and stop.
          "about": "Blocked on the staging deploy config",
          "urgency": "high",
          "suggestedReply": "Use the staging override for now — I'll land the chart fix tomorrow morning.",
-         "permalink": "https://…"
+         "permalink": "https://…",
+         "replyChannel": "D0ASZE1MVJS",
+         "replyTs": "1784893312.104219"
        }
      ]
    }
@@ -137,3 +165,6 @@ missing or the exact error string in `summary`, and stop.
   reads happen through the connector, but its send/draft tools are off-limits; the only
   send you perform is the one gateway-token digest message. Do not look for workarounds.
 - Suggested replies are suggestions. The owner sends them; you never do.
+- The send buttons are wired server-side: clicking one sends that exact reply into the
+  original thread. You only attach the data (`replyChannel`, `replyTs`, button value) —
+  you never send replies yourself.

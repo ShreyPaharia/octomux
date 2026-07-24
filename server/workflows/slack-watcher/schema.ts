@@ -73,6 +73,8 @@ export const SLACK_WATCHER_SCHEMA = {
           urgency: { type: 'string', enum: ['low', 'medium', 'high'] },
           suggestedReply: { type: 'string' },
           permalink: { type: 'string' },
+          replyChannel: { type: 'string' },
+          replyTs: { type: 'string' },
         },
         required: ['channel', 'from', 'about', 'urgency'],
         additionalProperties: false,
