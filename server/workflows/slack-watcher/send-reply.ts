@@ -63,9 +63,7 @@ function buildPrompt(input: SendWatcherReplyInput): string {
   ].join('\n');
 }
 
-export async function sendWatcherReply(
-  input: SendWatcherReplyInput,
-): Promise<SendReplyResult> {
+export async function sendWatcherReply(input: SendWatcherReplyInput): Promise<SendReplyResult> {
   try {
     const { result } = await runSessionVertical<SendReplyResult>({
       kind: 'slack-watcher-reply',

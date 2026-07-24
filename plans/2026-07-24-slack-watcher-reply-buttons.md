@@ -29,11 +29,13 @@
 ### Task 1: Item schema fields + Block Kit digest in the skill
 
 **Files:**
+
 - Modify: `server/workflows/slack-watcher/schema.ts` (items sub-schema)
 - Modify: `server/workflows/slack-watcher/schema.test.ts`
 - Modify: `plugin/skills/slack-watcher/SKILL.md` (slack send branch + item collection)
 
 **Interfaces:**
+
 - Consumes: existing `SLACK_WATCHER_SCHEMA`.
 - Produces: item objects may carry `replyChannel: string` and `replyTs: string` (both optional strings — watched-workspace channel id and thread ts for the suggested reply). Task 4's button values are built from these by the skill at digest time.
 
@@ -49,18 +51,18 @@ In `server/workflows/slack-watcher/schema.test.ts`, extend the full-item test ('
 (placed after `permalink`). Add a new test in the same describe block:
 
 ```typescript
-  it('accepts items without reply targeting fields', () => {
-    const validate = new Ajv().compile(SLACK_WATCHER_SCHEMA);
-    expect(
-      validate({
-        outcome: 'done',
-        window: '40m',
-        summary: '1 item',
-        digestSent: true,
-        items: [{ channel: '#x', from: 'a', about: 'b', urgency: 'low' }],
-      }),
-    ).toBe(true);
-  });
+it('accepts items without reply targeting fields', () => {
+  const validate = new Ajv().compile(SLACK_WATCHER_SCHEMA);
+  expect(
+    validate({
+      outcome: 'done',
+      window: '40m',
+      summary: '1 item',
+      digestSent: true,
+      items: [{ channel: '#x', from: 'a', about: 'b', urgency: 'low' }],
+    }),
+  ).toBe(true);
+});
 ```
 
 - [ ] **Step 2: Run to verify the extended test fails**
@@ -91,41 +93,41 @@ In `plugin/skills/slack-watcher/SKILL.md`:
 a. In step 2 (Collect), append a bullet:
 
 ```markdown
-   - For every candidate you keep, record where a reply would go: the watched-workspace
-     channel id and the thread ts (the root message's ts for a thread, the message's own
-     ts otherwise). These become the item's `replyChannel` / `replyTs`.
+- For every candidate you keep, record where a reply would go: the watched-workspace
+  channel id and the thread ts (the root message's ts for a thread, the message's own
+  ts otherwise). These become the item's `replyChannel` / `replyTs`.
 ```
 
 b. Replace the `slack` branch of step 5 (Send it) — the lines from `- \`slack\`: resolve the channel` through the chat.postMessage curl sentence — with:
 
 ````markdown
-   - `slack`: resolve the digest channel — `{{digestChannel}}` if non-empty, otherwise
-     `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{digestUserId}}"`
-     and take `.channel.id`. Then post the digest as **Block Kit** with one
-     `chat.postMessage` call: `-H "Content-Type: application/json"` with a JSON body
-     `{"channel": "<digest channel>", "text": "<plain-text digest fallback>", "blocks": [...]}`.
-     Blocks: one `header` block (`Slack digest — <n> things need you`), then per item a
-     `section` block (mrkdwn: `*<n>. <from> · <channel>* — <about>\n↳ suggested: "<reply>"`)
-     followed — **only when the item has `replyChannel`, `replyTs`, and
-     `suggestedReply`** — by an `actions` block:
+- `slack`: resolve the digest channel — `{{digestChannel}}` if non-empty, otherwise
+  `curl -s -X POST https://slack.com/api/conversations.open -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" -d "users={{digestUserId}}"`
+  and take `.channel.id`. Then post the digest as **Block Kit** with one
+  `chat.postMessage` call: `-H "Content-Type: application/json"` with a JSON body
+  `{"channel": "<digest channel>", "text": "<plain-text digest fallback>", "blocks": [...]}`.
+  Blocks: one `header` block (`Slack digest — <n> things need you`), then per item a
+  `section` block (mrkdwn: `*<n>. <from> · <channel>* — <about>\n↳ suggested: "<reply>"`)
+  followed — **only when the item has `replyChannel`, `replyTs`, and
+  `suggestedReply`** — by an `actions` block:
 
-     ```json
-     {
-       "type": "actions",
-       "block_id": "swr_<item index>",
-       "elements": [
-         {
-           "type": "button",
-           "text": { "type": "plain_text", "text": "Send reply <n>" },
-           "action_id": "slack_watcher_send_reply",
-           "value": "{\"i\":<item index>,\"c\":\"<replyChannel>\",\"t\":\"<replyTs>\",\"r\":\"<suggestedReply, JSON-escaped>\"}"
-         }
-       ]
-     }
-     ```
+  ```json
+  {
+    "type": "actions",
+    "block_id": "swr_<item index>",
+    "elements": [
+      {
+        "type": "button",
+        "text": { "type": "plain_text", "text": "Send reply <n>" },
+        "action_id": "slack_watcher_send_reply",
+        "value": "{\"i\":<item index>,\"c\":\"<replyChannel>\",\"t\":\"<replyTs>\",\"r\":\"<suggestedReply, JSON-escaped>\"}"
+      }
+    ]
+  }
+  ```
 
-     Keep each button's `value` under 2000 characters (replies are 1–2 sentences, so
-     this only matters if you quoted too much — trim the reply, not the JSON keys).
+  Keep each button's `value` under 2000 characters (replies are 1–2 sentences, so
+  this only matters if you quoted too much — trim the reply, not the JSON keys).
 ````
 
 c. In step 6's example `items` entry, add after `"permalink"`:
@@ -160,11 +162,13 @@ git commit -m "feat(workflows): reply targeting fields and Block Kit send button
 ### Task 2: The reply-send vertical
 
 **Files:**
+
 - Create: `server/workflows/slack-watcher/send-reply.ts`
 - Modify: `server/workflows/index.ts` (side-effect import `./slack-watcher/send-reply.js` after `./slack-watcher/index.js`)
 - Test: `server/workflows/slack-watcher/send-reply.test.ts`
 
 **Interfaces:**
+
 - Consumes: `runSessionVertical` (existing), `registerWorkflow` (existing).
 - Produces: `sendWatcherReply(input: SendWatcherReplyInput): Promise<SendReplyResult>` with `SendWatcherReplyInput = { workspaceDir: string; channel: string; threadTs: string; text: string }` and `SendReplyResult = { outcome: 'done' | 'failed'; error?: string }`. Also registers feed-only kind `slack-watcher-reply` (no cron trigger, no `run`) so its runs rows render on /runs.
 
@@ -347,11 +351,13 @@ git commit -m "feat(workflows): slack-watcher-reply verbatim-send vertical"
 ### Task 3: Adapter interface + Slack interactive listener
 
 **Files:**
+
 - Modify: `server/gateway/adapter.ts`
 - Modify: `server/gateway/slack.ts`
 - Test: `server/gateway/slack.test.ts` (extend the existing file — it already injects a fake `socket`/`client` via `buildSlack` opts; mirror its existing event-emission pattern)
 
 **Interfaces:**
+
 - Consumes: nothing from Tasks 1–2.
 - Produces: `InboundAction = { channel: 'telegram' | 'slack'; threadKey: string; senderId: string; externalId: string; actionId: string; value: string; messageTs: string; blocks: unknown[] }`; `ChannelAdapter.start(onMessage, onAction?)`; optional `ChannelAdapter.updateMessage?(threadKey, ts, text, blocks?)`. The Telegram adapter needs **no change** (optional members; its `start(onMessage)` still satisfies the interface).
 
@@ -482,32 +488,32 @@ interface SlackInteractivePayload {
 In `start()`, change the signature to `async start(onMessage, onAction?)` (types per adapter.ts) and add after the `message` listener:
 
 ```typescript
-      socket.on('interactive', async ({ body, ack, envelope_id }: SlackInteractivePayload) => {
-        // Always ack first — Slack redelivers unacked interactive payloads too.
-        await ack();
-        if (!onAction || body?.type !== 'block_actions') return;
+socket.on('interactive', async ({ body, ack, envelope_id }: SlackInteractivePayload) => {
+  // Always ack first — Slack redelivers unacked interactive payloads too.
+  await ack();
+  if (!onAction || body?.type !== 'block_actions') return;
 
-        const action = body.actions?.[0];
-        const userId = body.user?.id;
-        const channelId = body.channel?.id;
-        const messageTs = body.message?.ts;
-        if (!action?.action_id || !userId || !channelId || !messageTs) return;
+  const action = body.actions?.[0];
+  const userId = body.user?.id;
+  const channelId = body.channel?.id;
+  const messageTs = body.message?.ts;
+  if (!action?.action_id || !userId || !channelId || !messageTs) return;
 
-        try {
-          await onAction({
-            channel: 'slack',
-            threadKey: String(channelId),
-            senderId: String(userId),
-            externalId: String(envelope_id),
-            actionId: String(action.action_id),
-            value: String(action.value ?? ''),
-            messageTs: String(messageTs),
-            blocks: body.message?.blocks ?? [],
-          });
-        } catch (err) {
-          logger.error({ err, thread_key: channelId }, 'slack onAction handler threw');
-        }
-      });
+  try {
+    await onAction({
+      channel: 'slack',
+      threadKey: String(channelId),
+      senderId: String(userId),
+      externalId: String(envelope_id),
+      actionId: String(action.action_id),
+      value: String(action.value ?? ''),
+      messageTs: String(messageTs),
+      blocks: body.message?.blocks ?? [],
+    });
+  } catch (err) {
+    logger.error({ err, thread_key: channelId }, 'slack onAction handler threw');
+  }
+});
 ```
 
 Add to the adapter object after `sendTyping`:
@@ -540,10 +546,12 @@ git commit -m "feat(gateway): slack interactive block_actions listener and messa
 ### Task 4: Gateway handleAction — click → send → status update
 
 **Files:**
+
 - Modify: `server/gateway/gateway.ts`
 - Test: `server/gateway/gateway.test.ts` (extend; it already fakes the adapter + conductor and uses `createTestDb`)
 
 **Interfaces:**
+
 - Consumes: `InboundAction` (Task 3), `sendWatcherReply` (Task 2), existing `isAllowed` / `seenInbound` / `markInbound`.
 - Produces: `Gateway.handleAction(a: InboundAction): Promise<void>` (exported on the Gateway interface for tests); `createGateway(adapter, conductor?, deps?: { sendReply?: SendReplyFn })` where `SendReplyFn = (input: { workspaceDir: string; channel: string; threadTs: string; text: string }) => Promise<{ outcome: 'done' | 'failed'; error?: string }>`; `adapter.start(handleInbound, handleAction)` wired in `start()`.
 
@@ -649,69 +657,69 @@ c. `Gateway` interface gains `handleAction(a: InboundAction): Promise<void>;`, a
 d. Implementation (after `handleInbound`):
 
 ```typescript
-  const SEND_REPLY_ACTION = 'slack_watcher_send_reply';
+const SEND_REPLY_ACTION = 'slack_watcher_send_reply';
 
-  /** Replace the clicked item's actions block with a status line; leave the rest. */
-  function patchBlocks(blocks: unknown[], blockId: string | undefined, status: string): unknown[] {
-    return blocks.map((b) => {
-      const block = b as { type?: string; block_id?: string };
-      if (block.type !== 'actions') return b;
-      if (blockId !== undefined && block.block_id !== blockId) return b;
-      return {
-        type: 'context',
-        ...(block.block_id ? { block_id: block.block_id } : {}),
-        elements: [{ type: 'mrkdwn', text: status }],
-      };
-    });
+/** Replace the clicked item's actions block with a status line; leave the rest. */
+function patchBlocks(blocks: unknown[], blockId: string | undefined, status: string): unknown[] {
+  return blocks.map((b) => {
+    const block = b as { type?: string; block_id?: string };
+    if (block.type !== 'actions') return b;
+    if (blockId !== undefined && block.block_id !== blockId) return b;
+    return {
+      type: 'context',
+      ...(block.block_id ? { block_id: block.block_id } : {}),
+      elements: [{ type: 'mrkdwn', text: status }],
+    };
+  });
+}
+
+async function updateItem(a: InboundAction, blockId: string | undefined, status: string) {
+  if (!adapter.updateMessage) return;
+  try {
+    await adapter.updateMessage(
+      a.threadKey,
+      a.messageTs,
+      status,
+      patchBlocks(a.blocks, blockId, status),
+    );
+  } catch (err) {
+    logger.error({ thread_key: a.threadKey, err }, 'gateway: failed to update digest message');
+  }
+}
+
+async function handleAction(a: InboundAction): Promise<void> {
+  if (a.actionId !== SEND_REPLY_ACTION) return;
+
+  // Same trust boundary + redelivery guard as handleInbound.
+  if (!isAllowed(a.channel, a.senderId)) return;
+  if (seenInbound(a.channel, a.externalId)) return;
+  markInbound(a.channel, a.externalId);
+
+  let payload: { i?: number; c?: string; t?: string; r?: string };
+  try {
+    payload = JSON.parse(a.value) as typeof payload;
+  } catch {
+    payload = {};
+  }
+  const blockId = typeof payload.i === 'number' ? `swr_${payload.i}` : undefined;
+  if (!payload.c || !payload.t || !payload.r) {
+    await updateItem(a, blockId, '⚠️ failed: malformed button payload — reply not sent');
+    return;
   }
 
-  async function updateItem(a: InboundAction, blockId: string | undefined, status: string) {
-    if (!adapter.updateMessage) return;
-    try {
-      await adapter.updateMessage(
-        a.threadKey,
-        a.messageTs,
-        status,
-        patchBlocks(a.blocks, blockId, status),
-      );
-    } catch (err) {
-      logger.error({ thread_key: a.threadKey, err }, 'gateway: failed to update digest message');
-    }
+  await updateItem(a, blockId, '⏳ sending…');
+  const result = await sendReply({
+    workspaceDir: gatewayCwd(),
+    channel: payload.c,
+    threadTs: payload.t,
+    text: payload.r,
+  });
+  if (result.outcome === 'done') {
+    await updateItem(a, blockId, `✅ sent: "${payload.r}"`);
+  } else {
+    await updateItem(a, blockId, `⚠️ failed: ${result.error ?? 'unknown error'} — reply not sent`);
   }
-
-  async function handleAction(a: InboundAction): Promise<void> {
-    if (a.actionId !== SEND_REPLY_ACTION) return;
-
-    // Same trust boundary + redelivery guard as handleInbound.
-    if (!isAllowed(a.channel, a.senderId)) return;
-    if (seenInbound(a.channel, a.externalId)) return;
-    markInbound(a.channel, a.externalId);
-
-    let payload: { i?: number; c?: string; t?: string; r?: string };
-    try {
-      payload = JSON.parse(a.value) as typeof payload;
-    } catch {
-      payload = {};
-    }
-    const blockId = typeof payload.i === 'number' ? `swr_${payload.i}` : undefined;
-    if (!payload.c || !payload.t || !payload.r) {
-      await updateItem(a, blockId, '⚠️ failed: malformed button payload — reply not sent');
-      return;
-    }
-
-    await updateItem(a, blockId, '⏳ sending…');
-    const result = await sendReply({
-      workspaceDir: gatewayCwd(),
-      channel: payload.c,
-      threadTs: payload.t,
-      text: payload.r,
-    });
-    if (result.outcome === 'done') {
-      await updateItem(a, blockId, `✅ sent: "${payload.r}"`);
-    } else {
-      await updateItem(a, blockId, `⚠️ failed: ${result.error ?? 'unknown error'} — reply not sent`);
-    }
-  }
+}
 ```
 
 e. Wire it: in `start()`, `await adapter.start(handleInbound, handleAction);` and add `handleAction` to the returned object.
@@ -733,6 +741,7 @@ git commit -m "feat(gateway): dispatch slack-watcher reply sends from digest but
 ### Task 5: README + full gates + PR
 
 **Files:**
+
 - Modify: `server/gateway/README.md` (Slack watcher section)
 - No other new files; gates over the whole branch.
 
@@ -759,6 +768,7 @@ render but clicks go nowhere.
 ```bash
 bun run typecheck && bun run lint && bun run test
 ```
+
 Expected: pass (the known `HomePage.test.tsx` waitFor flake under full-suite load may recur — re-run that file in isolation to confirm it's the flake before dismissing).
 
 - [ ] **Step 3: Commit + PR**
