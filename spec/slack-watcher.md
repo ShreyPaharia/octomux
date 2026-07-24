@@ -42,17 +42,20 @@ the conductor bot app in the personal workspace handles posting and the gateway.
    (headless session vertical, `surfaces: ['artifact']`, cron trigger, config + output
    schemas). Skill prompt shipped at `plugin/skills/slack-watcher/SKILL.md`, seeded into the
    `schedule_skills` table on first read like every other cron kind.
-2. **Reactive (exists):** the Slack gateway (Socket Mode). The digest is posted into the
-   owner's DM with the bot, which is exactly the conversation the gateway routes to the
-   conductor.
+2. **Reactive (exists):** the gateways. The digest destination is configurable per
+   schedule (`digestTarget`): the owner's **Telegram** chat (gateway already live), a
+   **Slack DM** with the conductor bot, or a **Slack channel** in the bot's workspace.
+   Telegram and Slack-DM destinations land in a conversation a gateway routes to the
+   conductor, so replying to the digest just works; a channel destination is
+   broadcast-only unless the bot is subscribed to `message.channels` there.
 
 ### Slack access
 
-| Credential | Workspace | Used for |
-| ---------- | --------- | -------- |
+| Credential                             | Workspace             | Used for                                                                                      |
+| -------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------- |
 | claude.ai Slack MCP connector (exists) | **watched** (company) | All inbox reads: `slack_search_public_and_private`, `slack_read_thread`, `slack_read_channel` |
-| `xoxb-` bot token (conductor app) | **digest** (personal) | Posting the digest DM (`chat.postMessage`), opening the DM (`conversations.open`) |
-| `xapp-` app token (conductor app) | digest (personal) | Socket Mode (gateway) |
+| `xoxb-` bot token (conductor app)      | **digest** (personal) | Posting the digest DM (`chat.postMessage`), opening the DM (`conversations.open`)             |
+| `xapp-` app token (conductor app)      | digest (personal)     | Socket Mode (gateway)                                                                         |
 
 **Known risk:** the claude.ai connector is interactively authenticated; its availability
 inside headless cron sessions on this host is unverified. The skill must check for the
@@ -65,11 +68,12 @@ workspace with read-only user scopes (`search:read`, `im:history`, `mpim:history
 `OCTOMUX_SLACK_USER_TOKEN`; the skill then reads via `curl` instead of MCP. Nothing else
 in the design changes.
 
-No new env vars in v1. The watcher reuses `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` for posting:
-the headless session inherits the octomux server's environment (`runSessionVertical`
-does no env plumbing), so the token is visible to the skill, which posts with `curl`.
-Missing bot token or missing Slack MCP tools → the run submits `outcome: 'blocked'` with
-a reason instead of failing silently.
+No new env vars in v1. The watcher reuses the gateway tokens for posting —
+`OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` for Slack destinations, `OCTOMUX_GATEWAY_TELEGRAM_TOKEN`
+for Telegram: the headless session inherits the octomux server's environment
+(`runSessionVertical` does no env plumbing), so the tokens are visible to the skill,
+which posts with `curl`. Missing token for the configured target or missing Slack MCP
+tools → the run submits `outcome: 'blocked'` with a reason instead of failing silently.
 
 ## Components
 
@@ -83,14 +87,19 @@ Registers the kind. Shape mirrors `overnight-log-summary/index.ts`: `surfaces:
 ### `server/workflows/slack-watcher/schema.ts`
 
 ```
-SLACK_WATCHER_CONFIG_SCHEMA (drives the /schedules form):
+SLACK_WATCHER_CONFIG_SCHEMA (drives the /schedules form — every field below is
+user-editable in the UI, like the prompt body is via schedule_skills):
   slackUserId      string  — owner's member id in the WATCHED workspace; whose inbox to
                              search (member ids differ per workspace)
+  digestTarget     enum    — 'telegram' | 'slack'; where the digest goes. Default 'slack'
+  telegramChatId   string  — Telegram numeric chat id (same id as the gateway allowlist);
+                             required when digestTarget = 'telegram'
   digestUserId     string  — owner's member id in the DIGEST (bot's) workspace; whom the
                              bot DMs. Same value as slackUserId in single-workspace setups
   lookbackMinutes  number  — default 40 (cron interval + overlap so gaps can't drop messages)
-  digestChannel    string  — optional; channel id for the digest. Default '' = open a DM
-                             with digestUserId via conversations.open
+  digestChannel    string  — optional; Slack channel id for the digest (bot must be in the
+                             channel). Default '' = open a DM with digestUserId via
+                             conversations.open
 
 SLACK_WATCHER_SCHEMA (submit_result payload; envelope per spec/workflow-consolidation.md §5):
   outcome     'done' | 'blocked' | 'failed'
@@ -107,14 +116,14 @@ SLACK_WATCHER_SCHEMA (submit_result payload; envelope per spec/workflow-consolid
 Mirrors `overnight-log-summary/run.ts`:
 
 1. `resolveSchedulePrompt({ scheduleId, kind: 'slack-watcher' })` → DB skill body.
-2. Interpolates `{{slackUserId}}`, `{{digestUserId}}`, `{{lookbackMinutes}}`,
-   `{{digestChannel}}`, and
+2. Interpolates `{{slackUserId}}`, `{{digestTarget}}`, `{{telegramChatId}}`,
+   `{{digestUserId}}`, `{{lookbackMinutes}}`, `{{digestChannel}}`, and
    `{{previousItems}}` — the `items` JSON from the most recent `done` run of this kind
    (via `listRunsForWorkflow('slack-watcher')`), `'[]'` when none. This is the dedup
    memory: the skill must not re-digest a thread already covered unless there are new
    messages in it.
 3. `runSessionVertical({ kind: 'slack-watcher', scheduleId, workspaceDir: repoPath,
-   input: prompt, outputSchema: SLACK_WATCHER_SCHEMA, trigger })`. The Slack tokens reach
+input: prompt, outputSchema: SLACK_WATCHER_SCHEMA, trigger })`. The Slack tokens reach
    the skill via inherited server env (see §Slack app tokens).
 
 ### `plugin/skills/slack-watcher/SKILL.md`
@@ -131,11 +140,17 @@ bot-token `chat.postMessage`. Steps:
 2. **Filter against `{{previousItems}}`** — drop threads already digested with no new
    messages since.
 3. **Compose** — for each remaining item: who, where, what it's about in plain language, why
-   it needs the owner, urgency, and a suggested reply written in the owner's voice: short,
-   direct, no corporate filler. Order by urgency. Hard cap: digest ≤ 10 items, each ≤ 3
-   lines + reply.
-4. **Send** (bot token): resolve the digest channel (`{{digestChannel}}` or
-   `conversations.open` with `{{digestUserId}}`), one `chat.postMessage` with the digest.
+   it needs the owner, urgency, and a suggested reply. Order by urgency. Hard cap: digest
+   ≤ 10 items, each ≤ 3 lines + reply. Replies must read like the owner dashed them off,
+   not like an assistant wrote them; the skill carries explicit style rules (mirror the
+   thread's tone and the owner's own voice in it, 1–2 sentences, contractions, plain
+   words, a concrete next step over vague reassurance, and a banned-phrase list of AI
+   tells — greetings/sign-offs, "it's worth noting", "I hope this helps", "delve",
+   "seamless", "not just X but Y", etc.).
+4. **Send** — switch on `{{digestTarget}}`. `telegram`: one Bot API `sendMessage` to
+   `{{telegramChatId}}` with `OCTOMUX_GATEWAY_TELEGRAM_TOKEN`. `slack`: resolve the
+   channel (`{{digestChannel}}` or `conversations.open` with `{{digestUserId}}`), one
+   `chat.postMessage` with `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN`.
    **If no items survive filtering, send nothing.**
 5. **`submit_result`** matching `SLACK_WATCHER_SCHEMA`. Blocked tokens/API errors →
    `outcome: 'blocked'` with the reason in `summary`.
@@ -175,8 +190,10 @@ bot-token `chat.postMessage`. Steps:
 4. Verify the no-op Stop hook in `~/.claude/settings.json` (known gateway requirement —
    without it gateway replies buffer forever).
 5. Create the schedule: kind `slack-watcher`, repo path, cron `*/30 3-18 * * *` (UTC ≈
-   08:30–23:30 IST), config `{ slackUserId: <watched-workspace id>, digestUserId:
-   <personal-workspace id> }`.
+   08:30–23:30 IST), config `{ slackUserId: <watched-workspace id>, digestTarget:
+   'telegram', telegramChatId: <numeric id> }` — or `digestTarget: 'slack'` with
+   `digestUserId`/`digestChannel` once the conductor app exists. With the Telegram
+   target, steps 1–2 (the Slack conductor app) can be deferred entirely.
 6. Smoke: `POST /api/schedules/:id/run`, confirm digest DM arrives, reply to it, confirm the
    gateway conductor answers.
 
@@ -186,7 +203,7 @@ Follow the per-workflow layout (`overnight-log-summary` as the template):
 
 - `schema.test.ts` — config defaults applied; output schema accepts a full and a minimal
   (`digestSent: false`) payload.
-- `run.test.ts` — mocks `runSessionVertical`: prompt interpolation (all five placeholders)
+- `run.test.ts` — mocks `runSessionVertical`: prompt interpolation (all seven placeholders)
   and previous-run items threading.
 - `index.test.ts` — kind registered, cron-triggerable (`listCronWorkflowKinds` includes it).
 - `registry.test.ts` untouched; `schedule-prompt` seed test extended for the new kind.
