@@ -13,12 +13,24 @@ export interface RunContext {
   event?: unknown;
   /** How this invocation was triggered — cron poller or manual run-now. */
   trigger?: 'cron' | 'manual';
+  /** Per-schedule model override; null means harness default. */
+  model?: string | null;
+  /** Per-schedule session timeout in ms; null means DEFAULT_TIMEOUT_MS (300000). */
+  timeoutMs?: number | null;
 }
 
 export interface WorkflowType {
   kind: string;
   displayName: string;
   surfaces: SurfaceKind[];
+  /**
+   * How this workflow's runs are executed — drives capability flags in the API
+   * (supportsTimeout) and the UI field visibility matrix.
+   * 'session'  = headless agent session (runSessionVertical)
+   * 'task'     = loop task (doc-drift, prod-log-triage)
+   * 'chat'     = chat-based (daily-plan)
+   */
+  execution?: 'session' | 'task' | 'chat';
   /** JSON Schema for schedule instance config — drives the /schedules form. */
   config?: JsonSchema;
   /** JSON Schema for this workflow's item shape — drives the client's schema-driven default

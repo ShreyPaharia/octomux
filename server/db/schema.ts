@@ -169,14 +169,17 @@ CREATE TABLE IF NOT EXISTS schedules (
   id            TEXT PRIMARY KEY,
   kind          TEXT NOT NULL,
   repo_path     TEXT NOT NULL,
+  name          TEXT,
   cron          TEXT NOT NULL,
+  timezone      TEXT,
   enabled       INTEGER NOT NULL DEFAULT 1,
+  model         TEXT,
+  timeout_ms    INTEGER,
   last_run_at   TEXT,
   config_json   TEXT,
   prompt        TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(kind, repo_path)
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS schedule_skills (
