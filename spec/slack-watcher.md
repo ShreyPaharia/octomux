@@ -191,7 +191,7 @@ bot-token `chat.postMessage`. Steps:
    without it gateway replies buffer forever).
 5. Create the schedule: kind `slack-watcher`, repo path, cron `*/30 3-18 * * *` (UTC ≈
    08:30–23:30 IST), config `{ slackUserId: <watched-workspace id>, digestTarget:
-   'telegram', telegramChatId: <numeric id> }` — or `digestTarget: 'slack'` with
+'telegram', telegramChatId: <numeric id> }` — or `digestTarget: 'slack'` with
    `digestUserId`/`digestChannel` once the conductor app exists. With the Telegram
    target, steps 1–2 (the Slack conductor app) can be deferred entirely.
 6. Smoke: `POST /api/schedules/:id/run`, confirm digest DM arrives, reply to it, confirm the

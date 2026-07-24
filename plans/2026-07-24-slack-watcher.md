@@ -132,7 +132,8 @@ export const SLACK_WATCHER_CONFIG_SCHEMA = {
     telegramChatId: {
       type: 'string',
       title: 'Telegram chat id',
-      description: "Numeric Telegram chat id (the gateway allowlist id). Required for the 'telegram' target.",
+      description:
+        "Numeric Telegram chat id (the gateway allowlist id). Required for the 'telegram' target.",
       default: '',
     },
     digestUserId: {
@@ -537,7 +538,6 @@ missing or the exact error string in `summary`, and stop.
 
    **Suggested replies must sound like the owner dashed them off, not like an
    assistant wrote them.** Rules:
-
    - Before writing a reply, look at the owner's own messages in that thread or
      channel (they're in the context you already fetched) and mirror how they write
      there: formality, capitalization, emoji or none, greeting or none.
@@ -557,7 +557,6 @@ missing or the exact error string in `summary`, and stop.
 
 5. **Send it** — only if at least one item survived filtering, and only to the
    `{{digestTarget}}` destination:
-
    - `telegram`: one
      `curl -s -X POST "https://api.telegram.org/bot$OCTOMUX_GATEWAY_TELEGRAM_TOKEN/sendMessage" -d "chat_id={{telegramChatId}}" --data-urlencode "text=<digest>"`
      (plain text — drop the `*bold*` markers for Telegram).
@@ -904,7 +903,7 @@ Push the branch and open a PR against `next` titled `feat(workflows): slack-watc
 
 This task is checklist-style, not TDD — it configures the live instance at `~/.octomux/`.
 
-- [ ] **Step 1: Conductor app in the personal workspace** *(optional if going Telegram-first — deferrable until a Slack digest target is wanted)*. Only the Telegram gateway is live today. Send the owner (Slack self-DM, per user rules) the api.slack.com/apps link + the conductor manifest with instructions: create the app **in their personal workspace** from `server/gateway/slack-app-manifest.yaml`, enable Socket Mode, install, and hand back the `xoxb-` + `xapp-` tokens and their personal-workspace member id (profile → ⋯ → Copy member ID).
+- [ ] **Step 1: Conductor app in the personal workspace** _(optional if going Telegram-first — deferrable until a Slack digest target is wanted)_. Only the Telegram gateway is live today. Send the owner (Slack self-DM, per user rules) the api.slack.com/apps link + the conductor manifest with instructions: create the app **in their personal workspace** from `server/gateway/slack-app-manifest.yaml`, enable Socket Mode, install, and hand back the `xoxb-` + `xapp-` tokens and their personal-workspace member id (profile → ⋯ → Copy member ID).
 - [ ] **Step 2: Env.** Add to the `.env` octomux boots from: `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN`, `OCTOMUX_GATEWAY_SLACK_APP_TOKEN`, `OCTOMUX_GATEWAY_SLACK_ALLOW=<personal-workspace member id>`. Restart octomux; verify `gateway: Slack gateway started` in `~/.octomux/logs/octomux.log`. No watcher-specific env vars — inbox reads use the claude.ai Slack connector.
 - [ ] **Step 3: Stop hook.** Verify the no-op Stop hook exists in `~/.claude/settings.json` (known requirement: without it, gateway replies buffer forever).
 - [ ] **Step 4: Create the schedule.** `POST /api/schedules` (or /schedules UI): kind `slack-watcher`, repo path = the octomux repo, cron `*/30 3-18 * * *`, config `{ "slackUserId": "<watched-workspace member id>", "digestTarget": "telegram", "telegramChatId": "<numeric id from the Telegram allowlist>" }` — the Telegram gateway is already live, so this works before Steps 1–2; switch `digestTarget` to `slack` with `digestUserId`/`digestChannel` in the UI once the conductor app exists.
