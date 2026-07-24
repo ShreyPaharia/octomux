@@ -11,6 +11,8 @@ export interface RunWeeklyUpdateInput {
   repoPath: string;
   scheduleId?: string | null;
   trigger?: 'cron' | 'manual';
+  model?: string | null;
+  timeoutMs?: number | null;
 }
 
 export interface WeeklyUpdateResult {
@@ -35,5 +37,7 @@ export async function runWeeklyUpdate(
     input: prompt,
     outputSchema: WEEKLY_UPDATE_SCHEMA,
     trigger: input.trigger ?? 'cron',
+    model: input.model,
+    timeoutMs: input.timeoutMs,
   });
 }

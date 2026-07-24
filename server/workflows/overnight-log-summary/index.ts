@@ -10,6 +10,7 @@ export const overnightLogSummaryWorkflow: WorkflowType = {
   kind: 'overnight-log-summary',
   displayName: 'Overnight Log Summary',
   surfaces: ['artifact'],
+  execution: 'session',
   config: OVERNIGHT_LOG_SUMMARY_CONFIG_SCHEMA,
   output: OVERNIGHT_LOG_SUMMARY_SCHEMA,
   trigger: { kind: 'cron' },
@@ -26,6 +27,8 @@ export const overnightLogSummaryWorkflow: WorkflowType = {
       scheduleId: ctx.scheduleId,
       logCommand: cfg.logCommand,
       trigger: ctx.trigger,
+      model: ctx.model,
+      timeoutMs: ctx.timeoutMs,
     }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },

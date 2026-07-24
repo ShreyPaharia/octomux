@@ -13,6 +13,7 @@ import {
   deleteAgentRow,
 } from './repositories/index.js';
 import { getHarness } from './harnesses/index.js';
+import { applyModel } from './harnesses/shared.js';
 import { hookBaseUrl } from './hook-base-url.js';
 import { resolveHarnessFlags } from './harness-flags.js';
 import { childLogger } from './logger.js';
@@ -47,6 +48,7 @@ export interface CreateChatOptions {
   agent?: string | null;
   prompt?: string | null;
   harnessId?: string | null;
+  model?: string | null;
 }
 
 /**
@@ -64,7 +66,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
   const harness = getHarness(opts.harnessId ?? null);
   const agentId = id; // for standalone chats, agent row id == chat id
   const hookToken = crypto.randomBytes(32).toString('hex');
-  const flags = await resolveHarnessFlags(harness);
+  const flags = applyModel(await resolveHarnessFlags(harness), opts.model);
 
   let sessionIdForDb: string | null;
   let sessionIdForLaunch: string;

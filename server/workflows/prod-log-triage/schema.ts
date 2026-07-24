@@ -22,6 +22,20 @@ export const PROD_LOG_TRIAGE_CONFIG_SCHEMA = {
       minimum: 1,
       default: 5,
     },
+    baseBranch: {
+      type: 'string',
+      title: 'Base branch',
+      default: 'main',
+      format: 'single-line',
+      pattern: '^[a-zA-Z0-9._/-]{1,80}$',
+    },
+    branchPrefix: {
+      type: 'string',
+      title: 'Branch prefix',
+      default: 'triage',
+      format: 'single-line',
+      pattern: '^[a-zA-Z0-9._/-]{1,80}$',
+    },
   },
   additionalProperties: false,
 };

@@ -32,6 +32,8 @@ export interface InsertDocDriftTaskParams {
   initialPrompt: string;
   /** Set when this task was fired by a schedule — stamps tasks.schedule_id. */
   scheduleId?: string;
+  /** Per-schedule model override — stamps tasks.model. */
+  model?: string | null;
 }
 
 /**
@@ -63,6 +65,7 @@ export function insertDocDriftTask(params: InsertDocDriftTaskParams): string {
     source: 'doc_drift',
     worktree_id: worktreeId,
     schedule_id: params.scheduleId ?? null,
+    model: params.model ?? null,
   });
 
   return id;

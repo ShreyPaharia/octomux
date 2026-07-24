@@ -19,7 +19,7 @@ vi.mock('../events.js', () => ({
 
 // ─── Import after mocks — side-effect registers the workflow + schedule handler ──
 
-import { upsertSchedule } from '../repositories/schedules.js';
+import { createSchedule } from '../repositories/schedules.js';
 import { pollSchedules } from '../poller/schedule-cron.js';
 import './doc-drift/index.js';
 
@@ -46,7 +46,7 @@ describe('cron -> doc-drift e2e', () => {
   });
 
   it('fires a due schedule through the full cron -> service -> loop path', async () => {
-    upsertSchedule({ kind: 'doc-drift', repoPath: '/repo', cron: '0 7 * * *' });
+    createSchedule({ kind: 'doc-drift', repoPath: '/repo', cron: '0 7 * * *' });
     const now = new Date('2026-07-18T07:00:00Z');
 
     await pollSchedules(now);

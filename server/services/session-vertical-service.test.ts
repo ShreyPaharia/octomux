@@ -70,4 +70,53 @@ describe('runSessionVertical', () => {
     expect(call.model).toBeNull();
     expect(call.run.scheduleId).toBeUndefined();
   });
+
+  it('passes timeoutMs through to runAgentSession when provided', async () => {
+    mockGetHarness.mockReturnValue({ id: 'claude-code' });
+    mockRunAgentSession.mockResolvedValue({ result: {} });
+
+    await runSessionVertical({
+      kind: 'weekly-update',
+      workspaceDir: '/repo',
+      input: 'do the weekly update',
+      outputSchema: {},
+      model: 'claude-sonnet-4-6',
+      timeoutMs: 600_000,
+    });
+
+    const call = mockRunAgentSession.mock.calls[0][0];
+    expect(call.timeoutMs).toBe(600_000);
+    expect(call.model).toBe('claude-sonnet-4-6');
+  });
+
+  it('passes undefined for timeoutMs when omitted', async () => {
+    mockGetHarness.mockReturnValue({ id: 'claude-code' });
+    mockRunAgentSession.mockResolvedValue({ result: {} });
+
+    await runSessionVertical({
+      kind: 'weekly-update',
+      workspaceDir: '/repo',
+      input: 'x',
+      outputSchema: {},
+    });
+
+    const call = mockRunAgentSession.mock.calls[0][0];
+    expect(call.timeoutMs).toBeUndefined();
+  });
+
+  it('passes undefined for timeoutMs when explicitly null', async () => {
+    mockGetHarness.mockReturnValue({ id: 'claude-code' });
+    mockRunAgentSession.mockResolvedValue({ result: {} });
+
+    await runSessionVertical({
+      kind: 'weekly-update',
+      workspaceDir: '/repo',
+      input: 'x',
+      outputSchema: {},
+      timeoutMs: null,
+    });
+
+    const call = mockRunAgentSession.mock.calls[0][0];
+    expect(call.timeoutMs).toBeUndefined();
+  });
 });

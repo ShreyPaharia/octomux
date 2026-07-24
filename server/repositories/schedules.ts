@@ -13,45 +13,75 @@ export interface ScheduleRow {
   id: string;
   kind: string;
   repo_path: string;
+  name: string | null;
   cron: string;
+  timezone: string | null;
   enabled: number;
+  model: string | null;
+  timeout_ms: number | null;
   last_run_at: string | null;
   config_json: string | null;
+  prompt: string | null;
 }
 
-export interface UpsertScheduleInput {
+export interface CreateScheduleInput {
   kind: string;
   repoPath: string;
   cron: string;
+  name?: string;
+  timezone?: string;
   enabled?: boolean;
+  model?: string;
+  timeoutMs?: number;
   config?: Record<string, unknown>;
+  prompt?: string;
 }
 
-const SCHEDULE_COLUMNS = 'id, kind, repo_path, cron, enabled, last_run_at, config_json';
+export interface UpdateScheduleInput {
+  name?: string | null;
+  repoPath?: string;
+  cron?: string;
+  timezone?: string | null;
+  enabled?: boolean;
+  model?: string | null;
+  timeoutMs?: number | null;
+  config?: Record<string, unknown>;
+  prompt?: string | null;
+}
 
-/** Insert a schedule, or update cron/enabled/config on conflict for (kind, repo_path). */
-export function upsertSchedule(input: UpsertScheduleInput): ScheduleRow {
+const SCHEDULE_COLUMNS =
+  'id, kind, repo_path, name, cron, timezone, enabled, model, timeout_ms, last_run_at, config_json, prompt';
+
+/** Insert a new schedule row (pure insert — no upsert semantics). Returns the freshly inserted row. */
+export function createSchedule(input: CreateScheduleInput): ScheduleRow {
   const id = nanoid(12);
   const enabled = input.enabled === false ? 0 : 1;
   const configJson = input.config ? JSON.stringify(input.config) : null;
 
   getDb()
     .prepare(
-      `INSERT INTO schedules (id, kind, repo_path, cron, enabled, config_json)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(kind, repo_path) DO UPDATE SET
-         cron = excluded.cron,
-         enabled = excluded.enabled,
-         config_json = excluded.config_json,
-         updated_at = datetime('now')`,
+      `INSERT INTO schedules (id, kind, repo_path, name, cron, timezone, enabled, model, timeout_ms, config_json, prompt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, input.kind, input.repoPath, input.cron, enabled, configJson);
+    .run(
+      id,
+      input.kind,
+      input.repoPath,
+      input.name ?? null,
+      input.cron,
+      input.timezone ?? null,
+      enabled,
+      input.model ?? null,
+      input.timeoutMs ?? null,
+      configJson,
+      input.prompt ?? null,
+    );
 
   const row = getDb()
-    .prepare(`SELECT ${SCHEDULE_COLUMNS} FROM schedules WHERE kind = ? AND repo_path = ?`)
-    .get(input.kind, input.repoPath) as ScheduleRow;
+    .prepare(`SELECT ${SCHEDULE_COLUMNS} FROM schedules WHERE id = ?`)
+    .get(id) as ScheduleRow;
 
-  logger.info({ schedule_id: row.id, kind: input.kind }, 'schedule upserted');
+  logger.info({ schedule_id: row.id, kind: input.kind }, 'schedule created');
   return row;
 }
 
@@ -83,27 +113,32 @@ export function getSchedule(id: string): ScheduleRow | undefined {
     | undefined;
 }
 
-export interface UpdateScheduleInput {
-  cron?: string;
-  enabled?: boolean;
-  config?: Record<string, unknown>;
-}
-
-/** Partially update a schedule's cron/enabled/config. Returns undefined if not found. */
+/** Partially update a schedule's fields. Returns undefined if not found. */
 export function updateSchedule(id: string, patch: UpdateScheduleInput): ScheduleRow | undefined {
   const existing = getSchedule(id);
   if (!existing) return undefined;
 
   const cron = patch.cron ?? existing.cron;
+  const repoPath = patch.repoPath ?? existing.repo_path;
   const enabled = patch.enabled === undefined ? existing.enabled : patch.enabled ? 1 : 0;
   const configJson =
     patch.config !== undefined ? JSON.stringify(patch.config) : existing.config_json;
+  // null in patch means "clear it"; undefined means "keep existing"
+  const name = 'name' in patch ? (patch.name ?? null) : existing.name;
+  const timezone = 'timezone' in patch ? (patch.timezone ?? null) : existing.timezone;
+  const model = 'model' in patch ? (patch.model ?? null) : existing.model;
+  const timeoutMs = 'timeoutMs' in patch ? (patch.timeoutMs ?? null) : existing.timeout_ms;
+  const prompt = 'prompt' in patch ? (patch.prompt ?? null) : existing.prompt;
 
   getDb()
     .prepare(
-      `UPDATE schedules SET cron = ?, enabled = ?, config_json = ?, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE schedules
+       SET cron = ?, repo_path = ?, enabled = ?, config_json = ?, name = ?,
+           timezone = ?, model = ?, timeout_ms = ?, prompt = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`,
     )
-    .run(cron, enabled, configJson, id);
+    .run(cron, repoPath, enabled, configJson, name, timezone, model, timeoutMs, prompt, id);
 
   logger.info({ schedule_id: id }, 'schedule updated');
   return getSchedule(id);

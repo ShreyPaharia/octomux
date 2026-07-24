@@ -45,4 +45,31 @@ describe('runWeeklyUpdate', () => {
     expect(call.outputSchema).toBe(WEEKLY_UPDATE_SCHEMA);
     expect(call.trigger).toBe('manual');
   });
+
+  it('passes model and timeoutMs through to runSessionVertical', async () => {
+    mockResolveSchedulePrompt.mockResolvedValue('Weekly summary prompt.');
+    vi.mocked(runSessionVertical).mockResolvedValue({ result: { period: 'week' } });
+
+    await runWeeklyUpdate({
+      repoPath: '/repos/my-app',
+      scheduleId: 'sched-2',
+      model: 'claude-opus-4-8',
+      timeoutMs: 300000,
+    });
+
+    const call = vi.mocked(runSessionVertical).mock.calls[0][0];
+    expect(call.model).toBe('claude-opus-4-8');
+    expect(call.timeoutMs).toBe(300000);
+  });
+
+  it('passes undefined model and timeoutMs when not specified', async () => {
+    mockResolveSchedulePrompt.mockResolvedValue('Summarize.');
+    vi.mocked(runSessionVertical).mockResolvedValue({ result: { period: 'week' } });
+
+    await runWeeklyUpdate({ repoPath: '/repos/my-app', scheduleId: 'sched-3' });
+
+    const call = vi.mocked(runSessionVertical).mock.calls[0][0];
+    expect(call.model).toBeUndefined();
+    expect(call.timeoutMs).toBeUndefined();
+  });
 });

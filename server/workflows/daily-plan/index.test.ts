@@ -38,6 +38,33 @@ describe('daily-plan workflow registration', () => {
     });
 
     expect(mockRunDailyPlanFromSchedule).toHaveBeenCalledTimes(1);
-    expect(mockRunDailyPlanFromSchedule).toHaveBeenCalledWith({ scheduleId: 'sched-42' });
+    const call = mockRunDailyPlanFromSchedule.mock.calls[0][0];
+    expect(call.scheduleId).toBe('sched-42');
+  });
+
+  it('threads ctx.model into runDailyPlanFromSchedule', async () => {
+    const wf = getWorkflow('daily-plan')!;
+    await wf.run!({
+      repoPath: '/repo',
+      config: {},
+      scheduleId: 'sched-99',
+      model: 'claude-opus-4-8',
+    });
+
+    const call = mockRunDailyPlanFromSchedule.mock.calls[0][0];
+    expect(call.scheduleId).toBe('sched-99');
+    expect(call.model).toBe('claude-opus-4-8');
+  });
+
+  it('passes undefined model when ctx has none', async () => {
+    const wf = getWorkflow('daily-plan')!;
+    await wf.run!({
+      repoPath: '/repo',
+      config: {},
+      scheduleId: 'sched-100',
+    });
+
+    const call = mockRunDailyPlanFromSchedule.mock.calls[0][0];
+    expect(call.model).toBeUndefined();
   });
 });

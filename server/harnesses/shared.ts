@@ -1,6 +1,7 @@
 import fs from 'fs';
 import type { HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName } from './types.js';
+import { shellQuoteSingle } from '../shell-quote.js';
 
 /** Canonical JSON settings/config serialization (trailing newline). */
 export function formatJsonConfig(obj: unknown): string {
@@ -25,7 +26,7 @@ export function formatHarnessFlags(parts: string[]): string {
 export function applyModel(flags: string, model: string | null | undefined): string {
   if (!model) return flags;
   const stripped = flags.replace(/\s*--model\s+\S+/g, '');
-  return `${stripped} --model ${model}`;
+  return `${stripped} --model ${shellQuoteSingle(model)}`;
 }
 
 export type SettingsFieldValidator = (value: unknown) => unknown;

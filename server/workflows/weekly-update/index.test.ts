@@ -15,10 +15,15 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
     id: 'sched1',
     kind: 'weekly-update',
     repo_path: '/repo',
+    name: null,
     cron: '0 9 * * 1',
+    timezone: null,
     enabled: 1,
+    model: null,
+    timeout_ms: null,
     last_run_at: null,
     config_json: null,
+    prompt: null,
     ...overrides,
   };
 }
@@ -58,5 +63,35 @@ describe('weekly-update workflow registration', () => {
     const call = mockRunWeeklyUpdate.mock.calls[0][0];
     expect(call.repoPath).toBe('/repo');
     expect(call.scheduleId).toBe('sched-42');
+  });
+
+  it('threads ctx.model and ctx.timeoutMs into runWeeklyUpdate', async () => {
+    const wf = getWorkflow('weekly-update')!;
+    const row = makeRow({ id: 'sched-99' });
+    await wf.run!({
+      repoPath: row.repo_path,
+      config: {},
+      scheduleId: row.id,
+      model: 'claude-sonnet-4-6',
+      timeoutMs: 180000,
+    });
+
+    const call = mockRunWeeklyUpdate.mock.calls[0][0];
+    expect(call.model).toBe('claude-sonnet-4-6');
+    expect(call.timeoutMs).toBe(180000);
+  });
+
+  it('passes undefined model/timeoutMs when ctx has none', async () => {
+    const wf = getWorkflow('weekly-update')!;
+    const row = makeRow({ id: 'sched-100' });
+    await wf.run!({
+      repoPath: row.repo_path,
+      config: {},
+      scheduleId: row.id,
+    });
+
+    const call = mockRunWeeklyUpdate.mock.calls[0][0];
+    expect(call.model).toBeUndefined();
+    expect(call.timeoutMs).toBeUndefined();
   });
 });

@@ -909,6 +909,45 @@ export function runMigrations(instance: Database.Database): void {
   addColumn(instance, 'schedules', 'config_json', 'config_json TEXT', scheduleCols);
   addColumn(instance, 'schedules', 'prompt', 'prompt TEXT', scheduleCols);
 
+  // ── Schedule configurability: name/timezone/model/timeout_ms + drop UNIQUE
+  // (2026-07-24) ─────────────────────────────────────────────────────────────
+  // Table rebuild: adds new columns, removes UNIQUE(kind, repo_path) constraint.
+  // Idempotency guard: only run when `timezone` column is missing.
+  // Transaction-wrapped so a crash mid-rebuild cannot lose the table.
+  if (!columnsOf(instance, 'schedules').has('timezone')) {
+    instance
+      .transaction(() => {
+        instance.exec(`
+          CREATE TABLE schedules_new (
+            id            TEXT PRIMARY KEY,
+            kind          TEXT NOT NULL,
+            repo_path     TEXT NOT NULL,
+            name          TEXT,
+            cron          TEXT NOT NULL,
+            timezone      TEXT,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            model         TEXT,
+            timeout_ms    INTEGER,
+            last_run_at   TEXT,
+            config_json   TEXT,
+            prompt        TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `);
+        instance.exec(`
+          INSERT INTO schedules_new
+            (id, kind, repo_path, cron, enabled, last_run_at, config_json, prompt, created_at, updated_at)
+          SELECT
+            id, kind, repo_path, cron, enabled, last_run_at, config_json, prompt, created_at, updated_at
+          FROM schedules
+        `);
+        instance.exec(`DROP TABLE schedules`);
+        instance.exec(`ALTER TABLE schedules_new RENAME TO schedules`);
+      })
+      .default();
+  }
+
   // ── Link scheduled runs back to their schedule (2026-07-18, P5) ──────────
   const taskColsForSchedule = columnsOf(instance, 'tasks');
   addColumn(instance, 'tasks', 'schedule_id', 'schedule_id TEXT', taskColsForSchedule);

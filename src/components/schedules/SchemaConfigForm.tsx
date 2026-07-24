@@ -11,6 +11,7 @@ interface SchemaProperty {
   default?: unknown;
   minimum?: number;
   enum?: string[];
+  format?: string;
 }
 
 interface SchemaConfigFormProps {
@@ -107,14 +108,38 @@ export function SchemaConfigForm({ schema, value, onChange }: SchemaConfigFormPr
           );
         }
 
+        // Generic mechanism: `format: 'single-line'` renders as Input (one line).
+        // Backward compat: properties named `verify` or `logCommand` without
+        // `format: 'single-line'` keep their existing multi-line mono rendering.
+        const isSingleLine = prop.format === 'single-line';
+        const isCodeLike = key === 'verify' || key === 'logCommand';
+
+        if (isSingleLine) {
+          return (
+            <div key={key} className="flex flex-col gap-1.5">
+              <Label htmlFor={`config-${key}`}>{label}</Label>
+              <Input
+                id={`config-${key}`}
+                data-testid={`schedule-config-${key}`}
+                className={isCodeLike ? 'font-mono text-sm' : undefined}
+                value={typeof current === 'string' ? current : ''}
+                onChange={(e) => onChange({ ...value, [key]: e.target.value })}
+              />
+              {prop.description ? (
+                <p className="text-[10px] text-muted-soft">{prop.description}</p>
+              ) : null}
+            </div>
+          );
+        }
+
         return (
           <div key={key} className="flex flex-col gap-1.5 sm:col-span-2">
             <Label htmlFor={`config-${key}`}>{label}</Label>
             <Textarea
               id={`config-${key}`}
               data-testid={`schedule-config-${key}`}
-              className={key === 'verify' || key === 'logCommand' ? 'font-mono text-sm' : undefined}
-              rows={key === 'verify' || key === 'logCommand' ? 3 : 4}
+              className={isCodeLike ? 'font-mono text-sm' : undefined}
+              rows={isCodeLike ? 3 : 4}
               value={typeof current === 'string' ? current : ''}
               onChange={(e) => onChange({ ...value, [key]: e.target.value })}
             />

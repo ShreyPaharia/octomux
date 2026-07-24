@@ -4,6 +4,9 @@ import { validateAgainstSchema } from '../services/output-contract.js';
 import type { WorkflowType } from './types.js';
 
 const ajv = new Ajv({ allErrors: true, strict: true, useDefaults: true });
+// 'single-line' is a UI rendering hint (SchemaConfigForm renders Input vs Textarea),
+// not a validation format — register it as always-valid so strict mode accepts it.
+ajv.addFormat('single-line', true);
 
 export function validateWorkflowConfig(
   wf: WorkflowType,

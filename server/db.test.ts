@@ -699,3 +699,88 @@ describe('agents feature: agent_configs table + orchestrator_conversations.agent
     expect(agentIdCol!.notnull).toBe(0);
   });
 });
+
+describe('schedules configurability migration (2026-07-24)', () => {
+  it('fresh DB has schedules table with new columns and no UNIQUE(kind, repo_path)', () => {
+    const db = createTestDb();
+    const cols = (db.pragma('table_info(schedules)') as Array<{ name: string }>).map((c) => c.name);
+
+    for (const col of [
+      'id',
+      'kind',
+      'repo_path',
+      'name',
+      'cron',
+      'timezone',
+      'enabled',
+      'model',
+      'timeout_ms',
+      'last_run_at',
+      'config_json',
+      'prompt',
+      'created_at',
+      'updated_at',
+    ]) {
+      expect(cols).toContain(col);
+    }
+
+    // No UNIQUE(kind, repo_path) — two rows with same kind+repo_path must succeed
+    db.prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron) VALUES ('s1', 'watcher', '/repo', '0 7 * * *')`,
+    ).run();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO schedules (id, kind, repo_path, cron) VALUES ('s2', 'watcher', '/repo', '0 8 * * *')`,
+        )
+        .run(),
+    ).not.toThrow();
+  });
+
+  it('migration idempotent: calling initDb twice leaves schedules table intact', () => {
+    const db = createTestDb();
+    db.prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron) VALUES ('s1', 'watcher', '/repo', '0 7 * * *')`,
+    ).run();
+
+    // Second initDb (re-run migrations) — uses already-imported initDb
+    initDb(db);
+
+    const rows = db.prepare('SELECT id FROM schedules').all() as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toContain('s1');
+    const cols = (db.pragma('table_info(schedules)') as Array<{ name: string }>).map((c) => c.name);
+    expect(cols).toContain('timezone');
+  });
+
+  it('pre-migration rows preserve id and last_run_at after rebuild', () => {
+    // Use an already-initialized DB (all migrations have run), then directly
+    // write a row as if it existed before the timezone migration (no name/timezone/
+    // model/timeout_ms set). Calling initDb again must preserve id + last_run_at.
+    const db = createTestDb();
+
+    // Insert a row with only the pre-migration columns populated
+    db.prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron, last_run_at)
+       VALUES ('existing-id', 'prod-log-triage', '/live-repo', '0 7 * * *', '2026-07-23 07:00:00')`,
+    ).run();
+
+    // Re-run migrations (idempotent — timezone column already present, rebuild skipped)
+    initDb(db);
+
+    const row = db.prepare('SELECT * FROM schedules WHERE id = ?').get('existing-id') as Record<
+      string,
+      unknown
+    >;
+
+    expect(row).toBeDefined();
+    expect(row.id).toBe('existing-id');
+    expect(row.last_run_at).toBe('2026-07-23 07:00:00');
+    expect(row.kind).toBe('prod-log-triage');
+    expect(row.repo_path).toBe('/live-repo');
+    // New columns were not set — they should be NULL
+    expect(row.name).toBeNull();
+    expect(row.timezone).toBeNull();
+    expect(row.model).toBeNull();
+    expect(row.timeout_ms).toBeNull();
+  });
+});

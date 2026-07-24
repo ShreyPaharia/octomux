@@ -29,6 +29,19 @@ export async function executeScheduleRun(
 
   const config = resolveWorkflowConfig(wf, row.config_json);
   const trigger = options?.trigger ?? 'cron';
+  const promptSource = row.prompt ? 'schedule_override' : 'kind_skill';
+
+  logger.info(
+    {
+      schedule_id: row.id,
+      kind: row.kind,
+      trigger,
+      model: row.model ?? 'default',
+      timeout_ms: row.timeout_ms ?? 300000,
+      prompt_source: promptSource,
+    },
+    'schedule run started',
+  );
 
   try {
     await wf.run({
@@ -36,6 +49,8 @@ export async function executeScheduleRun(
       config,
       scheduleId: row.id,
       trigger,
+      model: row.model ?? null,
+      timeoutMs: row.timeout_ms ?? null,
     });
   } catch (err) {
     logger.error({ err, schedule_id: row.id, kind: row.kind }, 'executeScheduleRun: run failed');

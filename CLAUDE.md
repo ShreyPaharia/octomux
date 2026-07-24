@@ -130,11 +130,20 @@ the `agent_learnings` table and `server/routes/learnings.ts`.
 
 ## Schedules
 
-Cron-triggered runs replaced the old `octomux team` command (deleted in `90cf49e`). A `schedules`
-row is `(kind, repo_path)`-unique with a 5-field cron; `poller/schedule-cron.ts` calls
-`isCronDue()` (`server/schedules/cron.ts`, `croner`, evaluated in UTC) and hands due rows to
-`poller/execute-schedule-run.ts`. Managed from `/schedules` in the UI and
-`server/routes/schedules.ts` (`GET/POST /api/schedules`, `POST /api/schedules/:id/run`).
+Cron-triggered runs replaced the old `octomux team` command (deleted in `90cf49e`). Multiple
+schedules per `(kind, repo_path)` are allowed (the old UNIQUE constraint is gone). Each row
+carries a 5-field cron plus per-schedule `name`, `timezone` (IANA, NULL → UTC), `model`,
+`timeout_ms` (headless session timeout, NULL → 5 min), `config_json`, and `prompt` (per-schedule
+override of the kind's `schedule_skills` body — see spec/schedule-configurability.md).
+`poller/schedule-cron.ts` calls `isCronDue(expr, now, timezone)` (`server/schedules/cron.ts`,
+`croner`) with a same-minute refire guard, and hands due rows to
+`poller/execute-schedule-run.ts`, which threads model/timeout into the workflow's `RunContext`.
+Session-vertical prompts interpolate `{{configKey}}` placeholders generically
+(`server/prompt-interpolate.ts`, single-pass). The `custom` kind is a prompt-only session
+vertical (prompt + name required, generic outcome/summary/links envelope). Managed from
+`/schedules` in the UI and `server/routes/schedules.ts` (`GET/POST /api/schedules`,
+`PATCH /api/schedules/:id`, `POST /api/schedules/:id/run`,
+`GET /api/schedules/:id/effective-prompt`).
 
 ## Testing Patterns
 

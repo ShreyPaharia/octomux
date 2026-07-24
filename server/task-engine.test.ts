@@ -295,7 +295,9 @@ describe('startTask', () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task, model: 'claude-sonnet-4-6' } as any);
 
-    expect(findLaunchCmd()).toContain('--model claude-sonnet-4-6');
+    // the launch cmd is itself single-quoted into `zsh -ic '...'`, so the quoted
+    // model value appears in its shell-escaped '\\'' form
+    expect(findLaunchCmd()).toContain("--model '\\''claude-sonnet-4-6'\\''");
   });
 
   // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
