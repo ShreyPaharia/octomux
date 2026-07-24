@@ -2,7 +2,12 @@
  * run.ts can import them without a circular dependency.
  *
  * `outcome` + `links` are the universal run-result envelope (see
- * `RUN_RESULT_SCHEMA` in @octomux/types, spec/workflow-consolidation.md §5). */
+ * `RUN_RESULT_SCHEMA` in @octomux/types, spec/workflow-consolidation.md §5).
+ *
+ * Cross-field requirements (telegram target → telegramChatId, slack target →
+ * digestUserId/digestChannel) are intentionally NOT schema-enforced: the skill
+ * validates at runtime and submits a `blocked` result, so the /schedules form
+ * stays simple. Don't add if/then deps here. */
 export const SLACK_WATCHER_CONFIG_SCHEMA = {
   type: 'object',
   properties: {

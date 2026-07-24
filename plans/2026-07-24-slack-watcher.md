@@ -500,7 +500,8 @@ missing or the exact error string in `summary`, and stop.
 
 ## Steps
 
-1. **Compute the window.** `SINCE=$(date -d "-{{lookbackMinutes}} minutes" +%s)` —
+1. **Compute the window.** `SINCE=$(date -d "-{{lookbackMinutes}} minutes" +%s)`
+   (GNU date — on a macOS host use `date -v -{{lookbackMinutes}}M +%s` instead) —
    only messages with `ts >= $SINCE` count.
 
 2. **Collect candidates** with the Slack MCP tools (watched workspace):
