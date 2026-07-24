@@ -771,7 +771,7 @@ export const slackWatcherWorkflow: WorkflowType = {
       digestChannel: string;
     };
 
-    // Fire-and-forget: runSessionVertical blocks for the full headless agent run.
+    // Fire-and-forget: runSlackWatcher blocks for the full headless agent run.
     void runSlackWatcher({
       repoPath: ctx.repoPath,
       scheduleId: ctx.scheduleId,
