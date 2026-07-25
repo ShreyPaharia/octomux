@@ -184,9 +184,9 @@ export const BoardCard = memo(function BoardCard({
         <div className="mt-1.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-[11px]">
             <RuntimeDot state={task.runtime_state} />
-            {task.runtime_state === 'running' && task.agents && task.agents.length > 0 && (
+            {task.runtime_state === 'running' && task.workers && task.workers.length > 0 && (
               <span className="text-muted-soft">
-                {task.agents.length} agent{task.agents.length !== 1 ? 's' : ''}
+                {task.workers.length} agent{task.workers.length !== 1 ? 's' : ''}
               </span>
             )}
             <TaskDuration task={task} />

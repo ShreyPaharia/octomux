@@ -9,31 +9,31 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
-import type { Agent, UserTerminal } from '../types.js';
+import type { Worker, UserTerminal } from '../types.js';
 
 const logger = childLogger('repositories/workers');
 
 // ─── Agent reads ──────────────────────────────────────────────────────────────
 
 /** Fetch a single worker by id. */
-export function getWorker(id: string): Agent | undefined {
-  return getDb().prepare('SELECT * FROM workers WHERE id = ?').get(id) as Agent | undefined;
+export function getWorker(id: string): Worker | undefined {
+  return getDb().prepare('SELECT * FROM workers WHERE id = ?').get(id) as Worker | undefined;
 }
 
 /** List all non-stopped agents for a task, ordered by window_index. */
-export function listActiveAgents(taskId: string): Agent[] {
+export function listActiveAgents(taskId: string): Worker[] {
   return getDb()
     .prepare(
       `SELECT * FROM workers WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`,
     )
-    .all(taskId) as Agent[];
+    .all(taskId) as Worker[];
 }
 
 /** List all stopped agents for a task, ordered by window_index. */
-export function listStoppedAgents(taskId: string): Agent[] {
+export function listStoppedAgents(taskId: string): Worker[] {
   return getDb()
     .prepare(`SELECT * FROM workers WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`)
-    .all(taskId) as Agent[];
+    .all(taskId) as Worker[];
 }
 
 /**
@@ -47,10 +47,10 @@ export function getTaskHookToken(taskId: string): { hook_token: string } | undef
 }
 
 /** Fetch a single agent by id and task_id (returns undefined if not found or wrong task). */
-export function getAgentByIdAndTask(agentId: string, taskId: string): Agent | undefined {
+export function getAgentByIdAndTask(agentId: string, taskId: string): Worker | undefined {
   return getDb()
     .prepare('SELECT * FROM workers WHERE id = ? AND task_id = ?')
-    .get(agentId, taskId) as Agent | undefined;
+    .get(agentId, taskId) as Worker | undefined;
 }
 
 /** Fetch the first non-stopped agent for a task, ordered by window_index. */
@@ -70,12 +70,12 @@ export function findFirstActiveAgent(
  * Bulk-fetch all agents for a set of task ids, ordered by window_index.
  * Used by the GET /api/tasks list endpoint.
  */
-export function listAgentsByTasks(taskIds: string[]): Agent[] {
+export function listAgentsByTasks(taskIds: string[]): Worker[] {
   if (taskIds.length === 0) return [];
   const placeholders = taskIds.map(() => '?').join(',');
   return getDb()
     .prepare(`SELECT * FROM workers WHERE task_id IN (${placeholders}) ORDER BY window_index`)
-    .all(...taskIds) as Agent[];
+    .all(...taskIds) as Worker[];
 }
 
 /**
@@ -118,10 +118,10 @@ export function countAgentsForTask(taskId: string): number {
 }
 
 /** List all agents for a task (all statuses), ordered by window_index. */
-export function listAllAgents(taskId: string): Agent[] {
+export function listAllAgents(taskId: string): Worker[] {
   return getDb()
     .prepare('SELECT * FROM workers WHERE task_id = ? ORDER BY window_index')
-    .all(taskId) as Agent[];
+    .all(taskId) as Worker[];
 }
 
 /** List all user_terminals for a task, ordered by window_index. */
@@ -255,20 +255,20 @@ export function insertChatAgent(input: InsertChatAgentInput): void {
 }
 
 /** List all standalone chat agents (task_id IS NULL), oldest first. */
-export function listChatAgents(): Agent[] {
+export function listChatAgents(): Worker[] {
   return getDb()
     .prepare(
       `SELECT * FROM workers
          WHERE task_id IS NULL
          ORDER BY created_at ASC`,
     )
-    .all() as Agent[];
+    .all() as Worker[];
 }
 
 /** Fetch a single standalone chat agent by id (task_id IS NULL). */
-export function getChatAgent(id: string): Agent | undefined {
+export function getChatAgent(id: string): Worker | undefined {
   return getDb().prepare(`SELECT * FROM workers WHERE id = ? AND task_id IS NULL`).get(id) as
-    | Agent
+    | Worker
     | undefined;
 }
 

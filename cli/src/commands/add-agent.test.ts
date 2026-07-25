@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerAddAgent } from './add-agent.js';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 
-function makeAgent(partial: Partial<Agent> = {}): Agent {
+function makeAgent(partial: Partial<Worker> = {}): Worker {
   return {
     id: 'agent-1',
     task_id: 'task-1',

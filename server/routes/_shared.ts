@@ -16,7 +16,7 @@ import { nanoid } from 'nanoid';
 import fs from 'fs';
 import type {
   Task,
-  Agent,
+  Worker,
   UserTerminal,
   Worktree,
   DerivedTaskStatus,
@@ -98,7 +98,7 @@ export function deepMerge(
 }
 
 export interface TaskRelations {
-  agents: Agent[];
+  workers: Worker[];
   user_terminals: UserTerminal[];
   pending_prompts: PermissionPromptRow[];
 }
@@ -108,13 +108,13 @@ export interface TaskResponseExtras {
   existing_review_id?: string | null;
 }
 
-/** Load a task plus agents, terminals, and pending permission prompts. */
+/** Load a task plus workers, terminals, and pending permission prompts. */
 export function fetchTaskWithRelations(taskId: string): { task: Task; relations: TaskRelations } {
   const task = getTaskRepo(taskId) as Task;
   return {
     task,
     relations: {
-      agents: listAllAgents(taskId),
+      workers: listAllAgents(taskId),
       user_terminals: listUserTerminals(taskId),
       pending_prompts: listPendingPromptsByTask(taskId),
     },
@@ -129,9 +129,12 @@ export function formatTaskResponse(
 ) {
   return {
     ...task,
-    agents: relations.agents,
+    workers: relations.workers,
     pending_prompts: relations.pending_prompts,
-    derived_status: derivedStatus({ runtime_state: task.runtime_state, agents: relations.agents }),
+    derived_status: derivedStatus({
+      runtime_state: task.runtime_state,
+      workers: relations.workers,
+    }),
     user_terminals: relations.user_terminals,
     ...(extras?.worktree_row !== undefined ? { worktree_row: extras.worktree_row } : {}),
     ...(extras?.existing_review_id !== undefined
@@ -140,20 +143,20 @@ export function formatTaskResponse(
   };
 }
 
-/** Reload a task with its related agents and user_terminals (mutation-style, no prompts). */
+/** Reload a task with its related workers and user_terminals (mutation-style, no prompts). */
 export function fetchTaskBundle(taskId: string): Task {
   const { task, relations } = fetchTaskWithRelations(taskId);
-  task.agents = relations.agents;
+  task.workers = relations.workers;
   task.user_terminals = relations.user_terminals;
   return task;
 }
 
 export function derivedStatus(task: {
   runtime_state: string;
-  agents: Array<{ status: string; hook_activity: string }>;
+  workers: Array<{ status: string; hook_activity: string }>;
 }): DerivedTaskStatus | null {
   if (task.runtime_state !== 'running') return null;
-  const activities = task.agents.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
+  const activities = task.workers.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
   if (activities.length === 0) return 'done';
   if (activities.includes('active')) return 'working';
   if (activities.includes('waiting')) return 'needs_attention';

@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from 'react';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
 
@@ -7,7 +7,7 @@ const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
  * Display name for a comment author: "You" for the local user (no agent id),
  * otherwise the agent's label (falling back to "agent" if it's gone).
  */
-export function authorLabel(c: { agent_id: string | null }, agents: Agent[]): string {
+export function authorLabel(c: { agent_id: string | null }, agents: Worker[]): string {
   if (c.agent_id == null) return 'You';
   return agents.find((a) => a.id === c.agent_id)?.label ?? 'agent';
 }

@@ -13,7 +13,7 @@ import {
   insertAgentWithNotify,
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, computeFreshSessionIds } from '../launch.js';
-import type { Agent, Task } from '../../types.js';
+import type { Worker, Task } from '../../types.js';
 import type { AddAgentOpts } from './types.js';
 
 const logger = childLogger('task-engine/lifecycle');
@@ -114,7 +114,7 @@ export function persistAddAgentRow(
   resolved: ResolvedAddAgentOpts,
   prepared: PreparedAddAgentLaunch,
   windowIndex: number,
-): Agent {
+): Worker {
   const addTarget = `${task.tmux_session}:${windowIndex}`;
 
   insertAgentWithNotify({
@@ -149,7 +149,7 @@ export function persistAddAgentRow(
   };
 }
 
-export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Agent> {
+export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Worker> {
   logger.info(
     { task_id: task.id, operation: 'addAgent', agent: opts.agent ?? null },
     'addAgent: start',

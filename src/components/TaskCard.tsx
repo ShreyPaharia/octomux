@@ -131,11 +131,11 @@ export const TaskCard = memo(function TaskCard({
                 <span className="font-mono text-[#3B82F6]">{task.branch}</span>
               </>
             )}
-            {task.agents && task.agents.length > 0 && (
+            {task.workers && task.workers.length > 0 && (
               <>
                 <span className="text-[#2f2f2f]">|</span>
                 <span className="text-[#6a6a6a]">
-                  {task.agents.length} agent{task.agents.length !== 1 ? 's' : ''}
+                  {task.workers.length} agent{task.workers.length !== 1 ? 's' : ''}
                 </span>
               </>
             )}
@@ -170,9 +170,9 @@ export const TaskCard = memo(function TaskCard({
             </div>
           )}
 
-          {task.agents && task.agents.length > 0 && task.runtime_state === 'running' && (
+          {task.workers && task.workers.length > 0 && task.runtime_state === 'running' && (
             <div className="mt-2">
-              <AgentActivitySummary agents={task.agents} pendingPrompts={task.pending_prompts} />
+              <AgentActivitySummary workers={task.workers} pendingPrompts={task.pending_prompts} />
             </div>
           )}
           {task.pending_prompts && task.pending_prompts.length > 0 && (

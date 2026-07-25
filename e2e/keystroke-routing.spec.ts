@@ -24,7 +24,7 @@ async function getTask(page: Page, id: string) {
   return (await res.json()) as {
     id: string;
     tmux_session: string;
-    agents: { window_index: number }[];
+    workers: { window_index: number }[];
   };
 }
 
@@ -48,13 +48,13 @@ test.describe('keystroke routing', () => {
     expect(addRes.ok()).toBeTruthy();
 
     let detail = await getTask(page, task.id);
-    for (let i = 0; i < 20 && detail.agents.length < 2; i++) {
+    for (let i = 0; i < 20 && detail.workers.length < 2; i++) {
       await page.waitForTimeout(250);
       detail = await getTask(page, task.id);
     }
-    expect(detail.agents.length).toBeGreaterThanOrEqual(2);
+    expect(detail.workers.length).toBeGreaterThanOrEqual(2);
 
-    const [agent1, agent2] = detail.agents;
+    const [agent1, agent2] = detail.workers;
     await page.goto(`/tasks/${task.id}`);
     await page.waitForTimeout(2000);
 
@@ -111,8 +111,8 @@ test.describe('keystroke routing', () => {
     await typeIntoTerminal(page, typedB);
     await page.waitForTimeout(500);
 
-    const paneA = await tmuxCapture(detailA.tmux_session, detailA.agents[0].window_index);
-    const paneB = await tmuxCapture(detailB.tmux_session, detailB.agents[0].window_index);
+    const paneA = await tmuxCapture(detailA.tmux_session, detailA.workers[0].window_index);
+    const paneB = await tmuxCapture(detailB.tmux_session, detailB.workers[0].window_index);
 
     expect(paneA).toContain(typedA);
     expect(paneA).not.toContain(typedB);

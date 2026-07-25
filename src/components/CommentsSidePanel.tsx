@@ -7,14 +7,14 @@ import { timeAgo } from '@/lib/time';
 import { authorLabel } from '@/lib/comment-format';
 import { useCommentsContext } from '@/hooks/useTaskComments';
 import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 
 const ROW_CAP = 500;
 
 type FilterMode = 'all' | 'unresolved' | 'outdated';
 
 export interface CommentsSidePanelProps {
-  agents: Agent[];
+  agents: Worker[];
   /** Files currently in the diff — used to mark "no longer in diff" comments. */
   filesInDiff: Set<string>;
   rangeIsBase: boolean;

@@ -19,7 +19,7 @@ import { resolveHarnessFlags } from './harness-flags.js';
 import { childLogger } from './logger.js';
 import { execTmux } from './tmux-bin.js';
 import { shellQuoteSingle } from './shell-quote.js';
-import type { Agent } from './types.js';
+import type { Worker } from './types.js';
 
 const logger = childLogger('chats');
 
@@ -54,7 +54,7 @@ export interface CreateChatOptions {
 /**
  * Create a standalone agent row + tmux session + launch claude in it.
  */
-export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
+export async function createChat(opts: CreateChatOptions = {}): Promise<Worker> {
   const id = nanoid(12);
   const label = opts.label ?? 'Chat';
   const cwd = opts.cwd ?? chatDirFor(id);
@@ -142,15 +142,15 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     throw err;
   }
 
-  return getWorker(id) as Agent;
+  return getWorker(id) as Worker;
 }
 
 /** List all standalone agents (task_id IS NULL), oldest first. */
-export function listChats(): Agent[] {
+export function listChats(): Worker[] {
   return listChatAgents();
 }
 
-export function getChat(id: string): Agent | null {
+export function getChat(id: string): Worker | null {
   return getChatAgent(id) ?? null;
 }
 
@@ -185,7 +185,7 @@ async function killChatSession(id: string, session: string, op: string): Promise
  * Close a chat: stop the tmux session and mark the agent row stopped.
  * Preserves the DB row + scratch dir so history remains visible.
  */
-export async function closeChat(chat: Agent): Promise<void> {
+export async function closeChat(chat: Worker): Promise<void> {
   logger.info({ chat_id: chat.id, operation: 'closeChat' }, 'closeChat: start');
 
   stopChatAgent(chat.id);
@@ -200,7 +200,7 @@ export async function closeChat(chat: Agent): Promise<void> {
 /**
  * Delete a chat: kill tmux, remove scratch dir, delete DB row.
  */
-export async function deleteChat(chat: Agent): Promise<void> {
+export async function deleteChat(chat: Worker): Promise<void> {
   logger.info({ chat_id: chat.id, operation: 'deleteChat' }, 'deleteChat: start');
 
   if (chat.tmux_session) {

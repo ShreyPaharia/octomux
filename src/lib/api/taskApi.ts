@@ -13,7 +13,7 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   AddAgentRequest,
-  Agent,
+  Worker,
   UserTerminal,
   Worktree,
   WorktreeSummary,
@@ -268,7 +268,7 @@ export const taskApi = {
       body: JSON.stringify({ message }),
     }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
-    request<Agent>(`/tasks/${taskId}/workers`, {
+    request<Worker>(`/tasks/${taskId}/workers`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
@@ -307,15 +307,15 @@ export const taskApi = {
 
   // Worker task hopping (per-task tmux worker row ← tasks table)
   moveAgentToTask: (agentId: string, taskId: string | null) =>
-    request<Agent>(`/workers/${encodeURIComponent(agentId)}/task`, {
+    request<Worker>(`/workers/${encodeURIComponent(agentId)}/task`, {
       method: 'PATCH',
       body: JSON.stringify({ task_id: taskId }),
     }),
 
   // Chats (standalone runtime agents)
-  listChats: () => request<Agent[]>('/chats'),
+  listChats: () => request<Worker[]>('/chats'),
   closeChat: (id: string) =>
-    request<Agent>(`/chats/${encodeURIComponent(id)}`, {
+    request<Worker>(`/chats/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'stopped' }),
     }),

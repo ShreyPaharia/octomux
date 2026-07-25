@@ -10,7 +10,7 @@ import {
   getTask,
   DEFAULTS,
 } from './test-helpers.js';
-import type { Task, Agent } from './types.js';
+import type { Task, Worker } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -314,8 +314,8 @@ describe('GET /api/tasks', () => {
     const res = await request(app).get('/api/tasks');
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe(DEFAULTS.task.id);
-    expect(res.body[0].agents).toHaveLength(1);
-    expect(res.body[0].agents[0].label).toBe(DEFAULTS.agent.label);
+    expect(res.body[0].workers).toHaveLength(1);
+    expect(res.body[0].workers[0].label).toBe(DEFAULTS.agent.label);
   });
 
   it('orders by created_at DESC', async () => {
@@ -329,7 +329,7 @@ describe('GET /api/tasks', () => {
   it('returns empty agents array for tasks without agents', async () => {
     insertTask(db);
     const res = await request(app).get('/api/tasks');
-    expect(res.body[0].agents).toEqual([]);
+    expect(res.body[0].workers).toEqual([]);
   });
 
   it('filters tasks by repo_path query param', async () => {
@@ -479,7 +479,7 @@ describe('GET /api/tasks/:id', () => {
     const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
     expect(res.status).toBe(200);
     expect(res.body.title).toBe(DEFAULTS.task.title);
-    expect(res.body.agents).toHaveLength(1);
+    expect(res.body.workers).toHaveLength(1);
   });
 
   it('returns all task fields', async () => {
@@ -706,7 +706,7 @@ describe('PATCH /api/tasks/:id', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.runtime_state).toBe('idle');
-    expect(res.body.agents).toHaveLength(1);
+    expect(res.body.workers).toHaveLength(1);
   });
 
   it('updates updated_at timestamp', async () => {
@@ -1768,7 +1768,7 @@ describe('GET /api/tasks with permission prompts', () => {
           id: `a${i}`,
           task_id: 't1',
           window_index: i,
-          hook_activity: activity as Agent['hook_activity'],
+          hook_activity: activity as Worker['hook_activity'],
         });
       });
 

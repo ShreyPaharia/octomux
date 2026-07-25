@@ -65,7 +65,7 @@ export async function createExtractTaskFromMergedPr(
   insertRun({ workflowKind: 'pr-extract', trigger: 'github', taskId: id });
 
   const fresh = getTask(id) as Task;
-  fresh.agents = [];
+  fresh.workers = [];
   fresh.user_terminals = [];
 
   startTask(fresh)

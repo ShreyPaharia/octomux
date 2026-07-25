@@ -66,7 +66,7 @@ export async function createDocDriftTaskFromSchedule(
   broadcast({ type: 'task:created', payload: { taskId: id } });
 
   const fresh = getTask(id) as Task;
-  fresh.agents = [];
+  fresh.workers = [];
   fresh.user_terminals = [];
 
   await startTask(fresh);

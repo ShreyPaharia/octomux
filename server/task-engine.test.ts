@@ -15,7 +15,7 @@ import {
   countExecCalls,
   DEFAULTS,
 } from './test-helpers.js';
-import type { Task, Agent } from './types.js';
+import type { Task, Worker } from './types.js';
 import { getSettings } from './settings.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ describe('startTask', () => {
 
   describe('on success', () => {
     let updated: Task;
-    let agents: Agent[];
+    let agents: Worker[];
 
     beforeEach(async () => {
       insertTask(db);
@@ -1515,7 +1515,7 @@ describe('stopAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-window'] });
     expect(call).toBeDefined();
@@ -1528,7 +1528,7 @@ describe('stopAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db, { hook_activity: 'active' });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents[0].status).toBe('stopped');
@@ -1540,7 +1540,7 @@ describe('stopAgent', () => {
     insertAgent(db);
     insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     const other = agents.find((a) => a.id === 'agent-02')!;
@@ -2125,7 +2125,7 @@ describe('hook integration', () => {
       status: 'pending',
     });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const prompts = getPermissionPrompts(db, DEFAULTS.task.id);
     const agent1Prompt = prompts.find((p) => p.agent_id === DEFAULTS.agent.id)!;
@@ -2709,7 +2709,7 @@ describe('hopAgent', () => {
       ...agent,
       task_id: null,
       tmux_session: 'octomux-chat-agChat',
-    } as Agent;
+    } as Worker;
 
     const updated = await hopAgent(reloaded, 'tT');
     expect(updated.task_id).toBe('tT');

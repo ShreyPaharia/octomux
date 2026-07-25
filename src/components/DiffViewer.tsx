@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { taskApi, type DiffFileEntry, type DiffRange } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 import {
   getReviewed,
   setReviewed as persistReviewed,
@@ -33,7 +33,7 @@ interface Props {
   /** Opt-in to inline comment threads (uses CommentsContext). When true,
    *  callers must wrap with <CommentsContext.Provider>. */
   enableComments?: boolean;
-  agents?: Agent[];
+  agents?: Worker[];
   /** Notifier fired whenever the list of files in the diff changes. The host
    *  uses this to mark "no longer in diff" comments in the side panel. */
   onFilesChange?: (paths: string[]) => void;

@@ -10,7 +10,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { Agent, UserTerminal } from '@octomux/types';
+import type { Worker, UserTerminal } from '@octomux/types';
 import { CloseIcon } from '@/components/icons';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 
@@ -23,7 +23,7 @@ import { StatusGlyph } from '@/components/ui/status-glyph';
  * - status=waiting              → awaiting (▲ amber)
  * - status=idle                 → closed (○ grey)
  */
-function agentDisplayStatus(agent: Agent): string {
+function agentDisplayStatus(agent: Worker): string {
   if (agent.status === 'stopped') return 'closed';
   if (agent.status === 'waiting') return 'awaiting';
   if (agent.status === 'idle') return 'closed';
@@ -33,7 +33,7 @@ function agentDisplayStatus(agent: Agent): string {
 }
 
 interface AgentTabsProps {
-  agents: Agent[];
+  agents: Worker[];
   activeIndex: number;
   onSelect: (windowIndex: number) => void;
   onAddAgent: (prompt?: string) => void;
@@ -169,7 +169,7 @@ function AgentTabMenu({
   onDetach,
   onStop,
 }: {
-  agent: Agent;
+  agent: Worker;
   onMove?: (id: string) => void;
   onDetach?: (id: string) => void;
   onStop: (id: string) => void;

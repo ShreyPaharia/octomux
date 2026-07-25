@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb, insertTask, insertAgent, DEFAULTS } from './test-helpers.js';
 import { ensureHookToken } from './hook-token.js';
 import { getDb } from './db.js';
-import type { Agent } from './types.js';
+import type { Worker } from './types.js';
 
 // Stub the harness's installHooks so the test doesn't write real files.
 vi.mock('./harnesses/index.js', async () => {
@@ -17,7 +17,7 @@ vi.mock('./harnesses/index.js', async () => {
   };
 });
 
-function makeAgent(overrides: Partial<Agent> = {}): Agent {
+function makeAgent(overrides: Partial<Worker> = {}): Worker {
   return {
     id: 'a1',
     task_id: null,

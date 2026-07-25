@@ -1,7 +1,7 @@
 import { createRequestCore, qs } from '@octomux/api-client';
 import type {
   AddRefRequest,
-  Agent,
+  Worker,
   CreateTaskRequest,
   RunMode,
   Task,
@@ -11,7 +11,7 @@ import type {
   WorkflowStatus,
 } from '@octomux/types';
 
-export type { Agent, RunMode, Task, TaskExternalRef, TaskUpdate, WorkflowStatus };
+export type { Worker, RunMode, Task, TaskExternalRef, TaskUpdate, WorkflowStatus };
 
 export interface InlineCommentRow {
   id: string;
@@ -99,7 +99,7 @@ export interface OctomuxClient {
       skeleton?: string;
       notify_agent_id?: string | null;
     },
-  ): Promise<Agent>;
+  ): Promise<Worker>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
   startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<LoopRunResult>;
   startLoopGroup(data: {
@@ -201,7 +201,7 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<void>(`/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
     },
     addAgent(taskId, data) {
-      return request<Agent>(`/tasks/${encodeURIComponent(taskId)}/workers`, {
+      return request<Worker>(`/tasks/${encodeURIComponent(taskId)}/workers`, {
         method: 'POST',
         body: JSON.stringify(data || {}),
       });

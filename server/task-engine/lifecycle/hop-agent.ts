@@ -6,7 +6,7 @@ import { execTmux } from '../../tmux-bin.js';
 import { resolveHarnessFlags } from '../../harness-flags.js';
 import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { chatDirFor, chatSessionName } from '../../chats.js';
-import type { Agent, Worktree } from '../../types.js';
+import type { Worker, Worktree } from '../../types.js';
 import {
   getTask as getTaskRepo,
   getTaskTmuxSession,
@@ -19,7 +19,7 @@ import { isTmuxTargetMissing } from '../sessions.js';
 
 const logger = childLogger('task-engine/lifecycle');
 
-export async function hopAgent(agent: Agent, targetTaskId: string | null): Promise<Agent> {
+export async function hopAgent(agent: Worker, targetTaskId: string | null): Promise<Worker> {
   const fromTaskId = agent.task_id;
   logger.info(
     {
@@ -124,5 +124,5 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     'task_hop: complete',
   );
 
-  return getWorker(agent.id) as Agent;
+  return getWorker(agent.id) as Worker;
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
-import type { Task, Agent } from '../../types.js';
+import type { Task, Worker } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ beforeEach(() => {
   insertTask(db, { ...DEFAULTS.runningTask });
 });
 
-function makeAgentRow(overrides: Partial<Agent> = {}): Agent {
+function makeAgentRow(overrides: Partial<Worker> = {}): Worker {
   return insertAgent(db, {
     ...DEFAULTS.agent,
     window_index: 1,

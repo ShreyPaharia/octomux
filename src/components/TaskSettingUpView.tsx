@@ -14,7 +14,7 @@ interface Step {
 function buildSteps(task: Task): Step[] {
   const hasWorktree = !!(task.worktree || task.worktree_id);
   const hasTmux = !!task.tmux_session;
-  const firstAgent = task.agents?.[0];
+  const firstAgent = task.workers?.[0];
   const hasAgent = !!firstAgent;
   const hasOutput = firstAgent?.hook_activity === 'active';
 

@@ -31,7 +31,7 @@ export function flattenRunningAgents(tasks: Task[]): FlatAgent[] {
   const out: FlatAgent[] = [];
   for (const task of tasks) {
     if (task.runtime_state !== 'running' && task.runtime_state !== 'setting_up') continue;
-    for (const agent of task.agents ?? []) {
+    for (const agent of task.workers ?? []) {
       if (agent.status === 'stopped') continue;
       out.push({
         key: `${task.id}:${agent.window_index}`,
