@@ -3,8 +3,12 @@ import { createTestDb } from '../test-helpers.js';
 import { createGateway, type GatewayConductor } from './gateway.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
 import type { ChatEvent } from '../orchestrator/transcript.js';
-import { updateConversation, getPrimaryAgentConversation } from '../repositories/orchestrator.js';
-import { createAgent } from '../repositories/agents-config.js';
+import {
+  createConversation,
+  updateConversation,
+  getPrimaryAgentConversation,
+} from '../repositories/orchestrator.js';
+import { createAgent, getAgent } from '../repositories/agents-config.js';
 import { pushToConversation } from '../orchestrator/stream.js';
 
 /** A fake adapter that records outbound sends / typing indicators. */
@@ -268,5 +272,56 @@ describe('gateway glue', () => {
       '[supervisor] task `t1` plan ready — review and approve to begin implementation.',
       '[t1] plan ready for review: /api/orchestrator/artifact?task=t1&path=plan.json',
     ]);
+  });
+
+  it('start() pre-registers the proactive relay for a bound agent — a supervisor push reaches the channel with NO prior inbound (survives restart)', async () => {
+    const agentId = createAgent({
+      name: 'Ops Agent',
+      system_prompt: 'You watch prod.',
+      channel: 'telegram',
+      channel_config: JSON.stringify({ threadKey: 'chat-1' }),
+    });
+    // The agent's persistent conversation already exists (as it would after a
+    // restart) with a transcript path but no live thread in memory.
+    const convId = createConversation({ title: 'Ops Agent', agent_id: agentId });
+    updateConversation(convId, { transcript_path: `/fake/${convId}.jsonl` });
+
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    // Boot only — the owner has NOT messaged the bot in this process.
+    await gw.start();
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    pushToConversation(
+      convId,
+      JSON.stringify({ type: 'message', role: 'assistant', text: '[supervisor] task `t9` done' }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Before this fix nothing was relayed until the owner DMed the bot again.
+    expect(sent.map((s) => s.text)).toEqual(['[supervisor] task `t9` done']);
+  });
+
+  it('persists lastThreadKey for a channel-wide bound agent so a later boot can reach it', async () => {
+    process.env.OCTOMUX_GATEWAY_SLACK_ALLOW = ALLOWED;
+    const agentId = createAgent({
+      name: 'Slack Orchestrator',
+      system_prompt: 'coordinate',
+      channel: 'slack',
+      channel_config: null, // channel-wide binding: no threadKey yet
+    });
+
+    const { adapter } = fakeAdapter();
+    const { conductor } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound({ channel: 'slack', threadKey: 'D123', externalId: 's1' }));
+
+    const cfg = JSON.parse(getAgent(agentId)!.channel_config!) as { lastThreadKey?: string };
+    expect(cfg.lastThreadKey).toBe('D123');
+    // Binding stays channel-wide (no `threadKey` written), so it still matches any thread.
+    expect((cfg as { threadKey?: string }).threadKey).toBeUndefined();
   });
 });
