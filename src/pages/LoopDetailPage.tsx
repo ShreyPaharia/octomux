@@ -51,7 +51,7 @@ export default function LoopDetailPage() {
     }
   };
 
-  const activeAgent = task?.agents?.find((a) => a.status !== 'stopped') ?? null;
+  const activeAgent = task?.workers?.find((a) => a.status !== 'stopped') ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col p-6">

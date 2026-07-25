@@ -188,7 +188,7 @@ describe('POST /api/tasks/:id/review-runs', () => {
     const db = getDb();
     db.prepare(`UPDATE tasks SET runtime_state = 'running' WHERE id = 'task-rev1'`).run();
     db.prepare(
-      `INSERT INTO agents (id, task_id, window_index, label, status, hook_token)
+      `INSERT INTO workers (id, task_id, window_index, label, status, hook_token)
        VALUES ('ag1', 'task-rev1', 0, 'Agent', 'running', '')`,
     ).run();
     const res = await request(app).post('/api/tasks/task-rev1/review-runs').send();

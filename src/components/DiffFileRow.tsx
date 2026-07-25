@@ -3,7 +3,7 @@ import { Suspense, forwardRef, lazy, useCallback, useMemo, useRef, useState } fr
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type { DiffFileEntry, FileDiffResponse } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ClampedExplainer } from '@/components/review/ClampedExplainer';
@@ -61,7 +61,7 @@ export interface DiffFileRowProps {
   onToggleExpanded: () => void;
   onEditorMount?: (path: string, ed: editor.IStandaloneDiffEditor) => void;
   /** Agents on the task — used to attribute non-user comments. */
-  agents?: Agent[];
+  agents?: Worker[];
   /** Whether the surrounding diff is showing the base range (controls outdated chip). */
   rangeIsBase?: boolean;
   /** When true, inline comment threads render. Defaults to true if a comments
@@ -302,7 +302,7 @@ function CommentZonePortals({
 }: {
   editor: editor.IStandaloneDiffEditor | null;
   filePath: string;
-  agents: Agent[];
+  agents: Worker[];
   rangeIsBase: boolean;
 }) {
   const ctx = useCommentsContext();

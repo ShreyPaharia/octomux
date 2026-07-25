@@ -1,14 +1,14 @@
 /**
  * src/lib/api/agentsApi.ts
  *
- * Agents-feature API surface: CRUD for long-running agent configs plus the
+ * Agents-feature API surface: CRUD for long-running conductor agents plus the
  * derived live status and the endpoint that ensures/opens an agent's
  * persistent conductor session. Mirrors `server/routes/agents-crud.ts`.
  *
- * NAMING: the REST base is `/api/agent-configs`, not `/api/agents` — that path
- * is already taken by agent *role* definitions (`routes/agent-defs.ts`) and the
- * per-task tmux-window worker hop (`routes/chats.ts`). See
- * `plans/2026-07-24-agents-feature.md` ("Naming correction").
+ * The REST base is `/api/agents`. Agent *role* definitions
+ * (orchestrator/planner/reviewer) live at `/api/agent-roles`
+ * (`routes/agent-defs.ts`); the per-task tmux-window worker hop lives at
+ * `/api/workers/:id/task` (`routes/chats.ts`).
  */
 
 import type { OrchestratorConversation } from '../orchestrator-api';
@@ -51,16 +51,15 @@ export interface AgentSession extends OrchestratorConversation {
 }
 
 export const agentsApi = {
-  list: () => request<AgentWithStatus[]>('/agent-configs'),
+  list: () => request<AgentWithStatus[]>('/agents'),
   create: (data: CreateAgentInput) =>
-    request<AgentWithStatus>('/agent-configs', { method: 'POST', body: JSON.stringify(data) }),
-  get: (id: string) => request<AgentWithStatus>(`/agent-configs/${id}`),
+    request<AgentWithStatus>('/agents', { method: 'POST', body: JSON.stringify(data) }),
+  get: (id: string) => request<AgentWithStatus>(`/agents/${id}`),
   update: (id: string, data: UpdateAgentInput) =>
-    request<AgentWithStatus>(`/agent-configs/${id}`, {
+    request<AgentWithStatus>(`/agents/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
-  remove: (id: string) => request<void>(`/agent-configs/${id}`, { method: 'DELETE' }),
-  ensureSession: (id: string) =>
-    request<AgentSession>(`/agent-configs/${id}/session`, { method: 'POST' }),
+  remove: (id: string) => request<void>(`/agents/${id}`, { method: 'DELETE' }),
+  ensureSession: (id: string) => request<AgentSession>(`/agents/${id}/session`, { method: 'POST' }),
 };

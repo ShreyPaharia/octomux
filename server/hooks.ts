@@ -30,7 +30,7 @@ import {
   setAgentHookActivity,
   setAgentHookActivityIfNotIdle,
   countRunningAgentsExcept,
-} from './repositories/agent-runtime.js';
+} from './repositories/workers.js';
 import {
   getTaskWorkflowStatus,
   getTaskRuntimeState,

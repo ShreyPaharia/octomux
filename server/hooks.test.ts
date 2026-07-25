@@ -46,7 +46,7 @@ describe('Hook endpoints', () => {
     it.each(activatableCases)(
       'sets $description to active when user submits a prompt',
       async ({ from }) => {
-        db.prepare(`UPDATE agents SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
+        db.prepare(`UPDATE workers SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
 
         await request(app)
           .post('/api/hooks/user-prompt-submit?token=tok-test')
@@ -58,7 +58,7 @@ describe('Hook endpoints', () => {
     );
 
     it('no-ops (200) when session_id is missing — valid token, nothing to attribute', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app).post('/api/hooks/user-prompt-submit?token=tok-test').send({}).expect(200);
 
@@ -135,7 +135,7 @@ describe('Hook endpoints', () => {
     });
 
     it('does not override idle state (Stop hook may have fired first)', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
@@ -300,7 +300,7 @@ describe('Hook endpoints', () => {
     // (resume / compaction / manual relaunch). Hooks then arrive with a session
     // id we never recorded.
     it('reattaches a drifted session to the sole agent and rebinds harness_session_id', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
@@ -308,7 +308,7 @@ describe('Hook endpoints', () => {
         .expect(200);
 
       // Rebound so subsequent hooks exact-match…
-      const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+      const row = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a1') as {
         harness_session_id: string;
       };
       expect(row.harness_session_id).toBe('sess-NEW');
@@ -324,17 +324,17 @@ describe('Hook endpoints', () => {
         hook_token: 'tok-test',
         hook_activity: 'idle',
       } as any);
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
         .send({ session_id: 'sess-NEW' })
         .expect(200);
 
-      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+      const a1 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a1'`).get() as {
         harness_session_id: string;
       };
-      const a2 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a2'`).get() as {
+      const a2 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a2'`).get() as {
         harness_session_id: string;
       };
       expect(a1.harness_session_id).toBe('sess-123');
@@ -344,14 +344,14 @@ describe('Hook endpoints', () => {
     });
 
     it('does not resurrect a stopped agent (no live match for the token)', async () => {
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE id = 'a1'`).run();
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
         .send({ session_id: 'sess-NEW' })
         .expect(200);
 
-      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+      const a1 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a1'`).get() as {
         harness_session_id: string;
       };
       expect(a1.harness_session_id).toBe('sess-123');
@@ -412,7 +412,7 @@ describe('findAgentByTokenAndSession', () => {
     const row = findAgentByTokenAndSession('tok-2', 'sess-bound');
     expect(row).toMatchObject({ id: 'a2', task_id: 't1' });
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a2') as {
+    const reread = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a2') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-bound');
@@ -464,7 +464,9 @@ describe('POST /api/hooks/session-start', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({});
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+    const reread = db
+      .prepare(`SELECT harness_session_id FROM workers WHERE id = ?`)
+      .get('a-ss') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('chat-xyz');
@@ -490,7 +492,9 @@ describe('POST /api/hooks/session-start', () => {
       .send({ session_id: 'sess-from-fallback' });
     expect(res.status).toBe(200);
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+    const reread = db
+      .prepare(`SELECT harness_session_id FROM workers WHERE id = ?`)
+      .get('a-ss') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-from-fallback');

@@ -1491,7 +1491,7 @@ describe('pollAgentWindows', () => {
     );
 
     const agentRow = db
-      .prepare('SELECT status FROM agents WHERE id = ?')
+      .prepare('SELECT status FROM workers WHERE id = ?')
       .get('worker-agent-01') as { status: string };
     expect(agentRow.status).toBe('stopped');
   });

@@ -1,9 +1,9 @@
 import { memo } from 'react';
-import type { Agent, PermissionPrompt } from '@octomux/types';
+import type { Worker, PermissionPrompt } from '@octomux/types';
 import { timeAgo, timeSince } from '@/lib/time';
 
 interface AgentActivitySummaryProps {
-  agents: Agent[];
+  workers: Worker[];
   pendingPrompts?: PermissionPrompt[];
   /** Compact mode for table rows — single line, no wrapping */
   compact?: boolean;
@@ -15,7 +15,7 @@ const ACTIVITY_DOT: Record<string, string> = {
   waiting: 'bg-[#FFB800]',
 };
 
-function agentStatusText(agent: Agent): string {
+function agentStatusText(agent: Worker): string {
   if (agent.hook_activity === 'active') return 'Active';
   if (agent.hook_activity === 'waiting') return 'Waiting for input';
   // idle — show duration
@@ -25,9 +25,9 @@ function agentStatusText(agent: Agent): string {
   return 'Idle';
 }
 
-function mostRecentActivity(agents: Agent[]): string | null {
+function mostRecentActivity(workers: Worker[]): string | null {
   let latest: string | null = null;
-  for (const a of agents) {
+  for (const a of workers) {
     if (a.hook_activity_updated_at && (!latest || a.hook_activity_updated_at > latest)) {
       latest = a.hook_activity_updated_at;
     }
@@ -36,11 +36,11 @@ function mostRecentActivity(agents: Agent[]): string | null {
 }
 
 export const AgentActivitySummary = memo(function AgentActivitySummary({
-  agents,
+  workers,
   pendingPrompts,
   compact,
 }: AgentActivitySummaryProps) {
-  const activeAgents = agents.filter((a) => a.status !== 'stopped');
+  const activeAgents = workers.filter((a) => a.status !== 'stopped');
   const hasPendingPrompts = pendingPrompts && pendingPrompts.length > 0;
   const lastActivity = mostRecentActivity(activeAgents);
 

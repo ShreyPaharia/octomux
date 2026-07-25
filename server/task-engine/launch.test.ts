@@ -351,7 +351,7 @@ describe('prepareResumeLaunch', () => {
 
     // setAgentHarnessSessionId should have updated the DB
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string } | undefined;
     expect(updatedAgent?.harness_session_id).toBe('new-session-id-xyz');
   });
@@ -376,7 +376,7 @@ describe('prepareResumeLaunch', () => {
 
     // harness_session_id should remain null (not updated)
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string | null } | undefined;
     expect(updatedAgent?.harness_session_id).toBeNull();
   });
@@ -401,7 +401,7 @@ describe('prepareResumeLaunch', () => {
 
     // harness_session_id should remain the original value (resume path doesn't set it)
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string } | undefined;
     expect(updatedAgent?.harness_session_id).toBe('existing-session-id');
   });

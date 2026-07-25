@@ -17,7 +17,7 @@ import { badRequest, notFound } from '../services/errors.js';
 
 export const router = express.Router();
 
-router.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
+router.post('/api/tasks/:id/workers', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'running') {
@@ -46,7 +46,7 @@ router.post('/api/tasks/:id/agents', async (req: Request, res: Response) => {
   res.status(201).json(agent);
 });
 
-router.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Response) => {
+router.delete('/api/tasks/:id/workers/:agentId', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const agent = getAgentByIdAndTask(req.params.agentId as string, req.params.id as string);
 
@@ -59,7 +59,7 @@ router.delete('/api/tasks/:id/agents/:agentId', async (req: Request, res: Respon
   res.json({ success: true });
 });
 
-router.post('/api/tasks/:id/agents/:agentId/message', async (req: Request, res: Response) => {
+router.post('/api/tasks/:id/workers/:agentId/message', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
 
   if (task.runtime_state !== 'running') {

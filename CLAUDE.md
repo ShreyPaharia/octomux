@@ -60,10 +60,17 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
 - `e2e/` — Playwright E2E tests
 
 DB migrations are forward-only. Back up `~/.octomux/data/tasks.db` (prod) or
-`./data/tasks.db` (dev) before upgrading across the harness-abstraction
-migration (renames `agents.claude_session_id` → `harness_session_id`, adds
-`tasks.harness_id` / `agents.harness_id` / `agents.hook_token`, relaxes
-`permission_prompts.session_id` to nullable).
+`./data/tasks.db` (dev) before upgrading across either of these:
+
+- **harness abstraction** — renames `workers.claude_session_id` → `harness_session_id`,
+  adds `tasks.harness_id` / `workers.harness_id` / `workers.hook_token`, relaxes
+  `permission_prompts.session_id` to nullable.
+- **agents/workers rename** — `agents` → `workers` (per-task tmux worker) and
+  `agent_configs` → `agents` (persistent conductor agent), in that mandatory order.
+  Runs in `renameAgentWorkerTables()` **before** `SCHEMA` executes in `initDb()`, or
+  `CREATE TABLE IF NOT EXISTS workers` would create an empty placeholder ahead of the
+  rename and orphan every worker row. SQLite rewrites dependent `REFERENCES` clauses
+  automatically (`legacy_alter_table = 0`).
 
 ## Logging
 
@@ -86,9 +93,17 @@ draft → setting_up → running → closed/error
 Error at any point → error state with message in `task.error`
 
 Per task: git worktree at `<repo>/.worktrees/<id>`, tmux session `octomux-agent-<id>`,
-branch `agents/<id>`. Each agent = tmux window within the session.
+branch `agents/<id>`. Each **worker** = tmux window within the session.
 
-- **close** = stop agents + kill tmux session. Preserves worktree and branch (for resume).
+"Agent" means three distinct things; keep them straight:
+
+| Concept                            | Table     | Routes                                     |
+| ---------------------------------- | --------- | ------------------------------------------ |
+| per-task tmux worker               | `workers` | `/api/workers`, `/api/tasks/:id/workers`   |
+| persistent conductor agent         | `agents`  | `/api/agents`                              |
+| agent _role_ definition (markdown) | none      | `/api/agent-roles` (from the plugin files) |
+
+- **close** = stop workers + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
 
 ## Per-task model override
@@ -133,17 +148,48 @@ the `agent_learnings` table and `server/routes/learnings.ts`.
 Cron-triggered runs replaced the old `octomux team` command (deleted in `90cf49e`). Multiple
 schedules per `(kind, repo_path)` are allowed (the old UNIQUE constraint is gone). Each row
 carries a 5-field cron plus per-schedule `name`, `timezone` (IANA, NULL → UTC), `model`,
-`timeout_ms` (headless session timeout, NULL → 5 min), `config_json`, and `prompt` (per-schedule
-override of the kind's `schedule_skills` body — see spec/schedule-configurability.md).
+`timeout_ms` (headless session timeout, NULL → 5 min), `config_json`, and `prompt`.
+
+**Kinds are presets, schedule rows are self-contained** (spec/schedule-kinds-as-presets.md).
+A kind is a JSON file — `<pkg>/kinds/*.json` (built-in) plus `~/.octomux/kinds/*.json` (home,
+UI-authored, `session`-only, wins on collision) — loaded by `server/workflows/presets.ts` and
+merged with the code handlers that `registerWorkflow()` registers. Presets are read **only when
+the UI builds a create form**: prompt and config are copied into the row at create time with ajv
+defaults materialized on write, so `executeScheduleRun` reads the row and nothing else. There is
+no resolution chain, no per-kind DB table, and editing a preset never touches existing schedules.
+`listCronWorkflowKinds()` = "kinds that have a preset".
+
 `poller/schedule-cron.ts` calls `isCronDue(expr, now, timezone)` (`server/schedules/cron.ts`,
 `croner`) with a same-minute refire guard, and hands due rows to
 `poller/execute-schedule-run.ts`, which threads model/timeout into the workflow's `RunContext`.
 Session-vertical prompts interpolate `{{configKey}}` placeholders generically
-(`server/prompt-interpolate.ts`, single-pass). The `custom` kind is a prompt-only session
-vertical (prompt + name required, generic outcome/summary/links envelope). Managed from
-`/schedules` in the UI and `server/routes/schedules.ts` (`GET/POST /api/schedules`,
-`PATCH /api/schedules/:id`, `POST /api/schedules/:id/run`,
-`GET /api/schedules/:id/effective-prompt`).
+(`server/prompt-interpolate.ts`, single-pass). Managed from `/schedules` and Settings → Kinds
+in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH /api/schedules/:id`,
+`POST /api/schedules/:id/run`, `GET /api/schedules/:id/export`, `POST /api/schedules/import`)
+and `server/routes/kinds.ts` (`GET /api/kinds`, `PUT`/`DELETE /api/kinds/:kind`, home tier only).
+
+## Skills and agent roles
+
+Both ship in the bundled plugin (`plugin/skills/`, `plugin/agents/`) and reach launched
+agents via `--plugin-dir`. **Single source — there is no repo or home tier.** Earlier
+revisions had `<repo>/.octomux/{skills,agents}` and `~/.octomux/agents`; nothing ever
+delivered them (`syncAgents()` is a no-op in both harnesses), so they were listed over
+REST and invisible to every running agent. They are gone; don't reintroduce them.
+
+Users' own skills/subagents live in Claude Code's native `~/.claude/skills/`,
+`~/.claude/agents/`, and `<repo>/.claude/` — the harness reads those directly and octomux
+neither manages nor lists them. Repo-specific customization goes there.
+
+The skills are also installable into a user's own sessions via the plugin marketplace
+(`.claude-plugin/marketplace.json`): `/plugin marketplace add ShreyPaharia/octomux-agents`
+then `/plugin install octomux@octomux`.
+
+`workflows/review-deep.js` is a Claude Code _workflow_ script, which plugins cannot ship —
+`octomux init` installs it to `~/.claude/workflows/` copy-if-absent.
+
+The six cron-kind `SKILL.md` files were folded into `kinds/*.json`; the prompt lives there
+now, and the overlay plugin (`server/octomux-plugin.ts`) is the only delivery path for
+task-backed schedule prompts.
 
 ## Testing Patterns
 

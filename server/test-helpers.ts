@@ -12,7 +12,7 @@ import {
 } from '@octomux/test-fixtures';
 import { getDb, initDb, setDb } from './db.js';
 import { SELECT_TASK_SQL } from './task-select.js';
-import type { Task, Agent, UserTerminal } from './types.js';
+import type { Task, Worker, UserTerminal } from './types.js';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ export function createTestDb(): Database.Database {
 export function insertTask(db: Database.Database, overrides: Partial<Task> = {}): Task {
   const task: Task = {
     ...DEFAULTS.task,
-    agents: undefined,
+    workers: undefined,
     ...overrides,
   } as Task;
 
@@ -103,14 +103,14 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   return task;
 }
 
-export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {}): Agent {
-  const agent: Agent = {
+export function insertAgent(db: Database.Database, overrides: Partial<Worker> = {}): Worker {
+  const agent: Worker = {
     ...DEFAULTS.agent,
     ...overrides,
-  } as Agent;
+  } as Worker;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO workers (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
@@ -138,8 +138,8 @@ export function getTask(db: Database.Database, id: string): Task | undefined {
   return db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-export function getAgents(db: Database.Database, taskId: string): Agent[] {
-  return db.prepare('SELECT * FROM agents WHERE task_id = ?').all(taskId) as Agent[];
+export function getAgents(db: Database.Database, taskId: string): Worker[] {
+  return db.prepare('SELECT * FROM workers WHERE task_id = ?').all(taskId) as Worker[];
 }
 
 export function insertPermissionPrompt(
@@ -261,7 +261,7 @@ export function getAgentActivity(
   db: Database.Database,
   agentId: string,
 ): { hook_activity: string } {
-  return db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get(agentId) as {
+  return db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get(agentId) as {
     hook_activity: string;
   };
 }

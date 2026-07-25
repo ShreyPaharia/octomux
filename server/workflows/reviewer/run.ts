@@ -18,7 +18,7 @@ import {
 import { getTask, insertRun } from '../../repositories/index.js';
 import { startTask } from '../../task-engine/index.js';
 import { sendMessageToAgent } from '../../tmux-input.js';
-import { findFirstActiveAgent } from '../../repositories/agent-runtime.js';
+import { findFirstActiveAgent } from '../../repositories/workers.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';
@@ -220,7 +220,7 @@ function readbackAndKick(id: string): Task {
   broadcast({ type: 'task:created', payload: { taskId: id } });
 
   const fresh = getTask(id) as Task;
-  fresh.agents = [];
+  fresh.workers = [];
   fresh.user_terminals = [];
 
   // Fire-and-forget: the response shouldn't block on worktree setup.

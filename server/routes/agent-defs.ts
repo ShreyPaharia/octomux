@@ -5,14 +5,14 @@ import { toDomainServiceError } from '../services/errors.js';
 
 export const router = express.Router();
 
-// ─── Agents ──────────────────────────────────────────────────────────────────
+// ─── Agent role definitions (orchestrator/planner/reviewer plugin skeletons) ──
 
-router.get('/api/agents', async (_req: Request, res: Response) => {
+router.get('/api/agent-roles', async (_req: Request, res: Response) => {
   const agents = await listAgents();
   res.json(agents);
 });
 
-router.get('/api/agents/:name', async (req: Request, res: Response) => {
+router.get('/api/agent-roles/:name', async (req: Request, res: Response) => {
   try {
     const agent = await getAgent(req.params.name as string);
     res.json(agent);

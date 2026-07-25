@@ -22,7 +22,7 @@ export interface OrchestratorConversation {
   hook_token: string | null;
   /** The cwd the conductor session was launched from (used to resume a dead session). */
   cwd: string | null;
-  /** Agents feature: the `agent_configs` row this session belongs to, or null for an orchestrator-page conversation. */
+  /** Agents feature: the `agents` row this session belongs to, or null for an orchestrator-page conversation. */
   agent_id: string | null;
   created_at: string;
   updated_at: string;
@@ -75,7 +75,7 @@ export interface CreateConversationInput {
   tmux_window?: string;
   claude_session_id?: string;
   transcript_path?: string;
-  /** Agents feature: tag this conversation as the persistent session of an `agent_configs` row. */
+  /** Agents feature: tag this conversation as the persistent session of an `agents` row. */
   agent_id?: string;
 }
 

@@ -147,7 +147,7 @@ export async function createTask(input: CreateTaskServiceInput): Promise<Task> {
   }
 
   const created = getTask(id) as Task;
-  created.agents = [];
+  created.workers = [];
   created.user_terminals = [];
 
   broadcast({ type: 'task:created', payload: { taskId: id } });

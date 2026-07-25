@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 
 const TerminalView = lazy(() =>
   import('@/components/TerminalView').then((m) => ({ default: m.TerminalView })),
@@ -8,7 +8,7 @@ const TerminalView = lazy(() =>
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
-  const [chat, setChat] = useState<Agent | null>(null);
+  const [chat, setChat] = useState<Worker | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -16,7 +16,7 @@ export default function ChatPage() {
     let cancelled = false;
     fetch(`/api/chats/${id}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
-      .then((data: Agent) => {
+      .then((data: Worker) => {
         if (!cancelled) setChat(data);
       })
       .catch((e: Error) => {

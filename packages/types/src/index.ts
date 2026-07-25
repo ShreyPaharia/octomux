@@ -67,7 +67,7 @@ export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
   'done',
 ] as const;
 
-export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
+export type WorkerStatus = 'running' | 'idle' | 'waiting' | 'stopped';
 export type HookActivity = 'active' | 'idle' | 'waiting';
 export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
 
@@ -152,7 +152,7 @@ export interface Task {
   current_summary_updated_at: string | null;
   created_at: string;
   updated_at: string;
-  agents?: Agent[];
+  workers?: Worker[];
   user_terminals?: UserTerminal[];
   pending_prompts?: PermissionPrompt[];
   derived_status?: DerivedTaskStatus | null;
@@ -162,13 +162,13 @@ export interface Task {
   existing_review_id?: string | null;
 }
 
-export interface Agent {
+export interface Worker {
   id: string;
   /** Phase 2a: null for standalone agents (orchestrator, chats). */
   task_id: string | null;
   window_index: number;
   label: string;
-  status: AgentStatus;
+  status: WorkerStatus;
   harness_id: string;
   harness_session_id: string | null;
   /** Per-agent token used to authenticate hook callbacks. */

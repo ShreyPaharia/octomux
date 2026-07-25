@@ -13,7 +13,7 @@ import {
   listWatchedAgents,
   stopAgent,
   getNotifyAgentTarget,
-} from '../repositories/agent-runtime.js';
+} from '../repositories/workers.js';
 import type { Task } from '../types.js';
 import { pollTerminalActivity } from './terminal-activity.js';
 

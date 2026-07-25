@@ -8,7 +8,7 @@ import { shellQuoteSingle } from '../shell-quote.js';
 import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { setAgentHarnessSessionId } from '../repositories/index.js';
 import type { Harness } from '../harnesses/index.js';
-import type { Agent } from '../types.js';
+import type { Worker } from '../types.js';
 
 const logger = childLogger('task-engine/launch');
 
@@ -219,7 +219,7 @@ export function applyOrchestratorMcpConfig(
  * writes (setAgentWindowRunning / hopAgentToTask).
  */
 export function prepareResumeLaunch(opts: {
-  agent: Agent;
+  agent: Worker;
   harness: Harness;
   flags: string;
   model: string | null;

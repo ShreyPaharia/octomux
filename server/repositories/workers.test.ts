@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb, insertTask, insertAgent as insertTestAgent } from '../test-helpers.js';
 import {
-  getAgent,
+  getWorker,
   listActiveAgents,
   listStoppedAgents,
   getTaskHookToken,
@@ -21,10 +21,10 @@ import {
   deleteUserTerminalsByTask,
   deleteUserTerminal,
   countAgentsForTask,
-} from './agent-runtime.js';
+} from './workers.js';
 import type Database from 'better-sqlite3';
 
-describe('repositories/agent-runtime', () => {
+describe('repositories/workers', () => {
   let db: Database.Database;
 
   beforeEach(() => {
@@ -34,9 +34,9 @@ describe('repositories/agent-runtime', () => {
     insertTask(db, { id: 'task-02', worktree: null });
   });
 
-  // ─── insertAgent / getAgent round-trip ────────────────────────────────────────
+  // ─── insertAgent / getWorker round-trip ────────────────────────────────────────
 
-  describe('insertAgent / getAgent', () => {
+  describe('insertAgent / getWorker', () => {
     it('inserts and reads back an agent', () => {
       const id = insertAgent({
         task_id: 'task-01',
@@ -48,7 +48,7 @@ describe('repositories/agent-runtime', () => {
         agent: null,
       });
       expect(id).toMatch(/^[a-zA-Z0-9_-]{12}$/);
-      const a = getAgent(id);
+      const a = getWorker(id);
       expect(a).toBeDefined();
       expect(a!.task_id).toBe('task-01');
       expect(a!.window_index).toBe(0);
@@ -68,7 +68,7 @@ describe('repositories/agent-runtime', () => {
         harness_id: 'claude-code',
         hook_token: '',
       });
-      const a = getAgent(id);
+      const a = getWorker(id);
       expect(a!.created_at).not.toBeNull();
     });
 
@@ -81,11 +81,11 @@ describe('repositories/agent-runtime', () => {
         harness_id: 'claude-code',
         hook_token: '',
       });
-      expect(getAgent('my-agent-id')).toBeDefined();
+      expect(getWorker('my-agent-id')).toBeDefined();
     });
 
     it('returns undefined for unknown id', () => {
-      expect(getAgent('no-such')).toBeUndefined();
+      expect(getWorker('no-such')).toBeUndefined();
     });
   });
 
@@ -110,7 +110,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
         notify_agent_id: 'parent-agent',
       });
-      const a = getAgent(id);
+      const a = getWorker(id);
       expect(a!.notify_agent_id).toBe('parent-agent');
     });
 
@@ -122,7 +122,7 @@ describe('repositories/agent-runtime', () => {
         harness_id: 'claude-code',
         hook_token: '',
       });
-      expect(getAgent(id)!.notify_agent_id).toBeNull();
+      expect(getWorker(id)!.notify_agent_id).toBeNull();
     });
   });
 
@@ -234,7 +234,7 @@ describe('repositories/agent-runtime', () => {
         harness_session_id: null,
       });
       setAgentHarnessSessionId(id, 'new-session-id');
-      expect(getAgent(id)!.harness_session_id).toBe('new-session-id');
+      expect(getWorker(id)!.harness_session_id).toBe('new-session-id');
     });
   });
 
@@ -249,7 +249,7 @@ describe('repositories/agent-runtime', () => {
         status: 'stopped',
       }).id;
       setAgentWindowRunning(id, 5);
-      const a = getAgent(id);
+      const a = getWorker(id);
       expect(a!.window_index).toBe(5);
       expect(a!.status).toBe('running');
     });
@@ -274,9 +274,9 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       stopAllAgents('task-01');
-      expect(getAgent(id1)!.status).toBe('stopped');
-      expect(getAgent(id1)!.hook_activity).toBe('idle');
-      expect(getAgent(id2)!.status).toBe('stopped');
+      expect(getWorker(id1)!.status).toBe('stopped');
+      expect(getWorker(id1)!.hook_activity).toBe('idle');
+      expect(getWorker(id2)!.status).toBe('stopped');
     });
 
     it('sets hook_activity_updated_at', () => {
@@ -288,7 +288,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       stopAllAgents('task-01');
-      expect(getAgent(id)!.hook_activity_updated_at).not.toBeNull();
+      expect(getWorker(id)!.hook_activity_updated_at).not.toBeNull();
     });
 
     it('does not affect agents of a different task', () => {
@@ -300,7 +300,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       stopAllAgents('task-01');
-      expect(getAgent(id)!.status).toBe('running');
+      expect(getWorker(id)!.status).toBe('running');
     });
   });
 
@@ -322,8 +322,8 @@ describe('repositories/agent-runtime', () => {
         status: 'stopped',
       }).id;
       stopRunningAgents('task-01');
-      expect(getAgent(id1)!.status).toBe('stopped');
-      expect(getAgent(id2)!.status).toBe('stopped');
+      expect(getWorker(id1)!.status).toBe('stopped');
+      expect(getWorker(id2)!.status).toBe('stopped');
     });
   });
 
@@ -353,10 +353,10 @@ describe('repositories/agent-runtime', () => {
         status: 'stopped',
       }).id;
       stopRunningAgentsForTask('task-01');
-      expect(getAgent(runId)!.status).toBe('stopped');
+      expect(getWorker(runId)!.status).toBe('stopped');
       // The discriminating case: a non-running, non-stopped agent must be left as-is.
-      expect(getAgent(idleId)!.status).toBe('idle');
-      expect(getAgent(stoppedId)!.status).toBe('stopped');
+      expect(getWorker(idleId)!.status).toBe('idle');
+      expect(getWorker(stoppedId)!.status).toBe('stopped');
     });
   });
 
@@ -406,7 +406,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       stopAgent(id);
-      const a = getAgent(id);
+      const a = getWorker(id);
       expect(a!.status).toBe('stopped');
       expect(a!.hook_activity).toBe('idle');
     });
@@ -424,7 +424,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       hopAgentToTask(id, 'task-02', 3, null);
-      const a = getAgent(id);
+      const a = getWorker(id);
       expect(a!.task_id).toBe('task-02');
       expect(a!.window_index).toBe(3);
       expect(a!.tmux_session).toBeNull();
@@ -441,7 +441,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       hopAgentToTask(id, null, 0, 'standalone-session');
-      expect(getAgent(id)!.tmux_session).toBe('standalone-session');
+      expect(getWorker(id)!.tmux_session).toBe('standalone-session');
     });
 
     it('sets hook_activity_updated_at', () => {
@@ -453,7 +453,7 @@ describe('repositories/agent-runtime', () => {
         hook_token: '',
       });
       hopAgentToTask(id, 'task-02', 1, null);
-      expect(getAgent(id)!.hook_activity_updated_at).not.toBeNull();
+      expect(getWorker(id)!.hook_activity_updated_at).not.toBeNull();
     });
   });
 

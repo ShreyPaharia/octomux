@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/time';
@@ -8,7 +8,7 @@ import { linkify, authorLabel } from '@/lib/comment-format';
 
 export interface InlineCommentThreadProps {
   comments: InlineCommentWithOutdated[];
-  agents: Agent[];
+  agents: Worker[];
   /** Whether the parent surface is showing a non-base diff range. When true, we hide
    *  the outdated chip in favor of a "Posted on commit X" pill. */
   rangeIsBase: boolean;

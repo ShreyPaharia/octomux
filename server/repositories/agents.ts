@@ -1,14 +1,16 @@
 /**
- * Repository layer for the `agent_configs` table — long-running "Agents
- * feature" config rows (name, system prompt, channel binding). Not to be
- * confused with the `agents` table (per-task tmux-window workers).
+ * Repository layer for the `agents` table — long-running, persistent
+ * conductor agents (name, system prompt, channel binding). Not to be
+ * confused with `repositories/workers.ts` (the `workers` table — a per-task
+ * tmux-window worker, renamed from `agents` in the 2026-07-25 agents/workers
+ * terminology cleanup) or `server/agents.ts` (agent *role* definitions).
  * Plain exported functions — no base class, no ORM.
  */
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
 
-const logger = childLogger('repositories/agents-config');
+const logger = childLogger('repositories/agents');
 
 export interface AgentConfig {
   id: string;
@@ -35,7 +37,7 @@ export function createAgent(input: CreateAgentInput): string {
   const id = nanoid(12);
   getDb()
     .prepare(
-      `INSERT INTO agent_configs (id, name, system_prompt, channel, channel_config)
+      `INSERT INTO agents (id, name, system_prompt, channel, channel_config)
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(id, input.name, input.system_prompt, input.channel ?? null, input.channel_config ?? null);
@@ -46,15 +48,15 @@ export function createAgent(input: CreateAgentInput): string {
 
 /** Fetch a single agent config by id (returns undefined if not found). */
 export function getAgent(id: string): AgentConfig | undefined {
-  return getDb()
-    .prepare(`SELECT ${AGENT_CONFIG_COLUMNS} FROM agent_configs WHERE id = ?`)
-    .get(id) as AgentConfig | undefined;
+  return getDb().prepare(`SELECT ${AGENT_CONFIG_COLUMNS} FROM agents WHERE id = ?`).get(id) as
+    | AgentConfig
+    | undefined;
 }
 
 /** All agent configs, newest first. */
 export function listAgents(): AgentConfig[] {
   return getDb()
-    .prepare(`SELECT ${AGENT_CONFIG_COLUMNS} FROM agent_configs ORDER BY created_at DESC`)
+    .prepare(`SELECT ${AGENT_CONFIG_COLUMNS} FROM agents ORDER BY created_at DESC`)
     .all() as AgentConfig[];
 }
 
@@ -75,7 +77,7 @@ export function updateAgent(id: string, patch: UpdateAgentInput): void {
 
   getDb()
     .prepare(
-      `UPDATE agent_configs
+      `UPDATE agents
        SET name = ?, system_prompt = ?, channel = ?, channel_config = ?, updated_at = datetime('now')
        WHERE id = ?`,
     )
@@ -86,7 +88,7 @@ export function updateAgent(id: string, patch: UpdateAgentInput): void {
 
 /** Delete an agent config by id. No-op if it doesn't exist. */
 export function deleteAgent(id: string): void {
-  getDb().prepare(`DELETE FROM agent_configs WHERE id = ?`).run(id);
+  getDb().prepare(`DELETE FROM agents WHERE id = ?`).run(id);
   logger.info({ agent_id: id }, 'agent config deleted');
 }
 
@@ -102,7 +104,7 @@ export function deleteAgent(id: string): void {
  */
 export function getAgentByChannel(channel: string, threadKey: string): AgentConfig | undefined {
   const candidates = getDb()
-    .prepare(`SELECT ${AGENT_CONFIG_COLUMNS} FROM agent_configs WHERE channel = ?`)
+    .prepare(`SELECT ${AGENT_CONFIG_COLUMNS} FROM agents WHERE channel = ?`)
     .all(channel) as AgentConfig[];
 
   let channelWide: AgentConfig | undefined;

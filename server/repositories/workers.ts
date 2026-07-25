@@ -1,37 +1,39 @@
 /**
- * Repository layer for the `agents` and `user_terminals` tables.
+ * Repository layer for the `workers` (per-task tmux worker) and
+ * `user_terminals` tables. Not to be confused with `repositories/agents.ts`
+ * (the persistent conductor agent) or `server/agents.ts` (agent *role*
+ * definitions — orchestrator/planner/reviewer plugin skeletons).
  * Plain exported functions — no base class, no ORM, no new dependencies.
  * Always calls getDb() inside each function so setDb() test swaps work.
- *
- * Named `agent-runtime` to avoid colliding with the existing
- * `server/agents.ts` skeleton-definitions file.
  */
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
-import type { Agent, UserTerminal } from '../types.js';
+import type { Worker, UserTerminal } from '../types.js';
 
-const logger = childLogger('repositories/agent-runtime');
+const logger = childLogger('repositories/workers');
 
 // ─── Agent reads ──────────────────────────────────────────────────────────────
 
-/** Fetch a single agent by id. */
-export function getAgent(id: string): Agent | undefined {
-  return getDb().prepare('SELECT * FROM agents WHERE id = ?').get(id) as Agent | undefined;
+/** Fetch a single worker by id. */
+export function getWorker(id: string): Worker | undefined {
+  return getDb().prepare('SELECT * FROM workers WHERE id = ?').get(id) as Worker | undefined;
 }
 
 /** List all non-stopped agents for a task, ordered by window_index. */
-export function listActiveAgents(taskId: string): Agent[] {
+export function listActiveAgents(taskId: string): Worker[] {
   return getDb()
-    .prepare(`SELECT * FROM agents WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`)
-    .all(taskId) as Agent[];
+    .prepare(
+      `SELECT * FROM workers WHERE task_id = ? AND status != 'stopped' ORDER BY window_index`,
+    )
+    .all(taskId) as Worker[];
 }
 
 /** List all stopped agents for a task, ordered by window_index. */
-export function listStoppedAgents(taskId: string): Agent[] {
+export function listStoppedAgents(taskId: string): Worker[] {
   return getDb()
-    .prepare(`SELECT * FROM agents WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`)
-    .all(taskId) as Agent[];
+    .prepare(`SELECT * FROM workers WHERE task_id = ? AND status = 'stopped' ORDER BY window_index`)
+    .all(taskId) as Worker[];
 }
 
 /**
@@ -40,15 +42,15 @@ export function listStoppedAgents(taskId: string): Agent[] {
  */
 export function getTaskHookToken(taskId: string): { hook_token: string } | undefined {
   return getDb()
-    .prepare(`SELECT hook_token FROM agents WHERE task_id = ? AND hook_token != '' LIMIT 1`)
+    .prepare(`SELECT hook_token FROM workers WHERE task_id = ? AND hook_token != '' LIMIT 1`)
     .get(taskId) as { hook_token: string } | undefined;
 }
 
 /** Fetch a single agent by id and task_id (returns undefined if not found or wrong task). */
-export function getAgentByIdAndTask(agentId: string, taskId: string): Agent | undefined {
+export function getAgentByIdAndTask(agentId: string, taskId: string): Worker | undefined {
   return getDb()
-    .prepare('SELECT * FROM agents WHERE id = ? AND task_id = ?')
-    .get(agentId, taskId) as Agent | undefined;
+    .prepare('SELECT * FROM workers WHERE id = ? AND task_id = ?')
+    .get(agentId, taskId) as Worker | undefined;
 }
 
 /** Fetch the first non-stopped agent for a task, ordered by window_index. */
@@ -57,7 +59,7 @@ export function findFirstActiveAgent(
 ): { id: string; window_index: number } | undefined {
   return getDb()
     .prepare(
-      `SELECT id, window_index FROM agents
+      `SELECT id, window_index FROM workers
        WHERE task_id = ? AND status != 'stopped'
        ORDER BY window_index ASC LIMIT 1`,
     )
@@ -68,12 +70,12 @@ export function findFirstActiveAgent(
  * Bulk-fetch all agents for a set of task ids, ordered by window_index.
  * Used by the GET /api/tasks list endpoint.
  */
-export function listAgentsByTasks(taskIds: string[]): Agent[] {
+export function listAgentsByTasks(taskIds: string[]): Worker[] {
   if (taskIds.length === 0) return [];
   const placeholders = taskIds.map(() => '?').join(',');
   return getDb()
-    .prepare(`SELECT * FROM agents WHERE task_id IN (${placeholders}) ORDER BY window_index`)
-    .all(...taskIds) as Agent[];
+    .prepare(`SELECT * FROM workers WHERE task_id IN (${placeholders}) ORDER BY window_index`)
+    .all(...taskIds) as Worker[];
 }
 
 /**
@@ -107,17 +109,19 @@ export function getUserTerminalByIdAndTask(
  * getDb() call to this helper.
  */
 export function countAgentsForTask(taskId: string): number {
-  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM agents WHERE task_id = ?`).get(taskId) as {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM workers WHERE task_id = ?`)
+    .get(taskId) as {
     n: number;
   };
   return row.n;
 }
 
 /** List all agents for a task (all statuses), ordered by window_index. */
-export function listAllAgents(taskId: string): Agent[] {
+export function listAllAgents(taskId: string): Worker[] {
   return getDb()
-    .prepare('SELECT * FROM agents WHERE task_id = ? ORDER BY window_index')
-    .all(taskId) as Agent[];
+    .prepare('SELECT * FROM workers WHERE task_id = ? ORDER BY window_index')
+    .all(taskId) as Worker[];
 }
 
 /** List all user_terminals for a task, ordered by window_index. */
@@ -135,7 +139,7 @@ export function getChatAgentTmuxSession(
   chatId: string,
 ): { tmux_session: string | null } | undefined {
   return getDb()
-    .prepare(`SELECT tmux_session FROM agents WHERE id = ? AND task_id IS NULL`)
+    .prepare(`SELECT tmux_session FROM workers WHERE id = ? AND task_id IS NULL`)
     .get(chatId) as { tmux_session: string | null } | undefined;
 }
 
@@ -158,7 +162,7 @@ export function insertAgent(input: InsertAgentInput): string {
   const id = input.id ?? nanoid(12);
   getDb()
     .prepare(
-      `INSERT INTO agents
+      `INSERT INTO workers
          (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
@@ -181,7 +185,7 @@ export function insertAgentWithNotify(input: InsertAgentInput): string {
   const id = input.id ?? nanoid(12);
   getDb()
     .prepare(
-      `INSERT INTO agents
+      `INSERT INTO workers
          (id, task_id, window_index, label, harness_id, harness_session_id, hook_token, agent, notify_agent_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
@@ -205,12 +209,12 @@ export function insertAgentWithNotify(input: InsertAgentInput): string {
 
 /** Set the hook_token for an agent (used by ensureHookToken backfill). */
 export function setAgentHookToken(agentId: string, token: string): void {
-  getDb().prepare(`UPDATE agents SET hook_token = ? WHERE id = ?`).run(token, agentId);
+  getDb().prepare(`UPDATE workers SET hook_token = ? WHERE id = ?`).run(token, agentId);
 }
 
 /** Update the harness_session_id for an agent (called when a new session id is minted on resume/hop). */
 export function setAgentHarnessSessionId(agentId: string, sessionId: string): void {
-  getDb().prepare(`UPDATE agents SET harness_session_id = ? WHERE id = ?`).run(sessionId, agentId);
+  getDb().prepare(`UPDATE workers SET harness_session_id = ? WHERE id = ?`).run(sessionId, agentId);
   logger.info(
     { agent_id: agentId, operation: 'setAgentHarnessSessionId' },
     'agent harness_session_id updated',
@@ -234,7 +238,7 @@ export interface InsertChatAgentInput {
 export function insertChatAgent(input: InsertChatAgentInput): void {
   getDb()
     .prepare(
-      `INSERT INTO agents
+      `INSERT INTO workers
          (id, task_id, window_index, label, status, harness_id, harness_session_id,
           hook_token, hook_activity, tmux_session, agent, created_at)
        VALUES (?, NULL, 0, ?, 'running', ?, ?, ?, 'active', ?, ?, datetime('now'))`,
@@ -251,26 +255,26 @@ export function insertChatAgent(input: InsertChatAgentInput): void {
 }
 
 /** List all standalone chat agents (task_id IS NULL), oldest first. */
-export function listChatAgents(): Agent[] {
+export function listChatAgents(): Worker[] {
   return getDb()
     .prepare(
-      `SELECT * FROM agents
+      `SELECT * FROM workers
          WHERE task_id IS NULL
          ORDER BY created_at ASC`,
     )
-    .all() as Agent[];
+    .all() as Worker[];
 }
 
 /** Fetch a single standalone chat agent by id (task_id IS NULL). */
-export function getChatAgent(id: string): Agent | undefined {
-  return getDb().prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) as
-    | Agent
+export function getChatAgent(id: string): Worker | undefined {
+  return getDb().prepare(`SELECT * FROM workers WHERE id = ? AND task_id IS NULL`).get(id) as
+    | Worker
     | undefined;
 }
 
 /** Mark a single agent's status='stopped' (used by createChat failure path). */
 export function setAgentStopped(agentId: string): void {
-  getDb().prepare(`UPDATE agents SET status = 'stopped' WHERE id = ?`).run(agentId);
+  getDb().prepare(`UPDATE workers SET status = 'stopped' WHERE id = ?`).run(agentId);
 }
 
 /**
@@ -279,7 +283,7 @@ export function setAgentStopped(agentId: string): void {
 export function stopChatAgent(agentId: string): void {
   getDb()
     .prepare(
-      `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+      `UPDATE workers SET status = 'stopped', hook_activity = 'idle',
          hook_activity_updated_at = datetime('now')
        WHERE id = ?`,
     )
@@ -288,13 +292,13 @@ export function stopChatAgent(agentId: string): void {
 
 /** Hard-delete a single agent row (used by deleteChat). */
 export function deleteAgentRow(agentId: string): void {
-  getDb().prepare('DELETE FROM agents WHERE id = ?').run(agentId);
+  getDb().prepare('DELETE FROM workers WHERE id = ?').run(agentId);
 }
 
 /** Update window_index and status='running' for an agent (called per agent on resumeTask). */
 export function setAgentWindowRunning(agentId: string, windowIndex: number): void {
   getDb()
-    .prepare(`UPDATE agents SET window_index = ?, status = 'running' WHERE id = ?`)
+    .prepare(`UPDATE workers SET window_index = ?, status = 'running' WHERE id = ?`)
     .run(windowIndex, agentId);
   logger.info(
     { agent_id: agentId, window_index: windowIndex, operation: 'setAgentWindowRunning' },
@@ -306,7 +310,7 @@ export function setAgentWindowRunning(agentId: string, windowIndex: number): voi
 export function stopAllAgents(taskId: string): void {
   getDb()
     .prepare(
-      `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
+      `UPDATE workers SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ?`,
     )
     .run(taskId);
   logger.info({ task_id: taskId, operation: 'stopAllAgents' }, 'all agents stopped');
@@ -320,7 +324,7 @@ export function stopAllAgents(taskId: string): void {
 export function stopRunningAgents(taskId: string): void {
   getDb()
     .prepare(
-      `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status != 'stopped'`,
+      `UPDATE workers SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE task_id = ? AND status != 'stopped'`,
     )
     .run(taskId);
   logger.info({ task_id: taskId, operation: 'stopRunningAgents' }, 'running agents stopped');
@@ -334,7 +338,7 @@ export function stopRunningAgents(taskId: string): void {
 export function stopRunningAgentsForTask(taskId: string): void {
   getDb()
     .prepare(
-      `UPDATE agents
+      `UPDATE workers
           SET status = 'stopped',
               hook_activity = 'idle',
               hook_activity_updated_at = datetime('now')
@@ -348,7 +352,7 @@ export function stopRunningAgentsForTask(taskId: string): void {
 export function stopAgent(agentId: string): void {
   getDb()
     .prepare(
-      `UPDATE agents SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE workers SET status = 'stopped', hook_activity = 'idle', hook_activity_updated_at = datetime('now') WHERE id = ?`,
     )
     .run(agentId);
   logger.info({ agent_id: agentId, operation: 'stopAgent' }, 'agent stopped');
@@ -366,7 +370,7 @@ export function hopAgentToTask(
 ): void {
   getDb()
     .prepare(
-      `UPDATE agents
+      `UPDATE workers
           SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running',
               hook_activity = 'active', hook_activity_updated_at = datetime('now')
         WHERE id = ?`,
@@ -467,7 +471,7 @@ export function findAgentByHarnessSession(
 ): { id: string; task_id: string } | undefined {
   return getDb()
     .prepare(
-      `SELECT a.id, a.task_id FROM agents a
+      `SELECT a.id, a.task_id FROM workers a
        WHERE a.harness_session_id = ? AND a.status != 'stopped'
        LIMIT 1`,
     )
@@ -480,7 +484,7 @@ export function findAgentByHarnessSession(
  */
 export function checkAgentTokenExists(token: string): boolean {
   const row = getDb()
-    .prepare(`SELECT 1 AS ok FROM agents WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
+    .prepare(`SELECT 1 AS ok FROM workers WHERE hook_token = ? AND hook_token != '' LIMIT 1`)
     .get(token) as { ok: number } | undefined;
   return row !== undefined;
 }
@@ -495,7 +499,7 @@ export function findAgentByTokenAndExactSession(
 ): { id: string; task_id: string } | undefined {
   return getDb()
     .prepare(
-      `SELECT id, task_id FROM agents
+      `SELECT id, task_id FROM workers
        WHERE hook_token = ? AND harness_session_id = ?
        LIMIT 1`,
     )
@@ -511,7 +515,7 @@ export function findAgentByTokenWithNullSession(
 ): { id: string; task_id: string } | undefined {
   return getDb()
     .prepare(
-      `SELECT id, task_id FROM agents
+      `SELECT id, task_id FROM workers
        WHERE hook_token = ? AND harness_session_id IS NULL
        ORDER BY created_at DESC
        LIMIT 1`,
@@ -526,7 +530,7 @@ export function findAgentByTokenWithNullSession(
 export function findActiveAgentsByToken(token: string): Array<{ id: string; task_id: string }> {
   return getDb()
     .prepare(
-      `SELECT id, task_id FROM agents
+      `SELECT id, task_id FROM workers
        WHERE hook_token = ? AND hook_token != '' AND status != 'stopped'`,
     )
     .all(token) as Array<{ id: string; task_id: string }>;
@@ -539,7 +543,7 @@ export function setAgentHookActivity(
 ): void {
   getDb()
     .prepare(
-      `UPDATE agents SET hook_activity = ?, hook_activity_updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE workers SET hook_activity = ?, hook_activity_updated_at = datetime('now') WHERE id = ?`,
     )
     .run(activity, agentId);
 }
@@ -551,7 +555,7 @@ export function setAgentHookActivity(
 export function setAgentHookActivityIfNotIdle(agentId: string): void {
   getDb()
     .prepare(
-      `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+      `UPDATE workers SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
        WHERE id = ? AND hook_activity != 'idle'`,
     )
     .run(agentId);
@@ -561,7 +565,7 @@ export function setAgentHookActivityIfNotIdle(agentId: string): void {
 export function countRunningAgentsExcept(taskId: string, excludeAgentId: string): number {
   const row = getDb()
     .prepare(
-      `SELECT COUNT(*) AS n FROM agents WHERE task_id = ? AND status = 'running' AND id != ?`,
+      `SELECT COUNT(*) AS n FROM workers WHERE task_id = ? AND status = 'running' AND id != ?`,
     )
     .get(taskId, excludeAgentId) as { n: number };
   return row.n;
@@ -584,7 +588,7 @@ export function listWatchedAgents(): Array<{
     .prepare(
       `SELECT a.id, a.task_id, a.window_index, a.label,
               t.tmux_session, a.notify_agent_id
-       FROM agents a
+       FROM workers a
        INNER JOIN tasks t ON a.task_id = t.id
        WHERE a.status = 'running'
          AND a.notify_agent_id IS NOT NULL
@@ -612,7 +616,7 @@ export function getNotifyAgentTarget(
   return getDb()
     .prepare(
       `SELECT a.window_index, t.tmux_session
-       FROM agents a
+       FROM workers a
        INNER JOIN tasks t ON a.task_id = t.id
        WHERE a.id = ? AND a.status != 'stopped' AND t.runtime_state = 'running'`,
     )

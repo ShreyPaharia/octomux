@@ -16,7 +16,7 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   Task,
-  Agent,
+  Worker,
   UserTerminal,
   RunMode,
 } from '../types.js';
@@ -77,12 +77,12 @@ router.get('/api/tasks', (req: Request, res: Response) => {
   const allTerminals = listUserTerminalsByTasks(taskIds);
 
   // Group by task_id using Maps
-  const agentsByTask = new Map<string, Agent[]>();
+  const workersByTask = new Map<string, Worker[]>();
   for (const agent of allAgents) {
     if (!agent.task_id) continue; // standalone agents don't belong to a task
-    const list = agentsByTask.get(agent.task_id) || [];
+    const list = workersByTask.get(agent.task_id) || [];
     list.push(agent);
-    agentsByTask.set(agent.task_id, list);
+    workersByTask.set(agent.task_id, list);
   }
 
   const promptsByTask = new Map<string, PermissionPromptRow[]>();
@@ -102,7 +102,7 @@ router.get('/api/tasks', (req: Request, res: Response) => {
 
   const result = tasks.map((task) =>
     formatTaskResponse(task, {
-      agents: agentsByTask.get(task.id) || [],
+      workers: workersByTask.get(task.id) || [],
       pending_prompts: promptsByTask.get(task.id) || [],
       user_terminals: terminalsByTask.get(task.id) || [],
     }),
@@ -156,8 +156,8 @@ router.get('/api/tasks/:id', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const { relations } = fetchTaskWithRelations(task.id);
   // Backfill hook_token for pre-step-1 agents that have an empty token.
-  const agents = await Promise.all(
-    relations.agents.map(async (agent) => {
+  const workers = await Promise.all(
+    relations.workers.map(async (agent) => {
       if (agent.hook_token !== '') return agent;
       const token = await ensureHookToken(agent, task.worktree ?? null);
       return { ...agent, hook_token: token };
@@ -167,7 +167,7 @@ router.get('/api/tasks/:id', async (req: Request, res: Response) => {
   res.json(
     formatTaskResponse(
       task,
-      { ...relations, agents },
+      { ...relations, workers },
       {
         worktree_row: worktreeRow,
         existing_review_id: lookupExistingReviewId(task),

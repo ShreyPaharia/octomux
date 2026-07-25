@@ -6,13 +6,13 @@ import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
 import { execTmux } from '../../tmux-bin.js';
 import {
-  getAgent,
+  getWorker,
   setAgentWindowRunning,
   setAgentHarnessSessionId,
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, computeFreshSessionIds } from '../launch.js';
 import { isTmuxTargetMissing } from '../sessions.js';
-import type { Agent, Task } from '../../types.js';
+import type { Worker, Task } from '../../types.js';
 
 const logger = childLogger('task-engine/lifecycle');
 
@@ -34,9 +34,9 @@ const logger = childLogger('task-engine/lifecycle');
  */
 export async function respawnAgentFresh(
   task: Task,
-  agent: Agent,
+  agent: Worker,
   opts?: { prompt?: string; env?: Record<string, string>; fresh?: boolean },
-): Promise<Agent> {
+): Promise<Worker> {
   logger.info(
     { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh' },
     'respawn_fresh: start',
@@ -95,7 +95,7 @@ export async function respawnAgentFresh(
     });
   }
 
-  const updated = getAgent(agent.id) as Agent;
+  const updated = getWorker(agent.id) as Worker;
   broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 
   logger.info(

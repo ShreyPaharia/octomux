@@ -186,7 +186,7 @@ describe('startLoop', () => {
   });
 
   it('throws when the task has no active agent', async () => {
-    db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+    db.prepare(`UPDATE workers SET status = 'stopped' WHERE id = 'a1'`).run();
     await expect(startLoop('t1', LOOP_SPEC)).rejects.toThrow(/no active agent/);
   });
 

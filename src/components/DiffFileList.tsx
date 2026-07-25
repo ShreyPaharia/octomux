@@ -15,7 +15,7 @@ import {
   type DiffRange,
   type FileDiffResponse,
 } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
@@ -43,7 +43,7 @@ interface Props {
   onToggleReviewed: (path: string) => void;
   onActiveChange?: (path: string | null) => void;
   range?: DiffRange;
-  agents?: Agent[];
+  agents?: Worker[];
   rangeIsBase?: boolean;
   enableComments?: boolean;
   /** When provided, render sticky group-name dividers above each group's files. */

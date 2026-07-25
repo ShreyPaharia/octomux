@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import { childLogger } from '../logger.js';
 import { execTmux } from '../tmux-bin.js';
-import type { Task, Agent } from '../types.js';
+import type { Task, Worker } from '../types.js';
 import {
   setRuntimeState,
   stopAllAgents,
@@ -215,7 +215,7 @@ export async function deleteTask(task: Task): Promise<void> {
   logger.info({ task_id: task.id, operation: 'deleteTask' }, 'deleteTask: complete');
 }
 
-export async function stopAgent(task: Task, agent: Agent): Promise<void> {
+export async function stopAgent(task: Task, agent: Worker): Promise<void> {
   logger.info(
     {
       task_id: task.id,

@@ -50,10 +50,10 @@ export default function TaskDetail() {
 
   const validWindowIndexes = useMemo(() => {
     const s = new Set<number>();
-    for (const a of task?.agents || []) s.add(a.window_index);
+    for (const a of task?.workers || []) s.add(a.window_index);
     for (const t of task?.user_terminals || []) s.add(t.window_index);
     return s;
-  }, [task?.agents, task?.user_terminals]);
+  }, [task?.workers, task?.user_terminals]);
 
   const { terminalLRU } = useTerminalCache({ taskId, activeWindow, validWindowIndexes });
 
@@ -65,13 +65,13 @@ export default function TaskDetail() {
   const { reviewQueue, taskComments } = useTaskDetailComments({ taskId });
 
   const activeAgentId = useMemo(() => {
-    const ags = task?.agents ?? [];
+    const ags = task?.workers ?? [];
     if (activeWindow !== null) {
       const a = ags.find((x) => x.window_index === activeWindow && x.status !== 'stopped');
       if (a) return a.id;
     }
     return ags.find((x) => x.status !== 'stopped')?.id ?? null;
-  }, [task?.agents, activeWindow]);
+  }, [task?.workers, activeWindow]);
 
   const isDiffMode = mode === 'diff';
   const diffState = useDiffState({
@@ -135,7 +135,7 @@ export default function TaskDetail() {
     async (agentId: string) => {
       if (!taskId) return;
       try {
-        const taskAgents = task?.agents || [];
+        const taskAgents = task?.workers || [];
         const stoppedAgent = taskAgents.find((a) => a.id === agentId);
         await taskApi.stopAgent(taskId, agentId);
         if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
@@ -214,7 +214,7 @@ export default function TaskDetail() {
         const closedTerminal = terminals.find((t) => t.id === terminalId);
         await taskApi.closeTerminal(taskId, terminalId);
         if (closedTerminal && closedTerminal.window_index === activeWindow) {
-          const agents = task?.agents || [];
+          const agents = task?.workers || [];
           const runningAgent = agents.find((a) => a.status !== 'stopped');
           const otherTerminal = terminals.find((t) => t.id !== terminalId);
           setActiveWindow(runningAgent?.window_index ?? otherTerminal?.window_index ?? null);
@@ -246,7 +246,7 @@ export default function TaskDetail() {
     );
   }
 
-  const agents = task.agents || [];
+  const agents = task.workers || [];
   const isRunning = task.runtime_state === 'running';
   const isDraft = task.runtime_state === 'idle' && !task.initial_prompt;
   const canResume =

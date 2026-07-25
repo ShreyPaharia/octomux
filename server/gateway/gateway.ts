@@ -25,7 +25,7 @@ import {
   getConversation,
   getPrimaryAgentConversation,
 } from '../repositories/orchestrator.js';
-import { getAgentByChannel, listAgents, updateAgent } from '../repositories/agents-config.js';
+import { getAgentByChannel, listAgents, updateAgent } from '../repositories/agents.js';
 import { startConversation, sendTurn, interruptTurn } from '../orchestrator/runner.js';
 import type { StartConversationOpts } from '../orchestrator/runner.js';
 import {

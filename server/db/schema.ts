@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS task_updates (
   id          TEXT PRIMARY KEY,
   task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  agent_id    TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  agent_id    TEXT REFERENCES workers(id) ON DELETE SET NULL,
   kind        TEXT NOT NULL,
   from_status TEXT,
   to_status   TEXT,
@@ -72,7 +72,11 @@ CREATE TABLE IF NOT EXISTS integrations (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS agents (
+-- Per-task tmux worker (a Claude Code / Cursor process running inside a task's
+-- worktree, or a standalone chat with task_id NULL). Not to be confused with
+-- the 'agents' table (the persistent conductor agent, created in
+-- db/migrations.ts).
+CREATE TABLE IF NOT EXISTS workers (
     id                TEXT PRIMARY KEY,
     task_id           TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     window_index      INTEGER NOT NULL,
@@ -95,10 +99,10 @@ CREATE TABLE IF NOT EXISTS permission_prompts (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     resolved_at TEXT,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+    FOREIGN KEY (agent_id) REFERENCES workers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id);
+CREATE INDEX IF NOT EXISTS idx_workers_task ON workers(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status);

@@ -1,6 +1,6 @@
 import { installHookSettings } from '../hook-settings.js';
 import { listActiveTasksForHooks } from '../repositories/tasks.js';
-import { getTaskHookToken } from '../repositories/agent-runtime.js';
+import { getTaskHookToken } from '../repositories/workers.js';
 
 /**
  * Ensure hooks are installed in all running task worktrees.

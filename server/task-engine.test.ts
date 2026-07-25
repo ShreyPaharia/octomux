@@ -15,7 +15,7 @@ import {
   countExecCalls,
   DEFAULTS,
 } from './test-helpers.js';
-import type { Task, Agent } from './types.js';
+import type { Task, Worker } from './types.js';
 import { getSettings } from './settings.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ describe('startTask', () => {
 
   describe('on success', () => {
     let updated: Task;
-    let agents: Agent[];
+    let agents: Worker[];
 
     beforeEach(async () => {
       insertTask(db);
@@ -1267,7 +1267,7 @@ describe('addAgent opts', () => {
     await addAgent(task, { prompt: 'Go', notify_agent_id: 'parent-agent-01' });
     const row = db
       .prepare(
-        'SELECT notify_agent_id FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
+        'SELECT notify_agent_id FROM workers WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
       )
       .get(task.id) as { notify_agent_id: string | null };
     expect(row.notify_agent_id).toBe('parent-agent-01');
@@ -1277,7 +1277,7 @@ describe('addAgent opts', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(task, { prompt: 'Go', label: 'Researcher' });
     const row = db
-      .prepare('SELECT label FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
+      .prepare('SELECT label FROM workers WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
       .get(task.id) as { label: string };
     expect(row.label).toBe('Researcher');
   });
@@ -1515,7 +1515,7 @@ describe('stopAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-window'] });
     expect(call).toBeDefined();
@@ -1528,7 +1528,7 @@ describe('stopAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db, { hook_activity: 'active' });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents[0].status).toBe('stopped');
@@ -1540,7 +1540,7 @@ describe('stopAgent', () => {
     insertAgent(db);
     insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     const other = agents.find((a) => a.id === 'agent-02')!;
@@ -2125,7 +2125,7 @@ describe('hook integration', () => {
       status: 'pending',
     });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const prompts = getPermissionPrompts(db, DEFAULTS.task.id);
     const agent1Prompt = prompts.find((p) => p.agent_id === DEFAULTS.agent.id)!;
@@ -2704,12 +2704,12 @@ describe('hopAgent', () => {
       worktree: '/tmp/wt-t',
     });
     const agent = insertAgent(db, { id: 'agChat', task_id: null });
-    db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
+    db.prepare(`UPDATE workers SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
     const reloaded = {
       ...agent,
       task_id: null,
       tmux_session: 'octomux-chat-agChat',
-    } as Agent;
+    } as Worker;
 
     const updated = await hopAgent(reloaded, 'tT');
     expect(updated.task_id).toBe('tT');

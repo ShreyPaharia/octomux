@@ -1,7 +1,7 @@
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
-import type { Task, Agent } from '@octomux/types';
+import type { Task, Worker } from '@octomux/types';
 import {
   FRONTEND_AGENT_DEFAULTS,
   FRONTEND_TASK_DEFAULTS,
@@ -14,7 +14,7 @@ import {
 export const AGENT_DEFAULTS = FRONTEND_AGENT_DEFAULTS;
 export const TASK_DEFAULTS = FRONTEND_TASK_DEFAULTS;
 
-export function makeAgent(overrides: Partial<Agent> = {}): Agent {
+export function makeAgent(overrides: Partial<Worker> = {}): Worker {
   return makeAgentFixture(overrides);
 }
 

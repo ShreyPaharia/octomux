@@ -1,6 +1,6 @@
 export * from './tasks.js';
 export * from './worktrees.js';
-export * from './agent-runtime.js';
+export * from './workers.js';
 export * from './permission-prompts.js';
 export * from './hook-settings.js';
 export * from './config.js';
@@ -12,19 +12,11 @@ export * from './file-review-state.js';
 export * from './loop-runs.js';
 export * from './schedules.js';
 export * from './runs.js';
-// agents-config.ts (the Agents-feature config table) exports `getAgent`, which
-// collides with agent-runtime.ts's `getAgent` (the per-task tmux-window
-// agent) — re-export the colliding name under an alias; import the other
-// functions/type as-is, or import `getAgent` directly from
-// './agents-config.js' when unaliased access is needed.
-export {
-  createAgent,
-  listAgents,
-  updateAgent,
-  deleteAgent,
-  getAgentByChannel,
-  getAgent as getAgentConfig,
-} from './agents-config.js';
-export type { AgentConfig } from './agents-config.js';
+// workers.ts (the per-task tmux worker) exports `getWorker`; agents.ts (the
+// persistent conductor agent) exports `getAgent`. These used to collide
+// under the same name (`getAgent`) when both tables were named `agents` /
+// `agent_configs` — the 2026-07-25 agents/workers rename gave each its own
+// unambiguous name, so both re-export cleanly with no alias needed.
+export * from './agents.js';
 export * from './orchestrator.js';
 export * from '../integrations/store.js';

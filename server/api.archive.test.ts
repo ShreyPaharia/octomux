@@ -24,14 +24,14 @@ vi.mock('./task-engine/index.js', async () => {
       db.prepare(
         `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE task_id = ?`).run(task.id);
     }),
     softDeleteTask: vi.fn(async (task: any) => {
       const db = getDb();
       db.prepare(
         `UPDATE tasks SET deleted_at = datetime('now'), runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE task_id = ?`).run(task.id);
     }),
     deleteTask: vi.fn(),
     resumeTask: vi.fn(),
