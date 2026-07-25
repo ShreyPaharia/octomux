@@ -19,7 +19,7 @@ import {
   upsertManagedTask,
   getManagedTask,
   incrementConversationUsage,
-} from '../store.js';
+} from '../../repositories/orchestrator.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 

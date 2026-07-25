@@ -197,7 +197,7 @@ router.post('/api/tasks', async (req: Request, res: Response) => {
     storedWorktree = null;
   }
 
-  // Title/description resolution (fast path + optional AI polish via OCTOMUX_AI_TASK_NAMING)
+  // Title/description resolution (fast path + optional AI polish — see resolveAiTaskNamingEnabled)
   const { resolvedTitle, resolvedDescription } = await resolveTaskTitleAndDescription(body);
 
   const isDraft = !!body.draft;

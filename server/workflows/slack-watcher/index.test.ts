@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getWorkflow, listWorkflows, listCronWorkflowKinds } from '../registry.js';
-import { resolveWorkflowConfig } from '../config.js';
+import { resolveWorkflowConfig, applyConfigDefaults } from '../config.js';
 import type { ScheduleRow } from '../../repositories/schedules.js';
 
 const mockRunSlackWatcher = vi.fn().mockResolvedValue({ result: {} });
@@ -10,6 +10,17 @@ vi.mock('./run.js', () => ({
 }));
 
 import './index.js';
+
+/**
+ * Config defaults are materialized at write time now (§4.3) — a real row's
+ * `config_json` already has every default baked in by the time the poller
+ * reads it. Simulate that here with `applyConfigDefaults` so `wf.run()` sees
+ * exactly what production would hand it, instead of a partial object.
+ */
+function materializedConfigJson(partial: Record<string, unknown>): string {
+  const wf = getWorkflow('slack-watcher')!;
+  return JSON.stringify(applyConfigDefaults(wf, partial));
+}
 
 function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
   return {
@@ -53,10 +64,13 @@ describe('slack-watcher workflow registration', () => {
     mockRunSlackWatcher.mockReturnValue(new Promise(() => {}));
 
     const wf = getWorkflow('slack-watcher')!;
-    const row = makeRow({ id: 'sched-42', config_json: JSON.stringify({ slackUserId: 'U07X' }) });
+    const row = makeRow({
+      id: 'sched-42',
+      config_json: materializedConfigJson({ slackUserId: 'U07X' }),
+    });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
     });
 
@@ -75,7 +89,7 @@ describe('slack-watcher workflow registration', () => {
   it('passes through config overrides for digest user, lookback, and digest channel', async () => {
     const wf = getWorkflow('slack-watcher')!;
     const row = makeRow({
-      config_json: JSON.stringify({
+      config_json: materializedConfigJson({
         slackUserId: 'U07X',
         digestTarget: 'telegram',
         telegramChatId: '555123',
@@ -86,7 +100,7 @@ describe('slack-watcher workflow registration', () => {
     });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
     });
 
@@ -100,10 +114,10 @@ describe('slack-watcher workflow registration', () => {
 
   it('threads ctx.model and ctx.timeoutMs into runSlackWatcher', async () => {
     const wf = getWorkflow('slack-watcher')!;
-    const row = makeRow({ config_json: JSON.stringify({ slackUserId: 'U07X' }) });
+    const row = makeRow({ config_json: materializedConfigJson({ slackUserId: 'U07X' }) });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
       model: 'claude-haiku-4-5-20251001',
       timeoutMs: 60000,
@@ -116,10 +130,10 @@ describe('slack-watcher workflow registration', () => {
 
   it('passes null model/timeoutMs through when ctx has none', async () => {
     const wf = getWorkflow('slack-watcher')!;
-    const row = makeRow({ config_json: JSON.stringify({ slackUserId: 'U07X' }) });
+    const row = makeRow({ config_json: materializedConfigJson({ slackUserId: 'U07X' }) });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
     });
 

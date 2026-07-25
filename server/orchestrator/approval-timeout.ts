@@ -15,13 +15,19 @@
  * restart would drop. OSS precedent: CrewAI's HITL timeout auto-fallback so an
  * approval can't hang a run.
  *
- * Configuration:
+ * Configuration (env overrides settings.json's `approvalTimeoutMs`, which
+ * overrides the hardcoded default):
  *   OCTOMUX_APPROVAL_TIMEOUT_MS — per-card approval timeout in ms.
  *                                 Default: 30 minutes (DEFAULT_APPROVAL_TIMEOUT_MS).
  */
 
 import { childLogger } from '../logger.js';
-import { listExpiredPendingCards, resolveCard, upsertManagedTask } from './store.js';
+import { getStoredApprovalTimeoutMs } from '../settings.js';
+import {
+  listExpiredPendingCards,
+  resolveCard,
+  upsertManagedTask,
+} from '../repositories/orchestrator.js';
 import { pushToConversation } from './stream.js';
 
 const logger = childLogger('orchestrator/approval-timeout');
@@ -29,13 +35,18 @@ const logger = childLogger('orchestrator/approval-timeout');
 /** Default approval timeout: 30 minutes. Override with OCTOMUX_APPROVAL_TIMEOUT_MS. */
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
 
-/** Resolve the configured approval timeout (ms). Falls back to the default. */
+/**
+ * Resolve the configured approval timeout (ms): env override first, then the
+ * stored settings.json value, then the hardcoded default.
+ */
 export function approvalTimeoutMs(): number {
   const raw = process.env.OCTOMUX_APPROVAL_TIMEOUT_MS;
   if (raw) {
     const n = Number(raw);
     if (Number.isFinite(n) && n > 0) return n;
   }
+  const stored = getStoredApprovalTimeoutMs();
+  if (stored !== undefined) return stored;
   return DEFAULT_APPROVAL_TIMEOUT_MS;
 }
 

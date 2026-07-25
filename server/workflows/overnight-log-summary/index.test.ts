@@ -3,10 +3,10 @@ import { getWorkflow, listWorkflows, listCronWorkflowKinds } from '../registry.j
 import { resolveWorkflowConfig } from '../config.js';
 import type { ScheduleRow } from '../../repositories/schedules.js';
 
-const mockRunOvernightLogSummary = vi.fn().mockResolvedValue({ result: {} });
+const mockRunSession = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('./run.js', () => ({
-  runOvernightLogSummary: (...args: unknown[]) => mockRunOvernightLogSummary(...args),
+vi.mock('../session-runner.js', () => ({
+  runSession: (...args: unknown[]) => mockRunSession(...args),
 }));
 
 import './index.js';
@@ -31,7 +31,7 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
 
 describe('overnight-log-summary workflow registration', () => {
   beforeEach(() => {
-    mockRunOvernightLogSummary.mockClear();
+    mockRunSession.mockClear();
   });
 
   it('registers the overnight-log-summary kind with an artifact surface, output schema, cron trigger', () => {
@@ -49,49 +49,49 @@ describe('overnight-log-summary workflow registration', () => {
     expect(listCronWorkflowKinds()).toContain('overnight-log-summary');
   });
 
-  it('fires the run with the schedule id and default log command, without awaiting it', async () => {
-    mockRunOvernightLogSummary.mockReturnValue(new Promise(() => {}));
+  it('fires the generic session runner with the schedule id, repo path, and kind, without awaiting it', async () => {
+    mockRunSession.mockReturnValue(new Promise(() => {}));
 
-    const wf = getWorkflow('overnight-log-summary')!;
     const row = makeRow({ id: 'sched-42' });
+    const wf = getWorkflow('overnight-log-summary')!;
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
     });
 
-    expect(mockRunOvernightLogSummary).toHaveBeenCalledTimes(1);
-    const call = mockRunOvernightLogSummary.mock.calls[0][0];
+    expect(mockRunSession).toHaveBeenCalledTimes(1);
+    const call = mockRunSession.mock.calls[0][0];
     expect(call.repoPath).toBe('/repo');
     expect(call.scheduleId).toBe('sched-42');
-    expect(call.logCommand).toBe('gh run list --limit 30 --json databaseId,conclusion,name,url');
+    expect(call.kind).toBe('overnight-log-summary');
   });
 
-  it('passes through config_json overrides for logCommand', async () => {
+  it('passes config_json through to the session runner verbatim (defaults are write-time, not read-time)', async () => {
     const wf = getWorkflow('overnight-log-summary')!;
     const row = makeRow({ config_json: JSON.stringify({ logCommand: 'flyctl logs -a my-app' }) });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
     });
 
-    const call = mockRunOvernightLogSummary.mock.calls[0][0];
-    expect(call.logCommand).toBe('flyctl logs -a my-app');
+    const call = mockRunSession.mock.calls[0][0];
+    expect(call.config).toEqual({ logCommand: 'flyctl logs -a my-app' });
   });
 
-  it('threads ctx.model and ctx.timeoutMs into runOvernightLogSummary', async () => {
+  it('threads ctx.model and ctx.timeoutMs into runSession', async () => {
     const wf = getWorkflow('overnight-log-summary')!;
     const row = makeRow({ id: 'sched-99' });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
       model: 'claude-sonnet-4-6',
       timeoutMs: 450000,
     });
 
-    const call = mockRunOvernightLogSummary.mock.calls[0][0];
+    const call = mockRunSession.mock.calls[0][0];
     expect(call.model).toBe('claude-sonnet-4-6');
     expect(call.timeoutMs).toBe(450000);
   });
@@ -101,11 +101,11 @@ describe('overnight-log-summary workflow registration', () => {
     const row = makeRow({ id: 'sched-100' });
     await wf.run!({
       repoPath: row.repo_path,
-      config: resolveWorkflowConfig(wf, row.config_json),
+      config: resolveWorkflowConfig(row.config_json),
       scheduleId: row.id,
     });
 
-    const call = mockRunOvernightLogSummary.mock.calls[0][0];
+    const call = mockRunSession.mock.calls[0][0];
     expect(call.model).toBeUndefined();
     expect(call.timeoutMs).toBeUndefined();
   });

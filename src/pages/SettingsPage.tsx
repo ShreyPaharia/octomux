@@ -11,7 +11,7 @@ import {
   setTerminalCacheSize,
 } from '@/lib/terminal-cache-settings';
 import { ReviewsSection } from '@/components/settings/LearningsPanel';
-import { scheduleSkillsApi, type ScheduleSkill } from '@/lib/api/schedulesApi';
+import { KindsSection } from '@/components/kinds/KindsSection';
 import { showToast } from '@/components/CustomToast';
 import { repoName } from '@/lib/utils';
 import { AddChip } from '@/components/layout/add-chip';
@@ -831,116 +831,6 @@ function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) =>
   );
 }
 
-function ScheduleSkillRow({ skill, onChanged }: { skill: ScheduleSkill; onChanged: () => void }) {
-  const [content, setContent] = useState(skill.content);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setContent(skill.content);
-  }, [skill.content]);
-
-  const dirty = content !== skill.content;
-
-  const handleSave = useCallback(async () => {
-    setBusy(true);
-    try {
-      await scheduleSkillsApi.updateScheduleSkill(skill.kind, content);
-      showToast('success', 'SAVED', `${skill.kind} skill updated.`);
-      onChanged();
-    } catch (err) {
-      showToast('error', 'SAVE FAILED', (err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }, [skill.kind, content, onChanged]);
-
-  const handleReset = useCallback(async () => {
-    setBusy(true);
-    try {
-      await scheduleSkillsApi.resetScheduleSkill(skill.kind);
-      showToast('info', 'RESET', `${skill.kind} skill reset to shipped default.`);
-      onChanged();
-    } catch (err) {
-      showToast('error', 'RESET FAILED', (err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }, [skill.kind, onChanged]);
-
-  return (
-    <details className="group py-3" style={ROW_DIVIDER}>
-      <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
-        {skill.kind}
-        {dirty && <span className="text-[10px] text-[#8a8aff]">unsaved</span>}
-      </summary>
-      <div className="mt-3 flex flex-col gap-2">
-        <textarea
-          data-testid={`schedule-skill-${skill.kind}`}
-          className="focus-ring min-h-48 w-full rounded-lg border border-glass-edge bg-glass-l1 p-2 font-mono text-xs"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-        />
-        <div className="flex gap-2">
-          <GlassButton
-            variant="primary"
-            size="inline"
-            data-testid={`schedule-skill-save-${skill.kind}`}
-            disabled={busy || !content.trim() || !dirty}
-            onClick={handleSave}
-          >
-            {busy ? 'Saving…' : 'Save'}
-          </GlassButton>
-          <GlassButton
-            variant="cancel"
-            size="inline"
-            data-testid={`schedule-skill-reset-${skill.kind}`}
-            disabled={busy}
-            onClick={handleReset}
-          >
-            Reset to default
-          </GlassButton>
-        </div>
-      </div>
-    </details>
-  );
-}
-
-function ScheduleSkillsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
-  const [skills, setSkills] = useState<ScheduleSkill[] | null>(null);
-
-  const load = useCallback(() => {
-    scheduleSkillsApi.listScheduleSkills().then(setSkills);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return (
-    <SectionCard
-      id="schedule-skills"
-      title="Schedule skills"
-      help="Prompt bodies used by cron workflows — the DB is the source of truth."
-      scrollRef={scrollRef}
-    >
-      {skills === null ? (
-        <p
-          className="py-6 text-center text-sm text-[#8a8a8a]"
-          data-testid="schedule-skills-loading"
-        >
-          Loading…
-        </p>
-      ) : (
-        <div data-testid="schedule-skills-list">
-          {skills.map((skill) => (
-            <ScheduleSkillRow key={skill.kind} skill={skill} onChanged={load} />
-          ))}
-        </div>
-      )}
-    </SectionCard>
-  );
-}
-
 export default function SettingsPage() {
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const [activeSection, setActiveSection] = useState<SettingsScrollSection>('general');
@@ -974,7 +864,7 @@ export default function SettingsPage() {
       <EditorSection scrollRef={setRef('editor')} />
       <CodingAgentSection scrollRef={setRef('coding-agent')} />
       <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
-      <ScheduleSkillsSection scrollRef={setRef('schedule-skills')} />
+      <KindsSection scrollRef={setRef('kinds')} />
       <AdvancedSection scrollRef={setRef('advanced')} />
     </SettingsLayout>
   );

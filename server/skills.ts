@@ -1,7 +1,14 @@
+/**
+ * Octomux's own skills, read from the bundled plugin. Single source — see the
+ * note on `builtInSkillsDir()` for why the repo and home tiers were removed.
+ *
+ * A user's personal skills live in Claude Code's native `~/.claude/skills/` and
+ * are not listed here; the harness resolves those itself.
+ */
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from './logger.js';
-import { builtInSkillsDir, homeSkillsDir, repoSkillsDir } from './octomux-paths.js';
+import { builtInSkillsDir } from './octomux-paths.js';
 
 const logger = childLogger('skills');
 
@@ -13,11 +20,6 @@ export interface Skill {
 export interface SkillDetail {
   name: string;
   content: string;
-}
-
-export interface SkillsOptions {
-  /** When set, repo `.octomux/skills/` takes precedence over home and built-in. */
-  repoPath?: string;
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -73,44 +75,23 @@ async function readSkillContent(skillsRoot: string, name: string): Promise<strin
   }
 }
 
-/** Loader precedence: repo → home → built-in (later sources override earlier). */
-function skillSourceDirs(opts?: SkillsOptions): string[] {
-  const dirs: string[] = [builtInSkillsDir(), homeSkillsDir()];
-  if (opts?.repoPath) dirs.push(repoSkillsDir(opts.repoPath));
-  return dirs;
-}
+export async function listSkills(): Promise<Skill[]> {
+  const dir = builtInSkillsDir();
+  const skills: Skill[] = [];
 
-export async function listSkills(opts?: SkillsOptions): Promise<Skill[]> {
-  const homeDir = homeSkillsDir();
-  if (!opts?.repoPath) {
-    await fs.promises.mkdir(homeDir, { recursive: true });
-  }
-
-  const byName = new Map<string, Skill>();
-  for (const dir of skillSourceDirs(opts)) {
-    for (const name of await listSkillNamesInDir(dir)) {
-      const content = await readSkillContent(dir, name);
-      if (content === null) continue;
-      byName.set(name, { name, description: parseDescription(content) });
-    }
-  }
-
-  return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-async function resolveSkillContent(name: string, opts?: SkillsOptions): Promise<string | null> {
-  const dirs = [...skillSourceDirs(opts)].reverse();
-  for (const dir of dirs) {
+  for (const name of await listSkillNamesInDir(dir)) {
     const content = await readSkillContent(dir, name);
-    if (content !== null) return content;
+    if (content === null) continue;
+    skills.push({ name, description: parseDescription(content) });
   }
-  return null;
+
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getSkill(name: string, opts?: SkillsOptions): Promise<SkillDetail> {
+export async function getSkill(name: string): Promise<SkillDetail> {
   validateName(name);
 
-  const content = await resolveSkillContent(name, opts);
+  const content = await readSkillContent(builtInSkillsDir(), name);
   if (content === null) {
     throw new Error(`Skill not found: ${name}`);
   }

@@ -182,13 +182,6 @@ CREATE TABLE IF NOT EXISTS schedules (
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS schedule_skills (
-  kind        TEXT PRIMARY KEY,
-  content     TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS runs (
   id            TEXT PRIMARY KEY,
   workflow_kind TEXT NOT NULL,

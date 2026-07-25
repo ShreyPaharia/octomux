@@ -20,7 +20,7 @@ import {
   setGlobalMonitor,
   clearGlobalMonitor,
   getGlobalMonitorConversation,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 
 // We need to capture runSendMessage calls from supervisor's spec branch
 const mockRunSendMessage = vi.fn().mockResolvedValue(undefined);

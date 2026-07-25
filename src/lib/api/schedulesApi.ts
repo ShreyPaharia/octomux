@@ -23,11 +23,6 @@ export interface ScheduleRow {
   prompt: string | null;
 }
 
-export interface ScheduleSkill {
-  kind: string;
-  content: string;
-}
-
 export interface ScheduleKindInfo {
   kind: string;
   displayName: string;
@@ -62,6 +57,25 @@ export interface UpdateScheduleInput {
   prompt?: string | null;
 }
 
+/** Portable envelope from `GET /api/schedules/:id/export` — no `id`, `repoPath`,
+ * or `last_run_at`, so it can be imported into any repo (spec §5). */
+export interface ScheduleExport {
+  octomuxSchedule: number;
+  kind: string;
+  name: string | null;
+  cron: string;
+  timezone: string | null;
+  enabled: boolean;
+  model: string | null;
+  timeoutMs: number | null;
+  config?: Record<string, unknown>;
+  prompt: string | null;
+}
+
+export interface ImportScheduleInput extends ScheduleExport {
+  repoPath: string;
+}
+
 export const schedulesApi = {
   listSchedules: () => request<ScheduleRow[]>('/schedules'),
   getScheduleKinds: () => request<{ kinds: ScheduleKindInfo[] }>('/schedules/kinds'),
@@ -73,19 +87,7 @@ export const schedulesApi = {
   runScheduleNow: (id: string) =>
     request<{ ok: boolean }>(`/schedules/${id}/run`, { method: 'POST' }),
   getScheduleRuns: (id: string) => request<{ runs: WorkflowRunRow[] }>(`/schedules/${id}/runs`),
-  getEffectivePrompt: (id: string) =>
-    request<{ content: string; source: 'override' | 'kind_skill' }>(
-      `/schedules/${id}/effective-prompt`,
-    ),
-};
-
-export const scheduleSkillsApi = {
-  listScheduleSkills: () => request<ScheduleSkill[]>('/schedule-skills'),
-  updateScheduleSkill: (kind: string, content: string) =>
-    request<ScheduleSkill>(`/schedule-skills/${kind}`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    }),
-  resetScheduleSkill: (kind: string) =>
-    request<void>(`/schedule-skills/${kind}`, { method: 'DELETE' }),
+  exportSchedule: (id: string) => request<ScheduleExport>(`/schedules/${id}/export`),
+  importSchedule: (data: ImportScheduleInput) =>
+    request<ScheduleRow>('/schedules/import', { method: 'POST', body: JSON.stringify(data) }),
 };

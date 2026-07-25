@@ -38,8 +38,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../orchestrator/store.js')>();
+vi.mock('../repositories/orchestrator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../repositories/orchestrator.js')>();
   return {
     ...actual,
     isOrchestratorManaged: vi.fn(() => false),
@@ -64,7 +64,7 @@ const {
 } = await import('./launch.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
-const { isOrchestratorManaged } = await import('../orchestrator/store.js');
+const { isOrchestratorManaged } = await import('../repositories/orchestrator.js');
 const { mcpServerInvocation } = await import('../orchestrator/runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────

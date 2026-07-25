@@ -22,14 +22,11 @@ export interface SkillDetail {
 export interface AgentDefinition {
   name: string;
   description: string;
-  isCustom: boolean;
 }
 
 export interface AgentDetail {
   name: string;
   content: string;
-  defaultContent: string;
-  isCustom: boolean;
 }
 
 export interface OctomuxSettings {

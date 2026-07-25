@@ -1,8 +1,36 @@
+import fs from 'fs';
+import path from 'path';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
+import { builtInKindsDir } from '../octomux-paths.js';
+import { applyJsonSchemaDefaults } from '../workflows/config.js';
+import type { JsonSchema } from '../services/output-contract.js';
 
 const logger = childLogger('db');
+
+/**
+ * Read a built-in kind preset's JSON straight off disk — used only by the
+ * schedule-kinds-as-presets migration below. Deliberately does NOT go through
+ * `workflows/presets.ts` (which transitively imports the workflow registry,
+ * which transitively imports `repositories/*` → `db.ts`): importing that here
+ * would create `db.ts` → `migrations.ts` → `workflows/index.ts` → `db.ts`, a
+ * circular import through code that calls `getDb()` at module scope. This
+ * migration only needs the shipped preset's raw `prompt`/`config` fields, so a
+ * plain `fs.readFileSync` + `JSON.parse` sidesteps the cycle entirely.
+ */
+function readBuiltInPreset(kind: string): { prompt?: string; config?: JsonSchema } | undefined {
+  try {
+    const raw = fs.readFileSync(path.join(builtInKindsDir(), `${kind}.json`), 'utf-8');
+    const data = JSON.parse(raw) as { prompt?: unknown; config?: unknown };
+    return {
+      prompt: typeof data.prompt === 'string' ? data.prompt : undefined,
+      config: (data.config as JsonSchema | undefined) ?? undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 export function columnsOf(instance: Database.Database, table: string): Set<string> {
   const rows = instance.pragma(`table_info(${table})`) as Array<{ name: string }>;
@@ -1034,4 +1062,59 @@ export function runMigrations(instance: Database.Database): void {
     'agent_id TEXT REFERENCES agent_configs(id) ON DELETE SET NULL',
     orchConvColsForAgent,
   );
+
+  // ── Schedule kinds as presets (2026-07-25, spec/schedule-kinds-as-presets.md
+  // §8) ─────────────────────────────────────────────────────────────────────
+  // Forward-only, transaction-wrapped, guarded on `schedule_skills` still
+  // existing — a no-op on fresh installs (SCHEMA no longer creates the table)
+  // and on every boot after the first successful run.
+  const tablesForKindsPreset = new Set(
+    (
+      instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name),
+  );
+  if (tablesForKindsPreset.has('schedule_skills')) {
+    instance
+      .transaction(() => {
+        // 1. Backfill schedules.prompt for rows where prompt is NULL/empty,
+        // joined on kind against schedule_skills; fall back to the shipped
+        // preset's prompt when no schedule_skills row exists for that kind
+        // (production: 1 such row, doc-drift).
+        const rowsToBackfill = instance
+          .prepare(`SELECT id, kind FROM schedules WHERE prompt IS NULL OR prompt = ''`)
+          .all() as Array<{ id: string; kind: string }>;
+        const getSkillRow = instance.prepare(`SELECT content FROM schedule_skills WHERE kind = ?`);
+        const updatePrompt = instance.prepare(`UPDATE schedules SET prompt = ? WHERE id = ?`);
+
+        for (const row of rowsToBackfill) {
+          const skill = getSkillRow.get(row.kind) as { content: string } | undefined;
+          const prompt = skill?.content ?? readBuiltInPreset(row.kind)?.prompt;
+          if (prompt) updatePrompt.run(prompt, row.id);
+        }
+
+        // 2. Materialize config_json defaults for every existing row against
+        // its kind's current shipped config schema.
+        const allScheduleRows = instance
+          .prepare(`SELECT id, kind, config_json FROM schedules`)
+          .all() as Array<{ id: string; kind: string; config_json: string | null }>;
+        const updateConfig = instance.prepare(`UPDATE schedules SET config_json = ? WHERE id = ?`);
+
+        // Always write, even for kinds with no config schema (weekly-update,
+        // daily-plan): post-migration `config_json` is never NULL, so the
+        // read path's `?? '{}'` is belt-and-braces rather than load-bearing.
+        for (const row of allScheduleRows) {
+          const schema = readBuiltInPreset(row.kind)?.config;
+          const existing = row.config_json ? JSON.parse(row.config_json) : {};
+          const materialized = schema ? applyJsonSchemaDefaults(schema, existing) : existing;
+          updateConfig.run(JSON.stringify(materialized), row.id);
+        }
+
+        // 3. Drop the now-superseded table.
+        instance.exec(`DROP TABLE schedule_skills`);
+      })
+      .default();
+    logger.info('migrated schedule_skills into schedules.prompt/config_json and dropped the table');
+  }
 }

@@ -1,6 +1,6 @@
 import { registerWorkflow } from '../registry.js';
 import { childLogger } from '../../logger.js';
-import { runOvernightLogSummary } from './run.js';
+import { runSession } from '../session-runner.js';
 import { OVERNIGHT_LOG_SUMMARY_CONFIG_SCHEMA, OVERNIGHT_LOG_SUMMARY_SCHEMA } from './schema.js';
 import type { RunContext, WorkflowType } from '../types.js';
 
@@ -19,17 +19,9 @@ export const overnightLogSummaryWorkflow: WorkflowType = {
       { repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },
       'overnight-log-summary: schedule fired',
     );
-    const cfg = ctx.config as { logCommand: string };
 
-    // Fire-and-forget: runSessionVertical blocks for the full headless agent run.
-    void runOvernightLogSummary({
-      repoPath: ctx.repoPath,
-      scheduleId: ctx.scheduleId,
-      logCommand: cfg.logCommand,
-      trigger: ctx.trigger,
-      model: ctx.model,
-      timeoutMs: ctx.timeoutMs,
-    }).catch((err) => {
+    // Fire-and-forget: runSession blocks for the full headless agent run.
+    void runSession({ ...ctx, kind: 'overnight-log-summary' }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },
         'overnight-log-summary: run failed',

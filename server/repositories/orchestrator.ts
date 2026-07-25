@@ -1,3 +1,9 @@
+/**
+ * Repository layer for the orchestrator's tables: `orchestrator_conversations`,
+ * `orchestrator_messages`, `action_cards`, `managed_tasks`, `events`,
+ * `orchestrator_action_results` (idempotency cache), `conversation_usage`, and
+ * `permission_rules`. Plain exported functions — no base class, no ORM.
+ */
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 

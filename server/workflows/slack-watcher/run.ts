@@ -5,7 +5,7 @@
  * reach the skill through the server's inherited environment — see
  * spec/slack-watcher.md §Slack app tokens.
  */
-import { resolveSchedulePrompt } from '../../schedule-prompt.js';
+import { getSchedule } from '../../repositories/schedules.js';
 import { listRunsForWorkflow, listRunsForSchedule } from '../../repositories/runs.js';
 import { runSessionVertical } from '../../services/session-vertical-service.js';
 import { interpolatePrompt } from '../../prompt-interpolate.js';
@@ -71,10 +71,13 @@ export function previousItemsJson(scheduleId?: string | null): string {
 export async function runSlackWatcher(
   input: RunSlackWatcherInput,
 ): Promise<{ result: SlackWatcherResult }> {
-  const skillContent = await resolveSchedulePrompt({
-    scheduleId: input.scheduleId,
-    kind: 'slack-watcher',
-  });
+  // Self-contained schedule row (spec/schedule-kinds-as-presets.md §1):
+  // schedule.prompt is materialized from the kind's preset at create time —
+  // no resolution chain, just a read.
+  const skillContent = (input.scheduleId ? getSchedule(input.scheduleId) : undefined)?.prompt;
+  if (!skillContent) {
+    throw new Error(`slack-watcher: schedule ${input.scheduleId ?? '(none)'} has no prompt`);
+  }
   const prompt = interpolatePrompt(skillContent, {
     slackUserId: input.slackUserId,
     digestTarget: input.digestTarget,

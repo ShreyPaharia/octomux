@@ -20,7 +20,7 @@ import {
   listPermissionRules,
   insertPermissionRule,
   deletePermissionRule,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 import { buildPolicySets } from './command-registry.js';
 
 // ─── Tier sets (derived from command registry at startup) ───────────────────────

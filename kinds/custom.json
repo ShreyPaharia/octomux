@@ -1,0 +1,5 @@
+{
+  "kind": "custom",
+  "displayName": "Custom Prompt",
+  "execution": "session"
+}

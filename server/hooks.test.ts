@@ -18,7 +18,7 @@ import {
   upsertManagedTask,
   eventsSince,
   createConversation,
-} from './orchestrator/store.js';
+} from './repositories/orchestrator.js';
 import { advancePhaseForLabel } from './hooks.js';
 
 describe('Hook endpoints', () => {

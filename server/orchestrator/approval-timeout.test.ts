@@ -20,12 +20,19 @@ import {
   resolveCard,
   upsertManagedTask,
   getManagedTask,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 
 // Capture conversation pushes without a ws.
 const mockPush = vi.fn();
 vi.mock('./stream.js', () => ({
   pushToConversation: vi.fn((_convId: string, msg: string) => mockPush(msg)),
+}));
+
+// Stub the settings.json read — approvalTimeoutMs() reads it synchronously,
+// so tests control it directly instead of touching the real filesystem.
+const mockGetStoredApprovalTimeoutMs = vi.fn<() => number | undefined>();
+vi.mock('../settings.js', () => ({
+  getStoredApprovalTimeoutMs: () => mockGetStoredApprovalTimeoutMs(),
 }));
 
 import {
@@ -67,6 +74,7 @@ describe('approval-timeout sweep (SHR-164)', () => {
     createTestDb();
     vi.clearAllMocks();
     delete process.env.OCTOMUX_APPROVAL_TIMEOUT_MS;
+    mockGetStoredApprovalTimeoutMs.mockReturnValue(undefined);
     convId = createConversation({ title: 'conv' });
   });
 
@@ -137,6 +145,40 @@ describe('approval-timeout sweep (SHR-164)', () => {
     expect(approvalTimeoutMs()).toBe(90000);
     process.env.OCTOMUX_APPROVAL_TIMEOUT_MS = 'not-a-number';
     expect(approvalTimeoutMs()).toBe(DEFAULT_APPROVAL_TIMEOUT_MS);
+  });
+
+  describe.each([
+    {
+      name: 'env overrides a stored settings.json value',
+      env: '90000',
+      stored: 120000,
+      expected: 90000,
+    },
+    {
+      name: 'stored settings.json value is used when env is absent',
+      env: undefined,
+      stored: 120000,
+      expected: 120000,
+    },
+    {
+      name: 'hardcoded default is used when both env and stored are absent',
+      env: undefined,
+      stored: undefined,
+      expected: DEFAULT_APPROVAL_TIMEOUT_MS,
+    },
+    {
+      name: 'invalid env falls through to stored settings.json value',
+      env: 'not-a-number',
+      stored: 45000,
+      expected: 45000,
+    },
+  ])('approvalTimeoutMs resolution — $name', ({ env, stored, expected }) => {
+    it(`resolves to ${expected}`, () => {
+      if (env === undefined) delete process.env.OCTOMUX_APPROVAL_TIMEOUT_MS;
+      else process.env.OCTOMUX_APPROVAL_TIMEOUT_MS = env;
+      mockGetStoredApprovalTimeoutMs.mockReturnValue(stored);
+      expect(approvalTimeoutMs()).toBe(expected);
+    });
   });
 
   it('auto-rejects a card with no task_id without throwing', () => {

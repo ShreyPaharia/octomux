@@ -84,7 +84,11 @@ import {
   resumeConversation,
   conversationTmuxTarget,
 } from './runner.js';
-import { createConversation, getConversation, updateConversation } from './store.js';
+import {
+  createConversation,
+  getConversation,
+  updateConversation,
+} from '../repositories/orchestrator.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from './conductor-flags.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

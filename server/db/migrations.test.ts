@@ -82,4 +82,126 @@ describe('runMigrations (isolated)', () => {
     runMigrations(db);
     expect(() => runMigrations(db)).not.toThrow();
   });
+
+  // ── Schedule kinds as presets (spec/schedule-kinds-as-presets.md §8) ────────
+
+  describe('schedule_skills → schedules.prompt/config_json migration', () => {
+    /** Simulate a pre-migration DB: SCHEMA no longer creates `schedule_skills`,
+     * so an upgrade install needs it added back by hand before `runMigrations`
+     * can exercise the backfill-then-drop path. */
+    function addLegacyScheduleSkillsTable(instance: Database.Database): void {
+      instance.exec(`
+        CREATE TABLE schedule_skills (
+          kind        TEXT PRIMARY KEY,
+          content     TEXT NOT NULL,
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    }
+
+    function tableNames(instance: Database.Database): string[] {
+      return (
+        instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
+          name: string;
+        }>
+      ).map((r) => r.name);
+    }
+
+    it('backfills schedules.prompt from schedule_skills (joined on kind), materializes config_json, and drops the table', () => {
+      db = new Database(':memory:');
+      applyPragmas(db);
+      db.exec(SCHEMA);
+      addLegacyScheduleSkillsTable(db);
+
+      db.prepare(
+        `INSERT INTO schedule_skills (kind, content) VALUES ('weekly-update', 'Legacy DB skill body')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO schedules (id, kind, repo_path, cron, enabled, prompt)
+         VALUES ('sched-1', 'weekly-update', '/repo', '0 7 * * 1', 1, NULL)`,
+      ).run();
+      // Kind with no schedule_skills row — must fall back to the shipped
+      // preset's prompt (production: the one real case, doc-drift).
+      db.prepare(
+        `INSERT INTO schedules (id, kind, repo_path, cron, enabled, prompt)
+         VALUES ('sched-2', 'doc-drift', '/repo', '0 9 * * 1', 1, '')`,
+      ).run();
+      // Row with a non-empty prompt already — must NOT be overwritten.
+      db.prepare(
+        `INSERT INTO schedules (id, kind, repo_path, cron, enabled, prompt)
+         VALUES ('sched-3', 'doc-drift', '/repo', '0 9 * * 1', 1, 'already has a prompt')`,
+      ).run();
+
+      runMigrations(db);
+
+      expect(tableNames(db)).not.toContain('schedule_skills');
+
+      const row1 = db
+        .prepare(`SELECT prompt, config_json FROM schedules WHERE id = 'sched-1'`)
+        .get() as {
+        prompt: string;
+        config_json: string;
+      };
+      expect(row1.prompt).toBe('Legacy DB skill body');
+      // config_json materialized against weekly-update's schema (no config
+      // properties defined, so `{}`).
+      expect(JSON.parse(row1.config_json)).toEqual({});
+
+      const row2 = db
+        .prepare(`SELECT prompt, config_json FROM schedules WHERE id = 'sched-2'`)
+        .get() as {
+        prompt: string;
+        config_json: string;
+      };
+      expect(row2.prompt).toContain('# Doc drift'); // shipped kinds/doc-drift.json prompt
+      const config2 = JSON.parse(row2.config_json) as { maxIterations: number; baseBranch: string };
+      expect(config2.maxIterations).toBe(4);
+      expect(config2.baseBranch).toBe('main');
+
+      const row3 = db.prepare(`SELECT prompt FROM schedules WHERE id = 'sched-3'`).get() as {
+        prompt: string;
+      };
+      expect(row3.prompt).toBe('already has a prompt');
+    });
+
+    it('is a no-op when schedule_skills does not exist (fresh install)', () => {
+      db = new Database(':memory:');
+      applyPragmas(db);
+      db.exec(SCHEMA);
+      // SCHEMA no longer creates schedule_skills — nothing to migrate.
+      expect(tableNames(db)).not.toContain('schedule_skills');
+
+      expect(() => runMigrations(db)).not.toThrow();
+      expect(tableNames(db)).not.toContain('schedule_skills');
+    });
+
+    it('is idempotent: running twice does not re-run the backfill or error on the dropped table', () => {
+      db = new Database(':memory:');
+      applyPragmas(db);
+      db.exec(SCHEMA);
+      addLegacyScheduleSkillsTable(db);
+      db.prepare(
+        `INSERT INTO schedule_skills (kind, content) VALUES ('weekly-update', 'Legacy body')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO schedules (id, kind, repo_path, cron, enabled, prompt)
+         VALUES ('sched-1', 'weekly-update', '/repo', '0 7 * * 1', 1, NULL)`,
+      ).run();
+
+      runMigrations(db);
+      const firstPrompt = (
+        db.prepare(`SELECT prompt FROM schedules WHERE id = 'sched-1'`).get() as { prompt: string }
+      ).prompt;
+      expect(firstPrompt).toBe('Legacy body');
+
+      // Second run: schedule_skills is gone, so this must no-op — in
+      // particular, it must NOT clear the already-backfilled prompt.
+      expect(() => runMigrations(db)).not.toThrow();
+      const secondPrompt = (
+        db.prepare(`SELECT prompt FROM schedules WHERE id = 'sched-1'`).get() as { prompt: string }
+      ).prompt;
+      expect(secondPrompt).toBe('Legacy body');
+    });
+  });
 });
