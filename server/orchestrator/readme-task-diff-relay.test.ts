@@ -67,7 +67,11 @@ vi.mock('./exec.js', () => ({
 // Imported after the mocks. broadcast/events.js and hooks.js are intentionally
 // REAL — they are the wiring that was broken.
 import { createSupervisor, type Supervisor } from './supervisor.js';
-import { createConversation, upsertManagedTask, getManagedTask } from './store.js';
+import {
+  createConversation,
+  upsertManagedTask,
+  getManagedTask,
+} from '../repositories/orchestrator.js';
 import { advancePhaseForLabel } from '../hooks.js';
 import { broadcast, subscribeServerEvents } from '../events.js';
 

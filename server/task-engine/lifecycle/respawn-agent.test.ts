@@ -36,8 +36,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../../orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../orchestrator/store.js')>();
+vi.mock('../../repositories/orchestrator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../repositories/orchestrator.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 

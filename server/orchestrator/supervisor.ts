@@ -44,7 +44,7 @@ import {
   createCard,
   findConversationForTask,
   listManagedTasksForConversation,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 import { pushToConversation } from './stream.js';
 import { runSendMessage } from './exec.js';
 import { getTask } from '../repositories/index.js';

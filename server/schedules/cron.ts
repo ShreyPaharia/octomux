@@ -1,4 +1,5 @@
 import { Cron } from 'croner';
+import { badRequest, ServiceError } from '../services/errors.js';
 
 const cache = new Map<string, Cron>();
 
@@ -28,6 +29,52 @@ export function isCronDue(expr: string, now: Date, timezone?: string | null): bo
     const atMinute = new Date(now);
     atMinute.setUTCSeconds(0, 0);
     return job?.match(atMinute) ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate a cron expression against a timezone.
+ * Throws a 400 badRequest distinguishing expression vs. timezone errors.
+ *
+ * croner does not throw at construction time for invalid timezones — it only
+ * throws on .match(). We probe with a .match() call to trigger validation.
+ * To distinguish expression errors from timezone errors, we first try with UTC:
+ * if UTC also throws, the expression is bad; otherwise the timezone is bad.
+ */
+export function validateCronWithTimezone(expr: string, timezone?: string | null): void {
+  const tz = timezone ?? 'UTC';
+  try {
+    const job = new Cron(expr, { timezone: tz, paused: true });
+    // Probe to trigger timezone validation (croner validates timezone lazily on match)
+    job.match(new Date());
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    // Distinguish: try with UTC — if it also throws, the expression is bad;
+    // if UTC works, the timezone is the problem.
+    if (tz !== 'UTC') {
+      try {
+        const utcJob = new Cron(expr, { timezone: 'UTC', paused: true });
+        utcJob.match(new Date());
+        // Expression valid with UTC → timezone is the problem
+        throw badRequest(`invalid timezone: ${tz}`);
+      } catch (innerErr) {
+        if (innerErr instanceof ServiceError) throw innerErr;
+        // Also fails with UTC → expression is the problem
+        throw badRequest(`invalid cron expression: ${expr}`);
+      }
+    }
+    throw badRequest(`invalid cron expression: ${expr}`);
+  }
+}
+
+/** Boolean, non-throwing check — used by preset load-time validation (§3.2),
+ * which must never crash boot on a bad `defaultCron` in a hand-edited file. */
+export function isValidCronExpression(expr: string): boolean {
+  try {
+    validateCronWithTimezone(expr, 'UTC');
+    return true;
   } catch {
     return false;
   }

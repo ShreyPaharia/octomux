@@ -2,12 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb } from '../../test-helpers.js';
 import { getDb } from '../../db.js';
 
-const mockResolveSchedulePrompt = vi.fn();
 const mockCreateChat = vi.fn();
 
-vi.mock('../../schedule-prompt.js', () => ({
-  resolveSchedulePrompt: (...args: unknown[]) => mockResolveSchedulePrompt(...args),
-}));
 vi.mock('../../chats.js', () => ({
   createChat: (...args: unknown[]) => mockCreateChat(...args),
 }));
@@ -18,23 +14,29 @@ import { runDailyPlanFromSchedule, finishDailyPlanRunForChat } from './run.js';
 import { insertRun, getRun } from '../../repositories/runs.js';
 import type { RunResult } from '../../types.js';
 
+/** Insert a schedule row with a prompt — schedule.prompt is the self-contained
+ * source `runDailyPlanFromSchedule` now reads (spec/schedule-kinds-as-presets.md
+ * §1), materialized from the preset at create time in production. */
+function insertScheduleWithPrompt(id: string, prompt: string | null): void {
+  getDb()
+    .prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron, enabled, prompt) VALUES (?, 'daily-plan', '/repo', '0 9 * * *', 1, ?)`,
+    )
+    .run(id, prompt);
+}
+
 describe('runDailyPlanFromSchedule', () => {
   beforeEach(() => {
     createTestDb();
-    mockResolveSchedulePrompt.mockReset();
     mockCreateChat.mockReset();
   });
 
-  it('starts a chat with the resolved prompt and inserts a run row with chat_id set', async () => {
-    mockResolveSchedulePrompt.mockResolvedValue('Prep the day.');
+  it('starts a chat with the schedule prompt and inserts a run row with chat_id set', async () => {
+    insertScheduleWithPrompt('sched-1', 'Prep the day.');
     mockCreateChat.mockResolvedValue({ id: 'chat-1' });
 
     await runDailyPlanFromSchedule({ scheduleId: 'sched-1', trigger: 'manual' });
 
-    expect(mockResolveSchedulePrompt).toHaveBeenCalledWith({
-      scheduleId: 'sched-1',
-      kind: 'daily-plan',
-    });
     expect(mockCreateChat).toHaveBeenCalledWith({ prompt: 'Prep the day.', model: undefined });
 
     const rows = getDb()
@@ -47,7 +49,7 @@ describe('runDailyPlanFromSchedule', () => {
   });
 
   it('passes model to createChat when provided', async () => {
-    mockResolveSchedulePrompt.mockResolvedValue('Prep the day.');
+    insertScheduleWithPrompt('sched-2', 'Prep the day.');
     mockCreateChat.mockResolvedValue({ id: 'chat-2' });
 
     await runDailyPlanFromSchedule({
@@ -63,7 +65,7 @@ describe('runDailyPlanFromSchedule', () => {
   });
 
   it('passes null model to createChat when model is null', async () => {
-    mockResolveSchedulePrompt.mockResolvedValue('Prep the day.');
+    insertScheduleWithPrompt('sched-3', 'Prep the day.');
     mockCreateChat.mockResolvedValue({ id: 'chat-3' });
 
     await runDailyPlanFromSchedule({
@@ -76,6 +78,21 @@ describe('runDailyPlanFromSchedule', () => {
       prompt: 'Prep the day.',
       model: null,
     });
+  });
+
+  it('throws when the schedule has no prompt', async () => {
+    insertScheduleWithPrompt('sched-no-prompt', null);
+
+    await expect(
+      runDailyPlanFromSchedule({ scheduleId: 'sched-no-prompt', trigger: 'cron' }),
+    ).rejects.toThrow(/no prompt/);
+    expect(mockCreateChat).not.toHaveBeenCalled();
+  });
+
+  it('throws when the schedule does not exist', async () => {
+    await expect(
+      runDailyPlanFromSchedule({ scheduleId: 'does-not-exist', trigger: 'cron' }),
+    ).rejects.toThrow(/no prompt/);
   });
 });
 

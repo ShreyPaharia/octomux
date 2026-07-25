@@ -43,8 +43,8 @@ import {
   updateConversation,
   listActiveConversations,
   listPendingCards,
-} from './store.js';
-import type { OrchestratorConversation } from './store.js';
+} from '../repositories/orchestrator.js';
+import type { OrchestratorConversation } from '../repositories/orchestrator.js';
 
 const logger = childLogger('orchestrator/runner');
 

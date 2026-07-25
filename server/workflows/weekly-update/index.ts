@@ -1,6 +1,6 @@
 import { registerWorkflow } from '../registry.js';
 import { childLogger } from '../../logger.js';
-import { runWeeklyUpdate } from './run.js';
+import { runSession } from '../session-runner.js';
 import { WEEKLY_UPDATE_SCHEMA } from './schema.js';
 import type { RunContext, WorkflowType } from '../types.js';
 
@@ -19,13 +19,8 @@ export const weeklyUpdateWorkflow: WorkflowType = {
       'weekly-update: schedule fired',
     );
 
-    void runWeeklyUpdate({
-      repoPath: ctx.repoPath,
-      scheduleId: ctx.scheduleId,
-      trigger: ctx.trigger,
-      model: ctx.model,
-      timeoutMs: ctx.timeoutMs,
-    }).catch((err) => {
+    // Fire-and-forget: runSession blocks for the full headless agent run.
+    void runSession({ ...ctx, kind: 'weekly-update' }).catch((err) => {
       logger.error(
         { err, repo_path: ctx.repoPath, schedule_id: ctx.scheduleId },
         'weekly-update: run failed',

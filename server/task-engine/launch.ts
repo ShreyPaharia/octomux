@@ -3,7 +3,7 @@ import fs from 'fs';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { childLogger } from '../logger.js';
 import { mcpServerInvocation } from '../orchestrator/runner.js';
-import { isOrchestratorManaged } from '../orchestrator/store.js';
+import { isOrchestratorManaged } from '../repositories/orchestrator.js';
 import { shellQuoteSingle } from '../shell-quote.js';
 import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { setAgentHarnessSessionId } from '../repositories/index.js';

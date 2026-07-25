@@ -303,7 +303,8 @@ describe('startTask', () => {
   // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
 
   it('writes worker-mcp-config.json and adds --mcp-config flag for managed tasks', async () => {
-    const { upsertManagedTask, createConversation } = await import('./orchestrator/store.js');
+    const { upsertManagedTask, createConversation } =
+      await import('./repositories/orchestrator.js');
     insertTask(db);
     // Register the task as orchestrator-managed BEFORE calling startTask
     const convId = createConversation({ title: 'test-conv-mcp' });

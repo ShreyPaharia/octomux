@@ -86,11 +86,16 @@ vi.mock('@/lib/api/configApi', () => ({
 }));
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
-vi.mock('@/lib/api/schedulesApi', () => ({
-  scheduleSkillsApi: {
-    listScheduleSkills: vi.fn().mockResolvedValue([]),
-    updateScheduleSkill: vi.fn().mockResolvedValue({ kind: 'doc-drift', content: '' }),
-    resetScheduleSkill: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/lib/api/kindsApi', () => ({
+  kindsApi: {
+    listKinds: vi.fn().mockResolvedValue({ kinds: [] }),
+    savePreset: vi.fn().mockResolvedValue({
+      kind: 'my-custom-kind',
+      displayName: 'My Custom Kind',
+      execution: 'session',
+      source: 'home',
+    }),
+    deletePreset: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

@@ -3,7 +3,7 @@ import { createTestDb } from '../test-helpers.js';
 import { createGateway, type GatewayConductor } from './gateway.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
 import type { ChatEvent } from '../orchestrator/transcript.js';
-import { updateConversation, getPrimaryAgentConversation } from '../orchestrator/store.js';
+import { updateConversation, getPrimaryAgentConversation } from '../repositories/orchestrator.js';
 import { createAgent } from '../repositories/agents-config.js';
 import { pushToConversation } from '../orchestrator/stream.js';
 

@@ -3,7 +3,7 @@
  * an interactive chat (not a headless session) — the agent preps the day's
  * plan, then waits for the user to join and steer.
  */
-import { resolveSchedulePrompt } from '../../schedule-prompt.js';
+import { getSchedule } from '../../repositories/schedules.js';
 import { createChat } from '../../chats.js';
 import { insertRun, listRunsForWorkflow, finishRun } from '../../repositories/runs.js';
 import { childLogger } from '../../logger.js';
@@ -20,10 +20,13 @@ export interface RunDailyPlanFromScheduleInput {
 export async function runDailyPlanFromSchedule(
   input: RunDailyPlanFromScheduleInput,
 ): Promise<void> {
-  const prompt = await resolveSchedulePrompt({
-    scheduleId: input.scheduleId,
-    kind: 'daily-plan',
-  });
+  // Self-contained schedule row (spec/schedule-kinds-as-presets.md §1):
+  // schedule.prompt is materialized from the kind's preset at create time —
+  // no resolution chain, just a read.
+  const prompt = getSchedule(input.scheduleId)?.prompt;
+  if (!prompt) {
+    throw new Error(`daily-plan: schedule ${input.scheduleId} has no prompt`);
+  }
   const agent = await createChat({ prompt, model: input.model });
   const trigger = input.trigger ?? 'cron';
 

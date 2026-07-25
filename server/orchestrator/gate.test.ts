@@ -31,7 +31,7 @@ import {
   resolveCard,
   upsertManagedTask,
   getManagedTask,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 

@@ -11,7 +11,6 @@ export * from './published-reviews.js';
 export * from './file-review-state.js';
 export * from './loop-runs.js';
 export * from './schedules.js';
-export * from './schedule-skills.js';
 export * from './runs.js';
 // agents-config.ts (the Agents-feature config table) exports `getAgent`, which
 // collides with agent-runtime.ts's `getAgent` (the per-task tmux-window
@@ -27,5 +26,5 @@ export {
   getAgent as getAgentConfig,
 } from './agents-config.js';
 export type { AgentConfig } from './agents-config.js';
-export * from '../orchestrator/store.js';
+export * from './orchestrator.js';
 export * from '../integrations/store.js';

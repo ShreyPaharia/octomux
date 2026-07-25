@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SchedulesPage from './SchedulesPage';
 import { renderWithRouter } from '../test-helpers';
@@ -11,7 +11,7 @@ const {
   configApiProxy,
   loopApiProxy,
   schedulesApiProxy,
-  schedulesApiMock,
+  kindsApiProxy,
   apiMock,
 } = await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
 
@@ -20,6 +20,7 @@ vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 vi.mock('@/lib/api/loopApi', () => ({ loopApi: loopApiProxy }));
 vi.mock('@/lib/api/schedulesApi', () => ({ schedulesApi: schedulesApiProxy }));
+vi.mock('@/lib/api/kindsApi', () => ({ kindsApi: kindsApiProxy }));
 vi.mock('@/components/fields/RepoPickerField', () => ({
   RepoPickerField: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <input
@@ -109,10 +110,22 @@ describe('SchedulesPage', () => {
       ],
     });
     apiMock.listLoops.mockResolvedValue([]);
-    // getEffectivePrompt is not in the base schedulesApiMock defaults — add it directly.
-    (schedulesApiMock as Record<string, unknown>).getEffectivePrompt = vi.fn().mockResolvedValue({
-      content: 'Default prompt content with {{placeholder}}',
-      source: 'kind_skill',
+    apiMock.listKinds.mockResolvedValue({
+      kinds: [
+        {
+          kind: 'prod-log-triage',
+          displayName: 'Prod Log Triage',
+          execution: 'task',
+          source: 'builtin',
+          prompt: 'Default preset prompt for prod-log-triage.',
+        },
+        {
+          kind: 'custom',
+          displayName: 'Custom Prompt',
+          execution: 'session',
+          source: 'builtin',
+        },
+      ],
     });
   });
 
@@ -350,24 +363,98 @@ describe('SchedulesPage', () => {
     );
   });
 
-  it('effective-prompt preview is fetched when prompt override panel is expanded', async () => {
+  it('prompt is a plain textarea bound to schedules.prompt — no preview/reset machinery', async () => {
     const user = userEvent.setup();
-    apiMock.listSchedules.mockResolvedValue([makeSchedule({ id: 'sched-1' })]);
+    apiMock.listSchedules.mockResolvedValue([
+      makeSchedule({ id: 'sched-1', prompt: 'Existing schedule prompt.' }),
+    ]);
     apiMock.getScheduleRuns.mockResolvedValue({ runs: [] });
 
     renderWithRouter(<SchedulesPage />);
     await user.click(await screen.findByTestId('schedule-expand-sched-1'));
 
-    // Click the "Override prompt" toggle
-    const expandBtn = await screen.findByTestId('prompt-override-expand');
-    await user.click(expandBtn);
+    const promptField = await screen.findByTestId('schedule-edit-prompt-sched-1');
+    expect(promptField).toHaveValue('Existing schedule prompt.');
+    expect(screen.queryByTestId('prompt-override-expand')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('prompt-preview')).not.toBeInTheDocument();
+    expect(apiMock.getEffectivePrompt).toBeUndefined();
+
+    await user.clear(promptField);
+    await user.type(promptField, 'Updated prompt.');
+    await user.click(screen.getByTestId('schedule-save-sched-1'));
 
     await waitFor(() =>
-      expect(
-        (schedulesApiMock as Record<string, ReturnType<typeof vi.fn>>).getEffectivePrompt,
-      ).toHaveBeenCalledWith('sched-1'),
+      expect(apiMock.updateSchedule).toHaveBeenCalledWith(
+        'sched-1',
+        expect.objectContaining({ prompt: 'Updated prompt.' }),
+      ),
     );
-    expect(await screen.findByTestId('prompt-preview')).toBeTruthy();
+  });
+
+  it('create form pre-fills the prompt from the kind preset (kind-agnostic, via promptRequired)', async () => {
+    apiMock.listSchedules.mockResolvedValue([]);
+    renderWithRouter(<SchedulesPage />);
+
+    await screen.findByText(/no schedules yet/i);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('schedule-prompt')).toHaveValue(
+        'Default preset prompt for prod-log-triage.',
+      );
+    });
+  });
+
+  it('export action copies the schedule export envelope to the clipboard', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    apiMock.listSchedules.mockResolvedValue([makeSchedule({ id: 'sched-1' })]);
+
+    renderWithRouter(<SchedulesPage />);
+    await user.click(await screen.findByTestId('schedule-export-sched-1'));
+
+    await waitFor(() => expect(apiMock.exportSchedule).toHaveBeenCalledWith('sched-1'));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+  });
+
+  it('import dialog calls importSchedule with the parsed envelope and chosen repo', async () => {
+    const user = userEvent.setup();
+    apiMock.listSchedules.mockResolvedValue([]);
+    renderWithRouter(<SchedulesPage />);
+
+    await screen.findByText(/no schedules yet/i);
+    await user.click(screen.getByTestId('schedule-import-open'));
+
+    const dialog = await screen.findByTestId('schedule-import-dialog');
+    const repoInput = within(dialog).getByTestId('schedule-repo-path');
+    await user.type(repoInput, '/imported/repo');
+
+    const textarea = screen.getByTestId('schedule-import-textarea');
+    await user.click(textarea);
+    await user.paste(
+      JSON.stringify({
+        octomuxSchedule: 1,
+        kind: 'prod-log-triage',
+        name: 'Imported',
+        cron: '0 7 * * *',
+        timezone: null,
+        enabled: true,
+        model: null,
+        timeoutMs: null,
+        prompt: null,
+      }),
+    );
+
+    await user.click(screen.getByTestId('schedule-import-submit'));
+
+    await waitFor(() =>
+      expect(apiMock.importSchedule).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'prod-log-triage', repoPath: '/imported/repo' }),
+      ),
+    );
   });
 
   it('card title shows name when set, falls back to displayName', async () => {

@@ -201,7 +201,7 @@ describe('exec.runCreateTask', () => {
     });
 
     it('sets managed_tasks phase=planning when kind=plan and conversation_id is provided', async () => {
-      const { createConversation } = await import('./store.js');
+      const { createConversation } = await import('../repositories/orchestrator.js');
       const convId = createConversation({ title: 'Test conv' });
 
       const result = await runCreateTask({
@@ -262,7 +262,7 @@ describe('exec.runCreateTask', () => {
     });
 
     it('sets managed_tasks phase=speccing when kind=workflow and conversation_id provided', async () => {
-      const { createConversation } = await import('./store.js');
+      const { createConversation } = await import('../repositories/orchestrator.js');
       const convId = createConversation({ title: 'Workflow conv' });
 
       const result = await runCreateTask({
@@ -283,7 +283,7 @@ describe('exec.runCreateTask', () => {
     });
 
     it('kind=plan still sets phase=planning (unchanged)', async () => {
-      const { createConversation } = await import('./store.js');
+      const { createConversation } = await import('../repositories/orchestrator.js');
       const convId = createConversation({ title: 'Plan conv' });
 
       const result = await runCreateTask({
@@ -302,7 +302,7 @@ describe('exec.runCreateTask', () => {
     });
 
     it('default kind (no kind) still sets phase=implementing', async () => {
-      const { createConversation } = await import('./store.js');
+      const { createConversation } = await import('../repositories/orchestrator.js');
       const convId = createConversation({ title: 'Default conv' });
 
       const result = await runCreateTask({
@@ -681,7 +681,7 @@ describe('buildImplementWrapper', () => {
 describe('runCreateTask — plain managed task wraps brief with report_complete', () => {
   it('injects implement wrapper when conversation_id is set and kind is omitted', async () => {
     const db = createTestDb();
-    const { createConversation } = await import('./store.js');
+    const { createConversation } = await import('../repositories/orchestrator.js');
     const convId = createConversation({ title: 'test-plain-managed' });
 
     const result = await runCreateTask({
@@ -704,7 +704,7 @@ describe('runCreateTask — plain managed task wraps brief with report_complete'
 
   it('does NOT inject implement wrapper when kind=plan (uses planning template)', async () => {
     const db = createTestDb();
-    const { createConversation } = await import('./store.js');
+    const { createConversation } = await import('../repositories/orchestrator.js');
     const convId = createConversation({ title: 'test-plan-no-wrap' });
 
     const result = await runCreateTask({

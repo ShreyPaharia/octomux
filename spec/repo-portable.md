@@ -1,40 +1,41 @@
-# Repo-portable skills, agents, and saved files (SHR-184)
+# Skills, agent roles, and saved files (SHR-184)
 
-octomux stores repo-local configuration under `<repo>/.octomux/`. Skills and agents
-use a three-tier loader; saved files use a single documented directory with REST
-and CLI access.
+octomux stores repo-local configuration under `<repo>/.octomux/`. Skills and agent
+role definitions ship from a single source — the bundled octomux plugin — and are
+not editable through the API. Saved files use a documented repo-local directory
+with full REST and CLI access.
 
-## Layout
+## Skills and agent roles
 
-| Path                                     | Purpose                                       |
-| ---------------------------------------- | --------------------------------------------- |
-| `<repo>/.octomux/skills/<name>/SKILL.md` | Repo-portable skills (version-controlled)     |
-| `<repo>/.octomux/agents/<name>.md`       | Repo-portable agent definitions               |
-| `<repo>/.octomux/files/**`               | Saved files / lightweight memory (plain text) |
+Skills (e.g. `prod-log-triage`, `doc-drift`) and agent roles (`orchestrator`,
+`planner`, `reviewer`) live in the bundled octomux plugin:
 
-Home and package defaults still apply:
+| Path                                              | Purpose                                        |
+| ------------------------------------------------- | ---------------------------------------------- |
+| `<octomux-package>/plugin/skills/<name>/SKILL.md` | Built-in skills, single source                 |
+| `<octomux-package>/plugin/agents/<name>.md`       | Built-in agent role definitions, single source |
 
-| Path                                                   | Purpose                              |
-| ------------------------------------------------------ | ------------------------------------ |
-| `~/.claude/skills/<name>/SKILL.md`                     | User-global skills                   |
-| `$OCTOMUX_AGENTS_DIR` or `~/.octomux/agents/<name>.md` | User-global agent overrides          |
-| `<octomux-package>/skills/`                            | Built-in skills shipped with octomux |
-| `<octomux-package>/agents/`                            | Built-in agent definitions           |
+There is no repo or home tier and no edit/write API — earlier revisions had
+`<repo>/.octomux/{skills,agents}` and `~/.octomux/agents`, but nothing ever
+delivered them to a running agent: `syncAgents()` is a no-op in every harness,
+and delivery to launched agents is entirely via `--plugin-dir` pointing at the
+bundled plugin (see commit `1cd48c2`). Those tiers were readable through the
+REST API but invisible to every actual agent, so they were removed.
+`GET /api/skills`, `GET /api/skills/:name`, `GET /api/agents`, and
+`GET /api/agents/:name` now read only from the bundled plugin.
 
-## Loader precedence
+Users who want their own skills or subagents use Claude Code's native
+locations — `~/.claude/skills/` and `~/.claude/agents/` for user-global,
+`<repo>/.claude/` for repo-specific — which the harness reads directly and
+octomux neither manages nor lists.
 
-For both skills and agents:
+Octomux's own skills can also be installed into a user's own Claude Code
+directly, via the plugin marketplace:
 
-1. **Repo** — `<repo>/.octomux/...` (highest)
-2. **Home** — `~/.claude/skills` or `~/.octomux/agents`
-3. **Built-in** — package `skills/` and `agents/` dirs
-
-On task launch, effective skills are mirrored to `<worktree>/.claude/skills/` and
-agents to `<worktree>/.claude/agents/` (or Cursor rules) so harnesses resolve them
-without writing to `~/.claude`.
-
-Optional `repo_path` query parameter on skills/agents REST endpoints scopes reads and
-writes to the repo tier.
+```
+/plugin marketplace add ShreyPaharia/octomux-agents
+/plugin install octomux@octomux
+```
 
 ## Saved files API
 

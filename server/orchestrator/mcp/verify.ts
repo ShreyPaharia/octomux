@@ -38,7 +38,7 @@ import {
   upsertManagedTask,
   listManagedTasksWithDependsOn,
   getConversationUsage as storeGetConversationUsage,
-} from '../store.js';
+} from '../../repositories/orchestrator.js';
 import { pushToConversation } from '../stream.js';
 
 const logger = childLogger('orchestrator/mcp/verify');

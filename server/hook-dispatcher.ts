@@ -48,6 +48,32 @@ export function invalidateHookEnabledCache(scope?: string, key?: string): void {
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+/** Default hook script / integration-handler timeout (ms). Override via OCTOMUX_HOOK_TIMEOUT_MS. */
+const DEFAULT_HOOK_TIMEOUT_MS = 30000;
+
+/**
+ * Resolve the hook subprocess / integration-provider handler timeout (ms):
+ * env override first, then settings.json's `hookTimeoutMs`, then the
+ * hardcoded default. Settings are loaded lazily (mirrors the integrations
+ * lazy-import below) so a test env without settings.json/DB falls straight
+ * through to the default instead of throwing.
+ */
+export async function resolveHookTimeoutMs(): Promise<number> {
+  const raw = process.env.OCTOMUX_HOOK_TIMEOUT_MS;
+  if (raw !== undefined) {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  try {
+    const { getSettings } = await import('./settings.js');
+    const settings = await getSettings();
+    if (settings.hookTimeoutMs !== undefined) return settings.hookTimeoutMs;
+  } catch {
+    // settings unavailable (e.g. test env) — fall through to the default
+  }
+  return DEFAULT_HOOK_TIMEOUT_MS;
+}
+
 function resolveHooksLogsDir(): string {
   return isProduction
     ? path.join(octomuxRoot(), 'logs', 'hooks')
@@ -146,7 +172,7 @@ async function runScript(
   cwd: string,
   logsDir: string,
 ): Promise<void> {
-  const timeoutMs = parseInt(process.env.OCTOMUX_HOOK_TIMEOUT_MS ?? '30000', 10);
+  const timeoutMs = await resolveHookTimeoutMs();
   const startedAt = Date.now();
   const baseName = path.basename(scriptPath);
   const taskId = envelope.task?.id;
@@ -300,7 +326,7 @@ async function fireIntegrationProviders(
         }
       : envelope;
 
-  const timeoutMs = parseInt(process.env.OCTOMUX_HOOK_TIMEOUT_MS ?? '30000', 10);
+  const timeoutMs = await resolveHookTimeoutMs();
 
   for (const integration of integrations) {
     if (!integration.enabled) continue;

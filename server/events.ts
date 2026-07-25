@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { appendEvent, eventsSince } from './orchestrator/store.js';
+import { appendEvent, eventsSince } from './repositories/orchestrator.js';
 
 export type ServerEvent =
   | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
-import { updateConversation } from './orchestrator/store.js';
+import { updateConversation } from './repositories/orchestrator.js';
 
 /**
  * Fake conductor runtime: no real tmux. `startConversation` stamps a

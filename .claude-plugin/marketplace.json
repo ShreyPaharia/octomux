@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "octomux",
+  "description": "Skills and agent roles for orchestrating autonomous Claude Code agents with octomux.",
+  "owner": {
+    "name": "Shrey Paharia",
+    "url": "https://github.com/ShreyPaharia"
+  },
+  "plugins": [
+    {
+      "name": "octomux",
+      "description": "Task orchestration, PR review, planning, and scheduled-session skills for octomux.",
+      "source": "./plugin",
+      "category": "productivity"
+    }
+  ]
+}

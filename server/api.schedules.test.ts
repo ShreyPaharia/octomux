@@ -4,34 +4,12 @@ import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';
 import { createSchedule } from './repositories/schedules.js';
 import { insertRun } from './repositories/runs.js';
-import { upsertScheduleSkill } from './repositories/schedule-skills.js';
-import { registerWorkflow } from './workflows/registry.js';
-
-// Register a minimal 'custom' test workflow to exercise the custom-kind validation path.
-// B3 will register this in production; this inline registration keeps the tests self-contained
-// until that lands.
-function ensureCustomWorkflowRegistered() {
-  // Guard: if already registered (e.g. by B3 landing), skip.
-  try {
-    registerWorkflow({
-      kind: 'custom',
-      displayName: 'Custom Prompt',
-      surfaces: ['artifact'],
-      execution: 'session',
-      trigger: { kind: 'cron' },
-      run: async () => {},
-    });
-  } catch {
-    // registerWorkflow overwrites silently (Map.set), so no throw expected
-  }
-}
 
 describe('schedule routes', () => {
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     createTestDb();
-    ensureCustomWorkflowRegistered();
     app = createApp();
   });
 
@@ -157,6 +135,54 @@ describe('schedule routes', () => {
 
       expect(res.status).toBe(201);
       expect(JSON.parse(res.body.config_json)).toMatchObject({ slackUserId: 'U123' });
+    });
+
+    it('materializes config schema defaults at write time (§4.3) — config_json is never null for a kind with a schema', async () => {
+      const res = await request(app)
+        .post('/api/schedules')
+        .send({ kind: 'doc-drift', repoPath: '/repo', cron: '0 7 * * *' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.config_json).not.toBeNull();
+      const config = JSON.parse(res.body.config_json);
+      expect(config.maxIterations).toBe(4); // DOC_DRIFT_CONFIG_SCHEMA default
+      expect(config.baseBranch).toBe('main');
+    });
+
+    it('caller-supplied config values win over schema defaults', async () => {
+      const res = await request(app)
+        .post('/api/schedules')
+        .send({
+          kind: 'doc-drift',
+          repoPath: '/repo',
+          cron: '0 7 * * *',
+          config: { maxIterations: 9 },
+        });
+
+      expect(res.status).toBe(201);
+      expect(JSON.parse(res.body.config_json).maxIterations).toBe(9);
+    });
+
+    it('copies the prompt from the kind preset when the caller omits it (§1: self-contained row)', async () => {
+      const res = await request(app)
+        .post('/api/schedules')
+        .send({ kind: 'weekly-update', repoPath: '/repo', cron: '0 7 * * 1' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.prompt).toBeTruthy();
+      expect(res.body.prompt).toContain('Weekly Update');
+    });
+
+    it('caller-supplied prompt wins over the preset default', async () => {
+      const res = await request(app).post('/api/schedules').send({
+        kind: 'weekly-update',
+        repoPath: '/repo',
+        cron: '0 7 * * 1',
+        prompt: 'my own body',
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.prompt).toBe('my own body');
     });
 
     it('accepts optional name, timezone, model, timeoutMs, prompt', async () => {
@@ -547,64 +573,90 @@ describe('schedule routes', () => {
     });
   });
 
-  // ── GET /api/schedules/:id/effective-prompt ──────────────────────────────────
+  // ── GET /api/schedules/:id/effective-prompt is GONE (spec/schedule-kinds-as-presets.md
+  // §4.1) — the row *is* the prompt now, there is nothing left to "resolve".
 
-  describe('GET /api/schedules/:id/effective-prompt', () => {
+  // ── GET /api/schedules/:id/export + POST /api/schedules/import ──────────────
+
+  describe('GET /api/schedules/:id/export', () => {
     it('returns 404 for an unknown schedule id', async () => {
-      const res = await request(app).get('/api/schedules/does-not-exist/effective-prompt');
+      const res = await request(app).get('/api/schedules/does-not-exist/export');
       expect(res.status).toBe(404);
     });
 
-    it('returns kind_skill source when no schedule prompt override exists', async () => {
-      // Pre-seed the schedule_skills DB so resolveScheduleSkillContent doesn't hit the filesystem
-      upsertScheduleSkill('weekly-update', 'The weekly update skill content');
+    it('omits id, repo_path, last_run_at, and timestamps', async () => {
       const row = createSchedule({
         kind: 'weekly-update',
         repoPath: '/repo',
         cron: '0 7 * * 1',
+        name: 'My Weekly',
+        prompt: 'custom body',
       });
 
-      const res = await request(app).get(`/api/schedules/${row.id}/effective-prompt`);
+      const res = await request(app).get(`/api/schedules/${row.id}/export`);
       expect(res.status).toBe(200);
-      expect(res.body.source).toBe('kind_skill');
-      expect(res.body.content).toBe('The weekly update skill content');
+      expect(res.body.octomuxSchedule).toBe(1);
+      expect(res.body.kind).toBe('weekly-update');
+      expect(res.body.name).toBe('My Weekly');
+      expect(res.body.prompt).toBe('custom body');
+      expect(res.body).not.toHaveProperty('id');
+      expect(res.body).not.toHaveProperty('repo_path');
+      expect(res.body).not.toHaveProperty('repoPath');
+      expect(res.body).not.toHaveProperty('last_run_at');
+      expect(res.body).not.toHaveProperty('created_at');
+      expect(res.body).not.toHaveProperty('updated_at');
+    });
+  });
+
+  describe('POST /api/schedules/import', () => {
+    it('round-trips a schedule through export → import into a new repoPath', async () => {
+      const original = createSchedule({
+        kind: 'weekly-update',
+        repoPath: '/repo-a',
+        cron: '0 7 * * 1',
+        name: 'My Weekly',
+        prompt: 'custom body',
+        model: 'claude-opus-4-8',
+        timeoutMs: 120000,
+      });
+
+      const exported = await request(app).get(`/api/schedules/${original.id}/export`);
+      expect(exported.status).toBe(200);
+
+      const imported = await request(app)
+        .post('/api/schedules/import')
+        .send({ ...exported.body, repoPath: '/repo-b' });
+
+      expect(imported.status).toBe(201);
+      expect(imported.body.id).not.toBe(original.id);
+      expect(imported.body.kind).toBe('weekly-update');
+      expect(imported.body.repo_path).toBe('/repo-b');
+      expect(imported.body.name).toBe('My Weekly');
+      expect(imported.body.prompt).toBe('custom body');
+      expect(imported.body.model).toBe('claude-opus-4-8');
+      expect(imported.body.timeout_ms).toBe(120000);
     });
 
-    it('returns override source after PATCHing a prompt override', async () => {
-      upsertScheduleSkill('weekly-update', 'The weekly update skill content');
-      const row = createSchedule({
-        kind: 'weekly-update',
-        repoPath: '/repo',
-        cron: '0 7 * * 1',
-      });
-
-      // PATCH the prompt override
-      await request(app)
-        .patch(`/api/schedules/${row.id}`)
-        .send({ prompt: 'my custom override prompt' });
-
-      const res = await request(app).get(`/api/schedules/${row.id}/effective-prompt`);
-      expect(res.status).toBe(200);
-      expect(res.body.source).toBe('override');
-      expect(res.body.content).toBe('my custom override prompt');
+    it('rejects foreign JSON (missing/mismatched octomuxSchedule envelope) with 400', async () => {
+      const res = await request(app)
+        .post('/api/schedules/import')
+        .send({ kind: 'weekly-update', repoPath: '/repo', cron: '0 7 * * 1' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/octomuxSchedule|export/i);
     });
 
-    it('falls back to kind_skill source after clearing prompt override (prompt: null)', async () => {
-      upsertScheduleSkill('weekly-update', 'The weekly update skill content');
-      const row = createSchedule({
-        kind: 'weekly-update',
-        repoPath: '/repo',
-        cron: '0 7 * * 1',
-        prompt: 'my custom override',
-      });
+    it('rejects a kind-export envelope (octomuxKind, not octomuxSchedule) with 400', async () => {
+      const res = await request(app)
+        .post('/api/schedules/import')
+        .send({ octomuxKind: 1, kind: 'weekly-update', repoPath: '/repo', cron: '0 7 * * 1' });
+      expect(res.status).toBe(400);
+    });
 
-      // Clear the override
-      await request(app).patch(`/api/schedules/${row.id}`).send({ prompt: null });
-
-      const res = await request(app).get(`/api/schedules/${row.id}/effective-prompt`);
-      expect(res.status).toBe(200);
-      expect(res.body.source).toBe('kind_skill');
-      expect(res.body.content).toBe('The weekly update skill content');
+    it('still enforces normal create validation (missing repoPath → 400)', async () => {
+      const res = await request(app)
+        .post('/api/schedules/import')
+        .send({ octomuxSchedule: 1, kind: 'weekly-update', cron: '0 7 * * 1' });
+      expect(res.status).toBe(400);
     });
   });
 });
