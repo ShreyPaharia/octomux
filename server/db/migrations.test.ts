@@ -31,7 +31,7 @@ describe('runMigrations (isolated)', () => {
     }
     expect(taskCols).not.toContain('status');
 
-    const agentCols = (db.pragma('table_info(agents)') as Array<{ name: string }>).map(
+    const agentCols = (db.pragma('table_info(workers)') as Array<{ name: string }>).map(
       (c) => c.name,
     );
     for (const col of AGENTS_TABLE_COLUMNS) {

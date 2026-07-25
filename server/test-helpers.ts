@@ -110,7 +110,7 @@ export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {
   } as Agent;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO workers (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
@@ -139,7 +139,7 @@ export function getTask(db: Database.Database, id: string): Task | undefined {
 }
 
 export function getAgents(db: Database.Database, taskId: string): Agent[] {
-  return db.prepare('SELECT * FROM agents WHERE task_id = ?').all(taskId) as Agent[];
+  return db.prepare('SELECT * FROM workers WHERE task_id = ?').all(taskId) as Agent[];
 }
 
 export function insertPermissionPrompt(
@@ -261,7 +261,7 @@ export function getAgentActivity(
   db: Database.Database,
   agentId: string,
 ): { hook_activity: string } {
-  return db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get(agentId) as {
+  return db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get(agentId) as {
     hook_activity: string;
   };
 }

@@ -1267,7 +1267,7 @@ describe('addAgent opts', () => {
     await addAgent(task, { prompt: 'Go', notify_agent_id: 'parent-agent-01' });
     const row = db
       .prepare(
-        'SELECT notify_agent_id FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
+        'SELECT notify_agent_id FROM workers WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
       )
       .get(task.id) as { notify_agent_id: string | null };
     expect(row.notify_agent_id).toBe('parent-agent-01');
@@ -1277,7 +1277,7 @@ describe('addAgent opts', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(task, { prompt: 'Go', label: 'Researcher' });
     const row = db
-      .prepare('SELECT label FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
+      .prepare('SELECT label FROM workers WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
       .get(task.id) as { label: string };
     expect(row.label).toBe('Researcher');
   });
@@ -2704,7 +2704,7 @@ describe('hopAgent', () => {
       worktree: '/tmp/wt-t',
     });
     const agent = insertAgent(db, { id: 'agChat', task_id: null });
-    db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
+    db.prepare(`UPDATE workers SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
     const reloaded = {
       ...agent,
       task_id: null,

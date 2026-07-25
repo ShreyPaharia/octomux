@@ -27,7 +27,7 @@ import type { RunResult } from '../../types.js';
 function insertActiveAgent(taskId: string): void {
   getDb()
     .prepare(
-      `INSERT INTO agents (id, task_id, window_index, label, status, harness_id, hook_token)
+      `INSERT INTO workers (id, task_id, window_index, label, status, harness_id, hook_token)
        VALUES (?, ?, 0, 'Agent 1', 'running', 'claude-code', 'tok')`,
     )
     .run(`${taskId}-agent`, taskId);

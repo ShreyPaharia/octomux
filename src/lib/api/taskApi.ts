@@ -263,14 +263,17 @@ export const taskApi = {
   deleteComment: (taskId: string, commentId: string) =>
     request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' }),
   sendAgentMessage: (taskId: string, agentId: string, message: string) =>
-    request<{ ok: boolean }>(`/tasks/${taskId}/agents/${agentId}/message`, {
+    request<{ ok: boolean }>(`/tasks/${taskId}/workers/${agentId}/message`, {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
-    request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
+    request<Agent>(`/tasks/${taskId}/workers`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
   stopAgent: (taskId: string, agentId: string) =>
-    request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
+    request<void>(`/tasks/${taskId}/workers/${agentId}`, { method: 'DELETE' }),
   createUserTerminal: (taskId: string) =>
     request<{ editor: string; windowIndex: number | null }>(`/tasks/${taskId}/user-terminal`, {
       method: 'POST',
@@ -302,9 +305,9 @@ export const taskApi = {
   getTaskHookExecutions: (id: string, limit?: number) =>
     request<HookExecution[]>(`/tasks/${id}/hooks${limit ? `?limit=${limit}` : ''}`),
 
-  // Agent task hopping (runtime agent row ← tasks table)
+  // Worker task hopping (per-task tmux worker row ← tasks table)
   moveAgentToTask: (agentId: string, taskId: string | null) =>
-    request<Agent>(`/agents/${encodeURIComponent(agentId)}/task`, {
+    request<Agent>(`/workers/${encodeURIComponent(agentId)}/task`, {
       method: 'PATCH',
       body: JSON.stringify({ task_id: taskId }),
     }),

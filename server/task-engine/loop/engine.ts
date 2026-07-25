@@ -1,6 +1,6 @@
 import { childLogger } from '../../logger.js';
 import { getTask, setRuntimeState } from '../../repositories/tasks.js';
-import { getAgent, findFirstActiveAgent } from '../../repositories/agent-runtime.js';
+import { getWorker, findFirstActiveAgent } from '../../repositories/workers.js';
 import {
   createLoopRun,
   getActiveLoopRunForTask,
@@ -169,7 +169,7 @@ export async function startLoop(
 
   const agentRef = findFirstActiveAgent(taskId);
   if (!agentRef) throw new Error(`startLoop: no active agent for task ${taskId}`);
-  const agent = getAgent(agentRef.id);
+  const agent = getWorker(agentRef.id);
   if (!agent) throw new Error(`startLoop: agent not found: ${agentRef.id}`);
 
   const run = createLoopRun({
@@ -218,7 +218,7 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
     return;
   }
   const task = getTask(taskId);
-  const agent = getAgent(agentId);
+  const agent = getWorker(agentId);
   if (!task || !agent || !task.worktree) {
     logger.warn({ task_id: taskId, agent_id: agentId }, 'loop: task/agent/worktree missing');
     return;
@@ -346,7 +346,7 @@ export async function resumeLoopOnStartup(task: Task): Promise<void> {
   }
 
   const agentRef = findFirstActiveAgent(task.id);
-  const agent = agentRef ? getAgent(agentRef.id) : undefined;
+  const agent = agentRef ? getWorker(agentRef.id) : undefined;
   if (!agent) {
     logger.warn(
       { task_id: task.id, loop_run_id: run.id },

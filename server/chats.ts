@@ -4,7 +4,7 @@ import fs from 'fs';
 import { octomuxRoot } from './octomux-root.js';
 import { nanoid } from 'nanoid';
 import {
-  getAgent,
+  getWorker,
   insertChatAgent,
   listChatAgents,
   getChatAgent,
@@ -142,7 +142,7 @@ export async function createChat(opts: CreateChatOptions = {}): Promise<Agent> {
     throw err;
   }
 
-  return getAgent(id) as Agent;
+  return getWorker(id) as Agent;
 }
 
 /** List all standalone agents (task_id IS NULL), oldest first. */

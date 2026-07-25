@@ -204,7 +204,7 @@ describe('respawnAgentFresh', () => {
     expect(startupCmd).toContain('OCTOMUX_ACTION_TOKEN=');
     expect(startupCmd).toContain('real-hook-token-abc');
 
-    const { checkAgentTokenExists } = await import('../../repositories/agent-runtime.js');
+    const { checkAgentTokenExists } = await import('../../repositories/workers.js');
     expect(checkAgentTokenExists('real-hook-token-abc')).toBe(true);
   });
 

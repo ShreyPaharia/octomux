@@ -15,7 +15,7 @@ import {
   setPrHeadSha,
 } from '../repositories/tasks.js';
 import { deleteWorktree } from '../repositories/worktrees.js';
-import { findFirstActiveAgent } from '../repositories/agent-runtime.js';
+import { findFirstActiveAgent } from '../repositories/workers.js';
 import { checkoutRef, fetchOriginQuiet, isAncestor } from '../task-engine/git.js';
 import { repoNameWithOwner } from './github-repo.js';
 

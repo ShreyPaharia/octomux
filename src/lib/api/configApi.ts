@@ -161,9 +161,10 @@ export const configApi = {
   listSkills: () => request<Skill[]>('/skills'),
   getSkill: (name: string) => request<SkillDetail>(`/skills/${encodeURIComponent(name)}`),
 
-  // Agents
-  listAgents: () => request<AgentDefinition[]>('/agents'),
-  getAgent: (name: string) => request<AgentDetail>(`/agents/${encodeURIComponent(name)}`),
+  // Agent role definitions (orchestrator/planner/reviewer plugin skeletons) —
+  // not to be confused with `agentsApi` (persistent conductor agents, `/api/agents`).
+  listAgents: () => request<AgentDefinition[]>('/agent-roles'),
+  getAgent: (name: string) => request<AgentDetail>(`/agent-roles/${encodeURIComponent(name)}`),
 
   // Repo Config
   listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),

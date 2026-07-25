@@ -110,7 +110,7 @@ describe('loop routes', () => {
     });
 
     it('returns 400 when the task has no active agent', async () => {
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE id = 'a1'`).run();
       const res = await request(app)
         .post('/api/loops')
         .send({ taskId: 't1', spec: { prompt: 'x', verify: 'y', maxIterations: 5 } });

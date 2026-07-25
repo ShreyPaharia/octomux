@@ -44,7 +44,7 @@ test.describe('keystroke routing', () => {
     const task = await tracker.create(page, { title: 'Routing Within' });
     await waitForStatus(page, task.id, 'running');
 
-    const addRes = await page.request.post(`${API}/tasks/${task.id}/agents`, { data: {} });
+    const addRes = await page.request.post(`${API}/tasks/${task.id}/workers`, { data: {} });
     expect(addRes.ok()).toBeTruthy();
 
     let detail = await getTask(page, task.id);

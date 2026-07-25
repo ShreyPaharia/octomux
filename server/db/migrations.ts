@@ -51,7 +51,7 @@ export function addColumn(
 }
 
 function agentFkIsNotNull(instance: Database.Database): boolean {
-  const rows = instance.pragma('table_info(agents)') as Array<{
+  const rows = instance.pragma('table_info(workers)') as Array<{
     name: string;
     notnull: number;
   }>;
@@ -60,7 +60,7 @@ function agentFkIsNotNull(instance: Database.Database): boolean {
 }
 
 /**
- * Rebuild the `agents` table to make `task_id` nullable while preserving rows,
+ * Rebuild the `workers` table to make `task_id` nullable while preserving rows,
  * FK, cascade behaviour, and indexes. SQLite < 3.35 can't ALTER a column's
  * NOT NULL in place; a table rebuild is the supported path.
  */
@@ -68,7 +68,7 @@ function rebuildAgentsTable(instance: Database.Database): void {
   instance
     .transaction(() => {
       // Capture dynamically-added columns that may not exist in the CREATE.
-      const oldCols = (instance.pragma('table_info(agents)') as Array<{ name: string }>).map(
+      const oldCols = (instance.pragma('table_info(workers)') as Array<{ name: string }>).map(
         (c) => c.name,
       );
       const has = (c: string) => oldCols.includes(c);
@@ -105,14 +105,14 @@ function rebuildAgentsTable(instance: Database.Database): void {
         'created_at',
       ].join(', ');
 
-      instance.exec(`INSERT INTO agents_new SELECT ${selectCols} FROM agents`);
-      instance.exec(`DROP TABLE agents`);
-      instance.exec(`ALTER TABLE agents_new RENAME TO agents`);
+      instance.exec(`INSERT INTO agents_new SELECT ${selectCols} FROM workers`);
+      instance.exec(`DROP TABLE workers`);
+      instance.exec(`ALTER TABLE agents_new RENAME TO workers`);
 
       // Recreate indexes (idempotent CREATE IF NOT EXISTS).
-      instance.exec(`CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id)`);
+      instance.exec(`CREATE INDEX IF NOT EXISTS idx_workers_task ON workers(task_id)`);
       instance.exec(
-        `CREATE INDEX IF NOT EXISTS idx_agents_harness_session_id ON agents(harness_session_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_workers_harness_session_id ON workers(harness_session_id)`,
       );
     })
     .default();
@@ -126,43 +126,43 @@ export function runMigrations(instance: Database.Database): void {
   // were dropped after Phase 2a and are re-homed in the worktrees table.
   const taskCols = columnsOf(instance, 'tasks');
 
-  const agentCols = columnsOf(instance, 'agents');
+  const agentCols = columnsOf(instance, 'workers');
 
-  // Rename agents.claude_session_id -> agents.harness_session_id (step-1 of
+  // Rename workers.claude_session_id -> workers.harness_session_id (step-1 of
   // the harness abstraction). Must run BEFORE addColumn for harness_session_id
   // so the rename fires on old DBs before we try to add the new-named column.
   // Idempotent: only runs when the old column still exists.
   // SQLite 3.25+ supports RENAME COLUMN.
   if (agentCols.has('claude_session_id') && !agentCols.has('harness_session_id')) {
-    instance.exec(`ALTER TABLE agents RENAME COLUMN claude_session_id TO harness_session_id`);
+    instance.exec(`ALTER TABLE workers RENAME COLUMN claude_session_id TO harness_session_id`);
     instance.exec(`DROP INDEX IF EXISTS idx_agents_claude_session_id`);
     agentCols.delete('claude_session_id');
     agentCols.add('harness_session_id');
   }
 
-  addColumn(instance, 'agents', 'harness_session_id', 'harness_session_id TEXT', agentCols);
+  addColumn(instance, 'workers', 'harness_session_id', 'harness_session_id TEXT', agentCols);
   addColumn(
     instance,
-    'agents',
+    'workers',
     'hook_activity',
     "hook_activity TEXT NOT NULL DEFAULT 'active'",
     agentCols,
   );
   addColumn(
     instance,
-    'agents',
+    'workers',
     'hook_activity_updated_at',
     'hook_activity_updated_at TEXT',
     agentCols,
   );
   addColumn(
     instance,
-    'agents',
+    'workers',
     'harness_id',
     `harness_id TEXT NOT NULL DEFAULT 'claude-code'`,
     agentCols,
   );
-  addColumn(instance, 'agents', 'hook_token', `hook_token TEXT NOT NULL DEFAULT ''`, agentCols);
+  addColumn(instance, 'workers', 'hook_token', `hook_token TEXT NOT NULL DEFAULT ''`, agentCols);
 
   const taskRefCols = columnsOf(instance, 'task_external_refs');
   addColumn(instance, 'task_external_refs', 'metadata', 'metadata TEXT', taskRefCols);
@@ -183,7 +183,7 @@ export function runMigrations(instance: Database.Database): void {
   // Ensure the index exists (created here rather than SCHEMA to avoid ordering
   // issues when the old column is still named claude_session_id at SCHEMA time).
   instance.exec(
-    `CREATE INDEX IF NOT EXISTS idx_agents_harness_session_id ON agents(harness_session_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_workers_harness_session_id ON workers(harness_session_id)`,
   );
 
   // ─── Legacy pre-Phase-2a shim: add run_mode / backfill from no_worktree ──
@@ -225,9 +225,9 @@ export function runMigrations(instance: Database.Database): void {
       .default();
   }
 
-  // ─── Phase 2a migration: worktrees entity + agents.task_id nullable ──────
+  // ─── Phase 2a migration: worktrees entity + workers.task_id nullable ──────
   // Additive shape: introduces `worktrees` table, `tasks.worktree_id`,
-  // `agents.pinned`, `agents.tmux_session`, and nullable `agents.task_id`.
+  // `workers.pinned`, `workers.tmux_session`, and nullable `workers.task_id`.
   // Legacy columns on `tasks` (worktree, run_mode, etc.) remain for now;
   // a later phase rewrites consumers then drops them.
   const agentFk = agentFkIsNotNull(instance);
@@ -292,19 +292,19 @@ export function runMigrations(instance: Database.Database): void {
       .default();
   }
 
-  // Make agents.task_id nullable via table rebuild if currently NOT NULL.
+  // Make workers.task_id nullable via table rebuild if currently NOT NULL.
   if (agentFk) {
     rebuildAgentsTable(instance);
   }
 
-  // Add agents.tmux_session column (post-rebuild).
-  const agentCols2 = columnsOf(instance, 'agents');
-  addColumn(instance, 'agents', 'tmux_session', 'tmux_session TEXT', agentCols2);
-  addColumn(instance, 'agents', 'agent', 'agent TEXT', agentCols2);
+  // Add workers.tmux_session column (post-rebuild).
+  const agentCols2 = columnsOf(instance, 'workers');
+  addColumn(instance, 'workers', 'tmux_session', 'tmux_session TEXT', agentCols2);
+  addColumn(instance, 'workers', 'agent', 'agent TEXT', agentCols2);
   // Drop legacy `pinned` column from older installs (carried the singleton
   // orchestrator row). SQLite >= 3.35 supports DROP COLUMN.
   if (agentCols2.has('pinned')) {
-    instance.exec(`ALTER TABLE agents DROP COLUMN pinned`);
+    instance.exec(`ALTER TABLE workers DROP COLUMN pinned`);
     agentCols2.delete('pinned');
   }
 
@@ -351,7 +351,7 @@ export function runMigrations(instance: Database.Database): void {
   instance.exec(`DROP INDEX IF EXISTS idx_tasks_active_worktree`);
 
   // Drop the legacy seeded orchestrator agent row from older installs.
-  instance.prepare(`DELETE FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`).run();
+  instance.prepare(`DELETE FROM workers WHERE id = 'orchestrator' AND task_id IS NULL`).run();
 
   // ─── Workflow / runtime_state migration ───────────────────────────────────
   // Add new columns to tasks if they don't exist yet (pre-wave-1 DBs).
@@ -454,7 +454,7 @@ export function runMigrations(instance: Database.Database): void {
       CREATE TABLE IF NOT EXISTS task_updates (
         id          TEXT PRIMARY KEY,
         task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-        agent_id    TEXT REFERENCES agents(id) ON DELETE SET NULL,
+        agent_id    TEXT REFERENCES workers(id) ON DELETE SET NULL,
         kind        TEXT NOT NULL,
         from_status TEXT,
         to_status   TEXT,
@@ -559,7 +559,7 @@ export function runMigrations(instance: Database.Database): void {
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             resolved_at TEXT,
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+            FOREIGN KEY (agent_id) REFERENCES workers(id) ON DELETE CASCADE
           )
         `);
         instance.exec(`INSERT INTO permission_prompts SELECT * FROM permission_prompts_old`);
@@ -580,13 +580,13 @@ export function runMigrations(instance: Database.Database): void {
       .default();
   }
 
-  // Resolve stale pending prompts and reset agents stuck in 'waiting'
+  // Resolve stale pending prompts and reset workers stuck in 'waiting'
   // (hook callbacks lost during the previous run's shutdown)
   instance.exec(
     `UPDATE permission_prompts SET status = 'resolved', resolved_at = datetime('now') WHERE status = 'pending'`,
   );
   instance.exec(
-    `UPDATE agents SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
+    `UPDATE workers SET hook_activity = 'active', hook_activity_updated_at = datetime('now')
      WHERE hook_activity = 'waiting' AND status = 'running'`,
   );
 
@@ -730,10 +730,10 @@ export function runMigrations(instance: Database.Database): void {
        ON tasks(review_of_task_id) WHERE review_of_task_id IS NOT NULL`,
   );
 
-  // ── Intra-task sub-agents: notify_agent_id on agents (2026-06-11) ──────────
+  // ── Intra-task sub-workers: notify_agent_id on workers (2026-06-11) ──────────
   // When a sub-agent completes, its parent agent is notified via this link.
-  const agentCols3 = columnsOf(instance, 'agents');
-  addColumn(instance, 'agents', 'notify_agent_id', 'notify_agent_id TEXT', agentCols3);
+  const agentCols3 = columnsOf(instance, 'workers');
+  addColumn(instance, 'workers', 'notify_agent_id', 'notify_agent_id TEXT', agentCols3);
 
   // ── Orchestrator chat tables (2026-06-20, SHR-117) ───────────────────────
   // Forward-only; all created via CREATE TABLE IF NOT EXISTS for idempotency.
@@ -839,8 +839,8 @@ export function runMigrations(instance: Database.Database): void {
     orchConvCols,
   );
   // ── Conductor hook token (orchestrator gate auth) ───────────────────────────
-  // The conductor session is not an `agents` row, so its PreToolUse gate hook
-  // token has nowhere to live in the agents table. Persist it here so
+  // The conductor session is not a `workers` row, so its PreToolUse gate hook
+  // token has nowhere to live in the workers table. Persist it here so
   // requireHookToken can authenticate the conductor's gate callbacks. Forward-only.
   addColumn(instance, 'orchestrator_conversations', 'hook_token', 'hook_token TEXT', orchConvCols);
   // ── Conductor cwd (for resume) ──────────────────────────────────────────────
@@ -1040,11 +1040,17 @@ export function runMigrations(instance: Database.Database): void {
 
   // ── Agents feature: long-running agent config + owning conversation link
   // (2026-07-24) ─────────────────────────────────────────────────────────────
-  // Named `agent_configs` (not `agents`) — the `agents` table already exists
-  // and means something different (a per-task tmux-window worker). An agent's
-  // live session is an `orchestrator_conversations` row tagged with agent_id.
+  // Table named `agents` — the persistent conductor agent. Not to be confused
+  // with `workers` (a per-task tmux-window worker, renamed from `agents` in
+  // the 2026-07-25 agents/workers terminology cleanup below). An agent's live
+  // session is an `orchestrator_conversations` row tagged with agent_id.
+  //
+  // CREATE TABLE IF NOT EXISTS here is safe even on an old, not-yet-renamed
+  // install: at this point `agents` still means the old worker table, so this
+  // statement no-ops (table already exists under that name) and the real
+  // conductor table gets created once the rename below vacates the name.
   instance.exec(`
-    CREATE TABLE IF NOT EXISTS agent_configs (
+    CREATE TABLE IF NOT EXISTS agents (
       id             TEXT PRIMARY KEY,
       name           TEXT NOT NULL,
       system_prompt  TEXT NOT NULL,
@@ -1059,7 +1065,7 @@ export function runMigrations(instance: Database.Database): void {
     instance,
     'orchestrator_conversations',
     'agent_id',
-    'agent_id TEXT REFERENCES agent_configs(id) ON DELETE SET NULL',
+    'agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL',
     orchConvColsForAgent,
   );
 
@@ -1117,4 +1123,73 @@ export function runMigrations(instance: Database.Database): void {
       .default();
     logger.info('migrated schedule_skills into schedules.prompt/config_json and dropped the table');
   }
+}
+
+/**
+ * Rename `agents` → `workers` (per-task tmux worker) and `agent_configs` →
+ * `agents` (persistent conductor agent) — the 2026-07-25 terminology cleanup
+ * that resolves "agent" meaning three different things across the codebase.
+ *
+ * MUST run before `instance.exec(SCHEMA)`, not inside `runMigrations`. SCHEMA
+ * now declares the final `workers` table via `CREATE TABLE IF NOT EXISTS`; on
+ * an old, not-yet-renamed install that still has real data in a table named
+ * `agents`, running SCHEMA first would create a brand-new EMPTY `workers`
+ * table (since none exists yet under that name), and this function's guard
+ * (`workers` must not already exist) would then see `workers` present and
+ * skip the real rename — silently stranding all worker data in the orphaned
+ * `agents` table. Calling this first means `workers` never exists at SCHEMA
+ * time except via a real prior rename, so SCHEMA's `CREATE TABLE IF NOT
+ * EXISTS workers` always correctly no-ops post-rename.
+ *
+ * better-sqlite3 here runs SQLite 3.53.1 with `legacy_alter_table = 0`, under
+ * which `ALTER TABLE x RENAME TO y` rewrites `REFERENCES x(...)` clauses in
+ * dependent tables automatically (verified empirically, not just assumed):
+ * task_updates.agent_id and permission_prompts.agent_id get repointed to
+ * workers(id), and orchestrator_conversations.agent_id gets repointed to
+ * agents(id) — no separate FK-repair step needed.
+ *
+ * Order is mandatory: `agents` must become `workers` BEFORE `agent_configs`
+ * becomes `agents`, or step 2 collides with the still-existing `agents`
+ * table and errors loudly (proven safe — a reversed order throws instead of
+ * silently corrupting anything).
+ *
+ * Idempotent: guarded on `agents` existing AND `workers` NOT existing — false
+ * on fresh installs/test DBs (nothing named `agents` ever existed) and false
+ * on every boot after the first successful run (both tables already settled).
+ * Step 2 additionally no-ops when `agent_configs` doesn't exist (a DB old
+ * enough to predate the Agents feature entirely) — the "Agents feature"
+ * migration further down creates a fresh `agents` conductor table once step
+ * 1 has vacated the name, so there's nothing lost by skipping it here.
+ */
+export function renameAgentWorkerTables(instance: Database.Database): void {
+  const tableNames = new Set(
+    (
+      instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name),
+  );
+  if (!tableNames.has('agents') || tableNames.has('workers')) return;
+
+  // Step 2 only applies when there's actually an `agent_configs` table to
+  // rename — a DB old enough to predate the Agents feature entirely (has the
+  // legacy `agents` worker table but never saw `agent_configs` created) has
+  // nothing to rename here; the "Agents feature" migration below creates a
+  // fresh `agents` conductor table once step 1 has vacated the name.
+  const hasAgentConfigs = tableNames.has('agent_configs');
+
+  instance
+    .transaction(() => {
+      instance.exec(`ALTER TABLE agents RENAME TO workers`);
+      // Legacy index names carried over from the old `agents` table; drop
+      // them so SCHEMA's `idx_workers_*` creation below doesn't leave a
+      // redundant duplicate index behind.
+      instance.exec(`DROP INDEX IF EXISTS idx_agents_task`);
+      instance.exec(`DROP INDEX IF EXISTS idx_agents_harness_session_id`);
+      if (hasAgentConfigs) {
+        instance.exec(`ALTER TABLE agent_configs RENAME TO agents`);
+      }
+    })
+    .default();
+  logger.info('renamed agents -> workers and agent_configs -> agents');
 }

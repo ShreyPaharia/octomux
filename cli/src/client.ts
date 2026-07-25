@@ -201,14 +201,14 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<void>(`/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
     },
     addAgent(taskId, data) {
-      return request<Agent>(`/tasks/${encodeURIComponent(taskId)}/agents`, {
+      return request<Agent>(`/tasks/${encodeURIComponent(taskId)}/workers`, {
         method: 'POST',
         body: JSON.stringify(data || {}),
       });
     },
     stopAgent(taskId, agentId) {
       return request<void>(
-        `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}`,
+        `/tasks/${encodeURIComponent(taskId)}/workers/${encodeURIComponent(agentId)}`,
         { method: 'DELETE' },
       );
     },
@@ -223,7 +223,7 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(
-        `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/message`,
+        `/tasks/${encodeURIComponent(taskId)}/workers/${encodeURIComponent(agentId)}/message`,
         { method: 'POST', body: JSON.stringify({ message }) },
       );
     },

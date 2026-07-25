@@ -1,16 +1,12 @@
 /**
- * `/api/agent-configs` — CRUD for the Agents-feature `agent_configs` table,
+ * `/api/agents` — CRUD for the `agents` table (persistent conductor agents),
  * plus derived live status and the endpoint that ensures/opens an agent's
  * persistent conductor session.
  *
- * NAMING CORRECTION (mirrors the `agents` → `agent_configs` table rename from
- * Task 1): `/api/agents` was NOT available for this feature — it's already
- * `GET /api/agents` + `GET /api/agents/:name` in `routes/agent-defs.ts` (agent
- * *role* definitions: orchestrator/planner/reviewer) and
- * `PATCH /api/agents/:id/task` in `routes/chats.ts` (moving a per-task
- * tmux-window worker between tasks — the pre-existing `agents` table). Reusing
- * that path would have silently shadowed those routes. `/api/agent-configs`
- * matches the already-adopted `agent_configs` table/repository naming.
+ * The three-way "agent" naming collision this used to route around is gone:
+ * the per-task tmux worker now lives at `/api/workers` (`routes/task-agents.ts`,
+ * `routes/chats.ts`), and agent *role* definitions (orchestrator/planner/
+ * reviewer) live at `/api/agent-roles` (`routes/agent-defs.ts`).
  */
 import express from 'express';
 import type { Request, Response } from 'express';
@@ -22,7 +18,7 @@ import {
   deleteAgent,
   type AgentConfig,
   type UpdateAgentInput,
-} from '../repositories/agents-config.js';
+} from '../repositories/agents.js';
 import { createConversation, getPrimaryAgentConversation } from '../repositories/orchestrator.js';
 import {
   startConversation,
@@ -50,7 +46,7 @@ export interface AgentWithStatus extends AgentConfig {
  * 'idle' (v1 does not attempt to detect "actively generating" — that needs a
  * pane-content heuristic that isn't cheap/reliable enough yet; 'working' is
  * reserved for a later pass). Never throws: a tmux probe failure is treated as
- * 'stopped' so `GET /api/agent-configs` can't be taken down by a flaky tmux call.
+ * 'stopped' so `GET /api/agents` can't be taken down by a flaky tmux call.
  */
 export async function deriveAgentStatus(
   agentId: string,
@@ -83,14 +79,14 @@ function normalizeChannelConfig(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
-// GET /api/agent-configs — list all agents with derived status + session_id
-router.get('/api/agent-configs', async (_req: Request, res: Response) => {
+// GET /api/agents — list all agents with derived status + session_id
+router.get('/api/agents', async (_req: Request, res: Response) => {
   const agents = listAgents();
   res.json(await Promise.all(agents.map(withStatus)));
 });
 
-// POST /api/agent-configs — create an agent config
-router.post('/api/agent-configs', async (req: Request, res: Response) => {
+// POST /api/agents — create an agent config
+router.post('/api/agents', async (req: Request, res: Response) => {
   const body = req.body as {
     name?: unknown;
     system_prompt?: unknown;
@@ -118,16 +114,16 @@ router.post('/api/agent-configs', async (req: Request, res: Response) => {
   res.status(201).json(await withStatus(getAgent(id)!));
 });
 
-// GET /api/agent-configs/:id — a single agent with derived status + session_id
-router.get('/api/agent-configs/:id', async (req: Request, res: Response) => {
+// GET /api/agents/:id — a single agent with derived status + session_id
+router.get('/api/agents/:id', async (req: Request, res: Response) => {
   const { id } = req.params as Record<string, string>;
   const agent = getAgent(id);
   if (!agent) throw notFound('Agent not found');
   res.json(await withStatus(agent));
 });
 
-// PATCH /api/agent-configs/:id — update name/system_prompt/channel/channel_config
-router.patch('/api/agent-configs/:id', async (req: Request, res: Response) => {
+// PATCH /api/agents/:id — update name/system_prompt/channel/channel_config
+router.patch('/api/agents/:id', async (req: Request, res: Response) => {
   const { id } = req.params as Record<string, string>;
   const agent = getAgent(id);
   if (!agent) throw notFound('Agent not found');
@@ -165,8 +161,8 @@ router.patch('/api/agent-configs/:id', async (req: Request, res: Response) => {
   res.json(await withStatus(getAgent(id)!));
 });
 
-// DELETE /api/agent-configs/:id — delete the agent, stopping its session first
-router.delete('/api/agent-configs/:id', async (req: Request, res: Response) => {
+// DELETE /api/agents/:id — delete the agent, stopping its session first
+router.delete('/api/agents/:id', async (req: Request, res: Response) => {
   const { id } = req.params as Record<string, string>;
   const agent = getAgent(id);
   if (!agent) throw notFound('Agent not found');
@@ -181,8 +177,8 @@ router.delete('/api/agent-configs/:id', async (req: Request, res: Response) => {
   res.status(204).end();
 });
 
-// POST /api/agent-configs/:id/session — ensure + return the agent's persistent conversation
-router.post('/api/agent-configs/:id/session', async (req: Request, res: Response) => {
+// POST /api/agents/:id/session — ensure + return the agent's persistent conversation
+router.post('/api/agents/:id/session', async (req: Request, res: Response) => {
   const { id } = req.params as Record<string, string>;
   const agent = getAgent(id);
   if (!agent) throw notFound('Agent not found');

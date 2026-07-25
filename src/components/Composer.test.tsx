@@ -222,7 +222,7 @@ describe('Composer / submit', () => {
     });
   });
 
-  it('add-agent mode → POST /tasks/:id/agents with prompt, navigates to parent detail', async () => {
+  it('add-agent mode → POST /tasks/:id/workers with prompt, navigates to parent detail', async () => {
     apiMock.addAgent.mockResolvedValueOnce({
       id: 'a1',
       task_id: 't1',

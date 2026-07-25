@@ -6,7 +6,7 @@ import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
 import { execTmux } from '../../tmux-bin.js';
 import {
-  getAgent,
+  getWorker,
   setAgentWindowRunning,
   setAgentHarnessSessionId,
 } from '../../repositories/index.js';
@@ -95,7 +95,7 @@ export async function respawnAgentFresh(
     });
   }
 
-  const updated = getAgent(agent.id) as Agent;
+  const updated = getWorker(agent.id) as Agent;
   broadcast({ type: 'task:updated', payload: { taskId: task.id } });
 
   logger.info(

@@ -37,14 +37,14 @@ describe('Database', () => {
       expect(columns.map((c) => c.name)).toContain(col);
     });
 
-    it.each(AGENTS_TABLE_COLUMNS)('agents table has column: %s', (col) => {
-      const columns = db.pragma('table_info(agents)') as { name: string }[];
+    it.each(AGENTS_TABLE_COLUMNS)('workers table has column: %s', (col) => {
+      const columns = db.pragma('table_info(workers)') as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(col);
     });
 
     const indexCases = [
       { table: 'tasks', index: 'idx_tasks_active_worktree' },
-      { table: 'agents', index: 'idx_agents_task' },
+      { table: 'workers', index: 'idx_workers_task' },
     ];
 
     it.each(indexCases)('creates $index on $table', ({ table, index }) => {
@@ -58,7 +58,7 @@ describe('Database', () => {
   // ─── Constraint Tests ───────────────────────────────────────────────────
 
   describe('constraints', () => {
-    it('enforces foreign key on agents.task_id', () => {
+    it('enforces foreign key on workers.task_id', () => {
       expect(() => insertAgent(db, { task_id: 'nonexistent' })).toThrow();
     });
 
@@ -106,7 +106,7 @@ describe('Database', () => {
 
     it('auto-populates created_at on agents', () => {
       insertTask(db);
-      db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
+      db.prepare('INSERT INTO workers (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
         'auto-agent',
         DEFAULTS.task.id,
         0,
@@ -173,7 +173,7 @@ describe('Database', () => {
     const migrationColumns = [
       { table: 'tasks', column: 'initial_prompt' },
       { table: 'tasks', column: 'worktree_id' },
-      { table: 'agents', column: 'harness_session_id' },
+      { table: 'workers', column: 'harness_session_id' },
     ];
 
     it.each(migrationColumns)('$table has $column column (migration)', ({ table, column }) => {
@@ -192,8 +192,8 @@ describe('Database', () => {
       expect(cols).toEqual(PERMISSION_PROMPTS_TABLE_COLUMNS);
     });
 
-    it('adds hook_activity column to agents table', () => {
-      const cols = (db.pragma('table_info(agents)') as { name: string }[]).map((c) => c.name);
+    it('adds hook_activity column to workers table', () => {
+      const cols = (db.pragma('table_info(workers)') as { name: string }[]).map((c) => c.name);
       expect(cols).toContain('hook_activity');
       expect(cols).toContain('hook_activity_updated_at');
     });
@@ -232,7 +232,7 @@ describe('Database', () => {
 
       initDb(db);
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+      const agent = db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get('a1') as {
         hook_activity: string;
       };
       expect(agent.hook_activity).toBe(expected);
@@ -254,8 +254,8 @@ describe('Database', () => {
       expect(cols).toContain('worktree_id');
     });
 
-    it('makes agents.task_id nullable', () => {
-      const rows = db.pragma('table_info(agents)') as Array<{
+    it('makes workers.task_id nullable', () => {
+      const rows = db.pragma('table_info(workers)') as Array<{
         name: string;
         notnull: number;
       }>;
@@ -263,8 +263,8 @@ describe('Database', () => {
       expect(col.notnull).toBe(0);
     });
 
-    it('adds agents.tmux_session and agents.agent columns; drops legacy pinned', () => {
-      const cols = (db.pragma('table_info(agents)') as Array<{ name: string }>).map((c) => c.name);
+    it('adds workers.tmux_session and workers.agent columns; drops legacy pinned', () => {
+      const cols = (db.pragma('table_info(workers)') as Array<{ name: string }>).map((c) => c.name);
       expect(cols).toContain('tmux_session');
       expect(cols).toContain('agent');
       expect(cols).not.toContain('pinned');
@@ -277,14 +277,14 @@ describe('Database', () => {
 
     it('removes legacy seeded orchestrator agent row', () => {
       const row = db
-        .prepare(`SELECT id FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`)
+        .prepare(`SELECT id FROM workers WHERE id = 'orchestrator' AND task_id IS NULL`)
         .get();
       expect(row).toBeUndefined();
     });
 
     it('allows inserting a standalone agent with NULL task_id', () => {
       const stmt = db.prepare(
-        `INSERT INTO agents (id, task_id, window_index, label, tmux_session)
+        `INSERT INTO workers (id, task_id, window_index, label, tmux_session)
          VALUES (?, NULL, 0, 'chat', 'octomux-agent-chat-1')`,
       );
       expect(() => stmt.run('chat-1')).not.toThrow();
@@ -399,14 +399,14 @@ describe('Database', () => {
       expect(row.harness_id).toBe('claude-code');
     });
 
-    it('adds harness_id and hook_token to agents with defaults', () => {
+    it('adds harness_id and hook_token to workers with defaults', () => {
       const db = createTestDb();
       db.prepare(
-        `INSERT INTO agents (id, task_id, window_index, label, harness_session_id, agent)
+        `INSERT INTO workers (id, task_id, window_index, label, harness_session_id, agent)
          VALUES ('a1', NULL, 0, 'Agent 1', 'old-session-uuid', NULL)`,
       ).run();
       const row = db
-        .prepare(`SELECT harness_id, hook_token FROM agents WHERE id = ?`)
+        .prepare(`SELECT harness_id, hook_token FROM workers WHERE id = ?`)
         .get('a1') as {
         harness_id: string;
         hook_token: string;
@@ -419,7 +419,7 @@ describe('Database', () => {
       const db = createTestDb();
       initDb(db);
       initDb(db);
-      const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+      const cols = db.pragma('table_info(workers)') as Array<{ name: string }>;
       const names = cols.map((c) => c.name);
       expect(names.filter((n) => n === 'harness_id')).toHaveLength(1);
       expect(names.filter((n) => n === 'hook_token')).toHaveLength(1);
@@ -649,31 +649,34 @@ describe('claude_session_id rename', () => {
 
     initDb(db);
 
-    const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+    // Pre-rename simulation: `agents` had no `agent_configs` sibling, so the
+    // 2026-07-25 agents/workers rename renames `agents` -> `workers` (step 2,
+    // agent_configs -> agents, no-ops since there's nothing to rename).
+    const cols = db.pragma('table_info(workers)') as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
     expect(names).toContain('harness_session_id');
     expect(names).not.toContain('claude_session_id');
 
-    const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+    const row = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a1') as {
       harness_session_id: string;
     };
     expect(row.harness_session_id).toBe('old-uuid');
 
-    const indexes = db.pragma('index_list(agents)') as Array<{ name: string }>;
-    expect(indexes.map((i) => i.name)).toContain('idx_agents_harness_session_id');
+    const indexes = db.pragma('index_list(workers)') as Array<{ name: string }>;
+    expect(indexes.map((i) => i.name)).toContain('idx_workers_harness_session_id');
     expect(indexes.map((i) => i.name)).not.toContain('idx_agents_claude_session_id');
   });
 });
 
-describe('agents feature: agent_configs table + orchestrator_conversations.agent_id', () => {
-  it('creates the agent_configs table on a fresh DB', () => {
+describe('agents feature: agents table (conductor) + orchestrator_conversations.agent_id', () => {
+  it('creates the agents table on a fresh DB', () => {
     const db = createTestDb();
     const tables = db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
       .all() as Array<{ name: string }>;
-    expect(tables.map((t) => t.name)).toContain('agent_configs');
+    expect(tables.map((t) => t.name)).toContain('agents');
 
-    const cols = db.pragma('table_info(agent_configs)') as Array<{ name: string }>;
+    const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
     expect(names).toEqual(
       expect.arrayContaining([

@@ -18,7 +18,7 @@ import {
 import { getTask, insertRun } from '../../repositories/index.js';
 import { startTask } from '../../task-engine/index.js';
 import { sendMessageToAgent } from '../../tmux-input.js';
-import { findFirstActiveAgent } from '../../repositories/agent-runtime.js';
+import { findFirstActiveAgent } from '../../repositories/workers.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';

@@ -196,7 +196,7 @@ describe('loop-group routes', () => {
       const [runA, runB] = createRes.body.loopRuns;
       db.prepare(`UPDATE loop_runs SET status = 'done' WHERE id IN (?, ?)`).run(runA.id, runB.id);
 
-      const agentRow = db.prepare('SELECT hook_token FROM agents LIMIT 1').get() as {
+      const agentRow = db.prepare('SELECT hook_token FROM workers LIMIT 1').get() as {
         hook_token: string;
       };
 
@@ -223,7 +223,7 @@ describe('loop-group routes', () => {
       const createRes = await request(app)
         .post('/api/loop-groups')
         .send({ repoPath: '/repo', baseBranch: 'main', spec: VALID_SPEC, n: 2 });
-      const agentRow = db.prepare('SELECT hook_token FROM agents LIMIT 1').get() as {
+      const agentRow = db.prepare('SELECT hook_token FROM workers LIMIT 1').get() as {
         hook_token: string;
       };
 

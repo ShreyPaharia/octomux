@@ -8,7 +8,7 @@ import {
   updateConversation,
   getPrimaryAgentConversation,
 } from '../repositories/orchestrator.js';
-import { createAgent, getAgent } from '../repositories/agents-config.js';
+import { createAgent, getAgent } from '../repositories/agents.js';
 import { pushToConversation } from '../orchestrator/stream.js';
 
 /** A fake adapter that records outbound sends / typing indicators. */

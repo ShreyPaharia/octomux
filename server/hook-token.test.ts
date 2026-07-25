@@ -47,7 +47,7 @@ describe('ensureHookToken', () => {
     const agent = makeAgent();
     const token = await ensureHookToken(agent, null);
     expect(token).toMatch(/^[a-f0-9]{64}$/);
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = 'a1'`).get() as {
+    const row = getDb().prepare(`SELECT hook_token FROM workers WHERE id = 'a1'`).get() as {
       hook_token: string;
     };
     expect(row.hook_token).toBe(token);
@@ -69,7 +69,7 @@ describe('ensureHookToken', () => {
     const token = await ensureHookToken(agent, null);
     expect(token).toBe('');
     // DB row should still have empty token — no write occurred.
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = 'a3'`).get() as {
+    const row = getDb().prepare(`SELECT hook_token FROM workers WHERE id = 'a3'`).get() as {
       hook_token: string;
     };
     expect(row.hook_token).toBe('');
@@ -81,7 +81,7 @@ describe('ensureHookToken', () => {
     const agent = makeAgent({ id: 'a4', task_id: 't2' });
     const token = await ensureHookToken(agent, null);
     expect(token).toMatch(/^[a-f0-9]{64}$/);
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = 'a4'`).get() as {
+    const row = getDb().prepare(`SELECT hook_token FROM workers WHERE id = 'a4'`).get() as {
       hook_token: string;
     };
     expect(row.hook_token).toBe(token);

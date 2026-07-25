@@ -36,14 +36,14 @@ vi.mock('./task-engine/index.js', async () => {
       db.prepare(
         `UPDATE tasks SET runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare('UPDATE agents SET status = ? WHERE task_id = ?').run('stopped', task.id);
+      db.prepare('UPDATE workers SET status = ? WHERE task_id = ?').run('stopped', task.id);
     }),
     softDeleteTask: vi.fn(async (task: any) => {
       const db = getDb();
       db.prepare(
         `UPDATE tasks SET deleted_at = datetime('now'), runtime_state = 'idle', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE task_id = ?`).run(task.id);
     }),
     deleteTask: vi.fn(),
     resumeTask: vi.fn(async (task: any) => {
@@ -52,7 +52,7 @@ vi.mock('./task-engine/index.js', async () => {
         `UPDATE tasks SET runtime_state = 'running', updated_at = datetime('now') WHERE id = ?`,
       ).run(task.id);
       db.prepare(
-        "UPDATE agents SET status = 'running' WHERE task_id = ? AND status = 'stopped'",
+        "UPDATE workers SET status = 'running' WHERE task_id = ? AND status = 'stopped'",
       ).run(task.id);
     }),
     addAgent: vi.fn(async (_task: any, _opts?: any) => ({
@@ -91,14 +91,14 @@ vi.mock('./task-engine/index.js', async () => {
       const { getDb } = await import('./db.js');
       const db = getDb();
       db.prepare(
-        `UPDATE agents SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running' WHERE id = ?`,
+        `UPDATE workers SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running' WHERE id = ?`,
       ).run(
         toTaskId,
         toTaskId === null ? 0 : 7,
         toTaskId === null ? `octomux-chat-${agent.id}` : null,
         agent.id,
       );
-      return db.prepare('SELECT * FROM agents WHERE id = ?').get(agent.id);
+      return db.prepare('SELECT * FROM workers WHERE id = ?').get(agent.id);
     }),
   };
 });
@@ -126,33 +126,35 @@ vi.mock('./chats.js', async () => {
         counter += 1;
         const id = `chat-test-${counter.toString().padStart(2, '0')}`;
         db.prepare(
-          `INSERT INTO agents
+          `INSERT INTO workers
              (id, task_id, window_index, label, status, harness_id, harness_session_id,
               hook_token, hook_activity, tmux_session, agent, created_at)
            VALUES (?, NULL, 0, ?, 'running', 'claude-code', ?, '', 'active', ?, ?, datetime('now'))`,
         ).run(id, opts.label ?? 'Chat', `sid-${id}`, `octomux-chat-${id}`, opts.agent ?? null);
-        return db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
+        return db.prepare('SELECT * FROM workers WHERE id = ?').get(id);
       },
     ),
     listChats: vi.fn(() => {
       const db = getDb();
-      return db.prepare(`SELECT * FROM agents WHERE task_id IS NULL ORDER BY created_at ASC`).all();
+      return db
+        .prepare(`SELECT * FROM workers WHERE task_id IS NULL ORDER BY created_at ASC`)
+        .all();
     }),
     getChat: vi.fn((id: string) => {
       const db = getDb();
-      return db.prepare(`SELECT * FROM agents WHERE id = ? AND task_id IS NULL`).get(id) ?? null;
+      return db.prepare(`SELECT * FROM workers WHERE id = ? AND task_id IS NULL`).get(id) ?? null;
     }),
     closeChat: vi.fn(async (chat: { id: string }) => {
       const db = getDb();
       db.prepare(
-        `UPDATE agents SET status = 'stopped', hook_activity = 'idle',
+        `UPDATE workers SET status = 'stopped', hook_activity = 'idle',
             hook_activity_updated_at = datetime('now')
           WHERE id = ?`,
       ).run(chat.id);
     }),
     deleteChat: vi.fn(async (chat: { id: string }) => {
       const db = getDb();
-      db.prepare('DELETE FROM agents WHERE id = ?').run(chat.id);
+      db.prepare('DELETE FROM workers WHERE id = ?').run(chat.id);
     }),
   };
 });
@@ -265,15 +267,15 @@ const notFoundCases = [
     url: '/api/tasks/nonexistent/start',
   },
   {
-    name: 'POST /api/tasks/:id/agents',
+    name: 'POST /api/tasks/:id/workers',
     method: 'post' as const,
-    url: '/api/tasks/nonexistent/agents',
+    url: '/api/tasks/nonexistent/workers',
     body: {},
   },
   {
-    name: 'DELETE /api/tasks/:id/agents/:agentId',
+    name: 'DELETE /api/tasks/:id/workers/:agentId',
     method: 'delete' as const,
-    url: '/api/tasks/nonexistent/agents/agent1',
+    url: '/api/tasks/nonexistent/workers/agent1',
   },
 
   {
@@ -282,9 +284,9 @@ const notFoundCases = [
     url: '/api/tasks/nonexistent/user-terminal',
   },
   {
-    name: 'POST /api/tasks/:id/agents/:agentId/message',
+    name: 'POST /api/tasks/:id/workers/:agentId/message',
     method: 'post' as const,
-    url: '/api/tasks/nonexistent/agents/agent1/message',
+    url: '/api/tasks/nonexistent/workers/agent1/message',
     body: { message: 'hello' },
   },
 ];
@@ -904,7 +906,7 @@ describe('DELETE /api/tasks/:id', () => {
     await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
     // Agents still exist but are stopped
     const agents = db
-      .prepare('SELECT * FROM agents WHERE task_id = ?')
+      .prepare('SELECT * FROM workers WHERE task_id = ?')
       .all(DEFAULTS.task.id) as any[];
     expect(agents).toHaveLength(1);
     expect(agents[0].status).toBe('stopped');
@@ -1335,16 +1337,16 @@ describe('PATCH /api/tasks/:id/base', () => {
   });
 });
 
-// ─── POST /api/tasks/:id/agents ──────────────────────────────────────────────
+// ─── POST /api/tasks/:id/workers ──────────────────────────────────────────────
 
-describe('POST /api/tasks/:id/agents', () => {
+describe('POST /api/tasks/:id/workers', () => {
   // ─── Status gating (table-driven) ──────────────────────────────────────
 
   const nonRunningStates = ['idle', 'setting_up', 'error'];
 
   it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { runtime_state: state as any });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/workers`).send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('running');
   });
@@ -1353,7 +1355,7 @@ describe('POST /api/tasks/:id/agents', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
     const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers`)
       .send({ prompt: 'Write tests' });
 
     expect(res.status).toBe(201);
@@ -1364,28 +1366,32 @@ describe('POST /api/tasks/:id/agents', () => {
   it('passes prompt to addAgent', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers`)
       .send({ prompt: 'Write comprehensive tests' });
 
-    expect(vi.mocked(addAgent).mock.calls[0][1]).toMatchObject({
+    // Assert the call this test made, not `calls[0]`: `beforeEach` runs
+    // `restoreAllMocks` (spies) rather than `clearAllMocks`, so this mock's call
+    // history can carry over from an earlier test in the file and index 0 is
+    // then somebody else's call.
+    expect(vi.mocked(addAgent).mock.lastCall?.[1]).toMatchObject({
       prompt: 'Write comprehensive tests',
     });
   });
 
   it('works without prompt', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
+    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/workers`).send({});
     expect(res.status).toBe(201);
-    expect(vi.mocked(addAgent).mock.calls[0][1]).toMatchObject({ prompt: undefined });
+    expect(vi.mocked(addAgent).mock.lastCall?.[1]).toMatchObject({ prompt: undefined });
   });
 });
 
-// ─── DELETE /api/tasks/:id/agents/:agentId ───────────────────────────────────
+// ─── DELETE /api/tasks/:id/workers/:agentId ───────────────────────────────────
 
-describe('DELETE /api/tasks/:id/agents/:agentId', () => {
+describe('DELETE /api/tasks/:id/workers/:agentId', () => {
   it('returns 404 for nonexistent agent on existing task', async () => {
     insertTask(db);
-    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/agents/nonexistent`);
+    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/workers/nonexistent`);
     expect(res.status).toBe(404);
   });
 
@@ -1394,7 +1400,7 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
     insertTask(db, { id: 'task-b' });
     insertAgent(db, { id: 'agent-on-b', task_id: 'task-b' });
 
-    const res = await request(app).delete('/api/tasks/task-a/agents/agent-on-b');
+    const res = await request(app).delete('/api/tasks/task-a/workers/agent-on-b');
     expect(res.status).toBe(404);
   });
 
@@ -1403,7 +1409,7 @@ describe('DELETE /api/tasks/:id/agents/:agentId', () => {
     insertAgent(db);
 
     const res = await request(app).delete(
-      `/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}`,
+      `/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}`,
     );
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -1820,9 +1826,9 @@ describe('GET /api/tasks with permission prompts', () => {
   });
 });
 
-// ─── POST /api/tasks/:id/agents/:agentId/message ────────────────────────────
+// ─── POST /api/tasks/:id/workers/:agentId/message ────────────────────────────
 
-describe('POST /api/tasks/:id/agents/:agentId/message', () => {
+describe('POST /api/tasks/:id/workers/:agentId/message', () => {
   it('sends message via tmux send-keys and returns success', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
@@ -1835,7 +1841,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     }) as any);
 
     const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({ message: 'hello agent' });
 
     expect(res.status).toBe(200);
@@ -1872,7 +1878,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
     const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents/nonexistent/message`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers/nonexistent/message`)
       .send({ message: 'hello' });
 
     expect(res.status).toBe(404);
@@ -1884,7 +1890,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     insertAgent(db);
 
     const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({ message: 'hello' });
 
     expect(res.status).toBe(400);
@@ -1896,7 +1902,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     insertAgent(db);
 
     const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({});
 
     expect(res.status).toBe(400);
@@ -1908,7 +1914,7 @@ describe('POST /api/tasks/:id/agents/:agentId/message', () => {
     insertAgent(db);
 
     const res = await request(app)
-      .post(`/api/tasks/${DEFAULTS.task.id}/agents/${DEFAULTS.agent.id}/message`)
+      .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({ message: '' });
 
     expect(res.status).toBe(400);
@@ -2250,29 +2256,29 @@ describe('DELETE /api/worktrees/:id', () => {
   });
 });
 
-describe('PATCH /api/agents/:id/task', () => {
+describe('PATCH /api/workers/:id/task', () => {
   it('404 when agent does not exist', async () => {
-    const res = await request(app).patch('/api/agents/missing/task').send({ task_id: null });
+    const res = await request(app).patch('/api/workers/missing/task').send({ task_id: null });
     expect(res.status).toBe(404);
   });
 
   it('400 when body missing task_id key', async () => {
     insertAgent(db, { id: 'aBody', task_id: null });
-    const res = await request(app).patch('/api/agents/aBody/task').send({});
+    const res = await request(app).patch('/api/workers/aBody/task').send({});
     expect(res.status).toBe(400);
   });
 
   it('400 when task_id equals current task_id (no-op)', async () => {
     insertTask(db, { id: 'tSame', runtime_state: 'running' });
     insertAgent(db, { id: 'aSame', task_id: 'tSame' });
-    const res = await request(app).patch('/api/agents/aSame/task').send({ task_id: 'tSame' });
+    const res = await request(app).patch('/api/workers/aSame/task').send({ task_id: 'tSame' });
     expect(res.status).toBe(400);
   });
 
   it('404 when target task does not exist', async () => {
     insertAgent(db, { id: 'aOrph', task_id: null });
     const res = await request(app)
-      .patch('/api/agents/aOrph/task')
+      .patch('/api/workers/aOrph/task')
       .send({ task_id: 'does-not-exist' });
     expect(res.status).toBe(404);
   });
@@ -2280,7 +2286,7 @@ describe('PATCH /api/agents/:id/task', () => {
   it('409 when target task is not active', async () => {
     insertTask(db, { id: 'tClosed', runtime_state: 'idle' });
     insertAgent(db, { id: 'aC', task_id: null });
-    const res = await request(app).patch('/api/agents/aC/task').send({ task_id: 'tClosed' });
+    const res = await request(app).patch('/api/workers/aC/task').send({ task_id: 'tClosed' });
     expect(res.status).toBe(409);
   });
 
@@ -2288,7 +2294,7 @@ describe('PATCH /api/agents/:id/task', () => {
     insertTask(db, { id: 'tFrom', runtime_state: 'running' });
     insertAgent(db, { id: 'aDet', task_id: 'tFrom' });
 
-    const res = await request(app).patch('/api/agents/aDet/task').send({ task_id: null });
+    const res = await request(app).patch('/api/workers/aDet/task').send({ task_id: null });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBeNull();
     expect(res.body.tmux_session).toBe('octomux-chat-aDet');
@@ -2299,7 +2305,7 @@ describe('PATCH /api/agents/:id/task', () => {
     insertTask(db, { id: 'tB', runtime_state: 'running' });
     insertAgent(db, { id: 'aMove', task_id: 'tA' });
 
-    const res = await request(app).patch('/api/agents/aMove/task').send({ task_id: 'tB' });
+    const res = await request(app).patch('/api/workers/aMove/task').send({ task_id: 'tB' });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBe('tB');
   });
@@ -2308,9 +2314,9 @@ describe('PATCH /api/agents/:id/task', () => {
     insertTask(db, { id: 'tTarget', runtime_state: 'running' });
     insertAgent(db, { id: 'aChat', task_id: null });
     // Standalone agents carry their own tmux_session.
-    db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-aChat' WHERE id = 'aChat'`).run();
+    db.prepare(`UPDATE workers SET tmux_session = 'octomux-chat-aChat' WHERE id = 'aChat'`).run();
 
-    const res = await request(app).patch('/api/agents/aChat/task').send({ task_id: 'tTarget' });
+    const res = await request(app).patch('/api/workers/aChat/task').send({ task_id: 'tTarget' });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBe('tTarget');
   });
@@ -2406,11 +2412,11 @@ describe('agent name validation', () => {
     });
   });
 
-  describe('POST /api/tasks/:id/agents', () => {
+  describe('POST /api/tasks/:id/workers', () => {
     it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
       insertTask(db, { ...DEFAULTS.runningTask });
       const res = await request(app)
-        .post(`/api/tasks/${DEFAULTS.runningTask.id}/agents`)
+        .post(`/api/tasks/${DEFAULTS.runningTask.id}/workers`)
         .send({ agent });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/Invalid agent name/);

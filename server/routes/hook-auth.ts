@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { checkAgentTokenExists } from '../repositories/agent-runtime.js';
+import { checkAgentTokenExists } from '../repositories/workers.js';
 import { childLogger } from '../logger.js';
 
 const logger = childLogger('routes/hook-auth');

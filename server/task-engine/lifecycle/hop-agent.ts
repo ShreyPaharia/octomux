@@ -12,7 +12,7 @@ import {
   getTaskTmuxSession,
   getWorktree,
   hopAgentToTask,
-  getAgent,
+  getWorker,
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, prepareResumeLaunch } from '../launch.js';
 import { isTmuxTargetMissing } from '../sessions.js';
@@ -124,5 +124,5 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     'task_hop: complete',
   );
 
-  return getAgent(agent.id) as Agent;
+  return getWorker(agent.id) as Agent;
 }

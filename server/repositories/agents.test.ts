@@ -8,9 +8,9 @@ import {
   updateAgent,
   deleteAgent,
   getAgentByChannel,
-} from './agents-config.js';
+} from './agents.js';
 
-describe('agents-config repo', () => {
+describe('repositories/agents (conductor)', () => {
   beforeEach(() => {
     createTestDb();
   });
@@ -71,9 +71,7 @@ describe('agents-config repo', () => {
     const id = createAgent({ name: 'Original', system_prompt: 'orig prompt' });
 
     // Force a distinguishable updated_at by backdating the row first.
-    getDb()
-      .prepare(`UPDATE agent_configs SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`)
-      .run(id);
+    getDb().prepare(`UPDATE agents SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`).run(id);
     expect(getAgent(id)!.updated_at).toBe('2000-01-01 00:00:00');
 
     updateAgent(id, { system_prompt: 'new prompt' });
