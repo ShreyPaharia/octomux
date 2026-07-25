@@ -25,7 +25,7 @@ import {
   getConversation,
   getPrimaryAgentConversation,
 } from '../orchestrator/store.js';
-import { getAgentByChannel } from '../repositories/agents-config.js';
+import { getAgentByChannel, listAgents, updateAgent } from '../repositories/agents-config.js';
 import { startConversation, sendTurn, interruptTurn } from '../orchestrator/runner.js';
 import type { StartConversationOpts } from '../orchestrator/runner.js';
 import {
@@ -151,6 +151,52 @@ export function createGateway(
     };
   }
 
+  function parseChannelConfig(raw: string | null): {
+    threadKey?: string;
+    lastThreadKey?: string;
+  } {
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw) as { threadKey?: string; lastThreadKey?: string };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Wire a thread's two ears and record it in the `threads` map:
+   *  - the transcript consumer (the conductor's own live reply lines), and
+   *  - the conversation-message listener (supervisor-injected notes/cards).
+   * Shared by `ensureThread` (lazy, on inbound) and `preregisterBoundThreads`
+   * (eager, at boot) so both paths register identically.
+   */
+  function registerThread(
+    channel: Channel,
+    threadKey: string,
+    convId: string,
+    transcriptPath: string,
+  ): ThreadState {
+    const state: ThreadState = {
+      convId,
+      channel,
+      threadKey,
+      buffer: [],
+      inFlight: false,
+      unregister: () => {},
+      unregisterMessages: () => {},
+    };
+    state.unregister = conductor.registerConsumer(convId, transcriptPath, makeConsumer(state));
+    // Not part of the conductor injection seam — it touches no tmux/transcript,
+    // just an in-process listener registry (see stream.ts), so it runs for real
+    // in tests too.
+    state.unregisterMessages = registerConversationMessageListener(
+      convId,
+      makeMessageListener(state),
+    );
+    threads.set(key(channel, threadKey), state);
+    return state;
+  }
+
   async function ensureThread(msg: InboundMessage): Promise<ThreadState> {
     const k = key(msg.channel, msg.threadKey);
     const existing = threads.get(k);
@@ -174,6 +220,18 @@ export function createGateway(
           systemPrompt: agent.system_prompt,
         });
       }
+      // Remember where to reach this agent so proactive supervisor pushes (plan
+      // ready / done / failed) can be relayed after a restart, before the owner's
+      // next inbound re-establishes the thread (see preregisterBoundThreads). A
+      // channel-wide binding has no `threadKey`, so we stash the last-seen one
+      // under a separate key — getAgentByChannel only keys off `threadKey`, so
+      // the binding's scope is unchanged.
+      const cfg = parseChannelConfig(agent.channel_config);
+      if (!cfg.threadKey && cfg.lastThreadKey !== msg.threadKey) {
+        updateAgent(agent.id, {
+          channel_config: JSON.stringify({ ...cfg, lastThreadKey: msg.threadKey }),
+        });
+      }
     } else {
       // Reconnect to a mapped conversation across restarts, or create a new one.
       convId = getThreadConv(msg.channel, msg.threadKey) ?? '';
@@ -189,25 +247,36 @@ export function createGateway(
       throw new Error(`gateway: conversation ${convId} has no transcript path`);
     }
 
-    const state: ThreadState = {
-      convId,
-      channel: msg.channel,
-      threadKey: msg.threadKey,
-      buffer: [],
-      inFlight: false,
-      unregister: () => {},
-      unregisterMessages: () => {},
-    };
-    state.unregister = conductor.registerConsumer(convId, transcriptPath, makeConsumer(state));
-    // Not part of the conductor injection seam — it touches no tmux/transcript,
-    // just an in-process listener registry (see stream.ts), so it runs for real
-    // in tests too.
-    state.unregisterMessages = registerConversationMessageListener(
-      convId,
-      makeMessageListener(state),
-    );
-    threads.set(k, state);
-    return state;
+    return registerThread(msg.channel, msg.threadKey, convId, transcriptPath);
+  }
+
+  /**
+   * At boot, re-attach the proactive-relay ear for every agent bound to THIS
+   * gateway's channel whose destination we already know. Without this a
+   * supervisor push (plan ready / task done / failed) fired after a restart
+   * reaches the dashboard but NOT the bound channel — the ear is otherwise only
+   * plugged in lazily by `ensureThread` on the owner's next inbound, by which
+   * point the live push has already been dropped.
+   *
+   * Destination = the binding's `threadKey`, or the last-seen `lastThreadKey`
+   * persisted for a channel-wide binding on its first inbound. Unknown until the
+   * first message → skipped (best-effort; the lazy path still covers it later).
+   */
+  function preregisterBoundThreads(): void {
+    for (const agent of listAgents()) {
+      if (agent.channel !== adapter.id) continue;
+      const cfg = parseChannelConfig(agent.channel_config);
+      const threadKey = cfg.threadKey ?? cfg.lastThreadKey;
+      if (!threadKey) continue;
+      if (threads.has(key(adapter.id, threadKey))) continue;
+      const conv = getPrimaryAgentConversation(agent.id);
+      if (!conv?.transcript_path) continue;
+      registerThread(adapter.id, threadKey, conv.id, conv.transcript_path);
+      logger.info(
+        { agent_id: agent.id, channel: agent.channel, thread_key: threadKey },
+        'gateway: pre-registered proactive relay for bound agent',
+      );
+    }
   }
 
   async function handleInbound(msg: InboundMessage): Promise<void> {
@@ -243,6 +312,7 @@ export function createGateway(
   return {
     async start() {
       logger.info({ adapter: adapter.id }, 'gateway: starting');
+      preregisterBoundThreads();
       await adapter.start(handleInbound);
     },
     handleInbound,
