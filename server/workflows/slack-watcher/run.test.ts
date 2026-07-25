@@ -1,13 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb } from '../../test-helpers.js';
+import { getDb } from '../../db.js';
 import { insertRun, finishRun } from '../../repositories/runs.js';
 
-const mockGetSkill = vi.fn();
 const mockRunSessionVertical = vi.fn();
 
-vi.mock('../../skills.js', () => ({
-  getSkill: (...args: unknown[]) => mockGetSkill(...args),
-}));
 vi.mock('../../services/session-vertical-service.js', () => ({
   runSessionVertical: (...args: unknown[]) => mockRunSessionVertical(...args),
 }));
@@ -20,16 +17,27 @@ import { SLACK_WATCHER_SCHEMA } from './schema.js';
 const SKILL_BODY =
   'Watch {{slackUserId}} back {{lookbackMinutes}}m, via {{digestTarget}} tg:{{telegramChatId}} DM {{digestUserId}} at "{{digestChannel}}", skip {{previousItems}}.';
 
+/** Insert a schedule row with a prompt — schedule.prompt is the self-contained
+ * source `runSlackWatcher` now reads (spec/schedule-kinds-as-presets.md §1),
+ * materialized from the preset at create time in production. */
+function insertScheduleWithPrompt(id: string, prompt: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron, enabled, prompt) VALUES (?, 'slack-watcher', '/repo', '0 7 * * *', 1, ?)`,
+    )
+    .run(id, prompt);
+}
+
 describe('runSlackWatcher', () => {
   beforeEach(() => {
     createTestDb();
-    mockGetSkill.mockReset();
     mockRunSessionVertical.mockReset();
-    mockGetSkill.mockResolvedValue({ name: 'slack-watcher', content: SKILL_BODY });
     mockRunSessionVertical.mockResolvedValue({ result: { summary: 'ok' } });
   });
 
   it('interpolates config placeholders and calls runSessionVertical', async () => {
+    insertScheduleWithPrompt('sched-1', SKILL_BODY);
+
     const { result } = await runSlackWatcher({
       repoPath: '/repos/octomux',
       scheduleId: 'sched-1',
@@ -42,7 +50,6 @@ describe('runSlackWatcher', () => {
     });
 
     expect(result).toEqual({ summary: 'ok' });
-    expect(mockGetSkill).toHaveBeenCalledWith('slack-watcher');
     const call = mockRunSessionVertical.mock.calls[0][0];
     expect(call.kind).toBe('slack-watcher');
     expect(call.scheduleId).toBe('sched-1');
@@ -53,7 +60,31 @@ describe('runSlackWatcher', () => {
     expect(call.outputSchema).toBe(SLACK_WATCHER_SCHEMA);
   });
 
+  it('throws when the schedule has no prompt', async () => {
+    // No prompt inserted (self-contained model: nothing to fall back to).
+    getDb()
+      .prepare(
+        `INSERT INTO schedules (id, kind, repo_path, cron, enabled) VALUES ('sched-empty-prompt', 'slack-watcher', '/repo', '0 7 * * *', 1)`,
+      )
+      .run();
+
+    await expect(
+      runSlackWatcher({
+        repoPath: '/repos/octomux',
+        scheduleId: 'sched-empty-prompt',
+        slackUserId: 'U01',
+        digestTarget: 'slack',
+        telegramChatId: '',
+        digestUserId: 'U0P',
+        lookbackMinutes: 40,
+        digestChannel: '',
+      }),
+    ).rejects.toThrow(/no prompt/);
+  });
+
   it('passes model and timeoutMs through to runSessionVertical', async () => {
+    insertScheduleWithPrompt('sched-1', SKILL_BODY);
+
     await runSlackWatcher({
       repoPath: '/repos/octomux',
       scheduleId: 'sched-1',
@@ -72,23 +103,9 @@ describe('runSlackWatcher', () => {
     expect(call.timeoutMs).toBe(120000);
   });
 
-  it('passes null model and timeoutMs through to runSessionVertical when omitted', async () => {
-    await runSlackWatcher({
-      repoPath: '/repos/octomux',
-      slackUserId: 'U01',
-      digestTarget: 'slack',
-      telegramChatId: '',
-      digestUserId: 'U0P',
-      lookbackMinutes: 40,
-      digestChannel: '',
-    });
-
-    const call = mockRunSessionVertical.mock.calls[0][0];
-    expect(call.model).toBeUndefined();
-    expect(call.timeoutMs).toBeUndefined();
-  });
-
   it("threads the previous done run's items into {{previousItems}}", async () => {
+    insertScheduleWithPrompt('sched-x', SKILL_BODY);
+
     const items = [{ channel: '#x', from: 'Priya', about: 'deploy', urgency: 'high' }];
     const run = insertRun({
       workflowKind: 'slack-watcher',
@@ -138,6 +155,8 @@ describe('runSlackWatcher', () => {
   });
 
   it('previousItems is passed as a string scalar — a value containing {{tokens}} stays literal', async () => {
+    insertScheduleWithPrompt('sched-lit', SKILL_BODY);
+
     // Insert a run whose items JSON happens to contain curly-brace text
     const items = [{ channel: '#x', from: 'bot', about: '{{slackUserId}}', urgency: 'low' }];
     const run = insertRun({

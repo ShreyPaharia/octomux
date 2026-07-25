@@ -23,7 +23,9 @@
     "cli/package.json",
     "scripts/",
     "plugin/",
-    "templates/"
+    "templates/",
+    "workflows/",
+    "kinds/"
   ],
   "workspaces": [
     "packages/api-client",

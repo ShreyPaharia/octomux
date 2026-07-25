@@ -1,0 +1,65 @@
+{
+  "kind": "weekly-update",
+  "displayName": "Weekly Update",
+  "execution": "session",
+  "defaultCron": "0 9 * * 1",
+  "prompt": "---\nname: weekly-update\ndescription: Use when running a scheduled weekly-update session — gather git commits and available Jira/Linear context for the past week, produce a themed status report, and submit it via submit_result\n---\n\n# Weekly Update\n\nGenerate a themed status report summarizing the past week's work for a repo:\npull git history, cross-reference tickets if available, group by theme, and\nsubmit a structured result. This is a headless, unattended session — you do\nnot open a PR, edit files, or make any changes. Your only output is the\n`submit_result` call.\n\n## Steps\n\n1. **Gather git commits for the past week** by running:\n\n   ```bash\n   git log --all --since=\"last monday\" --until=\"tomorrow\" --pretty=format:\"%h %s (%ad)\" --date=short\n   ```\n\n2. **Gather ticket context, if available.** If Jira or Linear tools are\n   connected in this session, look up tickets referenced in commit messages\n   (e.g. `IN-123`) or updated this week, and note their status. If no ticket\n   tooling is available, skip this step — do not fabricate ticket data.\n\n3. **Group commits by theme**, not by ticket or commit order — e.g.\n   \"Hedging Safety & Reliability\", \"Observability\", \"Infrastructure\". Each\n   theme gets a short title and a list of concise, bullet-point items (bold\n   keyword, dash, short description, ticket id/status if known).\n\n4. **Note highlights.** Anything that deserves top-line visibility beyond\n   the themed breakdown — a release, a milestone, a notable metric. Keep\n   each entry to one short sentence.\n\n5. **Call the `submit_result` tool exactly once** with a JSON object shaped\n   like:\n\n   ```json\n   {\n     \"outcome\": \"done\",\n     \"summary\": \"<1-2 sentence overview of the week>\",\n     \"period\": \"<the date range covered, e.g. Mon DD - DD>\",\n     \"themes\": [\n       {\n         \"title\": \"Theme Name\",\n         \"items\": [\"**Feature** — concise description (IN-123 — Done)\"]\n       }\n     ],\n     \"highlights\": [\"...\"],\n     \"links\": [{ \"label\": \"...\", \"url\": \"...\" }]\n   }\n   ```\n\n   `outcome` and `summary` are required: `outcome` is `\"done\"` for a normal\n   report, `\"blocked\"` if you could not gather git history or ticket context\n   at all. `links` is optional — omit it, or point to a published report if\n   one exists.\n\n## Notes\n\n- Be conservative — this runs unattended with no human reviewing your\n  reasoning, only the structured result.\n- If there were no commits this week, say so plainly: an empty `themes`\n  array and a `highlights` entry noting the quiet week. Do not fabricate\n  activity.\n- Do not modify any files, commit, or open a PR. This skill only reads git\n  history and ticket context, then reports.\n",
+  "output": {
+    "type": "object",
+    "properties": {
+      "outcome": {
+        "type": "string",
+        "enum": ["done", "blocked", "failed"]
+      },
+      "summary": {
+        "type": "string"
+      },
+      "period": {
+        "type": "string"
+      },
+      "themes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["title", "items"],
+          "additionalProperties": false
+        }
+      },
+      "highlights": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "links": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["label", "url"],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["outcome", "summary", "period", "themes", "highlights"],
+    "additionalProperties": false
+  }
+}

@@ -31,7 +31,11 @@ import {
   listRecentRepoPaths,
 } from '../../repositories/index.js';
 import { searchShared } from '../../repositories/agent-learnings.js';
-import { getManagedTask, countManagedTasksByPhase, eventsSince } from '../store.js';
+import {
+  getManagedTask,
+  countManagedTasksByPhase,
+  eventsSince,
+} from '../../repositories/orchestrator.js';
 import { childLogger } from '../../logger.js';
 import type { Task } from '../../types.js';
 

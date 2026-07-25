@@ -25,6 +25,7 @@ import type {
   RunMode,
 } from '../types.js';
 import { RUN_MODES } from '../types.js';
+import { getSettings } from '../settings.js';
 import type { OctomuxSettings } from '../settings.js';
 import { generateTitleAndDescription } from '../title-gen.js';
 import { validateAgentName } from '../harnesses/types.js';
@@ -309,9 +310,29 @@ export function applyDraftUpdates(
 }
 
 /**
+ * Resolve whether AI task naming is enabled: OCTOMUX_AI_TASK_NAMING overrides
+ * settings.json's `aiTaskNaming`, which overrides the hardcoded default (false).
+ */
+export async function resolveAiTaskNamingEnabled(): Promise<boolean> {
+  const aiNamingEnv = process.env.OCTOMUX_AI_TASK_NAMING;
+  if (aiNamingEnv !== undefined) {
+    return aiNamingEnv === '1' || aiNamingEnv.toLowerCase() === 'true';
+  }
+  try {
+    const settings = await getSettings();
+    return settings.aiTaskNaming ?? false;
+  } catch {
+    // settings.json unavailable (e.g. test env with a partial fs mock) — default off
+    return false;
+  }
+}
+
+/**
  * Resolve the task title and description from the request body.
  * Fast path: derives from initial_prompt locally.
- * Optional: if OCTOMUX_AI_TASK_NAMING=1, calls Claude CLI for polish.
+ * Optional: if AI task naming is enabled (OCTOMUX_AI_TASK_NAMING or
+ * settings.json's aiTaskNaming — see resolveAiTaskNamingEnabled), calls the
+ * Claude CLI for polish.
  */
 export async function resolveTaskTitleAndDescription(body: {
   title?: string;
@@ -330,8 +351,7 @@ export async function resolveTaskTitleAndDescription(body: {
     if (!resolvedDescription) resolvedDescription = initialPromptTrimmed;
   }
 
-  const aiNamingEnv = process.env.OCTOMUX_AI_TASK_NAMING ?? '';
-  const aiTaskNamingEnabled = aiNamingEnv === '1' || aiNamingEnv.toLowerCase() === 'true';
+  const aiTaskNamingEnabled = await resolveAiTaskNamingEnabled();
   if (
     initialPromptTrimmed &&
     aiTaskNamingEnabled &&

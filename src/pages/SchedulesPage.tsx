@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { schedulesApi, type ScheduleKindInfo, type ScheduleRow } from '@/lib/api/schedulesApi';
+import {
+  schedulesApi,
+  type ImportScheduleInput,
+  type ScheduleKindInfo,
+  type ScheduleRow,
+} from '@/lib/api/schedulesApi';
+import { kindsApi, type PresetWithSource } from '@/lib/api/kindsApi';
 import type { WorkflowRunRow } from '@/lib/api/workflowsApi';
 import { useResource } from '@/lib/use-resource';
+import { showToast } from '@/components/CustomToast';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -64,7 +71,15 @@ function ModelsDatalist({ id }: { id: string }) {
 
 // ─── ScheduleForm (create panel) ─────────────────────────────────────────────
 
-function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreated: () => void }) {
+function ScheduleForm({
+  kinds,
+  presets,
+  onCreated,
+}: {
+  kinds: ScheduleKindInfo[];
+  presets: PresetWithSource[];
+  onCreated: () => void;
+}) {
   const [kind, setKind] = useState('');
   const [repoPath, setRepoPath] = useState('');
   const [cron, setCron] = useState(CRON_PRESETS[0].cron);
@@ -79,7 +94,13 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
   const [error, setError] = useState<string | null>(null);
 
   const selectedKind = useMemo(() => kinds.find((k) => k.kind === kind) ?? null, [kinds, kind]);
-  const isCustom = kind === 'custom';
+  const selectedPreset = useMemo(
+    () => presets.find((p) => p.kind === kind) ?? null,
+    [presets, kind],
+  );
+  // A kind is a preset (spec §1) — every capability check is driven by the
+  // API's derived flags, never a hardcoded kind name (§7 kind-agnosticism).
+  const promptRequired = selectedKind?.promptRequired ?? false;
 
   useEffect(() => {
     if (!kind && kinds.length > 0) setKind(kinds[0].kind);
@@ -93,12 +114,17 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
     setConfig(defaultsFromSchema(selectedKind.configSchema));
   }, [selectedKind]);
 
+  // The prompt is copied from the preset at create time (§1) — pre-fill it
+  // here so the copy is visible and editable, never an invisible default (§7.1).
+  useEffect(() => {
+    setPrompt(selectedPreset?.prompt ?? '');
+  }, [selectedPreset]);
+
   const canSubmit =
     kind.length > 0 &&
     repoPath.trim().length > 0 &&
     cron.trim().length > 0 &&
-    // custom requires both name and prompt
-    (!isCustom || (name.trim().length > 0 && prompt.trim().length > 0));
+    (!promptRequired || (name.trim().length > 0 && prompt.trim().length > 0));
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
@@ -184,38 +210,44 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <TimezoneField value={timezone} onChange={setTimezone} />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="schedule-name">
+            Name {promptRequired && <span className="text-destructive">*</span>}
+          </Label>
+          <Input
+            id="schedule-name"
+            data-testid="schedule-name"
+            placeholder={
+              promptRequired ? 'My custom schedule' : 'Leave blank to use kind display name'
+            }
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
       </div>
 
-      {/* Custom kind: name + prompt always visible and required */}
-      {isCustom && (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="schedule-name-custom">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="schedule-name-custom"
-              data-testid="schedule-name"
-              placeholder="My custom schedule"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="schedule-prompt-custom">
-              Prompt <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="schedule-prompt-custom"
-              data-testid="schedule-prompt"
-              placeholder="What should the agent do on each run?"
-              rows={4}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-          </div>
-        </div>
-      )}
+      {/* Prompt is copied from the preset into schedules.prompt at create time
+          (spec §1) — always shown as an editable field, never an invisible
+          default (§7.1). Required only when the kind's preset ships no prompt. */}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="schedule-prompt">
+          Prompt {promptRequired && <span className="text-destructive">*</span>}
+        </Label>
+        <Textarea
+          id="schedule-prompt"
+          data-testid="schedule-prompt"
+          placeholder="What should the agent do on each run?"
+          rows={4}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        {!promptRequired && (
+          <p className="text-[10px] text-muted-soft">
+            Pre-filled from the {selectedKind?.displayName ?? kind} preset. Editing here only
+            changes this schedule — the preset itself is untouched.
+          </p>
+        )}
+      </div>
 
       <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
         <input
@@ -242,25 +274,12 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
         </details>
       ) : null}
 
-      {/* Advanced: name (for built-ins), model, timeout */}
+      {/* Advanced: model, timeout */}
       <details className="group">
         <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
           Advanced
         </summary>
         <div className="mt-3 flex flex-col gap-3">
-          {/* Name only shown here for non-custom kinds */}
-          {!isCustom && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="schedule-name">Name (optional)</Label>
-              <Input
-                id="schedule-name"
-                data-testid="schedule-name"
-                placeholder="Leave blank to use kind display name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-          )}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="schedule-model">Model (optional)</Label>
             <ModelsDatalist id="schedule-models-list" />
@@ -304,9 +323,9 @@ function ScheduleForm({ kinds, onCreated }: { kinds: ScheduleKindInfo[]; onCreat
         >
           {submitting ? 'Creating…' : 'New schedule'}
         </Button>
-        {isCustom && (!name.trim() || !prompt.trim()) && (
+        {promptRequired && (!name.trim() || !prompt.trim()) && (
           <p className="mt-1.5 text-[10px] text-muted-foreground">
-            Name and prompt are required for custom schedules.
+            Name and prompt are required for this kind.
           </p>
         )}
       </div>
@@ -375,200 +394,6 @@ function ScheduleRuns({ scheduleId }: { scheduleId: string }) {
   );
 }
 
-// ─── Prompt override editor ───────────────────────────────────────────────────
-
-function PromptOverrideEditor({
-  scheduleId,
-  currentPrompt,
-  onSave,
-}: {
-  scheduleId: string;
-  currentPrompt: string | null;
-  onSave: (prompt: string | null) => Promise<void>;
-}) {
-  const [mode, setMode] = useState<'collapsed' | 'preview' | 'editing'>('collapsed');
-  const [preview, setPreview] = useState<{
-    content: string;
-    source: 'override' | 'kind_skill';
-  } | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-
-  const fetchPreview = useCallback(() => {
-    schedulesApi.getEffectivePrompt(scheduleId).then((res) => setPreview(res));
-  }, [scheduleId]);
-
-  const handleExpand = useCallback(() => {
-    setMode('preview');
-    fetchPreview();
-  }, [fetchPreview]);
-
-  const handleOverride = useCallback(() => {
-    if (preview) {
-      setEditValue(preview.content);
-    }
-    setMode('editing');
-  }, [preview]);
-
-  const handleSaveOverride = useCallback(async () => {
-    setSaving(true);
-    try {
-      await onSave(editValue.trim() || null);
-      setMode('preview');
-      fetchPreview();
-    } finally {
-      setSaving(false);
-    }
-  }, [editValue, onSave, fetchPreview]);
-
-  const handleReset = useCallback(async () => {
-    setSaving(true);
-    try {
-      await onSave(null);
-      setConfirmReset(false);
-      setMode('preview');
-      fetchPreview();
-    } finally {
-      setSaving(false);
-    }
-  }, [onSave, fetchPreview]);
-
-  if (mode === 'collapsed') {
-    return (
-      <button
-        type="button"
-        data-testid="prompt-override-expand"
-        className="text-xs text-muted-foreground hover:text-foreground"
-        onClick={handleExpand}
-      >
-        {currentPrompt ? '▸ Edit prompt override' : '▸ Override prompt'}
-      </button>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2" data-testid="prompt-override-panel">
-      <div className="flex items-center gap-2">
-        <p className="text-xs font-medium text-muted-foreground">
-          Prompt{' '}
-          {preview?.source === 'override' ? (
-            <Badge variant="outline" className="text-[10px]">
-              override
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="text-[10px]">
-              kind default
-            </Badge>
-          )}
-        </p>
-        <button
-          type="button"
-          className="text-[10px] text-muted-foreground hover:text-foreground"
-          onClick={() => setMode('collapsed')}
-        >
-          Collapse
-        </button>
-      </div>
-
-      {mode === 'preview' && (
-        <>
-          {preview ? (
-            <pre
-              data-testid="prompt-preview"
-              className="max-h-48 overflow-auto rounded-lg border border-glass-edge bg-glass-l1 p-3 font-mono text-[11px] text-foreground"
-            >
-              {preview.content}
-            </pre>
-          ) : (
-            <p className="text-xs text-muted-foreground">Loading…</p>
-          )}
-          <p className="text-[10px] text-muted-soft">
-            {'{{tokens}}'} are replaced at runtime by the config value with the same name.
-          </p>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              data-testid="prompt-override-btn"
-              onClick={handleOverride}
-            >
-              Override
-            </Button>
-            {currentPrompt && (
-              <Button
-                size="sm"
-                variant="outline"
-                data-testid="prompt-reset-btn"
-                onClick={() => setConfirmReset(true)}
-              >
-                Reset to kind default
-              </Button>
-            )}
-          </div>
-          {confirmReset && (
-            <div className="flex items-center gap-2 rounded-lg border border-glass-edge bg-glass-l1 p-3 text-xs">
-              <span>Remove your prompt override and use the kind default?</span>
-              <Button
-                size="sm"
-                variant="destructive"
-                data-testid="prompt-reset-confirm"
-                disabled={saving}
-                onClick={handleReset}
-              >
-                Reset
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setConfirmReset(false)}
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-
-      {mode === 'editing' && (
-        <>
-          <Textarea
-            data-testid="prompt-override-textarea"
-            rows={8}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            className="font-mono text-sm"
-          />
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              data-testid="prompt-override-save"
-              disabled={saving}
-              onClick={handleSaveOverride}
-            >
-              {saving ? 'Saving…' : 'Save override'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={saving}
-              onClick={() => {
-                setMode('preview');
-                fetchPreview();
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ─── ScheduleDetail (edit card) ───────────────────────────────────────────────
-
 function ScheduleDetail({
   row,
   kindInfo,
@@ -590,6 +415,7 @@ function ScheduleDetail({
   const [timezone, setTimezone] = useState(row.timezone ?? '');
   const [model, setModel] = useState(row.model ?? '');
   const [timeoutMins, setTimeoutMins] = useState(msToMinutes(row.timeout_ms));
+  const [prompt, setPrompt] = useState(row.prompt ?? '');
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -603,6 +429,7 @@ function ScheduleDetail({
     setTimezone(row.timezone ?? '');
     setModel(row.model ?? '');
     setTimeoutMins(msToMinutes(row.timeout_ms));
+    setPrompt(row.prompt ?? '');
   }, [row]);
 
   const handleSave = useCallback(async () => {
@@ -618,6 +445,7 @@ function ScheduleDetail({
         timezone: timezone || null,
         model: model.trim() ? model.trim() : null,
         timeoutMs: timeoutMs != null ? timeoutMs : null,
+        prompt: prompt.trim() ? prompt : null,
         ...(kindInfo?.configSchema ? { config } : {}),
       });
       onSaved();
@@ -635,18 +463,11 @@ function ScheduleDetail({
     timezone,
     model,
     timeoutMins,
+    prompt,
     config,
     kindInfo,
     onSaved,
   ]);
-
-  const handlePromptSave = useCallback(
-    async (prompt: string | null) => {
-      await schedulesApi.updateSchedule(row.id, { prompt });
-      onSaved();
-    },
-    [row.id, onSaved],
-  );
 
   const handleRunNow = useCallback(async () => {
     setRunning(true);
@@ -760,12 +581,23 @@ function ScheduleDetail({
         </div>
       ) : null}
 
-      {/* Prompt override editor */}
-      <PromptOverrideEditor
-        scheduleId={row.id}
-        currentPrompt={row.prompt ?? null}
-        onSave={handlePromptSave}
-      />
+      {/* Plain textarea bound to schedules.prompt — the row is self-contained
+          (spec §1), so there's no resolution, preview, or "reset to kind
+          default" here anymore; this schedule's copy is the only prompt. */}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`schedule-edit-prompt-${row.id}`}>Prompt</Label>
+        <Textarea
+          id={`schedule-edit-prompt-${row.id}`}
+          data-testid={`schedule-edit-prompt-${row.id}`}
+          rows={8}
+          className="font-mono text-sm"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <p className="text-[10px] text-muted-soft">
+          Copied from the kind preset at create time — editing here only affects this schedule.
+        </p>
+      </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
@@ -849,6 +681,87 @@ function ScheduleDeleteDialog({
   );
 }
 
+// ─── Import schedule dialog ───────────────────────────────────────────────────
+
+/**
+ * Imports a `GET /api/schedules/:id/export` envelope (spec §5/§6.2). `repoPath`
+ * is deliberately not part of the envelope — this dialog is the prompt for it,
+ * reusing the same repo picker as the create panel.
+ */
+function ImportScheduleDialog({
+  open,
+  onClose,
+  onImported,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [repoPath, setRepoPath] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleImport = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      await schedulesApi.importSchedule({
+        ...parsed,
+        repoPath: repoPath.trim(),
+      } as ImportScheduleInput);
+      setText('');
+      setRepoPath('');
+      onImported();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to import schedule');
+    } finally {
+      setSaving(false);
+    }
+  }, [text, repoPath, onImported]);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid="schedule-import-dialog" className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Import schedule JSON</DialogTitle>
+          <DialogDescription>
+            Paste a schedule export and pick the repository to run it against.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label>Repository</Label>
+            <RepoPickerField value={repoPath} onChange={setRepoPath} />
+          </div>
+          <Textarea
+            data-testid="schedule-import-textarea"
+            rows={10}
+            className="font-mono text-xs"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder='{"octomuxSchedule": 1, "kind": "...", ...}'
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            data-testid="schedule-import-submit"
+            disabled={!text.trim() || !repoPath.trim() || saving}
+            onClick={handleImport}
+          >
+            {saving ? 'Importing…' : 'Import'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Card title logic ─────────────────────────────────────────────────────────
 
 /**
@@ -883,15 +796,18 @@ export default function SchedulesPage() {
     schedulesApi.listSchedules(),
   );
   const [kinds, setKinds] = useState<ScheduleKindInfo[]>([]);
+  const [presets, setPresets] = useState<PresetWithSource[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(() => searchParams.get('expand'));
   const [deleteTarget, setDeleteTarget] = useState<ScheduleRow | null>(null);
   const [runsKey, setRunsKey] = useState(0);
+  const [importOpen, setImportOpen] = useState(false);
   const schedules = data ?? [];
 
   const kindByName = useMemo(() => new Map(kinds.map((k) => [k.kind, k])), [kinds]);
 
   useEffect(() => {
     schedulesApi.getScheduleKinds().then((res) => setKinds(res.kinds));
+    kindsApi.listKinds().then((res) => setPresets(res.kinds));
   }, []);
 
   const handleToggle = useCallback(
@@ -902,6 +818,16 @@ export default function SchedulesPage() {
     [refresh],
   );
 
+  const handleExport = useCallback(async (id: string) => {
+    try {
+      const data = await schedulesApi.exportSchedule(id);
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      showToast('success', 'COPIED', 'Schedule JSON copied to clipboard.');
+    } catch (err) {
+      showToast('error', 'EXPORT FAILED', (err as Error).message || 'Could not export schedule.');
+    }
+  }, []);
+
   const deleteKindInfo = deleteTarget ? (kindByName.get(deleteTarget.kind) ?? null) : null;
 
   return (
@@ -909,9 +835,19 @@ export default function SchedulesPage() {
       <PageHeader
         title="Schedules"
         description="Cron-triggered runs — creatable and observable from here."
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="schedule-import-open"
+            onClick={() => setImportOpen(true)}
+          >
+            Import JSON
+          </Button>
+        }
       />
 
-      <ScheduleForm kinds={kinds} onCreated={refresh} />
+      <ScheduleForm kinds={kinds} presets={presets} onCreated={refresh} />
 
       {loading ? (
         <div className="space-y-2">
@@ -970,6 +906,14 @@ export default function SchedulesPage() {
                       />
                       <button
                         type="button"
+                        data-testid={`schedule-export-${row.id}`}
+                        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                        onClick={() => handleExport(row.id)}
+                      >
+                        Export
+                      </button>
+                      <button
+                        type="button"
                         data-testid={`schedule-delete-${row.id}`}
                         className="text-xs text-destructive hover:underline"
                         onClick={() => setDeleteTarget(row)}
@@ -1004,6 +948,15 @@ export default function SchedulesPage() {
         onConfirm={async () => {
           if (!deleteTarget) return;
           await schedulesApi.deleteSchedule(deleteTarget.id);
+          refresh();
+        }}
+      />
+
+      <ImportScheduleDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          setImportOpen(false);
           refresh();
         }}
       />

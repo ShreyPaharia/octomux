@@ -43,8 +43,8 @@ import {
   resolveCard,
   upsertManagedTask,
   listAllPendingCards,
-} from './store.js';
-import type { ActionCard } from './store.js';
+} from '../repositories/orchestrator.js';
+import type { ActionCard } from '../repositories/orchestrator.js';
 import { pushToConversation } from './stream.js';
 import { getTask } from '../repositories/index.js';
 import {

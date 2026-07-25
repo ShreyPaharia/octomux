@@ -7,7 +7,7 @@ import {
   createConversation,
   updateConversation,
   getPrimaryAgentConversation,
-} from '../orchestrator/store.js';
+} from '../repositories/orchestrator.js';
 import { createAgent, getAgent } from '../repositories/agents-config.js';
 import { pushToConversation } from '../orchestrator/stream.js';
 

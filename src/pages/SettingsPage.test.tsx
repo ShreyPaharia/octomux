@@ -27,11 +27,16 @@ const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async 
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
-vi.mock('@/lib/api/schedulesApi', () => ({
-  scheduleSkillsApi: {
-    listScheduleSkills: vi.fn().mockResolvedValue([]),
-    updateScheduleSkill: vi.fn().mockResolvedValue({ kind: 'doc-drift', content: '' }),
-    resetScheduleSkill: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/lib/api/kindsApi', () => ({
+  kindsApi: {
+    listKinds: vi.fn().mockResolvedValue({ kinds: [] }),
+    savePreset: vi.fn().mockResolvedValue({
+      kind: 'my-custom-kind',
+      displayName: 'My Custom Kind',
+      execution: 'session',
+      source: 'home',
+    }),
+    deletePreset: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -57,10 +62,11 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('settings-nav-general')).toBeInTheDocument();
     });
-    for (const id of ['general', 'hooks', 'repositories', 'editor', 'agent-launch']) {
+    for (const id of ['general', 'hooks', 'repositories', 'editor', 'agent-launch', 'kinds']) {
       expect(screen.getByTestId(`settings-nav-${id}`)).toBeInTheDocument();
     }
     expect(screen.queryByTestId('settings-nav-orchestrator')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('settings-nav-schedule-skills')).not.toBeInTheDocument();
   });
 
   it('marks the default nav item (general) as active', async () => {
@@ -100,5 +106,14 @@ describe('SettingsPage', () => {
     });
     // The section element should be present in the DOM
     expect(document.getElementById('section-reviews')).toBeInTheDocument();
+  });
+
+  it('renders the Kinds section in place of the deleted Schedule skills section', async () => {
+    renderWithRouter(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-nav-kinds')).toBeInTheDocument();
+    });
+    expect(document.getElementById('section-kinds')).toBeInTheDocument();
+    expect(await screen.findByTestId('kinds-list')).toBeInTheDocument();
   });
 });

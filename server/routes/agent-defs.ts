@@ -5,21 +5,16 @@ import { toDomainServiceError } from '../services/errors.js';
 
 export const router = express.Router();
 
-function repoPathFromQuery(req: Request): string | undefined {
-  const repoPath = req.query.repo_path as string | undefined;
-  return repoPath || undefined;
-}
-
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
-router.get('/api/agents', async (req: Request, res: Response) => {
-  const agents = await listAgents(repoPathFromQuery(req));
+router.get('/api/agents', async (_req: Request, res: Response) => {
+  const agents = await listAgents();
   res.json(agents);
 });
 
 router.get('/api/agents/:name', async (req: Request, res: Response) => {
   try {
-    const agent = await getAgent(req.params.name as string, repoPathFromQuery(req));
+    const agent = await getAgent(req.params.name as string);
     res.json(agent);
   } catch (err) {
     throw toDomainServiceError(err);

@@ -27,7 +27,7 @@ import {
   listManagedTasksWithDependsOn,
   incrementConversationUsage,
   getConversationUsage,
-} from './store.js';
+} from './orchestrator.js';
 
 describe('orchestrator store', () => {
   beforeEach(() => {

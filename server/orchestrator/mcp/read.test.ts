@@ -35,7 +35,7 @@ import {
   handleDefaultBranch,
   handleSearchLearnings,
 } from './read.js';
-import { upsertManagedTask } from '../store.js';
+import { upsertManagedTask } from '../../repositories/orchestrator.js';
 import { setCurrentSummary } from '../../repositories/index.js';
 import { addLearning, SHARED_LANE } from '../../repositories/agent-learnings.js';
 import { POLICY_ONLY_COMMANDS } from '../command-registry.js';

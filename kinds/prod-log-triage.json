@@ -1,0 +1,45 @@
+{
+  "kind": "prod-log-triage",
+  "displayName": "Prod Log Triage",
+  "execution": "task",
+  "defaultCron": "0 * * * *",
+  "prompt": "---\nname: prod-log-triage\ndescription: Use when running a scheduled prod-log-triage task — fetch production logs, group errors into classes, write an incident summary, and open a fix PR directly via `gh`\n---\n\n# Prod log triage\n\nTriage production logs for a repo on a schedule: fetch recent logs, group\nrecurring errors into distinct classes, record an incident summary, and open\na fix PR. This skill has **no octomux sink** — you open the PR yourself with\n`gh`; nothing reads a structured `emit` from this task.\n\nA task maps to a single PR: octomux's PR-detection poller matches on this\ntask's own branch, so every error class you fix this run goes into **one**\nPR, as separate commits, opened from the branch octomux already checked out\nfor you. Do not create a separate `fix/...` branch per error class.\n\n## Steps\n\n1. **Fetch recent prod logs** using the log command given in your prompt\n   (e.g. `flyctl logs -a my-app`, `kubectl logs -l app=my-app --since=1h`,\n   `gh run view --log`). Run it as-is — don't invent a different command.\n\n2. **Group errors into distinct classes.** Cluster by stack trace signature,\n   error message shape, or failing endpoint/job — not by raw log line. Ignore\n   noise (expected 4xx, health-check timeouts) unless the prompt says\n   otherwise.\n\n3. **Write an incident summary** to `desk/incidents/<date>.md` (create the\n   `desk/incidents/` directory if it doesn't exist), one section per error\n   class:\n\n   ```markdown\n   # Incident triage — <date>\n\n   ## <error class 1>\n\n   - First seen / frequency\n   - Representative log lines\n   - Root-cause hypothesis\n   - Fix: <one-line description> — see PR #<n>\n   ```\n\n4. **Open one fix PR from this task's current branch** directly with `gh` —\n   do not use any octomux sink or emit command for this workflow, and do not\n   `git checkout -b` a new branch. Commit each error class's fix separately\n   on the branch you're already on, then open a single PR:\n\n   ```bash\n   # for each fixable error class:\n   git add -A && git commit -m \"fix(<scope>): <description>\"\n\n   # after all fixes are committed, open (or reuse) exactly one PR:\n   branch=\"$(git rev-parse --abbrev-ref HEAD)\"\n   git push -u origin \"$branch\"\n   existing=\"$(gh pr list --head \"$branch\" --state open --json number --jq '.[0].number')\"\n   if [ -z \"$existing\" ]; then\n     gh pr create --title \"fix: prod log triage <date>\" \\\n       --body \"<one section per error class fixed + link to desk/incidents/<date>.md>\"\n   fi\n   ```\n\n   Checking for an existing open PR on this branch first makes the step\n   idempotent — later loop iterations push more commits and refine the same\n   PR instead of creating duplicates. The incident summary should list every\n   error class handled in this run, whether fixed (with a note that the fix\n   is in this PR) or skipped.\n\n   If a class has no clear fix (needs human judgement), skip fixing it and\n   note that in the incident summary instead of forcing a speculative\n   change.\n\n5. **Verify contract:** this task runs inside octomux's retry-loop (see the\n   scheduling service that launched you). Each iteration re-runs the repo's\n   configured verify command (tests/lint/typecheck) against your changes —\n   make sure the fix you commit passes it before ending your turn. The loop\n   iterates automatically on verify failure; you don't need to invoke verify\n   yourself.\n\n## Notes\n\n- This is a scheduled, unattended run — be conservative. Prefer small,\n  reviewable fixes over broad refactors.\n- If no actionable errors are found, still write the incident summary (even\n  if it just says \"no new error classes since last run\") and end your turn.\n- Do not fabricate log data — if the log command fails or returns nothing,\n  say so in the incident summary rather than inventing findings.\n",
+  "config": {
+    "type": "object",
+    "properties": {
+      "logCommand": {
+        "type": "string",
+        "title": "Log command",
+        "description": "Command whose output the triage agent inspects.",
+        "default": "gh run list --limit 20 --json databaseId,conclusion,name,url"
+      },
+      "verify": {
+        "type": "string",
+        "title": "Verify command",
+        "description": "Shell command that exits 0 when triage work is complete (scoped to the task branch).",
+        "default": "test -f \"desk/incidents/$(date +%F).md\" && [ -n \"$(gh pr list --head \"$(git rev-parse --abbrev-ref HEAD)\" --state open --json number --jq '.[0].number')\" ]"
+      },
+      "maxIterations": {
+        "type": "integer",
+        "title": "Max iterations",
+        "minimum": 1,
+        "default": 5
+      },
+      "baseBranch": {
+        "type": "string",
+        "title": "Base branch",
+        "default": "main",
+        "format": "single-line",
+        "pattern": "^[a-zA-Z0-9._/-]{1,80}$"
+      },
+      "branchPrefix": {
+        "type": "string",
+        "title": "Branch prefix",
+        "default": "triage",
+        "format": "single-line",
+        "pattern": "^[a-zA-Z0-9._/-]{1,80}$"
+      }
+    },
+    "additionalProperties": false
+  }
+}

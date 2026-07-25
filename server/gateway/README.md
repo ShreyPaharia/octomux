@@ -7,6 +7,12 @@ starts when its own tokens are configured. You can enable either, both, or neith
 
 > Design: [`spec/agent-gateway.md`](../../spec/agent-gateway.md). Plan: [`plans/2026-07-23-phase2-gateway.md`](../../plans/2026-07-23-phase2-gateway.md).
 
+> **Configuring tokens:** every token/allowlist below can be set via env var (as documented) **or**
+> through `/integrations` in the dashboard (providers `slack-gateway` / `telegram-gateway`), which
+> persists them to the DB instead. **Env always wins** when both are set — same rule as every other
+> octomux integration (Jira, Linear, …). The env-var walkthroughs below still work exactly as
+> written; the UI is just an alternative to editing `.env`.
+
 ## Security model (read before enabling)
 
 - **Owner allowlist — default deny.** An empty/missing allowlist denies everyone, on every

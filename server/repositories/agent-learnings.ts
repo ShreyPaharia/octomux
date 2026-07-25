@@ -61,7 +61,8 @@ export function listForRead(
     .prepare(
       `SELECT * FROM agent_learnings
          WHERE repo_path = ? AND lane IN (?, ?) AND superseded_at IS NULL
-       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC
+       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC,
+                id ASC
        LIMIT ?`,
     )
     .all(repoPath, SHARED_LANE, ownLane, opts.limit ?? DEFAULT_READ_LIMIT) as AgentLearning[];
@@ -112,7 +113,8 @@ export function searchForRead(
       `SELECT * FROM agent_learnings
          WHERE repo_path = ? AND lane IN (?, ?) AND superseded_at IS NULL
            AND (trigger LIKE ? OR lesson LIKE ?)
-       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC
+       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC,
+                id ASC
        LIMIT ?`,
     )
     .all(repoPath, SHARED_LANE, ownLane, q, q, opts.limit ?? 8) as AgentLearning[];
@@ -133,7 +135,8 @@ export function searchShared(
   return getDb()
     .prepare(
       `SELECT * FROM agent_learnings WHERE ${where.join(' AND ')}
-       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC
+       ORDER BY (last_used_at IS NULL) ASC, last_used_at DESC, usage_count DESC, created_at DESC,
+                id ASC
        LIMIT ?`,
     )
     .all(...params) as AgentLearning[];
@@ -145,17 +148,17 @@ export function listForDigest(
 ): { additions: AgentLearning[]; unused: AgentLearning[]; superseded: AgentLearning[] } {
   const additions = getDb()
     .prepare(
-      `SELECT * FROM agent_learnings WHERE repo_path = ? AND created_at >= ? ORDER BY created_at DESC`,
+      `SELECT * FROM agent_learnings WHERE repo_path = ? AND created_at >= ? ORDER BY created_at DESC, id ASC`,
     )
     .all(repoPath, sinceIso) as AgentLearning[];
   const unused = getDb()
     .prepare(
-      `SELECT * FROM agent_learnings WHERE repo_path = ? AND usage_count = 0 AND superseded_at IS NULL ORDER BY created_at ASC`,
+      `SELECT * FROM agent_learnings WHERE repo_path = ? AND usage_count = 0 AND superseded_at IS NULL ORDER BY created_at ASC, id ASC`,
     )
     .all(repoPath) as AgentLearning[];
   const superseded = getDb()
     .prepare(
-      `SELECT * FROM agent_learnings WHERE repo_path = ? AND superseded_at IS NOT NULL ORDER BY superseded_at DESC`,
+      `SELECT * FROM agent_learnings WHERE repo_path = ? AND superseded_at IS NOT NULL ORDER BY superseded_at DESC, id ASC`,
     )
     .all(repoPath) as AgentLearning[];
   return { additions, unused, superseded };

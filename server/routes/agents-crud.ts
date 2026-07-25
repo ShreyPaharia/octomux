@@ -23,7 +23,7 @@ import {
   type AgentConfig,
   type UpdateAgentInput,
 } from '../repositories/agents-config.js';
-import { createConversation, getPrimaryAgentConversation } from '../orchestrator/store.js';
+import { createConversation, getPrimaryAgentConversation } from '../repositories/orchestrator.js';
 import {
   startConversation,
   stopConversation,

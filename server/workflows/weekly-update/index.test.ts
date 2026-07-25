@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getWorkflow, listWorkflows, listCronWorkflowKinds } from '../registry.js';
 import type { ScheduleRow } from '../../repositories/schedules.js';
 
-const mockRunWeeklyUpdate = vi.fn().mockResolvedValue({ result: {} });
+const mockRunSession = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('./run.js', () => ({
-  runWeeklyUpdate: (...args: unknown[]) => mockRunWeeklyUpdate(...args),
+vi.mock('../session-runner.js', () => ({
+  runSession: (...args: unknown[]) => mockRunSession(...args),
 }));
 
 import './index.js';
@@ -30,7 +30,7 @@ function makeRow(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
 
 describe('weekly-update workflow registration', () => {
   beforeEach(() => {
-    mockRunWeeklyUpdate.mockClear();
+    mockRunSession.mockClear();
   });
 
   it('registers the weekly-update kind with an artifact surface, output schema, cron trigger', () => {
@@ -48,8 +48,8 @@ describe('weekly-update workflow registration', () => {
     expect(listCronWorkflowKinds()).toContain('weekly-update');
   });
 
-  it('fires the run with the schedule id and repo path, without awaiting it', async () => {
-    mockRunWeeklyUpdate.mockReturnValue(new Promise(() => {}));
+  it('fires the generic session runner with the schedule id, repo path, and kind, without awaiting it', async () => {
+    mockRunSession.mockReturnValue(new Promise(() => {}));
 
     const wf = getWorkflow('weekly-update')!;
     const row = makeRow({ id: 'sched-42' });
@@ -59,13 +59,14 @@ describe('weekly-update workflow registration', () => {
       scheduleId: row.id,
     });
 
-    expect(mockRunWeeklyUpdate).toHaveBeenCalledTimes(1);
-    const call = mockRunWeeklyUpdate.mock.calls[0][0];
+    expect(mockRunSession).toHaveBeenCalledTimes(1);
+    const call = mockRunSession.mock.calls[0][0];
     expect(call.repoPath).toBe('/repo');
     expect(call.scheduleId).toBe('sched-42');
+    expect(call.kind).toBe('weekly-update');
   });
 
-  it('threads ctx.model and ctx.timeoutMs into runWeeklyUpdate', async () => {
+  it('threads ctx.model and ctx.timeoutMs into runSession', async () => {
     const wf = getWorkflow('weekly-update')!;
     const row = makeRow({ id: 'sched-99' });
     await wf.run!({
@@ -76,7 +77,7 @@ describe('weekly-update workflow registration', () => {
       timeoutMs: 180000,
     });
 
-    const call = mockRunWeeklyUpdate.mock.calls[0][0];
+    const call = mockRunSession.mock.calls[0][0];
     expect(call.model).toBe('claude-sonnet-4-6');
     expect(call.timeoutMs).toBe(180000);
   });
@@ -90,7 +91,7 @@ describe('weekly-update workflow registration', () => {
       scheduleId: row.id,
     });
 
-    const call = mockRunWeeklyUpdate.mock.calls[0][0];
+    const call = mockRunSession.mock.calls[0][0];
     expect(call.model).toBeUndefined();
     expect(call.timeoutMs).toBeUndefined();
   });

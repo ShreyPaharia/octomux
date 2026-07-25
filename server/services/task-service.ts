@@ -12,7 +12,7 @@ import {
   getTask,
   inTransaction,
 } from '../repositories/index.js';
-import { upsertManagedTask } from '../orchestrator/store.js';
+import { upsertManagedTask } from '../repositories/orchestrator.js';
 import { startTask } from '../task-engine/index.js';
 import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';

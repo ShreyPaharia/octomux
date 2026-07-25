@@ -126,7 +126,7 @@ describe('executeScheduleRun', () => {
 
   // ── run-start info log ──────────────────────────────────────────────────────
 
-  it('logs run-start info with schedule_id, kind, trigger, model, timeout_ms, prompt_source', async () => {
+  it('logs run-start info with schedule_id, kind, trigger, model and timeout_ms', async () => {
     const { getLogger, setLogger } = await import('../logger.js');
     const original = getLogger();
     const buf = bufferStream();
@@ -150,31 +150,10 @@ describe('executeScheduleRun', () => {
       expect(startLog!.trigger).toBe('cron');
       expect(startLog!.model).toBe('claude-sonnet-4-6');
       expect(startLog!.timeout_ms).toBe(120000);
-      expect(startLog!.prompt_source).toBe('kind_skill');
-    } finally {
-      setLogger(original);
-    }
-  });
-
-  it('logs prompt_source as schedule_override when schedule has a prompt', async () => {
-    const { getLogger, setLogger } = await import('../logger.js');
-    const original = getLogger();
-    const buf = bufferStream();
-    setLogger(pino({ level: 'trace' }, buf.stream));
-
-    try {
-      const row = createSchedule({
-        kind: 'weekly-update',
-        repoPath: '/repo',
-        cron: '0 7 * * *',
-        prompt: 'custom prompt text',
-      });
-
-      await executeScheduleRun(row.id, { trigger: 'manual' });
-
-      const startLog = buf.lines().find((l) => l.msg === 'schedule run started');
-      expect(startLog).toBeDefined();
-      expect(startLog!.prompt_source).toBe('schedule_override');
+      // No `prompt_source`: the row's own prompt is the only prompt, so there is
+      // no resolution chain and nothing to attribute. Asserted absent so the
+      // deleted precedence logic cannot creep back unnoticed.
+      expect(startLog!.prompt_source).toBeUndefined();
     } finally {
       setLogger(original);
     }

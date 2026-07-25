@@ -26,7 +26,7 @@
 
 import { childLogger } from '../logger.js';
 import { pushToConversation } from './stream.js';
-import { getActionResult, putActionResult } from './store.js';
+import { getActionResult, putActionResult } from '../repositories/orchestrator.js';
 import { COMMANDS, getCommandByAction } from './command-registry.js';
 import type { OrchestratorAction } from './command-registry.js';
 

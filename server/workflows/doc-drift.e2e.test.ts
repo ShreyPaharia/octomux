@@ -20,6 +20,8 @@ vi.mock('../events.js', () => ({
 // ─── Import after mocks — side-effect registers the workflow + schedule handler ──
 
 import { createSchedule } from '../repositories/schedules.js';
+import { getWorkflow } from './registry.js';
+import { applyConfigDefaults } from './config.js';
 import { pollSchedules } from '../poller/schedule-cron.js';
 import './doc-drift/index.js';
 
@@ -46,7 +48,15 @@ describe('cron -> doc-drift e2e', () => {
   });
 
   it('fires a due schedule through the full cron -> service -> loop path', async () => {
-    createSchedule({ kind: 'doc-drift', repoPath: '/repo', cron: '0 7 * * *' });
+    // Mirror the route's write-time default materialization (§4.3): rows created
+    // through the API always carry a fully materialized config, and the runtime
+    // deliberately no longer re-resolves defaults at read time.
+    createSchedule({
+      kind: 'doc-drift',
+      repoPath: '/repo',
+      cron: '0 7 * * *',
+      config: applyConfigDefaults(getWorkflow('doc-drift')!, {}) as Record<string, unknown>,
+    });
     const now = new Date('2026-07-18T07:00:00Z');
 
     await pollSchedules(now);

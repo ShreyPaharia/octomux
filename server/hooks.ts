@@ -13,7 +13,7 @@ import {
   upsertManagedTask,
   getManagedTask,
   conversationIdForHookToken,
-} from './orchestrator/store.js';
+} from './repositories/orchestrator.js';
 import { handlePreToolUse } from './orchestrator/gate.js';
 import {
   runOrchestratorAction,
