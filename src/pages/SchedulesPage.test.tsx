@@ -80,6 +80,12 @@ function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
   };
 }
 
+/** Creation lives in a dialog — open it before touching any create-form field. */
+async function openCreateDialog(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByTestId('schedule-new'));
+  await screen.findByTestId('schedule-create-dialog');
+}
+
 describe('SchedulesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -152,6 +158,7 @@ describe('SchedulesPage', () => {
     renderWithRouter(<SchedulesPage />);
 
     await screen.findByText(/no schedules yet/i);
+    await openCreateDialog(user);
 
     await user.type(screen.getByTestId('schedule-repo-path'), '/my/repo');
     await user.click(screen.getByTestId('schedule-submit'));
@@ -219,14 +226,14 @@ describe('SchedulesPage', () => {
     renderWithRouter(<SchedulesPage />);
     await user.click(await screen.findByTestId('schedule-expand-sched-1'));
 
-    const presetSelect = await screen.findByTestId('schedule-edit-cron-preset-sched-1');
-    await user.selectOptions(presetSelect, 'daily');
+    // Row cron is '0 7 * * 1-5' — switching to Daily keeps the 07:00 time.
+    await user.click(await screen.findByTestId('schedule-edit-cron-sched-1-daily'));
     await user.click(screen.getByTestId('schedule-save-sched-1'));
 
     await waitFor(() =>
       expect(apiMock.updateSchedule).toHaveBeenCalledWith(
         'sched-1',
-        expect.objectContaining({ cron: '0 9 * * *' }),
+        expect.objectContaining({ cron: '0 7 * * *' }),
       ),
     );
   });
@@ -267,6 +274,8 @@ describe('SchedulesPage', () => {
 
     await screen.findByText(/no schedules yet/i);
 
+    await openCreateDialog(user);
+
     // Switch to custom kind
     const kindSelect = screen.getByTestId('schedule-kind');
     await user.selectOptions(kindSelect, 'custom');
@@ -285,6 +294,8 @@ describe('SchedulesPage', () => {
 
     await screen.findByText(/no schedules yet/i);
 
+    await openCreateDialog(user);
+
     const kindSelect = screen.getByTestId('schedule-kind');
     await user.selectOptions(kindSelect, 'custom');
 
@@ -302,6 +313,8 @@ describe('SchedulesPage', () => {
     renderWithRouter(<SchedulesPage />);
 
     await screen.findByText(/no schedules yet/i);
+
+    await openCreateDialog(user);
 
     const kindSelect = screen.getByTestId('schedule-kind');
     await user.selectOptions(kindSelect, 'custom');
@@ -324,10 +337,12 @@ describe('SchedulesPage', () => {
   });
 
   it('advanced disclosure is collapsed by default', async () => {
+    const user = userEvent.setup();
     apiMock.listSchedules.mockResolvedValue([]);
     renderWithRouter(<SchedulesPage />);
 
     await screen.findByText(/no schedules yet/i);
+    await openCreateDialog(user);
 
     // Advanced <details> summary should exist but content should not be visible by default
     expect(screen.getByText('Advanced')).toBeTruthy();
@@ -392,10 +407,12 @@ describe('SchedulesPage', () => {
   });
 
   it('create form pre-fills the prompt from the kind preset (kind-agnostic, via promptRequired)', async () => {
+    const user = userEvent.setup();
     apiMock.listSchedules.mockResolvedValue([]);
     renderWithRouter(<SchedulesPage />);
 
     await screen.findByText(/no schedules yet/i);
+    await openCreateDialog(user);
 
     await waitFor(() => {
       expect(screen.getByTestId('schedule-prompt')).toHaveValue(
