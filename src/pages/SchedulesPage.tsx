@@ -29,11 +29,12 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { timeAgo } from '@/lib/time';
 import { SchemaConfigForm, defaultsFromSchema } from '@/components/schedules/SchemaConfigForm';
-import { CronPresetField } from '@/components/schedules/CronPresetField';
-import { CRON_PRESETS } from '@/components/schedules/cronPresets';
+import { CronScheduleField } from '@/components/schedules/CronScheduleField';
+import { DEFAULT_CRON } from '@/components/schedules/cronBuilder';
 import { RepoPickerField } from '@/components/fields/RepoPickerField';
 import { TimezoneField } from '@/components/schedules/TimezoneField';
 import { KNOWN_MODELS } from '@/lib/models';
+import { cn } from '@/lib/utils';
 
 function parseConfigJson(configJson: string | null): Record<string, unknown> {
   if (!configJson) return {};
@@ -69,20 +70,89 @@ function ModelsDatalist({ id }: { id: string }) {
   );
 }
 
-// ─── ScheduleForm (create panel) ─────────────────────────────────────────────
+// ─── Section heading ──────────────────────────────────────────────────────────
 
-function ScheduleForm({
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{children}</p>
+  );
+}
+
+// ─── Trigger picker ───────────────────────────────────────────────────────────
+
+/**
+ * Only `schedule` (cron) is wired end-to-end — the `schedules` table stores a
+ * cron and nothing else. GitHub/Linear are shown disabled so the surface is
+ * honest about what exists rather than hiding the roadmap.
+ */
+const TRIGGERS = [
+  { id: 'schedule', label: 'Schedule', hint: 'Run on a recurring cron schedule' },
+  { id: 'github', label: 'GitHub event', hint: 'Run when a GitHub webhook event fires' },
+  { id: 'linear', label: 'Linear event', hint: 'Run when a Linear issue changes' },
+] as const;
+
+function TriggerPicker({
+  cron,
+  onCronChange,
+  timezone,
+  timezoneField,
+}: {
+  cron: string;
+  onCronChange: (cron: string) => void;
+  timezone: string;
+  timezoneField: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {TRIGGERS.map((trigger) => {
+        const active = trigger.id === 'schedule';
+        return (
+          <div
+            key={trigger.id}
+            data-testid={`schedule-trigger-${trigger.id}`}
+            className={cn(
+              'rounded-xl border px-3.5 py-3',
+              active ? 'border-primary/50 bg-glass-l1' : 'border-glass-edge opacity-50',
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">{trigger.label}</span>
+              {!active && (
+                <span className="ml-auto text-[10px] text-muted-soft">Not available yet</span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">{trigger.hint}</p>
+            {active && (
+              <div className="mt-3 flex flex-col gap-3">
+                <CronScheduleField value={cron} onChange={onCronChange} timezone={timezone} />
+                {timezoneField}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Create dialog ────────────────────────────────────────────────────────────
+
+function ScheduleDialog({
+  open,
+  onClose,
   kinds,
   presets,
   onCreated,
 }: {
+  open: boolean;
+  onClose: () => void;
   kinds: ScheduleKindInfo[];
   presets: PresetWithSource[];
   onCreated: () => void;
 }) {
   const [kind, setKind] = useState('');
   const [repoPath, setRepoPath] = useState('');
-  const [cron, setCron] = useState(CRON_PRESETS[0].cron);
+  const [cron, setCron] = useState(DEFAULT_CRON);
   const [timezone, setTimezone] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [config, setConfig] = useState<Record<string, unknown>>({});
@@ -149,7 +219,7 @@ function ScheduleForm({
       });
 
       setRepoPath('');
-      setCron(CRON_PRESETS[0].cron);
+      setCron(DEFAULT_CRON);
       setTimezone('');
       setEnabled(true);
       setName('');
@@ -162,6 +232,7 @@ function ScheduleForm({
         setConfig({});
       }
       onCreated();
+      onClose();
     } catch (err) {
       setError((err as Error).message || 'Failed to create schedule');
     } finally {
@@ -181,155 +252,167 @@ function ScheduleForm({
     prompt,
     selectedKind,
     onCreated,
+    onClose,
   ]);
 
   return (
-    <GlassPanel level={2} className="flex flex-col gap-3 rounded-2xl p-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="schedule-kind">Kind</Label>
-          <FormSelect
-            id="schedule-kind"
-            data-testid="schedule-kind"
-            value={kind}
-            onChange={(e) => setKind(e.target.value)}
-          >
-            {kinds.map((k) => (
-              <option key={k.kind} value={k.kind}>
-                {k.displayName}
-              </option>
-            ))}
-          </FormSelect>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="repo-path">Repository</Label>
-          <RepoPickerField value={repoPath} onChange={setRepoPath} />
-        </div>
-        <CronPresetField value={cron} onChange={setCron} />
-      </div>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        data-testid="schedule-create-dialog"
+        className="max-h-[88vh] gap-0 overflow-y-auto sm:max-w-2xl"
+      >
+        <DialogHeader className="pb-4">
+          <DialogTitle>New schedule</DialogTitle>
+          <DialogDescription>
+            A cron-triggered agent run. Pick a template, tell it what to do, choose when it fires.
+          </DialogDescription>
+        </DialogHeader>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <TimezoneField value={timezone} onChange={setTimezone} />
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="schedule-name">
-            Name {promptRequired && <span className="text-destructive">*</span>}
-          </Label>
-          <Input
-            id="schedule-name"
-            data-testid="schedule-name"
-            placeholder={
-              promptRequired ? 'My custom schedule' : 'Leave blank to use kind display name'
-            }
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Prompt is copied from the preset into schedules.prompt at create time
-          (spec §1) — always shown as an editable field, never an invisible
-          default (§7.1). Required only when the kind's preset ships no prompt. */}
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="schedule-prompt">
-          Prompt {promptRequired && <span className="text-destructive">*</span>}
-        </Label>
-        <Textarea
-          id="schedule-prompt"
-          data-testid="schedule-prompt"
-          placeholder="What should the agent do on each run?"
-          rows={4}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        {!promptRequired && (
-          <p className="text-[10px] text-muted-soft">
-            Pre-filled from the {selectedKind?.displayName ?? kind} preset. Editing here only
-            changes this schedule — the preset itself is untouched.
-          </p>
-        )}
-      </div>
-
-      <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => setEnabled(e.target.checked)}
-          className="h-3.5 w-3.5 cursor-pointer accent-[#3B82F6]"
-        />
-        Enabled
-      </label>
-
-      {selectedKind?.configSchema ? (
-        <details className="group" open>
-          <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-            Workflow config
-          </summary>
-          <div className="mt-3">
-            <SchemaConfigForm
-              schema={selectedKind.configSchema}
-              value={config}
-              onChange={setConfig}
-            />
-          </div>
-        </details>
-      ) : null}
-
-      {/* Advanced: model, timeout */}
-      <details className="group">
-        <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-          Advanced
-        </summary>
-        <div className="mt-3 flex flex-col gap-3">
+        <div className="flex flex-col gap-5">
+          {/* ── What it does ─────────────────────────────────────────── */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="schedule-model">Model (optional)</Label>
-            <ModelsDatalist id="schedule-models-list" />
+            <Label htmlFor="schedule-kind">Template</Label>
+            <FormSelect
+              id="schedule-kind"
+              data-testid="schedule-kind"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            >
+              {kinds.map((k) => (
+                <option key={k.kind} value={k.kind}>
+                  {k.displayName}
+                </option>
+              ))}
+            </FormSelect>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="schedule-name">
+              Name {promptRequired && <span className="text-destructive">*</span>}
+            </Label>
             <Input
-              id="schedule-model"
-              data-testid="schedule-model"
-              list="schedule-models-list"
-              placeholder="Harness default"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
+              id="schedule-name"
+              data-testid="schedule-name"
+              placeholder={
+                promptRequired ? 'e.g. Daily code review' : selectedKind?.displayName || 'Optional'
+              }
+              value={name}
+              onChange={(e) => setName(e.target.value)}
             />
           </div>
-          {selectedKind?.supportsTimeout && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="schedule-timeout">Timeout (minutes, optional)</Label>
-              <Input
-                id="schedule-timeout"
-                data-testid="schedule-timeout"
-                type="number"
-                min={1}
-                placeholder="5"
-                value={timeoutMins}
-                onChange={(e) => setTimeoutMins(e.target.value)}
-              />
+
+          {/* Prompt is copied from the preset into schedules.prompt at create time
+              (spec §1) — always shown as an editable field, never an invisible
+              default (§7.1). Required only when the kind's preset ships no prompt. */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="schedule-prompt">
+              Instructions {promptRequired && <span className="text-destructive">*</span>}
+            </Label>
+            <Textarea
+              id="schedule-prompt"
+              data-testid="schedule-prompt"
+              placeholder="Describe what the agent should do in each run"
+              rows={8}
+              className="min-h-[9rem] font-mono text-sm"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            {!promptRequired && (
               <p className="text-[10px] text-muted-soft">
-                Defaults to 5 minutes (300 s). Min 10 s, max 24 h.
+                Pre-filled from the {selectedKind?.displayName ?? kind} preset. Editing here only
+                changes this schedule — the preset itself is untouched.
               </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="repo-path">Repository</Label>
+            <RepoPickerField value={repoPath} onChange={setRepoPath} />
+          </div>
+
+          {/* ── When it fires ────────────────────────────────────────── */}
+          <div className="flex flex-col gap-3 border-t border-glass-edge pt-4">
+            <SectionLabel>Select a trigger</SectionLabel>
+            <TriggerPicker
+              cron={cron}
+              onCronChange={setCron}
+              timezone={timezone}
+              timezoneField={<TimezoneField value={timezone} onChange={setTimezone} />}
+            />
+          </div>
+
+          {/* ── Options ──────────────────────────────────────────────── */}
+          {selectedKind?.configSchema ? (
+            <div className="flex flex-col gap-3 border-t border-glass-edge pt-4">
+              <SectionLabel>Workflow config</SectionLabel>
+              <SchemaConfigForm
+                schema={selectedKind.configSchema}
+                value={config}
+                onChange={setConfig}
+              />
             </div>
-          )}
+          ) : null}
+
+          <details className="group border-t border-glass-edge pt-4">
+            <summary className="flex w-fit cursor-pointer items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase hover:text-foreground">
+              Advanced
+            </summary>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="schedule-model">Model</Label>
+                <ModelsDatalist id="schedule-models-list" />
+                <Input
+                  id="schedule-model"
+                  data-testid="schedule-model"
+                  list="schedule-models-list"
+                  placeholder="Harness default"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                />
+              </div>
+              {selectedKind?.supportsTimeout && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="schedule-timeout">Timeout (minutes)</Label>
+                  <Input
+                    id="schedule-timeout"
+                    data-testid="schedule-timeout"
+                    type="number"
+                    min={1}
+                    placeholder="5"
+                    value={timeoutMins}
+                    onChange={(e) => setTimeoutMins(e.target.value)}
+                  />
+                  <p className="text-[10px] text-muted-soft">
+                    Defaults to 5 minutes. Min 10 s, max 24 h.
+                  </p>
+                </div>
+              )}
+            </div>
+          </details>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
-      </details>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
-
-      <div>
-        <Button
-          size="sm"
-          data-testid="schedule-submit"
-          disabled={!canSubmit || submitting}
-          onClick={handleSubmit}
-        >
-          {submitting ? 'Creating…' : 'New schedule'}
-        </Button>
-        {promptRequired && (!name.trim() || !prompt.trim()) && (
-          <p className="mt-1.5 text-[10px] text-muted-foreground">
-            Name and prompt are required for this kind.
-          </p>
-        )}
-      </div>
-    </GlassPanel>
+        <DialogFooter className="mt-5 items-center sm:justify-between">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <Switch checked={enabled} onChange={setEnabled} aria-label="Enabled" />
+            Enabled
+          </label>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button
+              data-testid="schedule-submit"
+              disabled={!canSubmit || submitting}
+              onClick={handleSubmit}
+            >
+              {submitting ? 'Creating…' : 'Create'}
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -494,13 +577,15 @@ function ScheduleDetail({
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <CronPresetField
-          id={`schedule-edit-cron-${row.id}`}
-          value={cron}
-          onChange={setCron}
-          presetTestId={`schedule-edit-cron-preset-${row.id}`}
-          customTestId={`schedule-edit-cron-${row.id}`}
-        />
+        <div className="flex flex-col gap-1.5">
+          <Label>Trigger</Label>
+          <CronScheduleField
+            value={cron}
+            onChange={setCron}
+            timezone={timezone}
+            testIdPrefix={`schedule-edit-cron-${row.id}`}
+          />
+        </div>
         <TimezoneField
           id={`schedule-edit-timezone-${row.id}`}
           value={timezone}
@@ -801,6 +886,7 @@ export default function SchedulesPage() {
   const [deleteTarget, setDeleteTarget] = useState<ScheduleRow | null>(null);
   const [runsKey, setRunsKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const schedules = data ?? [];
 
   const kindByName = useMemo(() => new Map(kinds.map((k) => [k.kind, k])), [kinds]);
@@ -836,18 +922,29 @@ export default function SchedulesPage() {
         title="Schedules"
         description="Cron-triggered runs — creatable and observable from here."
         actions={
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="schedule-import-open"
-            onClick={() => setImportOpen(true)}
-          >
-            Import JSON
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="schedule-import-open"
+              onClick={() => setImportOpen(true)}
+            >
+              Import JSON
+            </Button>
+            <Button size="sm" data-testid="schedule-new" onClick={() => setCreateOpen(true)}>
+              New schedule
+            </Button>
+          </div>
         }
       />
 
-      <ScheduleForm kinds={kinds} presets={presets} onCreated={refresh} />
+      <ScheduleDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        kinds={kinds}
+        presets={presets}
+        onCreated={refresh}
+      />
 
       {loading ? (
         <div className="space-y-2">
@@ -859,7 +956,15 @@ export default function SchedulesPage() {
           ))}
         </div>
       ) : schedules.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No schedules yet.</p>
+        <GlassPanel
+          level={2}
+          className="flex flex-col items-center gap-3 rounded-2xl px-4 py-10 text-center"
+        >
+          <p className="text-sm text-muted-foreground">No schedules yet.</p>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            New schedule
+          </Button>
+        </GlassPanel>
       ) : (
         <ul className="flex flex-col gap-2">
           {schedules.map((row) => {

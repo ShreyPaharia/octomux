@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { CronPresetField } from '@/components/schedules/CronPresetField';
+import { CronScheduleField } from '@/components/schedules/CronScheduleField';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
 
 function emptyDraft(): Preset {
@@ -156,13 +156,14 @@ function PresetEditorDialog({
               onChange={(e) => setDisplayName(e.target.value)}
             />
           </div>
-          <CronPresetField
-            id="kind-editor-cron"
-            value={defaultCron}
-            onChange={setDefaultCron}
-            presetTestId="kind-editor-cron-preset"
-            customTestId="kind-editor-cron-custom"
-          />
+          <div className="flex flex-col gap-1.5">
+            <Label>Default schedule</Label>
+            <CronScheduleField
+              value={defaultCron}
+              onChange={setDefaultCron}
+              testIdPrefix="kind-editor-cron"
+            />
+          </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="kind-editor-prompt">Prompt</Label>
             <Textarea
