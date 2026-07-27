@@ -50,6 +50,10 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
   - `schedules/cron.ts` — `isCronDue()`, the 5-field cron evaluator (`croner`, UTC) behind
     scheduled runs. Rows live in the `schedules` table; `poller/schedule-cron.ts` fires them.
 - `src/` — React SPA (pages, components, lib/api.ts)
+  - `workflows/` — front-end workflow-UI registry mirroring `server/workflows/`.
+    `registerWorkflowUI(kind, { navLabel, icon, ListView, DetailView })` (`loops/register.tsx`)
+    backs the generic `/w/:kind/:id` route; a kind that registers `getItem` + `outputSchema`
+    instead of a `DetailView` falls back to the schema-driven `DefaultDetailView`.
 - `cli/` — CLI tool; one file per subcommand in `cli/src/commands/` (create-task, list-tasks,
   get-task, close-task, resume-task, delete-task, add-agent, send-message, stop-agent, init,
   emit, loop-start, loop-start-group, learn/recall/unlearn, post-review,
@@ -134,7 +138,8 @@ octomux emit --run <loop-run-id> --status done|blocked|needs_human --reason "<wh
   `max_iterations`, `budget` (tokens/time), `no_progress` (`--stall-after` N no-op iterations).
 - Each iteration appends to a curated playbook in the worktree so the next fresh context sees
   what earlier ones tried.
-- UI at `/loops`, `/loops/:id`; REST in `server/routes/loops.ts`.
+- UI at `/loops` (list) and `/w/loops/:id` (detail, via the workflow-UI registry); `/loops/:id`
+  is a legacy redirect. REST in `server/routes/loops.ts`.
 - Spec: `spec/workflow-framework.md`; plans: `plans/2026-07-12-loop-harness-*.md`.
 
 ### Learnings
