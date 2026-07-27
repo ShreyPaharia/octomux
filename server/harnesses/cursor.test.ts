@@ -255,4 +255,33 @@ describe('cursorHarness.installHooks', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it('uninstallHooks removes the bridge dir and our hooks.json', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-rm-'));
+    try {
+      await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
+      await cursorHarness.uninstallHooks(tmpDir);
+      expect(fs.existsSync(path.join(tmpDir, '.octomux-hooks'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, '.cursor', 'hooks.json'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uninstallHooks keeps a hooks.json that is not ours, and no-ops on a bare dir', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-keep-'));
+    try {
+      const hooksPath = path.join(tmpDir, '.cursor', 'hooks.json');
+      fs.mkdirSync(path.dirname(hooksPath), { recursive: true });
+      fs.writeFileSync(hooksPath, '{"version":1,"hooks":{"sessionStart":[]}}', 'utf-8');
+      await cursorHarness.uninstallHooks(tmpDir);
+      expect(fs.existsSync(hooksPath)).toBe(true);
+
+      const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-bare-'));
+      await expect(cursorHarness.uninstallHooks(bare)).resolves.toBeUndefined();
+      fs.rmSync(bare, { recursive: true, force: true });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

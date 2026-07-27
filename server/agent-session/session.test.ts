@@ -79,6 +79,7 @@ function makeStubHarness(): Harness {
     buildResumeCommand: vi.fn().mockReturnValue('stub-resume'),
     buildContinueCommand: vi.fn().mockReturnValue(null),
     installHooks: vi.fn().mockResolvedValue(undefined),
+    uninstallHooks: vi.fn().mockResolvedValue(undefined),
     syncAgents: vi.fn().mockResolvedValue(undefined),
     resolveFlags: vi.fn().mockReturnValue(''),
     validateSettings: vi.fn().mockReturnValue({}),

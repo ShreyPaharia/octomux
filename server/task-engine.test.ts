@@ -1480,6 +1480,35 @@ describe('deleteTask', () => {
         findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
       ).toBeUndefined();
     });
+
+    // The repo survives deleteTask, so our hook config must not — a config
+    // whose token outlives the agent row 401s in every later session there.
+    it('strips our hook config from the user-owned repo', async () => {
+      insertTask(db, noneRunningTask);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          permissions: { allow: ['Bash(ls:*)'] },
+          hooks: {
+            Stop: [
+              { hooks: [{ type: 'http', url: 'http://127.0.0.1:7777/api/hooks/stop?token=t' }] },
+            ],
+            PreToolUse: [{ hooks: [{ type: 'command', command: 'mine' }] }],
+          },
+        }),
+      );
+
+      await deleteTask(noneRunningTask);
+
+      const write = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find(([p]) => String(p).endsWith('settings.local.json'));
+      expect(write).toBeDefined();
+      expect(String(write![0])).toContain(noneRunningTask.repo_path);
+      const written = JSON.parse(String(write![1]));
+      expect(written.hooks.Stop).toBeUndefined();
+      expect(written.hooks.PreToolUse).toHaveLength(1);
+      expect(written.permissions.allow).toEqual(['Bash(ls:*)']);
+    });
   });
 
   describe('run_mode=existing (safety)', () => {

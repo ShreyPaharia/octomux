@@ -68,6 +68,14 @@ export interface Harness {
   buildResumeCommand(opts: HarnessResumeOpts): string;
   buildContinueCommand(opts: HarnessResumeOpts): string | null;
   installHooks(worktreePath: string, baseUrl: string, hookToken: string): Promise<void>;
+  /**
+   * Remove octomux's hook wiring from a directory. Called on teardown for paths
+   * octomux does NOT own (run_mode `existing`/`none`), which survive deleteTask
+   * — otherwise the config outlives the worker row whose token it carries and
+   * every later session in that directory 401s on every hook. Must leave the
+   * user's own hooks and permissions intact, and no-op when nothing is there.
+   */
+  uninstallHooks(dirPath: string): Promise<void>;
   syncAgents(worktreePath: string): Promise<void>;
   /**
    * Optional post-launch hook called after the launch command is sent to the
