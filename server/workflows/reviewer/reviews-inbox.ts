@@ -1,5 +1,5 @@
 import { listPublishedReviews } from '../../repositories/published-reviews.js';
-import { getCurrentRun, listRunsForTask } from '../../repositories/review-runs.js';
+import { getLatestRun, listRunsForTask } from '../../repositories/review-runs.js';
 import { listComments, countCommentsByStatus } from '../../repositories/inline-comments.js';
 import { listReviewTasks, getReviewTask } from '../../repositories/index.js';
 import { childLogger } from '../../logger.js';
@@ -13,7 +13,8 @@ export type ReviewInboxStatus =
   | 'drafts-ready' // latest run completed, drafts await user action
   | 'head-advanced' // PR head SHA differs from latest review_run's SHA
   | 'published' // a published_review exists for the current head SHA and no drafts left
-  | 'failed'; // latest run failed
+  | 'failed' // latest run failed
+  | 'error'; // the task errored before any review_run started
 
 export interface ReviewInboxRow {
   task_id: string;
@@ -48,6 +49,10 @@ function deriveStatus(
   if (latestRun?.status === 'running') return 'reviewing';
   if (latestRun?.status === 'failed') return 'failed';
 
+  // The task died before a review_run ever started (e.g. worktree setup
+  // failure) — without this it would fall through to 'published'.
+  if (!latestRun && task.runtime_state === 'error') return 'error';
+
   // Head has advanced past the last reviewed SHA
   if (latestRun && task.pr_head_sha && latestRun.pr_head_sha !== task.pr_head_sha) {
     return 'head-advanced';
@@ -61,7 +66,9 @@ export function listReviewsInbox(): ReviewInboxRow[] {
   const tasks = listReviewTasks();
 
   return tasks.map((task) => {
-    const latestRun = getCurrentRun(task.id);
+    // True latest run (including failed) — a failed latest run must surface as
+    // 'failed', not be skipped in favour of an older completed run.
+    const latestRun = getLatestRun(task.id);
 
     const counts = countCommentsByStatus(task.id);
 

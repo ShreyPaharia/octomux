@@ -46,6 +46,31 @@ describe('reviews-inbox', () => {
     expect(row.status).toBe('drafts-ready'); // accepted > 0 OR drafts > 0 AND latest run completed
   });
 
+  it('shows failed when the latest run failed, even with older completed runs', () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, status, error, started_at, completed_at)
+       VALUES ('r2', 't1', 'sha-h2', 'failed', 'timeout: no progress for 15 minutes',
+               datetime('now'), datetime('now'))`,
+    ).run();
+
+    const row = listReviewsInbox()[0];
+    expect(row.status).toBe('failed');
+  });
+
+  it('shows error for an errored task with no review runs instead of published', () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO tasks
+         (id, title, description, runtime_state, workflow_status, source, worktree_id, pr_number, error)
+       VALUES ('t-err', 'PR review', '', 'error', 'backlog', 'auto_review', 'wt1', 9,
+               'worktree add failed')`,
+    ).run();
+
+    const row = listReviewsInbox().find((r) => r.task_id === 't-err')!;
+    expect(row.status).toBe('error');
+  });
+
   it('getReviewDetail returns task + latest run + all comments (active + history) + published history', () => {
     const detail = getReviewDetail('t1');
     expect(detail).not.toBeNull();

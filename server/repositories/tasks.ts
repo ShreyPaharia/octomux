@@ -742,6 +742,25 @@ export function findExistingPrTask(
 }
 
 /**
+ * True when a soft-deleted (trashed) auto-review task still exists for the
+ * repo+PR. Used by the reviewer poller to avoid resurrecting a review the user
+ * just deleted — the trashed task's worktree is only removed when the trash
+ * purges, so recreating early would also collide with the leftover worktree.
+ */
+export function hasTrashedPrReviewTask(repoPath: string, prNumber: number): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.pr_number = ?
+          AND t.source = 'auto_review' AND t.deleted_at IS NOT NULL
+        LIMIT 1`,
+    )
+    .get(repoPath, prNumber);
+  return row !== undefined;
+}
+
+/**
  * List idle auto-review draft tasks for a given repo_path.
  * Used by cleanupResolvedReviewDrafts to find and purge drafts whose PR is no
  * longer awaiting review.

@@ -9,6 +9,7 @@ import { sendMessageToAgent } from '../tmux-input.js';
 import {
   listTaskRepoPaths,
   findExistingPrTask,
+  hasTrashedPrReviewTask,
   listAutoReviewDrafts,
   hardDeleteTask,
   updateTaskPromptAndSha,
@@ -232,6 +233,13 @@ async function upsertReviewTask(
       return { action: 'nudged', taskId: existing.id };
     }
 
+    return { action: 'skipped' };
+  }
+
+  // The user deleted this PR's review — don't resurrect it while the trashed
+  // task exists (its worktree is only removed when the trash purges, so an
+  // early recreate would error on the leftover worktree anyway).
+  if (hasTrashedPrReviewTask(repoPath, pr.number)) {
     return { action: 'skipped' };
   }
 

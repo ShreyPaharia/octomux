@@ -16,7 +16,8 @@ export type ReviewInboxStatus =
   | 'drafts-ready'
   | 'head-advanced'
   | 'published'
-  | 'failed';
+  | 'failed'
+  | 'error';
 
 export type PublishedReviewVerdict = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 

@@ -933,6 +933,20 @@ describe('pollReviewerRequests', () => {
     expect((calledWith as { id: string }).id).toBe(created.id);
   });
 
+  it('does not resurrect a soft-deleted review task for the same PR', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, { id: 'trashed', repo_path: REPO, pr_number: 42, source: 'auto_review' });
+    db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 'trashed'`).run();
+    mockPrList([makePR()]);
+
+    await pollReviewerRequests();
+
+    const created = db
+      .prepare(`SELECT id FROM tasks WHERE source = 'auto_review' AND deleted_at IS NULL`)
+      .all();
+    expect(created).toHaveLength(0);
+  });
+
   it('skips when owner is not in reviewRequests (e.g. already reviewed)', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     mockPrList([makePR({ reviewRequests: [{ login: 'someone-else' }] })]);
@@ -1320,6 +1334,64 @@ describe('sweepStuckReviewRuns', () => {
     };
     expect(row.status).toBe('failed');
     expect(row.error).toMatch(/timeout/);
+  });
+
+  it('fails a post-walkthrough run whose task is no longer running', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t1', 'x', '', 'idle', 'backlog', 'auto_review')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, started_at)
+       VALUES ('r1', 't1', 'sha', '{"global":{}}', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status, error FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+      error: string | null;
+    };
+    expect(row.status).toBe('failed');
+    expect(row.error).toMatch(/no longer running/);
+  });
+
+  it('fails a stale run whose PR head advanced past its sha', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source, pr_head_sha)
+       VALUES ('t1', 'x', '', 'running', 'backlog', 'auto_review', 'sha-new')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, started_at)
+       VALUES ('r1', 't1', 'sha-old', '{"global":{}}', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status, error FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+      error: string | null;
+    };
+    expect(row.status).toBe('failed');
+    expect(row.error).toMatch(/superseded/);
+  });
+
+  it('leaves an old post-walkthrough run alone while its task still runs on the same head', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source, pr_head_sha)
+       VALUES ('t1', 'x', '', 'running', 'backlog', 'auto_review', 'sha')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, started_at)
+       VALUES ('r1', 't1', 'sha', '{"global":{}}', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+    };
+    expect(row.status).toBe('running');
   });
 
   it('leaves a fresh review_run alone', async () => {

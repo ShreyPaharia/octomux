@@ -5,7 +5,7 @@
  */
 import { subscribeServerEvents } from '../../events.js';
 import { getTask } from '../../repositories/index.js';
-import { getReviewRun } from '../../repositories/review-runs.js';
+import { getReviewRun, getLatestRun } from '../../repositories/review-runs.js';
 import { countCommentsForRun } from '../../repositories/inline-comments.js';
 import { finishRun, listRunsForWorkflow } from '../../repositories/runs.js';
 import { childLogger } from '../../logger.js';
@@ -57,6 +57,45 @@ export function finishReviewerRun(taskId: string, reviewRunId: string, failed: b
     { task_id: taskId, run_id: run.id, review_run_id: reviewRunId, comment_count: commentCount },
     'reviewer: run finished on drafts ready',
   );
+}
+
+/**
+ * Reconcile running reviewer `runs` rows against review_runs state in the DB.
+ *
+ * `octomux review complete` runs in the agent's CLI process, so its
+ * `review:drafts-ready` broadcast never reaches this process's in-process
+ * listeners — without this sweep every github-triggered reviewer run would sit
+ * at 'running' forever. Called from the poller; idempotent.
+ */
+export function reconcileReviewerRuns(): void {
+  const running = listRunsForWorkflow('reviewer').filter(
+    (r) => r.status === 'running' && r.task_id,
+  );
+
+  for (const run of running) {
+    const taskId = run.task_id as string;
+    const latest = getLatestRun(taskId);
+
+    if (latest?.status === 'completed') {
+      finishReviewerRun(taskId, latest.id, false);
+    } else if (latest?.status === 'failed') {
+      finishReviewerRun(taskId, latest.id, true);
+    } else if (!latest) {
+      const task = getTask(taskId);
+      if (task?.runtime_state === 'error') {
+        const summary = task.error ?? 'task errored before the review started';
+        finishRun(run.id, {
+          status: 'failed',
+          error: summary,
+          result: { outcome: 'failed', summary } satisfies RunResult,
+        });
+        logger.info(
+          { task_id: taskId, run_id: run.id },
+          'reviewer: run finished on task error (no review_run)',
+        );
+      }
+    }
+  }
 }
 
 /** Subscribe to review lifecycle events. Returns unsubscribe — call from server startup only. */
