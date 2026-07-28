@@ -25,11 +25,14 @@ server/           Express backend (API, terminal streaming, task lifecycle, DB)
   routes/         one module per REST surface (tasks, diffs, reviews, loops, …)
   task-engine/    worktree + tmux + harness lifecycle (cleanup.ts: closeTask, deleteTask)
   harnesses/      pluggable agent backends (claude-code.ts, cursor.ts)
+  workflows/      workflow kinds (loops, reviewer, doc-drift, …) + kind presets
+  schedules/      cron.ts — isCronDue(), the 5-field cron evaluator behind schedules
   poller/         background pollers (PR detection, merged-PR close, hooks, schedules)
   db.ts           SQLite singleton with getDb() / setDb() / initDb()
   db/             schema.ts + forward-only migrations.ts
   types.ts        re-exports @octomux/types + review-orchestrator types
 src/              React SPA (pages, components, lib/api.ts)
+  workflows/      front-end workflow-UI registry behind the /w/:kind/:id route
 cli/              CLI tool for task management
 packages/         bun workspaces: types, diff-engine, api-client, test-fixtures
 electron/         macOS desktop shell
