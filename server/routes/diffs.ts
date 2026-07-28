@@ -10,6 +10,7 @@ import {
   getFileDiff,
   clearDiffBaseCache,
 } from '@octomux/diff-engine';
+import type { DiffSummary, DiffRange } from '@octomux/diff-engine';
 import { childLogger } from '../logger.js';
 import { taskWorkingDir } from '../task-paths.js';
 import { decorateDiffSummaryWithReviewState } from '../diff-review-state.js';
@@ -22,6 +23,47 @@ import { badRequest, conflict } from '../services/errors.js';
 
 const logger = childLogger('api:diffs');
 const diffLogger = childLogger('diff');
+
+// ─── Diff summary in-memory cache ────────────────────────────────────────────
+// Keyed by (task_id, base_sha, range). When head sha or base changes, the key
+// changes, so explicit invalidation is not needed. A short TTL (10 s) is kept
+// as a safety net. Misses transparently fall through to getDiffSummary.
+
+const DIFF_SUMMARY_TTL_MS = 10_000;
+
+interface DiffSummaryCacheEntry {
+  summary: DiffSummary;
+  expiresAt: number;
+}
+
+const diffSummaryCache = new Map<string, DiffSummaryCacheEntry>();
+
+function diffSummaryCacheKey(taskId: string, baseSha: string, range: DiffRange): string {
+  return `${taskId}:${baseSha}:${JSON.stringify(range)}`;
+}
+
+/** Exposed for tests to reset cache state between runs. */
+export function clearDiffSummaryCache(): void {
+  diffSummaryCache.clear();
+}
+
+async function getDiffSummaryCached(
+  taskId: string,
+  baseSha: string,
+  range: DiffRange,
+  fetchFn: () => Promise<DiffSummary>,
+): Promise<DiffSummary> {
+  const key = diffSummaryCacheKey(taskId, baseSha, range);
+  const now = Date.now();
+  const cached = diffSummaryCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.summary;
+  }
+  // Miss — compute (may throw; let the error propagate, never cache failures).
+  const summary = await fetchFn();
+  diffSummaryCache.set(key, { summary, expiresAt: now + DIFF_SUMMARY_TTL_MS });
+  return summary;
+}
 
 function requireDiffTask(req: Request) {
   const task = loadTaskOrFail(req);
@@ -68,7 +110,9 @@ router.get('/api/tasks/:id/diff', async (req: Request, res: Response) => {
   const range = parseRangeOrThrow(
     typeof req.query.range === 'string' ? req.query.range : undefined,
   );
-  const summary = await getDiffSummary({ target: task, range, logger: diffLogger });
+  const summary = await getDiffSummaryCached(task.id, task.base_sha!, range, () =>
+    getDiffSummary({ target: task, range, logger: diffLogger }),
+  );
   const decorated = await decorateDiffSummaryWithReviewState(task.id, cwd, summary);
   res.json(decorated);
 });
