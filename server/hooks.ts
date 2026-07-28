@@ -9,7 +9,6 @@ import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
 import { handleLoopIterationBoundary } from './task-engine/loop/engine.js';
 import {
-  isOrchestratorManaged,
   upsertManagedTask,
   getManagedTask,
   conversationIdForHookToken,
@@ -29,7 +28,6 @@ import {
   setAgentHarnessSessionId,
   setAgentHookActivity,
   setAgentHookActivityIfNotIdle,
-  countRunningAgentsExcept,
 } from './repositories/workers.js';
 import {
   getTaskWorkflowStatus,
@@ -41,9 +39,7 @@ import {
 } from './repositories/tasks.js';
 import {
   insertPermissionPrompt,
-  resolveAgentPermissionPrompts,
   resolveOldestPendingByAgent,
-  countPendingByTask,
 } from './repositories/permission-prompts.js';
 import { inTransaction } from './repositories/tx.js';
 
@@ -329,12 +325,7 @@ router.post(
       return;
     }
 
-    inTransaction(() => {
-      // Resolve ALL pending prompts for this agent
-      resolveAgentPermissionPrompts(agent.id);
-
-      setAgentHookActivity(agent.id, 'idle');
-    });
+    setAgentHookActivity(agent.id, 'idle');
 
     // Loop harness: a looping task's Stop hook marks an iteration boundary, not
     // a normal turn end — bypass human_review/task_updates/fireHook/summarizer
@@ -348,43 +339,6 @@ router.post(
       });
       res.status(200).send();
       return;
-    }
-
-    // B4: Auto-transition in_progress → human_review when the last agent stops.
-    // SUPPRESSED for orchestrator-managed tasks (§6.5, R3-I1): managed_tasks.phase
-    // is authoritative; workflow_status is set only via set_workflow_status tool.
-    const task = getTaskWorkflowStatus(agent.task_id);
-
-    if (task && task.workflow_status === 'in_progress' && !isOrchestratorManaged(task.id)) {
-      const otherRunning = countRunningAgentsExcept(agent.task_id, agent.id);
-      const pendingPrompts = countPendingByTask(agent.task_id);
-
-      if (otherRunning === 0 && pendingPrompts === 0) {
-        setWorkflowStatus(task.id, 'human_review');
-        addTaskUpdate({
-          task_id: task.id,
-          kind: 'transition',
-          from_status: 'in_progress',
-          to_status: 'human_review',
-          body: 'auto: agent stopped',
-        });
-
-        logger.info(
-          { task_id: task.id, agent_id: agent.id, operation: 'auto_human_review' },
-          'auto-transitioned to human_review',
-        );
-
-        fireHook('workflow_status_changed', {
-          event: 'workflow_status_changed',
-          task: { id: task.id, workflow_status: 'human_review' as const },
-          data: { from: 'in_progress', to: 'human_review', note: 'auto: agent stopped' },
-        });
-      }
-    } else if (task && task.workflow_status === 'in_progress' && isOrchestratorManaged(task.id)) {
-      logger.info(
-        { task_id: task.id, agent_id: agent.id, operation: 'stop_suppressed_managed' },
-        'Stop hook: suppressed auto-human_review for orchestrator-managed task',
-      );
     }
 
     // Orchestrator phase-complete detection (spec §6.5). A managed task signals

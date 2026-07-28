@@ -259,7 +259,10 @@ describe('Hook endpoints', () => {
   });
 
   describe('POST /api/hooks/stop', () => {
-    it('resolves all pending prompts and sets agent to idle', async () => {
+    it('sets agent to idle but does NOT blanket-resolve pending permission prompts', async () => {
+      // Subagents inherit the parent hook token and post under the same worker row.
+      // Blanket-resolving on Stop would clobber subagent prompts — so Stop must
+      // no longer call resolveAgentPermissionPrompts.
       insertPermissionPrompt(db, {
         id: 'pp1',
         task_id: 't1',
@@ -278,9 +281,11 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', stop_hook_active: false })
         .expect(200);
 
+      // Prompts must remain pending — Stop no longer blanket-resolves them
       const prompts = getPermissionPrompts(db, 't1');
-      expect(prompts.every((p) => p.status === 'resolved')).toBe(true);
+      expect(prompts.every((p) => p.status === 'pending')).toBe(true);
 
+      // Agent activity still flips to idle
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
 
@@ -603,8 +608,10 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
     } as any);
   });
 
-  it('auto-transitions in_progress → human_review for UN-managed tasks (existing behavior)', async () => {
-    // task-m is NOT in managed_tasks → existing B4 behavior applies
+  it('Stop hook does NOT synchronously transition to human_review (debounced via poller)', async () => {
+    // The B4 synchronous transition has been removed — Stop now only sets the agent idle.
+    // The quiescence poller (pollQuiescence) handles the in_progress → human_review
+    // transition after the debounce window expires.
     await request(app)
       .post('/api/hooks/stop?token=tok-m')
       .send({ session_id: 'sess-m' })
@@ -613,7 +620,8 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
     const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-m') as {
       workflow_status: string;
     };
-    expect(row.workflow_status).toBe('human_review');
+    // Must remain in_progress — quiescence poller decides after debounce
+    expect(row.workflow_status).toBe('in_progress');
   });
 
   it('SUPPRESSES in_progress → human_review auto-transition for orchestrator-managed tasks', async () => {

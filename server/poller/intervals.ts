@@ -1,4 +1,6 @@
 /** Poll cadences — 0 in test env so setInterval is skipped (tests call tick fns directly). */
+export const QUIESCENCE_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
+export const QUIESCENCE_DEBOUNCE_MS = 90000; // 90s: must exceed observed subagent re-wake gaps (30–75s)
 export const STATUS_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 5000;
 export const PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
 export const MERGED_PR_INTERVAL = process.env.NODE_ENV === 'test' ? 0 : 60000;
