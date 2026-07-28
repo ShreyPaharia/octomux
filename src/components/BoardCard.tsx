@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { GlassPanel } from '@/components/ui/glass-panel';
@@ -7,6 +7,7 @@ import { timeAgo } from '@/lib/time';
 import { formatDuration } from '@/lib/format-duration';
 import { cn, repoName } from '@/lib/utils';
 import { taskApi } from '@/lib/api/taskApi';
+import { useTicker } from '@/lib/use-ticker';
 import { TrashCountdown } from './TrashCountdown';
 import { clearDiffTreeExpandedState } from '@/lib/diff-tree-storage';
 
@@ -35,13 +36,7 @@ function RuntimeDot({ state }: { state: Task['runtime_state'] }) {
  */
 function TaskDuration({ task }: { task: Task }) {
   const isActive = task.runtime_state === 'running' || task.runtime_state === 'setting_up';
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!isActive) return;
-    const t = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(t);
-  }, [isActive]);
+  const now = useTicker(isActive);
 
   const start = new Date(task.created_at + 'Z').getTime();
   if (Number.isNaN(start)) return null;

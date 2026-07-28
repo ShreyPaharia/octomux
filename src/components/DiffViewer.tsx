@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { taskApi, type DiffFileEntry, type DiffRange } from '@/lib/api/taskApi';
 import type { Worker } from '@octomux/types';
+import { useServerEvents } from '@/lib/use-server-events';
+import { throttle } from '@/lib/throttle';
 import {
   getReviewed,
   setReviewed as persistReviewed,
@@ -11,7 +13,10 @@ import { DIFF_REVIEW_BADGE } from '@/lib/design-tokens';
 import { DiffFileTree } from './DiffFileTree';
 import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
 
-const POLL_INTERVAL_MS = 2000;
+/** Slow fallback poll for when no WS event has arrived. WS task:updated drives fast refresh. */
+const FALLBACK_POLL_INTERVAL_MS = 20_000;
+/** Throttle WS-triggered diff refetches so a burst costs at most one refetch + one trailing. */
+const WS_THROTTLE_MS = 500;
 
 interface Props {
   taskId: string;
@@ -212,18 +217,37 @@ export function DiffViewer({
     }
   }, [taskId, onSummaryLoaded, range]);
 
+  // Throttled WS-driven refresh — created once per mount, updated via ref.
+  const loadSummaryRef = useRef(loadSummary);
+  loadSummaryRef.current = loadSummary;
+  const throttledLoad = useMemo(
+    () => throttle(() => void loadSummaryRef.current(), WS_THROTTLE_MS),
+    [],
+  );
+  useEffect(() => () => throttledLoad.cancel(), [throttledLoad]);
+
+  // Subscribe to WS task:updated events for this task to drive fast diff refresh.
+  // Only active for live full-diff view; historical ranges don't change.
+  const wsEnabled = isRunning && isBaseRange;
+  useServerEvents(
+    wsEnabled ? throttledLoad : null,
+    wsEnabled ? (event) => event.payload.taskId === taskId : undefined,
+  );
+
   useEffect(() => {
     loadSummary();
-    // Polling only makes sense for the live full diff. Historical commit/range
-    // views don't change underneath us.
+    // Slow fallback poll so diff still refreshes if WS is disconnected.
     if (!isRunning || !isBaseRange) return;
-    const t = setInterval(loadSummary, POLL_INTERVAL_MS);
+    const t = setInterval(loadSummary, FALLBACK_POLL_INTERVAL_MS);
     return () => clearInterval(t);
   }, [loadSummary, isRunning, isBaseRange]);
 
-  const handleSelect = useCallback((path: string) => {
-    listRef.current?.scrollToFile(path);
-  }, []);
+  const handleSelect = useCallback(
+    (path: string) => {
+      listRef.current?.scrollToFile(path);
+    },
+    [listRef],
+  );
 
   if (baseShaUnavailable) {
     return (
