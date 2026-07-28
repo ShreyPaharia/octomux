@@ -111,7 +111,7 @@ describe('TaskDetail', () => {
   it('shows loading state initially', () => {
     apiMock.getTask.mockReturnValue(new Promise(() => {}));
     renderDetail();
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Loading task…')).toBeInTheDocument();
   });
 
   // ─── Error state ──────────────────────────────────────────────────────────
