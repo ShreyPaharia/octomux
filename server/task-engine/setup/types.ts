@@ -6,7 +6,6 @@ export interface SetupResult {
   baseBranch: string | null;
   baseSha: string | null;
   installHooksAt: string;
-  runPreflight: boolean;
 }
 
 export type SetupFn = (task: Task) => Promise<SetupResult>;

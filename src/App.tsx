@@ -5,17 +5,20 @@ import { useNotifications } from './lib/use-notifications';
 import HomePage from './pages/HomePage';
 import TasksPage from './pages/TasksPage';
 import ReviewsPage from './pages/ReviewsPage';
-import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/sidebar/universal-sidebar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { ResponsiveToaster } from './components/ResponsiveToaster';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SetupBanner } from './components/SetupBanner';
+import { TaskDetailSkeleton } from './components/skeletons/TaskDetailSkeleton';
+import { PageSkeleton } from './components/skeletons/PageSkeleton';
 
 // The four most-clicked nav targets stay eager so navigating to them never
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+// SettingsPage is heavy (~870 lines, 23 imports) but infrequently visited, so lazy-load it.
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const GridMonitor = lazy(() => import('./pages/GridMonitor'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
@@ -101,17 +104,18 @@ export function AppShell() {
         <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <div className="ambient-tint-backdrop" aria-hidden="true" />
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Loading...
-                </div>
-              }
-            >
+            <Suspense fallback={<PageSkeleton />}>
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
-                <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route
+                  path="/tasks/:id"
+                  element={
+                    <Suspense fallback={<TaskDetailSkeleton />}>
+                      <TaskDetail />
+                    </Suspense>
+                  }
+                />
                 <Route path="/reviews" element={<ReviewsPage />} />
                 <Route path="/reviews/:id" element={<ReviewDetailPage />} />
                 <Route path="/monitor" element={<GridMonitor />} />

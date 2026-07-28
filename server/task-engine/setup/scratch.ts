@@ -13,6 +13,5 @@ export async function setupScratch(task: Task): Promise<SetupResult> {
     baseBranch: null,
     baseSha: null,
     installHooksAt: dir,
-    runPreflight: false,
   };
 }

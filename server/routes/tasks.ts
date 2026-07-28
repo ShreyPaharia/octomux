@@ -156,13 +156,20 @@ router.get('/api/tasks/:id', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const { relations } = fetchTaskWithRelations(task.id);
   // Backfill hook_token for pre-step-1 agents that have an empty token.
-  const workers = await Promise.all(
-    relations.workers.map(async (agent) => {
-      if (agent.hook_token !== '') return agent;
-      const token = await ensureHookToken(agent, task.worktree ?? null);
-      return { ...agent, hook_token: token };
-    }),
-  );
+  // Common case: all tokens already exist — skip async work entirely.
+  const needsBackfill = relations.workers.some((w) => !w.hook_token);
+  let workers: Worker[];
+  if (needsBackfill) {
+    workers = await Promise.all(
+      relations.workers.map(async (agent) => {
+        if (agent.hook_token) return agent;
+        const token = await ensureHookToken(agent, task.worktree ?? null);
+        return { ...agent, hook_token: token };
+      }),
+    );
+  } else {
+    workers = relations.workers;
+  }
   const worktreeRow = task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
   res.json(
     formatTaskResponse(
