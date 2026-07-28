@@ -109,7 +109,7 @@ interface TaskProducer {
 
 export function BulkCreateDialog({ open, onOpenChange }: BulkCreateDialogProps) {
   const navigate = useNavigate();
-  const { refresh } = useTasksContext();
+  const { refresh, addOptimistic } = useTasksContext();
 
   const [mode, setMode] = useState<Mode>('paste');
 
@@ -196,7 +196,8 @@ export function BulkCreateDialog({ open, onOpenChange }: BulkCreateDialogProps) 
           ...(baseBranch.trim() ? { base_branch: baseBranch.trim() } : {}),
           ...(harnessId ? { harness_id: harnessId } : {}),
         };
-        await taskApi.createTask(payload);
+        const createdTask = await taskApi.createTask(payload);
+        addOptimistic(createdTask);
         created += 1;
       } catch (err) {
         failed.push({ label: producer.label, reason: (err as Error).message || 'unknown error' });
@@ -214,7 +215,17 @@ export function BulkCreateDialog({ open, onOpenChange }: BulkCreateDialogProps) 
     }
     // Partial failure — keep the dialog open and show the summary.
     setResult({ created, failed });
-  }, [buildProducers, repoPath, baseBranch, harnessId, refresh, reset, onOpenChange, navigate]);
+  }, [
+    buildProducers,
+    repoPath,
+    baseBranch,
+    harnessId,
+    refresh,
+    addOptimistic,
+    reset,
+    onOpenChange,
+    navigate,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
