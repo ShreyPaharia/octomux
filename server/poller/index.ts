@@ -10,6 +10,7 @@ import {
   APPROVAL_INTERVAL,
   SCHEDULE_INTERVAL,
   TRIAGE_PR_COMMENTS_INTERVAL,
+  QUIESCENCE_INTERVAL,
 } from './intervals.js';
 import { pollMergedPRs } from './merged-pr.js';
 import { pollPRsAndReviewers } from './pr-and-reviewers.js';
@@ -18,6 +19,7 @@ import { pollSoftDeletes } from './soft-deletes.js';
 import { pollStatuses } from './status.js';
 import { pollTriagePrComments } from './triage-pr-comments.js';
 import { pollWalkthroughHandoffs } from './walkthrough-handoff.js';
+import { pollQuiescence } from './quiescence.js';
 
 const logger = childLogger('poller');
 
@@ -27,6 +29,7 @@ export function startPolling(): void {
   ensureHooksInstalled();
 
   pollers = [
+    createPoller(pollQuiescence, QUIESCENCE_INTERVAL),
     createPoller(pollStatuses, STATUS_INTERVAL),
     createPoller(pollPRsAndReviewers, PR_INTERVAL),
     createPoller(pollMergedPRs, MERGED_PR_INTERVAL),
@@ -72,3 +75,4 @@ export { pollPRsAndReviewers } from './pr-and-reviewers.js';
 export { pollSchedules } from './schedule-cron.js';
 export { checkTriagePrComments, pollTriagePrComments } from './triage-pr-comments.js';
 export { repoNameWithOwner, parseNameWithOwner } from './github-repo.js';
+export { pollQuiescence } from './quiescence.js';

@@ -828,6 +828,50 @@ export function listNoneModeActiveTasks(
 }
 
 /**
+ * List tasks that are candidates for the quiescence → human_review transition.
+ * A task qualifies when:
+ *   - workflow_status = 'in_progress'
+ *   - runtime_state = 'running' (excludes looping / idle / etc.)
+ *   - NOT deleted
+ *   - has at least one worker
+ *   - every non-stopped worker has hook_activity = 'idle'
+ *   - the most-recent hook_activity_updated_at across all non-stopped workers is
+ *     older than debounceMs (continuous idle for at least the debounce window)
+ *
+ * The orchestrator-managed guard and pending-prompt guard are applied in JS
+ * after fetching (simpler to test, no extra joins needed).
+ *
+ * Returns task ids only — callers load full state via getTaskWorkflowStatus.
+ */
+export function listTasksAwaitingQuiescence(
+  debounceMs: number,
+): Array<{ id: string }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id
+         FROM tasks t
+        WHERE t.workflow_status = 'in_progress'
+          AND t.runtime_state = 'running'
+          AND t.deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM workers w WHERE w.task_id = t.id AND w.status != 'stopped'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM workers w
+             WHERE w.task_id = t.id
+               AND w.status != 'stopped'
+               AND w.hook_activity != 'idle'
+          )
+          AND (
+            SELECT MAX(w.hook_activity_updated_at)
+              FROM workers w
+             WHERE w.task_id = t.id AND w.status != 'stopped'
+          ) <= datetime('now', ? || ' seconds')`,
+    )
+    .all(`-${Math.ceil(debounceMs / 1000)}`) as Array<{ id: string }>;
+}
+
+/**
  * Tasks that need the user's attention right now: pending permission prompts,
  * or errored tasks whose error hasn't been viewed. Used by the inbox.
  */
