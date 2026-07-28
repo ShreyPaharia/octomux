@@ -13,10 +13,30 @@ export interface CreateReviewRunInput {
 
 export function createReviewRun(input: CreateReviewRunInput): ReviewRun {
   const id = nanoid(12);
-  getDb()
-    .prepare(`INSERT INTO review_runs (id, task_id, pr_head_sha) VALUES (?, ?, ?)`)
-    .run(id, input.task_id, input.pr_head_sha);
-  const row = getReviewRun(id);
+  const row = getDb().transaction(() => {
+    // A run for a new head replaces any run still chasing an older head —
+    // without this, the old row stays 'running' forever (nothing else ever
+    // completes it) and the inbox shows a permanent "reviewing".
+    const superseded = getDb()
+      .prepare(
+        `UPDATE review_runs
+            SET status = 'failed',
+                error = 'superseded by review run for head ' || ?,
+                completed_at = datetime('now')
+          WHERE task_id = ? AND status = 'running' AND pr_head_sha != ?`,
+      )
+      .run(input.pr_head_sha, input.task_id, input.pr_head_sha);
+    if (superseded.changes > 0) {
+      logger.info(
+        { task_id: input.task_id, superseded_count: superseded.changes },
+        'superseded older running review_runs',
+      );
+    }
+    getDb()
+      .prepare(`INSERT INTO review_runs (id, task_id, pr_head_sha) VALUES (?, ?, ?)`)
+      .run(id, input.task_id, input.pr_head_sha);
+    return getReviewRun(id);
+  })();
   if (!row) throw new Error('failed to read review_run after insert');
   logger.info(
     { task_id: input.task_id, review_run_id: id, pr_head_sha: input.pr_head_sha },
@@ -59,6 +79,19 @@ export function getCurrentRun(taskId: string): ReviewRun | null {
       .prepare(
         `SELECT * FROM review_runs
            WHERE task_id = ? AND status != 'failed'
+           ORDER BY started_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(taskId) as ReviewRun | undefined) ?? null
+  );
+}
+
+/** True latest run for the task, including failed ones. */
+export function getLatestRun(taskId: string): ReviewRun | null {
+  return (
+    (getDb()
+      .prepare(
+        `SELECT * FROM review_runs
+           WHERE task_id = ?
            ORDER BY started_at DESC, rowid DESC LIMIT 1`,
       )
       .get(taskId) as ReviewRun | undefined) ?? null
@@ -116,24 +149,47 @@ export function getReviewRunHeadSha(id: string): string | undefined {
 export interface StuckReviewRun {
   id: string;
   task_id: string;
+  reason: 'no-progress' | 'task-not-running' | 'head-advanced';
 }
 
 /**
- * Find review_runs that have been 'running' longer than timeoutMinutes without
- * producing a walkthrough or any inline comments since they started.
+ * Find review_runs that have been 'running' longer than timeoutMinutes and can
+ * never complete on their own:
+ * - 'no-progress': no walkthrough and no inline comments since they started
+ * - 'task-not-running': the task has no live agents left to call `review complete`
+ * - 'head-advanced': the PR head moved past the run's sha (a re-review was
+ *   requested but a run for the new head never started)
  * Used by poller.sweepStuckReviewRuns.
  */
 export function findStuckReviewRuns(timeoutMinutes: number): StuckReviewRun[] {
   return getDb()
     .prepare(
-      `SELECT rr.id, rr.task_id FROM review_runs rr
+      `SELECT rr.id, rr.task_id,
+              CASE
+                WHEN rr.walkthrough IS NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM inline_comments ic
+                        WHERE ic.review_run_id = rr.id
+                          AND ic.created_at > rr.started_at
+                     )
+                  THEN 'no-progress'
+                WHEN t.runtime_state NOT IN ('running', 'setting_up')
+                  THEN 'task-not-running'
+                ELSE 'head-advanced'
+              END AS reason
+         FROM review_runs rr
+         JOIN tasks t ON t.id = rr.task_id
         WHERE rr.status = 'running'
           AND rr.started_at < datetime('now', ?)
-          AND rr.walkthrough IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM inline_comments ic
-             WHERE ic.review_run_id = rr.id
-               AND ic.created_at > rr.started_at
+          AND (
+            (rr.walkthrough IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM inline_comments ic
+                WHERE ic.review_run_id = rr.id
+                  AND ic.created_at > rr.started_at
+             ))
+            OR t.runtime_state NOT IN ('running', 'setting_up')
+            OR (t.pr_head_sha IS NOT NULL AND rr.pr_head_sha != t.pr_head_sha)
           )`,
     )
     .all(`-${timeoutMinutes} minutes`) as StuckReviewRun[];
