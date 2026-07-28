@@ -35,6 +35,8 @@ src/              React SPA (pages, components, lib/api.ts)
   workflows/      front-end workflow-UI registry behind the /w/:kind/:id route
 cli/              CLI tool for task management
 packages/         bun workspaces: types, diff-engine, api-client, test-fixtures
+plugin/           bundled Claude Code plugin (skills/, agents/) — the only tier agents see
+kinds/            built-in schedule-kind presets (*.json), read by server/workflows/presets.ts
 electron/         macOS desktop shell
 e2e/              Playwright E2E tests
 ```

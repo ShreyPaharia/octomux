@@ -115,7 +115,7 @@ branch `agents/<id>`. Each **worker** = tmux window within the session.
 `tasks.model TEXT` column. Propagated through:
 
 - `POST /api/tasks` body: `{ model: "claude-opus-4-8" }` → stored in DB
-- `POST /api/tasks/:id/agents` body: `{ model: ... }` → stored on agent launch
+- `POST /api/tasks/:id/workers` body: `{ model: ... }` → stored on worker launch
 - `octomux create-task --model <id>` and `octomux add-agent --model <id>`
 - Harness: `applyModel(flags, model)` strips any existing `--model` then appends the per-task one
 
