@@ -47,7 +47,7 @@ Each screen is a lens over one managed agent backend:
 - **Monitor grid** — every running agent's terminal tiled into one live wall; spot the stuck one instantly.
 - **Orchestrator view** — watch an agent that dispatches agents: the parent planning, its children coding, who's blocked — the whole tree at once.
 - **Review workstation** — an agent drafts a walkthrough + inline comments (grounded against the real diff, no invented line numbers); nothing hits GitHub until you accept it, then it posts as one batched review. Reject a comment with a reason and it remembers for next time.
-- **Chats, Workspaces, skill & agent editing** — detach a quick spike as its own session, manage the reusable worktrees behind your tasks, and author your Claude Code skills and subagents from **Settings** in the browser.
+- **Chats, Workspaces, persistent agents** — detach a quick spike as its own session, manage the reusable worktrees behind your tasks, and keep long-lived agents (own system prompt, optional Telegram/Slack channel) on **Agents**.
 - **Loops** — hand a task a prompt plus a verify command and it re-runs itself in fresh context until verify passes; `/loops` shows the iteration ledger, what each pass changed, and the stop controls. Fan out N competing candidates from one prompt when you want options.
 - **Schedules** — run a task on a cron from `/schedules` (nightly triage, a weekly digest) instead of remembering to kick it off.
 - **Worktrees keep agents off each other** — five agents can edit `auth.ts` at once without conflicts on your main tree.

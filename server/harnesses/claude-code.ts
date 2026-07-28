@@ -88,6 +88,54 @@ export const claudeCodeHarness: Harness = {
     writeJsonConfig(settingsPath, merged);
   },
 
+  async uninstallHooks(dirPath: string) {
+    const settingsPath = path.join(dirPath, '.claude', 'settings.local.json');
+
+    let existing: Record<string, unknown>;
+    try {
+      existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch {
+      return; // no config (or unparseable) — nothing to clean
+    }
+    if (typeof existing !== 'object' || existing === null || Array.isArray(existing)) return;
+    if (
+      typeof existing.hooks !== 'object' ||
+      existing.hooks === null ||
+      Array.isArray(existing.hooks)
+    ) {
+      return;
+    }
+
+    // Strip only OUR entries (url contains /api/hooks/); the user's own hooks,
+    // and their permissions, stay untouched.
+    const hooks: Record<string, unknown> = {};
+    for (const [event, matchers] of Object.entries(existing.hooks as Record<string, unknown>)) {
+      if (!Array.isArray(matchers)) {
+        hooks[event] = matchers;
+        continue;
+      }
+      const kept = matchers
+        .map((m) => {
+          const inner = (m as { hooks?: unknown })?.hooks;
+          if (!Array.isArray(inner)) return m;
+          const keptInner = inner.filter(
+            (h) => !String((h as { url?: unknown })?.url ?? '').includes('/api/hooks/'),
+          );
+          return keptInner.length === inner.length ? m : { ...(m as object), hooks: keptInner };
+        })
+        .filter((m) => {
+          const inner = (m as { hooks?: unknown })?.hooks;
+          return !Array.isArray(inner) || inner.length > 0;
+        });
+      if (kept.length > 0) hooks[event] = kept;
+    }
+
+    const next: Record<string, unknown> = { ...existing };
+    if (Object.keys(hooks).length > 0) next.hooks = hooks;
+    else delete next.hooks;
+    writeJsonConfig(settingsPath, next);
+  },
+
   async syncAgents(_worktreePath: string) {
     // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
   },

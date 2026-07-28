@@ -115,7 +115,6 @@ const {
   closeShellTerminal,
   cleanupLinkedSessions,
   cleanupOrphanedViewerSessions,
-  preflightWorktree,
   hopAgent,
   buildAgentStartupCommand,
 } = await import('./task-engine/index.js');
@@ -1480,6 +1479,35 @@ describe('deleteTask', () => {
         findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
       ).toBeUndefined();
     });
+
+    // The repo survives deleteTask, so our hook config must not — a config
+    // whose token outlives the agent row 401s in every later session there.
+    it('strips our hook config from the user-owned repo', async () => {
+      insertTask(db, noneRunningTask);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          permissions: { allow: ['Bash(ls:*)'] },
+          hooks: {
+            Stop: [
+              { hooks: [{ type: 'http', url: 'http://127.0.0.1:7777/api/hooks/stop?token=t' }] },
+            ],
+            PreToolUse: [{ hooks: [{ type: 'command', command: 'mine' }] }],
+          },
+        }),
+      );
+
+      await deleteTask(noneRunningTask);
+
+      const write = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find(([p]) => String(p).endsWith('settings.local.json'));
+      expect(write).toBeDefined();
+      expect(String(write![0])).toContain(noneRunningTask.repo_path);
+      const written = JSON.parse(String(write![1]));
+      expect(written.hooks.Stop).toBeUndefined();
+      expect(written.hooks.PreToolUse).toHaveLength(1);
+      expect(written.permissions.allow).toEqual(['Bash(ls:*)']);
+    });
   });
 
   describe('run_mode=existing (safety)', () => {
@@ -2475,138 +2503,6 @@ describe('deleteTask linked session cleanup', () => {
 
     // Linked session killed before main session
     expect(callOrder).toEqual([`${session}-v-xyz789`, session]);
-  });
-});
-
-// ─── preflightWorktree ────────────────────────────────────────────────────────
-
-describe('preflightWorktree', () => {
-  beforeEach(() => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('display-message')) {
-        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('list-windows')) {
-        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('new-window')) {
-        nextWindowIndex++;
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: 'true', stderr: '' });
-      }
-    }) as any);
-  });
-
-  const worktreePath = '/repo/.worktrees/my-branch';
-  const config = {
-    repo_path: '/repo',
-    base_branch: null,
-    test_command: 'bun run test',
-    format_command: 'bun run format',
-    lint_command: 'bun run lint',
-    ref_inference_json: null,
-    created_at: '2024-01-01T00:00:00.000Z',
-    updated_at: '2024-01-01T00:00:00.000Z',
-  };
-
-  it('runs format and lint commands with correct cwd', async () => {
-    await preflightWorktree(worktreePath, config);
-
-    const formatCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'sh',
-      argsInclude: ['-c', 'bun run format'],
-    });
-    expect(formatCall).toBeDefined();
-    expect((formatCall![2] as any).cwd).toBe(worktreePath);
-
-    const lintCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'sh',
-      argsInclude: ['-c', 'bun run lint'],
-    });
-    expect(lintCall).toBeDefined();
-    expect((lintCall![2] as any).cwd).toBe(worktreePath);
-  });
-
-  it('commits when git diff has output', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('diff')) {
-        cb(null, { stdout: 'src/foo.ts\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await preflightWorktree(worktreePath, config);
-
-    const addCall = findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['add', '-A'] });
-    expect(addCall).toBeDefined();
-
-    const commitCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'git',
-      argsInclude: ['commit', '-m', 'chore: fix pre-existing formatting'],
-    });
-    expect(commitCall).toBeDefined();
-  });
-
-  it('skips commit when diff is empty', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('diff')) {
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await preflightWorktree(worktreePath, config);
-
-    const commitCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'git',
-      argsInclude: ['commit', '-m', 'chore: fix pre-existing formatting'],
-    });
-    expect(commitCall).toBeUndefined();
-  });
-
-  it('continues when format command fails (lint should still run)', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('-c') && args.includes('bun run format')) {
-        cb(new Error('format failed'), null);
-      } else if (args.includes('diff')) {
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await preflightWorktree(worktreePath, config);
-
-    const lintCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'sh',
-      argsInclude: ['-c', 'bun run lint'],
-    });
-    expect(lintCall).toBeDefined();
   });
 });
 
