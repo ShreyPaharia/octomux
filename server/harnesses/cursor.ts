@@ -150,6 +150,20 @@ export const cursorHarness: Harness = {
     }
   },
 
+  async uninstallHooks(dirPath: string): Promise<void> {
+    // `.cursor/hooks.json` is written wholesale by installHooks and every entry
+    // points at our bridge — drop it only when that still holds, so a
+    // hand-edited file survives.
+    const hooksJsonPath = path.join(dirPath, '.cursor', 'hooks.json');
+    try {
+      const raw = fs.readFileSync(hooksJsonPath, 'utf-8');
+      if (raw.includes('.octomux-hooks')) fs.rmSync(hooksJsonPath, { force: true });
+    } catch {
+      /* absent or unreadable — nothing to clean */
+    }
+    fs.rmSync(path.join(dirPath, '.octomux-hooks'), { recursive: true, force: true });
+  },
+
   async syncAgents(_worktreePath: string): Promise<void> {
     // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
   },
