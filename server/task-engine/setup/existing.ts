@@ -56,6 +56,5 @@ export async function setupExisting(task: Task): Promise<SetupResult> {
     baseBranch,
     baseSha,
     installHooksAt: worktreePath,
-    runPreflight: false,
   };
 }
