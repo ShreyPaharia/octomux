@@ -49,6 +49,11 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
   - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
   - `schedules/cron.ts` — `isCronDue()`, the 5-field cron evaluator (`croner`, UTC) behind
     scheduled runs. Rows live in the `schedules` table; `poller/schedule-cron.ts` fires them.
+  - `orchestrator/` — the conductor: command gate/schemas, MCP server, approval timeouts.
+  - `gateway/` — chat-DM front end onto the conductor (Telegram + Slack), default-deny
+    owner allowlist, opt-in per channel. Setup and security model in `server/gateway/README.md`.
+  - `integrations/` — provider registry + credential store (`jira`, `linear`,
+    `slack-gateway`, `telegram-gateway`); env vars win over DB-stored values.
 - `src/` — React SPA (pages, components, lib/api.ts)
   - `workflows/` — front-end workflow-UI registry mirroring `server/workflows/`.
     `registerWorkflowUI(kind, { navLabel, icon, ListView, DetailView })` (`loops/register.tsx`)
@@ -180,6 +185,11 @@ agents via `--plugin-dir`. **Single source — there is no repo or home tier.** 
 revisions had `<repo>/.octomux/{skills,agents}` and `~/.octomux/agents`; nothing ever
 delivered them (`syncAgents()` is a no-op in both harnesses), so they were listed over
 REST and invisible to every running agent. They are gone; don't reintroduce them.
+
+One narrow exception survives: `octomux add-agent --skeleton <name>` reads
+`<worktree>/.octomux/agents/<name>.md` and prepends it to the prompt
+(`task-engine/lifecycle/add-agent.ts`). That is a per-worktree file read at launch, not a
+discovery tier — nothing lists or serves it.
 
 Users' own skills/subagents live in Claude Code's native `~/.claude/skills/`,
 `~/.claude/agents/`, and `<repo>/.claude/` — the harness reads those directly and octomux
