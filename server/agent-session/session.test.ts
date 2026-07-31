@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { nanoid } from 'nanoid';
-import { runAgentSession, mcpSubmitResultCapture } from './session.js';
+import { runAgentSession, mcpSubmitResultCapture, readResultFileIfReady } from './session.js';
 import type { CaptureStrategy, RunAgentSessionOptions } from './session.js';
 import type { ProcessHandle, ProcessSubstrate } from './substrate.js';
 import type { Harness } from '../harnesses/types.js';
@@ -404,5 +404,63 @@ describe('mcpSubmitResultCapture — default capture round-trip', () => {
       capture.dispose();
       fs.rmSync(resultDir, { recursive: true, force: true });
     }
+  });
+
+  // Regression: the watcher fires the instant the file is created, before the
+  // MCP server has flushed the JSON. A truncated read must be treated as
+  // "not ready, retry" — NOT a fatal "Failed to parse result file" reject
+  // (which was breaking the slack-watcher schedule).
+  it('does not reject on a transient truncated/empty file — polls until complete', async () => {
+    const resultDir = path.join(os.tmpdir(), `octomux-test-cap3-${nanoid(8)}`);
+    const schema = {
+      type: 'object',
+      properties: { reply: { type: 'string' } },
+      required: ['reply'],
+    };
+    const capture = mcpSubmitResultCapture<{ reply: string }>(schema, { resultDir });
+
+    try {
+      await capture.setup({ workspaceDir: resultDir });
+      const resultPath = path.join(resultDir, 'result.json');
+
+      const waitPromise = capture.waitForResult();
+      await new Promise<void>((resolve) => setImmediate(resolve)); // let watcher attach
+
+      fs.writeFileSync(resultPath, ''); // half-written: exists but empty
+      // Give the watcher + a poll cycle (100ms) time to (wrongly) reject.
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      fs.writeFileSync(resultPath, JSON.stringify({ reply: 'done' })); // now complete
+
+      await expect(waitPromise).resolves.toEqual({ reply: 'done' });
+    } finally {
+      capture.dispose();
+      fs.rmSync(resultDir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
+
+describe('readResultFileIfReady', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-rfr-'));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('returns null when the file is absent', () => {
+    expect(readResultFileIfReady(path.join(dir, 'nope.json'))).toBeNull();
+  });
+
+  it('returns null for an empty/truncated file (not ready)', () => {
+    const p = path.join(dir, 'r.json');
+    fs.writeFileSync(p, '');
+    expect(readResultFileIfReady(p)).toBeNull();
+    fs.writeFileSync(p, '{"reply": "par'); // truncated mid-write
+    expect(readResultFileIfReady(p)).toBeNull();
+  });
+
+  it('parses a complete file', () => {
+    const p = path.join(dir, 'r.json');
+    fs.writeFileSync(p, JSON.stringify({ reply: 'ok' }));
+    expect(readResultFileIfReady(p)).toEqual({ reply: 'ok' });
   });
 });

@@ -83,6 +83,24 @@ export interface McpSubmitResultCaptureOpts {
 }
 
 /**
+ * Read + parse the result file if it's fully written. Returns the parsed value,
+ * or `null` when the file is absent OR present-but-not-yet-complete. The watcher
+ * fires the instant the file is created — before the MCP server has flushed the
+ * JSON — so a parse failure means "not ready, retry", NOT a fatal error. A
+ * genuinely malformed file just never parses and the caller times out.
+ * (Results are schema-validated objects, so a bare `null` is never written.)
+ */
+export function readResultFileIfReady<T = unknown>(rPath: string): T | null {
+  if (!fs.existsSync(rPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(rPath, 'utf8')) as T;
+  } catch (err) {
+    logger.debug({ rPath, err }, 'result file not yet parseable; will retry');
+    return null;
+  }
+}
+
+/**
  * Create the default CaptureStrategy backed by the submit_result MCP server.
  * The agent CLI is told to load the generated mcp-config.json; the MCP server
  * subprocess writes captured results to a JSON file which we watch for.
@@ -155,19 +173,17 @@ export function mcpSubmitResultCapture<T = unknown>(
           reject(err);
         };
 
-        // Read + parse the result file; returns true once handled (resolved or
-        // rejected). Returns false if the file isn't there yet.
+        // Read + parse the result file; returns true once handled (resolved).
+        // Returns false if the file isn't there yet OR is present but not fully
+        // written — the 100ms poll retries until it parses or we time out.
         const tryRead = (): boolean => {
           if (disposed) {
             settleReject(new Error('capture disposed before result'));
             return true;
           }
-          if (!fs.existsSync(rPath)) return false;
-          try {
-            settleResolve(JSON.parse(fs.readFileSync(rPath, 'utf8')) as T);
-          } catch (err) {
-            settleReject(new Error(`Failed to parse result file: ${err}`));
-          }
+          const value = readResultFileIfReady<T>(rPath);
+          if (value === null) return false;
+          settleResolve(value);
           return true;
         };
 
