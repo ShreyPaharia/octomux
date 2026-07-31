@@ -927,6 +927,48 @@ export function runMigrations(instance: Database.Database): void {
   );
   instance.exec(`CREATE INDEX IF NOT EXISTS idx_loop_runs_group ON loop_runs(group_id);`);
 
+  // ── Multiple PRs per task — pull_requests table (2026-07-31) ────────────────
+  // Forward-only. CREATE TABLE IF NOT EXISTS is idempotent for fresh DBs (already
+  // in SCHEMA). For old DBs that ran an earlier SCHEMA without this table, the
+  // CREATE ensures the table exists before we backfill from tasks.pr_url.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS pull_requests (
+      id          TEXT PRIMARY KEY,
+      task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      branch      TEXT NOT NULL,
+      base_branch TEXT,
+      number      INTEGER,
+      url         TEXT,
+      head_sha    TEXT,
+      title       TEXT,
+      state       TEXT NOT NULL DEFAULT 'open',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(task_id, branch)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pull_requests_task_id ON pull_requests(task_id);
+    CREATE INDEX IF NOT EXISTS idx_pull_requests_state ON pull_requests(state);
+  `);
+
+  // Backfill: for every task that has a non-null pr_url, insert one pull_requests
+  // row using the task's branch (from the joined worktrees table). Idempotent via
+  // INSERT OR IGNORE (guarded by the UNIQUE(task_id, branch) constraint).
+  instance.exec(`
+    INSERT OR IGNORE INTO pull_requests (id, task_id, branch, base_branch, number, url, state)
+    SELECT
+      lower(hex(randomblob(6))) || lower(hex(randomblob(6))),
+      t.id,
+      w.branch,
+      w.base_branch,
+      t.pr_number,
+      t.pr_url,
+      'open'
+    FROM tasks t
+    INNER JOIN worktrees w ON t.worktree_id = w.id
+    WHERE t.pr_url IS NOT NULL
+      AND w.branch IS NOT NULL
+  `);
+
   // ── Remove the Teams feature (2026-07-18, P0) ────────────────────────────
   // Forward-only drop: team_schedules/team_runs are no longer read or written.
   instance.exec('DROP TABLE IF EXISTS team_runs;');
