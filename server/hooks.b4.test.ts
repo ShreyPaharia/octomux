@@ -67,9 +67,9 @@ describe('B4 (removed): POST /api/hooks/stop no longer synchronously transitions
   });
 
   it('Stop sets agent to idle regardless', async () => {
-    const row = db
-      .prepare(`SELECT hook_activity FROM workers WHERE id = 'a1'`)
-      .get() as { hook_activity: string };
+    const row = db.prepare(`SELECT hook_activity FROM workers WHERE id = 'a1'`).get() as {
+      hook_activity: string;
+    };
     // starts active
     expect(row.hook_activity).toBe('active');
 
@@ -78,9 +78,9 @@ describe('B4 (removed): POST /api/hooks/stop no longer synchronously transitions
       .send({ session_id: 'sess-123' })
       .expect(200);
 
-    const after = db
-      .prepare(`SELECT hook_activity FROM workers WHERE id = 'a1'`)
-      .get() as { hook_activity: string };
+    const after = db.prepare(`SELECT hook_activity FROM workers WHERE id = 'a1'`).get() as {
+      hook_activity: string;
+    };
     expect(after.hook_activity).toBe('idle');
   });
 

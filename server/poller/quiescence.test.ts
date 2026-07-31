@@ -1,15 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertPermissionPrompt,
-} from '../test-helpers.js';
-import {
-  upsertManagedTask,
-  createConversation,
-} from '../repositories/orchestrator.js';
+import { createTestDb, insertTask, insertAgent, insertPermissionPrompt } from '../test-helpers.js';
+import { upsertManagedTask, createConversation } from '../repositories/orchestrator.js';
 import { pollQuiescence } from './quiescence.js';
 
 // Helper to set hook_activity and hook_activity_updated_at directly
@@ -25,9 +17,9 @@ function setWorkerActivity(
 }
 
 function getWorkflowStatus(db: Database.Database, taskId: string): string {
-  const row = db
-    .prepare(`SELECT workflow_status FROM tasks WHERE id = ?`)
-    .get(taskId) as { workflow_status: string };
+  const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get(taskId) as {
+    workflow_status: string;
+  };
   return row.workflow_status;
 }
 
@@ -210,7 +202,11 @@ describe('pollQuiescence', () => {
   });
 
   it('task with no workers is not transitioned (no workers = not yet started)', async () => {
-    insertTask(db, { id: 'task-noworker', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertTask(db, {
+      id: 'task-noworker',
+      runtime_state: 'running',
+      workflow_status: 'in_progress',
+    });
     // No workers inserted
 
     await pollQuiescence();
