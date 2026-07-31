@@ -3,6 +3,11 @@
   "version": "1.0.30",
   "description": "Prebuilt static tmux for octomux (darwin arm64)",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShreyPaharia/octomux.git",
+    "directory": "packages/tmux-darwin-arm64"
+  },
   "os": [
     "darwin"
   ],
