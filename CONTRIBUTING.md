@@ -37,6 +37,8 @@ cli/              CLI tool for task management
 packages/         bun workspaces: types, diff-engine, api-client, test-fixtures
 plugin/           bundled Claude Code plugin (skills/, agents/) — the only tier agents see
 kinds/            built-in schedule-kind presets (*.json), read by server/workflows/presets.ts
+workflows/        Claude Code workflow scripts (review-deep.js) — plugins can't ship these,
+                  so `octomux init` copies them into ~/.claude/workflows/
 electron/         macOS desktop shell
 e2e/              Playwright E2E tests
 ```

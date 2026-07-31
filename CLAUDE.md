@@ -32,8 +32,10 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
 
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
   - `api.ts` — mounts the routers from `routes/` onto the Express app
-  - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, reviews,
-    review-runs, comments, chats, loops, skills, schedules, settings, orchestrator, …)
+  - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, comments,
+    chats, loops, skills, schedules, kinds, settings, orchestrator, …). Workflow-owned
+    routers (`loops`, plus `reviews` and `pr-extracts` under `server/workflows/*/routes.ts`)
+    are mounted via each workflow's `apiRouter`, not imported by `api.ts` directly.
   - `app.ts` — extracted `createApp()` for testability
   - `task-engine/` — worktree + tmux + harness lifecycle. `cleanup.ts` holds `closeTask` /
     `deleteTask`; also `launch.ts`, `git.ts`, `sessions.ts`, `terminals.ts`, `reconcile.ts`,
@@ -186,7 +188,7 @@ Users' own skills/subagents live in Claude Code's native `~/.claude/skills/`,
 neither manages nor lists them. Repo-specific customization goes there.
 
 The skills are also installable into a user's own sessions via the plugin marketplace
-(`.claude-plugin/marketplace.json`): `/plugin marketplace add ShreyPaharia/octomux-agents`
+(`.claude-plugin/marketplace.json`): `/plugin marketplace add ShreyPaharia/octomux`
 then `/plugin install octomux@octomux`.
 
 `workflows/review-deep.js` is a Claude Code _workflow_ script, which plugins cannot ship —
