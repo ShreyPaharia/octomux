@@ -498,13 +498,11 @@ describe('pollPRs', () => {
     expect(task.pr_number).toBe(99);
   });
 
-  const pollPRSkipCases = [
-    {
-      name: 'already has a PR',
-      overrides: { pr_url: 'https://github.com/org/repo/pull/1', pr_number: 1 },
-    },
-    { name: 'has no branch', overrides: { branch: null } },
-  ];
+  // Note: a task that "already has a PR" is intentionally NOT skipped anymore —
+  // the poller keeps looking so it can discover additional slice-branch PRs on a
+  // long-running task. The null→'pr' workflow flip is still guarded (see
+  // pr-detection.test.ts). Only a missing branch skips detection.
+  const pollPRSkipCases = [{ name: 'has no branch', overrides: { branch: null } }];
 
   it.each(pollPRSkipCases)('skips tasks that $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
