@@ -862,9 +862,7 @@ export function listNoneModeActiveTasks(
  *
  * Returns task ids only — callers load full state via getTaskWorkflowStatus.
  */
-export function listTasksAwaitingQuiescence(
-  debounceMs: number,
-): Array<{ id: string }> {
+export function listTasksAwaitingQuiescence(debounceMs: number): Array<{ id: string }> {
   return getDb()
     .prepare(
       `SELECT t.id
