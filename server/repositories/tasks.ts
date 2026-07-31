@@ -791,13 +791,17 @@ export function listRunningTasksWithPr(): Task[] {
 }
 
 /**
- * List tasks that are running or idle with no PR url yet and a branch set.
- * Used by pollPRs to find tasks that need PR detection.
+ * List running/idle tasks with a branch set. Used by pollPRs to detect PRs.
+ * We intentionally keep polling AFTER the first PR is found (no `pr_url IS NULL`
+ * gate): a long-running task can open several slice PRs over its life, and the
+ * poller discovers each `agents/<id>*` branch's PR. The workflow → 'pr'
+ * transition is guarded on the null→non-null flip in pollPRs, so re-polling an
+ * already-PR'd task is idempotent.
  */
 export function listTasksNeedingPrDetection(): Task[] {
   return getDb()
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND w.branch IS NOT NULL`,
     )
     .all() as Task[];
 }

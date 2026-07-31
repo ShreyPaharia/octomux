@@ -105,6 +105,9 @@ router.get('/api/tasks', (req: Request, res: Response) => {
       workers: workersByTask.get(task.id) || [],
       pending_prompts: promptsByTask.get(task.id) || [],
       user_terminals: terminalsByTask.get(task.id) || [],
+      // ponytail: list endpoint omits pull_requests to avoid N+1 DB queries;
+      // add bulk fetch here if the dashboard ever needs per-task PR lists in the board view.
+      pull_requests: [],
     }),
   );
 

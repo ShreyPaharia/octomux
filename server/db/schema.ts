@@ -203,6 +203,23 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS idx_runs_workflow_kind ON runs(workflow_kind);
 CREATE INDEX IF NOT EXISTS idx_runs_schedule_id ON runs(schedule_id);
 
+CREATE TABLE IF NOT EXISTS pull_requests (
+    id          TEXT PRIMARY KEY,
+    task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    branch      TEXT NOT NULL,
+    base_branch TEXT,
+    number      INTEGER,
+    url         TEXT,
+    head_sha    TEXT,
+    title       TEXT,
+    state       TEXT NOT NULL DEFAULT 'open',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(task_id, branch)
+);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_task_id ON pull_requests(task_id);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_state ON pull_requests(state);
+
 `;
 
 /** Apply SQLite pragmas required for octomux (WAL + foreign keys). */

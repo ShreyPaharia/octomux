@@ -10,6 +10,8 @@ import {
   listUserTerminals,
   listPendingPromptsByTask,
 } from '../repositories/index.js';
+import { listPullRequestsByTask } from '../repositories/pull-requests.js';
+import type { PullRequest } from '../repositories/pull-requests.js';
 import type { PermissionPromptRow } from '../repositories/permission-prompts.js';
 import { findReviewTaskByPrNumber, findReviewTaskBySource } from '../repositories/index.js';
 import { nanoid } from 'nanoid';
@@ -101,6 +103,7 @@ export interface TaskRelations {
   workers: Worker[];
   user_terminals: UserTerminal[];
   pending_prompts: PermissionPromptRow[];
+  pull_requests: PullRequest[];
 }
 
 export interface TaskResponseExtras {
@@ -108,7 +111,7 @@ export interface TaskResponseExtras {
   existing_review_id?: string | null;
 }
 
-/** Load a task plus workers, terminals, and pending permission prompts. */
+/** Load a task plus workers, terminals, pending permission prompts, and pull_requests. */
 export function fetchTaskWithRelations(taskId: string): { task: Task; relations: TaskRelations } {
   const task = getTaskRepo(taskId) as Task;
   return {
@@ -117,6 +120,7 @@ export function fetchTaskWithRelations(taskId: string): { task: Task; relations:
       workers: listAllAgents(taskId),
       user_terminals: listUserTerminals(taskId),
       pending_prompts: listPendingPromptsByTask(taskId),
+      pull_requests: listPullRequestsByTask(taskId),
     },
   };
 }
@@ -136,6 +140,7 @@ export function formatTaskResponse(
       workers: relations.workers,
     }),
     user_terminals: relations.user_terminals,
+    pull_requests: relations.pull_requests,
     ...(extras?.worktree_row !== undefined ? { worktree_row: extras.worktree_row } : {}),
     ...(extras?.existing_review_id !== undefined
       ? { existing_review_id: extras.existing_review_id }
@@ -143,7 +148,7 @@ export function formatTaskResponse(
   };
 }
 
-/** Reload a task with its related workers and user_terminals (mutation-style, no prompts). */
+/** Reload a task with its related workers, user_terminals, and pull_requests (mutation-style, no prompts). */
 export function fetchTaskBundle(taskId: string): Task {
   const { task, relations } = fetchTaskWithRelations(taskId);
   task.workers = relations.workers;
