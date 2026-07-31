@@ -18,8 +18,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; the bundled npm is older.
+      - run: npm install -g npm@latest
 
       - run: bun install
 
@@ -41,9 +44,9 @@ jobs:
 
       - run: bun run build
 
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      # No token: authenticated via OIDC trusted publishing configured on
+      # npmjs.com (package settings -> Publishing access -> GitHub Actions).
+      - run: npm publish --provenance --access public
 
       # electron-release.yml runs on the same v* tag and its
       # `electron-builder --publish always` (releaseType: release) creates the
