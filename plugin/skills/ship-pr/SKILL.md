@@ -44,18 +44,18 @@ monitoring. This skill is the autonomous version.
    is the normal create-pr body — the `.octomux/pr-walkthrough.md` artifact stays
    separate.
 
-5. **Monitor and fix.** After the PR is open, watch it and push fixes to the
-   branch until it settles:
+5. **Monitor and fix — you own this, no separate poller.** You implemented the
+   change, so you monitor the PR yourself. You're a long-running agent; stay on
+   it until the PR settles:
    - `gh pr checks <number> --watch` — wait for CI; if anything goes red, read
      the failing logs, fix on the branch, push, and re-watch.
    - `gh pr view <number> --comments` — read review/bot comments; push fixes for
      the actionable ones (don't argue with bots in the skill — just fix or note).
    - Repeat until checks are green and there are no unresolved actionable comments.
 
-   > This monitor loop is bounded by the current agent turn. A durable,
-   > across-turns watcher (CI red / new comments after you stop) belongs in an
-   > octomux poller or Ralph loop — kick that off if the PR needs babysitting
-   > beyond this session.
+   If your turn ends and octomux later nudges you about a fresh failure or
+   comment, resume and fix it — the PR is yours until it's merged. No poller or
+   Ralph loop is needed; the implementing agent is the watcher.
 
 6. **Refresh the walkthrough.** Once the PR is green, update
    `<worktree>/.octomux/pr-walkthrough.md` so it reflects the final state
