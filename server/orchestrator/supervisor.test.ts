@@ -10,6 +10,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
@@ -707,5 +710,63 @@ describe('supervisor spec branch — phase:spec relay', () => {
       .prepare(`SELECT * FROM action_cards WHERE conversation_id = ?`)
       .all(convId) as Array<{ tool_name: string }>;
     expect(cards.some((c) => c.tool_name === 'approve-plan')).toBe(true);
+  });
+
+  it('phase=plan → relay message + card embed the plan summary (not a bare link)', async () => {
+    // Real worktree with a plan.json so summarizeArtifact returns content.
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plan-'));
+    fs.writeFileSync(
+      path.join(worktree, 'plan.json'),
+      JSON.stringify({
+        schema_version: '1.0.0',
+        summary: 'Wire up the frobnicator end to end.',
+        files: [{ path: 'src/frob.ts', action: 'create' }],
+        open_questions: [],
+      }),
+      'utf8',
+    );
+
+    const convId = createConversation({ title: 'Plan summary conv' });
+    const task = insertTask(getDb(), { id: 'task-plan-summary-01', worktree });
+    upsertManagedTask({ conversation_id: convId, task_id: task.id, phase: 'planning' });
+
+    const seq = appendEvent({
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'plan', artifacts: ['plan.json'] }),
+    });
+    await supervisor.processEvent({
+      seq,
+      task_id: task.id,
+      type: 'task:phase_complete',
+      payload: JSON.stringify({ phase: 'plan', artifacts: ['plan.json'] }),
+    });
+
+    const pushed = mockPush.mock.calls.map((c) => {
+      try {
+        return JSON.parse(String(c[0])) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    });
+
+    // The card carries the summary in args.
+    const planCard = pushed.find((p) => p && p['command'] === 'approve-plan');
+    expect((planCard!['args'] as Record<string, unknown>)['summary']).toContain(
+      'Wire up the frobnicator',
+    );
+
+    // The relay message leads with the summary and is not a bare-link-only payload.
+    const note = pushed.find(
+      (p) =>
+        p &&
+        p['type'] === 'message' &&
+        typeof p['text'] === 'string' &&
+        (p['text'] as string).includes('Wire up the frobnicator'),
+    );
+    expect(note).toBeDefined();
+    expect(note!['text'] as string).toContain('src/frob.ts — create');
+
+    fs.rmSync(worktree, { recursive: true, force: true });
   });
 });
