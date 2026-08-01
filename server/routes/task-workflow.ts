@@ -13,6 +13,7 @@ import {
   listTaskUpdates,
   getTaskExternalRefs,
   getTaskExternalRef,
+  getTaskExternalRefByRef,
   upsertTaskExternalRef,
   deleteTaskExternalRef,
 } from '../repositories/index.js';
@@ -173,18 +174,23 @@ router.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
 router.delete('/api/tasks/:id/refs/:integration', (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const integration = (req.params as Record<string, string>).integration;
+  // Optional ?ref= query param: when supplied, delete only that specific ref row.
+  // Without it, delete ALL refs for this integration (back-compat).
+  const ref = typeof req.query.ref === 'string' ? req.query.ref : undefined;
 
-  const existing = getTaskExternalRef(task.id, integration);
+  const existing = ref
+    ? getTaskExternalRefByRef(task.id, integration, ref)
+    : getTaskExternalRef(task.id, integration);
   if (!existing) {
     throw notFound('Ref not found');
   }
 
-  deleteTaskExternalRef(task.id, integration);
+  deleteTaskExternalRef(task.id, integration, ref);
 
   fireHook('ref_removed', {
     event: 'ref_removed',
     task,
-    data: { integration },
+    data: { integration, ref },
   });
 
   res.status(204).send();

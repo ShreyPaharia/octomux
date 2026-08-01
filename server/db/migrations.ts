@@ -167,6 +167,50 @@ export function runMigrations(instance: Database.Database): void {
   const taskRefCols = columnsOf(instance, 'task_external_refs');
   addColumn(instance, 'task_external_refs', 'metadata', 'metadata TEXT', taskRefCols);
 
+  // ── Multi-ticket external refs: relax PK to (task_id, integration, ref) ────
+  // SQLite can't ALTER a PK — rebuild the table if it still has the old
+  // (task_id, integration) PK. Guard: check whether the PK already includes
+  // `ref` by looking at the index list for a PK index that covers 3 columns.
+  // Idempotent: the guard is evaluated every boot; skip when already migrated.
+  {
+    const pkCols = (
+      instance.pragma('table_info(task_external_refs)') as Array<{
+        name: string;
+        pk: number;
+      }>
+    )
+      .filter((c) => c.pk > 0)
+      .map((c) => c.name);
+
+    const needsRebuild = pkCols.length === 2 && !pkCols.includes('ref');
+
+    if (needsRebuild) {
+      instance
+        .transaction(() => {
+          instance.exec(`
+            CREATE TABLE task_external_refs_new (
+              task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+              integration TEXT NOT NULL,
+              ref         TEXT NOT NULL,
+              url         TEXT,
+              metadata    TEXT,
+              created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+              PRIMARY KEY (task_id, integration, ref)
+            )
+          `);
+          instance.exec(`
+            INSERT INTO task_external_refs_new (task_id, integration, ref, url, metadata, created_at)
+            SELECT task_id, integration, ref, url, metadata, created_at
+            FROM task_external_refs
+          `);
+          instance.exec(`DROP TABLE task_external_refs`);
+          instance.exec(`ALTER TABLE task_external_refs_new RENAME TO task_external_refs`);
+        })
+        .default();
+      logger.info('migrated task_external_refs PK to (task_id, integration, ref)');
+    }
+  }
+
   // reviewed_blob_sha records the git blob hash of the file content a reviewer
   // approved (working-tree content), so "changed since review" can detect both
   // new commits and uncommitted edits. Null on legacy rows → callers fall back

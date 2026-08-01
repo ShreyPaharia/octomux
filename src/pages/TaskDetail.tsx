@@ -19,6 +19,7 @@ import { TerminalRectIcon } from '@/components/icons';
 import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
 import { TaskHooksPanel } from '@/components/TaskHooksPanel';
+import { PullRequestList } from '@/components/PullRequestList';
 import { JiraLinkHelper } from '@/components/integrations/JiraLinkHelper';
 import { TaskDetailAgentView, detachAgent } from '@/components/task-detail/TaskDetailAgentView';
 import { TaskDetailDiffView } from '@/components/task-detail/TaskDetailDiffView';
@@ -443,6 +444,9 @@ export default function TaskDetail() {
             <TaskInfoPanel>
               <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
               <JiraLinkHelper taskId={task.id} />
+              {task.pull_requests && task.pull_requests.length > 0 && (
+                <PullRequestList pullRequests={task.pull_requests} />
+              )}
             </TaskInfoPanel>
             <TaskInfoPanel>
               <TaskHooksPanel taskId={task.id} />

@@ -258,6 +258,81 @@ describe('Hook endpoints', () => {
     });
   });
 
+  describe('POST /api/hooks/post-tool-use — PR tracking', () => {
+    it('upserts a pull_requests row when gh pr create output includes a URL', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'gh pr create --title "fix: thing" --body ""' },
+          tool_response: 'https://github.com/org/repo/pull/55\n',
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].url).toBe('https://github.com/org/repo/pull/55');
+      expect(rows[0].number).toBe(55);
+    });
+
+    it('upserts a branch-only row on git push (no url/number yet)', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'git push -u origin agents/my-branch' },
+          tool_response: 'Branch pushed.',
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].branch).toBe('agents/my-branch');
+      expect(rows[0].url).toBeNull();
+      expect(rows[0].number).toBeNull();
+    });
+
+    it('no-ops when tool_response is missing', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'gh pr create --title "x"' },
+          // no tool_response
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(0);
+    });
+
+    it('no-ops for unrelated commands (npm test)', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'npm test' },
+          tool_response: 'Tests passed',
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(0);
+    });
+  });
+
   describe('POST /api/hooks/stop', () => {
     it('sets agent to idle but does NOT blanket-resolve pending permission prompts', async () => {
       // Subagents inherit the parent hook token and post under the same worker row.
