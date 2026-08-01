@@ -36,10 +36,10 @@ export function registerGetTask(program: Command): void {
       console.log(label('Created', task.created_at));
       console.log(label('Updated', task.updated_at));
 
-      if (task.agents && task.agents.length > 0) {
+      if (task.workers && task.workers.length > 0) {
         console.log('');
         heading('Agents');
-        for (const agent of task.agents) {
+        for (const agent of task.workers) {
           console.log(
             `  ${agent.label.padEnd(20)} ${colorAgentStatus(agent.status).padEnd(18 + 10)} window:${agent.window_index}`,
           );

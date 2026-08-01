@@ -1,6 +1,4 @@
-import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { execFile as execFileCb, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
@@ -107,31 +105,6 @@ function packageRoot(): string {
   return path.resolve(__dirname, '..');
 }
 
-function bundledSkillsDir(): string {
-  return path.join(packageRoot(), 'skills');
-}
-
-function claudeSkillsDir(): string {
-  return path.join(os.homedir(), '.claude', 'skills');
-}
-
-function missingBundledSkills(): string[] {
-  const src = bundledSkillsDir();
-  if (!fs.existsSync(src)) return [];
-  const target = claudeSkillsDir();
-  const missing: string[] = [];
-  for (const name of fs.readdirSync(src)) {
-    const srcPath = path.join(src, name);
-    try {
-      if (!fs.statSync(srcPath).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    if (!fs.existsSync(path.join(target, name))) missing.push(name);
-  }
-  return missing;
-}
-
 /**
  * Pick an install action for a missing binary dep: prefer Homebrew on macOS, then a
  * fixed shell installer on any POSIX platform. Returns undefined when neither applies
@@ -222,18 +195,6 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
 
   items.push(buildEditorItem(settings.editor));
 
-  const missingSkills = missingBundledSkills();
-  items.push({
-    id: 'skills',
-    label: 'Octomux skills (Claude Code)',
-    category: 'recommended',
-    status: missingSkills.length === 0 ? 'ok' : 'missing',
-    detail: missingSkills.length ? `Missing: ${missingSkills.join(', ')}` : undefined,
-    install: missingSkills.length
-      ? { kind: 'copy', id: 'skills', label: 'Install bundled skills' }
-      : undefined,
-  });
-
   const ghProbe = probeBinary({ cmd: 'gh', checkArgs: ['--version'] });
   let ghStatus: SetupItemStatus = ghProbe.ok ? 'unconfigured' : 'missing';
   let ghDetail: string | undefined = ghProbe.ok ? undefined : 'Install GitHub CLI';
@@ -313,40 +274,12 @@ const INSTALL_ALLOWLIST = new Set([
   'cursor-agent',
   'editor',
   'gh',
-  'skills',
   'lazyvim-sync',
 ]);
 
 export async function runSetupInstall(id: string): Promise<{ ok: boolean; message: string }> {
   if (!INSTALL_ALLOWLIST.has(id)) {
     throw new Error(`Install not allowed for: ${id}`);
-  }
-
-  if (id === 'skills') {
-    const src = bundledSkillsDir();
-    if (!fs.existsSync(src)) {
-      return { ok: false, message: 'Bundled skills directory not found' };
-    }
-    const target = claudeSkillsDir();
-    fs.mkdirSync(target, { recursive: true });
-    let count = 0;
-    for (const skill of fs.readdirSync(src)) {
-      const skillSrc = path.join(src, skill);
-      try {
-        if (!fs.statSync(skillSrc).isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      const dest = path.join(target, skill);
-      if (!fs.existsSync(dest)) {
-        fs.cpSync(skillSrc, dest, { recursive: true });
-        count++;
-      }
-    }
-    return {
-      ok: true,
-      message: count ? `Installed ${count} skill(s)` : 'All skills already present',
-    };
   }
 
   const shellDep = BINARY_DEPS.find((d) => d.id === id && d.shellInstall);

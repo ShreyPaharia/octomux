@@ -18,7 +18,7 @@ import {
   upsertManagedTask,
   eventsSince,
   createConversation,
-} from './orchestrator/store.js';
+} from './repositories/orchestrator.js';
 import { advancePhaseForLabel } from './hooks.js';
 
 describe('Hook endpoints', () => {
@@ -46,7 +46,7 @@ describe('Hook endpoints', () => {
     it.each(activatableCases)(
       'sets $description to active when user submits a prompt',
       async ({ from }) => {
-        db.prepare(`UPDATE agents SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
+        db.prepare(`UPDATE workers SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
 
         await request(app)
           .post('/api/hooks/user-prompt-submit?token=tok-test')
@@ -58,7 +58,7 @@ describe('Hook endpoints', () => {
     );
 
     it('no-ops (200) when session_id is missing — valid token, nothing to attribute', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app).post('/api/hooks/user-prompt-submit?token=tok-test').send({}).expect(200);
 
@@ -135,7 +135,7 @@ describe('Hook endpoints', () => {
     });
 
     it('does not override idle state (Stop hook may have fired first)', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
@@ -258,8 +258,86 @@ describe('Hook endpoints', () => {
     });
   });
 
+  describe('POST /api/hooks/post-tool-use — PR tracking', () => {
+    it('upserts a pull_requests row when gh pr create output includes a URL', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'gh pr create --title "fix: thing" --body ""' },
+          tool_response: 'https://github.com/org/repo/pull/55\n',
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].url).toBe('https://github.com/org/repo/pull/55');
+      expect(rows[0].number).toBe(55);
+    });
+
+    it('upserts a branch-only row on git push (no url/number yet)', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'git push -u origin agents/my-branch' },
+          tool_response: 'Branch pushed.',
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].branch).toBe('agents/my-branch');
+      expect(rows[0].url).toBeNull();
+      expect(rows[0].number).toBeNull();
+    });
+
+    it('no-ops when tool_response is missing', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'gh pr create --title "x"' },
+          // no tool_response
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(0);
+    });
+
+    it('no-ops for unrelated commands (npm test)', async () => {
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({
+          session_id: 'sess-123',
+          tool_name: 'Bash',
+          tool_input: { command: 'npm test' },
+          tool_response: 'Tests passed',
+        })
+        .expect(200);
+
+      const rows = db
+        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
+        .all() as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(0);
+    });
+  });
+
   describe('POST /api/hooks/stop', () => {
-    it('resolves all pending prompts and sets agent to idle', async () => {
+    it('sets agent to idle but does NOT blanket-resolve pending permission prompts', async () => {
+      // Subagents inherit the parent hook token and post under the same worker row.
+      // Blanket-resolving on Stop would clobber subagent prompts — so Stop must
+      // no longer call resolveAgentPermissionPrompts.
       insertPermissionPrompt(db, {
         id: 'pp1',
         task_id: 't1',
@@ -278,9 +356,11 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', stop_hook_active: false })
         .expect(200);
 
+      // Prompts must remain pending — Stop no longer blanket-resolves them
       const prompts = getPermissionPrompts(db, 't1');
-      expect(prompts.every((p) => p.status === 'resolved')).toBe(true);
+      expect(prompts.every((p) => p.status === 'pending')).toBe(true);
 
+      // Agent activity still flips to idle
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
 
@@ -300,7 +380,7 @@ describe('Hook endpoints', () => {
     // (resume / compaction / manual relaunch). Hooks then arrive with a session
     // id we never recorded.
     it('reattaches a drifted session to the sole agent and rebinds harness_session_id', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
@@ -308,7 +388,7 @@ describe('Hook endpoints', () => {
         .expect(200);
 
       // Rebound so subsequent hooks exact-match…
-      const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+      const row = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a1') as {
         harness_session_id: string;
       };
       expect(row.harness_session_id).toBe('sess-NEW');
@@ -324,17 +404,17 @@ describe('Hook endpoints', () => {
         hook_token: 'tok-test',
         hook_activity: 'idle',
       } as any);
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
         .send({ session_id: 'sess-NEW' })
         .expect(200);
 
-      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+      const a1 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a1'`).get() as {
         harness_session_id: string;
       };
-      const a2 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a2'`).get() as {
+      const a2 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a2'`).get() as {
         harness_session_id: string;
       };
       expect(a1.harness_session_id).toBe('sess-123');
@@ -344,14 +424,14 @@ describe('Hook endpoints', () => {
     });
 
     it('does not resurrect a stopped agent (no live match for the token)', async () => {
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE id = 'a1'`).run();
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
         .send({ session_id: 'sess-NEW' })
         .expect(200);
 
-      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+      const a1 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a1'`).get() as {
         harness_session_id: string;
       };
       expect(a1.harness_session_id).toBe('sess-123');
@@ -412,7 +492,7 @@ describe('findAgentByTokenAndSession', () => {
     const row = findAgentByTokenAndSession('tok-2', 'sess-bound');
     expect(row).toMatchObject({ id: 'a2', task_id: 't1' });
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a2') as {
+    const reread = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a2') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-bound');
@@ -464,7 +544,9 @@ describe('POST /api/hooks/session-start', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({});
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+    const reread = db
+      .prepare(`SELECT harness_session_id FROM workers WHERE id = ?`)
+      .get('a-ss') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('chat-xyz');
@@ -490,7 +572,9 @@ describe('POST /api/hooks/session-start', () => {
       .send({ session_id: 'sess-from-fallback' });
     expect(res.status).toBe(200);
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+    const reread = db
+      .prepare(`SELECT harness_session_id FROM workers WHERE id = ?`)
+      .get('a-ss') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-from-fallback');
@@ -599,8 +683,10 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
     } as any);
   });
 
-  it('auto-transitions in_progress → human_review for UN-managed tasks (existing behavior)', async () => {
-    // task-m is NOT in managed_tasks → existing B4 behavior applies
+  it('Stop hook does NOT synchronously transition to human_review (debounced via poller)', async () => {
+    // The B4 synchronous transition has been removed — Stop now only sets the agent idle.
+    // The quiescence poller (pollQuiescence) handles the in_progress → human_review
+    // transition after the debounce window expires.
     await request(app)
       .post('/api/hooks/stop?token=tok-m')
       .send({ session_id: 'sess-m' })
@@ -609,7 +695,8 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
     const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-m') as {
       workflow_status: string;
     };
-    expect(row.workflow_status).toBe('human_review');
+    // Must remain in_progress — quiescence poller decides after debounce
+    expect(row.workflow_status).toBe('in_progress');
   });
 
   it('SUPPRESSES in_progress → human_review auto-transition for orchestrator-managed tasks', async () => {

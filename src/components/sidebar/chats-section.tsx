@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { taskApi } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 import {
   ACTIVE_ACCENT,
   ACTIVE_FILL,
@@ -30,7 +30,7 @@ export function ChatsSection({
   collapsed: boolean;
   activePath: string;
 }) {
-  const [chats, setChats] = useState<Agent[]>([]);
+  const [chats, setChats] = useState<Worker[]>([]);
   const [movingAgentId, setMovingAgentId] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -39,7 +39,7 @@ export function ChatsSection({
     try {
       const res = await fetch('/api/chats');
       if (!res.ok) return;
-      const rows = (await res.json()) as Agent[];
+      const rows = (await res.json()) as Worker[];
       setChats(rows);
     } catch {
       // silent

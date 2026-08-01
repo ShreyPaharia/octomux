@@ -1,6 +1,5 @@
 export type { AddAgentOpts } from './lifecycle/types.js';
 export {
-  preflightWorktree,
   startTask,
   addAgent,
   resumeTask,

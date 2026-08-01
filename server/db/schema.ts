@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     initial_prompt               TEXT,
     last_viewed_at               TEXT,
     source                       TEXT,
+    schedule_id                  TEXT,
     error                        TEXT,
     current_summary              TEXT,
     current_summary_updated_at   TEXT,
@@ -43,7 +44,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS task_updates (
   id          TEXT PRIMARY KEY,
   task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  agent_id    TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  agent_id    TEXT REFERENCES workers(id) ON DELETE SET NULL,
   kind        TEXT NOT NULL,
   from_status TEXT,
   to_status   TEXT,
@@ -58,7 +59,7 @@ CREATE TABLE IF NOT EXISTS task_external_refs (
   ref         TEXT NOT NULL,
   url         TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (task_id, integration)
+  PRIMARY KEY (task_id, integration, ref)
 );
 
 CREATE TABLE IF NOT EXISTS integrations (
@@ -71,7 +72,11 @@ CREATE TABLE IF NOT EXISTS integrations (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS agents (
+-- Per-task tmux worker (a Claude Code / Cursor process running inside a task's
+-- worktree, or a standalone chat with task_id NULL). Not to be confused with
+-- the 'agents' table (the persistent conductor agent, created in
+-- db/migrations.ts).
+CREATE TABLE IF NOT EXISTS workers (
     id                TEXT PRIMARY KEY,
     task_id           TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     window_index      INTEGER NOT NULL,
@@ -94,10 +99,10 @@ CREATE TABLE IF NOT EXISTS permission_prompts (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     resolved_at TEXT,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+    FOREIGN KEY (agent_id) REFERENCES workers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id);
+CREATE INDEX IF NOT EXISTS idx_workers_task ON workers(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status);
 CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status);
@@ -164,26 +169,56 @@ CREATE TABLE IF NOT EXISTS hook_settings (
   PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE IF NOT EXISTS team_schedules (
-  name        TEXT PRIMARY KEY,
-  repo_path   TEXT NOT NULL,
-  config_path TEXT NOT NULL,
-  cron        TEXT NOT NULL,
-  enabled     INTEGER NOT NULL DEFAULT 1,
-  last_run_at TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS schedules (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL,
+  repo_path     TEXT NOT NULL,
+  name          TEXT,
+  cron          TEXT NOT NULL,
+  timezone      TEXT,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  model         TEXT,
+  timeout_ms    INTEGER,
+  last_run_at   TEXT,
+  config_json   TEXT,
+  prompt        TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS team_runs (
-  id           TEXT PRIMARY KEY,
-  team         TEXT NOT NULL,
-  lead_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE SET NULL,
-  started_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  status       TEXT NOT NULL DEFAULT 'running'
+CREATE TABLE IF NOT EXISTS runs (
+  id            TEXT PRIMARY KEY,
+  workflow_kind TEXT NOT NULL,
+  trigger       TEXT NOT NULL,
+  schedule_id   TEXT,
+  task_id       TEXT,
+  chat_id       TEXT,
+  loop_run_id   TEXT,
+  status        TEXT NOT NULL DEFAULT 'running',
+  result_json   TEXT,
+  error         TEXT,
+  started_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at      TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_team_runs_team ON team_runs(team);
-CREATE INDEX IF NOT EXISTS idx_team_runs_status ON team_runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_workflow_kind ON runs(workflow_kind);
+CREATE INDEX IF NOT EXISTS idx_runs_schedule_id ON runs(schedule_id);
+
+CREATE TABLE IF NOT EXISTS pull_requests (
+    id          TEXT PRIMARY KEY,
+    task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    branch      TEXT NOT NULL,
+    base_branch TEXT,
+    number      INTEGER,
+    url         TEXT,
+    head_sha    TEXT,
+    title       TEXT,
+    state       TEXT NOT NULL DEFAULT 'open',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(task_id, branch)
+);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_task_id ON pull_requests(task_id);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_state ON pull_requests(state);
 
 `;
 

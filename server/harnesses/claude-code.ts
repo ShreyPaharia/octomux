@@ -76,20 +76,68 @@ export const claudeCodeHarness: Harness = {
     const mergedDeny = [...new Set([...DENIED_TOOLS, ...existingDeny])];
     const mergedPermissions = { ...existingPerms, allow: mergedAllow, deny: mergedDeny };
 
-    const merged = { ...existing, permissions: mergedPermissions, hooks: mergedHooks };
+    // Force NON-vim keybindings unless the worktree explicitly chose one. octomux
+    // drives agents with tmux `send-keys` (paste → Enter to submit). If the
+    // operator's global config has `editorMode: vim`, the agent's TUI starts in
+    // vim INSERT mode where Enter's submit behavior is mode-dependent and
+    // unreliable — turns (incl. plan approvals) get pasted but never submitted.
+    // emacs keybindings make `send-keys Enter` submit deterministically.
+    const editorMode = typeof existing.editorMode === 'string' ? existing.editorMode : 'emacs';
+
+    const merged = { ...existing, editorMode, permissions: mergedPermissions, hooks: mergedHooks };
     writeJsonConfig(settingsPath, merged);
   },
 
-  async syncAgents(worktreePath: string) {
-    const { listAgents, getAgent } = await import('../agents.js');
-    const targetDir = path.join(worktreePath, '.claude', 'agents');
-    await fs.promises.mkdir(targetDir, { recursive: true });
+  async uninstallHooks(dirPath: string) {
+    const settingsPath = path.join(dirPath, '.claude', 'settings.local.json');
 
-    const agents = await listAgents(worktreePath);
-    for (const def of agents) {
-      const agent = await getAgent(def.name, worktreePath);
-      await fs.promises.writeFile(path.join(targetDir, `${def.name}.md`), agent.content, 'utf-8');
+    let existing: Record<string, unknown>;
+    try {
+      existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch {
+      return; // no config (or unparseable) — nothing to clean
     }
+    if (typeof existing !== 'object' || existing === null || Array.isArray(existing)) return;
+    if (
+      typeof existing.hooks !== 'object' ||
+      existing.hooks === null ||
+      Array.isArray(existing.hooks)
+    ) {
+      return;
+    }
+
+    // Strip only OUR entries (url contains /api/hooks/); the user's own hooks,
+    // and their permissions, stay untouched.
+    const hooks: Record<string, unknown> = {};
+    for (const [event, matchers] of Object.entries(existing.hooks as Record<string, unknown>)) {
+      if (!Array.isArray(matchers)) {
+        hooks[event] = matchers;
+        continue;
+      }
+      const kept = matchers
+        .map((m) => {
+          const inner = (m as { hooks?: unknown })?.hooks;
+          if (!Array.isArray(inner)) return m;
+          const keptInner = inner.filter(
+            (h) => !String((h as { url?: unknown })?.url ?? '').includes('/api/hooks/'),
+          );
+          return keptInner.length === inner.length ? m : { ...(m as object), hooks: keptInner };
+        })
+        .filter((m) => {
+          const inner = (m as { hooks?: unknown })?.hooks;
+          return !Array.isArray(inner) || inner.length > 0;
+        });
+      if (kept.length > 0) hooks[event] = kept;
+    }
+
+    const next: Record<string, unknown> = { ...existing };
+    if (Object.keys(hooks).length > 0) next.hooks = hooks;
+    else delete next.hooks;
+    writeJsonConfig(settingsPath, next);
+  },
+
+  async syncAgents(_worktreePath: string) {
+    // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
   },
 
   resolveFlags(settings: OctomuxSettings): string {

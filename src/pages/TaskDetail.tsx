@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { TaskDetailSkeleton } from '@/components/skeletons/TaskDetailSkeleton';
 import { TerminalView } from '@/components/TerminalView';
 import { DraftEditForm } from '@/components/DraftEditForm';
 import { EmptyState } from '@/components/EmptyState';
@@ -18,6 +19,7 @@ import { TerminalRectIcon } from '@/components/icons';
 import { TaskActivityPanel } from '@/components/TaskActivityPanel';
 import { TaskRefsPanel } from '@/components/TaskRefsPanel';
 import { TaskHooksPanel } from '@/components/TaskHooksPanel';
+import { PullRequestList } from '@/components/PullRequestList';
 import { JiraLinkHelper } from '@/components/integrations/JiraLinkHelper';
 import { TaskDetailAgentView, detachAgent } from '@/components/task-detail/TaskDetailAgentView';
 import { TaskDetailDiffView } from '@/components/task-detail/TaskDetailDiffView';
@@ -50,10 +52,10 @@ export default function TaskDetail() {
 
   const validWindowIndexes = useMemo(() => {
     const s = new Set<number>();
-    for (const a of task?.agents || []) s.add(a.window_index);
+    for (const a of task?.workers || []) s.add(a.window_index);
     for (const t of task?.user_terminals || []) s.add(t.window_index);
     return s;
-  }, [task?.agents, task?.user_terminals]);
+  }, [task?.workers, task?.user_terminals]);
 
   const { terminalLRU } = useTerminalCache({ taskId, activeWindow, validWindowIndexes });
 
@@ -65,13 +67,13 @@ export default function TaskDetail() {
   const { reviewQueue, taskComments } = useTaskDetailComments({ taskId });
 
   const activeAgentId = useMemo(() => {
-    const ags = task?.agents ?? [];
+    const ags = task?.workers ?? [];
     if (activeWindow !== null) {
       const a = ags.find((x) => x.window_index === activeWindow && x.status !== 'stopped');
       if (a) return a.id;
     }
     return ags.find((x) => x.status !== 'stopped')?.id ?? null;
-  }, [task?.agents, activeWindow]);
+  }, [task?.workers, activeWindow]);
 
   const isDiffMode = mode === 'diff';
   const diffState = useDiffState({
@@ -122,32 +124,38 @@ export default function TaskDetail() {
       if (!taskId) return;
       try {
         const agent = await taskApi.addAgent(taskId, prompt ? { prompt } : undefined);
+        // Switch to the new agent's window immediately; WS task:updated handles the list refresh.
         setActiveWindow(agent.window_index);
-        refresh();
       } catch (err) {
         console.error('Failed to add agent:', err);
+        toast.error((err as Error).message || 'Failed to add agent');
       }
     },
-    [taskId, refresh, setActiveWindow],
+    [taskId, setActiveWindow],
   );
 
   const handleStopAgent = useCallback(
     async (agentId: string) => {
       if (!taskId) return;
+      // Switch to another window immediately (optimistic) before the server
+      // confirms, so the terminal doesn't freeze on the stopping agent.
+      const taskAgents = task?.workers || [];
+      const stoppedAgent = taskAgents.find((a) => a.id === agentId);
+      if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
+        const nextAgent = taskAgents.find((a) => a.id !== agentId && a.status !== 'stopped');
+        if (nextAgent) setActiveWindow(nextAgent.window_index);
+      }
       try {
-        const taskAgents = task?.agents || [];
-        const stoppedAgent = taskAgents.find((a) => a.id === agentId);
         await taskApi.stopAgent(taskId, agentId);
-        if (stoppedAgent && stoppedAgent.window_index === activeWindow) {
-          const nextAgent = taskAgents.find((a) => a.id !== agentId && a.status !== 'stopped');
-          if (nextAgent) setActiveWindow(nextAgent.window_index);
-        }
-        refresh();
+        // WS task:updated will fire and useTask will refetch; no explicit refresh needed.
       } catch (err) {
         console.error('Failed to stop agent:', err);
+        toast.error((err as Error).message || 'Failed to stop agent');
+        // Revert window switch on error
+        if (stoppedAgent) setActiveWindow(stoppedAgent.window_index);
       }
     },
-    [taskId, refresh, task, activeWindow, setActiveWindow],
+    [taskId, task, activeWindow, setActiveWindow],
   );
 
   const handleClose = useCallback(async () => {
@@ -173,13 +181,13 @@ export default function TaskDetail() {
 
   const handleDelete = useCallback(async () => {
     if (!taskId) return;
-    try {
-      await taskApi.deleteTask(taskId);
-      clearDiffTreeExpandedState(taskId);
-      navigate('/tasks');
-    } catch (err) {
+    // Navigate away optimistically — the WS event will reconcile the task list.
+    clearDiffTreeExpandedState(taskId);
+    navigate('/tasks');
+    taskApi.deleteTask(taskId).catch((err) => {
       console.error('Failed to delete task:', err);
-    }
+      toast.error((err as Error).message || 'Failed to delete task');
+    });
   }, [taskId, navigate]);
 
   const handleResume = useCallback(async () => {
@@ -199,40 +207,41 @@ export default function TaskDetail() {
     if (!taskId) return;
     try {
       const terminal = await taskApi.createTerminal(taskId);
+      // Switch to new terminal immediately; WS task:updated reconciles the rest.
       setActiveWindow(terminal.window_index);
-      refresh();
     } catch (err) {
       console.error('Failed to create terminal:', err);
+      toast.error((err as Error).message || 'Failed to create terminal');
     }
-  }, [taskId, refresh, setActiveWindow]);
+  }, [taskId, setActiveWindow]);
 
   const handleCloseTerminal = useCallback(
     async (terminalId: string) => {
       if (!taskId) return;
+      // Optimistically switch away from the closed terminal window.
+      const terminals = task?.user_terminals || [];
+      const closedTerminal = terminals.find((t) => t.id === terminalId);
+      if (closedTerminal && closedTerminal.window_index === activeWindow) {
+        const agents = task?.workers || [];
+        const runningAgent = agents.find((a) => a.status !== 'stopped');
+        const otherTerminal = terminals.find((t) => t.id !== terminalId);
+        setActiveWindow(runningAgent?.window_index ?? otherTerminal?.window_index ?? null);
+      }
       try {
-        const terminals = task?.user_terminals || [];
-        const closedTerminal = terminals.find((t) => t.id === terminalId);
         await taskApi.closeTerminal(taskId, terminalId);
-        if (closedTerminal && closedTerminal.window_index === activeWindow) {
-          const agents = task?.agents || [];
-          const runningAgent = agents.find((a) => a.status !== 'stopped');
-          const otherTerminal = terminals.find((t) => t.id !== terminalId);
-          setActiveWindow(runningAgent?.window_index ?? otherTerminal?.window_index ?? null);
-        }
-        refresh();
+        // WS task:updated will reconcile the terminal list.
       } catch (err) {
         console.error('Failed to close terminal:', err);
+        toast.error((err as Error).message || 'Failed to close terminal');
+        // Revert window switch on error
+        if (closedTerminal) setActiveWindow(closedTerminal.window_index);
       }
     },
-    [taskId, refresh, task, activeWindow, setActiveWindow],
+    [taskId, task, activeWindow, setActiveWindow],
   );
 
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        Loading...
-      </div>
-    );
+    return <TaskDetailSkeleton />;
   }
 
   if (!task) {
@@ -246,7 +255,7 @@ export default function TaskDetail() {
     );
   }
 
-  const agents = task.agents || [];
+  const agents = task.workers || [];
   const isRunning = task.runtime_state === 'running';
   const isDraft = task.runtime_state === 'idle' && !task.initial_prompt;
   const canResume =
@@ -435,6 +444,9 @@ export default function TaskDetail() {
             <TaskInfoPanel>
               <TaskRefsPanel taskId={task.id} initialRefs={task.external_refs} />
               <JiraLinkHelper taskId={task.id} />
+              {task.pull_requests && task.pull_requests.length > 0 && (
+                <PullRequestList pullRequests={task.pull_requests} />
+              )}
             </TaskInfoPanel>
             <TaskInfoPanel>
               <TaskHooksPanel taskId={task.id} />

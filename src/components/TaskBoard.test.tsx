@@ -257,6 +257,41 @@ describe('MoveWithNoteDialog', async () => {
 
 // ─── Optimistic update + revert on error ────────────────────────────────────
 
+describe('TaskBoard automated toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMock.listTasks.mockResolvedValue([]);
+    localStorage.clear();
+  });
+
+  it('does not fetch automated tasks by default', () => {
+    renderBoard(makeTasks([{ id: 'manual', title: 'Manual task', workflow_status: 'backlog' }]));
+    expect(screen.getByText('Manual task')).toBeInTheDocument();
+    expect(apiMock.listTasks).not.toHaveBeenCalled();
+  });
+
+  it('fetches and shows automated tasks once the toggle is switched on', async () => {
+    const user = userEvent.setup();
+    apiMock.listTasks.mockResolvedValue(
+      makeTasks([
+        { id: 'manual', title: 'Manual task', workflow_status: 'backlog', source: null },
+        { id: 'drift', title: 'Doc drift run', workflow_status: 'backlog', source: 'doc_drift' },
+      ]),
+    );
+
+    renderBoard(makeTasks([{ id: 'manual', title: 'Manual task', workflow_status: 'backlog' }]));
+
+    expect(screen.queryByText('Doc drift run')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('show-automated-toggle'));
+
+    expect(await screen.findByText('Doc drift run')).toBeInTheDocument();
+    expect(apiMock.listTasks).toHaveBeenCalledWith({ includeAutomated: true });
+    // The manual task from the prop isn't duplicated by the fetched copy.
+    expect(screen.getAllByText('Manual task')).toHaveLength(1);
+  });
+});
+
 describe('TaskBoard optimistic updates', () => {
   beforeEach(() => {
     vi.clearAllMocks();

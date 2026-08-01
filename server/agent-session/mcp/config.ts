@@ -30,20 +30,35 @@ export function submitResultServerInvocation(): { command: string; args: string[
   const here = fileURLToPath(import.meta.url);
   const dir = path.dirname(here);
 
-  // prod: this file lives in dist-server/agent-session/mcp/config.js → server.js sibling
-  const prodServer = path.join(dir, 'submit-result-server.js');
-  if (fs.existsSync(prodServer)) {
-    return { command: process.execPath, args: [prodServer] };
+  // prod candidates. `import.meta.url` resolves to either:
+  //   - the sibling location when this module keeps its own file
+  //     (dist-server/agent-session/mcp/config.js → server.js sibling), or
+  //   - the BUNDLE root when the server is bundled into dist-server/index.js
+  //     (or a chunk in dist-server/), where `dir` is dist-server/ and the emitted
+  //     server lives one sub-path down. Both are checked so bundling can't hide it.
+  const prodCandidates = [
+    path.join(dir, 'submit-result-server.js'),
+    path.join(dir, 'agent-session', 'mcp', 'submit-result-server.js'),
+  ];
+  for (const candidate of prodCandidates) {
+    if (fs.existsSync(candidate)) {
+      return { command: process.execPath, args: [candidate] };
+    }
   }
 
-  // dev: this file lives in server/agent-session/mcp/config.ts → server.ts sibling
-  const devServer = path.join(dir, 'submit-result-server.ts');
-  if (fs.existsSync(devServer)) {
-    try {
-      const tsxCli = createRequire(import.meta.url).resolve('tsx/cli');
-      return { command: process.execPath, args: [tsxCli, devServer] };
-    } catch {
-      return null;
+  // dev candidates: sibling .ts (unbundled) or the source sub-path, run via tsx.
+  const devCandidates = [
+    path.join(dir, 'submit-result-server.ts'),
+    path.join(dir, 'agent-session', 'mcp', 'submit-result-server.ts'),
+  ];
+  for (const candidate of devCandidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const tsxCli = createRequire(import.meta.url).resolve('tsx/cli');
+        return { command: process.execPath, args: [tsxCli, candidate] };
+      } catch {
+        return null;
+      }
     }
   }
 

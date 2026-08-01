@@ -16,7 +16,7 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   Task,
-  Agent,
+  Worker,
   UserTerminal,
   RunMode,
 } from '../types.js';
@@ -27,7 +27,6 @@ import {
   listDoneTasks,
   setRuntimeState,
   setWorkflowStatus,
-  softDeleteTask as softDeleteTaskRepo,
   restoreTask as restoreTaskRepo,
   hardDeleteTask,
   touchLastViewed,
@@ -61,8 +60,9 @@ export const router = express.Router();
 router.get('/api/tasks', (req: Request, res: Response) => {
   const repoPath = req.query.repo_path as string | undefined;
   const trash = req.query.trash === 'true';
+  const includeAutomated = req.query.includeAutomated === 'true';
 
-  const tasks = listTasks({ trash, repoPath, includeAutoReview: false });
+  const tasks = listTasks({ trash, repoPath, includeAutoReview: false, includeAutomated });
 
   if (tasks.length === 0) {
     res.json([]);
@@ -77,12 +77,12 @@ router.get('/api/tasks', (req: Request, res: Response) => {
   const allTerminals = listUserTerminalsByTasks(taskIds);
 
   // Group by task_id using Maps
-  const agentsByTask = new Map<string, Agent[]>();
+  const workersByTask = new Map<string, Worker[]>();
   for (const agent of allAgents) {
     if (!agent.task_id) continue; // standalone agents don't belong to a task
-    const list = agentsByTask.get(agent.task_id) || [];
+    const list = workersByTask.get(agent.task_id) || [];
     list.push(agent);
-    agentsByTask.set(agent.task_id, list);
+    workersByTask.set(agent.task_id, list);
   }
 
   const promptsByTask = new Map<string, PermissionPromptRow[]>();
@@ -102,9 +102,12 @@ router.get('/api/tasks', (req: Request, res: Response) => {
 
   const result = tasks.map((task) =>
     formatTaskResponse(task, {
-      agents: agentsByTask.get(task.id) || [],
+      workers: workersByTask.get(task.id) || [],
       pending_prompts: promptsByTask.get(task.id) || [],
       user_terminals: terminalsByTask.get(task.id) || [],
+      // ponytail: list endpoint omits pull_requests to avoid N+1 DB queries;
+      // add bulk fetch here if the dashboard ever needs per-task PR lists in the board view.
+      pull_requests: [],
     }),
   );
 
@@ -130,12 +133,9 @@ router.post('/api/tasks/delete-done', async (req: Request, res: Response) => {
 
   let deletedCount = 0;
   for (const task of doneTasks) {
-    // Close running tasks before soft-deleting
-    if (task.runtime_state === 'running' || task.runtime_state === 'setting_up') {
-      await closeTask(task);
-    }
-
-    softDeleteTaskRepo(task.id);
+    // task-engine softDeleteTask kills the tmux session (and its agent
+    // processes) before soft-deleting — same as single-task delete
+    await softDeleteTask(task);
 
     broadcast({ type: 'task:updated', payload: { taskId: task.id } });
     deletedCount++;
@@ -159,18 +159,25 @@ router.get('/api/tasks/:id', async (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const { relations } = fetchTaskWithRelations(task.id);
   // Backfill hook_token for pre-step-1 agents that have an empty token.
-  const agents = await Promise.all(
-    relations.agents.map(async (agent) => {
-      if (agent.hook_token !== '') return agent;
-      const token = await ensureHookToken(agent, task.worktree ?? null);
-      return { ...agent, hook_token: token };
-    }),
-  );
+  // Common case: all tokens already exist — skip async work entirely.
+  const needsBackfill = relations.workers.some((w) => !w.hook_token);
+  let workers: Worker[];
+  if (needsBackfill) {
+    workers = await Promise.all(
+      relations.workers.map(async (agent) => {
+        if (agent.hook_token) return agent;
+        const token = await ensureHookToken(agent, task.worktree ?? null);
+        return { ...agent, hook_token: token };
+      }),
+    );
+  } else {
+    workers = relations.workers;
+  }
   const worktreeRow = task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
   res.json(
     formatTaskResponse(
       task,
-      { ...relations, agents },
+      { ...relations, workers },
       {
         worktree_row: worktreeRow,
         existing_review_id: lookupExistingReviewId(task),
@@ -200,7 +207,7 @@ router.post('/api/tasks', async (req: Request, res: Response) => {
     storedWorktree = null;
   }
 
-  // Title/description resolution (fast path + optional AI polish via OCTOMUX_AI_TASK_NAMING)
+  // Title/description resolution (fast path + optional AI polish — see resolveAiTaskNamingEnabled)
   const { resolvedTitle, resolvedDescription } = await resolveTaskTitleAndDescription(body);
 
   const isDraft = !!body.draft;

@@ -18,7 +18,7 @@ describe('buildPrReviewPrompt', () => {
       headRefOid: 'deadbeef',
       requestedAt: '2026-01-01T00:00:00Z',
     });
-    expect(prompt.startsWith('/review-walkthrough')).toBe(true);
+    expect(prompt.startsWith('/octomux:review-walkthrough')).toBe(true);
     expect(prompt).toContain('Review task id: REVIEW123abc');
     expect(prompt).toMatch(/--task REVIEW123abc/);
     expect(prompt).toContain('PR: Fix the thing (#42)');
@@ -38,7 +38,7 @@ describe('buildManualReviewPrompt', () => {
       prHeadSha: 'headsha',
       requestedAt: '2026-01-01T00:00:00Z',
     });
-    expect(prompt.startsWith('/review-walkthrough')).toBe(true);
+    expect(prompt.startsWith('/octomux:review-walkthrough')).toBe(true);
     // The review task's own id is what the CLI must be invoked with.
     expect(prompt).toContain('Review task id: REVIEW123abc');
     expect(prompt).toMatch(/--task REVIEW123abc/);
@@ -59,13 +59,13 @@ it('pr + manual prompts invoke the walkthrough skill', () => {
     headRefOid: 'h',
     requestedAt: 'now',
   });
-  expect(pr).toContain('/review-walkthrough');
+  expect(pr).toContain('/octomux:review-walkthrough');
   expect(pr).not.toContain('/review-orchestrator');
 });
 
 it('buildDeepReviewPrompt invokes the deep skill and pins the task id', () => {
   const p = buildDeepReviewPrompt({ reviewTaskId: 'rt1' });
-  expect(p).toContain('/review-deep');
+  expect(p).toContain('/octomux:review-deep');
   expect(p).toContain('Review task id: rt1');
   expect(p).toContain('--task rt1');
 });

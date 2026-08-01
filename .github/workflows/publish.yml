@@ -18,8 +18,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; the bundled npm is older.
+      - run: npm install -g npm@latest
 
       - run: bun install
 
@@ -41,10 +44,24 @@ jobs:
 
       - run: bun run build
 
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+      # No token: authenticated via OIDC trusted publishing configured on
+      # npmjs.com (package settings -> Publishing access -> GitHub Actions).
+      - run: npm publish --provenance --access public
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
+      # electron-release.yml runs on the same v* tag and its
+      # `electron-builder --publish always` (releaseType: release) creates the
+      # release too if it gets there first. softprops/action-gh-release lost that
+      # race and hard-failed with
+      #   Validation Failed: {"resource":"Release","code":"already_exists"}.
+      # Create-or-adopt instead: both sides create a PUBLISHED release, so
+      # whichever one exists is the right one to attach artifacts to.
+      - name: Ensure GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — adopting it"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+              || gh release view "$GITHUB_REF_NAME"
+          fi

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
-import { getConfig, readGithubLogin, writeGithubLogin } from './config.js';
+import { readGithubLogin, writeGithubLogin } from './config.js';
 
 describe('repositories/config', () => {
   beforeEach(() => {
@@ -27,24 +27,7 @@ describe('repositories/config', () => {
 
     it('creates the config row when absent', () => {
       writeGithubLogin('new-user');
-      const row = getConfig();
-      expect(row).toBeDefined();
-      expect(row!.id).toBe(1);
-      expect(row!.github_login).toBe('new-user');
-    });
-  });
-
-  describe('getConfig', () => {
-    it('returns undefined when config is empty', () => {
-      expect(getConfig()).toBeUndefined();
-    });
-
-    it('returns the config row after write', () => {
-      writeGithubLogin('test-login');
-      const row = getConfig();
-      expect(row).toBeDefined();
-      expect(row!.github_login).toBe('test-login');
-      expect(row!.updated_at).toBeTruthy();
+      expect(readGithubLogin()).toBe('new-user');
     });
   });
 });

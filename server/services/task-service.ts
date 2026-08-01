@@ -12,7 +12,7 @@ import {
   getTask,
   inTransaction,
 } from '../repositories/index.js';
-import { upsertManagedTask } from '../orchestrator/store.js';
+import { upsertManagedTask } from '../repositories/orchestrator.js';
 import { startTask } from '../task-engine/index.js';
 import { broadcast } from '../events.js';
 import { childLogger } from '../logger.js';
@@ -147,7 +147,7 @@ export async function createTask(input: CreateTaskServiceInput): Promise<Task> {
   }
 
   const created = getTask(id) as Task;
-  created.agents = [];
+  created.workers = [];
   created.user_terminals = [];
 
   broadcast({ type: 'task:created', payload: { taskId: id } });

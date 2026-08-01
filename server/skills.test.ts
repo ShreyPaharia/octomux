@@ -1,24 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import pino from 'pino';
 import { setLogger } from './logger.js';
+import { builtInSkillsDir } from './octomux-paths.js';
 
 vi.mock('fs', () => {
   const promises = {
     access: vi.fn(),
-    mkdir: vi.fn(),
     readdir: vi.fn(),
     readFile: vi.fn(),
-    writeFile: vi.fn(),
-    rm: vi.fn(),
   };
   return { default: { promises }, promises };
 });
-vi.mock('os');
 
-const { listSkills, getSkill, createSkill, updateSkill, deleteSkill } = await import('./skills.js');
+const { listSkills, getSkill } = await import('./skills.js');
 
 function enoent(): NodeJS.ErrnoException {
   const err = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
@@ -26,27 +22,15 @@ function enoent(): NodeJS.ErrnoException {
   return err;
 }
 
-const SKILLS_DIR = '/mock-home/.claude/skills';
+const SKILLS_DIR = builtInSkillsDir();
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.mocked(os.homedir).mockReturnValue('/mock-home');
+  vi.mocked(fs.promises.access).mockResolvedValue(undefined);
 });
 
 describe('listSkills', () => {
-  it('creates directory and returns empty array when dir does not exist', async () => {
-    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
-    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
-    vi.mocked(fs.promises.readdir).mockResolvedValue([]);
-
-    const result = await listSkills();
-
-    expect(fs.promises.mkdir).toHaveBeenCalledWith(SKILLS_DIR, { recursive: true });
-    expect(result).toEqual([]);
-  });
-
   it('returns skills with descriptions parsed from YAML frontmatter', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
     const entries = [
       { name: 'my-skill', isDirectory: () => true },
       { name: 'another-skill', isDirectory: () => true },
@@ -71,7 +55,6 @@ describe('listSkills', () => {
   });
 
   it('skips non-directory entries', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
     const entries = [
       { name: 'my-skill', isDirectory: () => true },
       { name: 'readme.txt', isDirectory: () => false },
@@ -86,7 +69,6 @@ describe('listSkills', () => {
   });
 
   it('returns empty description when no frontmatter', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
     const entries = [{ name: 'bare-skill', isDirectory: () => true }];
     vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
     vi.mocked(fs.promises.readFile).mockResolvedValue('# Just content, no frontmatter');
@@ -99,7 +81,6 @@ describe('listSkills', () => {
   it.each([{ hidden: '.claude' }, { hidden: '.git' }, { hidden: '.cache' }])(
     'skips hidden directory $hidden',
     async ({ hidden }) => {
-      vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
       const entries = [
         { name: hidden, isDirectory: () => true },
         { name: 'real-skill', isDirectory: () => true },
@@ -127,7 +108,6 @@ describe('listSkills', () => {
     const stream = { write: (msg: string) => logs.push(msg) };
     setLogger(pino({ level: 'trace' }, stream));
 
-    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
     const entries = [
       { name: 'broken-skill', isDirectory: () => true },
       { name: 'good-skill', isDirectory: () => true },
@@ -149,22 +129,7 @@ describe('listSkills', () => {
     expect(warnLine).toContain('"code":"ENOENT"');
   });
 
-  it('returns [] when every entry is a hidden dir', async () => {
-    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
-    const entries = [
-      { name: '.claude', isDirectory: () => true },
-      { name: '.git', isDirectory: () => true },
-    ];
-    vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
-
-    const result = await listSkills();
-
-    expect(result).toEqual([]);
-    expect(fs.promises.readFile).not.toHaveBeenCalled();
-  });
-
   it('rethrows non-ENOENT errors from readFile', async () => {
-    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
     const entries = [{ name: 'unreadable', isDirectory: () => true }];
     vi.mocked(fs.promises.readdir).mockResolvedValue(entries as any);
     const eacces = new Error('EACCES') as NodeJS.ErrnoException;
@@ -177,7 +142,6 @@ describe('listSkills', () => {
 
 describe('getSkill', () => {
   it('returns skill content', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
     vi.mocked(fs.promises.readFile).mockResolvedValue('# My Skill\nSome content');
 
     const result = await getSkill('my-skill');
@@ -198,98 +162,5 @@ describe('getSkill', () => {
   it('rejects path traversal names', async () => {
     await expect(getSkill('..')).rejects.toThrow('Invalid skill name');
     await expect(getSkill('../etc')).rejects.toThrow('Invalid skill name');
-  });
-});
-
-describe('createSkill', () => {
-  it('creates directory and SKILL.md', async () => {
-    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
-    vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
-    vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
-
-    const result = await createSkill('new-skill', '# New Skill');
-
-    expect(fs.promises.mkdir).toHaveBeenCalledWith(path.join(SKILLS_DIR, 'new-skill'), {
-      recursive: true,
-    });
-    expect(fs.promises.writeFile).toHaveBeenCalledWith(
-      path.join(SKILLS_DIR, 'new-skill', 'SKILL.md'),
-      '# New Skill',
-      'utf-8',
-    );
-    expect(result).toEqual({ name: 'new-skill', content: '# New Skill' });
-  });
-
-  it('rejects path traversal names', async () => {
-    await expect(createSkill('..', '# Bad')).rejects.toThrow('Invalid skill name');
-    await expect(createSkill('../etc', '# Bad')).rejects.toThrow('Invalid skill name');
-  });
-
-  it('rejects names with spaces', async () => {
-    await expect(createSkill('my skill', '# Bad')).rejects.toThrow('Invalid skill name');
-  });
-
-  it('rejects names with uppercase', async () => {
-    await expect(createSkill('MySkill', '# Bad')).rejects.toThrow('Invalid skill name');
-  });
-
-  it('rejects duplicate skill', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
-
-    await expect(createSkill('existing-skill', '# Dupe')).rejects.toThrow(
-      'Skill already exists: existing-skill',
-    );
-  });
-});
-
-describe('updateSkill', () => {
-  it('writes content to existing skill', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
-    vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
-
-    const result = await updateSkill('my-skill', '# Updated');
-
-    expect(fs.promises.writeFile).toHaveBeenCalledWith(
-      path.join(SKILLS_DIR, 'my-skill', 'SKILL.md'),
-      '# Updated',
-      'utf-8',
-    );
-    expect(result).toEqual({ name: 'my-skill', content: '# Updated' });
-  });
-
-  it('throws on missing skill', async () => {
-    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
-
-    await expect(updateSkill('nonexistent', '# Content')).rejects.toThrow(
-      'Skill not found: nonexistent',
-    );
-  });
-
-  it('rejects path traversal names', async () => {
-    await expect(updateSkill('..', '# Bad')).rejects.toThrow('Invalid skill name');
-    await expect(updateSkill('../etc', '# Bad')).rejects.toThrow('Invalid skill name');
-  });
-});
-
-describe('deleteSkill', () => {
-  it('removes skill directory', async () => {
-    vi.mocked(fs.promises.access).mockResolvedValue(undefined);
-    vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
-
-    await deleteSkill('my-skill');
-
-    expect(fs.promises.rm).toHaveBeenCalledWith(path.join(SKILLS_DIR, 'my-skill'), {
-      recursive: true,
-    });
-  });
-
-  it('throws on missing skill', async () => {
-    vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
-
-    await expect(deleteSkill('nonexistent')).rejects.toThrow('Skill not found: nonexistent');
-  });
-
-  it('rejects path traversal names', async () => {
-    await expect(deleteSkill('..')).rejects.toThrow('Invalid skill name');
   });
 });

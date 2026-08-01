@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
-import { appendEvent, eventsSince } from './orchestrator/store.js';
+import { appendEvent, eventsSince } from './repositories/orchestrator.js';
 
 export type ServerEvent =
   | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
@@ -29,6 +29,14 @@ export type ServerEvent =
   | {
       type: 'loop:emit';
       payload: { taskId: string; loopRunId: string; status: string; reason: string };
+    }
+  | {
+      type: 'pr_extract:created';
+      payload: { taskId: string; extractId: string };
+    }
+  | {
+      type: 'loop_group:judging' | 'loop_group:judged';
+      payload: { groupId: string };
     };
 
 /** Event types that carry a taskId and should be persisted to the durable events log. */

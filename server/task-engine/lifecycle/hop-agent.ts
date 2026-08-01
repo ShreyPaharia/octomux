@@ -1,26 +1,25 @@
 import fs from 'fs';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { childLogger } from '../../logger.js';
 import { execTmux } from '../../tmux-bin.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { chatDirFor, chatSessionName } from '../../chats.js';
-import type { Agent, Worktree } from '../../types.js';
+import type { Worker, Worktree } from '../../types.js';
 import {
   getTask as getTaskRepo,
   getTaskTmuxSession,
-  getTaskModel,
   getWorktree,
   hopAgentToTask,
-  getAgent,
+  getWorker,
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, prepareResumeLaunch } from '../launch.js';
 import { isTmuxTargetMissing } from '../sessions.js';
 
 const logger = childLogger('task-engine/lifecycle');
 
-export async function hopAgent(agent: Agent, targetTaskId: string | null): Promise<Agent> {
+export async function hopAgent(agent: Worker, targetTaskId: string | null): Promise<Worker> {
   const fromTaskId = agent.task_id;
   logger.info(
     {
@@ -85,16 +84,19 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
   }
 
   const harness = getHarness(agent.harness_id);
-  const flags = harness.resolveFlags(await getSettings());
 
   let hopModel: string | null = null;
-  if (targetTaskId) {
-    const hopTask = getTaskModel(targetTaskId);
-    hopModel = hopTask?.model ?? null;
+  const hopTask = targetTaskId ? getTaskRepo(targetTaskId) : null;
+  if (hopTask) {
+    hopModel = hopTask.model ?? null;
   }
 
-  await harness.syncAgents(cwd);
-  await syncSkills(cwd);
+  const flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (hopTask as { schedule_id?: string | null } | null)?.schedule_id,
+    ),
+  });
+
   await harness.installHooks(cwd, hookBaseUrl(), agent.hook_token);
 
   const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: hopModel, cwd });
@@ -122,5 +124,5 @@ export async function hopAgent(agent: Agent, targetTaskId: string | null): Promi
     'task_hop: complete',
   );
 
-  return getAgent(agent.id) as Agent;
+  return getWorker(agent.id) as Worker;
 }

@@ -13,6 +13,7 @@ import {
   listTaskUpdates,
   getTaskExternalRefs,
   getTaskExternalRef,
+  getTaskExternalRefByRef,
   upsertTaskExternalRef,
   deleteTaskExternalRef,
 } from '../repositories/index.js';
@@ -36,10 +37,9 @@ router.post('/api/tasks/:id/move', async (req: Request, res: Response) => {
     throw badRequest(`note is required when moving to ${body.workflow_status}`);
   }
 
-  if (
-    body.workflow_status === 'done' &&
-    (task.runtime_state === 'running' || task.runtime_state === 'setting_up')
-  ) {
+  // Close eagerly on every move to done — idle agents still hold a live claude
+  // process (+MCP sidecars); reopening resumes via harness_session_id.
+  if (body.workflow_status === 'done' && task.workflow_status !== 'done') {
     await closeTask(task);
   }
 
@@ -174,18 +174,23 @@ router.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
 router.delete('/api/tasks/:id/refs/:integration', (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const integration = (req.params as Record<string, string>).integration;
+  // Optional ?ref= query param: when supplied, delete only that specific ref row.
+  // Without it, delete ALL refs for this integration (back-compat).
+  const ref = typeof req.query.ref === 'string' ? req.query.ref : undefined;
 
-  const existing = getTaskExternalRef(task.id, integration);
+  const existing = ref
+    ? getTaskExternalRefByRef(task.id, integration, ref)
+    : getTaskExternalRef(task.id, integration);
   if (!existing) {
     throw notFound('Ref not found');
   }
 
-  deleteTaskExternalRef(task.id, integration);
+  deleteTaskExternalRef(task.id, integration, ref);
 
   fireHook('ref_removed', {
     event: 'ref_removed',
     task,
-    data: { integration },
+    data: { integration, ref },
   });
 
   res.status(204).send();

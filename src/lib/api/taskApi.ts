@@ -13,7 +13,7 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   AddAgentRequest,
-  Agent,
+  Worker,
   UserTerminal,
   Worktree,
   WorktreeSummary,
@@ -196,8 +196,13 @@ export const taskApi = {
     request<string[]>(`/branches?repo_path=${encodeURIComponent(repoPath)}`),
   getDefaultBranch: (repoPath: string) =>
     request<{ branch: string }>(`/default-branch?repo_path=${encodeURIComponent(repoPath)}`),
-  listTasks: (opts?: { trash?: boolean }) =>
-    request<Task[]>(opts?.trash ? '/tasks?trash=true' : '/tasks'),
+  listTasks: (opts?: { trash?: boolean; includeAutomated?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.trash) params.set('trash', 'true');
+    if (opts?.includeAutomated) params.set('includeAutomated', 'true');
+    const qs = params.toString();
+    return request<Task[]>(qs ? `/tasks?${qs}` : '/tasks');
+  },
   getTask: (id: string) => request<Task>(`/tasks/${id}`),
   createTask: (data: CreateTaskRequest) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
@@ -258,14 +263,17 @@ export const taskApi = {
   deleteComment: (taskId: string, commentId: string) =>
     request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' }),
   sendAgentMessage: (taskId: string, agentId: string, message: string) =>
-    request<{ ok: boolean }>(`/tasks/${taskId}/agents/${agentId}/message`, {
+    request<{ ok: boolean }>(`/tasks/${taskId}/workers/${agentId}/message`, {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
-    request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
+    request<Worker>(`/tasks/${taskId}/workers`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
   stopAgent: (taskId: string, agentId: string) =>
-    request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
+    request<void>(`/tasks/${taskId}/workers/${agentId}`, { method: 'DELETE' }),
   createUserTerminal: (taskId: string) =>
     request<{ editor: string; windowIndex: number | null }>(`/tasks/${taskId}/user-terminal`, {
       method: 'POST',
@@ -297,17 +305,17 @@ export const taskApi = {
   getTaskHookExecutions: (id: string, limit?: number) =>
     request<HookExecution[]>(`/tasks/${id}/hooks${limit ? `?limit=${limit}` : ''}`),
 
-  // Agent task hopping (runtime agent row ← tasks table)
+  // Worker task hopping (per-task tmux worker row ← tasks table)
   moveAgentToTask: (agentId: string, taskId: string | null) =>
-    request<Agent>(`/agents/${encodeURIComponent(agentId)}/task`, {
+    request<Worker>(`/workers/${encodeURIComponent(agentId)}/task`, {
       method: 'PATCH',
       body: JSON.stringify({ task_id: taskId }),
     }),
 
   // Chats (standalone runtime agents)
-  listChats: () => request<Agent[]>('/chats'),
+  listChats: () => request<Worker[]>('/chats'),
   closeChat: (id: string) =>
-    request<Agent>(`/chats/${encodeURIComponent(id)}`, {
+    request<Worker>(`/chats/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'stopped' }),
     }),

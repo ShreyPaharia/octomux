@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createTestDb, insertTask } from '../../test-helpers.js';
 import { getDb } from '../../db.js';
-import { createConversation, upsertManagedTask } from '../store.js';
+import { createConversation, upsertManagedTask } from '../../repositories/orchestrator.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 

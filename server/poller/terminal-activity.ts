@@ -1,6 +1,6 @@
 import { broadcast } from '../events.js';
 import { execTmux } from '../tmux-bin.js';
-import { listRunningTerminals, updateUserTerminalStatus } from '../repositories/agent-runtime.js';
+import { listRunningTerminals, updateUserTerminalStatus } from '../repositories/workers.js';
 import type { UserTerminal } from '../types.js';
 
 const SHELL_COMMANDS = new Set(['zsh', 'bash', 'sh', 'fish', 'dash']);

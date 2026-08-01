@@ -7,6 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { NewLoopDialog } from '../components/loop/NewLoopDialog';
+import { NewLoopGroupDialog } from '../components/loop/NewLoopGroupDialog';
 import { timeAgo } from '@/lib/time';
 
 const STATUS_VARIANT: Record<
@@ -24,13 +25,17 @@ export default function LoopsPage() {
     events: (event) => event.type === 'loop:emit' || event.type === 'task:updated',
   });
   const [newLoopOpen, setNewLoopOpen] = useState(false);
+  const [newLoopGroupOpen, setNewLoopGroupOpen] = useState(false);
   const runs = data ?? [];
   const nav = useNavigate();
 
   return (
     <div className="flex h-full min-h-0 flex-col p-6">
       <PageHeader title="Loops" />
-      <div className="mt-4 flex items-center justify-end">
+      <div className="mt-4 flex items-center justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={() => setNewLoopGroupOpen(true)}>
+          Best of N
+        </Button>
         <Button size="sm" onClick={() => setNewLoopOpen(true)}>
           New loop
         </Button>
@@ -86,6 +91,11 @@ export default function LoopsPage() {
           refresh();
           nav(`/loops/${run.id}`);
         }}
+      />
+      <NewLoopGroupDialog
+        open={newLoopGroupOpen}
+        onOpenChange={setNewLoopGroupOpen}
+        onCreated={(group) => nav(`/loop-groups/${group.id}`)}
       />
     </div>
   );

@@ -268,6 +268,29 @@ export function OrchestratorIcon({ color }: { color: string }) {
   );
 }
 
+export function AgentsIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <rect x="3" y="8" width="18" height="12" rx="2" />
+      <path d="M12 8V4M8 4h8" />
+      <circle cx="8.5" cy="14" r="1" fill={color} stroke="none" />
+      <circle cx="15.5" cy="14" r="1" fill={color} stroke="none" />
+      <path d="M9 18h6" />
+    </svg>
+  );
+}
+
 export function LoopsIcon({ color }: { color: string }) {
   return (
     <svg
@@ -283,6 +306,68 @@ export function LoopsIcon({ color }: { color: string }) {
       aria-hidden="true"
     >
       <path d="M17 2.1 21 6l-4 3.9M3 12v-2a4 4 0 0 1 4-4h14M7 21.9 3 18l4-3.9M21 12v2a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
+export function ExtractsIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6M9 13h6M9 17h6" />
+    </svg>
+  );
+}
+
+export function SchedulesIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
+
+export function WorkflowsIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <circle cx="5" cy="6" r="3" />
+      <circle cx="5" cy="18" r="3" />
+      <circle cx="19" cy="12" r="3" />
+      <path d="M8 6h5a4 4 0 0 1 4 4M8 18h5a4 4 0 0 0 4-4" />
     </svg>
   );
 }

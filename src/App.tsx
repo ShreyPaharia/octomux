@@ -1,24 +1,25 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAttentionIndicator } from './lib/use-attention-indicator';
 import { useNotifications } from './lib/use-notifications';
 import HomePage from './pages/HomePage';
 import TasksPage from './pages/TasksPage';
 import ReviewsPage from './pages/ReviewsPage';
-import SettingsPage from './pages/SettingsPage';
 import { TasksProvider, useTasksContext } from './lib/tasks-context';
 import { UniversalSidebar } from './components/sidebar/universal-sidebar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { ResponsiveToaster } from './components/ResponsiveToaster';
 import { OfflineBanner } from './components/OfflineBanner';
 import { SetupBanner } from './components/SetupBanner';
+import { TaskDetailSkeleton } from './components/skeletons/TaskDetailSkeleton';
+import { PageSkeleton } from './components/skeletons/PageSkeleton';
 
 // The four most-clicked nav targets stay eager so navigating to them never
 // shows a Suspense fallback flash. Heavier, less-frequent routes below are lazy.
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+// SettingsPage is heavy (~870 lines, 23 imports) but infrequently visited, so lazy-load it.
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const GridMonitor = lazy(() => import('./pages/GridMonitor'));
-const SkillEditor = lazy(() => import('./pages/SkillEditor'));
-const AgentEditor = lazy(() => import('./pages/AgentEditor'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'));
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'));
@@ -26,8 +27,20 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const SetupPage = lazy(() => import('./pages/SetupPage'));
 const ReviewDetailPage = lazy(() => import('./pages/ReviewDetailPage'));
 const OrchestratorPage = lazy(() => import('./pages/OrchestratorPage'));
+const AgentsPage = lazy(() => import('./pages/AgentsPage'));
+const AgentDetailPage = lazy(() => import('./pages/AgentDetailPage'));
+const WorkflowDetailRoute = lazy(() => import('./workflows/WorkflowDetailRoute'));
 const LoopsPage = lazy(() => import('./pages/LoopsPage'));
-const LoopDetailPage = lazy(() => import('./pages/LoopDetailPage'));
+const LoopGroupDetailPage = lazy(() => import('./pages/LoopGroupDetailPage'));
+const SchedulesPage = lazy(() => import('./pages/SchedulesPage'));
+const RunsPage = lazy(() => import('./pages/RunsPage'));
+
+/** `/loops/:id` predates the generic registry; redirect it to the equivalent `/w/loops/:id`
+ * rather than dropping support for old bookmarks/links. */
+function LoopsRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/w/loops/${id}`} replace />;
+}
 
 /** Runs at app root so notifications fire on every page. */
 function GlobalNotifications() {
@@ -91,31 +104,37 @@ export function AppShell() {
         <main className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <div className="ambient-tint-backdrop" aria-hidden="true" />
           <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Loading...
-                </div>
-              }
-            >
+            <Suspense fallback={<PageSkeleton />}>
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/tasks" element={<TasksPage />} />
-                <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route
+                  path="/tasks/:id"
+                  element={
+                    <Suspense fallback={<TaskDetailSkeleton />}>
+                      <TaskDetail />
+                    </Suspense>
+                  }
+                />
                 <Route path="/reviews" element={<ReviewsPage />} />
                 <Route path="/reviews/:id" element={<ReviewDetailPage />} />
                 <Route path="/monitor" element={<GridMonitor />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/skills/:name" element={<SkillEditor />} />
-                <Route path="/agents/:name" element={<AgentEditor />} />
                 <Route path="/chats/:id" element={<ChatPage />} />
                 <Route path="/workspaces" element={<WorkspacesPage />} />
                 <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/setup" element={<SetupPage />} />
                 <Route path="/orchestrator" element={<OrchestratorPage />} />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/agents/:id" element={<AgentDetailPage />} />
+                <Route path="/w/:kind/:id" element={<WorkflowDetailRoute />} />
                 <Route path="/loops" element={<LoopsPage />} />
-                <Route path="/loops/:id" element={<LoopDetailPage />} />
+                <Route path="/loops/:id" element={<LoopsRedirect />} />
+                <Route path="/extracts" element={<Navigate to="/runs?kind=pr-extract" replace />} />
+                <Route path="/loop-groups/:id" element={<LoopGroupDetailPage />} />
+                <Route path="/schedules" element={<SchedulesPage />} />
+                <Route path="/runs" element={<RunsPage />} />
               </Routes>
             </Suspense>
           </div>

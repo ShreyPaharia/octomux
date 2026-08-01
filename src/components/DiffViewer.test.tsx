@@ -13,6 +13,11 @@ vi.mock('@/lib/api/taskApi', async () => {
 });
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+// Prevent DiffViewer's useServerEvents from opening a real WebSocket in jsdom.
+vi.mock('@/lib/event-source', () => ({
+  subscribe: vi.fn(() => () => {}),
+  subscribeConnectionState: vi.fn(() => () => {}),
+}));
 
 // Monaco's DiffEditor does real DOM work; replace with a stub that exposes
 // the original/modified content, options, and a per-mount id so tests can
@@ -157,6 +162,7 @@ describe('DiffViewer', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     render(<DiffViewer taskId="t1" isRunning={true} />);
     await waitFor(() => expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(1));
+    // Advance less than FALLBACK_POLL_INTERVAL_MS (20 000ms) — no poll fires.
     await vi.advanceTimersByTimeAsync(2500);
     // Allow microtasks to settle.
     await Promise.resolve();
@@ -184,7 +190,8 @@ describe('DiffViewer', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     render(<DiffViewer taskId="t1" isRunning={true} />);
     await waitFor(() => expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(1));
-    await vi.advanceTimersByTimeAsync(2500);
+    // FALLBACK_POLL_INTERVAL_MS = 20 000; advance past it to trigger the slow poll.
+    await vi.advanceTimersByTimeAsync(21_000);
     await waitFor(() => expect(apiMock.getTaskDiffFile).toHaveBeenCalledTimes(2));
     vi.useRealTimers();
   });

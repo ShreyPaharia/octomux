@@ -1,0 +1,78 @@
+{
+  "kind": "overnight-log-summary",
+  "displayName": "Overnight Log Summary",
+  "execution": "session",
+  "defaultCron": "0 7 * * *",
+  "prompt": "---\nname: overnight-log-summary\ndescription: Use when running a scheduled overnight-log-summary session — fetch overnight logs, cluster errors, and submit a structured summary via submit_result\n---\n\n# Overnight log summary\n\nSummarize what happened overnight for a repo: fetch recent logs, cluster\nerrors into classes, note anything else notable, and submit a structured\nresult. This is a headless, unattended session — you do not open a PR, edit\nfiles, or make any changes. Your only output is the `submit_result` call.\n\n## Steps\n\n1. **Fetch overnight logs** by running this command as-is — don't invent a\n   different one:\n\n   ```\n   {{logCommand}}\n   ```\n\n2. **Cluster errors into classes.** Group by stack trace signature, error\n   message shape, or failing endpoint/job — not by raw log line. For each\n   class, note a short name, how many times it occurred, and a severity\n   (`low`, `medium`, or `high`) based on how disruptive it looks.\n\n3. **Note notable events.** Anything else worth a human's attention that\n   isn't an error class — a deploy, a restart, an unusual spike, a config\n   change. Keep each entry to one short sentence.\n\n4. **Call the `submit_result` tool exactly once** with a JSON object shaped\n   like:\n\n   ```json\n   {\n     \"outcome\": \"done\",\n     \"window\": \"<the time window you summarized, e.g. last 12h>\",\n     \"summary\": \"<2-4 sentence overview>\",\n     \"errorClasses\": [{ \"name\": \"...\", \"count\": 0, \"severity\": \"low\" }],\n     \"notableEvents\": [\"...\"],\n     \"links\": [{ \"label\": \"...\", \"url\": \"...\" }]\n   }\n   ```\n\n   `outcome` is required: `\"done\"` for a normal summary, `\"blocked\"` if you\n   could not fetch the logs at all, `\"failed\"` only if something about the\n   summarization itself broke. `links` is optional — omit it, or point to a\n   dashboard/incident file if one is relevant.\n\n## Notes\n\n- Be conservative — this runs unattended with no human reviewing your\n  reasoning, only the structured result.\n- If the log command returns no output or nothing of note, say so plainly in\n  `summary` (e.g. \"No errors overnight.\") with empty `errorClasses` and\n  `notableEvents` arrays — do not fabricate findings.\n- Do not modify any files, commit, or open a PR. This skill only reads logs\n  and reports.\n",
+  "config": {
+    "type": "object",
+    "properties": {
+      "logCommand": {
+        "type": "string",
+        "title": "Log command",
+        "description": "Command whose output the summary agent inspects.",
+        "default": "gh run list --limit 30 --json databaseId,conclusion,name,url"
+      }
+    },
+    "additionalProperties": false
+  },
+  "output": {
+    "type": "object",
+    "properties": {
+      "outcome": {
+        "type": "string",
+        "enum": ["done", "blocked", "failed"]
+      },
+      "window": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "errorClasses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "count": {
+              "type": "number"
+            },
+            "severity": {
+              "type": "string",
+              "enum": ["low", "medium", "high"]
+            }
+          },
+          "required": ["name", "count", "severity"],
+          "additionalProperties": false
+        }
+      },
+      "notableEvents": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "links": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["label", "url"],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["outcome", "window", "summary", "errorClasses", "notableEvents"],
+    "additionalProperties": false
+  }
+}

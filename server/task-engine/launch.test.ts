@@ -38,8 +38,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../orchestrator/store.js')>();
+vi.mock('../repositories/orchestrator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../repositories/orchestrator.js')>();
   return {
     ...actual,
     isOrchestratorManaged: vi.fn(() => false),
@@ -64,7 +64,7 @@ const {
 } = await import('./launch.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
-const { isOrchestratorManaged } = await import('../orchestrator/store.js');
+const { isOrchestratorManaged } = await import('../repositories/orchestrator.js');
 const { mcpServerInvocation } = await import('../orchestrator/runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ describe('buildAgentStartupCommand', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
       'Do the thing',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
@@ -351,7 +351,7 @@ describe('prepareResumeLaunch', () => {
 
     // setAgentHarnessSessionId should have updated the DB
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string } | undefined;
     expect(updatedAgent?.harness_session_id).toBe('new-session-id-xyz');
   });
@@ -376,7 +376,7 @@ describe('prepareResumeLaunch', () => {
 
     // harness_session_id should remain null (not updated)
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string | null } | undefined;
     expect(updatedAgent?.harness_session_id).toBeNull();
   });
@@ -401,7 +401,7 @@ describe('prepareResumeLaunch', () => {
 
     // harness_session_id should remain the original value (resume path doesn't set it)
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string } | undefined;
     expect(updatedAgent?.harness_session_id).toBe('existing-session-id');
   });

@@ -46,19 +46,19 @@ export function getTask(id: string): Task | undefined {
   return getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-/** Fetch a task by its worktree_id (returns undefined if not found). */
-export function getTaskByWorktreeId(worktreeId: string): Task | undefined {
-  return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? AND t.deleted_at IS NULL`)
-    .get(worktreeId) as Task | undefined;
-}
-
 export interface ListTasksOpts {
   /**
    * When false (default) auto_review tasks are excluded — reviews use the
    * /api/reviews endpoint.  Pass true to include them.
    */
   includeAutoReview?: boolean;
+  /**
+   * When false (default) tasks created by an automated workflow (any non-null
+   * `source` other than 'auto_review', which has its own `includeAutoReview`
+   * flag) are excluded — the Tasks board shows manual work only, automated
+   * runs live on /runs. Pass true to include them (CLI, orchestrator, pollers).
+   */
+  includeAutomated?: boolean;
   /** When true, include soft-deleted tasks only (trash view). */
   trash?: boolean;
   /** Filter by exact repo_path. */
@@ -68,23 +68,27 @@ export interface ListTasksOpts {
 /** List tasks with optional filtering. Results ordered newest-first by created_at (or deleted_at for trash). */
 export function listTasks(opts: ListTasksOpts = {}): Task[] {
   const db = getDb();
-  const { includeAutoReview = false, trash = false, repoPath } = opts;
+  const { includeAutoReview = false, includeAutomated = false, trash = false, repoPath } = opts;
 
   const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
   const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
   const autoReviewClause = includeAutoReview ? '' : `AND ${SQL_EXCLUDE_AUTO_REVIEW}`;
+  const automatedFlag = includeAutomated ? 1 : 0;
 
   if (repoPath) {
     return db
       .prepare(
-        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND w.repo_path = ? ${orderBy}`,
+        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause}
+                              AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') AND w.repo_path = ? ${orderBy}`,
       )
-      .all(repoPath) as Task[];
+      .all(automatedFlag, repoPath) as Task[];
   }
 
   return db
-    .prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} ${orderBy}`)
-    .all() as Task[];
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') ${orderBy}`,
+    )
+    .all(automatedFlag) as Task[];
 }
 
 /** List soft-deleted tasks that have passed their grace window. */
@@ -290,13 +294,6 @@ export function getTaskRuntimeState(id: string): { runtime_state: string } | und
     | undefined;
 }
 
-/** Fetch just the model column from a task (for hop inheritance). */
-export function getTaskModel(id: string): { model: string | null } | undefined {
-  return getDb().prepare(`SELECT model FROM tasks WHERE id = ?`).get(id) as
-    | { model: string | null }
-    | undefined;
-}
-
 /**
  * List tasks for scratch GC: idle/setting_up/running scratch tasks (not deleted)
  * so the GC knows which scratch dirs are still alive.
@@ -332,6 +329,8 @@ export interface InsertTaskInput {
   pr_head_sha?: string | null;
   /** Used by review tasks. */
   review_of_task_id?: string | null;
+  /** Set on scheduled runs — links back to the `schedules` row that fired them. */
+  schedule_id?: string | null;
 }
 
 /** Insert a new task row. Returns the generated id. */
@@ -340,8 +339,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -360,6 +359,7 @@ export function insertTask(input: InsertTaskInput): string {
       input.pr_number ?? null,
       input.pr_head_sha ?? null,
       input.review_of_task_id ?? null,
+      input.schedule_id ?? null,
     );
   logger.info({ task_id: id, operation: 'insertTask' }, 'task inserted');
   return id;
@@ -435,16 +435,6 @@ export function setTmuxSession(id: string, session: string): void {
 /** Set the linked worktree_id. */
 export function setWorktreeId(id: string, worktreeId: string | null): void {
   getDb().prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
-}
-
-/** Set pr_url, pr_number, pr_head_sha (called when a PR is opened). */
-export function setPr(id: string, prUrl: string, prNumber: number, prHeadSha: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks SET pr_url = ?, pr_number = ?, pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .run(prUrl, prNumber, prHeadSha, id);
-  logger.info({ task_id: id, pr_number: prNumber, operation: 'setPr' }, 'PR fields set');
 }
 
 /** Update pr_head_sha (called when a PR gets a new commit). */
@@ -752,6 +742,25 @@ export function findExistingPrTask(
 }
 
 /**
+ * True when a soft-deleted (trashed) auto-review task still exists for the
+ * repo+PR. Used by the reviewer poller to avoid resurrecting a review the user
+ * just deleted — the trashed task's worktree is only removed when the trash
+ * purges, so recreating early would also collide with the leftover worktree.
+ */
+export function hasTrashedPrReviewTask(repoPath: string, prNumber: number): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.pr_number = ?
+          AND t.source = 'auto_review' AND t.deleted_at IS NOT NULL
+        LIMIT 1`,
+    )
+    .get(repoPath, prNumber);
+  return row !== undefined;
+}
+
+/**
  * List idle auto-review draft tasks for a given repo_path.
  * Used by cleanupResolvedReviewDrafts to find and purge drafts whose PR is no
  * longer awaiting review.
@@ -775,18 +784,24 @@ export function listAutoReviewDrafts(
  */
 export function listRunningTasksWithPr(): Task[] {
   return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL AND t.workflow_status != 'done'`,
+    )
     .all() as Task[];
 }
 
 /**
- * List tasks that are running or idle with no PR url yet and a branch set.
- * Used by pollPRs to find tasks that need PR detection.
+ * List running/idle tasks with a branch set. Used by pollPRs to detect PRs.
+ * We intentionally keep polling AFTER the first PR is found (no `pr_url IS NULL`
+ * gate): a long-running task can open several slice PRs over its life, and the
+ * poller discovers each `agents/<id>*` branch's PR. The workflow → 'pr'
+ * transition is guarded on the null→non-null flip in pollPRs, so re-polling an
+ * already-PR'd task is idempotent.
  */
 export function listTasksNeedingPrDetection(): Task[] {
   return getDb()
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND w.branch IS NOT NULL`,
     )
     .all() as Task[];
 }
@@ -833,6 +848,48 @@ export function listNoneModeActiveTasks(
     runtime_state: string;
     branch: string | null;
   }>;
+}
+
+/**
+ * List tasks that are candidates for the quiescence → human_review transition.
+ * A task qualifies when:
+ *   - workflow_status = 'in_progress'
+ *   - runtime_state = 'running' (excludes looping / idle / etc.)
+ *   - NOT deleted
+ *   - has at least one worker
+ *   - every non-stopped worker has hook_activity = 'idle'
+ *   - the most-recent hook_activity_updated_at across all non-stopped workers is
+ *     older than debounceMs (continuous idle for at least the debounce window)
+ *
+ * The orchestrator-managed guard and pending-prompt guard are applied in JS
+ * after fetching (simpler to test, no extra joins needed).
+ *
+ * Returns task ids only — callers load full state via getTaskWorkflowStatus.
+ */
+export function listTasksAwaitingQuiescence(debounceMs: number): Array<{ id: string }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id
+         FROM tasks t
+        WHERE t.workflow_status = 'in_progress'
+          AND t.runtime_state = 'running'
+          AND t.deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM workers w WHERE w.task_id = t.id AND w.status != 'stopped'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM workers w
+             WHERE w.task_id = t.id
+               AND w.status != 'stopped'
+               AND w.hook_activity != 'idle'
+          )
+          AND (
+            SELECT MAX(w.hook_activity_updated_at)
+              FROM workers w
+             WHERE w.task_id = t.id AND w.status != 'stopped'
+          ) <= datetime('now', ? || ' seconds')`,
+    )
+    .all(`-${Math.ceil(debounceMs / 1000)}`) as Array<{ id: string }>;
 }
 
 /**
@@ -982,14 +1039,28 @@ export function getTaskExternalRefs(taskId: string): TaskExternalRef[] {
   return rows.map(parseRefRow);
 }
 
-/** Get a single external ref by task_id + integration. */
+/** Get the first external ref for (task_id, integration) — back-compat. */
 export function getTaskExternalRef(
   taskId: string,
   integration: string,
 ): TaskExternalRef | undefined {
   const row = getDb()
-    .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
+    .prepare(
+      'SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ? ORDER BY created_at ASC LIMIT 1',
+    )
     .get(taskId, integration) as ExternalRefRow | undefined;
+  return row ? parseRefRow(row) : undefined;
+}
+
+/** Get an external ref by exact (task_id, integration, ref) triple. */
+export function getTaskExternalRefByRef(
+  taskId: string,
+  integration: string,
+  ref: string,
+): TaskExternalRef | undefined {
+  const row = getDb()
+    .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ? AND ref = ?')
+    .get(taskId, integration, ref) as ExternalRefRow | undefined;
   return row ? parseRefRow(row) : undefined;
 }
 
@@ -1016,11 +1087,11 @@ export function upsertTaskExternalRef(input: UpsertTaskExternalRefInput): TaskEx
     .run(input.task_id, input.integration, input.ref, input.url ?? null, metadataJson);
 
   logger.info(
-    { task_id: input.task_id, integration: input.integration, operation: 'upsertTaskExternalRef' },
+    { task_id: input.task_id, integration: input.integration, ref: input.ref, operation: 'upsertTaskExternalRef' },
     'external ref upserted',
   );
 
-  return getTaskExternalRef(input.task_id, input.integration)!;
+  return getTaskExternalRefByRef(input.task_id, input.integration, input.ref)!;
 }
 
 /**
@@ -1041,13 +1112,23 @@ export function insertTaskExternalRefIfAbsent(input: {
     .run(input.task_id, input.integration, input.ref, input.url ?? null);
 }
 
-/** Delete an external ref. */
-export function deleteTaskExternalRef(taskId: string, integration: string): void {
-  getDb()
-    .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?')
-    .run(taskId, integration);
+/**
+ * Delete an external ref.
+ * - With `ref`: deletes only that specific (task_id, integration, ref) row.
+ * - Without `ref`: deletes ALL rows for (task_id, integration) — back-compat.
+ */
+export function deleteTaskExternalRef(taskId: string, integration: string, ref?: string): void {
+  if (ref !== undefined) {
+    getDb()
+      .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ? AND ref = ?')
+      .run(taskId, integration, ref);
+  } else {
+    getDb()
+      .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?')
+      .run(taskId, integration);
+  }
   logger.info(
-    { task_id: taskId, integration, operation: 'deleteTaskExternalRef' },
+    { task_id: taskId, integration, ref, operation: 'deleteTaskExternalRef' },
     'external ref deleted',
   );
 }

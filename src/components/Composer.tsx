@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { taskApi } from '@/lib/api/taskApi';
 import type { PreflightResult } from '@/lib/api/taskApi';
 import { useTasksContext } from '@/lib/tasks-context';
-import type { Task, Agent } from '@octomux/types';
+import type { Task, Worker } from '@octomux/types';
 import { NoneModeConflictDialog } from './NoneModeConflictDialog';
 import { NoneModeDirtyDialog } from './NoneModeDirtyDialog';
 import { NoneModeSharedBranchDialog } from './NoneModeSharedBranchDialog';
@@ -34,14 +34,14 @@ async function createChatRequest(body: {
   agent?: string | null;
   prompt?: string;
   harness_id?: string;
-}): Promise<Agent> {
+}): Promise<Worker> {
   const res = await fetch('/api/chats', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`POST /api/chats: ${res.status}`);
-  return (await res.json()) as Agent;
+  return (await res.json()) as Worker;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────

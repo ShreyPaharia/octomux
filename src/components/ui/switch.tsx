@@ -18,14 +18,22 @@ export interface SwitchProps {
   onChange: (value: boolean) => void;
   disabled?: boolean;
   className?: string;
+  'aria-label'?: string;
 }
 
-export function Switch({ checked, onChange, disabled, className }: SwitchProps) {
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  className,
+  'aria-label': ariaLabel,
+}: SwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       className={cn(
         'focus-ring relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-40',

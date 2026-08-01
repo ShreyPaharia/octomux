@@ -20,10 +20,6 @@ vi.mock('../settings.js', () => ({
   getSettings: vi.fn(async () => ({})),
 }));
 
-vi.mock('../skills.js', () => ({
-  syncSkills: vi.fn(async () => undefined),
-}));
-
 const { validateAndResolveAddAgentOpts } = await import('./add-agent.js');
 
 let db: Database.Database;

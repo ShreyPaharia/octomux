@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
-import type { Task, Agent } from '../../types.js';
+import type { Task, Worker } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -36,8 +36,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../../orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../orchestrator/store.js')>();
+vi.mock('../../repositories/orchestrator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../repositories/orchestrator.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 
@@ -51,10 +51,6 @@ vi.mock('../../hook-base-url.js', () => ({
 
 vi.mock('../../settings.js', () => ({
   getSettings: vi.fn(async () => ({})),
-}));
-
-vi.mock('../../skills.js', () => ({
-  syncSkills: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../events.js', () => ({
@@ -94,7 +90,7 @@ beforeEach(() => {
   insertTask(db, { ...DEFAULTS.runningTask });
 });
 
-function makeAgentRow(overrides: Partial<Agent> = {}): Agent {
+function makeAgentRow(overrides: Partial<Worker> = {}): Worker {
   return insertAgent(db, {
     ...DEFAULTS.agent,
     window_index: 1,
@@ -208,7 +204,7 @@ describe('respawnAgentFresh', () => {
     expect(startupCmd).toContain('OCTOMUX_ACTION_TOKEN=');
     expect(startupCmd).toContain('real-hook-token-abc');
 
-    const { checkAgentTokenExists } = await import('../../repositories/agent-runtime.js');
+    const { checkAgentTokenExists } = await import('../../repositories/workers.js');
     expect(checkAgentTokenExists('real-hook-token-abc')).toBe(true);
   });
 

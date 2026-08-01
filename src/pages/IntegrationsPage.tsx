@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { SectionCard } from '@/components/layout/section-card';
 import { SettingsLayout } from '@/components/layout/settings-layout';
 import { Switch } from '@/components/ui/switch';
@@ -8,7 +9,7 @@ import { FormSelect } from '@/components/ui/form-select';
 import { showToast } from '@/components/CustomToast';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
 import { configApi } from '@/lib/api/configApi';
-import type { IntegrationRow } from '@/lib/api/configApi';
+import type { IntegrationRow, IntegrationProvider } from '@/lib/api/configApi';
 import { useProviders, useIntegrations, useHookTemplates, useSettings } from '@/lib/hooks';
 import { JiraConfigForm, toJiraConfig } from '@/components/integrations/JiraConfigForm';
 import type { JiraConfig } from '@/components/integrations/JiraConfigForm';
@@ -20,6 +21,119 @@ function providerIcon(kind: string): string {
   if (kind === 'jira') return 'J';
   if (kind === 'linear') return 'L';
   return kind.charAt(0).toUpperCase();
+}
+
+const GENERIC_LABEL_STYLE: React.CSSProperties = {
+  display: 'block',
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#8a8a8a',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  marginBottom: 4,
+};
+
+/**
+ * Schema-driven fallback form for any provider without a bespoke component
+ * (e.g. slack-gateway, telegram-gateway) — renders one text/password input
+ * per `configSchema.properties` entry instead of hardcoding provider-specific
+ * fields. Secret fields round-trip the masked sentinel ('••••') unchanged
+ * unless the user overwrites it, same as the bespoke forms.
+ */
+function GenericConfigForm({
+  provider,
+  initial,
+  nameInitial = '',
+  onSubmit,
+  onCancel,
+  submitLabel = 'Save',
+}: {
+  provider: IntegrationProvider;
+  initial?: Record<string, unknown>;
+  nameInitial?: string;
+  onSubmit: (config: Record<string, unknown>, name: string) => Promise<void>;
+  onCancel: () => void;
+  submitLabel?: string;
+}) {
+  const properties =
+    (provider.configSchema.properties as Record<string, Record<string, unknown>>) ?? {};
+  const required = (provider.configSchema.required as string[] | undefined) ?? [];
+  const [name, setName] = useState(nameInitial);
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const key of Object.keys(properties)) {
+      const v = initial?.[key];
+      init[key] = typeof v === 'string' ? v : '';
+    }
+    return init;
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!name.trim()) {
+      setError('Name is required');
+      return;
+    }
+    for (const key of required) {
+      if (!values[key]?.trim()) {
+        setError(`${(properties[key]?.title as string | undefined) ?? key} is required`);
+        return;
+      }
+    }
+    setSubmitting(true);
+    try {
+      await onSubmit(values, name.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+      <div>
+        <label style={GENERIC_LABEL_STYLE} htmlFor="generic-config-name">
+          Name
+        </label>
+        <Input
+          id="generic-config-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      {Object.entries(properties).map(([key, schema]) => (
+        <div key={key}>
+          <label style={GENERIC_LABEL_STYLE} htmlFor={`generic-config-${key}`}>
+            {(schema.title as string | undefined) ?? key}
+          </label>
+          <Input
+            id={`generic-config-${key}`}
+            type={schema.secret ? 'password' : 'text'}
+            value={values[key] ?? ''}
+            onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+            autoComplete="off"
+          />
+          {typeof schema.description === 'string' && (
+            <p className="mt-1 text-xs text-muted-soft">{schema.description}</p>
+          )}
+        </div>
+      ))}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex justify-end gap-2 pt-2">
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={submitting}>
+          {submitting ? 'Saving…' : submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
 }
 
 /** Display metadata for installable workflow-hook templates. */
@@ -164,6 +278,8 @@ export default function IntegrationsPage() {
     | { kind: 'edit-jira'; integration: IntegrationRow }
     | { kind: 'create-linear' }
     | { kind: 'edit-linear'; integration: IntegrationRow }
+    | { kind: 'create-generic'; provider: IntegrationProvider }
+    | { kind: 'edit-generic'; integration: IntegrationRow; provider: IntegrationProvider }
     | null
   >(null);
   const deleteCrud = useCrudSection({
@@ -248,6 +364,18 @@ export default function IntegrationsPage() {
     void refresh();
   }
 
+  async function handleCreateGeneric(kind: string, config: Record<string, unknown>, name: string) {
+    await configApi.createIntegration(kind, name, config);
+    setModal(null);
+    void refresh();
+  }
+
+  async function handleEditGeneric(id: string, config: Record<string, unknown>, name: string) {
+    await configApi.updateIntegration(id, { name, config });
+    setModal(null);
+    void refresh();
+  }
+
   async function handleDelete() {
     await deleteCrud.delete.submit();
   }
@@ -310,6 +438,7 @@ export default function IntegrationsPage() {
                   onClick={() => {
                     if (p.kind === 'jira') setModal({ kind: 'create-jira' });
                     else if (p.kind === 'linear') setModal({ kind: 'create-linear' });
+                    else setModal({ kind: 'create-generic', provider: p });
                   }}
                 >
                   Add {p.displayName}
@@ -332,6 +461,10 @@ export default function IntegrationsPage() {
                 onEdit={() => {
                   if (i.kind === 'jira') setModal({ kind: 'edit-jira', integration: i });
                   else if (i.kind === 'linear') setModal({ kind: 'edit-linear', integration: i });
+                  else {
+                    const provider = providers.find((p) => p.kind === i.kind);
+                    if (provider) setModal({ kind: 'edit-generic', integration: i, provider });
+                  }
                 }}
                 onDelete={() => deleteCrud.delete.setTarget(i.id)}
                 onToggle={(enabled) => void handleToggle(i.id, enabled)}
@@ -447,6 +580,30 @@ export default function IntegrationsPage() {
             initial={toLinearConfig(modal.integration)}
             nameInitial={modal.integration.name}
             onSubmit={(config, name) => handleEditLinear(modal.integration.id, config, name)}
+            onCancel={() => setModal(null)}
+            submitLabel="Save changes"
+          />
+        </Modal>
+      )}
+
+      {modal?.kind === 'create-generic' && (
+        <Modal title={`Add ${modal.provider.displayName}`} onClose={() => setModal(null)}>
+          <GenericConfigForm
+            provider={modal.provider}
+            onSubmit={(config, name) => handleCreateGeneric(modal.provider.kind, config, name)}
+            onCancel={() => setModal(null)}
+            submitLabel="Create"
+          />
+        </Modal>
+      )}
+
+      {modal?.kind === 'edit-generic' && (
+        <Modal title={`Edit ${modal.provider.displayName}`} onClose={() => setModal(null)}>
+          <GenericConfigForm
+            provider={modal.provider}
+            initial={modal.integration.config}
+            nameInitial={modal.integration.name}
+            onSubmit={(config, name) => handleEditGeneric(modal.integration.id, config, name)}
             onCancel={() => setModal(null)}
             submitLabel="Save changes"
           />

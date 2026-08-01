@@ -1,5 +1,5 @@
 export type { AddAgentOpts } from './types.js';
-export { preflightWorktree, startTask } from './start-task.js';
+export { startTask } from './start-task.js';
 export {
   addAgent,
   validateAndResolveAddAgentOpts,

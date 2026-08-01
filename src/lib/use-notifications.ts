@@ -1,16 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import type { Task, Agent } from '@octomux/types';
+import type { Task, Worker } from '@octomux/types';
 import { showToast } from '../components/CustomToast';
 import { getNotificationsEnabled } from './notification-settings';
 
 interface AgentSnapshot {
-  status: Agent['status'];
-  hookActivity: Agent['hook_activity'];
+  status: Worker['status'];
+  hookActivity: Worker['hook_activity'];
 }
 
 /** Format: "Task Title #1" — extracts number from agent label like "Agent 1". */
-function agentTag(task: Task, agent: Agent): string {
+function agentTag(task: Task, agent: Worker): string {
   const num = agent.label.match(/\d+/)?.[0] ?? '1';
   return `${task.title} #${num}`;
 }
@@ -61,12 +61,12 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
 
     for (const task of tasks) {
       currentTaskStates.set(task.id, task.runtime_state);
-      if (!task.agents) continue;
+      if (!task.workers) continue;
 
       const isViewing = task.id === viewingTaskId;
       const suppressAgentToasts = taskTransitioning.has(task.id);
 
-      for (const agent of task.agents) {
+      for (const agent of task.workers) {
         currentAgents.set(agent.id, {
           status: agent.status,
           hookActivity: agent.hook_activity,
@@ -110,7 +110,7 @@ export function useNotifications(tasks: Task[], navigate: (path: string) => void
             notifiedPrompts.current.add(prompt.id);
             const taskId = task.id;
             const agentId = prompt.agent_id;
-            const promptAgent = task.agents?.find((a) => a.id === prompt.agent_id);
+            const promptAgent = task.workers?.find((a) => a.id === prompt.agent_id);
             const promptTag = promptAgent ? agentTag(task, promptAgent) : `${task.title} #?`;
             showToast('warning', promptTag, `Needs permission: ${prompt.tool_name}`, {
               label: 'View',

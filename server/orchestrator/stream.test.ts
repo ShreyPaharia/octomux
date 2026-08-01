@@ -16,6 +16,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
+import { createServer, type Server } from 'http';
+import { WebSocket } from 'ws';
 import { createApp } from '../app.js';
 import { createTestDb } from '../test-helpers.js';
 import {
@@ -25,7 +27,7 @@ import {
   appendMessage,
   createCard,
   resolveCard,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 import {
   dispatchUserTurn,
   persistAndPush,
@@ -34,8 +36,14 @@ import {
   chatEventToWsEvent,
   cardRowToWsEvent,
   replayConnectionState,
+  registerTranscriptConsumer,
+  registerConversationMessageListener,
+  pushToConversation,
+  cleanupOrchestratorClients,
 } from './stream.js';
-import type { ActionCard } from './store.js';
+import type { OrchestratorWsEvent } from './stream.js';
+import { tailTranscript } from './transcript.js';
+import type { ActionCard } from '../repositories/orchestrator.js';
 import type { ChatEvent } from './transcript.js';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
@@ -360,6 +368,48 @@ describe('dispatchUserTurn', () => {
   });
 });
 
+describe('registerTranscriptConsumer (gateway-owned tail)', () => {
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+  });
+
+  it('a gateway consumer receives assistant lines with zero WS clients connected', async () => {
+    const convId = createConversation({ title: 'Phone DM', tmux_window: 'mock-session:1' });
+
+    // Capture the onEvent the tail is started with, and hand back a stop fn.
+    let emit: ((e: ChatEvent) => void) | null = null;
+    const stop = vi.fn();
+    vi.mocked(tailTranscript).mockImplementationOnce(async (_path, onEvent) => {
+      emit = onEvent;
+      return stop;
+    });
+
+    const received: ChatEvent[] = [];
+    const unregister = registerTranscriptConsumer(convId, '/fake/transcript.jsonl', (e) =>
+      received.push(e),
+    );
+
+    // Let ensureTail's await settle so `emit` is wired up.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(emit).not.toBeNull();
+
+    // The conductor emits an assistant reply and a turn-done boundary.
+    emit!({ type: 'assistant', text: 'Deployed. All green.', uuid: 'a1', timestamp: 't' });
+    emit!({ type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+
+    // Consumer saw both — no browser client needed.
+    expect(received.map((e) => e.type)).toEqual(['assistant', 'system']);
+    // And the assistant message was persisted once (tail-level persist).
+    expect(listMessages(convId)).toHaveLength(1);
+
+    // Unregistering the last consumer stops the tail.
+    unregister();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('handleOrchestratorUpgrade', () => {
   beforeEach(() => {
     createTestDb();
@@ -410,6 +460,119 @@ describe('handleOrchestratorUpgrade', () => {
       result = true;
     }
     expect(result).toBe(true);
+  });
+});
+
+// ─── pushToConversation → gateway listener + web WS (agents-feature Task 6) ───
+
+describe('pushToConversation delivers to both a gateway listener and web WS clients', () => {
+  let server: Server;
+  let port: number;
+
+  function connectWs(convId: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://localhost:${port}/ws/orchestrator/${convId}`);
+      ws.on('open', () => resolve(ws));
+      ws.on('error', reject);
+    });
+  }
+
+  beforeEach(async () => {
+    createTestDb();
+    setupOrchestratorWebSocket();
+    server = createServer();
+    server.on('upgrade', (req, socket, head) => {
+      if (!handleOrchestratorUpgrade(req, socket, head)) socket.destroy();
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        const addr = server.address();
+        port = typeof addr === 'object' && addr ? addr.port : 0;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    cleanupOrchestratorClients();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('forwards a worker-report message to a registered listener (the gateway) AND the connected web WS client', async () => {
+    const convId = createConversation({ title: 'agent session' });
+    const ws = await connectWs(convId);
+    const received: string[] = [];
+    ws.on('message', (data) => received.push(data.toString()));
+
+    const forwarded: OrchestratorWsEvent[] = [];
+    registerConversationMessageListener(convId, (event) => forwarded.push(event));
+
+    pushToConversation(
+      convId,
+      JSON.stringify({ type: 'message', role: 'assistant', text: 'worker report: done' }),
+    );
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The gateway-style listener saw it (this is the fix — it did not before).
+    expect(forwarded).toEqual([
+      { type: 'message', role: 'assistant', text: 'worker report: done' },
+    ]);
+    // The web WS path still receives it exactly as before (additive change, not a replacement).
+    expect(
+      received.some((m) => (JSON.parse(m) as { text?: string }).text === 'worker report: done'),
+    ).toBe(true);
+
+    ws.close();
+  });
+
+  it('forwards a card event (with its artifact_url) to the registered listener', async () => {
+    const convId = createConversation({ title: 'agent session' });
+    const forwarded: OrchestratorWsEvent[] = [];
+    registerConversationMessageListener(convId, (event) => forwarded.push(event));
+
+    pushToConversation(
+      convId,
+      JSON.stringify({
+        type: 'card',
+        id: 'card-1',
+        command: 'approve-plan',
+        args: {
+          task_id: 't1',
+          plan_path: 'plan.json',
+          artifact_url: '/api/orchestrator/artifact?task=t1&path=plan.json',
+        },
+      }),
+    );
+
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0]).toMatchObject({ type: 'card', command: 'approve-plan' });
+  });
+
+  it('does not notify the listener for non message/card events (e.g. status)', () => {
+    const convId = createConversation({ title: 'agent session' });
+    const forwarded: OrchestratorWsEvent[] = [];
+    registerConversationMessageListener(convId, (event) => forwarded.push(event));
+
+    pushToConversation(convId, JSON.stringify({ type: 'status', status: 'thinking' }));
+
+    expect(forwarded).toHaveLength(0);
+  });
+
+  it('unregister stops further delivery to that listener', async () => {
+    const convId = createConversation({ title: 'agent session' });
+    const forwarded: OrchestratorWsEvent[] = [];
+    const unregister = registerConversationMessageListener(convId, (event) =>
+      forwarded.push(event),
+    );
+    unregister();
+
+    pushToConversation(
+      convId,
+      JSON.stringify({ type: 'message', role: 'assistant', text: 'should not arrive' }),
+    );
+
+    expect(forwarded).toHaveLength(0);
   });
 });
 

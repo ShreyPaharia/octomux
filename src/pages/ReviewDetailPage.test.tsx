@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import ReviewDetailPage from './ReviewDetailPage';
 import { renderWithRouter } from '../test-helpers';
 import type { ReviewDetail, InlineCommentDTO } from '@/lib/api/reviewApi';
@@ -9,6 +10,7 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
 );
 
 const scrollToFileSpy = vi.hoisted(() => vi.fn());
+const revealLineSpy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
@@ -21,9 +23,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, useParams: () => ({ id: 't1' }) };
 });
-// Stub DiffViewer so the test focuses on host wiring (file-tree + walkthrough +
-// scroll-handle invocation). The real component fetches/renders Monaco and
-// pulls in a lot of unrelated machinery.
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/components/DiffViewer', async () => {
   const { useEffect } = await import('react');
   return {
@@ -40,7 +40,12 @@ vi.mock('@/components/DiffViewer', async () => {
       onFilesChange?: (paths: string[]) => void;
     }) => {
       useEffect(() => {
-        if (listRef) listRef.current = { scrollToFile: scrollToFileSpy, revealLineInFile: vi.fn() };
+        if (listRef) {
+          listRef.current = {
+            scrollToFile: scrollToFileSpy,
+            revealLineInFile: revealLineSpy,
+          };
+        }
         onFilesChange?.(['server/db.ts', 'src/extra.ts']);
       }, [listRef, onFilesChange]);
       return <div data-testid="diff-viewer-stub" />;
@@ -50,16 +55,16 @@ vi.mock('@/components/DiffViewer', async () => {
 
 function comment(overrides: Partial<InlineCommentDTO> = {}): InlineCommentDTO {
   return {
-    id: 'c',
+    id: 'c1',
     task_id: 't1',
     file_path: 'server/db.ts',
-    line: 1,
+    line: 5,
     side: 'new',
-    body: '',
+    body: 'fix this please',
     status: 'draft',
     kind: 'comment',
     severity: 'issue',
-    bucket: null,
+    bucket: 'actionable',
     existing_code: null,
     suggested_code: null,
     re_flag_of: null,
@@ -90,11 +95,12 @@ function makeDetail(overrides: Partial<ReviewDetail> = {}): ReviewDetail {
 }
 
 const WALKTHROUGH_JSON = JSON.stringify({
+  verdict: 'adds the thing; low risk',
+  highlights: [{ title: 'watch migration', file: 'server/db.ts', line: 5, side: 'new' }],
   global: {
     type: 'Enhancement',
     risk: 'low',
     summary: 'adds the thing',
-    key_review_points: ['watch migration'],
   },
   groups: [
     {
@@ -105,9 +111,20 @@ const WALKTHROUGH_JSON = JSON.stringify({
   ],
 });
 
+function detailWithWalkthrough(extra: Partial<ReviewDetail> = {}): ReviewDetail {
+  return makeDetail({
+    latest_run: { id: 'r1', pr_head_sha: 'sha1', walkthrough: WALKTHROUGH_JSON, status: 'done' },
+    ...extra,
+  });
+}
+
 describe('ReviewDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMock.patchComment.mockImplementation(async (_t, _id, patch) => ({
+      ...comment(),
+      ...patch,
+    }));
   });
 
   it('renders the PR title from review detail', async () => {
@@ -129,103 +146,90 @@ describe('ReviewDetailPage', () => {
     expect(await screen.findByText(/not found/i)).toBeTruthy();
   });
 
-  it('renders WalkthroughPanel with summary and key review points', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-      }),
-    );
+  it('orients first: renders the walkthrough verdict, risk, and highlights', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough());
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    const panel = await screen.findByTestId('walkthrough-panel');
-    expect(panel).toBeTruthy();
-    expect(screen.getByText(/adds the thing/i)).toBeTruthy();
+    const orient = await screen.findByTestId('walkthrough-orient');
+    expect(orient).toBeTruthy();
+    expect(screen.getByTestId('walkthrough-verdict').textContent).toMatch(/adds the thing/i);
     expect(screen.getByText(/risk: low/)).toBeTruthy();
     expect(screen.getByText('watch migration')).toBeTruthy();
+    // The heavy finding queue is not mounted while orienting.
+    expect(screen.queryByTestId('finding-queue')).toBeNull();
   });
 
-  it('renders ReviewContextStrip with file notes when a file is selected', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-      }),
-    );
+  it('clicking a highlight enters review, reveals the code, and syncs the spine', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough());
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    await screen.findByTestId('review-file-tree');
-    const row = await screen.findByTestId('review-file-row-server/db.ts');
-    fireEvent.click(row.querySelector('button')!);
+    const hl = await screen.findByTestId('walkthrough-highlight-0');
+    fireEvent.click(hl);
+    // summary → code linking
+    await waitFor(() => expect(revealLineSpy).toHaveBeenCalledWith('server/db.ts', 5, 'new'));
+    // now in review mode with the spine docked and "you are here" synced to the group
+    expect(await screen.findByTestId('walkthrough-spine')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('spine-group-Schema').getAttribute('data-active')).toBe('true'),
+    );
+  });
+
+  it('Start review docks the spine and shows the per-file note in one canonical place', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough({ comments: [comment()] }));
+    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    fireEvent.click(await screen.findByTestId('start-review-btn'));
+    const item = await screen.findByTestId('finding-queue-item-c1');
+    fireEvent.click(item);
     const fileCtx = await screen.findByTestId('review-context-file');
     expect(fileCtx.textContent).toMatch(/migration/);
   });
 
-  it('renders one ReviewFileTree section per walkthrough group', async () => {
+  it('renders finding queue with draft body and triage actions', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(makeDetail({ comments: [comment()] }));
+    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    const detail = await screen.findByTestId('finding-queue-detail');
+    expect(detail.textContent).toMatch(/fix this please/);
+    expect(screen.getByText('Accept')).toBeTruthy();
+  });
+
+  it('accepting a finding enables Publish', async () => {
+    const user = userEvent.setup();
+    apiMock.getReviewDetail
+      .mockResolvedValueOnce(makeDetail({ comments: [comment()] }))
+      .mockResolvedValue(makeDetail({ comments: [comment({ status: 'accepted' })] }));
+    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
+    const publishBtn = (await screen.findByText('Publish review')).closest('button')!;
+    expect(publishBtn.disabled).toBe(true);
+    await user.click(screen.getByText('Accept'));
+    await waitFor(() => expect(apiMock.patchComment).toHaveBeenCalled());
+    await waitFor(() => expect(publishBtn.disabled).toBe(false));
+  });
+
+  it('shows published history in the Discussion tab with a GitHub link', async () => {
     apiMock.getReviewDetail.mockResolvedValue(
       makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
+        published_history: [
+          {
+            id: 'pr1',
+            github_review_url: 'https://github.com/o/r/pull/1#review-1',
+            published_at: '2026-01-01',
+            verdict: 'COMMENT',
+            comment_count: 2,
+          },
+        ],
       }),
     );
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    expect(await screen.findByTestId('review-file-group-Schema')).toBeTruthy();
+    fireEvent.click(await screen.findByTestId('review-tab-discussion'));
+    const panel = await screen.findByTestId('published-history-panel');
+    expect(panel).toBeTruthy();
+    expect(screen.getByText('View on GitHub').closest('a')?.href).toContain('review-1');
   });
 
-  it('renders "Other" group for diff files not in the walkthrough', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-      }),
-    );
+  it('selecting a finding reveals its line in the diff', async () => {
+    apiMock.getReviewDetail.mockResolvedValue(detailWithWalkthrough({ comments: [comment()] }));
     renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    expect(await screen.findByTestId('review-file-group-Other')).toBeTruthy();
-    expect(screen.getByTestId('review-file-row-src/extra.ts')).toBeTruthy();
-  });
-
-  it('clicking a file invokes the DiffViewer scroll handle', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({
-        latest_run: {
-          id: 'r1',
-          pr_head_sha: 'sha1',
-          walkthrough: WALKTHROUGH_JSON,
-          status: 'done',
-        },
-        comments: [comment()],
-      }),
-    );
-    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    const row = await screen.findByTestId('review-file-row-server/db.ts');
-    // Row is now a <li>; the inner selection <button> wraps the filename.
-    const selectButton = row.querySelector('button');
-    if (!selectButton) throw new Error('expected selection button inside file row');
-    fireEvent.click(selectButton);
-    await waitFor(() => expect(scrollToFileSpy).toHaveBeenCalledWith('server/db.ts'));
-  });
-
-  it('does NOT render the legacy filters bar or inline-comment cards', async () => {
-    apiMock.getReviewDetail.mockResolvedValue(
-      makeDetail({ comments: [comment({ body: 'fix this please' })] }),
-    );
-    renderWithRouter(<ReviewDetailPage />, { route: '/reviews/t1', path: '/reviews/:id' });
-    await screen.findByText('Add foo');
-    expect(screen.queryByText(/^Filter:$/)).toBeNull();
-    expect(screen.queryByText('fix this please')).toBeNull();
+    fireEvent.click(await screen.findByTestId('start-review-btn'));
+    const item = await screen.findByTestId('finding-queue-item-c1');
+    fireEvent.click(item);
+    await waitFor(() => expect(revealLineSpy).toHaveBeenCalledWith('server/db.ts', 5, 'new'));
   });
 });

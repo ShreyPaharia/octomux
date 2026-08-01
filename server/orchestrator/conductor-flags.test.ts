@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { claudeCodeHarness } from '../harnesses/claude-code.js';
+import { shellQuoteSingle } from '../shell-quote.js';
 import { buildOrchestratorConductorFlags, ORCHESTRATOR_SYSTEM_PROMPT } from './conductor-flags.js';
 
 describe('buildOrchestratorConductorFlags', () => {
@@ -40,6 +41,34 @@ describe('buildOrchestratorConductorFlags', () => {
     expect(cmd).toBe(
       `claude --session-id sess-1 --settings '/tmp/settings.local.json' --mcp-config '/tmp/mcp-config.json' --strict-mcp-config --append-system-prompt '${ORCHESTRATOR_SYSTEM_PROMPT.replace(/'/g, `'\\''`)}'`,
     );
+  });
+
+  it('defaults to ORCHESTRATOR_SYSTEM_PROMPT when systemPrompt is omitted (byte-identical flags)', () => {
+    const withDefault = buildOrchestratorConductorFlags({
+      settingsPath: '/tmp/settings.local.json',
+      mcpConfigPath: '/tmp/mcp-config.json',
+    });
+    const withExplicitDefault = buildOrchestratorConductorFlags({
+      settingsPath: '/tmp/settings.local.json',
+      mcpConfigPath: '/tmp/mcp-config.json',
+      systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
+    });
+
+    expect(withDefault).toBe(withExplicitDefault);
+    expect(withDefault).toContain(shellQuoteSingle(ORCHESTRATOR_SYSTEM_PROMPT));
+  });
+
+  it('uses a custom systemPrompt in --append-system-prompt when given', () => {
+    const customPrompt = 'You are AGENT Foo. Only do X.';
+    const flags = buildOrchestratorConductorFlags({
+      settingsPath: '/tmp/settings.local.json',
+      mcpConfigPath: '/tmp/mcp-config.json',
+      systemPrompt: customPrompt,
+    });
+
+    expect(flags).toContain('--append-system-prompt');
+    expect(flags).toContain(shellQuoteSingle(customPrompt));
+    expect(flags).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT);
   });
 
   it('routes through harness buildResumeCommand with orchestrator flags', () => {

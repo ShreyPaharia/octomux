@@ -67,7 +67,7 @@ vi.mock('@monaco-editor/react', () => ({
 const runningTask: Task = makeTask({
   runtime_state: 'running',
   tmux_session: 'octomux-agent-test-task-01',
-  agents: [makeAgent({ id: 'a1' })],
+  workers: [makeAgent({ id: 'a1' })],
 });
 
 describe('TaskDetail', () => {
@@ -111,7 +111,7 @@ describe('TaskDetail', () => {
   it('shows loading state initially', () => {
     apiMock.getTask.mockReturnValue(new Promise(() => {}));
     renderDetail();
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Loading task…')).toBeInTheDocument();
   });
 
   // ─── Error state ──────────────────────────────────────────────────────────
@@ -202,7 +202,7 @@ describe('TaskDetail', () => {
   // ─── Draft task controls ────────────────────────────────────────────────
 
   it('shows Start button for draft task', async () => {
-    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'idle', agents: [] }));
+    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'idle', workers: [] }));
     renderDetail();
     await waitFor(() => {
       // Header has a Start button, edit form also has one
@@ -213,7 +213,7 @@ describe('TaskDetail', () => {
 
   it('clicking Start calls startTask', async () => {
     const user = userEvent.setup();
-    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'idle', agents: [] }));
+    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'idle', workers: [] }));
     renderDetail();
     await waitFor(() => {
       expect(screen.getAllByText('Start').length).toBeGreaterThanOrEqual(1);
@@ -230,7 +230,7 @@ describe('TaskDetail', () => {
   const nonRunningStates = ['idle', 'error'] as const;
 
   it.each(nonRunningStates)('hides Close button when runtime_state is "%s"', async (state) => {
-    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, agents: [] }));
+    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, workers: [] }));
     renderDetail();
     await waitFor(() => {
       expect(screen.getByText('Fix order validation')).toBeInTheDocument();
@@ -257,7 +257,7 @@ describe('TaskDetail', () => {
   });
 
   it('shows edit form when task is draft', async () => {
-    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'idle', agents: [] }));
+    apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'idle', workers: [] }));
     renderDetail();
     await waitFor(() => {
       expect(screen.getByLabelText('Title')).toBeInTheDocument();
@@ -268,7 +268,7 @@ describe('TaskDetail', () => {
   it('shows "Terminal session ended" message for closed task without agents', async () => {
     apiMock.getTask.mockResolvedValue(
       // initial_prompt set → not a draft, just a closed task with no active terminal
-      makeTask({ runtime_state: 'idle', tmux_session: null, agents: [], initial_prompt: 'do it' }),
+      makeTask({ runtime_state: 'idle', tmux_session: null, workers: [], initial_prompt: 'do it' }),
     );
     renderDetail();
     await waitFor(() => {
@@ -337,7 +337,7 @@ describe('TaskDetail', () => {
         runtime_state: 'idle',
         branch: null,
         worktree: null,
-        agents: [],
+        workers: [],
       }),
     );
     renderDetail();
@@ -388,7 +388,7 @@ describe('TaskDetail', () => {
 
   it('renders setting_up checklist when status=setting_up and no terminal yet', async () => {
     apiMock.getTask.mockResolvedValue(
-      makeTask({ runtime_state: 'setting_up', agents: [], tmux_session: null }),
+      makeTask({ runtime_state: 'setting_up', workers: [], tmux_session: null }),
     );
     renderDetail();
     await waitFor(() => {
@@ -411,7 +411,7 @@ describe('TaskDetail', () => {
     const noEditorStates = ['idle', 'setting_up', 'error'] as const;
 
     it.each(noEditorStates)('hides Editor button when runtime_state is "%s"', async (state) => {
-      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, agents: [] }));
+      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, workers: [] }));
       renderDetail();
       await waitFor(() => {
         expect(screen.getByText('Fix order validation')).toBeInTheDocument();
@@ -463,7 +463,7 @@ describe('TaskDetail', () => {
         expect(apiMock.createUserTerminal).toHaveBeenCalledTimes(1);
       });
 
-      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'setting_up', agents: [] }));
+      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'setting_up', workers: [] }));
       simulateEvent();
       await waitFor(() => {
         expect(screen.getByTestId('task-setting-up')).toBeInTheDocument();
@@ -592,7 +592,7 @@ describe('TaskDetail', () => {
         expect(apiMock.createUserTerminal).toHaveBeenCalled();
       });
 
-      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'setting_up', agents: [] }));
+      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: 'setting_up', workers: [] }));
       simulateEvent();
       await waitFor(() => {
         expect(screen.getByTestId('task-setting-up')).toBeInTheDocument();
@@ -606,7 +606,7 @@ describe('TaskDetail', () => {
     const taskWithTerminals = makeTask({
       runtime_state: 'running',
       tmux_session: 'octomux-agent-test-task-01',
-      agents: [makeAgent({ id: 'a1' })],
+      workers: [makeAgent({ id: 'a1' })],
       user_terminals: [
         {
           id: 'term-1',
@@ -698,7 +698,7 @@ describe('TaskDetail', () => {
           makeTask({
             run_mode: mode,
             runtime_state: 'running',
-            agents: [makeAgent({ id: 'a1' })],
+            workers: [makeAgent({ id: 'a1' })],
             branch: mode === 'scratch' ? null : 'agents/test-task-01',
             repo_path: mode === 'scratch' ? '' : '/Users/dev/projects/my-repo',
           }),
@@ -726,7 +726,7 @@ describe('TaskDetail', () => {
           run_mode: 'none',
           runtime_state: 'running',
           branch: 'feat/inplace',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
         }),
       );
       renderDetail();
@@ -741,7 +741,7 @@ describe('TaskDetail', () => {
           run_mode: 'existing',
           runtime_state: 'running',
           branch: 'feat/existing',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
         }),
       );
       renderDetail();
@@ -755,7 +755,7 @@ describe('TaskDetail', () => {
         makeTask({
           run_mode: 'scratch',
           runtime_state: 'running',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
           pr_url: 'https://github.com/org/repo/pull/99',
           pr_number: 99,
         }),
@@ -772,7 +772,7 @@ describe('TaskDetail', () => {
         makeTask({
           run_mode: undefined as unknown as 'new',
           runtime_state: 'running',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
         }),
       );
       renderDetail();
@@ -843,7 +843,7 @@ describe('TaskDetail', () => {
           runtime_state: 'running',
           worktree: '/tmp/wt',
           base_branch: 'main',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
         }),
       );
       apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary());
@@ -867,7 +867,7 @@ describe('TaskDetail', () => {
           runtime_state: 'running',
           worktree: '/tmp/wt',
           base_branch: 'main',
-          agents: [makeAgent({ id: 'agent-99', window_index: 0, status: 'running' })],
+          workers: [makeAgent({ id: 'agent-99', window_index: 0, status: 'running' })],
         }),
       );
       apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary());
@@ -927,7 +927,7 @@ describe('TaskDetail', () => {
           runtime_state: 'running',
           worktree: '/tmp/wt',
           base_branch: 'main',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
         }),
       );
       apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary({ base_is_stale: true }));
@@ -947,7 +947,7 @@ describe('TaskDetail', () => {
           runtime_state: 'running',
           worktree: '/tmp/wt',
           base_branch: 'main',
-          agents: [makeAgent({ id: 'a1' })],
+          workers: [makeAgent({ id: 'a1' })],
         }),
       );
       apiMock.getTaskDiffSummary.mockResolvedValue(makeDiffSummary());

@@ -34,14 +34,14 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('./orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./orchestrator/store.js')>();
+vi.mock('./repositories/orchestrator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./repositories/orchestrator.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 vi.mock('./orchestrator/runner.js', () => ({ mcpServerInvocation: vi.fn(() => null) }));
 vi.mock('./hook-base-url.js', () => ({ hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777') }));
 vi.mock('./settings.js', () => ({ getSettings: vi.fn(async () => ({})) }));
-vi.mock('./skills.js', () => ({ syncSkills: vi.fn(async () => undefined) }));
+vi.mock('./skills.js', () => ({}));
 vi.mock('./harnesses/index.js', () => ({
   getHarness: vi.fn(() => ({
     id: 'claude-code',
@@ -110,7 +110,7 @@ describe('loop routes', () => {
     });
 
     it('returns 400 when the task has no active agent', async () => {
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE id = 'a1'`).run();
       const res = await request(app)
         .post('/api/loops')
         .send({ taskId: 't1', spec: { prompt: 'x', verify: 'y', maxIterations: 5 } });

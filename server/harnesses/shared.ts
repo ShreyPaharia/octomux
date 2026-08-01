@@ -1,6 +1,7 @@
 import fs from 'fs';
 import type { HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName } from './types.js';
+import { shellQuoteSingle } from '../shell-quote.js';
 
 /** Canonical JSON settings/config serialization (trailing newline). */
 export function formatJsonConfig(obj: unknown): string {
@@ -25,7 +26,7 @@ export function formatHarnessFlags(parts: string[]): string {
 export function applyModel(flags: string, model: string | null | undefined): string {
   if (!model) return flags;
   const stripped = flags.replace(/\s*--model\s+\S+/g, '');
-  return `${stripped} --model ${model}`;
+  return `${stripped} --model ${shellQuoteSingle(model)}`;
 }
 
 export type SettingsFieldValidator = (value: unknown) => unknown;
@@ -71,6 +72,14 @@ export function validateSettingsObject(
   return out;
 }
 
+/** Normalize resolved flags to a single leading-space-separated string (or ''),
+ *  so callers can't accidentally glue flags onto the preceding token (e.g. the
+ *  session id) by passing flags without/with-stray leading whitespace. */
+function flagsSuffix(flags: string, model: string | null | undefined): string {
+  const resolved = applyModel(flags, model).trim();
+  return resolved ? ` ${resolved}` : '';
+}
+
 export function buildClaudeLaunchCommand({
   sessionId,
   agent,
@@ -78,8 +87,7 @@ export function buildClaudeLaunchCommand({
   model,
 }: HarnessLaunchOpts): string {
   const agentPart = agent ? ` --agent ${validateAgentName(agent)}` : '';
-  const resolvedFlags = applyModel(flags, model);
-  return `claude${agentPart} --session-id ${sessionId}${resolvedFlags}`;
+  return `claude${agentPart} --session-id ${sessionId}${flagsSuffix(flags, model)}`;
 }
 
 export function buildClaudeResumeCommand({
@@ -87,8 +95,7 @@ export function buildClaudeResumeCommand({
   flags = '',
   model,
 }: HarnessResumeOpts): string {
-  const resolvedFlags = applyModel(flags, model);
-  return `claude --resume ${sessionId}${resolvedFlags}`;
+  return `claude --resume ${sessionId}${flagsSuffix(flags, model)}`;
 }
 
 export function buildClaudeContinueCommand({
@@ -96,6 +103,5 @@ export function buildClaudeContinueCommand({
   flags = '',
   model,
 }: HarnessResumeOpts): string {
-  const resolvedFlags = applyModel(flags, model);
-  return `claude --continue --session-id ${sessionId}${resolvedFlags}`;
+  return `claude --continue --session-id ${sessionId}${flagsSuffix(flags, model)}`;
 }

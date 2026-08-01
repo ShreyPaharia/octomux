@@ -1,15 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestDb } from '../test-helpers.js';
-import {
-  getHookEnabled,
-  getHookSetting,
-  listHookSettings,
-  upsertHookSetting,
-} from './hook-settings.js';
+import { getHookEnabled, upsertHookSetting } from './hook-settings.js';
 
 describe('repositories/hook-settings', () => {
+  let db: ReturnType<typeof createTestDb>;
+
   beforeEach(() => {
-    createTestDb();
+    db = createTestDb();
   });
 
   // ─── getHookEnabled ────────────────────────────────────────────────────────
@@ -40,48 +37,17 @@ describe('repositories/hook-settings', () => {
   describe('upsertHookSetting', () => {
     it('inserts a new row', () => {
       upsertHookSetting('repo:/tmp', 'my-event/script.sh', true);
-      const row = getHookSetting('repo:/tmp', 'my-event/script.sh');
+      const row = db
+        .prepare(`SELECT enabled FROM hook_settings WHERE scope = ? AND key = ?`)
+        .get('repo:/tmp', 'my-event/script.sh') as { enabled: number } | undefined;
       expect(row).toBeDefined();
-      expect(row!.enabled).toBe(true);
+      expect(row!.enabled).toBe(1);
     });
 
     it('updates an existing row on conflict', () => {
       upsertHookSetting('global', 'update/test', true);
       upsertHookSetting('global', 'update/test', false);
-      const row = getHookSetting('global', 'update/test');
-      expect(row!.enabled).toBe(false);
-    });
-  });
-
-  // ─── getHookSetting ───────────────────────────────────────────────────────
-
-  describe('getHookSetting', () => {
-    it('returns undefined for unknown (scope, key)', () => {
-      expect(getHookSetting('global', 'never/inserted')).toBeUndefined();
-    });
-
-    it('returns the row with enabled as boolean', () => {
-      upsertHookSetting('builtin', 'summarize-progress', false);
-      const row = getHookSetting('builtin', 'summarize-progress');
-      expect(row).toBeDefined();
-      expect(row!.scope).toBe('builtin');
-      expect(row!.key).toBe('summarize-progress');
-      expect(row!.enabled).toBe(false);
-    });
-  });
-
-  // ─── listHookSettings ────────────────────────────────────────────────────
-
-  describe('listHookSettings', () => {
-    it('returns all rows ordered by scope, key', () => {
-      upsertHookSetting('global', 'b-event/script', true);
-      upsertHookSetting('builtin', 'summarize-progress', false);
-      upsertHookSetting('global', 'a-event/script', true);
-      const rows = listHookSettings();
-      expect(rows.length).toBeGreaterThanOrEqual(3);
-      // Ordered by scope then key: builtin comes before global
-      const scopes = rows.map((r) => r.scope);
-      expect(scopes.indexOf('builtin')).toBeLessThan(scopes.indexOf('global'));
+      expect(getHookEnabled('global', 'update/test')).toBe(false);
     });
   });
 });

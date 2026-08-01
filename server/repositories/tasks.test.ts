@@ -3,7 +3,6 @@ import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
   getTask,
-  getTaskByWorktreeId,
   listTasks,
   insertTask,
   updateTaskFields,
@@ -16,6 +15,7 @@ import {
   listTaskUpdates,
   getTaskExternalRefs,
   getTaskExternalRef,
+  getTaskExternalRefByRef,
   upsertTaskExternalRef,
   deleteTaskExternalRef,
   insertTaskExternalRefIfAbsent,
@@ -112,23 +112,34 @@ describe('repositories/tasks', () => {
       expect(row.pr_number).toBe(42);
       expect(row.pr_head_sha).toBe('abc123');
     });
-  });
 
-  // ─── getTaskByWorktreeId ─────────────────────────────────────────────────────
-
-  describe('getTaskByWorktreeId', () => {
-    it('returns the task linked to a worktree', () => {
-      db.prepare(
-        `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt1', '', 'new', 'available')`,
-      ).run();
-      const id = insertTask({ title: 'T', description: 'D', worktree_id: 'wt1' });
-      const task = getTaskByWorktreeId('wt1');
-      expect(task).toBeDefined();
-      expect(task!.id).toBe(id);
+    it('accepts an optional schedule_id at insert', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBe('sched-1');
     });
 
-    it('returns undefined when no task references the worktree', () => {
-      expect(getTaskByWorktreeId('no-such-wt')).toBeUndefined();
+    it('leaves schedule_id null when not provided', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBeNull();
+    });
+
+    // Regression: SELECT_TASK_SQL used to omit t.schedule_id, so every reader of
+    // a getTask()-shaped Task (laneFor in agent-learnings.ts, respawn-agent.ts,
+    // start-task.ts, etc.) saw `schedule_id: undefined` even for a task the
+    // schedule poller stamped — silently routing scheduled agents' learnings
+    // into a fresh loop:<task-id> lane every cron firing instead of the shared
+    // schedule:<id> lane (see plans/2026-07-22-agent-learnings-store.md Task 5).
+    it('getTask surfaces schedule_id on the returned Task', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      expect(getTask(id)!.schedule_id).toBe('sched-1');
     });
   });
 
@@ -168,6 +179,29 @@ describe('repositories/tasks', () => {
       const tasks = listTasks({ trash: true });
       expect(tasks.map((t) => t.id)).toContain('t1');
       expect(tasks.map((t) => t.id)).not.toContain('t2');
+    });
+  });
+
+  describe('listTasks automated filtering', () => {
+    beforeEach(() => {
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('manual', 'manual', '', 'idle', 'backlog', NULL)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('drift', 'drift', '', 'idle', 'backlog', 'doc_drift')`,
+      ).run();
+    });
+
+    it('hides tasks with a non-null source by default', () => {
+      const rows = listTasks();
+      expect(rows.map((t) => t.id)).toEqual(['manual']);
+    });
+
+    it('includes automated tasks when asked', () => {
+      const rows = listTasks({ includeAutomated: true });
+      expect(rows.map((t) => t.id).sort()).toEqual(['drift', 'manual']);
     });
   });
 
@@ -462,11 +496,53 @@ describe('repositories/tasks', () => {
       expect(refs[0]!.metadata).toBeNull();
     });
 
-    it('upsert replaces on conflict', () => {
+    it('upsert with same ref updates the row (same PK)', () => {
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-5', url: 'old' });
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-5', url: 'new' });
+      const refs = getTaskExternalRefs(taskId);
+      expect(refs).toHaveLength(1);
+      expect(refs[0]!.url).toBe('new');
+    });
+
+    it('upsert with different ref adds a new row (multi-ticket)', () => {
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-2' });
+      const refs = getTaskExternalRefs(taskId);
+      expect(refs).toHaveLength(2);
+      expect(refs.map((r) => r.ref).sort()).toEqual(['SHR-1', 'SHR-2']);
+    });
+
+    it('upsert replaces on conflict (legacy: same ref = update, not duplicate)', () => {
       upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'OLD' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'NEW' });
-      const ref = getTaskExternalRef(taskId, 'linear');
-      expect(ref!.ref).toBe('NEW');
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'OLD' });
+      const refs = getTaskExternalRefs(taskId);
+      expect(refs).toHaveLength(1);
+      expect(refs[0]!.ref).toBe('OLD');
+    });
+
+    it('getTaskExternalRefByRef looks up by exact (task_id, integration, ref)', () => {
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-10' });
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-11' });
+      const found = getTaskExternalRefByRef(taskId, 'linear', 'SHR-11');
+      expect(found).toBeDefined();
+      expect(found!.ref).toBe('SHR-11');
+      expect(getTaskExternalRefByRef(taskId, 'linear', 'SHR-99')).toBeUndefined();
+    });
+
+    it('deleteTaskExternalRef with ref deletes only that row', () => {
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-2' });
+      deleteTaskExternalRef(taskId, 'linear', 'SHR-1');
+      const refs = getTaskExternalRefs(taskId);
+      expect(refs).toHaveLength(1);
+      expect(refs[0]!.ref).toBe('SHR-2');
+    });
+
+    it('deleteTaskExternalRef without ref deletes all rows for that integration', () => {
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-2' });
+      deleteTaskExternalRef(taskId, 'linear');
+      expect(getTaskExternalRefs(taskId)).toHaveLength(0);
     });
 
     it('deleteTaskExternalRef removes the row', () => {
@@ -478,8 +554,12 @@ describe('repositories/tasks', () => {
     it('insertTaskExternalRefIfAbsent does not overwrite existing', () => {
       upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
       insertTaskExternalRefIfAbsent({ task_id: taskId, integration: 'linear', ref: 'SHR-99' });
-      const ref = getTaskExternalRef(taskId, 'linear');
-      expect(ref!.ref).toBe('SHR-1'); // original not overwritten
+      // SHR-1 still exists; SHR-99 was not inserted because SHR-1 already occupied the key
+      // Note: with the new PK (task_id, integration, ref), INSERT OR IGNORE skips only
+      // exact (task_id, integration, ref) conflicts. SHR-99 IS a different ref so it WILL
+      // be inserted — this existing test's behaviour changes.
+      const refs = getTaskExternalRefs(taskId);
+      expect(refs.map((r) => r.ref).sort()).toContain('SHR-1');
     });
 
     it('created_at is non-null', () => {

@@ -1,8 +1,9 @@
 # octomux
 
-npm package (`octomux`) for orchestrating autonomous Claude Code agents from a web dashboard.
-Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
-`./data/` in development (`NODE_ENV !== 'production'`).
+npm package (`octomux`) for orchestrating autonomous Claude Code and Cursor agents from a
+web dashboard. Single binary: `octomux <command>`. Data stored at `~/.octomux/` in
+production, `./data/` in development (`NODE_ENV !== 'production'`); override the production
+root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path).
 
 ## Tech Stack
 
@@ -23,34 +24,57 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
 - `bun run test:e2e:ui` — Playwright interactive UI mode
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
-- `bun run typecheck` — tsc --noEmit
-- `bun run build` — Vite build + tsc server
+- `bun run typecheck` — `tsc -b` (project references across `packages/*`)
+- `bun run build` — builds `packages/*` (diff-engine, types, test-fixtures, api-client),
+  then Vite build + tsup server bundle + `cli:build`, then `scripts/verify-build.js`
 
 ## Architecture
 
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
-  - `api.ts` — REST routes mounted on Express app
+  - `api.ts` — mounts the routers from `routes/` onto the Express app
+  - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, reviews,
+    review-runs, comments, chats, loops, skills, schedules, settings, orchestrator, …)
   - `app.ts` — extracted `createApp()` for testability
-  - `task-runner.ts` — worktree + tmux + harness lifecycle (closeTask, deleteTask)
+  - `task-engine/` — worktree + tmux + harness lifecycle. `cleanup.ts` holds `closeTask` /
+    `deleteTask`; also `launch.ts`, `git.ts`, `sessions.ts`, `terminals.ts`, `reconcile.ts`,
+    plus `lifecycle/`, `setup/`, `loop/` subdirs.
   - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
   - `logger.ts` — pino root + `childLogger('<module>')` helper
   - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
-  - `harnesses/` — pluggable harness implementations (Claude Code today; Cursor planned).
+  - `harnesses/` — pluggable harness implementations (`claude-code.ts`, `cursor.ts`;
+    `claude-code` is the default via `DEFAULT_HARNESS_ID`).
     Each `Harness` exports `id`, `displayName`, `sessionIdMode`, command builders,
     `installHooks`, `syncAgents`, `resolveFlags`, `validateSettings`. Spec at
     `spec/harness-abstraction.md`; step plan at `plans/2026-05-08-harness-abstraction-step-1.md`.
   - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
-  - `teams.ts` — team feature: `parseTeamConfig`, `validateTeamConfig`, `runTeam`, `upsertTeamSchedule`,
-    `listTeamSchedules`, `isCronDue`, `pollTeamSchedules`. Config lives in `<repo>/.octomux/team.yaml`.
+  - `schedules/cron.ts` — `isCronDue()`, the 5-field cron evaluator (`croner`, UTC) behind
+    scheduled runs. Rows live in the `schedules` table; `poller/schedule-cron.ts` fires them.
 - `src/` — React SPA (pages, components, lib/api.ts)
-- `cli/` — CLI tool for task management (create-task, list-tasks, get-task, close-task)
+  - `workflows/` — front-end workflow-UI registry mirroring `server/workflows/`.
+    `registerWorkflowUI(kind, { navLabel, icon, ListView, DetailView })` (`loops/register.tsx`)
+    backs the generic `/w/:kind/:id` route; a kind that registers `getItem` + `outputSchema`
+    instead of a `DetailView` falls back to the schema-driven `DefaultDetailView`.
+- `cli/` — CLI tool; one file per subcommand in `cli/src/commands/` (create-task, list-tasks,
+  get-task, close-task, resume-task, delete-task, add-agent, send-message, stop-agent, init,
+  emit, loop-start, loop-start-group, learn/recall/unlearn, post-review,
+  task-move/note/summary/updates, skills, files, …)
+- `packages/` — bun workspaces: `types`, `diff-engine`, `api-client`, `test-fixtures`, plus
+  the prebuilt `tmux-{darwin,linux}-{arm64,x64}` binaries
+- `electron/` — macOS desktop app wrapper (`build:electron` / `dist:electron`)
 - `e2e/` — Playwright E2E tests
 
-DB migrations are forward-only. Back up `~/.octomux/octomux.sqlite` (prod) or
-`./data/octomux.sqlite` (dev) before upgrading across the harness-abstraction
-migration (renames `agents.claude_session_id` → `harness_session_id`, adds
-`tasks.harness_id` / `agents.harness_id` / `agents.hook_token`, relaxes
-`permission_prompts.session_id` to nullable).
+DB migrations are forward-only. Back up `~/.octomux/data/tasks.db` (prod) or
+`./data/tasks.db` (dev) before upgrading across either of these:
+
+- **harness abstraction** — renames `workers.claude_session_id` → `harness_session_id`,
+  adds `tasks.harness_id` / `workers.harness_id` / `workers.hook_token`, relaxes
+  `permission_prompts.session_id` to nullable.
+- **agents/workers rename** — `agents` → `workers` (per-task tmux worker) and
+  `agent_configs` → `agents` (persistent conductor agent), in that mandatory order.
+  Runs in `renameAgentWorkerTables()` **before** `SCHEMA` executes in `initDb()`, or
+  `CREATE TABLE IF NOT EXISTS workers` would create an empty placeholder ahead of the
+  rename and orphan every worker row. SQLite rewrites dependent `REFERENCES` clauses
+  automatically (`legacy_alter_table = 0`).
 
 ## Logging
 
@@ -73,78 +97,104 @@ draft → setting_up → running → closed/error
 Error at any point → error state with message in `task.error`
 
 Per task: git worktree at `<repo>/.worktrees/<id>`, tmux session `octomux-agent-<id>`,
-branch `agents/<id>`. Each agent = tmux window within the session.
+branch `agents/<id>`. Each **worker** = tmux window within the session.
 
-- **close** = stop agents + kill tmux session. Preserves worktree and branch (for resume).
+"Agent" means three distinct things; keep them straight:
+
+| Concept                            | Table     | Routes                                     |
+| ---------------------------------- | --------- | ------------------------------------------ |
+| per-task tmux worker               | `workers` | `/api/workers`, `/api/tasks/:id/workers`   |
+| persistent conductor agent         | `agents`  | `/api/agents`                              |
+| agent _role_ definition (markdown) | none      | `/api/agent-roles` (from the plugin files) |
+
+- **close** = stop workers + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
 
-## Agent Teams
+## Per-task model override
 
-Reusable crews of agents that run on a schedule against any repo. Config-as-code: definitions
-live in `<repo>/.octomux/team.yaml`; octomux reads at run time, never stores in DB.
-
-### CLI commands
-
-```
-octomux team run <name> [-r <repo-path>]       # fire immediately from .octomux/team.yaml
-octomux team schedule <name> --cron <expr> [-r <path>]  # upsert cron schedule
-octomux team list                              # list configured schedules
-```
-
-### team.yaml schema
-
-```yaml
-name: my-team # must match name passed to CLI
-base_branch: main # optional; default main
-schedule: '0 7 * * 1-5' # optional; only used as reference — use `team schedule` to activate
-notify_command: "slack-notify.sh '#alerts'" # optional; passed to Lead
-journal_dir: desk/journal # optional; default desk/journal
-incidents_dir: desk/incidents # optional; default desk/incidents
-roster:
-  - role: lead # REQUIRED; exactly one lead
-    skeleton: desk-lead # filename under agents/ (no .md)
-    model: claude-opus-4-8
-    overlay: .octomux/overlays/lead.md # optional repo-specific override
-  - role: researcher
-    skeleton: researcher
-    model: claude-sonnet-4-6
-  - role: risk-ops
-    skeleton: risk-ops
-    model: claude-sonnet-4-6
-```
-
-### Skeletons
-
-Skeletons live in the **target repo** at `<repo>/.octomux/agents/<name>.md`. octomux
-ships no built-in skeletons — each consuming repo owns its own. A Lead receives the full
-roster in its kick-off prompt and spawns workers via `octomux create-task --model <model> ...`.
-
-### Per-task model override
-
-`tasks.model TEXT` column added in Phase 0. Propagated through:
+`tasks.model TEXT` column. Propagated through:
 
 - `POST /api/tasks` body: `{ model: "claude-opus-4-8" }` → stored in DB
-- `POST /api/tasks/:id/agents` body: `{ model: ... }` → stored on agent launch
+- `POST /api/tasks/:id/workers` body: `{ model: ... }` → stored on worker launch
 - `octomux create-task --model <id>` and `octomux add-agent --model <id>`
 - Harness: `applyModel(flags, model)` strips any existing `--model` then appends the per-task one
 
-### DB tables (additive migrations)
+## Loops (Ralph loops)
 
-```sql
--- operational state only; definitions stay in team.yaml
-team_schedules (name PK, repo_path, config_path, cron, enabled, last_run_at, created_at, updated_at)
-team_runs      (id PK, team, lead_task_id → tasks.id, started_at, status)
+A loop re-runs a task's agent in **fresh context** until a verify command exits 0. Engine in
+`server/task-engine/loop/` (`engine.ts` policy + `verify.ts` runner); each iteration respawns the
+active agent via `lifecycle/respawn-agent.ts`, so loop tasks are exempt from the idle poller.
+
+```
+octomux loop-start --task <id> --prompt <text|@file> --verify '<cmd>' --max-iterations <n> \
+                   [--budget-tokens <n>] [--stall-after <n>]
+octomux loop-start-group --repo <path> --base-branch <b> --prompt … --verify … \
+                   --max-iterations <n> [--n <candidates>]   # fan out N competing candidates
+octomux emit --run <loop-run-id> --status done|blocked|needs_human --reason "<why>"
 ```
 
-### Poller integration
+- `emit` is how the agent inside the loop reports its own completion back to octomux.
+- Termination is layered — stops on any of: `done` + verify passed, `blocked`, `needs_human`,
+  `max_iterations`, `budget` (tokens/time), `no_progress` (`--stall-after` N no-op iterations).
+- Each iteration appends to a curated playbook in the worktree so the next fresh context sees
+  what earlier ones tried.
+- UI at `/loops` (list) and `/w/loops/:id` (detail, via the workflow-UI registry); `/loops/:id`
+  is a legacy redirect. REST in `server/routes/loops.ts`.
+- Spec: `spec/workflow-framework.md`; plans: `plans/2026-07-12-loop-harness-*.md`.
 
-`startPolling()` sets a 60 s interval calling `pollTeamSchedules()`. For each enabled schedule:
+### Learnings
 
-1. evaluate 5-field cron (`* * * * *`) against current UTC minute via `croner` (`isCronDue`)
-2. skip if a `team_runs` row with `status='running'` already exists (idempotent)
-3. call `runTeam()`, insert `team_runs` row, update `last_run_at`
+`octomux learn --trigger … --lesson … --evidence … [--private]` and `octomux recall --query …`
+persist and retrieve durable notes per repo (`unlearn` / `learn-forget` retire them). Backed by
+the `agent_learnings` table and `server/routes/learnings.ts`.
 
-Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/15`, `1-5`, `mon-fri`). Schedules are evaluated in UTC.
+## Schedules
+
+Cron-triggered runs replaced the old `octomux team` command (deleted in `90cf49e`). Multiple
+schedules per `(kind, repo_path)` are allowed (the old UNIQUE constraint is gone). Each row
+carries a 5-field cron plus per-schedule `name`, `timezone` (IANA, NULL → UTC), `model`,
+`timeout_ms` (headless session timeout, NULL → 5 min), `config_json`, and `prompt`.
+
+**Kinds are presets, schedule rows are self-contained** (spec/schedule-kinds-as-presets.md).
+A kind is a JSON file — `<pkg>/kinds/*.json` (built-in) plus `~/.octomux/kinds/*.json` (home,
+UI-authored, `session`-only, wins on collision) — loaded by `server/workflows/presets.ts` and
+merged with the code handlers that `registerWorkflow()` registers. Presets are read **only when
+the UI builds a create form**: prompt and config are copied into the row at create time with ajv
+defaults materialized on write, so `executeScheduleRun` reads the row and nothing else. There is
+no resolution chain, no per-kind DB table, and editing a preset never touches existing schedules.
+`listCronWorkflowKinds()` = "kinds that have a preset".
+
+`poller/schedule-cron.ts` calls `isCronDue(expr, now, timezone)` (`server/schedules/cron.ts`,
+`croner`) with a same-minute refire guard, and hands due rows to
+`poller/execute-schedule-run.ts`, which threads model/timeout into the workflow's `RunContext`.
+Session-vertical prompts interpolate `{{configKey}}` placeholders generically
+(`server/prompt-interpolate.ts`, single-pass). Managed from `/schedules` and Settings → Kinds
+in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH /api/schedules/:id`,
+`POST /api/schedules/:id/run`, `GET /api/schedules/:id/export`, `POST /api/schedules/import`)
+and `server/routes/kinds.ts` (`GET /api/kinds`, `PUT`/`DELETE /api/kinds/:kind`, home tier only).
+
+## Skills and agent roles
+
+Both ship in the bundled plugin (`plugin/skills/`, `plugin/agents/`) and reach launched
+agents via `--plugin-dir`. **Single source — there is no repo or home tier.** Earlier
+revisions had `<repo>/.octomux/{skills,agents}` and `~/.octomux/agents`; nothing ever
+delivered them (`syncAgents()` is a no-op in both harnesses), so they were listed over
+REST and invisible to every running agent. They are gone; don't reintroduce them.
+
+Users' own skills/subagents live in Claude Code's native `~/.claude/skills/`,
+`~/.claude/agents/`, and `<repo>/.claude/` — the harness reads those directly and octomux
+neither manages nor lists them. Repo-specific customization goes there.
+
+The skills are also installable into a user's own sessions via the plugin marketplace
+(`.claude-plugin/marketplace.json`): `/plugin marketplace add ShreyPaharia/octomux-agents`
+then `/plugin install octomux@octomux`.
+
+`workflows/review-deep.js` is a Claude Code _workflow_ script, which plugins cannot ship —
+`octomux init` installs it to `~/.claude/workflows/` copy-if-absent.
+
+The six cron-kind `SKILL.md` files were folded into `kinds/*.json`; the prompt lives there
+now, and the overlay plugin (`server/octomux-plugin.ts`) is the only delivery path for
+task-backed schedule prompts.
 
 ## Testing Patterns
 
@@ -153,9 +203,8 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 - Shared test harness: `server/test-helpers.ts` (DEFAULTS fixtures, insert/get helpers,
   shell mock assertion helpers via `findExecCall`/`countExecCalls`)
 - DB tests use in-memory SQLite via `createTestDb()` → calls `setDb()` for isolation
-- task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
+- task-engine tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
-- `CLAUDE_INIT_DELAY` is 0 in test env to avoid 3s sleeps
 - `OCTOMUX_AI_TASK_NAMING=1` (or `true`) — optional: on task create with `initial_prompt`, run Claude CLI to polish omitted title/description; off by default so POST `/api/tasks` returns immediately without that subprocess
 - E2E: Playwright tests in `e2e/`, config in `playwright.config.ts`
 - E2E: `webServer` config auto-starts Express + Vite, reuses running servers in dev
@@ -169,12 +218,14 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 - ESLint: `@typescript-eslint/no-explicit-any` is warn (off in test files)
 - Conventional commits enforced: `feat(scope): message`, `fix(scope): message`, etc.
 - Kebab-case scopes, 100 char header max
+- Never add any AI attribution to commits or PRs — no `Co-Authored-By: Claude …` trailers,
+  no "Generated with Claude Code" footers, nothing of the kind
 - Use template literals for SQL with `datetime('now')` — single quotes inside backticks
 
 ## Gotchas
 
 - SQLite `datetime('now')` needs single-quoted `'now'` — use template literals, not regular strings
-- `fs` mock for task-runner needs `default: mocked` in vi.mock return (default import)
+- `fs` mock for task-engine needs `default: mocked` in vi.mock return (default import)
 - Express 5 uses `req.params` differently — use `as Record<string, string>` if needed
 - better-sqlite3 is synchronous — no await needed for DB calls
 - node-pty `spawn-helper` may lack +x after install — postinstall script fixes this
@@ -195,18 +246,24 @@ Cron expressions use `croner` (ranges, steps, lists, named weekdays — e.g. `*/
 
 ## Dispatching parallel Claude Code sub-agents in this repo
 
-When working on this codebase via Claude Code, parallel `Agent({ isolation: "worktree" })`
-dispatches have proved unreliable: agents leaked back into the parent worktree and
-clobbered each other's commits during the wave-2 implementation. Until that's
-verified end-to-end, default to **sequential dispatch** — one sub-agent at a time, or
-a single agent for an entire wave.
+When working on this codebase via Claude Code, **default to parallel dispatch** — fan
+out independent work across sub-agents concurrently. This is the intended way to move
+fast on multi-part changes.
 
-If you must run agents in parallel:
+To keep parallel `Agent({ isolation: "worktree" })` dispatches reliable (an earlier
+wave saw agents leak back into the parent worktree and clobber each other's commits),
+always:
 
+- Give each agent a **disjoint file set** — no two concurrent agents editing the same
+  file. Split the work so their diffs can't overlap.
 - After dispatch, capture each agent's actual worktree path with `git worktree list`.
 - Pass the absolute path explicitly in the prompt and tell the agent to `cd` there
   before any file or git operation.
-- Verify both agents are on distinct branches before they start committing.
+- Verify each agent is on its own distinct branch before it starts committing.
+
+Fall back to sequential dispatch only for a phase whose file sets genuinely can't be
+made disjoint (e.g. several changes to the same shared file like `api.ts` or the DB
+schema).
 
 This is unrelated to octomux's own runtime tasks (worktree + tmux + agents) — see
 "Task Lifecycle" above for that. The note here is purely about Claude Code's

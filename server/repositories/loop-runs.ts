@@ -10,14 +10,19 @@ export interface CreateLoopRunInput {
   spec_json: string;
   max_iterations?: number | null;
   budget_json?: string | null;
+  group_id?: string | null;
+  /** Pre-generated id, so a caller can thread it into `insertRun({ loopRunId })`
+   * before this row exists (see doc-drift/prod-log-triage services). Defaults
+   * to a fresh nanoid when omitted. */
+  id?: string;
 }
 
 export function createLoopRun(input: CreateLoopRunInput): LoopRun {
-  const id = nanoid(12);
+  const id = input.id ?? nanoid(12);
   getDb()
     .prepare(
-      `INSERT INTO loop_runs (id, task_id, spec_json, max_iterations, budget_json)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO loop_runs (id, task_id, spec_json, max_iterations, budget_json, group_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -25,6 +30,7 @@ export function createLoopRun(input: CreateLoopRunInput): LoopRun {
       input.spec_json,
       input.max_iterations ?? null,
       input.budget_json ?? null,
+      input.group_id ?? null,
     );
   const row = getLoopRun(id);
   if (!row) throw new Error('failed to read loop_run after insert');
@@ -81,6 +87,13 @@ export function appendIteration(loopRunId: string, row: AppendIterationInput): L
 
   logger.info({ loop_run_id: loopRunId, n }, 'loop_iteration appended');
   return db.prepare(`SELECT * FROM loop_iterations WHERE id = ?`).get(id) as LoopIteration;
+}
+
+/** Records how many past-run learnings were seeded into the prompt for this iteration (benefit metric). */
+export function setLearningsSeeded(iterationId: string, count: number): void {
+  getDb()
+    .prepare(`UPDATE loop_iterations SET learnings_seeded = ? WHERE id = ?`)
+    .run(count, iterationId);
 }
 
 export interface RecordEmitInput {

@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import { childLogger } from '../logger.js';
 import { execTmux } from '../tmux-bin.js';
-import type { Task, Agent } from '../types.js';
+import type { Task, Worker } from '../types.js';
 import {
   setRuntimeState,
   stopAllAgents,
@@ -19,6 +19,7 @@ import {
   resolveTaskPermissionPrompts,
   resolveAgentPermissionPrompts,
 } from '../repositories/permission-prompts.js';
+import { getHarness } from '../harnesses/index.js';
 import { isTmuxTargetMissing } from './sessions.js';
 import { scratchDirFor } from './reconcile.js';
 import { cleanupLinkedSessions } from './sessions.js';
@@ -171,13 +172,27 @@ export async function deleteTask(task: Task): Promise<void> {
       break;
     }
     case 'existing':
-    case 'none':
-      // Intentionally do nothing — user's worktree/repo must never be touched.
-      logger.info(
-        { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
-        'deleteTask: skipped filesystem cleanup (user-owned path)',
-      );
+    case 'none': {
+      // The user's worktree/repo is never removed — but our hook wiring must
+      // be, or it outlives the worker rows holding its token and every later
+      // session in that directory 401s on every hook. (Two live tasks sharing
+      // one path already clobber each other's token at install time, so there
+      // is nothing extra to guard here.)
+      const dir = task.worktree || task.repo_path;
+      try {
+        await getHarness(task.harness_id).uninstallHooks(dir);
+        logger.info(
+          { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode, dir },
+          'deleteTask: hook config removed from user-owned path',
+        );
+      } catch (err) {
+        logger.warn(
+          { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode, dir, err },
+          'deleteTask: hook config removal failed',
+        );
+      }
       break;
+    }
     case 'scratch': {
       const dir = task.worktree || scratchDirFor(task.id);
       try {
@@ -215,7 +230,7 @@ export async function deleteTask(task: Task): Promise<void> {
   logger.info({ task_id: task.id, operation: 'deleteTask' }, 'deleteTask: complete');
 }
 
-export async function stopAgent(task: Task, agent: Agent): Promise<void> {
+export async function stopAgent(task: Task, agent: Worker): Promise<void> {
   logger.info(
     {
       task_id: task.id,

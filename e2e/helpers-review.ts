@@ -91,7 +91,7 @@ export async function createReviewFixture(
         },
         {
           id: `${taskId}-c2`,
-          file_path: 'server/publish-review.ts',
+          file_path: 'server/workflows/reviewer/publish-review.ts',
           line: 1,
           side: 'new',
           body: 'Consider using a const here.',

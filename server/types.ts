@@ -21,7 +21,28 @@ export interface TicketCompliance {
   reason?: string;
 }
 
+/**
+ * A single ranked "look at this" — the pyramid's middle tier. Each highlight is
+ * linked to specific code so the walkthrough summary and the diff stay welded.
+ */
+export interface WalkthroughHighlight {
+  /** One-line "look at this" the reviewer actually needs to check. */
+  title: string;
+  /** Diff-relative file path this highlight points at (must exist in the diff). */
+  file: string;
+  /** Optional anchor line in `file`. */
+  line?: number;
+  /** Which side of the diff `line` refers to. */
+  side?: 'old' | 'new';
+  /** Optional one-sentence expansion, shown on demand. */
+  detail?: string;
+}
+
 export interface Walkthrough {
+  /** One-line verdict: what this PR does + its risk, in a sentence. */
+  verdict: string;
+  /** ≤5 ranked, code-linked highlights — the only things that actually matter. */
+  highlights: WalkthroughHighlight[];
   global: {
     type: PRType;
     risk: 'low' | 'medium' | 'high';
@@ -30,7 +51,6 @@ export interface Walkthrough {
     security_concerns: string | null;
     ticket_compliance: TicketCompliance[];
     summary: string;
-    key_review_points: string[];
   };
   groups: Array<{
     name: string;
@@ -66,6 +86,9 @@ export interface PublishedReview {
   published_at: string;
 }
 
+// Wire shape returned by GET /api/repos/:repoPath/learnings (frontend Settings > Reviews panel).
+// No longer backed by its own table — server/routes/learnings.ts maps it from the
+// agent_learnings 'review' lane (see spec/agent-learnings-store.md Task 9).
 export interface ReviewLearning {
   id: string;
   repo_path: string;
@@ -74,6 +97,22 @@ export interface ReviewLearning {
   usage_count: number;
   last_used_at: string | null;
   created_at: string;
+}
+
+export interface AgentLearning {
+  id: string;
+  repo_path: string;
+  lane: string;
+  trigger: string;
+  lesson: string;
+  evidence: string | null;
+  source_run_id: string | null;
+  source_commit: string | null;
+  usage_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  superseded_at: string | null;
+  superseded_reason: string | null;
 }
 
 export type CommentStatus = 'draft' | 'accepted' | 'rejected' | 'published' | 'stale';
@@ -93,6 +132,24 @@ export interface LoopRun {
   max_iterations: number | null;
   budget_json: string | null;
   termination_reason: string | null;
+  group_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Best-of-N loop group types ────────────────────────────────────────────
+
+export type JudgeStatus = 'not_run' | 'running' | 'done' | 'error';
+
+export interface LoopGroup {
+  id: string;
+  spec_json: string;
+  n: number;
+  repo_path: string;
+  base_branch: string;
+  judge_status: JudgeStatus;
+  winner_loop_run_id: string | null;
+  judge_rationale: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -116,6 +173,28 @@ export interface LoopSpec {
   maxIterations: number;
   budget?: { tokens?: number; timeMs?: number };
   noProgress?: { afterIters: number };
+  /** The `runs.id` this loop's run row lives under — round-tripped through
+   * spec_json (see `startLoop`) so the loop engine can `finishRun` it at
+   * termination without a schema migration. */
+  runId?: string;
+}
+
+// ── PR-extract workflow types ─────────────────────────────────────────────
+
+export type PrExtractRisk = 'low' | 'medium' | 'high';
+
+export interface PrExtract {
+  id: string;
+  task_id: string;
+  repo_path: string;
+  pr_number: number;
+  pr_head_sha: string;
+  area: string;
+  risk: PrExtractRisk;
+  has_migration: boolean;
+  surface: string;
+  loc: number;
+  created_at: string;
 }
 
 export type CommentBucket = 'actionable' | 'informational';

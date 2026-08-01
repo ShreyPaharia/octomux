@@ -21,8 +21,10 @@ vi.mock('../../db.js', () => ({
   })),
 }));
 
-vi.mock('../store.js', async () => {
-  const actual = await vi.importActual<typeof import('../store.js')>('../store.js');
+vi.mock('../../repositories/orchestrator.js', async () => {
+  const actual = await vi.importActual<typeof import('../../repositories/orchestrator.js')>(
+    '../../repositories/orchestrator.js',
+  );
   return {
     ...actual,
     getManagedTask: vi.fn(() => undefined),

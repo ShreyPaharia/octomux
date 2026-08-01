@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getSettings, updateSettings, resolveClaudeFlags, DEFAULT_SETTINGS } from './settings.js';
+import {
+  getSettings,
+  updateSettings,
+  resolveClaudeFlags,
+  getStoredApprovalTimeoutMs,
+  DEFAULT_SETTINGS,
+} from './settings.js';
 import type { OctomuxSettings } from './settings.js';
 
 // Mock fs
@@ -304,6 +310,149 @@ describe('deleteGraceHours', () => {
         /Invalid deleteGraceHours/,
       );
     });
+  });
+});
+
+describe('approvalTimeoutMs / hookTimeoutMs / aiTaskNaming settings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFs.mkdir.mockResolvedValue(undefined);
+    mockFs.writeFile.mockResolvedValue(undefined);
+  });
+
+  describe('getSettings', () => {
+    it.each([
+      ['approvalTimeoutMs', 90000, 90000],
+      ['approvalTimeoutMs', -1, undefined],
+      ['approvalTimeoutMs', 0, undefined],
+      ['approvalTimeoutMs', 'not-a-number', undefined],
+      ['hookTimeoutMs', 60000, 60000],
+      ['hookTimeoutMs', -1, undefined],
+      ['hookTimeoutMs', 'nope', undefined],
+    ])('parses stored %s = %p as %p', async (key, stored, expected) => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ editor: 'nvim', harnesses: {}, [key]: stored }),
+      );
+      const settings = await getSettings();
+      expect((settings as any)[key]).toBe(expected);
+    });
+
+    it.each([
+      [true, true],
+      [false, false],
+      ['yes', undefined],
+      [1, undefined],
+    ])('parses stored aiTaskNaming = %p as %p', async (stored, expected) => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ editor: 'nvim', harnesses: {}, aiTaskNaming: stored }),
+      );
+      const settings = await getSettings();
+      expect(settings.aiTaskNaming).toBe(expected);
+    });
+
+    it('returns undefined for all three when absent from disk', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify({ editor: 'nvim', harnesses: {} }));
+      const settings = await getSettings();
+      expect(settings.approvalTimeoutMs).toBeUndefined();
+      expect(settings.hookTimeoutMs).toBeUndefined();
+      expect(settings.aiTaskNaming).toBeUndefined();
+    });
+  });
+
+  describe('updateSettings', () => {
+    beforeEach(() => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+    });
+
+    it('persists approvalTimeoutMs and hookTimeoutMs and round-trips them', async () => {
+      const result = await updateSettings({ approvalTimeoutMs: 90000, hookTimeoutMs: 60000 });
+      expect(result.approvalTimeoutMs).toBe(90000);
+      expect(result.hookTimeoutMs).toBe(60000);
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      const written = JSON.parse(writtenJson);
+      expect(written.approvalTimeoutMs).toBe(90000);
+      expect(written.hookTimeoutMs).toBe(60000);
+    });
+
+    it('persists aiTaskNaming: true', async () => {
+      const result = await updateSettings({ aiTaskNaming: true });
+      expect(result.aiTaskNaming).toBe(true);
+    });
+
+    it.each([
+      ['approvalTimeoutMs', 0],
+      ['approvalTimeoutMs', -5],
+      ['approvalTimeoutMs', NaN],
+      ['hookTimeoutMs', 0],
+      ['hookTimeoutMs', -5],
+    ])('rejects invalid %s = %p', async (key, value) => {
+      await expect(updateSettings({ [key]: value } as any)).rejects.toThrow(
+        new RegExp(`Invalid ${key}`),
+      );
+    });
+
+    it('rejects a non-boolean aiTaskNaming', async () => {
+      await expect(updateSettings({ aiTaskNaming: 'yes' as any })).rejects.toThrow(
+        /Invalid aiTaskNaming/,
+      );
+    });
+
+    it('leaves the three fields untouched when not in patch', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({
+          ...DEFAULT_SETTINGS,
+          approvalTimeoutMs: 90000,
+          hookTimeoutMs: 60000,
+          aiTaskNaming: true,
+        }),
+      );
+      const result = await updateSettings({ editor: 'vscode' });
+      expect(result.approvalTimeoutMs).toBe(90000);
+      expect(result.hookTimeoutMs).toBe(60000);
+      expect(result.aiTaskNaming).toBe(true);
+    });
+  });
+});
+
+describe('getStoredApprovalTimeoutMs', () => {
+  // getStoredApprovalTimeoutMs uses fs.readFileSync (via the default `fs`
+  // import), which the mock at the top of this file passes through to the
+  // real implementation (only fs.promises.* is mocked) — so this exercises
+  // the real filesystem against a temp settings.json, keyed off OCTOMUX_DATA_DIR
+  // (octomuxRoot() reads it at call time, so no module reset is needed).
+  let dir: string;
+  let prevDataDir: string | undefined;
+
+  beforeEach(async () => {
+    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const os = await import('os');
+    const path = await import('path');
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'octomux-settings-test-'));
+    prevDataDir = process.env.OCTOMUX_DATA_DIR;
+    process.env.OCTOMUX_DATA_DIR = dir;
+  });
+
+  afterEach(async () => {
+    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    if (prevDataDir === undefined) delete process.env.OCTOMUX_DATA_DIR;
+    else process.env.OCTOMUX_DATA_DIR = prevDataDir;
+    fsSync.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['{"approvalTimeoutMs": 90000}', 90000],
+    ['{"approvalTimeoutMs": -1}', undefined],
+    ['{}', undefined],
+    ['not json', undefined],
+  ])('reads %s as %p from settings.json on disk', async (contents, expected) => {
+    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const path = await import('path');
+    fsSync.writeFileSync(path.join(dir, 'settings.json'), contents);
+    expect(getStoredApprovalTimeoutMs()).toBe(expected);
+  });
+
+  it('returns undefined when settings.json does not exist', () => {
+    expect(getStoredApprovalTimeoutMs()).toBeUndefined();
   });
 });
 

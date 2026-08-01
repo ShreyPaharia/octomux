@@ -14,6 +14,9 @@ function throwSettingsError(err: unknown): never {
   const clientInputError =
     message.startsWith('Invalid editor') ||
     message.startsWith('Invalid claudeFlags') ||
+    message.startsWith('Invalid approvalTimeoutMs') ||
+    message.startsWith('Invalid hookTimeoutMs') ||
+    message.startsWith('Invalid aiTaskNaming') ||
     message.includes('Invalid claude-code') ||
     message.includes('Invalid harnesses.claude-code');
   if (clientInputError) {

@@ -4,18 +4,19 @@ import { broadcast } from '../events.js';
 import { readGithubLogin } from '../github-login.js';
 import { childLogger } from '../logger.js';
 import { buildPrReviewPrompt } from '../review-tasks.js';
-import { createReviewTaskFromPr } from '../services/review-service.js';
+import { getWorkflow } from '../workflows/registry.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import {
   listTaskRepoPaths,
   findExistingPrTask,
+  hasTrashedPrReviewTask,
   listAutoReviewDrafts,
   hardDeleteTask,
   updateTaskPromptAndSha,
   setPrHeadSha,
 } from '../repositories/tasks.js';
 import { deleteWorktree } from '../repositories/worktrees.js';
-import { findFirstActiveAgent } from '../repositories/agent-runtime.js';
+import { findFirstActiveAgent } from '../repositories/workers.js';
 import { checkoutRef, fetchOriginQuiet, isAncestor } from '../task-engine/git.js';
 import { repoNameWithOwner } from './github-repo.js';
 
@@ -235,17 +236,31 @@ async function upsertReviewTask(
     return { action: 'skipped' };
   }
 
-  const { id } = await createReviewTaskFromPr({
-    repo_path: repoPath,
-    pr_number: pr.number,
-    pr_url: pr.url,
-    pr_head_sha: pr.headRefOid,
-    base_branch: pr.baseRefName,
-    title: pr.title,
-    author: pr.author?.login ?? null,
-    requested_at: new Date().toISOString(),
+  // The user deleted this PR's review — don't resurrect it while the trashed
+  // task exists (its worktree is only removed when the trash purges, so an
+  // early recreate would error on the leftover worktree anyway).
+  if (hasTrashedPrReviewTask(repoPath, pr.number)) {
+    return { action: 'skipped' };
+  }
+
+  await getWorkflow('reviewer')!.run!({
+    repoPath,
+    config: {},
+    event: {
+      pr_number: pr.number,
+      pr_url: pr.url,
+      pr_head_sha: pr.headRefOid,
+      base_branch: pr.baseRefName,
+      title: pr.title,
+      author: pr.author?.login ?? null,
+      requested_at: new Date().toISOString(),
+    },
   });
-  return { action: 'created', taskId: id };
+  const created = findExistingPrTask(repoPath, pr.number);
+  if (!created || created.source !== 'auto_review') {
+    return { action: 'skipped' };
+  }
+  return { action: 'created', taskId: created.id };
 }
 
 function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<number>): string[] {

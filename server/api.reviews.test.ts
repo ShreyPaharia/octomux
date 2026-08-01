@@ -22,7 +22,7 @@ vi.mock('./tmux-input.js', () => ({
   sendMessageToAgent: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('./publish-review.js', () => ({
+vi.mock('./workflows/reviewer/publish-review.js', () => ({
   publishReview: vi.fn().mockResolvedValue({ github_review_url: 'https://github.com/test' }),
 }));
 
@@ -92,12 +92,20 @@ describe('GET /api/reviews/:id', () => {
     app = createApp();
   });
 
-  it('returns full review detail', async () => {
+  it('returns full review detail with all comments (active + history for Discussion)', async () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO inline_comments
+         (id, task_id, file_path, line, side, original_commit_sha, body, status, kind, review_run_id)
+       VALUES ('cc3', 'task-rev1', 'a.ts', 3, 'new', 'sha-head', 'rejected', 'rejected', 'comment', 'run-r1')`,
+    ).run();
     const res = await request(app).get('/api/reviews/task-rev1');
     expect(res.status).toBe(200);
     expect(res.body.task.id).toBe('task-rev1');
     expect(res.body.latest_run.id).toBe('run-r1');
-    expect(res.body.comments).toHaveLength(2);
+    // The rejected comment is included so the Discussion tab can render history.
+    expect(res.body.comments).toHaveLength(3);
+    expect(res.body.comments.some((c: { status: string }) => c.status === 'rejected')).toBe(true);
     expect(res.body.published_history).toEqual([]);
   });
 
@@ -180,7 +188,7 @@ describe('POST /api/tasks/:id/review-runs', () => {
     const db = getDb();
     db.prepare(`UPDATE tasks SET runtime_state = 'running' WHERE id = 'task-rev1'`).run();
     db.prepare(
-      `INSERT INTO agents (id, task_id, window_index, label, status, hook_token)
+      `INSERT INTO workers (id, task_id, window_index, label, status, hook_token)
        VALUES ('ag1', 'task-rev1', 0, 'Agent', 'running', '')`,
     ).run();
     const res = await request(app).post('/api/tasks/task-rev1/review-runs').send();
@@ -213,8 +221,8 @@ describe('GET /api/repos/:repoPath/learnings', () => {
     app = createApp();
     const db = getDb();
     db.prepare(
-      `INSERT INTO review_learnings (id, repo_path, why)
-       VALUES ('l1', '/repos/foo', 'avoid bare exceptions')`,
+      `INSERT INTO agent_learnings (id, repo_path, lane, trigger, lesson, evidence)
+       VALUES ('l1', '/repos/foo', 'review', 'PR review learning', 'avoid bare exceptions', 'c1')`,
     ).run();
   });
 
@@ -223,6 +231,7 @@ describe('GET /api/repos/:repoPath/learnings', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].why).toBe('avoid bare exceptions');
+    expect(res.body[0].created_from_comment_id).toBe('c1');
   });
 
   it('returns empty array for unknown repo', async () => {
@@ -240,15 +249,15 @@ describe('DELETE /api/learnings/:id', () => {
     app = createApp();
     const db = getDb();
     db.prepare(
-      `INSERT INTO review_learnings (id, repo_path, why)
-       VALUES ('l1', '/repos/foo', 'avoid bare exceptions')`,
+      `INSERT INTO agent_learnings (id, repo_path, lane, trigger, lesson, evidence)
+       VALUES ('l1', '/repos/foo', 'review', 'PR review learning', 'avoid bare exceptions', 'review')`,
     ).run();
   });
 
   it('deletes a learning and returns 204', async () => {
     const res = await request(app).delete('/api/learnings/l1');
     expect(res.status).toBe(204);
-    const remaining = getDb().prepare(`SELECT * FROM review_learnings WHERE id = 'l1'`).all();
+    const remaining = getDb().prepare(`SELECT * FROM agent_learnings WHERE id = 'l1'`).all();
     expect(remaining).toHaveLength(0);
   });
 

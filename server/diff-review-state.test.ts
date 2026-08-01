@@ -43,7 +43,11 @@ async function commit(dir: string, files: Record<string, string>, msg: string): 
   await execFile('git', ['-C', dir, 'commit', '-q', '-m', msg]);
 }
 
-describe('decorateDiffSummaryWithReviewState', () => {
+// Every case here drives real `git` subprocesses against a temp repo, which
+// costs ~2.5-3.7s per test on its own. Under the full suite's parallel load that
+// overruns vitest's 5s default and the file flakes. 20s leaves headroom without
+// hiding a genuine hang.
+describe('decorateDiffSummaryWithReviewState', { timeout: 20_000 }, () => {
   let repo: string;
   let baseSha: string;
 

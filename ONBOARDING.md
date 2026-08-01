@@ -52,7 +52,7 @@ octomux create-task -t "Spike UI" -r . --harness cursor  # Cursor CLI
 
 **Per-agent mix:** on a running task, **Add agent** can attach a second window under either harness (e.g. Claude plans, Cursor implements).
 
-Custom agent personas live under **Settings → Agents** (`.md` files). Claude uses them via `--agent`; Cursor gets matching rules under each worktree’s `.cursor/rules/`.
+Agent role definitions (orchestrator, planner, reviewer) ship in octomux's bundled plugin and reach both harnesses via `--plugin-dir` — there is no repo or home tier to edit. Your own skills and subagents go in Claude Code's native `~/.claude/skills/`, `~/.claude/agents/`, or `<repo>/.claude/`, which the harness reads directly and octomux does not manage.
 
 ## 4. GitHub CLI (optional)
 
@@ -108,11 +108,13 @@ Draft first if you want to edit title, prompt, and branch before agents start �
 | `./data/tasks.db`             | Task state (development)                                |
 | `~/.octomux/logs/`            | Server + hook logs                                      |
 | `~/.octomux/hooks/<event>.d/` | Lifecycle hooks                                         |
-| `~/.octomux/agents/`          | Custom agent definitions (Claude + Cursor)              |
-| `~/.claude/skills/`           | Skills installed for Claude Code                        |
+| `~/.octomux/kinds/`           | Your own schedule-kind presets (Settings → Kinds)       |
+| `~/.claude/skills/`           | Your own Claude Code skills (read by the harness)       |
+| `~/.claude/workflows/`        | Review workflow scripts installed by `octomux init`     |
 | `<repo>/.worktrees/<task-id>` | Per-task git worktree                                   |
 | `<worktree>/.octomux-hooks/`  | Cursor hook bridge (Cursor tasks)                       |
-| `<worktree>/.cursor/rules/`   | Cursor rules synced from agent definitions              |
+
+Set `OCTOMUX_DATA_DIR` to move the `~/.octomux` root elsewhere — the desktop app does this so it never shares the CLI's data directory.
 
 ## Troubleshooting
 

@@ -49,7 +49,7 @@ test.describe('Task Detail', () => {
   });
 
   test('switches between agent tabs', async ({ page }) => {
-    await page.request.post(`http://localhost:7777/api/tasks/${taskId}/agents`, {
+    await page.request.post(`http://localhost:7777/api/tasks/${taskId}/workers`, {
       data: {},
     });
 

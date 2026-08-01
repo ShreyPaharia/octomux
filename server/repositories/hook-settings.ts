@@ -8,15 +8,6 @@ import { childLogger } from '../logger.js';
 
 const logger = childLogger('repositories/hook-settings');
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface HookSettingRow {
-  scope: string;
-  key: string;
-  enabled: boolean;
-  updated_at: string;
-}
-
 // ─── Reads ────────────────────────────────────────────────────────────────────
 
 /**
@@ -35,27 +26,6 @@ export function getHookEnabled(scope: string, key: string, defaultEnabled = true
     // DB may not be ready — treat as defaultEnabled.
     return defaultEnabled;
   }
-}
-
-/** Fetch a single hook_setting row by (scope, key). Returns undefined if absent. */
-export function getHookSetting(scope: string, key: string): HookSettingRow | undefined {
-  const row = getDb()
-    .prepare(
-      `SELECT scope, key, enabled, updated_at FROM hook_settings WHERE scope = ? AND key = ?`,
-    )
-    .get(scope, key) as
-    | { scope: string; key: string; enabled: number; updated_at: string }
-    | undefined;
-  if (!row) return undefined;
-  return { ...row, enabled: row.enabled !== 0 };
-}
-
-/** List all hook_settings rows (for admin/debug). */
-export function listHookSettings(): HookSettingRow[] {
-  const rows = getDb()
-    .prepare(`SELECT scope, key, enabled, updated_at FROM hook_settings ORDER BY scope, key`)
-    .all() as Array<{ scope: string; key: string; enabled: number; updated_at: string }>;
-  return rows.map((r) => ({ ...r, enabled: r.enabled !== 0 }));
 }
 
 // ─── Writes ───────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
 import { octomuxRoot } from './octomux-root.js';
 import { SCHEMA, applyPragmas } from './db/schema.js';
-import { runMigrations } from './db/migrations.js';
+import { runMigrations, renameAgentWorkerTables } from './db/migrations.js';
 
 export { SCHEMA } from './db/schema.js';
 
@@ -71,6 +71,10 @@ export function pingDb(): void {
 /** Initialize a database with schema and pragmas. */
 export function initDb(instance: Database.Database): void {
   applyPragmas(instance);
+  // Must run before SCHEMA — see the doc comment on renameAgentWorkerTables
+  // for why (SCHEMA's `CREATE TABLE IF NOT EXISTS workers` would otherwise
+  // create an empty placeholder ahead of the real rename on old installs).
+  renameAgentWorkerTables(instance);
   instance.exec(SCHEMA);
   runMigrations(instance);
 }

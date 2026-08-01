@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Task } from '@octomux/types';
 import type {
-  Skill,
   RepoConfig,
   AgentDefinition,
   HarnessSummary,
@@ -14,7 +13,8 @@ import { taskApi } from './api/taskApi';
 import { configApi } from './api/configApi';
 import { reviewApi, type ReviewDetail } from './api/reviewApi';
 import { subscribe } from './event-source';
-import { useResource } from './use-resource';
+import { useResource, REFETCH_THROTTLE_MS } from './use-resource';
+import { throttle } from './throttle';
 
 const DEFAULT_GRACE_HOURS = 6;
 
@@ -65,7 +65,14 @@ export function useTasks() {
 
   useEffect(() => {
     refresh();
-    return subscribe(() => refresh());
+    // useTasks listens to every event of every task, so agent tool-call
+    // broadcasts would otherwise refetch the full list per event.
+    const throttled = throttle(() => void refresh(), REFETCH_THROTTLE_MS);
+    const unsubscribe = subscribe(throttled);
+    return () => {
+      unsubscribe();
+      throttled.cancel();
+    };
   }, [refresh]);
 
   return { tasks, loading, error, refresh, addOptimistic };
@@ -83,13 +90,6 @@ export function useTask(id: string) {
     },
   );
   return { task: data, loading, error, refresh };
-}
-
-export function useSkills() {
-  const { data, loading, error, refresh } = useResource<Skill[]>('skills', () =>
-    configApi.listSkills(),
-  );
-  return { skills: data ?? [], loading, error, refresh };
 }
 
 export function useRepoConfigs() {

@@ -74,7 +74,7 @@ const apiCases = [
   {
     name: 'addAgent with prompt',
     call: () => taskApi.addAgent('t1', { prompt: 'Write tests' }),
-    expectedUrl: '/api/tasks/t1/agents',
+    expectedUrl: '/api/tasks/t1/workers',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({ prompt: 'Write tests' }),
     response: { id: 'a1' },
@@ -82,7 +82,7 @@ const apiCases = [
   {
     name: 'addAgent without data',
     call: () => taskApi.addAgent('t1'),
-    expectedUrl: '/api/tasks/t1/agents',
+    expectedUrl: '/api/tasks/t1/workers',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({}),
     response: { id: 'a1' },
@@ -90,7 +90,7 @@ const apiCases = [
   {
     name: 'stopAgent',
     call: () => taskApi.stopAgent('t1', 'a1'),
-    expectedUrl: '/api/tasks/t1/agents/a1',
+    expectedUrl: '/api/tasks/t1/workers/a1',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
     response: undefined,

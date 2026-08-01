@@ -184,20 +184,12 @@ describe('cursorHarness', () => {
   // syncAgents
   // -------------------------------------------------------------------------
 
-  it('syncAgents mirrors octomux agent definitions under .cursor/rules', async () => {
+  it('syncAgents is a no-op (agents ship via bundled plugin)', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-sync-'));
     try {
       await cursorHarness.syncAgents(tmpDir);
       const rulesDir = path.join(tmpDir, '.cursor', 'rules');
-      const names = fs.readdirSync(rulesDir).filter((f) => f.startsWith('octomux-agent-'));
-      expect(names.length).toBeGreaterThan(0);
-      const sample = fs.readFileSync(path.join(rulesDir, names[0]!), 'utf-8');
-      expect(sample).toMatch(/^---\s*\ndescription:/m);
-      expect(sample).toMatch(/alwaysApply: false/m);
-      await cursorHarness.syncAgents(tmpDir);
-      expect(fs.readdirSync(rulesDir).filter((f) => f.startsWith('octomux-agent-')).length).toBe(
-        names.length,
-      );
+      expect(fs.existsSync(rulesDir)).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -259,6 +251,35 @@ describe('cursorHarness.installHooks', () => {
       await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
       expect(fs.readFileSync(configPath, 'utf-8')).toBe(configBefore);
       expect(fs.readFileSync(hooksPath, 'utf-8')).toBe(hooksBefore);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uninstallHooks removes the bridge dir and our hooks.json', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-rm-'));
+    try {
+      await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
+      await cursorHarness.uninstallHooks(tmpDir);
+      expect(fs.existsSync(path.join(tmpDir, '.octomux-hooks'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, '.cursor', 'hooks.json'))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uninstallHooks keeps a hooks.json that is not ours, and no-ops on a bare dir', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-keep-'));
+    try {
+      const hooksPath = path.join(tmpDir, '.cursor', 'hooks.json');
+      fs.mkdirSync(path.dirname(hooksPath), { recursive: true });
+      fs.writeFileSync(hooksPath, '{"version":1,"hooks":{"sessionStart":[]}}', 'utf-8');
+      await cursorHarness.uninstallHooks(tmpDir);
+      expect(fs.existsSync(hooksPath)).toBe(true);
+
+      const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-bare-'));
+      await expect(cursorHarness.uninstallHooks(bare)).resolves.toBeUndefined();
+      fs.rmSync(bare, { recursive: true, force: true });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

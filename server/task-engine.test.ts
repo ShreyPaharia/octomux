@@ -15,7 +15,7 @@ import {
   countExecCalls,
   DEFAULTS,
 } from './test-helpers.js';
-import type { Task, Agent } from './types.js';
+import type { Task, Worker } from './types.js';
 import { getSettings } from './settings.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -115,7 +115,6 @@ const {
   closeShellTerminal,
   cleanupLinkedSessions,
   cleanupOrphanedViewerSessions,
-  preflightWorktree,
   hopAgent,
   buildAgentStartupCommand,
 } = await import('./task-engine/index.js');
@@ -191,7 +190,7 @@ describe('buildAgentStartupCommand', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
       'Do the thing',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
@@ -211,7 +210,7 @@ describe('startTask', () => {
 
   describe('on success', () => {
     let updated: Task;
-    let agents: Agent[];
+    let agents: Worker[];
 
     beforeEach(async () => {
       insertTask(db);
@@ -273,7 +272,7 @@ describe('startTask', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Do the thing',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
@@ -295,13 +294,16 @@ describe('startTask', () => {
     insertTask(db);
     await startTask({ ...DEFAULTS.task, model: 'claude-sonnet-4-6' } as any);
 
-    expect(findLaunchCmd()).toContain('--model claude-sonnet-4-6');
+    // the launch cmd is itself single-quoted into `zsh -ic '...'`, so the quoted
+    // model value appears in its shell-escaped '\\'' form
+    expect(findLaunchCmd()).toContain("--model '\\''claude-sonnet-4-6'\\''");
   });
 
   // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
 
   it('writes worker-mcp-config.json and adds --mcp-config flag for managed tasks', async () => {
-    const { upsertManagedTask, createConversation } = await import('./orchestrator/store.js');
+    const { upsertManagedTask, createConversation } =
+      await import('./repositories/orchestrator.js');
     insertTask(db);
     // Register the task as orchestrator-managed BEFORE calling startTask
     const convId = createConversation({ title: 'test-conv-mcp' });
@@ -1159,7 +1161,7 @@ describe('addAgent', () => {
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
       'Write tests',
-      { mode: 0o600, flag: 'wx' },
+      { mode: 0o600 },
     );
   });
 
@@ -1264,7 +1266,7 @@ describe('addAgent opts', () => {
     await addAgent(task, { prompt: 'Go', notify_agent_id: 'parent-agent-01' });
     const row = db
       .prepare(
-        'SELECT notify_agent_id FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
+        'SELECT notify_agent_id FROM workers WHERE task_id = ? ORDER BY window_index DESC LIMIT 1',
       )
       .get(task.id) as { notify_agent_id: string | null };
     expect(row.notify_agent_id).toBe('parent-agent-01');
@@ -1274,7 +1276,7 @@ describe('addAgent opts', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(task, { prompt: 'Go', label: 'Researcher' });
     const row = db
-      .prepare('SELECT label FROM agents WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
+      .prepare('SELECT label FROM workers WHERE task_id = ? ORDER BY window_index DESC LIMIT 1')
       .get(task.id) as { label: string };
     expect(row.label).toBe('Researcher');
   });
@@ -1477,6 +1479,35 @@ describe('deleteTask', () => {
         findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['branch', '-D'] }),
       ).toBeUndefined();
     });
+
+    // The repo survives deleteTask, so our hook config must not — a config
+    // whose token outlives the agent row 401s in every later session there.
+    it('strips our hook config from the user-owned repo', async () => {
+      insertTask(db, noneRunningTask);
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          permissions: { allow: ['Bash(ls:*)'] },
+          hooks: {
+            Stop: [
+              { hooks: [{ type: 'http', url: 'http://127.0.0.1:7777/api/hooks/stop?token=t' }] },
+            ],
+            PreToolUse: [{ hooks: [{ type: 'command', command: 'mine' }] }],
+          },
+        }),
+      );
+
+      await deleteTask(noneRunningTask);
+
+      const write = vi
+        .mocked(fs.writeFileSync)
+        .mock.calls.find(([p]) => String(p).endsWith('settings.local.json'));
+      expect(write).toBeDefined();
+      expect(String(write![0])).toContain(noneRunningTask.repo_path);
+      const written = JSON.parse(String(write![1]));
+      expect(written.hooks.Stop).toBeUndefined();
+      expect(written.hooks.PreToolUse).toHaveLength(1);
+      expect(written.permissions.allow).toEqual(['Bash(ls:*)']);
+    });
   });
 
   describe('run_mode=existing (safety)', () => {
@@ -1512,7 +1543,7 @@ describe('stopAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const call = findExecCall(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-window'] });
     expect(call).toBeDefined();
@@ -1525,7 +1556,7 @@ describe('stopAgent', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db, { hook_activity: 'active' });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     expect(agents[0].status).toBe('stopped');
@@ -1537,7 +1568,7 @@ describe('stopAgent', () => {
     insertAgent(db);
     insertAgent(db, { id: 'agent-02', window_index: 1, label: 'Agent 2' });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const agents = getAgents(db, DEFAULTS.task.id);
     const other = agents.find((a) => a.id === 'agent-02')!;
@@ -2122,7 +2153,7 @@ describe('hook integration', () => {
       status: 'pending',
     });
 
-    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Agent);
+    await stopAgent({ ...DEFAULTS.runningTask } as Task, { ...DEFAULTS.agent } as Worker);
 
     const prompts = getPermissionPrompts(db, DEFAULTS.task.id);
     const agent1Prompt = prompts.find((p) => p.agent_id === DEFAULTS.agent.id)!;
@@ -2475,138 +2506,6 @@ describe('deleteTask linked session cleanup', () => {
   });
 });
 
-// ─── preflightWorktree ────────────────────────────────────────────────────────
-
-describe('preflightWorktree', () => {
-  beforeEach(() => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('display-message')) {
-        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('list-windows')) {
-        cb(null, { stdout: String(nextWindowIndex), stderr: '' });
-      } else if (args.includes('new-window')) {
-        nextWindowIndex++;
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: 'true', stderr: '' });
-      }
-    }) as any);
-  });
-
-  const worktreePath = '/repo/.worktrees/my-branch';
-  const config = {
-    repo_path: '/repo',
-    base_branch: null,
-    test_command: 'bun run test',
-    format_command: 'bun run format',
-    lint_command: 'bun run lint',
-    ref_inference_json: null,
-    created_at: '2024-01-01T00:00:00.000Z',
-    updated_at: '2024-01-01T00:00:00.000Z',
-  };
-
-  it('runs format and lint commands with correct cwd', async () => {
-    await preflightWorktree(worktreePath, config);
-
-    const formatCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'sh',
-      argsInclude: ['-c', 'bun run format'],
-    });
-    expect(formatCall).toBeDefined();
-    expect((formatCall![2] as any).cwd).toBe(worktreePath);
-
-    const lintCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'sh',
-      argsInclude: ['-c', 'bun run lint'],
-    });
-    expect(lintCall).toBeDefined();
-    expect((lintCall![2] as any).cwd).toBe(worktreePath);
-  });
-
-  it('commits when git diff has output', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('diff')) {
-        cb(null, { stdout: 'src/foo.ts\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await preflightWorktree(worktreePath, config);
-
-    const addCall = findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['add', '-A'] });
-    expect(addCall).toBeDefined();
-
-    const commitCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'git',
-      argsInclude: ['commit', '-m', 'chore: fix pre-existing formatting'],
-    });
-    expect(commitCall).toBeDefined();
-  });
-
-  it('skips commit when diff is empty', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('diff')) {
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await preflightWorktree(worktreePath, config);
-
-    const commitCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'git',
-      argsInclude: ['commit', '-m', 'chore: fix pre-existing formatting'],
-    });
-    expect(commitCall).toBeUndefined();
-  });
-
-  it('continues when format command fails (lint should still run)', async () => {
-    vi.mocked(execFile).mockImplementation(((
-      _cmd: string,
-      args: string[],
-      optsOrCb: Function | object,
-      maybeCb?: Function,
-    ) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
-      if (args.includes('-c') && args.includes('bun run format')) {
-        cb(new Error('format failed'), null);
-      } else if (args.includes('diff')) {
-        cb(null, { stdout: '', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    }) as any);
-
-    await preflightWorktree(worktreePath, config);
-
-    const lintCall = findExecCall(vi.mocked(execFile), {
-      cmd: 'sh',
-      argsInclude: ['-c', 'bun run lint'],
-    });
-    expect(lintCall).toBeDefined();
-  });
-});
-
 // ─── hopAgent ────────────────────────────────────────────────────────────────
 
 describe('hopAgent', () => {
@@ -2701,12 +2600,12 @@ describe('hopAgent', () => {
       worktree: '/tmp/wt-t',
     });
     const agent = insertAgent(db, { id: 'agChat', task_id: null });
-    db.prepare(`UPDATE agents SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
+    db.prepare(`UPDATE workers SET tmux_session = 'octomux-chat-agChat' WHERE id = 'agChat'`).run();
     const reloaded = {
       ...agent,
       task_id: null,
       tmux_session: 'octomux-chat-agChat',
-    } as Agent;
+    } as Worker;
 
     const updated = await hopAgent(reloaded, 'tT');
     expect(updated.task_id).toBe('tT');

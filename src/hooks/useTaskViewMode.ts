@@ -66,10 +66,10 @@ export function useTaskViewMode({
     }
   }, [taskId, activeWindow, mode]);
 
-  const firstAgentWindow = task?.agents?.[0]?.window_index ?? null;
+  const firstAgentWindow = task?.workers?.[0]?.window_index ?? null;
   useEffect(() => {
-    if (agentParam && task?.agents) {
-      const agent = task.agents.find((a) => a.id === agentParam);
+    if (agentParam && task?.workers) {
+      const agent = task.workers.find((a) => a.id === agentParam);
       if (agent) {
         setActiveWindow(agent.window_index);
         return;
@@ -78,7 +78,7 @@ export function useTaskViewMode({
     if (activeWindow === null && firstAgentWindow !== null) {
       setActiveWindow(firstAgentWindow);
     }
-  }, [firstAgentWindow, activeWindow, agentParam, task?.agents]);
+  }, [firstAgentWindow, activeWindow, agentParam, task?.workers]);
 
   useEffect(() => {
     if (task && task.runtime_state !== 'running') {

@@ -4,6 +4,7 @@ import os from 'os';
 import readline from 'readline';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { fileURLToPath } from 'url';
 import { errorMessage, success } from '../format.js';
 
 interface InitOptions {
@@ -59,6 +60,57 @@ function normalizeProjectKey(raw: string): string {
     throw new Error(`Project key "${raw}" must match [A-Z][A-Z0-9]+ (e.g. PROJ, ENG, INFRA2)`);
   }
   return upper;
+}
+
+/**
+ * Locate the packaged `workflows/` dir by walking up from this module, mirroring
+ * `bundledOctomuxPluginDir()` in the server. Returns null when not found (e.g. a
+ * partial install) so init never hard-fails on an optional asset.
+ */
+function bundledWorkflowsDir(): string | null {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, 'workflows');
+    if (fs.existsSync(path.join(candidate, 'review-deep.js'))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Install bundled Claude Code workflow scripts into `~/.claude/workflows/`.
+ *
+ * Claude Code plugins cannot ship workflow scripts, but `/octomux:review-deep`
+ * invokes `Workflow({ scriptPath: "~/.claude/workflows/review-deep.js" })` — so
+ * without this step the skill silently cannot run.
+ *
+ * Copy-if-absent. An existing file that differs is left alone with a warning:
+ * clobbering it would discard a user's edits.
+ */
+async function installWorkflows(): Promise<void> {
+  const srcDir = bundledWorkflowsDir();
+  if (!srcDir) return;
+
+  const destDir = path.join(os.homedir(), '.claude', 'workflows');
+  await fs.promises.mkdir(destDir, { recursive: true });
+
+  for (const entry of await fs.promises.readdir(srcDir)) {
+    if (!entry.endsWith('.js')) continue;
+    const src = path.join(srcDir, entry);
+    const dest = path.join(destDir, entry);
+
+    const existing = await fs.promises.readFile(dest, 'utf-8').catch(() => null);
+    if (existing === null) {
+      await fs.promises.copyFile(src, dest);
+      success(`Installed ${dest}`);
+      continue;
+    }
+    if (existing !== (await fs.promises.readFile(src, 'utf-8'))) {
+      console.log(chalk.yellow(`  ! ${dest} differs from the bundled copy — left unchanged`));
+    }
+  }
 }
 
 function promptOnce(rl: readline.Interface, question: string, def?: string): Promise<string> {
@@ -159,8 +211,21 @@ export function registerInit(program: Command): void {
 
       console.log('');
       success(`Wrote ${settingsPath()}`);
+
+      try {
+        await installWorkflows();
+      } catch (err) {
+        // Optional asset — never fail init over it.
+        console.log(
+          chalk.yellow(`  ! Could not install workflow scripts: ${(err as Error).message}`),
+        );
+      }
+
       console.log('');
       console.log(chalk.bold('Optional next steps:'));
+      console.log('  • Use the octomux skills in your own Claude Code sessions:');
+      console.log('    ' + chalk.yellow('/plugin marketplace add ShreyPaharia/octomux-agents'));
+      console.log('    ' + chalk.yellow('/plugin install octomux@octomux'));
       console.log('  • Authenticate GitHub (for the create-pr skill):');
       console.log('    ' + chalk.yellow('gh auth login'));
       console.log('  • Set Jira credentials (only needed for the jira-status hook):');

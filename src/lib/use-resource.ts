@@ -19,9 +19,15 @@
  * There is intentionally NO cross-component cache: each mount owns its own state.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useServerEvents } from './use-server-events';
 import type { ServerEvent } from './event-source';
+import { throttle } from './throttle';
+
+// Agents broadcast task:updated per tool call, so event bursts are common.
+// Throttle event-driven refetches (leading edge immediate) so a burst costs
+// one refetch + one trailing catch-up instead of one refetch per event.
+export const REFETCH_THROTTLE_MS = 500;
 
 export interface UseResourceResult<T> {
   data: T | null;
@@ -76,7 +82,12 @@ export function useResource<T>(
     refresh();
   }, [key, refresh]);
 
-  useServerEvents(key !== null && opts?.events ? () => refresh() : null, opts?.events);
+  const throttledRefresh = useMemo(
+    () => throttle(() => void refresh(), REFETCH_THROTTLE_MS),
+    [refresh],
+  );
+  useEffect(() => () => throttledRefresh.cancel(), [throttledRefresh]);
+  useServerEvents(key !== null && opts?.events ? throttledRefresh : null, opts?.events);
 
   return { data, loading, error, refresh };
 }
