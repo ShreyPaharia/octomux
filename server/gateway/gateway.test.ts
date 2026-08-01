@@ -274,6 +274,47 @@ describe('gateway glue', () => {
     ]);
   });
 
+  it('a card with args.summary sends the summary as payload — link only a trailing ref', async () => {
+    createAgent({
+      name: 'Ops Agent',
+      system_prompt: 'You watch prod.',
+      channel: 'telegram',
+      channel_config: JSON.stringify({ threadKey: 'chat-1' }),
+    });
+
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+    await gw.handleInbound(inbound());
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    pushToConversation(
+      convId,
+      JSON.stringify({
+        type: 'card',
+        id: 'card-1',
+        command: 'approve-plan',
+        args: {
+          task_id: 't1',
+          plan_path: 'plan.json',
+          artifact_url: '/api/orchestrator/artifact?task=t1&path=plan.json',
+          summary: 'Add a widget.\n\nFiles:\n• src/widget.ts — create',
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sent).toHaveLength(1);
+    const text = sent[0]!.text;
+    // Summary is the payload; the URL is a trailing secondary ref, never alone.
+    expect(text).toContain('Add a widget.');
+    expect(text).toContain('src/widget.ts — create');
+    expect(text).toContain('(ref: /api/orchestrator/artifact?task=t1&path=plan.json)');
+    expect(text).not.toBe(
+      '[t1] plan ready for review: /api/orchestrator/artifact?task=t1&path=plan.json',
+    );
+  });
+
   it('start() pre-registers the proactive relay for a bound agent — a supervisor push reaches the channel with NO prior inbound (survives restart)', async () => {
     const agentId = createAgent({
       name: 'Ops Agent',

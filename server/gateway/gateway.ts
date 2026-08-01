@@ -117,6 +117,7 @@ export function createGateway(
     const args = event.args;
     const taskId = typeof args.task_id === 'string' ? args.task_id : undefined;
     const artifactUrl = typeof args.artifact_url === 'string' ? args.artifact_url : undefined;
+    const summary = typeof args.summary === 'string' ? args.summary.trim() : '';
     const label =
       event.command === 'approve-plan'
         ? 'plan ready for review'
@@ -124,6 +125,13 @@ export function createGateway(
           ? 'spec ready for review'
           : event.command;
     const prefix = taskId ? `[${taskId}] ` : '';
+    // Summary is the payload; the link (when present) is a trailing secondary
+    // reference only — a user on mobile/SSH can't open it, so it must never be
+    // the whole message.
+    if (summary) {
+      const ref = artifactUrl ? `\n\n(ref: ${artifactUrl})` : '';
+      return `${prefix}${label}\n\n${summary}${ref}`;
+    }
     return artifactUrl ? `${prefix}${label}: ${artifactUrl}` : `${prefix}${label}`;
   }
 

@@ -227,6 +227,41 @@ describe('orchestrator mcp read tools', () => {
     });
   });
 
+  // ─── regression: post-rename schema (no `no such column: task_id`) ───────────
+  //
+  // get_task and get_agent_output both count agents via `countAgentsForTask`.
+  // A stale build queried `FROM agents WHERE task_id` — after the agents→workers
+  // rename `agents` is the conductor table (no task_id), so the live conductor
+  // saw `no such column: task_id` on exactly these two tools while list_tasks etc.
+  // (which never count agents) kept working. This pins the count to `workers`
+  // against the real migrated schema so that regression can't silently return.
+  describe('post-rename agent-count regression (SHR: no such column task_id)', () => {
+    it('get_task counts workers rows without throwing on the post-rename schema', () => {
+      const db = getDb();
+      insertTask(db, { id: 'task-reg-01', title: 'Regression task' });
+      insertAgent(db, { id: 'w-reg-01', task_id: 'task-reg-01' });
+      insertAgent(db, { id: 'w-reg-02', task_id: 'task-reg-01', window_index: 1 });
+
+      expect(() => handleGetTask({ task_id: 'task-reg-01' })).not.toThrow();
+      expect(handleGetTask({ task_id: 'task-reg-01' })!.agent_count).toBe(2);
+    });
+
+    it('get_agent_output counts workers rows without throwing on the post-rename schema', async () => {
+      const db = getDb();
+      insertTask(db, {
+        id: 'task-reg-02',
+        title: 'Regression task 2',
+        tmux_session: 'octomux-agent-task-reg-02',
+      });
+      insertAgent(db, { id: 'w-reg-03', task_id: 'task-reg-02' });
+      tmuxState.hasSession = true;
+      tmuxState.capture = 'working\n';
+
+      const result = await handleGetAgentOutput({ task_id: 'task-reg-02' });
+      expect(result.agent_count).toBe(1);
+    });
+  });
+
   // ─── monitor_status ────────────────────────────────────────────────────────
 
   describe('handleMonitorStatus', () => {
