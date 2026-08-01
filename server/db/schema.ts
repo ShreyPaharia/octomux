@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS task_external_refs (
   ref         TEXT NOT NULL,
   url         TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (task_id, integration)
+  PRIMARY KEY (task_id, integration, ref)
 );
 
 CREATE TABLE IF NOT EXISTS integrations (

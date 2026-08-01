@@ -42,8 +42,61 @@ import {
   resolveOldestPendingByAgent,
 } from './repositories/permission-prompts.js';
 import { inTransaction } from './repositories/tx.js';
+import { upsertPullRequest } from './repositories/pull-requests.js';
 
 const logger = childLogger('hooks');
+
+// ─── parsePrFromToolUse ───────────────────────────────────────────────────────
+// Pure helper: extract PR info from a PostToolUse payload. Exported for tests.
+
+export interface PrFromToolUse {
+  branch?: string;
+  number?: number;
+  url?: string;
+}
+
+/**
+ * Attempt to extract PR tracking info from a shell-tool PostToolUse event.
+ * Returns null when the command is unrecognised or not PR-related.
+ * Never throws — callers rely on fail-open behaviour.
+ */
+export function parsePrFromToolUse(
+  command: string,
+  toolResponse: string,
+): PrFromToolUse | null {
+  try {
+    // ── gh pr create ──
+    // Output typically ends with the PR URL on its own line.
+    if (/gh\s+pr\s+create/.test(command)) {
+      const urlMatch = /https:\/\/github\.com\/[^\s]+\/pull\/(\d+)/.exec(toolResponse);
+      if (!urlMatch) return null; // tool ran but didn't print a URL yet
+      const url = urlMatch[0];
+      const number = parseInt(urlMatch[1], 10);
+      // Try to extract --head flag from command for branch
+      const headMatch = /--head[=\s]+(\S+)/.exec(command);
+      return { url, number: isNaN(number) ? undefined : number, branch: headMatch?.[1] };
+    }
+
+    // ── git push ... <branch> ──
+    // Forms: `git push origin mybranch`, `git push -u origin mybranch`,
+    //        `git push --set-upstream origin mybranch`
+    if (/git\s+push\b/.test(command)) {
+      // Strip flags that consume no value, then find positional remote + branch
+      // Simplification: grab the last non-flag token as branch.
+      // ponytail: naive positional parse; handles common forms, not every git-push flag
+      const tokens = command.split(/\s+/).filter(Boolean);
+      const nonFlag = tokens.filter((t) => !t.startsWith('-'));
+      // nonFlag[0]='git', nonFlag[1]='push', nonFlag[2]=remote, nonFlag[3]=branch
+      const branch = nonFlag[3];
+      if (!branch) return null;
+      return { branch };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 const router = Router();
 
@@ -268,7 +321,13 @@ router.post('/permission-request', requireHookToken, (req, res) => {
 
 // POST /api/hooks/post-tool-use
 router.post('/post-tool-use', requireHookToken, (req, res) => {
-  const { session_id, conversation_id, tool_name, tool_input } = req.body;
+  const { session_id, conversation_id, tool_name, tool_input, tool_response } = req.body as {
+    session_id?: string;
+    conversation_id?: string;
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+    tool_response?: string;
+  };
   const sid = (session_id ?? conversation_id) as string | undefined;
   if (!sid) {
     res.status(200).send();
@@ -294,6 +353,38 @@ router.post('/post-tool-use', requireHookToken, (req, res) => {
       setCurrentSummary(agent.task_id, summary);
     }
   });
+
+  // Fast-path PR tracking: parse gh pr create / git push output and upsert a row.
+  // Shell tools: Claude Code uses 'Bash', Cursor uses 'run_terminal_cmd'.
+  if (
+    agent.task_id &&
+    (tool_name === 'Bash' || tool_name === 'run_terminal_cmd') &&
+    typeof tool_input?.command === 'string' &&
+    typeof tool_response === 'string'
+  ) {
+    try {
+      const parsed = parsePrFromToolUse(tool_input.command, tool_response);
+      // Require at least a branch OR a url+number so we have a meaningful row.
+      // When gh pr create prints a URL but --head wasn't passed, use 'pr-<n>' as a
+      // synthetic branch key so the poller can fill in the real branch later.
+      const branch = parsed?.branch ?? (parsed?.url && parsed?.number ? `pr-${parsed.number}` : undefined);
+      if (parsed && branch) {
+        upsertPullRequest({
+          task_id: agent.task_id,
+          branch,
+          number: parsed.number ?? null,
+          url: parsed.url ?? null,
+        });
+        logger.info(
+          { task_id: agent.task_id, branch, pr_number: parsed.number, operation: 'post_tool_use_pr_upsert' },
+          'upserted pull_request from PostToolUse',
+        );
+      }
+    } catch (err) {
+      // Fail open — PR tracking is best-effort
+      logger.warn({ task_id: agent.task_id, err, operation: 'post_tool_use_pr_upsert' }, 'PR upsert failed (ignored)');
+    }
+  }
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();

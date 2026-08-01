@@ -1039,14 +1039,28 @@ export function getTaskExternalRefs(taskId: string): TaskExternalRef[] {
   return rows.map(parseRefRow);
 }
 
-/** Get a single external ref by task_id + integration. */
+/** Get the first external ref for (task_id, integration) — back-compat. */
 export function getTaskExternalRef(
   taskId: string,
   integration: string,
 ): TaskExternalRef | undefined {
   const row = getDb()
-    .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
+    .prepare(
+      'SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ? ORDER BY created_at ASC LIMIT 1',
+    )
     .get(taskId, integration) as ExternalRefRow | undefined;
+  return row ? parseRefRow(row) : undefined;
+}
+
+/** Get an external ref by exact (task_id, integration, ref) triple. */
+export function getTaskExternalRefByRef(
+  taskId: string,
+  integration: string,
+  ref: string,
+): TaskExternalRef | undefined {
+  const row = getDb()
+    .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ? AND ref = ?')
+    .get(taskId, integration, ref) as ExternalRefRow | undefined;
   return row ? parseRefRow(row) : undefined;
 }
 
@@ -1073,11 +1087,11 @@ export function upsertTaskExternalRef(input: UpsertTaskExternalRefInput): TaskEx
     .run(input.task_id, input.integration, input.ref, input.url ?? null, metadataJson);
 
   logger.info(
-    { task_id: input.task_id, integration: input.integration, operation: 'upsertTaskExternalRef' },
+    { task_id: input.task_id, integration: input.integration, ref: input.ref, operation: 'upsertTaskExternalRef' },
     'external ref upserted',
   );
 
-  return getTaskExternalRef(input.task_id, input.integration)!;
+  return getTaskExternalRefByRef(input.task_id, input.integration, input.ref)!;
 }
 
 /**
@@ -1098,13 +1112,23 @@ export function insertTaskExternalRefIfAbsent(input: {
     .run(input.task_id, input.integration, input.ref, input.url ?? null);
 }
 
-/** Delete an external ref. */
-export function deleteTaskExternalRef(taskId: string, integration: string): void {
-  getDb()
-    .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?')
-    .run(taskId, integration);
+/**
+ * Delete an external ref.
+ * - With `ref`: deletes only that specific (task_id, integration, ref) row.
+ * - Without `ref`: deletes ALL rows for (task_id, integration) — back-compat.
+ */
+export function deleteTaskExternalRef(taskId: string, integration: string, ref?: string): void {
+  if (ref !== undefined) {
+    getDb()
+      .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ? AND ref = ?')
+      .run(taskId, integration, ref);
+  } else {
+    getDb()
+      .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?')
+      .run(taskId, integration);
+  }
   logger.info(
-    { task_id: taskId, integration, operation: 'deleteTaskExternalRef' },
+    { task_id: taskId, integration, ref, operation: 'deleteTaskExternalRef' },
     'external ref deleted',
   );
 }

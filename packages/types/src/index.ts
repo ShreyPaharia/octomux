@@ -158,6 +158,7 @@ export interface Task {
   derived_status?: DerivedTaskStatus | null;
   external_refs?: TaskExternalRef[];
   recent_updates?: TaskUpdate[];
+  pull_requests?: TaskPullRequest[];
   /** Live review task pointing at this source (or this PR). Set by GET /api/tasks/:id. */
   existing_review_id?: string | null;
 }
@@ -225,6 +226,22 @@ export interface TaskUpdate {
   to_status: string | null;
   body: string | null;
   created_at: string;
+}
+
+export type PullRequestState = 'open' | 'merged' | 'closed';
+
+export interface TaskPullRequest {
+  id: string;
+  task_id: string;
+  branch: string;
+  base_branch: string | null;
+  number: number | null;
+  url: string | null;
+  head_sha: string | null;
+  title: string | null;
+  state: PullRequestState;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Integration {
