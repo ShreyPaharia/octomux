@@ -1,6 +1,8 @@
 [![CI](https://github.com/ShreyPaharia/octomux/actions/workflows/ci.yml/badge.svg)](https://github.com/ShreyPaharia/octomux/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/octomux)](https://www.npmjs.com/package/octomux)
 [![license](https://img.shields.io/github/license/ShreyPaharia/octomux)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dw/octomux)](https://www.npmjs.com/package/octomux)
+[![npm downloads](https://img.shields.io/npm/dw/octomux)](https://www.npmjs.com/package/octomux)
 [![GitHub stars](https://img.shields.io/github/stars/ShreyPaharia/octomux)](https://github.com/ShreyPaharia/octomux)
 
 # octomux
@@ -21,22 +23,44 @@ Open **[localhost:7777](http://localhost:7777)**, describe a task, pick **Claude
 
 ## What you get
 
-Three phases, one window — from prompt to merged PR:
+Four acts, one window — from prompt to merged PR:
 
-- **① Dispatch** — Type a task (or paste a Jira/Linear/GitHub link, or a whole list). Each one gets its own worktree, branch, and agent. Pick the model per task.
-- **② Watch** — Every agent's live terminal, the diff as it grows, and a **Monitor grid** of the whole fleet. Permission prompts land in one **inbox** instead of scattered across panes.
-- **③ Review & Ship** — Diff review in the same window: mark files reviewed, leave inline comments, send them back to the agent to fix. The agent opens the PR — octomux detects it by branch and auto-closes the task when it merges.
+- **① Dispatch** — Type a task (or paste a Jira/Linear/GitHub link, or a whole list). Each one gets its own worktree, branch, and agent. Pick the model and the harness per task.
+- **② Run unattended** — Attach a verify command and the agent **loops in fresh context until that command exits 0**. Put it on a **cron** and it does that at 3am. Hand a goal to the **orchestrator** and it plans, splits, and dispatches child tasks for you to approve.
+- **③ Watch, or don't** — Every agent's live terminal on one **Monitor grid**, the diff as it grows, and every "allow this tool?" prompt collected in a single **inbox** instead of scattered across panes.
+- **④ Review & ship** — An agent drafts a walkthrough and inline comments grounded on the real diff. You read it in-app, mark files reviewed, send comments back for a fix, and publish as one batched GitHub review when *you* accept it. octomux spots the PR by branch and closes the task when it merges.
 
 Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
 
+### The 60-second version
+
+```bash
+npm install -g octomux && octomux init
+cd your-repo && octomux start          # → localhost:7777
+
+# or skip the UI and loop a task until the tests actually pass:
+octomux create-task -t "Fix the flaky checkout test" -d "..." -p "..." -r .
+octomux loop-start --task <id> --verify "npm test" --max-iterations 8
+```
+
 ## Screenshots
 
-|                                                                               |                                                          |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------- |
-| **Home inbox + composer** — permission prompts, recent activity, dispatch bar | ![Home](assets/screenshots/dashboard-hero.png)           |
-| **Command center** — kanban from backlog → done                               | ![Command center](assets/screenshots/command-center.png) |
-| **Task cockpit** — agent tabs, live session, Review, Done                     | ![Task detail](assets/screenshots/task-detail.png)       |
-| **Diff review** — file tree, reviewed state, inline comments                  | ![Diff](assets/screenshots/diff-review.png)              |
+**Review workstation** — the agent opens with a verdict, a risk read, and a ranked list of things worth looking at, each linked to a line. Start there, then drop into the diff.
+
+![Review walkthrough](assets/screenshots/review-walkthrough.png)
+
+**Monitor grid** — every running agent's terminal on one wall. Spot the stuck one instantly.
+
+![Monitor grid](assets/screenshots/monitor-grid.png)
+
+|                                                                        |                                                                |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------- |
+| **Home inbox + composer** — permission prompts, activity, dispatch bar | ![Home](assets/screenshots/home-inbox.png)                     |
+| **Command center** — kanban from backlog → done                        | ![Command center](assets/screenshots/command-center.png)       |
+| **Schedules** — cron, timezone, model, verify command, prompt          | ![Schedules](assets/screenshots/schedules.png)                 |
+| **Orchestrator** — an agent planning and dispatching child tasks       | ![Orchestrator](assets/screenshots/orchestrator.png)           |
+| **Diff review** — file tree, reviewed state, inline comments           | ![Diff](assets/screenshots/diff-review.png)                    |
+| **On your phone** — same fleet, over a Tailscale tailnet               | ![Mobile](assets/screenshots/mobile-remote.png)                |
 
 ## Features
 
@@ -77,6 +101,10 @@ Three workflows octomux makes one-click:
 | Platform                               | macOS + Linux     | macOS/Linux/Win   | macOS only    | macOS/Linux/Win |
 
 <sub>\* Bloop, the company behind vibe-kanban, wound down in early 2026; it continues as a community project.</sub>
+
+<sub>Verified 2 Aug 2026 against each project's own docs. Something out of date or unfair? [Open an issue](https://github.com/ShreyPaharia/octomux/issues/new) — corrections to this table are welcome and get merged.</sub>
+
+<sub>Verified 2 Aug 2026 against each project's own docs. Something out of date or unfair? [Open an issue](https://github.com/ShreyPaharia/octomux/issues/new) — corrections to this table are welcome and get merged.</sub>
 
 ## Why octomux
 
@@ -149,9 +177,13 @@ we're building toward; if that's what you want, [open an issue](https://github.c
 
 ## FAQ
 
-**How is this different from tmux + Claude Code?** octomux adds the inbox, the fleet grid, the review workstation, and the orchestrator view on top. tmux is plumbing underneath.
+**Is this just tmux + git worktrees?** Underneath, largely yes — one tmux session per task, one window per agent, one worktree per branch. `tmux attach -t octomux-agent-<id>` still works and your own scripts still work; nothing is hidden from you. What octomux adds is the layer above: one permission inbox, the whole fleet on one grid, loops with a verify command, cron schedules, and a review workstation. If you have already built that on top of tmux, you do not need this.
 
-**What if two agents touch the same file?** They can't — each task runs in its own git worktree on its own branch.
+**What does it cost to run?** Nothing beyond what you already pay. MIT licensed, and it adds no inference cost of its own — it drives the Claude Code or Cursor subscription you already have. Loops multiply token spend by the iteration count, so set `--max-iterations` and a budget.
+
+**Will an overnight loop burn through my plan limits?** Loops are capped. You set a max iteration count and an optional token/time budget, and a loop stops early when it stops making progress. Every pass and its cost lands in the `/loops` ledger, and you can stop a run from the UI or your phone.
+
+**What if two agents touch the same file?** During the work they can't — each task is its own git worktree on its own branch, so your main working tree never moves. At merge time you still get normal git conflicts; what octomux gives you is all N diffs in one review queue so you pick the merge order deliberately.
 
 **Can I use it from my phone?** Yes — host it on a tailnet box and open the mobile-ready dashboard from any device on the tailnet.
 
