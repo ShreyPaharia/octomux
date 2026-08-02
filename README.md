@@ -45,6 +45,8 @@ octomux loop-start --task <id> --verify "npm test" --max-iterations 8
 
 ## Screenshots
 
+Every screenshot is full width — a dashboard shrunk into a table cell is texture, not information.
+
 **Review workstation** — the agent opens with a verdict, a risk read, and a ranked list of things worth looking at, each linked to a line. Start there, then drop into the diff.
 
 ![Review walkthrough](assets/screenshots/review-walkthrough.png)
@@ -53,14 +55,34 @@ octomux loop-start --task <id> --verify "npm test" --max-iterations 8
 
 ![Monitor grid](assets/screenshots/monitor-grid.png)
 
-|                                                                        |                                                                |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------- |
-| **Home inbox + composer** — permission prompts, activity, dispatch bar | ![Home](assets/screenshots/home-inbox.png)                     |
-| **Command center** — kanban from backlog → done                        | ![Command center](assets/screenshots/command-center.png)       |
-| **Schedules** — cron, timezone, model, verify command, prompt          | ![Schedules](assets/screenshots/schedules.png)                 |
-| **Orchestrator** — an agent planning and dispatching child tasks       | ![Orchestrator](assets/screenshots/orchestrator.png)           |
-| **Diff review** — file tree, reviewed state, inline comments           | ![Diff](assets/screenshots/diff-review.png)                    |
-| **On your phone** — same fleet, over a Tailscale tailnet               | ![Mobile](assets/screenshots/mobile-remote.png)                |
+**Command center** — kanban across the real workflow, backlog → done.
+
+![Command center](assets/screenshots/command-center.png)
+
+<details>
+<summary><b>More screens</b> — inbox, schedules, orchestrator, diff review, phone</summary>
+
+**Home inbox + composer** — every "allow this?" in one queue, recent activity, and the dispatch bar.
+
+![Home inbox](assets/screenshots/home-inbox.png)
+
+**Schedules** — cron, timezone, model, verify command and prompt, all editable from the UI.
+
+![Schedules](assets/screenshots/schedules.png)
+
+**Orchestrator** — an agent planning and dispatching child tasks, each awaiting your approval.
+
+![Orchestrator](assets/screenshots/orchestrator.png)
+
+**Diff review** — file tree, reviewed state, inline comments.
+
+![Diff review](assets/screenshots/diff-review.png)
+
+**On your phone** — same fleet over a Tailscale tailnet.
+
+![Mobile](assets/screenshots/mobile-remote.png)
+
+</details>
 
 ## Features
 
