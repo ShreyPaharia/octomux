@@ -42,6 +42,7 @@ import { tailTranscript } from './transcript.js';
 import type { ChatEvent } from './transcript.js';
 import type { StopFn } from './transcript.js';
 import { executeCard } from './gate.js';
+import { installHeartbeat } from '../ws-heartbeat.js';
 
 const logger = childLogger('orchestrator/stream');
 
@@ -530,6 +531,7 @@ let wss: WebSocketServer;
 /** Initialise the orchestrator WebSocket server (noServer mode). Call once at startup. */
 export function setupOrchestratorWebSocket(): void {
   wss = new WebSocketServer({ noServer: true });
+  installHeartbeat(wss);
   logger.debug({}, 'stream: orchestrator WebSocket server initialised');
 }
 

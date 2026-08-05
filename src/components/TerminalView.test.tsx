@@ -348,4 +348,33 @@ describe('TerminalView', () => {
     const stale = MockWebSocket.instances.find((ws, idx) => idx >= 2 && ws.url.endsWith('/0'));
     expect(stale).toBeUndefined();
   });
+
+  it('reconnects immediately on tab return when the socket is dead', async () => {
+    // Background tabs throttle the backoff timer, so a scheduled reconnect can
+    // sit for minutes. Returning to the tab must not wait for it.
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws1 = MockWebSocket.instances[0];
+    act(() => ws1._open());
+    act(() => ws1._close(1006)); // abnormal close → reconnect scheduled with backoff
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('does not open a duplicate socket on tab return while connected', async () => {
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    act(() => MockWebSocket.instances[0]._open());
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
 });
