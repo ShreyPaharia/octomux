@@ -125,6 +125,68 @@ describe('gateway glue', () => {
     expect(sent[0]!.text).not.toContain('ghp_ABCDEFGH12345678');
   });
 
+  it('delivers a raw plan.json reply as a readable summary, never the raw JSON', async () => {
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn, emit } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound());
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    // The conductor pastes the raw plan artifact into its reply (the observed
+    // live failure mode) — the gateway must condense it before send.
+    const planJson = JSON.stringify(
+      {
+        schema_version: '1.0.0',
+        summary: 'Wire the condense guard into the outbound path.',
+        files: [{ path: 'server/gateway/gateway.ts', action: 'modify', steps: ['wire'] }],
+        open_questions: ['ship behind a flag?'],
+        detail: 'long body '.repeat(100),
+      },
+      null,
+      2,
+    );
+    emit(convId, {
+      type: 'assistant',
+      text: `plan ready for task abc123 — approve?\n\`\`\`json\n${planJson}\n\`\`\``,
+      uuid: 'a1',
+      timestamp: 't',
+    });
+    emit(convId, { type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sent).toHaveLength(1);
+    const text = sent[0]!.text;
+    expect(text).toContain('plan ready for task abc123 — approve?');
+    expect(text).toContain('📋 Plan: Wire the condense guard into the outbound path.');
+    expect(text).toContain('• server/gateway/gateway.ts (modify)');
+    expect(text).toContain('• ship behind a flag?');
+    expect(text).not.toContain('schema_version');
+    expect(text).not.toContain('long body');
+  });
+
+  it('truncates an over-long reply with a clear marker instead of dumping it', async () => {
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn, emit } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound());
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    emit(convId, {
+      type: 'assistant',
+      text: `# Spec\n${'spec prose '.repeat(2000)}`, // ~22KB, like the observed spec dump
+      uuid: 'a1',
+      timestamp: 't',
+    });
+    emit(convId, { type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text.length).toBeLessThan(4096); // Telegram hard limit
+    expect(sent[0]!.text).toContain('… [truncated,');
+  });
+
   it('reuses the same conversation for a second message on the same thread', async () => {
     const { adapter } = fakeAdapter();
     const { conductor, sendTurn, emit } = fakeConductor();

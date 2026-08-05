@@ -17,6 +17,7 @@
 import { childLogger } from '../logger.js';
 import { isAllowed, type Channel } from './allowlist.js';
 import { redactSecrets } from './redact.js';
+import { condenseForChat } from './condense.js';
 import { OutboundQueue } from './outbound.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
 import { getThreadConv, setThreadConv, seenInbound, markInbound } from '../repositories/gateway.js';
@@ -89,7 +90,12 @@ export function createGateway(
   adapter: ChannelAdapter,
   conductor: GatewayConductor = realConductor,
 ): Gateway {
-  const outbound = new OutboundQueue((threadKey, text) => adapter.send(threadKey, text));
+  // Single choke point for every outbound chat message (turn replies AND
+  // supervisor pushes): condense raw artifact payloads and cap length here so
+  // no adapter ever receives a raw plan.json dump or an over-limit message.
+  const outbound = new OutboundQueue((threadKey, text) =>
+    adapter.send(threadKey, condenseForChat(text)),
+  );
   const threads = new Map<string, ThreadState>();
 
   const key = (channel: Channel, threadKey: string) => `${channel}:${threadKey}`;
