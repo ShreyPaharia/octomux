@@ -2,7 +2,6 @@
 [![npm version](https://img.shields.io/npm/v/octomux)](https://www.npmjs.com/package/octomux)
 [![license](https://img.shields.io/github/license/ShreyPaharia/octomux)](LICENSE)
 [![npm downloads](https://img.shields.io/npm/dw/octomux)](https://www.npmjs.com/package/octomux)
-[![npm downloads](https://img.shields.io/npm/dw/octomux)](https://www.npmjs.com/package/octomux)
 [![GitHub stars](https://img.shields.io/github/stars/ShreyPaharia/octomux)](https://github.com/ShreyPaharia/octomux)
 
 # octomux
@@ -126,8 +125,6 @@ Three workflows octomux makes one-click:
 
 <sub>Verified 2 Aug 2026 against each project's own docs. Something out of date or unfair? [Open an issue](https://github.com/ShreyPaharia/octomux/issues/new) — corrections to this table are welcome and get merged.</sub>
 
-<sub>Verified 2 Aug 2026 against each project's own docs. Something out of date or unfair? [Open an issue](https://github.com/ShreyPaharia/octomux/issues/new) — corrections to this table are welcome and get merged.</sub>
-
 ## Why octomux
 
 The editor was built around a human typing one file at a time. That's not the job anymore. The job is directing a fleet — and the hard part moved from _writing_ code to _reviewing_ it, _unblocking_ it, and _knowing what's happening_ across ten sessions.
@@ -186,10 +183,10 @@ octomux keeps a clean line between the **agent backend** (done for you) and the 
 (where the value is). Building blocks available today:
 
 - **REST API** (~130 endpoints) over tasks, agents, diffs, reviews, chats, workspaces, skills.
-- **Two live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux.
+- **Three live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux, and `/ws/orchestrator/:convId` for the conductor's conversation stream.
 - **A queryable SQLite schema** — tasks, agents, permission prompts, review runs, comments, learnings.
 - **A pluggable harness interface** — add a new agent backend by implementing one interface and registering it.
-- **User hook scripts** — drop executables in `~/.octomux/hooks` to fire on task-lifecycle events.
+- **User hook scripts** — drop executables in `~/.octomux/hooks/<event>.d/` (or `<repo>/.octomux/hooks/<event>.d/`) to fire on task-lifecycle events.
 
 There isn't a drop-in plugin API for custom UI views yet — adding one means building against
 these blocks in the codebase. A first-class way to author and share views is the direction
