@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { appendEvent, eventsSince } from './repositories/orchestrator.js';
+import { installHeartbeat } from './ws-heartbeat.js';
 
 export type ServerEvent =
   | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
@@ -68,6 +69,7 @@ export function subscribeServerEvents(listener: InProcessListener): () => void {
 
 export function setupEventWebSocket(): void {
   wss = new WebSocketServer({ noServer: true });
+  installHeartbeat(wss);
 }
 
 export function handleEventUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {

@@ -349,6 +349,22 @@ export function TerminalView({
     }
   }, [connectWs]);
 
+  // A reconnect scheduled while the tab is hidden gets throttled by the browser
+  // (background timers fire at most ~once a minute), so a dropped connection can
+  // stay down long after the user returns. Retry immediately on tab return if
+  // the socket is dead. CONNECTING/OPEN sockets are left alone — retrying then
+  // would leak a duplicate connection.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ws = wsRef.current;
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) return;
+      handleRetryNow();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [handleRetryNow]);
+
   // Connect on mount and reconnect when taskId/windowIndex changes
   useEffect(() => {
     unmounted.current = false;

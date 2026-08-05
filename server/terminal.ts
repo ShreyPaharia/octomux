@@ -5,6 +5,7 @@ import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
 import { getTask, getChatAgentTmuxSession } from './repositories/index.js';
 import { execTmux, tmuxSpawnSpec } from './tmux-bin.js';
+import { installHeartbeat } from './ws-heartbeat.js';
 
 interface TerminalConnection {
   ws: WebSocket;
@@ -19,6 +20,7 @@ export function setupTerminalWebSocket(): void {
   // repetitive ANSI — compression cuts remote-viewing bandwidth ~10x. ws only
   // compresses frames above its 1KB threshold, so keystroke echo stays fast.
   wss = new WebSocketServer({ noServer: true, perMessageDeflate: true });
+  installHeartbeat(wss);
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
