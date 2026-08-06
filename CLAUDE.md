@@ -186,7 +186,7 @@ Users' own skills/subagents live in Claude Code's native `~/.claude/skills/`,
 neither manages nor lists them. Repo-specific customization goes there.
 
 The skills are also installable into a user's own sessions via the plugin marketplace
-(`.claude-plugin/marketplace.json`): `/plugin marketplace add ShreyPaharia/octomux-agents`
+(`.claude-plugin/marketplace.json`): `/plugin marketplace add ShreyPaharia/octomux`
 then `/plugin install octomux@octomux`.
 
 `workflows/review-deep.js` is a Claude Code _workflow_ script, which plugins cannot ship —
