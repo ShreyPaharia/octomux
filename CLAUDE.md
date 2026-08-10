@@ -40,7 +40,8 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
     plus `lifecycle/`, `setup/`, `loop/` subdirs.
   - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
   - `logger.ts` — pino root + `childLogger('<module>')` helper
-  - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
+  - `types.ts` — re-exports `@octomux/types` (Task, Worker, RuntimeState, WorkflowStatus,
+    WorkerStatus) plus the server-only review/orchestrator types
   - `harnesses/` — pluggable harness implementations (`claude-code.ts`, `cursor.ts`;
     `claude-code` is the default via `DEFAULT_HARNESS_ID`).
     Each `Harness` exports `id`, `displayName`, `sessionIdMode`, command builders,
@@ -93,8 +94,13 @@ DB migrations are forward-only. Back up `~/.octomux/data/tasks.db` (prod) or
 
 ## Task Lifecycle
 
-draft → setting_up → running → closed/error
-Error at any point → error state with message in `task.error`
+A task carries two orthogonal statuses (`packages/types/src/index.ts`):
+
+- `runtime_state: RuntimeState` — `idle | setting_up | running | error | looping`
+- `workflow_status: WorkflowStatus` — the board column, `backlog | planned | in_progress | human_review | pr | done`
+
+`setting_up → running → idle` is the usual runtime path (close sets `idle`). Error at any
+point → `error` with the message in `task.error`.
 
 Per task: git worktree at `<repo>/.worktrees/<id>`, tmux session `octomux-agent-<id>`,
 branch `agents/<id>`. Each **worker** = tmux window within the session.
