@@ -32,8 +32,10 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
 
 - `server/` — Express backend (API, terminal streaming, task lifecycle, DB)
   - `api.ts` — mounts the routers from `routes/` onto the Express app
-  - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, reviews,
-    review-runs, comments, chats, loops, skills, schedules, settings, orchestrator, …)
+  - `routes/` — one router per surface (tasks, task-agents, task-workflow, diffs, comments,
+    chats, loops, skills, schedules, kinds, settings, orchestrator, …). Workflow-owned
+    routers (`loops`, plus `reviews` and `pr-extracts` under `server/workflows/*/routes.ts`)
+    are mounted via each workflow's `apiRouter`, not imported by `api.ts` directly.
   - `app.ts` — extracted `createApp()` for testability
   - `task-engine/` — worktree + tmux + harness lifecycle. `cleanup.ts` holds `closeTask` /
     `deleteTask`; also `launch.ts`, `git.ts`, `sessions.ts`, `terminals.ts`, `reconcile.ts`,
@@ -49,6 +51,11 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
   - `hook-base-url.ts` — `hookBaseUrl()` returns `http://127.0.0.1:<port>` for harness callbacks.
   - `schedules/cron.ts` — `isCronDue()`, the 5-field cron evaluator (`croner`, UTC) behind
     scheduled runs. Rows live in the `schedules` table; `poller/schedule-cron.ts` fires them.
+  - `orchestrator/` — the conductor: command gate/schemas, MCP server, approval timeouts.
+  - `gateway/` — chat-DM front end onto the conductor (Telegram + Slack), default-deny
+    owner allowlist, opt-in per channel. Setup and security model in `server/gateway/README.md`.
+  - `integrations/` — provider registry + credential store (`jira`, `linear`,
+    `slack-gateway`, `telegram-gateway`); env vars win over DB-stored values.
 - `src/` — React SPA (pages, components, lib/api.ts)
   - `workflows/` — front-end workflow-UI registry mirroring `server/workflows/`.
     `registerWorkflowUI(kind, { navLabel, icon, ListView, DetailView })` (`loops/register.tsx`)
@@ -169,8 +176,9 @@ no resolution chain, no per-kind DB table, and editing a preset never touches ex
 `poller/execute-schedule-run.ts`, which threads model/timeout into the workflow's `RunContext`.
 Session-vertical prompts interpolate `{{configKey}}` placeholders generically
 (`server/prompt-interpolate.ts`, single-pass). Managed from `/schedules` and Settings → Kinds
-in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH /api/schedules/:id`,
-`POST /api/schedules/:id/run`, `GET /api/schedules/:id/export`, `POST /api/schedules/import`)
+in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH`/`DELETE /api/schedules/:id`,
+`POST /api/schedules/:id/run`, `GET /api/schedules/:id/runs`,
+`GET /api/schedules/:id/export`, `POST /api/schedules/import`, `GET /api/schedules/kinds`)
 and `server/routes/kinds.ts` (`GET /api/kinds`, `PUT`/`DELETE /api/kinds/:kind`, home tier only).
 
 ## Skills and agent roles
@@ -180,6 +188,11 @@ agents via `--plugin-dir`. **Single source — there is no repo or home tier.** 
 revisions had `<repo>/.octomux/{skills,agents}` and `~/.octomux/agents`; nothing ever
 delivered them (`syncAgents()` is a no-op in both harnesses), so they were listed over
 REST and invisible to every running agent. They are gone; don't reintroduce them.
+
+One narrow exception survives: `octomux add-agent --skeleton <name>` reads
+`<worktree>/.octomux/agents/<name>.md` and prepends it to the prompt
+(`task-engine/lifecycle/add-agent.ts`). That is a per-worktree file read at launch, not a
+discovery tier — nothing lists or serves it.
 
 Users' own skills/subagents live in Claude Code's native `~/.claude/skills/`,
 `~/.claude/agents/`, and `<repo>/.claude/` — the harness reads those directly and octomux

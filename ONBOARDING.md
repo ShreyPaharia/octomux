@@ -101,18 +101,19 @@ Draft first if you want to edit title, prompt, and branch before agents start �
 
 ## 7. Where things live
 
-| Path                          | Purpose                                                 |
-| ----------------------------- | ------------------------------------------------------- |
-| `~/.octomux/settings.json`    | Defaults (editor, Jira, harness flags, default harness) |
-| `~/.octomux/data/tasks.db`    | Task state (production)                                 |
-| `./data/tasks.db`             | Task state (development)                                |
-| `~/.octomux/logs/`            | Server + hook logs                                      |
-| `~/.octomux/hooks/<event>.d/` | Lifecycle hooks                                         |
-| `~/.octomux/kinds/`           | Your own schedule-kind presets (Settings → Kinds)       |
-| `~/.claude/skills/`           | Your own Claude Code skills (read by the harness)       |
-| `~/.claude/workflows/`        | Review workflow scripts installed by `octomux init`     |
-| `<repo>/.worktrees/<task-id>` | Per-task git worktree                                   |
-| `<worktree>/.octomux-hooks/`  | Cursor hook bridge (Cursor tasks)                       |
+| Path                               | Purpose                                                 |
+| ---------------------------------- | ------------------------------------------------------- |
+| `~/.octomux/settings.json`         | Defaults (editor, Jira, harness flags, default harness) |
+| `~/.octomux/data/tasks.db`         | Task state (production)                                 |
+| `./data/tasks.db`                  | Task state (development)                                |
+| `~/.octomux/logs/`                 | Server + hook logs                                      |
+| `~/.octomux/hooks/<event>.d/`      | Lifecycle hooks (global)                                |
+| `<repo>/.octomux/hooks/<event>.d/` | Lifecycle hooks (repo-local; run after the global ones) |
+| `~/.octomux/kinds/`                | Your own schedule-kind presets (Settings → Kinds)       |
+| `~/.claude/skills/`                | Your own Claude Code skills (read by the harness)       |
+| `~/.claude/workflows/`             | Review workflow scripts installed by `octomux init`     |
+| `<repo>/.worktrees/<task-id>`      | Per-task git worktree                                   |
+| `<worktree>/.octomux-hooks/`       | Cursor hook bridge (Cursor tasks)                       |
 
 Set `OCTOMUX_DATA_DIR` to move the `~/.octomux` root elsewhere — the desktop app does this so it never shares the CLI's data directory.
 
