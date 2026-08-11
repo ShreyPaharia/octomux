@@ -16,6 +16,16 @@ class FakeWss extends EventEmitter {
     this.emit('connection', ws);
     return ws;
   }
+
+  /**
+   * How production actually connects: `wss.handleUpgrade(req, socket, head, cb)`
+   * adds the socket to `clients` and calls `cb` — it never emits 'connection'.
+   */
+  upgrade(): FakeWs {
+    const ws = new FakeWs();
+    this.clients.add(ws);
+    return ws;
+  }
 }
 
 describe('installHeartbeat', () => {
@@ -53,6 +63,25 @@ describe('installHeartbeat', () => {
     vi.advanceTimersByTime(1000); // missed pong detected
     expect(ws.terminate).toHaveBeenCalledTimes(1);
     expect(ws.ping).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps noServer clients alive even though they never emit connection', () => {
+    const ws = wss.upgrade();
+    vi.advanceTimersByTime(1000); // adopted + pinged, not terminated
+    expect(ws.terminate).not.toHaveBeenCalled();
+    expect(ws.ping).toHaveBeenCalledTimes(1);
+
+    (ws as unknown as WebSocket).emit('pong'); // pong listener must be attached
+    vi.advanceTimersByTime(1000);
+    expect(ws.terminate).not.toHaveBeenCalled();
+    expect(ws.ping).toHaveBeenCalledTimes(2);
+  });
+
+  it('still terminates a noServer client that misses a pong', () => {
+    const ws = wss.upgrade();
+    vi.advanceTimersByTime(1000); // adopted, ping sent
+    vi.advanceTimersByTime(1000); // no pong came back
+    expect(ws.terminate).toHaveBeenCalledTimes(1);
   });
 
   it('stops pinging after the server closes', () => {

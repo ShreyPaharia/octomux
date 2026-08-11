@@ -18,12 +18,22 @@ export function installHeartbeat(
   intervalMs: number = HEARTBEAT_INTERVAL_MS,
 ): void {
   const alive = new WeakSet<WebSocket>();
-  wss.on('connection', (ws) => {
+  const tracked = new WeakSet<WebSocket>();
+
+  // Adopt clients off `wss.clients` rather than off a 'connection' listener: in
+  // noServer mode `ws` never emits 'connection' — the handleUpgrade callback
+  // takes its place — so every socket would look unanswered and get terminated
+  // on the first tick. Adopting here covers every upgrade site by construction.
+  const track = (ws: WebSocket): void => {
+    if (tracked.has(ws)) return;
+    tracked.add(ws);
     alive.add(ws);
     ws.on('pong', () => alive.add(ws));
-  });
+  };
+
   const timer = setInterval(() => {
     for (const ws of wss.clients) {
+      track(ws);
       if (!alive.has(ws)) {
         ws.terminate();
         continue;
