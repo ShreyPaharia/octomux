@@ -504,7 +504,8 @@ export function registerTaskCapabilities(): void {
   defineCapability({
     id: 'task.create',
     summary: 'Create a task (and start it immediately unless draft:true).',
-    http: { method: 'post', path: '/api/tasks' },
+    // 201 matches routes/tasks.ts:253 — see HttpProjection.status.
+    http: { method: 'post', path: '/api/tasks', status: 201 },
     cli: 'task create',
     cliAliases: ['create-task'],
     mcp: 'create_task',
@@ -556,7 +557,8 @@ export function registerTaskCapabilities(): void {
     summary:
       'Delete a task: soft-delete by default; purge:true hard-deletes a previously ' +
       'soft-deleted task (kills tmux + removes worktree + deletes branch + DB rows).',
-    http: { method: 'delete', path: '/api/tasks/:id' },
+    // 204 + empty body matches routes/tasks.ts:348.
+    http: { method: 'delete', path: '/api/tasks/:id', status: 204 },
     cli: 'task delete',
     cliAliases: ['delete-task'],
     mcp: 'delete_task',

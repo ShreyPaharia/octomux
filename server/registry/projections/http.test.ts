@@ -204,3 +204,35 @@ describe('resolveCallerFromRequest', () => {
     expect(resolveCallerFromRequest(req)).toBe('agent');
   });
 });
+
+describe('mountCapabilities — success status codes', () => {
+  // Behaviour preservation: the routes these capabilities replace answer 201 on
+  // create and 204 on delete. Defaulting everything to 200 would silently
+  // change the contract for existing clients.
+  it.each<[string, number | undefined, number, unknown]>([
+    ['defaults to 200 with a body', undefined, 200, { ok: true }],
+    ['honours 201 with a body', 201, 201, { ok: true }],
+    ['honours 204 and sends no body', 204, 204, {}],
+  ])('%s', async (_label, status, expectedStatus, expectedBody) => {
+    defineCapability(
+      cap({
+        http: status
+          ? { method: 'post', path: '/api/things', status }
+          : { method: 'post', path: '/api/things' },
+        input: z.object({}),
+        handler: () => ({ ok: true }),
+      }),
+    );
+
+    const app = express();
+    app.use(express.json());
+    const router = express.Router();
+    mountCapabilities(router);
+    app.use(router);
+    app.use(errorMiddleware);
+
+    const res = await request(app).post('/api/things').send({});
+    expect(res.status).toBe(expectedStatus);
+    expect(res.body).toEqual(expectedBody);
+  });
+});

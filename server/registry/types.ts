@@ -49,6 +49,17 @@ export interface HttpProjection {
   method: HttpMethod;
   /** Express path, e.g. '/api/tasks/:id'. */
   path: string;
+  /**
+   * Success status code. Defaults to 200.
+   *
+   * Required for behaviour preservation when a capability replaces a
+   * hand-written route: the routes being migrated return 201 on create and
+   * 204 on delete, and silently downgrading those to 200 would change the
+   * contract for every existing client.
+   *
+   * 204 sends no body, per RFC 9110 — the handler's return value is discarded.
+   */
+  status?: number;
 }
 
 // ─── Capability ───────────────────────────────────────────────────────────────

@@ -92,7 +92,14 @@ function handlerFor(cap: Capability) {
     }
 
     const result = await cap.handler(parsed.data, { caller });
-    res.json(result);
+
+    const status = cap.http?.status ?? 200;
+    // 204 means "no content" — sending a body would violate the status.
+    if (status === 204) {
+      res.status(204).send();
+      return;
+    }
+    res.status(status).json(result);
   };
 }
 

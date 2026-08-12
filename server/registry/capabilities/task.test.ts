@@ -83,10 +83,24 @@ describe('registerTaskCapabilities', () => {
     ['task.delete', 'delete', '/api/tasks/:id', 'task delete', 'delete_task', 'always-ask'],
   ] as const)('%s has the expected http/cli/mcp/tier shape', (id, method, path, cli, mcp, tier) => {
     const cap = getCapability(id)!;
-    expect(cap.http).toEqual({ method, path });
+    expect(cap.http?.method).toBe(method);
+    expect(cap.http?.path).toBe(path);
     expect(cap.cli).toBe(cli);
     expect(cap.mcp).toBe(mcp);
     expect(cap.tier).toBe(tier);
+  });
+
+  // Behaviour preservation against the routes these replace: 201 at
+  // routes/tasks.ts:253, 204 at routes/tasks.ts:348. Everything else is 200.
+  it.each([
+    ['task.create', 201],
+    ['task.delete', 204],
+    ['task.list', undefined],
+    ['task.get', undefined],
+    ['task.start', undefined],
+    ['task.move', undefined],
+  ] as const)('%s declares success status %s', (id, status) => {
+    expect(getCapability(id)!.http?.status).toBe(status);
   });
 
   // task.close deliberately deviates from the ticket's table (`cli: task close`):
