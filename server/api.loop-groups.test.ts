@@ -70,7 +70,11 @@ vi.mock('./repositories/orchestrator.js', async (importOriginal) => {
 vi.mock('./orchestrator/runner.js', () => ({ mcpServerInvocation: vi.fn(() => null) }));
 vi.mock('./hook-base-url.js', () => ({ hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777') }));
 vi.mock('./settings.js', () => ({ getSettings: vi.fn(async () => ({})) }));
-vi.mock('./skills.js', () => ({}));
+vi.mock('./skills.js', () => ({
+  // registry-docs.ts imports these eagerly; the old routes/skills.ts did not.
+  listSkills: vi.fn(async () => []),
+  getSkill: vi.fn(async () => null),
+}));
 vi.mock('./harnesses/index.js', () => ({
   getHarness: vi.fn(() => ({
     id: 'claude-code',

@@ -39,6 +39,7 @@ import { broadcast } from '../../events.js';
 import { ensureHookToken } from '../../hook-token.js';
 import { fireHook } from '../../hook-dispatcher.js';
 import { runCloseTask } from '../../orchestrator/exec.js';
+import { upsertManagedTask } from '../../repositories/orchestrator.js';
 
 const ctx: CapabilityContext = { caller: 'agent' };
 
@@ -134,11 +135,33 @@ describe('registerTaskCapabilities', () => {
 // ─── Handler delegation ─────────────────────────────────────────────────────────
 
 describe('task.list', () => {
-  it('returns rows shaped by the shared formatTaskResponse envelope', async () => {
+  it('returns the lean summary by default — no relations, no full task row', async () => {
     insertTestTask({ id: 't1', workflow_status: 'in_progress' });
 
     const cap = getCapability('task.list')!;
     const result = (await cap.handler({}, ctx)) as Array<Record<string, unknown>>;
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      id: 't1',
+      title: expect.any(String),
+      runtime_state: expect.any(String),
+      workflow_status: 'in_progress',
+      created_at: expect.any(String),
+      updated_at: expect.any(String),
+    });
+    expect(result[0]).not.toHaveProperty('workers');
+    expect(result[0]).not.toHaveProperty('description');
+  });
+
+  it('expands to the full task row + requested relations via include', async () => {
+    insertTestTask({ id: 't1', workflow_status: 'in_progress' });
+
+    const cap = getCapability('task.list')!;
+    const result = (await cap.handler(
+      { include: 'workers,pending_prompts,user_terminals' },
+      ctx,
+    )) as Array<Record<string, unknown>>;
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -146,8 +169,19 @@ describe('task.list', () => {
       workers: [],
       pending_prompts: [],
       user_terminals: [],
-      pull_requests: [],
     });
+    // pull_requests is never offered for list (would be an N+1) — see module doc point 6.
+    expect(result[0]).not.toHaveProperty('pull_requests');
+  });
+
+  it('rejects an unknown include value', () => {
+    // listTasksHandler is synchronous — parseInclude throws immediately rather
+    // than returning a rejected promise (unlike task.get's async handler).
+    // Needs a task in the DB — the empty-list short-circuit runs before include
+    // is even parsed.
+    insertTestTask({ id: 't1' });
+    const cap = getCapability('task.list')!;
+    expect(() => cap.handler({ include: 'pull_requests' }, ctx)).toThrow(/unknown include value/);
   });
 
   it('short-circuits to [] when there are no tasks', async () => {
@@ -157,12 +191,42 @@ describe('task.list', () => {
 });
 
 describe('task.get', () => {
-  it('delegates to fetchTaskWithRelations + formatTaskResponse for an existing task', async () => {
+  it('returns the lean summary by default — no relations, no hook_token backfill', async () => {
+    insertTestTask({ id: 't1' });
+    insertAgent(db, { id: 'a1', task_id: 't1', hook_token: '' });
+
+    const cap = getCapability('task.get')!;
+    const result = (await cap.handler({ id: 't1' }, ctx)) as Record<string, unknown>;
+
+    expect(result.id).toBe('t1');
+    expect(result).toHaveProperty('agent_count', 1);
+    expect(result).toHaveProperty('phase', null);
+    expect(result).not.toHaveProperty('workers');
+    expect(ensureHookToken).not.toHaveBeenCalled();
+  });
+
+  it('lean summary surfaces the managed phase (distinguishes paused-at-gate from working)', async () => {
+    insertTestTask({ id: 't1', runtime_state: 'running' });
+    db.prepare(`INSERT INTO orchestrator_conversations (id, title) VALUES ('conv-gt', 'c')`).run();
+    upsertManagedTask({ conversation_id: 'conv-gt', task_id: 't1', phase: 'awaiting_approval' });
+
+    const cap = getCapability('task.get')!;
+    const result = (await cap.handler({ id: 't1' }, ctx)) as Record<string, unknown>;
+
+    // runtime_state says 'running', but phase reveals it's paused for approval.
+    expect(result.runtime_state).toBe('running');
+    expect(result.phase).toBe('awaiting_approval');
+  });
+
+  it('expands to the full task row + workers via include=workers', async () => {
     insertTestTask({ id: 't1' });
     insertAgent(db, { id: 'a1', task_id: 't1', hook_token: 'has-a-token' });
 
     const cap = getCapability('task.get')!;
-    const result = (await cap.handler({ id: 't1' }, ctx)) as Record<string, unknown>;
+    const result = (await cap.handler({ id: 't1', include: 'workers' }, ctx)) as Record<
+      string,
+      unknown
+    >;
 
     expect(result.id).toBe('t1');
     expect(result.workers).toHaveLength(1);
@@ -174,12 +238,20 @@ describe('task.get', () => {
     await expect(cap.handler({ id: 'nope' }, ctx)).rejects.toThrow('Task not found');
   });
 
-  it('backfills an empty hook_token via ensureHookToken', async () => {
+  it('rejects an unknown include value', async () => {
+    insertTestTask({ id: 't1' });
+    const cap = getCapability('task.get')!;
+    await expect(cap.handler({ id: 't1', include: 'bogus' }, ctx)).rejects.toThrow(
+      /unknown include value/,
+    );
+  });
+
+  it('backfills an empty hook_token via ensureHookToken when include is non-empty', async () => {
     insertTestTask({ id: 't1' });
     insertAgent(db, { id: 'a1', task_id: 't1', hook_token: '' });
 
     const cap = getCapability('task.get')!;
-    const result = (await cap.handler({ id: 't1' }, ctx)) as {
+    const result = (await cap.handler({ id: 't1', include: 'workers' }, ctx)) as {
       workers: Array<{ hook_token: string }>;
     };
 

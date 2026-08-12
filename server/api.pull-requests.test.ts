@@ -56,7 +56,7 @@ describe('GET /api/tasks/:id — pull_requests field', () => {
   it('returns empty pull_requests array when the task has no PRs', async () => {
     insertTask(db, { id: 't1', branch: 'agents/t1', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/tasks/t1').expect(200);
+    const res = await request(app).get('/api/tasks/t1?include=pull_requests').expect(200);
     expect(res.body.pull_requests).toEqual([]);
   });
 
@@ -78,7 +78,7 @@ describe('GET /api/tasks/:id — pull_requests field', () => {
       state: 'merged',
     });
 
-    const res = await request(app).get('/api/tasks/t2').expect(200);
+    const res = await request(app).get('/api/tasks/t2?include=pull_requests').expect(200);
     expect(res.body.pull_requests).toHaveLength(2);
     const urls = res.body.pull_requests.map((p: { url: string }) => p.url);
     expect(urls).toContain('https://github.com/o/r/pull/7');
@@ -94,7 +94,7 @@ describe('GET /api/tasks/:id — pull_requests field', () => {
       pr_number: 5,
     });
 
-    const res = await request(app).get('/api/tasks/t3').expect(200);
+    const res = await request(app).get('/api/tasks/t3?include=pull_requests').expect(200);
     expect(res.body.pr_url).toBe('https://github.com/o/r/pull/5');
     expect(res.body.pr_number).toBe(5);
     // pull_requests array is populated by the backfill migration

@@ -200,7 +200,7 @@ describe('GET /api/tasks/:id — hook token backfill', () => {
     insertAgent(db, { id: 'w1', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-aaa' });
     insertAgent(db, { id: 'w2', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-bbb' });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}?include=workers`);
     expect(res.status).toBe(200);
 
     // ensureHookToken must not have been called at all.
@@ -212,7 +212,7 @@ describe('GET /api/tasks/:id — hook token backfill', () => {
     insertAgent(db, { id: 'w3', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-existing' });
     insertAgent(db, { id: 'w4', task_id: DEFAULTS.runningTask.id, hook_token: '' });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}?include=workers`);
     expect(res.status).toBe(200);
 
     // Only the agent with an empty token should trigger ensureHookToken.
@@ -226,7 +226,7 @@ describe('GET /api/tasks/:id — hook token backfill', () => {
   it('returns task successfully even with no agents', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}?include=workers`);
     expect(res.status).toBe(200);
     expect(ensureHookToken).not.toHaveBeenCalled();
   });

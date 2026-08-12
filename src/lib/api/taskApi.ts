@@ -185,6 +185,14 @@ export interface HookExecution {
   stderr_excerpt: string;
 }
 
+/**
+ * Relations the dashboard needs beyond the lean default. `task.list` and
+ * `task.get` return a minimal shape unless asked for more — see
+ * server/registry/capabilities/task.ts.
+ */
+const LIST_INCLUDE = 'workers,pending_prompts,user_terminals';
+const DETAIL_INCLUDE = 'workers,pending_prompts,user_terminals,worktree,existing_review_id';
+
 export const taskApi = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -200,10 +208,13 @@ export const taskApi = {
     const params = new URLSearchParams();
     if (opts?.trash) params.set('trash', 'true');
     if (opts?.includeAutomated) params.set('includeAutomated', 'true');
-    const qs = params.toString();
-    return request<Task[]>(qs ? `/tasks?${qs}` : '/tasks');
+    // task.list is lean by default — one shape for the dashboard, the CLI and
+    // MCP alike. The dashboard needs these relations to render task cards,
+    // attention indicators and the sessions inbox, so it asks for them.
+    params.set('include', LIST_INCLUDE);
+    return request<Task[]>(`/tasks?${params.toString()}`);
   },
-  getTask: (id: string) => request<Task>(`/tasks/${id}`),
+  getTask: (id: string) => request<Task>(`/tasks/${id}?include=${DETAIL_INCLUDE}`),
   createTask: (data: CreateTaskRequest) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (id: string, data: UpdateTaskRequest) =>

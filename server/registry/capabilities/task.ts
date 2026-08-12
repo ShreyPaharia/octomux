@@ -49,18 +49,14 @@
  *    returns the closest useful JSON body instead.
  *
  * 4. `task.list` / `task.get` / `task.move` mcp names (`list_tasks`, `get_task`,
- *    `set_task_status`) collide by NAME with tools already hand-registered in
- *    `server/orchestrator/mcp/server.ts` (a lean `list_tasks`/`get_task` pair
+ *    `set_task_status`) collide by NAME with tools that used to be hand-registered
+ *    in `server/orchestrator/mcp/server.ts` (a lean `list_tasks`/`get_task` pair
  *    always registered, and a `set_task_status` write tool gated behind
  *    `orchestratorWriteEnabled()`, sourced from the OLD
- *    `orchestrator/command-registry.ts`). Those existing tools have DIFFERENT
- *    shapes (lean summaries, `task_id`-keyed args, narrower semantics) than the
- *    capabilities below. `registerCapabilityMcpTools` is not wired into
- *    `mcp/server.ts` yet (verified: no references), so there is no live
- *    collision today — but wiring it in later requires either renaming one
- *    side or removing the hand-written tool, or the MCP SDK will throw on
- *    duplicate tool-name registration. Flagged for the integration step, not
- *    fixed here (mcp/server.ts is an existing file this ticket must not touch).
+ *    `orchestrator/command-registry.ts`). `server/orchestrator/mcp/server.ts` now
+ *    calls `registerCapabilityMcpTools()` instead of hand-registering those six
+ *    names — see point 6 below for how `task.list`/`task.get` were redesigned so
+ *    the capability version doesn't regress the conductor's lean-summary contract.
  *
  * 5. `task.move`'s `mcp: 'set_task_status'` intentionally does NOT reuse
  *    `setStatusInputSchema` / `runSetStatus` from command-schemas.ts / exec.ts.
@@ -74,6 +70,26 @@
  *    Reusing the old schema/handler would silently drop all of that on
  *    migration, so this capability defines its own schema/handler mirroring
  *    the route instead.
+ *
+ * 6. `task.list` / `task.get` default to the SAME lean summary shape the old
+ *    hand-written MCP tools returned (`{id, title, runtime_state, workflow_status,
+ *    created_at, updated_at}` for list; `+ agent_count, phase, current_summary,
+ *    current_summary_updated_at` for get) — for EVERY caller (dashboard, CLI,
+ *    MCP), not a special case for MCP. A caller that wants the full task row +
+ *    relations (workers/pending_prompts/user_terminals/pull_requests/worktree/
+ *    existing_review_id) opts in via `include` (comma-separated relation names)
+ *    on the SAME capability — there is deliberately no second "lean" capability
+ *    or handler. The dashboard's `GET /api/tasks` and `GET /api/tasks/:id` calls
+ *    (`src/lib/api/taskApi.ts`'s `listTasks`/`getTask`) do NOT currently send
+ *    `include` and therefore now get the lean shape too — see the integration
+ *    report for the exact query-string fix required there (out of scope here:
+ *    `src/` is another agent's tree). `task.get`'s hook_token backfill
+ *    (`ensureHookToken`) only runs when `include` is non-empty — it's a real DB
+ *    write, not just display formatting, so the lean/frequent-polling path skips
+ *    it rather than paying for it on every call. `pull_requests` is intentionally
+ *    NOT an offered include value for `task.list` (would be an N+1 query across
+ *    every listed task, same reasoning as the ponytail note in `listTasksHandler`
+ *    below); use `task.get` with `include=pull_requests` for a single task's PRs.
  */
 
 import { z } from 'zod';
@@ -99,7 +115,9 @@ import {
   listUserTerminalsByTasks,
   getWorktree,
   hardDeleteTask,
+  countAgentsForTask,
 } from '../../repositories/index.js';
+import { getManagedTask } from '../../repositories/orchestrator.js';
 import type { PermissionPromptRow } from '../../repositories/permission-prompts.js';
 import { createTask } from '../../services/task-service.js';
 import { badRequest, conflict, notFound } from '../../services/errors.js';
@@ -116,6 +134,7 @@ import { runCloseTask } from '../../orchestrator/exec.js';
 import { closeTaskInputSchema, createTaskInputSchema } from '../../orchestrator/command-schemas.js';
 import { WORKFLOW_STATUSES } from '../../types.js';
 import type {
+  Task,
   Worker,
   UserTerminal,
   RunMode,
@@ -127,12 +146,38 @@ const workflowStatusEnum = z.enum(
   WORKFLOW_STATUSES as unknown as [WorkflowStatus, ...WorkflowStatus[]],
 );
 
+// ─── include= parsing (shared by task.list / task.get) ────────────────────────
+//
+// One capability, one handler, parameterised — not a second lean tool/route
+// (see module doc point 6). `include` is a comma-separated string (not an
+// array) so the SAME zod field works unchanged over HTTP querystrings, CLI
+// flags, and MCP tool args.
+
+/** Parse a comma-separated `include` value against an allow-list. Throws 400 on any unknown entry. */
+function parseInclude(raw: string | undefined, allowed: readonly string[]): Set<string> {
+  if (!raw) return new Set();
+  const requested = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const unknown = requested.filter((r) => !allowed.includes(r));
+  if (unknown.length > 0) {
+    throw badRequest(
+      `unknown include value(s): ${unknown.join(', ')} (allowed: ${allowed.join(', ')})`,
+    );
+  }
+  return new Set(requested);
+}
+
 // ─── task.list ────────────────────────────────────────────────────────────────
 //
 // No dedicated service function exists for "tasks + their related rows" — the
 // logic is inline in GET /api/tasks (server/routes/tasks.ts). Mirrored here by
 // calling the same repository functions the route calls (per the ticket's
 // point 4), not reimplemented from scratch.
+
+/** Relations `task.list` can expand into — pull_requests deliberately excluded (see module doc point 6). */
+const LIST_INCLUDE_VALUES = ['workers', 'pending_prompts', 'user_terminals'] as const;
 
 const taskListInputSchema = z.object({
   repo_path: z.string().optional().describe('Filter by repo path'),
@@ -141,7 +186,29 @@ const taskListInputSchema = z.object({
   // z.boolean() (which a querystring can never satisfy — see mergeInput).
   trash: z.string().optional().describe("'true' to list trashed tasks"),
   includeAutomated: z.string().optional().describe("'true' to include automated review tasks"),
+  include: z
+    .string()
+    .optional()
+    .describe(
+      `Comma-separated relations to expand each task to its full row: ${LIST_INCLUDE_VALUES.join(', ')}. ` +
+        'Omit for the lean summary {id, title, runtime_state, workflow_status, created_at, updated_at} ' +
+        '— the default for every caller (dashboard, CLI, and agents alike). pull_requests is not ' +
+        "offered here (would be an N+1 query across every listed task); use task.get's include for " +
+        "a single task's pull_requests.",
+    ),
 });
+
+/** The lean default: id/title/status/timestamps only — no relations, no full task row. */
+function leanTaskSummary(t: Task) {
+  return {
+    id: t.id,
+    title: t.title,
+    runtime_state: t.runtime_state,
+    workflow_status: t.workflow_status,
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+  };
+}
 
 function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
   const tasks = listTasks({
@@ -153,58 +220,114 @@ function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
 
   if (tasks.length === 0) return [];
 
+  const included = parseInclude(input.include, LIST_INCLUDE_VALUES);
+  if (included.size === 0) {
+    return tasks.map(leanTaskSummary);
+  }
+
   const taskIds = tasks.map((t) => t.id);
-  const allAgents = listAgentsByTasks(taskIds);
-  const allPrompts = listPendingPromptsByTasks(taskIds);
-  const allTerminals = listUserTerminalsByTasks(taskIds);
 
   const workersByTask = new Map<string, Worker[]>();
-  for (const agent of allAgents) {
-    if (!agent.task_id) continue;
-    const list = workersByTask.get(agent.task_id) || [];
-    list.push(agent);
-    workersByTask.set(agent.task_id, list);
+  if (included.has('workers')) {
+    for (const agent of listAgentsByTasks(taskIds)) {
+      if (!agent.task_id) continue;
+      const list = workersByTask.get(agent.task_id) || [];
+      list.push(agent);
+      workersByTask.set(agent.task_id, list);
+    }
   }
 
   const promptsByTask = new Map<string, PermissionPromptRow[]>();
-  for (const pp of allPrompts) {
-    const taskId = pp.task_id as string;
-    const list = promptsByTask.get(taskId) || [];
-    list.push(pp);
-    promptsByTask.set(taskId, list);
+  if (included.has('pending_prompts')) {
+    for (const pp of listPendingPromptsByTasks(taskIds)) {
+      const taskId = pp.task_id as string;
+      const list = promptsByTask.get(taskId) || [];
+      list.push(pp);
+      promptsByTask.set(taskId, list);
+    }
   }
 
   const terminalsByTask = new Map<string, UserTerminal[]>();
-  for (const ut of allTerminals) {
-    const list = terminalsByTask.get(ut.task_id) || [];
-    list.push(ut);
-    terminalsByTask.set(ut.task_id, list);
+  if (included.has('user_terminals')) {
+    for (const ut of listUserTerminalsByTasks(taskIds)) {
+      const list = terminalsByTask.get(ut.task_id) || [];
+      list.push(ut);
+      terminalsByTask.set(ut.task_id, list);
+    }
   }
 
-  return tasks.map((task) =>
-    formatTaskResponse(task, {
-      workers: workersByTask.get(task.id) || [],
+  return tasks.map((task) => {
+    const workers = workersByTask.get(task.id) || [];
+    const full = formatTaskResponse(task, {
+      workers,
       pending_prompts: promptsByTask.get(task.id) || [],
       user_terminals: terminalsByTask.get(task.id) || [],
-      // ponytail (mirrored from the route): list omits pull_requests to avoid
-      // an N+1 — see the matching comment in server/routes/tasks.ts.
+      // ponytail: list never fetches pull_requests, to avoid an N+1 — see
+      // LIST_INCLUDE_VALUES above and the matching comment in server/routes/tasks.ts.
       pull_requests: [],
-    }),
-  );
+    }) as Record<string, unknown>;
+    if (!included.has('workers')) {
+      // derived_status is only meaningful alongside the workers it's computed from.
+      delete full.workers;
+      delete full.derived_status;
+    }
+    if (!included.has('pending_prompts')) delete full.pending_prompts;
+    if (!included.has('user_terminals')) delete full.user_terminals;
+    delete full.pull_requests;
+    return full;
+  });
 }
 
 // ─── task.get ─────────────────────────────────────────────────────────────────
 
+/** Relations/extras `task.get` can expand into. */
+const GET_INCLUDE_VALUES = [
+  'workers',
+  'pending_prompts',
+  'user_terminals',
+  'pull_requests',
+  'worktree',
+  'existing_review_id',
+] as const;
+
 const taskGetInputSchema = z.object({
   id: z.string().describe('The octomux task id'),
+  include: z
+    .string()
+    .optional()
+    .describe(
+      `Comma-separated relations to expand to the full task row: ${GET_INCLUDE_VALUES.join(', ')}. ` +
+        'Omit for the lean summary {id, title, runtime_state, workflow_status, created_at, updated_at, ' +
+        'agent_count, phase, current_summary, current_summary_updated_at} — the default for every ' +
+        'caller (dashboard, CLI, and agents alike).',
+    ),
 });
 
 async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
   const task = getTaskRepo(input.id);
   if (!task) throw notFound('Task not found');
 
+  const included = parseInclude(input.include, GET_INCLUDE_VALUES);
+
+  if (included.size === 0) {
+    return {
+      id: task.id,
+      title: task.title,
+      runtime_state: task.runtime_state,
+      workflow_status: task.workflow_status,
+      created_at: task.created_at,
+      updated_at: task.updated_at,
+      agent_count: countAgentsForTask(task.id),
+      phase: getManagedTask(task.id)?.phase ?? null,
+      current_summary: task.current_summary,
+      current_summary_updated_at: task.current_summary_updated_at,
+    };
+  }
+
   const { relations } = fetchTaskWithRelations(task.id);
-  // Backfill hook_token for pre-step-1 agents that have an empty token.
+  // Backfill hook_token for pre-step-1 agents that have an empty token. This is
+  // a real DB write, not display formatting — only paid for on the rich (include
+  // non-empty) path, so lean/frequent-polling callers never trigger it.
   const needsBackfill = relations.workers.some((w) => !w.hook_token);
   let workers: Worker[];
   if (needsBackfill) {
@@ -219,12 +342,27 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
     workers = relations.workers;
   }
 
-  const worktreeRow = task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
-  return formatTaskResponse(
+  const worktreeRow =
+    included.has('worktree') && task.worktree_id ? (getWorktree(task.worktree_id) ?? null) : null;
+  const existingReviewId = included.has('existing_review_id') ? lookupExistingReviewId(task) : null;
+
+  const full = formatTaskResponse(
     task,
     { ...relations, workers },
-    { worktree_row: worktreeRow, existing_review_id: lookupExistingReviewId(task) },
-  );
+    { worktree_row: worktreeRow, existing_review_id: existingReviewId },
+  ) as Record<string, unknown>;
+
+  if (!included.has('workers')) {
+    delete full.workers;
+    delete full.derived_status;
+  }
+  if (!included.has('pending_prompts')) delete full.pending_prompts;
+  if (!included.has('user_terminals')) delete full.user_terminals;
+  if (!included.has('pull_requests')) delete full.pull_requests;
+  if (!included.has('worktree')) delete full.worktree_row;
+  if (!included.has('existing_review_id')) delete full.existing_review_id;
+
+  return full;
 }
 
 // ─── task.create ────────────────────────────────────────────────────────────
@@ -477,7 +615,9 @@ async function deleteTaskHandler(input: z.infer<typeof taskDeleteInputSchema>) {
 export function registerTaskCapabilities(): void {
   defineCapability({
     id: 'task.list',
-    summary: 'List tasks with their workers, pending prompts, and terminals.',
+    summary:
+      'List tasks (lean summary by default — pass include=workers,pending_prompts,user_terminals ' +
+      'for the full task rows).',
     http: { method: 'get', path: '/api/tasks' },
     cli: 'task list',
     cliAliases: ['list-tasks'],
@@ -490,7 +630,9 @@ export function registerTaskCapabilities(): void {
 
   defineCapability({
     id: 'task.get',
-    summary: 'Get a single task with its workers, terminals, prompts, and pull requests.',
+    summary:
+      'Get a single task (lean summary by default — pass include=workers,pending_prompts,' +
+      'user_terminals,pull_requests,worktree,existing_review_id for the full task row).',
     http: { method: 'get', path: '/api/tasks/:id' },
     cli: 'task get',
     cliAliases: ['get-task'],
