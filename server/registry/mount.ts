@@ -15,10 +15,11 @@ import type { Express } from 'express';
 import type { Command } from 'commander';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { childLogger } from '../logger.js';
+import { listCliCapabilities } from './index.js';
 import type { CallerClass } from './types.js';
 import { mountCapabilities } from './projections/http.js';
 import { registerCapabilityTools } from './projections/mcp.js';
-import { registerCapabilityCommands } from './projections/cli.js';
+import { registerCapabilityCommands } from '@octomux/capabilities';
 import { registerTaskCapabilities } from './capabilities/task.js';
 import { registerRouteExemptions } from './exemptions.js';
 
@@ -87,5 +88,5 @@ export function registerCapabilityMcpTools(server: McpServer, caller: CallerClas
  */
 export function registerCapabilityCli(program: Command): void {
   installCapabilities();
-  registerCapabilityCommands(program);
+  registerCapabilityCommands(program, listCliCapabilities());
 }

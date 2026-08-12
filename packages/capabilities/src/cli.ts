@@ -1,20 +1,22 @@
 /**
- * server/registry/projections/cli.ts
+ * @octomux/capabilities — CLI projection generator.
  *
- * CLI projection generator. Turns every `listCliCapabilities()` row into a
- * commander subcommand: flags are derived from `cap.input` (the zod schema),
- * so a schema field can never drift from its flag the way hand-written
- * commander definitions could — see `cli/src/commands/command-schema-drift.test.ts`,
- * which this generator makes unnecessary.
+ * Turns each capability into a commander subcommand. Flags are derived from
+ * `cap.input` (the zod schema), so a schema field cannot drift from its flag
+ * the way hand-written commander definitions could.
  *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md §5.1, §5.2
+ * Lives in this package rather than in `server/` because it needs only
+ * capability METADATA. Importing it from `cli/` must not pull in the server —
+ * see the note in ./types.ts. Callers pass the capability list in; this module
+ * never reaches for a server-side registry.
+ *
+ * Design doc: spec/surface-consolidation-and-centaur.md §5.1, §5.2
  */
 
 import { createRequestCore, qs } from '@octomux/api-client';
 import { Command } from 'commander';
 import { z } from 'zod';
-import { listCliCapabilities } from '../index.js';
-import type { Capability } from '../types.js';
+import type { CapabilityMeta } from './types.js';
 
 // ─── zod introspection ─────────────────────────────────────────────────────────
 //
@@ -109,7 +111,7 @@ function addOption(cmd: Command, capId: string, fieldName: string, schema: z.Zod
 }
 
 /** The zod object's field map, or throws — a capability's CLI flags must come from a flat shape. */
-function objectFields(cap: Capability): Record<string, z.ZodTypeAny> {
+function objectFields(cap: CapabilityMeta): Record<string, z.ZodTypeAny> {
   if (!(cap.input instanceof z.ZodObject)) {
     throw new Error(
       `registry: capability '${cap.id}' input must be a z.object() to derive CLI flags`,
@@ -225,8 +227,8 @@ function getOrCreateGroup(
 /** Attaches flags and the server-calling action handler to a leaf command. */
 function configureLeaf(
   cmd: Command,
-  cap: Capability,
-  http: NonNullable<Capability['http']>,
+  cap: CapabilityMeta,
+  http: NonNullable<CapabilityMeta['http']>,
   fields: Record<string, z.ZodTypeAny>,
   pathParamFields: Map<string, string>,
   write: WriteLine,
@@ -291,7 +293,7 @@ function configureLeaf(
 function registerOne(
   program: Command,
   groups: Map<string, Command>,
-  cap: Capability,
+  cap: CapabilityMeta,
   write: WriteLine,
 ): void {
   if (!cap.cli) return;
@@ -336,11 +338,12 @@ function registerOne(
  */
 export function registerCapabilityCommands(
   program: Command,
+  capabilities: CapabilityMeta[],
   opts: { write?: WriteLine } = {},
 ): void {
   const write = opts.write ?? defaultWriteLine;
   const groups = new Map<string, Command>();
-  for (const cap of listCliCapabilities()) {
+  for (const cap of capabilities.filter((c) => c.cli)) {
     registerOne(program, groups, cap, write);
   }
 }

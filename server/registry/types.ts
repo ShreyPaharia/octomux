@@ -1,66 +1,23 @@
 /**
  * server/registry/types.ts
  *
- * The capability registry: one definition per capability, projected onto every
- * transport that needs it (HTTP route, CLI subcommand, MCP tool, gate tier).
+ * Server-side capability type. The METADATA half — id, summary, projections,
+ * tier, callers, input — lives in `@octomux/capabilities` so the CLI can build
+ * its command tree without importing the server. `handler` is the only field
+ * that needs server internals, so it stays here.
  *
- * Supersedes `server/orchestrator/command-registry.ts`, which defines 7
- * capabilities but only generates 2 of the 4 surfaces it touches — CLI
- * commander definitions and REST routes are hand-written and merely
- * drift-tested against it.
- *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md
+ * Design doc: spec/surface-consolidation-and-centaur.md §5.1
  */
 
-import type { z } from 'zod';
+import type { CapabilityMeta, CallerClass, HttpMethod } from '@octomux/capabilities';
 
-// ─── Caller identity ──────────────────────────────────────────────────────────
-//
-// The load-bearing new concept. One capability row now serves the dashboard,
-// the CLI, and MCP. The row must know who is calling, because an agent invoking
-// `task.create` should hit the `ask` tier while a human clicking the same
-// button in the UI should not.
-//
-// FAIL-CLOSED: an unidentified caller is treated as `agent`. Getting this
-// backwards either gates the UI into uselessness or ungates agents entirely.
-
-export type CallerClass =
-  /** The React dashboard, same-origin. Trusted — the human is already present. */
-  | 'ui'
-  /** A human at a terminal running `octomux ...`. Trusted. */
-  | 'human'
-  /** An autonomous agent, via MCP or CLI. Subject to the gate tier. */
-  | 'agent';
-
-/** Gate classification. Mirrors `orchestrator/policy.ts` tiers. */
-export type PolicyTier =
-  /** Runs without asking. Reads, and writes with no blast radius. */
-  | 'auto'
-  /** Asks a human, but the answer is promotable to `auto` via permission_rules. */
-  | 'ask'
-  /** Always asks. Never promotable — destructive or irreversible. */
-  | 'always-ask';
-
-// ─── Transport projections ────────────────────────────────────────────────────
-
-export type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
-
-export interface HttpProjection {
-  method: HttpMethod;
-  /** Express path, e.g. '/api/tasks/:id'. */
-  path: string;
-  /**
-   * Success status code. Defaults to 200.
-   *
-   * Required for behaviour preservation when a capability replaces a
-   * hand-written route: the routes being migrated return 201 on create and
-   * 204 on delete, and silently downgrading those to 200 would change the
-   * contract for every existing client.
-   *
-   * 204 sends no body, per RFC 9110 — the handler's return value is discarded.
-   */
-  status?: number;
-}
+export type {
+  CapabilityMeta,
+  CallerClass,
+  PolicyTier,
+  HttpMethod,
+  HttpProjection,
+} from '@octomux/capabilities';
 
 // ─── Capability ───────────────────────────────────────────────────────────────
 
@@ -73,50 +30,9 @@ export interface CapabilityContext {
   conversationId?: string;
 }
 
-export interface Capability<TInput = unknown, TResult = unknown> {
-  /**
-   * Canonical id, `noun.verb`. The single name this capability is known by;
-   * every projection derives its own name from here or overrides explicitly.
-   */
-  id: string;
-
-  /** One-line description. Becomes the MCP tool description and CLI help text. */
-  summary: string;
-
-  /** HTTP projection. Omit for capabilities with no REST surface. */
-  http?: HttpProjection;
-
-  /**
-   * CLI projection, e.g. 'task create'. Omit → not a CLI command.
-   * Deliberately narrower than `http`: not every route deserves a subcommand.
-   */
-  cli?: string;
-
-  /**
-   * Legacy flat CLI names kept as permanent hidden aliases (e.g. 'create-task').
-   * These are baked into third-party prompts and configs outside this repo, so
-   * they never get removed — only hidden from `--help`.
-   */
-  cliAliases?: string[];
-
-  /**
-   * MCP tool name, e.g. 'create_task'. Omit → not an MCP tool.
-   * Deliberately the narrowest projection: every tool costs context on every
-   * agent turn, so this is set only where an agent genuinely needs it.
-   */
-  mcp?: string;
-
-  /** Gate tier applied when `caller === 'agent'`. */
-  tier: PolicyTier;
-
-  /** Caller classes permitted to invoke this at all. */
-  callers: CallerClass[];
-
-  /** Canonical input schema. The one source for validation across transports. */
-  input: z.ZodType<TInput>;
-
+export type Capability<TInput = unknown, TResult = unknown> = CapabilityMeta<TInput> & {
   handler: (input: TInput, ctx: CapabilityContext) => Promise<TResult> | TResult;
-}
+};
 
 // ─── Out-of-registry declarations ─────────────────────────────────────────────
 //
