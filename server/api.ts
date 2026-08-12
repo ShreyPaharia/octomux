@@ -28,6 +28,7 @@ import { router as kindsRouter } from './routes/kinds.js';
 import { router as workflowRunsRouter } from './routes/workflow-runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { listWorkflows } from './workflows/registry.js';
+import { mountCapabilityRoutes } from './registry/mount.js';
 
 import { insertWorktreeIfAbsent, insertTaskIfAbsent, inTransaction } from './repositories/index.js';
 
@@ -61,6 +62,16 @@ export function setupRoutes(app: Express): void {
   app.use(kindsRouter);
   app.use(workflowRunsRouter);
   app.use(agentsCrudRouter);
+
+  // Capability registry LAST. A migrated capability and the hand-written route
+  // it replaces can never both be mounted — Express takes the first match — so
+  // migrating a route means deleting its handler above.
+  //
+  // Mounting last matters: `/api/tasks/:id` would otherwise swallow sibling
+  // literal routes declared later, such as `/api/tasks/inbox`, which is exactly
+  // why the hand-written routers declare their literal paths before their
+  // parameterised ones.
+  mountCapabilityRoutes(app);
 
   // ─── Test-only seed endpoint ─────────────────────────────────────────────────
   // Gated strictly on NODE_ENV=test. Never exposed in production.
