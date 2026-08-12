@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { loopApi, type LoopRun } from '../lib/api/loopApi';
+import { runApi, type RunRow } from '../lib/api/runApi';
 import { useResource } from '../lib/use-resource';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { Badge } from '../components/ui/badge';
@@ -10,10 +10,7 @@ import { NewLoopDialog } from '../components/loop/NewLoopDialog';
 import { NewLoopGroupDialog } from '../components/loop/NewLoopGroupDialog';
 import { timeAgo } from '@/lib/time';
 
-const STATUS_VARIANT: Record<
-  LoopRun['status'],
-  'default' | 'secondary' | 'destructive' | 'outline'
-> = {
+const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   running: 'secondary',
   done: 'outline',
   blocked: 'destructive',
@@ -21,9 +18,14 @@ const STATUS_VARIANT: Record<
 };
 
 export default function LoopsPage() {
-  const { data, loading, refresh } = useResource<LoopRun[]>('loops', () => loopApi.listLoops(), {
-    events: (event) => event.type === 'loop:emit' || event.type === 'task:updated',
-  });
+  // `GET /api/runs?kind=loop` returns thin `runs` rows (no iteration/max_iterations/
+  // termination_reason — those are loop_runs-specific fields, only available on the
+  // detail endpoint's nested `loop` object) — see server/routes/runs.ts's module doc.
+  const { data, loading, refresh } = useResource<RunRow[]>(
+    'loops',
+    () => runApi.listRuns('loop').then((res) => res.runs),
+    { events: (event) => event.type === 'loop:emit' || event.type === 'task:updated' },
+  );
   const [newLoopOpen, setNewLoopOpen] = useState(false);
   const [newLoopGroupOpen, setNewLoopGroupOpen] = useState(false);
   const runs = data ?? [];
@@ -68,15 +70,10 @@ export default function LoopsPage() {
                     <span className="truncate text-sm font-medium text-foreground group-hover:text-primary">
                       {r.task_id}
                     </span>
-                    <Badge variant={STATUS_VARIANT[r.status]}>{r.status}</Badge>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {r.iteration} / {r.max_iterations ?? '∞'}
-                    </span>
-                    <span className="text-[10px] text-muted-soft">{timeAgo(r.updated_at)}</span>
+                    <Badge variant={STATUS_VARIANT[r.effective_status]}>{r.effective_status}</Badge>
+                    <span className="text-[10px] text-muted-soft">{timeAgo(r.started_at)}</span>
                   </div>
-                  {r.termination_reason && (
-                    <p className="mt-1 text-xs text-muted-foreground">{r.termination_reason}</p>
-                  )}
+                  {r.error && <p className="mt-1 text-xs text-muted-foreground">{r.error}</p>}
                 </div>
               </GlassPanel>
             </li>

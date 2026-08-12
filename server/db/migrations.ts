@@ -1165,6 +1165,16 @@ export function runMigrations(instance: Database.Database): void {
       .default();
     logger.info('migrated schedule_skills into schedules.prompt/config_json and dropped the table');
   }
+
+  // ── Loop-group run-adoption link (2026-08-13, surface-cuts) ────────────────
+  // Reverse link from a loop_groups row to its `runs` row — mirrors
+  // LoopSpec.runId, the analogous reverse link a plain loop_run carries in its
+  // own spec_json. Lets GET/POST /api/runs/:id and POST /api/runs/:id/emit
+  // resolve a loop-group run without growing `runs` itself (see
+  // server/repositories/loop-groups.ts's getLoopGroupByRunId).
+  const loopGroupsCols = columnsOf(instance, 'loop_groups');
+  addColumn(instance, 'loop_groups', 'run_id', 'run_id TEXT REFERENCES runs(id)', loopGroupsCols);
+  instance.exec(`CREATE INDEX IF NOT EXISTS idx_loop_groups_run ON loop_groups(run_id);`);
 }
 
 /**

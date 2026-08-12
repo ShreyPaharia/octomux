@@ -29,7 +29,10 @@ export type ServerEvent =
     }
   | {
       type: 'loop:emit';
-      payload: { taskId: string; loopRunId: string; status: string; reason: string };
+      // runId is the `runs.id` this loop's run row lives under (see
+      // server/routes/runs.ts's module doc) — loopRunId is the underlying
+      // loop_runs.id, kept for callers that still key off it.
+      payload: { taskId: string; runId: string; loopRunId: string; status: string; reason: string };
     }
   | {
       type: 'pr_extract:created';
@@ -37,7 +40,7 @@ export type ServerEvent =
     }
   | {
       type: 'loop_group:judging' | 'loop_group:judged';
-      payload: { groupId: string };
+      payload: { groupId: string; runId: string };
     };
 
 /** Event types that carry a taskId and should be persisted to the durable events log. */

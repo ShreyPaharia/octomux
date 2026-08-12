@@ -64,6 +64,31 @@ export interface HttpProjection {
    * 204 sends no body, per RFC 9110 — the handler's return value is discarded.
    */
   status?: number;
+
+  /**
+   * Extra gate the HTTP projection must enforce BEFORE resolving a caller or
+   * running the handler. Omit for the routes the generic caller-class check
+   * (`authorize()`) already covers correctly.
+   *
+   * A closed union of known mechanisms, not a function — this package must
+   * stay importable by a browser and a thin CLI (no filesystem, no Node
+   * built-ins, no server internals; see the module doc above), so it cannot
+   * hold actual middleware. `server/registry/projections/http.ts`'s
+   * `mountCapabilities` is what turns this flag into the real
+   * `requireBearerHookToken` middleware (`server/routes/hook-auth.ts`) —
+   * this field only says WHICH mechanism to apply, never HOW.
+   *
+   * 'bearer-hook-token': reject with 401 any request whose
+   * `Authorization: Bearer <token>` header is missing or does not match a
+   * live agent's `hook_token`. Exists because `authorize()`'s caller-class
+   * check is not an authentication check: an unrecognised request fails
+   * closed to the `'agent'` caller class (see `CallerClass` below), so a
+   * capability whose `callers` includes `'agent'` — every route this flag is
+   * for — would otherwise authorize a request that never proved it was an
+   * agent at all. This flag is what makes "no token" fail before that
+   * fallback ever gets consulted.
+   */
+  auth?: 'bearer-hook-token';
 }
 
 // ─── Capability metadata ──────────────────────────────────────────────────────

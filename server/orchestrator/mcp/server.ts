@@ -79,9 +79,9 @@ export function createOctomuxMcpServer(): McpServer {
     { capabilities: { tools: {} } },
   );
 
-  // list_tasks / get_task are registered below (conditionally, alongside the
-  // other capability-registry tools) via registerCapabilityMcpTools — see the
-  // module doc and the call site further down.
+  // list_tasks / get_task are registered below via registerCapabilityMcpTools,
+  // unconditionally — they are 'auto' tier, so both the conductor and a worker
+  // get them. See the module doc and the call site further down.
 
   // ── monitor_status ──────────────────────────────────────────────────────────
   server.registerTool(
@@ -290,31 +290,33 @@ export function createOctomuxMcpServer(): McpServer {
   // capability lists 'agent' in its `callers`, so this is the only class that
   // makes sense here.
   //
-  // Env gating: registerCapabilityMcpTools(server, caller) registers every
-  // MCP-exposed capability that caller may invoke in ONE call — task.list/get
-  // (tier 'auto') alongside task.create/start/move (tier 'ask') and
-  // task.close/delete (tier 'always-ask'). There is no per-tier filter in that
-  // API (the extension point for that, `onGatedInvoke`, is unimplemented — see
-  // server/registry/projections/mcp.ts's doc comment), so this is an
-  // all-7-or-none choice per call. Gating the whole call on
-  // orchestratorWriteEnabled() — conductor-only — preserves today's boundary:
-  // workers have NEVER had create_task/close_task/delete_task here (that write
-  // loop below already excluded them), and still don't. The cost is that
-  // workers also lose the lean list_tasks/get_task read tools they used to get
-  // unconditionally; that's judged acceptable because (a) list_tasks/get_task
-  // were never this file's documented reason for the worker's MCP server (see
-  // writeWorkerMcpConfig's docblock — that's report_complete), (b) workers keep
-  // Bash access to the equivalent `octomux get-task`/`list-tasks` CLI
-  // subcommands, and (c) workers keep monitor_status/get_task_output/
-  // get_agent_output here regardless. Registering task.create/start/move/close/
-  // delete for the conductor here does NOT change its blast radius: those
-  // actions already ran immediately with no approval gate via the old COMMANDS
-  // write loop (see actions.ts's docblock) — this only changes the code path
-  // (in-process capability handler instead of an RPC to
-  // /api/hooks/orchestrator-action), not the "runs immediately" semantics.
-  if (orchestratorWriteEnabled()) {
-    registerCapabilityMcpTools(server, 'agent');
-  }
+  // Tier split: the conductor gets every task.* capability; a worker gets only
+  // the 'auto' tier — task.list/get. That preserves both boundaries at once.
+  // Workers have never had create_task/close_task/delete_task (the write loop
+  // below already excluded them) and still don't, because those capabilities
+  // are 'ask'/'always-ask'. But workers DO keep the lean list_tasks/get_task
+  // read tools they have always had unconditionally, which an all-or-nothing
+  // gate on orchestratorWriteEnabled() would have taken away.
+  //
+  // Filtering on tier rather than on a tool-name allowlist means a new
+  // capability lands on the correct side of this boundary by virtue of the
+  // tier its author already had to choose — there is no second list to keep
+  // in sync, and forgetting to update one cannot silently widen a worker's
+  // reach.
+  //
+  // ONE call, not two: registering the 'auto' tier unconditionally and then
+  // the rest for the conductor would register the auto tools twice for the
+  // conductor, and the MCP SDK rejects a duplicate tool name.
+  //
+  // Registering task.create/start/move/close/delete for the conductor does not
+  // change its blast radius: those actions already ran immediately with no
+  // approval gate via the old COMMANDS write loop (see actions.ts's docblock).
+  // This changes the code path — in-process capability handler instead of an
+  // RPC to /api/hooks/orchestrator-action — not the "runs immediately"
+  // semantics. Adding that approval step is `onGatedInvoke`'s job.
+  registerCapabilityMcpTools(server, 'agent', {
+    tiers: orchestratorWriteEnabled() ? undefined : ['auto'],
+  });
 
   // ── Write tools (SHR-142) ─────────────────────────────────────────────────
   // Only registered for an orchestrator-started session (base url + token in

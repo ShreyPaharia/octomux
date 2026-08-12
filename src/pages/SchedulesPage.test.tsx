@@ -9,7 +9,7 @@ const {
   taskApiProxy,
   reviewApiProxy,
   configApiProxy,
-  loopApiProxy,
+  runApiProxy,
   schedulesApiProxy,
   kindsApiProxy,
   apiMock,
@@ -18,7 +18,7 @@ const {
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
-vi.mock('@/lib/api/loopApi', () => ({ loopApi: loopApiProxy }));
+vi.mock('@/lib/api/runApi', () => ({ runApi: runApiProxy }));
 vi.mock('@/lib/api/schedulesApi', () => ({ schedulesApi: schedulesApiProxy }));
 vi.mock('@/lib/api/kindsApi', () => ({ kindsApi: kindsApiProxy }));
 vi.mock('@/components/fields/RepoPickerField', () => ({
@@ -115,7 +115,6 @@ describe('SchedulesPage', () => {
         },
       ],
     });
-    apiMock.listLoops.mockResolvedValue([]);
     apiMock.listKinds.mockResolvedValue({
       kinds: [
         {

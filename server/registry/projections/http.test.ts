@@ -205,6 +205,61 @@ describe('resolveCallerFromRequest', () => {
   });
 });
 
+describe('mountCapabilities — auth: bearer-hook-token', () => {
+  // Proves the generic mechanism (independent of any real capability):
+  // mountCapabilities must apply requireBearerHookToken BEFORE the handler
+  // for any capability declaring `http.auth: 'bearer-hook-token'`, so a
+  // request that never proves it holds a live agent token never reaches
+  // caller resolution or the handler at all — the exact regression a
+  // capability's `callers: ['agent']` combined with resolveCaller's
+  // fail-closed default would otherwise silently permit (see the comments in
+  // ./http.ts's resolveCallerFor and mountCapabilities).
+  it.each<[string, string | undefined, number]>([
+    ['no Authorization header at all', undefined, 401],
+    ['a token that does not match any live agent', 'Bearer tok-wrong', 401],
+    ['the correct, live agent token', 'Bearer tok-valid', 200],
+  ])('%s -> %d', async (_label, authHeader, expectedStatus) => {
+    const task = insertTestTask();
+    insertAgent(db, { task_id: task.id, hook_token: 'tok-valid' });
+    defineCapability(
+      cap({
+        id: 'thing.bearer',
+        http: { method: 'get', path: '/api/bearer-thing', auth: 'bearer-hook-token' },
+        callers: ['agent'],
+      }),
+    );
+    const app = appWithRegistry();
+    let req = request(app).get('/api/bearer-thing');
+    if (authHeader) req = req.set('Authorization', authHeader);
+    const res = await req;
+    expect(res.status).toBe(expectedStatus);
+  });
+
+  // Requirement 3 (resolveCaller precision): once the bearer gate has passed,
+  // the caller must resolve to 'agent' from the verified token alone — never
+  // re-derived from (and therefore never overridable by) a spoofable header
+  // like the UI client-class header.
+  it('resolves caller to agent from the verified token, ignoring a spoofed UI client-class header', async () => {
+    const task = insertTestTask();
+    insertAgent(db, { task_id: task.id, hook_token: 'tok-valid' });
+    defineCapability(
+      cap({
+        id: 'thing.bearer.whoami',
+        http: { method: 'get', path: '/api/bearer-whoami', auth: 'bearer-hook-token' },
+        callers: ['agent'],
+        handler: (_input, ctx) => ({ caller: ctx.caller }),
+      }),
+    );
+    const app = appWithRegistry();
+    const res = await request(app)
+      .get('/api/bearer-whoami')
+      .set('Authorization', 'Bearer tok-valid')
+      .set(CLIENT_CLASS_HEADER, 'ui');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ caller: 'agent' });
+  });
+});
+
 describe('mountCapabilities — success status codes', () => {
   // Behaviour preservation: the routes these capabilities replace answer 201 on
   // create and 204 on delete. Defaulting everything to 200 would silently

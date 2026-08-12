@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { renderWithRouter } from '@/test-helpers';
 import { NewLoopGroupDialog } from './NewLoopGroupDialog';
 
-vi.mock('@/lib/api/loopGroupApi', () => ({
-  loopGroupApi: { createLoopGroup: vi.fn() },
+vi.mock('@/lib/api/runApi', () => ({
+  runApi: { startLoopGroup: vi.fn() },
 }));
 vi.mock('@/components/fields/RepoPickerField', () => ({
   RepoPickerField: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
@@ -20,9 +20,9 @@ vi.mock('@/components/fields/BranchPickerField', () => ({
 
 describe('NewLoopGroupDialog', () => {
   it('submits repo/branch/spec/n and calls onCreated with the result', async () => {
-    const { loopGroupApi } = await import('@/lib/api/loopGroupApi');
-    const group = { id: 'group-1', n: 3, loopRuns: [] };
-    vi.mocked(loopGroupApi.createLoopGroup).mockResolvedValue(group as never);
+    const { runApi } = await import('@/lib/api/runApi');
+    const result = { id: 'run-group-1', loopGroup: { id: 'group-1', n: 3, candidates: [] } };
+    vi.mocked(runApi.startLoopGroup).mockResolvedValue(result as never);
     const onCreated = vi.fn();
     const user = userEvent.setup();
 
@@ -34,8 +34,8 @@ describe('NewLoopGroupDialog', () => {
     await user.type(screen.getByTestId('loop-group-verify'), 'true');
     await user.click(screen.getByTestId('new-loop-group-submit'));
 
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(group));
-    expect(loopGroupApi.createLoopGroup).toHaveBeenCalledWith({
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(result));
+    expect(runApi.startLoopGroup).toHaveBeenCalledWith({
       repoPath: '/repo',
       baseBranch: 'main',
       spec: { prompt: 'improve X', verify: 'true', maxIterations: 10 },

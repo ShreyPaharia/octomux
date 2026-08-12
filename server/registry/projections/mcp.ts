@@ -43,6 +43,19 @@ export interface RegisterCapabilityToolsOptions {
    * unset, non-`'auto'` tools simply run immediately, same as `'auto'` ones.
    */
   onGatedInvoke?: (cap: Capability, tier: PolicyTier, input: unknown) => Promise<void> | void;
+  /**
+   * Restrict registration to capabilities whose RESOLVED tier (post-
+   * `authorize()`, so `ui`/`human` callers always resolve to `'auto'`) is in
+   * this list. Omit to register every authorized capability.
+   *
+   * Exists because a worker session and the conductor are both `agent` callers
+   * but must not get the same tools: a worker needs the read tier
+   * (`task.list`/`task.get`) and must not get `task.create`/`close`/`delete`.
+   * Tier is the honest axis for that split — it is already the field that says
+   * "this one needs a human" — so filtering on it avoids a second, drifting
+   * allowlist of tool names.
+   */
+  tiers?: PolicyTier[];
 }
 
 /**
@@ -61,6 +74,18 @@ export function registerCapabilityTools(
       logger.debug(
         { operation: 'registerCapabilityTools', capability: cap.id, caller: opts.caller },
         'capability not authorized for caller — skipping MCP registration',
+      );
+      continue;
+    }
+    if (opts.tiers && !opts.tiers.includes(decision.tier)) {
+      logger.debug(
+        {
+          operation: 'registerCapabilityTools',
+          capability: cap.id,
+          caller: opts.caller,
+          tier: decision.tier,
+        },
+        'capability tier excluded by caller tier filter — skipping MCP registration',
       );
       continue;
     }

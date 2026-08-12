@@ -58,6 +58,19 @@ export interface LoopRunResult {
   updated_at: string;
 }
 
+export interface LoopIterationResult {
+  id: string;
+  loop_run_id: string;
+  n: number;
+  sha_from: string | null;
+  sha_to: string | null;
+  verify_passed: number | null;
+  tokens: number | null;
+  emit_status: string | null;
+  emit_reason: string | null;
+  created_at: string;
+}
+
 export interface LoopGroupResult {
   id: string;
   n: number;
@@ -68,7 +81,31 @@ export interface LoopGroupResult {
   judge_rationale: string | null;
   created_at: string;
   updated_at: string;
-  loopRuns: LoopRunResult[];
+}
+
+/**
+ * Polymorphic `runs` row — what POST/GET /api/runs(/:id) return post-collapse
+ * (see server/routes/runs.ts's module doc). `loop` is set for a loop-backed run
+ * (workflow_kind 'loop', 'doc-drift', 'prod-log-triage', ...); `loopGroup` is
+ * set only for workflow_kind 'loop-group'. Exactly one of the two is non-null
+ * for a startLoop/startLoopGroup response.
+ */
+export interface RunResult {
+  id: string;
+  workflow_kind: string;
+  trigger: string;
+  schedule_id: string | null;
+  task_id: string | null;
+  chat_id: string | null;
+  loop_run_id: string | null;
+  status: string;
+  effective_status: string;
+  result_json: string | null;
+  error: string | null;
+  started_at: string;
+  ended_at: string | null;
+  loop: (LoopRunResult & { iterations: LoopIterationResult[] }) | null;
+  loopGroup: (LoopGroupResult & { candidates: LoopRunResult[] }) | null;
 }
 
 export interface IntegrationRow {
@@ -101,25 +138,18 @@ export interface OctomuxClient {
     },
   ): Promise<Worker>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
-  startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<LoopRunResult>;
+  startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<RunResult>;
   startLoopGroup(data: {
     repoPath: string;
     baseBranch: string;
     spec: LoopSpecInput;
     n: number;
-  }): Promise<LoopGroupResult>;
+  }): Promise<RunResult>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
   recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
   defaultBranch(repoPath: string): Promise<{ branch: string }>;
-  getRepoConfig(repoPath: string): Promise<{
-    repo_path: string;
-    base_branch: string | null;
-    test_command: string;
-    format_command: string;
-    lint_command: string;
-  }>;
   postComment(taskId: string, data: PostCommentInput): Promise<InlineCommentRow>;
   listComments(
     taskId: string,
@@ -216,12 +246,15 @@ export function createClient(serverUrl: string): OctomuxClient {
       );
     },
     startLoop(data) {
-      return request<LoopRunResult>('/loops', { method: 'POST', body: JSON.stringify(data) });
+      return request<RunResult>('/runs', {
+        method: 'POST',
+        body: JSON.stringify({ workflowKind: 'loop', ...data }),
+      });
     },
     startLoopGroup(data) {
-      return request<LoopGroupResult>('/loop-groups', {
+      return request<RunResult>('/runs', {
         method: 'POST',
-        body: JSON.stringify(data),
+        body: JSON.stringify({ workflowKind: 'loop-group', ...data }),
       });
     },
     sendMessage(taskId, agentId, message) {
@@ -241,9 +274,6 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     defaultBranch(repoPath) {
       return request<{ branch: string }>(`/default-branch${qs({ repo_path: repoPath })}`);
-    },
-    getRepoConfig(repoPath) {
-      return request(`/repo-config${qs({ repo_path: repoPath })}`);
     },
     postComment(taskId, data) {
       return request<InlineCommentRow>(`/tasks/${encodeURIComponent(taskId)}/comments`, {

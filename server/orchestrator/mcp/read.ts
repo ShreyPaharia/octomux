@@ -36,7 +36,7 @@ import {
   listPendingPromptsByTasks,
   listRecentRepoPaths,
 } from '../../repositories/index.js';
-import { searchShared } from '../../repositories/agent-learnings.js';
+import { recallLearnings } from '../../routes/learnings.js';
 import {
   getManagedTask,
   countManagedTasksByPhase,
@@ -375,13 +375,19 @@ export interface LearningSummary {
  * Search the shared-lane agent_learnings store for a recall query (spec §12
  * agent-learnings; gateway Task 2). Cross-repo unless `repo` is given.
  * Returns lean summaries only — never the full row (usage_count, ids, etc.).
+ *
+ * Delegates to `recallLearnings` (server/routes/learnings.ts) — the same
+ * in-process function `GET /api/learnings` calls — with no `taskId` (this
+ * tool runs on the conductor's MCP server, which has no per-task context, so
+ * this preserves the shared-lane-only / no-usage-bump behaviour this tool
+ * always had). One implementation of "recall a learning" now, not two.
  */
 export function handleSearchLearnings(input: SearchLearningsInput): LearningSummary[] {
   const { query, repo } = input;
 
   logger.debug({ operation: 'search_learnings', query, repo }, 'search_learnings called');
 
-  const rows = searchShared(query, repo ? { repo } : {});
+  const rows = recallLearnings({ query, repo });
 
   return rows.map((r) => ({
     trigger: r.trigger,

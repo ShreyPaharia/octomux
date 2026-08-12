@@ -88,6 +88,15 @@ const LIST_WITH_EFFECTIVE_STATUS_SQL = `
   LEFT JOIN tasks t ON runs.task_id = t.id
 `;
 
+/** Single run row + its effective_status — backs GET /api/runs/:id. */
+export function getRunWithEffectiveStatus(
+  id: string,
+): (RunRow & { effective_status: string }) | undefined {
+  return getDb().prepare(`${LIST_WITH_EFFECTIVE_STATUS_SQL} WHERE runs.id = ?`).get(id) as
+    | (RunRow & { effective_status: string })
+    | undefined;
+}
+
 export function listRunsForWorkflow(kind: string): Array<RunRow & { effective_status: string }> {
   return getDb()
     .prepare(

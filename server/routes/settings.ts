@@ -1,11 +1,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import { getSettings, updateSettings } from '../settings.js';
-import {
-  getOrCreateRepoConfig,
-  updateRepoConfig,
-  listRepoConfigs,
-} from '../repositories/repo-config.js';
+import { updateRepoConfig, listRepoConfigs } from '../repositories/repo-config.js';
 import { augmentDashboardSettings } from './_shared.js';
 import { badRequest, ServiceError } from '../services/errors.js';
 
@@ -52,15 +48,6 @@ router.patch('/api/settings', async (req: Request, res: Response) => {
 router.get('/api/repo-configs', async (_req: Request, res: Response) => {
   const configs = listRepoConfigs();
   res.json(configs);
-});
-
-router.get('/api/repo-config', async (req: Request, res: Response) => {
-  const repoPath = req.query.repo_path as string;
-  if (!repoPath) {
-    throw badRequest('repo_path query parameter is required');
-  }
-  const config = await getOrCreateRepoConfig(repoPath);
-  res.json(config);
 });
 
 router.patch('/api/repo-config', async (req: Request, res: Response) => {

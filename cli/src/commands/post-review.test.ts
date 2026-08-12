@@ -37,7 +37,6 @@ function makeClient(postComment: OctomuxClient['postComment']): OctomuxClient {
     getSkill: notImpl as never,
     recentRepos: notImpl as never,
     defaultBranch: notImpl as never,
-    getRepoConfig: notImpl as never,
     postComment,
     listComments: notImpl as never,
     updateComment: notImpl as never,

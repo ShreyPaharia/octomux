@@ -6,13 +6,13 @@ import { renderWithRouter } from '../test-helpers';
 import type { WorkflowRunRow } from '@/lib/api/workflowsApi';
 import { registerWorkflowUI } from '@/workflows/registry';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, loopApiProxy, workflowsApiProxy, apiMock } =
+const { taskApiProxy, reviewApiProxy, configApiProxy, runApiProxy, workflowsApiProxy, apiMock } =
   await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
 
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
-vi.mock('@/lib/api/loopApi', () => ({ loopApi: loopApiProxy }));
+vi.mock('@/lib/api/runApi', () => ({ runApi: runApiProxy }));
 vi.mock('@/lib/api/workflowsApi', () => ({ workflowsApi: workflowsApiProxy }));
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),

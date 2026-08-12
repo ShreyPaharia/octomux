@@ -6,14 +6,12 @@
  * below as still pending migration. A route that's none of the three is a
  * silent gap — someone added a handler and nobody declared it.
  *
- * `server/registry/capabilities/task.ts` is being written concurrently by
- * another agent and may or may not exist when this runs. This test doesn't
- * assume either way: it asserts every *currently* undeclared route is a
- * member of `PENDING_MIGRATION` (subset, not exact-equality), so it passes
- * whether task.ts capabilities have landed yet or not. As capabilities land
- * and cover routes on this list, `PENDING_MIGRATION` should be trimmed to
- * match — down to empty as migration proceeds — but nothing here forces
- * that trim to happen in the same PR that adds the capability.
+ * The check is exact equality in BOTH directions against `PENDING_MIGRATION`,
+ * so the list cannot drift from reality: an undeclared route missing from the
+ * list is a new undeclared surface, and a listed route that is no longer
+ * undeclared is a stale entry overstating how much work remains. Migrating or
+ * deleting a route therefore forces the same PR to trim the list. It only ever
+ * shrinks, down to empty when migration is done.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -31,18 +29,15 @@ function routeKey(r: { method: string; path: string }): string {
 const TEST_ONLY_ROUTE = 'POST /api/__test__/seed-review';
 
 /**
- * Routes that are neither a capability nor a declared exemption (as of this
- * writing, with zero task.* capabilities registered) — the hand-written
- * surface still waiting on a capability row. Shrinks to empty as migration
- * proceeds; see the file header for why this is a subset check rather than
- * an exact-equality ratchet.
+ * Routes that are neither a capability nor a declared exemption — the
+ * hand-written surface still waiting on a capability row, or waiting to be
+ * deleted outright. Kept exactly in sync by the test below.
  */
 const PENDING_MIGRATION: string[] = [
   'DELETE /api/agents/:id',
   'DELETE /api/chats/:id',
   'DELETE /api/integrations/:id',
   'DELETE /api/kinds/:kind',
-  'DELETE /api/learnings/:id',
   'DELETE /api/schedules/:id',
   'DELETE /api/tasks/:id/comments/:cid',
   'DELETE /api/tasks/:id/refs/:integration',
@@ -65,12 +60,6 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/integrations',
   'GET /api/integrations/providers',
   'GET /api/kinds',
-  'GET /api/learnings',
-  'GET /api/learnings/digest',
-  'GET /api/loop-groups',
-  'GET /api/loop-groups/:id',
-  'GET /api/loops',
-  'GET /api/loops/:runId',
   'GET /api/orchestrator/conversations',
   'GET /api/orchestrator/conversations/:id',
   'GET /api/orchestrator/conversations/:id/messages',
@@ -79,14 +68,13 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/pr-extracts/:id',
   'GET /api/preflight/none-mode',
   'GET /api/recent-repos',
-  'GET /api/repo-config',
   'GET /api/repo-configs',
   'GET /api/repos/:repoPath/files',
   'GET /api/repos/:repoPath/files/content',
-  'GET /api/repos/:repoPath/learnings',
   'GET /api/reviews',
   'GET /api/reviews/:id',
   'GET /api/runs',
+  'GET /api/runs/:id',
   'GET /api/schedules',
   'GET /api/schedules/:id/export',
   'GET /api/schedules/:id/runs',
@@ -104,7 +92,6 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/tasks/:id/updates',
   'GET /api/tasks/inbox',
   'GET /api/workflows',
-  'GET /api/workflows/:kind/runs',
   'GET /api/worktrees',
   'GET /api/worktrees/:id',
   'PATCH /api/agents/:id',
@@ -117,7 +104,6 @@ const PENDING_MIGRATION: string[] = [
   'PATCH /api/tasks/:id',
   'PATCH /api/tasks/:id/base',
   'PATCH /api/tasks/:id/comments/:cid',
-  'PATCH /api/tasks/:id/review-runs/:rid/walkthrough',
   'PATCH /api/tasks/:id/viewed',
   'PATCH /api/workers/:id/task',
   'POST /api/agents',
@@ -127,19 +113,13 @@ const PENDING_MIGRATION: string[] = [
   'POST /api/integrations',
   'POST /api/integrations/:id/test',
   'POST /api/integrations/linear/prefill',
-  'POST /api/learnings',
-  'POST /api/learnings/:id/supersede',
-  'POST /api/loop-groups',
-  'POST /api/loop-groups/:id/judge',
-  'POST /api/loop-groups/:id/judge/emit',
-  'POST /api/loops',
-  'POST /api/loops/:runId/emit',
-  'POST /api/loops/:runId/stop',
   'POST /api/orchestrator/conversations',
   'POST /api/orchestrator/conversations/:id/global-monitor',
   'POST /api/pr-extracts/:taskId/emit',
   'POST /api/preflight/stash',
   'POST /api/reviews',
+  'POST /api/runs',
+  'POST /api/runs/:id/stop',
   'POST /api/schedules',
   'POST /api/schedules/:id/run',
   'POST /api/schedules/import',
@@ -156,7 +136,6 @@ const PENDING_MIGRATION: string[] = [
   'POST /api/tasks/:id/user-terminal',
   'POST /api/tasks/:id/workers',
   'POST /api/tasks/:id/workers/:agentId/message',
-  'POST /api/tasks/:taskId/review',
   'POST /api/tasks/delete-done',
   'POST /api/tasks/viewed-all',
   'PUT /api/kinds/:kind',

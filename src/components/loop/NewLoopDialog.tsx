@@ -12,12 +12,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { TaskPickerField } from '@/components/fields/TaskPickerField';
-import { loopApi, type LoopRun } from '@/lib/api/loopApi';
+import { runApi, type RunDetail } from '@/lib/api/runApi';
 
 interface NewLoopDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: (run: LoopRun) => void;
+  onCreated: (run: RunDetail) => void;
 }
 
 export function NewLoopDialog({ open, onOpenChange, onCreated }: NewLoopDialogProps) {
@@ -62,7 +62,7 @@ export function NewLoopDialog({ open, onOpenChange, onCreated }: NewLoopDialogPr
     setError(null);
     try {
       const budgetTokensN = Number.parseInt(budgetTokens, 10);
-      const run = await loopApi.createLoop(taskId, {
+      const run = await runApi.startLoop(taskId, {
         prompt: prompt.trim(),
         verify: verify.trim(),
         maxIterations: maxIterationsN,

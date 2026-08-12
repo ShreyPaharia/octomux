@@ -96,6 +96,15 @@ describe('learnings API', () => {
       expect(res.status).toBe(401);
     });
 
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .post('/api/learnings')
+        .set('Authorization', 'Bearer tok-wrong')
+        .send({ taskId: task.id, trigger: 't', lesson: 'x', evidence: 'e' });
+
+      expect(res.status).toBe(401);
+    });
+
     it('returns 404 for an unknown task', async () => {
       const res = await request(app)
         .post('/api/learnings')
@@ -166,6 +175,14 @@ describe('learnings API', () => {
       const res = await request(app).get('/api/learnings').query({ taskId: task.id, query: 'x' });
       expect(res.status).toBe(401);
     });
+
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .get('/api/learnings')
+        .set('Authorization', 'Bearer tok-wrong')
+        .query({ taskId: task.id, query: 'x' });
+      expect(res.status).toBe(401);
+    });
   });
 
   describe('GET /api/learnings/digest', () => {
@@ -201,6 +218,15 @@ describe('learnings API', () => {
 
     it('rejects a missing token with 401', async () => {
       const res = await request(app).get('/api/learnings/digest').query({ repo: task.repo_path });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .get('/api/learnings/digest')
+        .set('Authorization', 'Bearer tok-wrong')
+        .query({ repo: task.repo_path });
 
       expect(res.status).toBe(401);
     });
@@ -299,6 +325,72 @@ describe('learnings API', () => {
         .send({ taskId: task.id, reason: 'x' });
 
       expect(res.status).toBe(401);
+    });
+
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .post('/api/learnings/some-id/supersede')
+        .set('Authorization', 'Bearer tok-wrong')
+        .send({ taskId: task.id, reason: 'x' });
+
+      expect(res.status).toBe(401);
+    });
+  });
+
+  // Both of these now run through the capability registry (learning.list /
+  // learning.delete) rather than a hand-written route — see
+  // server/registry/capabilities/learning.ts. Neither carries auth, before or
+  // after.
+
+  describe('GET /api/repos/:repoPath/learnings', () => {
+    it('returns shared + review-lane rows for the repo without a bearer token', async () => {
+      // listForRead(repoPath, REVIEW_LANE) matches lane IN (shared, review) —
+      // a plain (shared-lane) learning is expected to surface here too.
+      const created = await request(app)
+        .post('/api/learnings')
+        .set('Authorization', `Bearer ${hookToken}`)
+        .send({ taskId: task.id, trigger: 't', lesson: 'shared lesson', evidence: 'e' });
+
+      const res = await request(app).get(
+        `/api/repos/${encodeURIComponent(task.repo_path)}/learnings`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([
+        expect.objectContaining({ id: created.body.id, why: 'shared lesson' }),
+      ]);
+    });
+
+    it('does not surface a learning from another task’s private lane', async () => {
+      await request(app).post('/api/learnings').set('Authorization', `Bearer ${hookToken}`).send({
+        taskId: task.id,
+        trigger: 't',
+        lesson: 'private to this task',
+        evidence: 'e',
+        private: true,
+      });
+
+      const res = await request(app).get(
+        `/api/repos/${encodeURIComponent(task.repo_path)}/learnings`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+  });
+
+  describe('DELETE /api/learnings/:id', () => {
+    it('hard-deletes a learning without a bearer token', async () => {
+      const created = await request(app)
+        .post('/api/learnings')
+        .set('Authorization', `Bearer ${hookToken}`)
+        .send({ taskId: task.id, trigger: 't', lesson: 'to be deleted', evidence: 'e' });
+      const id = created.body.id as string;
+
+      const res = await request(app).delete(`/api/learnings/${id}`);
+
+      expect(res.status).toBe(204);
+      expect(getLearning(id)).toBeUndefined();
     });
   });
 });

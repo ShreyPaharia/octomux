@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { loopApi, type LoopRunDetail } from '../lib/api/loopApi';
+import { runApi, type RunDetail } from '../lib/api/runApi';
 import { taskApi } from '../lib/api/taskApi';
 import { useResource } from '../lib/use-resource';
 import { IterationLedger } from '../components/loop/IterationLedger';
@@ -17,34 +17,35 @@ export default function LoopDetailPage() {
     data: run,
     loading,
     refresh,
-  } = useResource<LoopRunDetail>(id ? `loop:${id}` : null, () => loopApi.getLoop(id!), {
+  } = useResource<RunDetail>(id ? `loop:${id}` : null, () => runApi.getRun(id!), {
     events: (event) =>
-      (event.type === 'loop:emit' && event.payload.loopRunId === id) ||
-      event.type === 'task:updated',
+      (event.type === 'loop:emit' && event.payload.runId === id) || event.type === 'task:updated',
   });
   const [tab, setTab] = useState<Tab>('ledger');
   const [stopping, setStopping] = useState(false);
 
-  const { data: task } = useResource(run ? `task:${run.task_id}` : null, () =>
-    taskApi.getTask(run!.task_id),
+  const loop = run?.loop ?? null;
+
+  const { data: task } = useResource(loop ? `task:${loop.task_id}` : null, () =>
+    taskApi.getTask(loop!.task_id),
   );
 
   if (loading) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
-  if (!run) return <div className="p-6 text-sm text-destructive">Loop run not found.</div>;
+  if (!run || !loop) return <div className="p-6 text-sm text-destructive">Loop run not found.</div>;
 
   const spec = (() => {
     try {
-      return JSON.parse(run.spec_json) as { budget?: { tokens?: number } };
+      return JSON.parse(loop.spec_json) as { budget?: { tokens?: number } };
     } catch {
       return {};
     }
   })();
-  const tokensUsed = run.iterations.reduce((sum, it) => sum + (it.tokens ?? 0), 0);
+  const tokensUsed = loop.iterations.reduce((sum, it) => sum + (it.tokens ?? 0), 0);
 
   const handleStop = async () => {
     setStopping(true);
     try {
-      await loopApi.stopLoop(run.id);
+      await runApi.stopRun(run.id);
       await refresh();
     } finally {
       setStopping(false);
@@ -61,21 +62,21 @@ export default function LoopDetailPage() {
         data-testid="loop-control-strip"
         className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-glass-edge bg-glass-l1 px-4 py-3"
       >
-        <Badge data-testid="loop-status-badge">{run.status}</Badge>
+        <Badge data-testid="loop-status-badge">{loop.status}</Badge>
         <span className="font-mono text-sm">
-          Iteration {run.iteration} / {run.max_iterations ?? '∞'}
+          Iteration {loop.iteration} / {loop.max_iterations ?? '∞'}
         </span>
         {spec.budget?.tokens != null && (
           <span className="text-xs text-muted-foreground">
             {tokensUsed} / {spec.budget.tokens} tokens
           </span>
         )}
-        {run.termination_reason && (
+        {loop.termination_reason && (
           <span data-testid="termination-reason" className="text-xs text-muted-foreground">
-            {run.termination_reason}
+            {loop.termination_reason}
           </span>
         )}
-        {run.status === 'running' && (
+        {loop.status === 'running' && (
           <Button
             size="sm"
             variant="destructive"
@@ -108,9 +109,9 @@ export default function LoopDetailPage() {
 
       <div className="mt-4 min-h-0 flex-1">
         {tab === 'ledger' ? (
-          <IterationLedger taskId={run.task_id} iterations={run.iterations} />
+          <IterationLedger taskId={loop.task_id} iterations={loop.iterations} />
         ) : activeAgent ? (
-          <TerminalView taskId={run.task_id} windowIndex={activeAgent.window_index} />
+          <TerminalView taskId={loop.task_id} windowIndex={activeAgent.window_index} />
         ) : (
           <p className="text-sm text-muted-foreground">No active agent session.</p>
         )}

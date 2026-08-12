@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { DiffViewer } from '@/components/DiffViewer';
-import type { LoopIteration } from '@/lib/api/loopApi';
+import type { LoopIteration } from '@/lib/api/runApi';
 
 interface IterationLedgerProps {
   taskId: string;
