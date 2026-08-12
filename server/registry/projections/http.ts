@@ -11,6 +11,7 @@ import { authorize, listHttpCapabilities, resolveCaller } from '../index.js';
 import type { Capability, CallerClass } from '../index.js';
 import { CLIENT_CLASS_HEADER } from '@octomux/api-client';
 import { checkAgentTokenExists } from '../../repositories/workers.js';
+import { requireBearerHookToken } from '../../routes/hook-auth.js';
 import { ServiceError } from '../../services/errors.js';
 import { childLogger } from '../../logger.js';
 
@@ -70,9 +71,41 @@ export function mergeInput(req: Request): Record<string, unknown> {
   };
 }
 
+/**
+ * Resolve the caller for a capability's request, taking the route's own
+ * auth (if any) into account.
+ *
+ * For a capability declaring `auth: 'bearer-hook-token'`, this runs only
+ * after `mountCapabilities`'s `requireBearerHookToken` middleware has 401'd
+ * every request without a live agent hook token — so reaching here at all is
+ * proof of a verified token, and the caller is hard-set to `'agent'`.
+ *
+ * BE PRECISE ABOUT WHAT THIS LINE DOES AND DOES NOT PROTECT. It is a
+ * shortcut, not the security boundary. Deleting it changes NO observable
+ * behaviour today, and a mutation test confirms that: `resolveCaller`
+ * (server/registry/index.ts) checks `isAgentToken` BEFORE `isDashboard`, so
+ * `resolveCallerFromRequest` already returns `'agent'` for any request
+ * carrying a valid token, spoofed `X-Client-Class: ui` header or not.
+ *
+ * The two things that actually enforce the boundary are:
+ *  1. the `requireBearerHookToken` middleware, which rejects bad tokens; and
+ *  2. `resolveCaller`'s ordering, which makes the token signal outrank the
+ *     client-class header.
+ * If either is ever changed, THIS LINE WILL NOT SAVE YOU — and conversely,
+ * do not delete either one on the belief that this line covers it.
+ *
+ * What it does buy: it skips re-running the same `checkAgentTokenExists` DB
+ * lookup the middleware just did, and it states the intent locally so the
+ * verdict cannot drift if `resolveCallerFromRequest` grows new signals.
+ */
+function resolveCallerFor(cap: Capability, req: Request): CallerClass {
+  if (cap.http?.auth === 'bearer-hook-token') return 'agent';
+  return resolveCallerFromRequest(req);
+}
+
 function handlerFor(cap: Capability) {
   return async (req: Request, res: Response): Promise<void> => {
-    const caller = resolveCallerFromRequest(req);
+    const caller = resolveCallerFor(cap, req);
     const decision = authorize(cap, caller);
     if (!decision.allowed) {
       logger.warn({ capability: cap.id, caller, reason: decision.reason }, 'capability denied');
@@ -106,8 +139,18 @@ function handlerFor(cap: Capability) {
 /** Register every HTTP-projected capability on `router` at its declared route. */
 export function mountCapabilities(router: Router): void {
   for (const cap of listHttpCapabilities()) {
-    const { method, path } = cap.http!;
-    logger.debug({ capability: cap.id, method, path }, 'mounting capability');
-    router[method](path, handlerFor(cap));
+    const { method, path, auth } = cap.http!;
+    logger.debug({ capability: cap.id, method, path, auth }, 'mounting capability');
+    // requireBearerHookToken (server/routes/hook-auth.ts) is the SAME
+    // middleware the hand-written bearer-gated routes use — reused, not
+    // reimplemented, so token comparison lives in exactly one place. It runs
+    // BEFORE handlerFor, so a missing/invalid token 401s before caller
+    // resolution or the handler ever run. See resolveCallerFor's doc comment
+    // above for how this interacts with caller resolution.
+    if (auth === 'bearer-hook-token') {
+      router[method](path, requireBearerHookToken, handlerFor(cap));
+    } else {
+      router[method](path, handlerFor(cap));
+    }
   }
 }

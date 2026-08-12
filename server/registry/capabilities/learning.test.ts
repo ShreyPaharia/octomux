@@ -25,10 +25,17 @@ afterEach(() => {
 // ─── Registration + shape ──────────────────────────────────────────────────────
 
 describe('registerLearningCapabilities', () => {
-  it('registers both capabilities without throwing', () => {
+  it('registers all six capabilities without throwing', () => {
     resetRegistry();
     expect(() => registerLearningCapabilities()).not.toThrow();
-    for (const id of ['learning.list', 'learning.delete']) {
+    for (const id of [
+      'learning.list',
+      'learning.delete',
+      'learning.add',
+      'learning.recall',
+      'learning.supersede',
+      'learning.digest',
+    ]) {
       expect(getCapability(id), `${id} should be registered`).toBeDefined();
     }
   });
@@ -36,6 +43,10 @@ describe('registerLearningCapabilities', () => {
   it.each([
     ['learning.list', 'get', '/api/repos/:repoPath/learnings', 'auto'],
     ['learning.delete', 'delete', '/api/learnings/:id', 'always-ask'],
+    ['learning.add', 'post', '/api/learnings', 'auto'],
+    ['learning.recall', 'get', '/api/learnings', 'auto'],
+    ['learning.supersede', 'post', '/api/learnings/:id/supersede', 'auto'],
+    ['learning.digest', 'get', '/api/learnings/digest', 'auto'],
   ] as const)('%s has the expected http/tier shape', (id, method, path, tier) => {
     const cap = getCapability(id)!;
     expect(cap.http?.method).toBe(method);
@@ -54,6 +65,24 @@ describe('registerLearningCapabilities', () => {
 
   it('learning.delete declares 204 (matches the route it replaces)', () => {
     expect(getCapability('learning.delete')!.http?.status).toBe(204);
+  });
+
+  // The four bearer-gated capabilities: preserve `requireBearerHookToken`'s
+  // original gate exactly. `callers: ['agent']` (not the trio above) because
+  // the pre-migration routes never served a request that hadn't already
+  // proved it was an agent — see @octomux/capabilities's learning.ts module
+  // doc for why this differs from learning.list/learning.delete.
+  it.each(['learning.add', 'learning.recall', 'learning.supersede', 'learning.digest'] as const)(
+    '%s declares auth: bearer-hook-token and callers: [agent] only',
+    (id) => {
+      const cap = getCapability(id)!;
+      expect(cap.http?.auth).toBe('bearer-hook-token');
+      expect(cap.callers).toEqual(['agent']);
+    },
+  );
+
+  it('learning.add declares 201 (matches the route it replaces)', () => {
+    expect(getCapability('learning.add')!.http?.status).toBe(201);
   });
 });
 

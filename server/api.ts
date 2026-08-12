@@ -6,7 +6,6 @@ import { hookRoutes } from './hooks.js';
 import './workflows/index.js';
 
 import { router as miscRouter } from './routes/misc.js';
-import { router as learningsRouter } from './routes/learnings.js';
 import { skillsRouter, agentDefsRouter } from './routes/registry-docs.js';
 import { router as savedFilesRouter } from './routes/saved-files.js';
 import { router as setupRouter } from './routes/setup.js';
@@ -37,7 +36,6 @@ export function setupRoutes(app: Express): void {
 
   // Mount extracted routers (bare app.use — each router keeps full /api/... paths)
   app.use(miscRouter);
-  app.use(learningsRouter);
   app.use(skillsRouter);
   app.use(savedFilesRouter);
   app.use(setupRouter);

@@ -96,6 +96,15 @@ describe('learnings API', () => {
       expect(res.status).toBe(401);
     });
 
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .post('/api/learnings')
+        .set('Authorization', 'Bearer tok-wrong')
+        .send({ taskId: task.id, trigger: 't', lesson: 'x', evidence: 'e' });
+
+      expect(res.status).toBe(401);
+    });
+
     it('returns 404 for an unknown task', async () => {
       const res = await request(app)
         .post('/api/learnings')
@@ -166,6 +175,14 @@ describe('learnings API', () => {
       const res = await request(app).get('/api/learnings').query({ taskId: task.id, query: 'x' });
       expect(res.status).toBe(401);
     });
+
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .get('/api/learnings')
+        .set('Authorization', 'Bearer tok-wrong')
+        .query({ taskId: task.id, query: 'x' });
+      expect(res.status).toBe(401);
+    });
   });
 
   describe('GET /api/learnings/digest', () => {
@@ -201,6 +218,15 @@ describe('learnings API', () => {
 
     it('rejects a missing token with 401', async () => {
       const res = await request(app).get('/api/learnings/digest').query({ repo: task.repo_path });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .get('/api/learnings/digest')
+        .set('Authorization', 'Bearer tok-wrong')
+        .query({ repo: task.repo_path });
 
       expect(res.status).toBe(401);
     });
@@ -296,6 +322,15 @@ describe('learnings API', () => {
     it('rejects a missing token with 401', async () => {
       const res = await request(app)
         .post('/api/learnings/some-id/supersede')
+        .send({ taskId: task.id, reason: 'x' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects a wrong token with 401', async () => {
+      const res = await request(app)
+        .post('/api/learnings/some-id/supersede')
+        .set('Authorization', 'Bearer tok-wrong')
         .send({ taskId: task.id, reason: 'x' });
 
       expect(res.status).toBe(401);
