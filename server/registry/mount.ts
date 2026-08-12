@@ -19,6 +19,7 @@ import { listCliCapabilities } from './index.js';
 import type { CallerClass } from './types.js';
 import { mountCapabilities } from './projections/http.js';
 import { registerCapabilityTools } from './projections/mcp.js';
+import type { RegisterCapabilityToolsOptions } from './projections/mcp.js';
 import { registerCapabilityCommands } from '@octomux/capabilities';
 import { registerTaskCapabilities } from './capabilities/task.js';
 import { registerRouteExemptions } from './exemptions.js';
@@ -76,9 +77,13 @@ export function mountCapabilityRoutes(app: Express): void {
  * `caller` is authorized to invoke as a tool on `server`. Safe to call with
  * zero capabilities registered — registering nothing is valid.
  */
-export function registerCapabilityMcpTools(server: McpServer, caller: CallerClass): void {
+export function registerCapabilityMcpTools(
+  server: McpServer,
+  caller: CallerClass,
+  opts: Omit<RegisterCapabilityToolsOptions, 'caller'> = {},
+): void {
   installCapabilities();
-  registerCapabilityTools(server, { caller });
+  registerCapabilityTools(server, { ...opts, caller });
 }
 
 /**
