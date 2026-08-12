@@ -33,7 +33,7 @@ they land after, they cost one registry row each.
 | ----------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
 | REST routes in `server/routes/*.ts` | 122      |                                                                                                                   |
 | REST routes mounted elsewhere       | 12       | `workflows/reviewer/routes.ts` (7), `workflows/pr-extract/routes.ts` (3), `orchestrator/artifact-endpoint.ts` (2) |
-| **Total production REST**           | **134**  | plus 1 test-only seed route                                                                                       |
+| **Total production REST**           | **145**  | measured at runtime by `listMountedRoutes()`, not grepped; 146 including the test-only seed route                 |
 | Hook endpoints (`server/hooks.ts`)  | 8        |                                                                                                                   |
 | CLI leaf commands                   | ~32      | across **two** independent dispatch trees                                                                         |
 | MCP tools                           | up to 17 | across **two** independent MCP servers                                                                            |
@@ -209,6 +209,8 @@ Recorded because each shaped an earlier version of this design.
 | `octomux learn`/`recall` don't exist (drift)                                                   | Shipped, with `agent_learnings`.                                                                                                                               |
 | `team_runs` / `team_schedules` need removing                                                   | Already dropped (`migrations.ts:973-975`).                                                                                                                     |
 | §7's `tasks.kind` / `trigger` / `schedule` columns are needed                                  | Reinvents `WorkflowType` + `runs` + `schedules`. The gap is **adoption**, not abstraction.                                                                     |
+| The surface is 134 REST routes (static grep)                                                   | **145** at runtime. Grep misses routes only reachable by executing `setupRoutes`. `listMountedRoutes()` is authoritative.                                      |
+| `GET /api/browse` is an out-of-registry escape-hatch route                                     | Plain JSON in, plain JSON out — no wildcard, streaming, or binary. Two independent agents refused to exempt it. It belongs in migration.                       |
 
 ## 4. Verified duplication worth acting on
 
@@ -283,7 +285,7 @@ fail-closed default alone would gate the dashboard's own calls. The
 use. An agent token always wins over the header.
 
 **Escape hatch, explicitly declared.** Streaming, wildcard and binary routes
-(`GET /api/tasks/:id/diff/*path`, SSE, PTY WebSockets, `/api/browse`) stay
+(`GET /api/tasks/:id/diff/*path`, PTY WebSockets) stay
 hand-written but must be _registered as out-of-registry_, so "unlisted" is a
 test failure rather than a silent gap. That is what makes the surface complete
 rather than merely smaller.
@@ -396,7 +398,11 @@ Decision: agents talk to octomux exclusively through MCP. Consequences accepted:
   bypasses both and curls `/api/tasks` directly.
 - External skills shelling out to `octomux …` break on upgrade.
 
-### 5.9 API reduction — 134 → ~100
+### 5.9 API reduction — 145 → ~110
+
+> The per-move figures below were derived when a static grep suggested 134
+> routes. `listMountedRoutes()` measures **145** production routes at runtime,
+> so each row is a relative saving against the larger real surface.
 
 | Move                                                                                                                                                                                                       | Routes | Δ   |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | --- |
@@ -409,10 +415,10 @@ Decision: agents talk to octomux exclusively through MCP. Consequences accepted:
 | `learnings` — two GETs → one with a query param, two POSTs → one accepting an array                                                                                                                        | 6 → 4  | −2  |
 | One each: terminals pair, file-reviewed toggle, viewed/viewed-all, repo-config/repo-configs, preflight pair, branches pair, `workflows/:kind/runs`, integrations prefill→invoke, pr-extract emit→runs emit |        | −9  |
 
-**~100 is the floor** without merging things that genuinely differ.
+**~110 is the floor** without merging things that genuinely differ.
 
-**Route count is the wrong metric once the registry exists.** 100 rows generated
-from one definition each is a far smaller surface than 134 hand-written ones.
+**Route count is the wrong metric once the registry exists.** 110 rows generated
+from one definition each is a far smaller surface than 145 hand-written ones.
 What a person actually holds in their head is **8 nouns** — `task`, `worker`,
 `run`, `review`, `artifact`, `docs`, `repo`, `integration`. The CLI (~32) and
 MCP (~14) projections stay deliberately narrower.
