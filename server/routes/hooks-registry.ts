@@ -18,10 +18,16 @@ const apiLogger = childLogger('api');
 
 export const router = express.Router();
 
+// 'note_added' deprecated (spec §5.5): POST /api/tasks/:id/note — its only
+// writer — was retired when the note/summary narrative moved into the
+// per-task `.octomux/artifact.md` (server/artifact.ts). Nothing in this pass
+// replaces standalone note-adding, so the event can no longer fire; dropped
+// from the selectable list so new webhooks can't be wired to a dead event.
+// Existing webhook configs keyed on it (server/hook-types.ts still types the
+// literal) simply stop receiving callbacks rather than erroring.
 const ALL_HOOK_EVENTS = [
   'workflow_status_changed',
   'summary_updated',
-  'note_added',
   'ref_added',
   'ref_removed',
   'task_created',
@@ -174,7 +180,7 @@ router.get('/api/hooks/registry', (_req: Request, res: Response) => {
     event: null,
     script_path: null,
     description:
-      'After each agent stop, calls Haiku to write a one-sentence progress summary to tasks.current_summary.',
+      "After each agent stop, calls Haiku to write a one-sentence progress summary to the task's .octomux/artifact.md.",
     enabled: builtinEnabled,
     requires_env: process.env.ANTHROPIC_API_KEY ? null : 'ANTHROPIC_API_KEY',
     last_run_at: null,

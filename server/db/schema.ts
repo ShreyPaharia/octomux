@@ -33,8 +33,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     source                       TEXT,
     schedule_id                  TEXT,
     error                        TEXT,
-    current_summary              TEXT,
-    current_summary_updated_at   TEXT,
     harness_id                   TEXT NOT NULL DEFAULT 'claude-code',
     deleted_at                   TEXT,
     created_at                   TEXT NOT NULL DEFAULT (datetime('now')),

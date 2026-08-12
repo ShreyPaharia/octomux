@@ -73,8 +73,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   const workflowStatus = (task as any).workflow_status ?? 'backlog';
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, current_summary, current_summary_updated_at, notify_task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, notify_task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -91,8 +91,6 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.source ?? null,
     wtId,
     task.error,
-    (task as any).current_summary ?? null,
-    (task as any).current_summary_updated_at ?? null,
     (task as any).notify_task_id ?? null,
     task.created_at,
     task.updated_at,
@@ -316,8 +314,6 @@ export const TASKS_TABLE_COLUMNS = [
   'last_viewed_at',
   'source',
   'error',
-  'current_summary',
-  'current_summary_updated_at',
   'created_at',
   'updated_at',
   'agent',

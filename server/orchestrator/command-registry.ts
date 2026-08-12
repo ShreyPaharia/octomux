@@ -125,7 +125,9 @@ export const POLICY_ONLY_COMMANDS: PolicyOnlyCommand[] = [
   { cliSubcommand: 'default-branch', tier: 'auto' },
   { cliSubcommand: 'list-skills', tier: 'auto' },
   { cliSubcommand: 'get-skill', tier: 'auto' },
-  { cliSubcommand: 'task-summary', tier: 'auto' },
+  // 'task-summary' CLI subcommand retired with the `octomux task-summary`
+  // command (spec §5.5) — the narrative it wrote moved into the per-task
+  // `.octomux/artifact.md`, which has no CLI write surface in this pass.
   { cliSubcommand: 'task-updates', tier: 'auto' },
   { cliSubcommand: 'hooks-list', tier: 'auto' },
   { cliSubcommand: 'list-integrations', tier: 'auto' },

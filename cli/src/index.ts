@@ -14,8 +14,6 @@ import { registerListSkills } from './commands/list-skills.js';
 import { registerGetSkill } from './commands/get-skill.js';
 import { registerRecentRepos } from './commands/recent-repos.js';
 import { registerDefaultBranch } from './commands/default-branch.js';
-import { registerTaskSummary } from './commands/task-summary.js';
-import { registerTaskNote } from './commands/task-note.js';
 import { registerTaskRefAdd } from './commands/task-ref-add.js';
 import { registerTaskRefRm } from './commands/task-ref-rm.js';
 import { registerTaskUpdates } from './commands/task-updates.js';
@@ -63,8 +61,9 @@ registerListSkills(program);
 registerGetSkill(program);
 registerRecentRepos(program);
 registerDefaultBranch(program);
-registerTaskSummary(program);
-registerTaskNote(program);
+// task-summary / task-note retired with POST /api/tasks/:id/summary and
+// /note (spec §5.5) — narrative now lives in the task's
+// .octomux/artifact.md, with no CLI write surface in this pass.
 registerTaskRefAdd(program);
 registerTaskRefRm(program);
 registerTaskUpdates(program);

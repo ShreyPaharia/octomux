@@ -139,6 +139,7 @@ import {
   countAgentsForTask,
 } from '../../repositories/index.js';
 import { getManagedTask } from '../../repositories/orchestrator.js';
+import { getArtifactSummary } from '../../artifact.js';
 import type { PermissionPromptRow } from '../../repositories/permission-prompts.js';
 import { createTask } from '../../services/task-service.js';
 import { badRequest, conflict, notFound } from '../../services/errors.js';
@@ -252,6 +253,11 @@ function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
       // LIST_INCLUDE_VALUES above and the matching comment in server/routes/tasks.ts.
       pull_requests: [],
     }) as Record<string, unknown>;
+    // current_summary(+_updated_at) no longer lives on the `tasks` row (spec
+    // §5.5) — read from the task's .octomux/artifact.md Summary section.
+    // Unconditional (not gated by `included`): BoardCard renders it on every
+    // board card, same as before the migration.
+    Object.assign(full, getArtifactSummary(task.worktree ?? null));
     if (!included.has('workers')) {
       // derived_status is only meaningful alongside the workers it's computed from.
       delete full.workers;
@@ -282,8 +288,9 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
       updated_at: task.updated_at,
       agent_count: countAgentsForTask(task.id),
       phase: getManagedTask(task.id)?.phase ?? null,
-      current_summary: task.current_summary,
-      current_summary_updated_at: task.current_summary_updated_at,
+      // current_summary(+_updated_at) sourced from .octomux/artifact.md, not
+      // the (retired) tasks columns — see server/artifact.ts.
+      ...getArtifactSummary(task.worktree ?? null),
     };
   }
 
@@ -314,6 +321,9 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
     { ...relations, workers },
     { worktree_row: worktreeRow, existing_review_id: existingReviewId },
   ) as Record<string, unknown>;
+  // current_summary(+_updated_at) sourced from .octomux/artifact.md, not the
+  // (retired) tasks columns — see server/artifact.ts.
+  Object.assign(full, getArtifactSummary(task.worktree ?? null));
 
   if (!included.has('workers')) {
     delete full.workers;

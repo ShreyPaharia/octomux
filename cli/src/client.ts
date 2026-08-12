@@ -162,8 +162,6 @@ export interface OctomuxClient {
   ): Promise<InlineCommentRow>;
   deleteComment(taskId: string, commentId: string): Promise<void>;
   moveTask(taskId: string, data: { workflow_status: WorkflowStatus; note?: string }): Promise<Task>;
-  postTaskSummary(taskId: string, data: { summary: string; author?: string }): Promise<Task>;
-  postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
   addTaskRef(taskId: string, data: AddRefRequest): Promise<TaskExternalRef>;
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
@@ -300,18 +298,6 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     moveTask(taskId, data) {
       return request<Task>(`/tasks/${encodeURIComponent(taskId)}/move`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    postTaskSummary(taskId, data) {
-      return request<Task>(`/tasks/${encodeURIComponent(taskId)}/summary`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    postTaskNote(taskId, data) {
-      return request<{ ok: boolean }>(`/tasks/${encodeURIComponent(taskId)}/note`, {
         method: 'POST',
         body: JSON.stringify(data),
       });

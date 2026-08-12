@@ -191,7 +191,6 @@ describe('buildPolicySets', () => {
         'list-skills',
         'list-tasks',
         'recent-repos',
-        'task-summary',
         'task-updates',
       ].sort(),
     );

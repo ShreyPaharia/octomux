@@ -1,63 +1,26 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { broadcast } from '../events.js';
-import type { SummaryRequest, NoteRequest, AddRefRequest } from '../types.js';
+import type { AddRefRequest } from '../types.js';
 import { fireHook, getTaskHookExecutions } from '../hook-dispatcher.js';
 import {
-  setCurrentSummary,
-  addTaskUpdate,
   listTaskUpdates,
   getTaskExternalRefs,
   getTaskExternalRef,
   upsertTaskExternalRef,
   deleteTaskExternalRef,
 } from '../repositories/index.js';
-import { loadTaskOrFail, fetchTaskBundle } from './_shared.js';
+import { loadTaskOrFail } from './_shared.js';
 import { badRequest, notFound } from '../services/errors.js';
 
 export const router = express.Router();
 
-// Move task to a new workflow_status
-router.post('/api/tasks/:id/summary', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req);
-  const body = req.body as SummaryRequest;
-
-  if (!body.summary?.trim()) {
-    throw badRequest('summary is required');
-  }
-
-  setCurrentSummary(task.id, body.summary);
-  addTaskUpdate({ task_id: task.id, kind: 'summary', body: body.summary });
-
-  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-  fireHook('summary_updated', {
-    event: 'summary_updated',
-    task: { ...task, current_summary: body.summary },
-    data: { summary: body.summary },
-  });
-
-  const updated = fetchTaskBundle(task.id);
-  res.json(updated);
-});
-
-router.post('/api/tasks/:id/note', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req);
-  const body = req.body as NoteRequest;
-
-  if (!body.body?.trim()) {
-    throw badRequest('body is required');
-  }
-
-  const updateId = addTaskUpdate({ task_id: task.id, kind: 'note', body: body.body });
-
-  fireHook('note_added', {
-    event: 'note_added',
-    task,
-    data: { body: body.body },
-  });
-
-  res.status(201).json({ id: updateId, task_id: task.id, kind: 'note', body: body.body });
-});
+// POST /api/tasks/:id/summary and POST /api/tasks/:id/note retired (spec
+// §5.5): the narrative they wrote now lives in the task's
+// `.octomux/artifact.md` (see server/artifact.ts). The one remaining
+// summary writer (server/summarize.ts, server/hooks.ts post-tool-use) calls
+// setTaskSummary() directly — there is no HTTP surface left for it. Note-
+// adding has no replacement in this pass (see report); 'note_added' is
+// deprecated in server/routes/hooks-registry.ts accordingly.
 
 router.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);

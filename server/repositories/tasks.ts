@@ -29,8 +29,6 @@ const TASK_WRITABLE_COLUMNS = new Set([
   'last_viewed_at',
   'deleted_at',
   'error',
-  'current_summary',
-  'current_summary_updated_at',
   'worktree_id',
   'agent',
   'model',
@@ -430,20 +428,6 @@ export function setPrHeadSha(id: string, prHeadSha: string): void {
   getDb()
     .prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(prHeadSha, id);
-}
-
-/** Set current_summary and bump updated_at. */
-export function setCurrentSummary(id: string, summary: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks
-          SET current_summary = ?,
-              current_summary_updated_at = datetime('now'),
-              updated_at = datetime('now')
-        WHERE id = ?`,
-    )
-    .run(summary, id);
-  logger.info({ task_id: id, operation: 'setCurrentSummary' }, 'current_summary updated');
 }
 
 /** Touch last_viewed_at for a single task. */
