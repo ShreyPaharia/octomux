@@ -2,7 +2,8 @@
  * src/lib/api/workflowsApi.ts
  *
  * Workflows control-plane API surface: the registry listing (with trigger +
- * run count) and per-workflow run history. Mirrors `server/routes/workflow-runs.ts`.
+ * run count) and run history (optionally filtered by kind, server-side).
+ * Mirrors `server/routes/workflow-runs.ts`.
  */
 
 import { request } from './client';
@@ -39,6 +40,5 @@ export interface WorkflowRunRow {
 
 export const workflowsApi = {
   listWorkflows: () => request<{ workflows: WorkflowRow[] }>('/workflows'),
-  getWorkflowRuns: (kind: string) => request<{ runs: WorkflowRunRow[] }>(`/workflows/${kind}/runs`),
   listAllRuns: () => request<{ runs: WorkflowRunRow[] }>('/runs'),
 };

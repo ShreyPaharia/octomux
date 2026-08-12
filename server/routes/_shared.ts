@@ -77,32 +77,6 @@ export function lookupExistingReviewId(task: {
   return byLink?.id ?? null;
 }
 
-/** Recursively merge `incoming` into `base` (objects merged, primitives overwritten). */
-export function deepMerge(
-  base: Record<string, unknown>,
-  incoming: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...base };
-  for (const [key, val] of Object.entries(incoming)) {
-    if (
-      val !== null &&
-      typeof val === 'object' &&
-      !Array.isArray(val) &&
-      typeof result[key] === 'object' &&
-      result[key] !== null &&
-      !Array.isArray(result[key])
-    ) {
-      result[key] = deepMerge(
-        result[key] as Record<string, unknown>,
-        val as Record<string, unknown>,
-      );
-    } else {
-      result[key] = val;
-    }
-  }
-  return result;
-}
-
 export interface TaskRelations {
   workers: Worker[];
   user_terminals: UserTerminal[];

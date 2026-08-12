@@ -168,8 +168,6 @@ export const configApi = {
 
   // Repo Config
   listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),
-  getRepoConfig: (repoPath: string) =>
-    request<RepoConfig>(`/repo-config?repo_path=${encodeURIComponent(repoPath)}`),
   updateRepoConfig: (repoPath: string, updates: Partial<RepoConfig>) =>
     request<RepoConfig>('/repo-config', {
       method: 'PATCH',

@@ -113,13 +113,6 @@ export interface OctomuxClient {
   getSkill(name: string): Promise<{ name: string; content: string }>;
   recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
   defaultBranch(repoPath: string): Promise<{ branch: string }>;
-  getRepoConfig(repoPath: string): Promise<{
-    repo_path: string;
-    base_branch: string | null;
-    test_command: string;
-    format_command: string;
-    lint_command: string;
-  }>;
   postComment(taskId: string, data: PostCommentInput): Promise<InlineCommentRow>;
   listComments(
     taskId: string,
@@ -241,9 +234,6 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     defaultBranch(repoPath) {
       return request<{ branch: string }>(`/default-branch${qs({ repo_path: repoPath })}`);
-    },
-    getRepoConfig(repoPath) {
-      return request(`/repo-config${qs({ repo_path: repoPath })}`);
     },
     postComment(taskId, data) {
       return request<InlineCommentRow>(`/tasks/${encodeURIComponent(taskId)}/comments`, {

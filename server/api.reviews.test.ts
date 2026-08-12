@@ -121,52 +121,6 @@ describe('GET /api/reviews/:id', () => {
   });
 });
 
-describe('PATCH /api/tasks/:id/review-runs/:rid/walkthrough', () => {
-  let app: ReturnType<typeof createApp>;
-
-  beforeEach(() => {
-    createTestDb();
-    seedReviewTask();
-    app = createApp();
-  });
-
-  it('deep-merges walkthrough JSON', async () => {
-    const res = await request(app)
-      .patch('/api/tasks/task-rev1/review-runs/run-r1/walkthrough')
-      .send({ global: { risk: 'high' }, newKey: 'newVal' });
-    expect(res.status).toBe(200);
-    const wt = JSON.parse(res.body.walkthrough);
-    expect(wt.global.risk).toBe('high');
-    expect(wt.newKey).toBe('newVal');
-  });
-
-  it('returns 404 for unknown run', async () => {
-    const res = await request(app)
-      .patch('/api/tasks/task-rev1/review-runs/no-such-run/walkthrough')
-      .send({ global: {} });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 404 for unknown task', async () => {
-    const res = await request(app)
-      .patch('/api/tasks/no-task/review-runs/run-r1/walkthrough')
-      .send({ global: {} });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 409 if review already published for this head SHA', async () => {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO published_reviews (id, task_id, github_review_id, github_review_url, head_sha, verdict, comment_count)
-       VALUES ('pub1', 'task-rev1', 12345, 'https://gh/r', 'sha-head', 'COMMENT', 1)`,
-    ).run();
-    const res = await request(app)
-      .patch('/api/tasks/task-rev1/review-runs/run-r1/walkthrough')
-      .send({ global: {} });
-    expect(res.status).toBe(409);
-  });
-});
-
 describe('POST /api/tasks/:id/review-runs', () => {
   let app: ReturnType<typeof createApp>;
 

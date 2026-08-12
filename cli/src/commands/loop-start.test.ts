@@ -23,7 +23,6 @@ function makeClient(startLoop: OctomuxClient['startLoop']): OctomuxClient {
     getSkill: notImpl as never,
     recentRepos: notImpl as never,
     defaultBranch: notImpl as never,
-    getRepoConfig: notImpl as never,
     startLoop,
   } as OctomuxClient;
 }

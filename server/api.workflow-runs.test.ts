@@ -5,7 +5,7 @@ import { createTestDb } from './test-helpers.js';
 import { insertRun, finishRun } from './repositories/runs.js';
 import './workflows/index.js';
 
-describe('GET /api/workflows/:kind/runs', () => {
+describe('GET /api/runs?kind=', () => {
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -17,7 +17,7 @@ describe('GET /api/workflows/:kind/runs', () => {
     const run = insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
     insertRun({ workflowKind: 'reviewer', trigger: 'github' });
 
-    const res = await request(app).get('/api/workflows/pr-extract/runs');
+    const res = await request(app).get('/api/runs?kind=pr-extract');
 
     expect(res.status).toBe(200);
     expect(res.body.runs).toHaveLength(1);
@@ -25,7 +25,7 @@ describe('GET /api/workflows/:kind/runs', () => {
   });
 
   it('returns an empty list for a kind with no runs', async () => {
-    const res = await request(app).get('/api/workflows/unknown-kind/runs');
+    const res = await request(app).get('/api/runs?kind=unknown-kind');
 
     expect(res.status).toBe(200);
     expect(res.body.runs).toEqual([]);
@@ -35,7 +35,7 @@ describe('GET /api/workflows/:kind/runs', () => {
     const run = insertRun({ workflowKind: 'overnight-log-summary', trigger: 'cron' });
     finishRun(run.id, { status: 'done', result: { window: 'last 12h', summary: 'all clear' } });
 
-    const res = await request(app).get('/api/workflows/overnight-log-summary/runs');
+    const res = await request(app).get('/api/runs?kind=overnight-log-summary');
 
     expect(res.status).toBe(200);
     expect(res.body.runs[0].task_id).toBeNull();

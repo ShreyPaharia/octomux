@@ -359,7 +359,6 @@ export function mockReviewApi(overrides: Record<string, unknown> = {}) {
     listReviewsInbox: vi.fn().mockResolvedValue([]),
     getReviewDetail: vi.fn().mockResolvedValue(null),
     patchComment: vi.fn().mockResolvedValue({ id: 'c1', status: 'accepted' }),
-    patchWalkthrough: vi.fn().mockResolvedValue({ walkthrough: '{}' }),
     publishReview: vi.fn().mockResolvedValue({ publishedReviewId: 'pr1', commentCount: 0 }),
     requestReReview: vi.fn().mockResolvedValue({ ok: true }),
     triggerManualReview: vi.fn().mockResolvedValue({ id: 'rev1', action: 'created' as const }),
@@ -415,7 +414,6 @@ export function mockConfigApi(overrides: Record<string, unknown> = {}) {
       content: '# Test',
     }),
     listRepoConfigs: vi.fn().mockResolvedValue([]),
-    getRepoConfig: vi.fn().mockResolvedValue(null),
     updateRepoConfig: vi.fn().mockResolvedValue(null),
     listProviders: vi.fn().mockResolvedValue([]),
     listIntegrations: vi.fn().mockResolvedValue([]),
@@ -590,7 +588,6 @@ export function mockKindsApi(overrides: Record<string, unknown> = {}) {
 export function mockWorkflowsApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
-    getWorkflowRuns: vi.fn().mockResolvedValue({ runs: [] }),
     listAllRuns: vi.fn().mockResolvedValue({ runs: [] }),
   };
   return { ...defaults, ...overrides };
