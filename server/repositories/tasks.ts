@@ -214,7 +214,9 @@ export function listRecentRepoPaths(limit = 10): Array<{ repo_path: string; last
 
 /**
  * Find an existing live review task for a given repo_path + pr_number.
- * Returns only the id.
+ * Returns only the id. Repo-scoped: PR numbers are per-repo, so a repo_path
+ * filter is required to avoid matching a same-numbered PR in a different repo.
+ * Used by the manual-review-create route and by lookupExistingReviewId.
  */
 export function findExistingReviewTask(
   repoPath: string,
@@ -228,20 +230,6 @@ export function findExistingReviewTask(
           ORDER BY t.created_at DESC LIMIT 1`,
     )
     .get(repoPath, prNumber) as { id: string } | undefined;
-}
-/**
- * Find a live auto_review task by pr_number only (no repo_path filter).
- * Used by lookupExistingReviewId in the API layer.
- */
-export function findReviewTaskByPrNumber(prNumber: number): { id: string } | undefined {
-  return getDb()
-    .prepare(
-      `SELECT id FROM tasks
-        WHERE pr_number = ? AND source = 'auto_review'
-          AND runtime_state != 'error' AND deleted_at IS NULL
-        ORDER BY created_at DESC LIMIT 1`,
-    )
-    .get(prNumber) as { id: string } | undefined;
 }
 
 /**
