@@ -311,7 +311,7 @@ describe('GET /api/tasks', () => {
     insertTask(db);
     insertAgent(db);
 
-    const res = await request(app).get('/api/tasks');
+    const res = await request(app).get('/api/tasks?include=workers');
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe(DEFAULTS.task.id);
     expect(res.body[0].workers).toHaveLength(1);
@@ -328,7 +328,7 @@ describe('GET /api/tasks', () => {
 
   it('returns empty agents array for tasks without agents', async () => {
     insertTask(db);
-    const res = await request(app).get('/api/tasks');
+    const res = await request(app).get('/api/tasks?include=workers');
     expect(res.body[0].workers).toEqual([]);
   });
 
@@ -340,7 +340,9 @@ describe('GET /api/tasks', () => {
     const res = await request(app).get('/api/tasks?repo_path=/repo/alpha');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
-    expect(res.body.every((t: Task) => t.repo_path === '/repo/alpha')).toBe(true);
+    // repo_path itself isn't in the lean default shape — the filter's effect is
+    // observed via which task ids come back, not via a field on the response.
+    expect(res.body.map((t: Task) => t.id).sort()).toEqual(['task-a', 'task-c']);
   });
 
   it('returns all tasks when repo_path is not provided', async () => {
@@ -476,7 +478,7 @@ describe('GET /api/tasks/:id', () => {
     insertTask(db);
     insertAgent(db);
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}?include=workers`);
     expect(res.status).toBe(200);
     expect(res.body.title).toBe(DEFAULTS.task.title);
     expect(res.body.workers).toHaveLength(1);
@@ -489,7 +491,9 @@ describe('GET /api/tasks/:id', () => {
       pr_number: 42,
     });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.task.id}?include=workers,pull_requests,user_terminals`,
+    );
     expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
     expect(res.body.pr_number).toBe(42);
     expect(res.body.branch).toBe(DEFAULTS.runningTask.branch);
@@ -1708,7 +1712,9 @@ describe('GET /api/tasks/:id — user_terminals', () => {
     insertTask(db, DEFAULTS.runningTask);
     insertAgent(db);
     insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}?include=user_terminals`,
+    );
     expect(res.status).toBe(200);
     expect(res.body.user_terminals).toHaveLength(1);
     expect(res.body.user_terminals[0].label).toBe('Terminal 1');
@@ -1729,7 +1735,7 @@ describe('GET /api/tasks with permission prompts', () => {
       tool_input: '{"command":"npm test"}',
     });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=pending_prompts').expect(200);
     const task = res.body[0];
     expect(task.pending_prompts).toHaveLength(1);
     expect(task.pending_prompts[0].tool_name).toBe('Bash');
@@ -1747,7 +1753,7 @@ describe('GET /api/tasks with permission prompts', () => {
       status: 'resolved' as any,
     });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=pending_prompts').expect(200);
     expect(res.body[0].pending_prompts).toHaveLength(0);
   });
 
@@ -1772,7 +1778,7 @@ describe('GET /api/tasks with permission prompts', () => {
         });
       });
 
-      const res = await request(app).get('/api/tasks').expect(200);
+      const res = await request(app).get('/api/tasks?include=workers').expect(200);
       expect(res.body[0].derived_status).toBe(expected);
     },
   );
@@ -1781,14 +1787,14 @@ describe('GET /api/tasks with permission prompts', () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
   it('derived_status is done when task has no agents', async () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
@@ -1797,7 +1803,7 @@ describe('GET /api/tasks with permission prompts', () => {
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'active' });
     insertAgent(db, { id: 'a2', task_id: 't1', window_index: 1, hook_activity: 'waiting' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     // Stopped agent's 'active' is ignored; only running agent's 'waiting' counts
     expect(res.body[0].derived_status).toBe('needs_attention');
   });
@@ -1805,7 +1811,7 @@ describe('GET /api/tasks with permission prompts', () => {
   it('derived_status is null for non-running tasks', async () => {
     insertTask(db, { id: 't1', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBeNull();
   });
 
@@ -1820,7 +1826,7 @@ describe('GET /api/tasks with permission prompts', () => {
       tool_input: '{"file_path":"server/api.ts"}',
     });
 
-    const res = await request(app).get('/api/tasks/t1').expect(200);
+    const res = await request(app).get('/api/tasks/t1?include=workers,pending_prompts').expect(200);
     expect(res.body.pending_prompts).toHaveLength(1);
     expect(res.body.derived_status).toBe('working');
   });
@@ -2328,7 +2334,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt2','/tmp/wt2','existing','in_use')`,
     ).run();
     insertTask(db, { id: 'tJ', worktree_id: 'wt2' });
-    const res = await request(app).get('/api/tasks/tJ');
+    const res = await request(app).get('/api/tasks/tJ?include=worktree');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeTruthy();
     expect(res.body.worktree_row.id).toBe('wt2');
@@ -2338,7 +2344,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
   it('worktree_row is null when task has no worktree_id', async () => {
     insertTask(db, { id: 'tK' });
     db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = 'tK'`).run();
-    const res = await request(app).get('/api/tasks/tK');
+    const res = await request(app).get('/api/tasks/tK?include=worktree');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeNull();
   });

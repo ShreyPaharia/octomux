@@ -6,6 +6,10 @@
  *  - Conductor write tools are registered ONLY when OCTOMUX_CONVERSATION_ID + base url + token
  *    are set (and OCTOMUX_TASK_ID is NOT set)
  *  - Worker mode (OCTOMUX_TASK_ID) disables conductor write tools
+ *  - The capability-registry tools (list_tasks/get_task/create_task/set_task_status/
+ *    close_task/delete_task) are registered ONLY alongside the conductor write
+ *    tools (orchestratorWriteEnabled()) — never for a worker session, and never
+ *    for a "plain" session with no env at all.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -87,9 +91,20 @@ describe('createOctomuxMcpServer — tool registration', () => {
     const server = createOctomuxMcpServer();
     const tools = getRegisteredToolNames(server);
     expect(tools).not.toContain('report_complete');
-    // Read tools are always registered
-    expect(tools).toContain('list_tasks');
-    expect(tools).toContain('get_task');
+    // Read tools with no capability-registry equivalent are always registered.
+    expect(tools).toContain('monitor_status');
+    expect(tools).toContain('get_task_output');
+  });
+
+  it('does NOT register capability-registry tools for a "plain" session (no env at all)', async () => {
+    const { createOctomuxMcpServer } = await import('./server.js');
+    const server = createOctomuxMcpServer();
+    const tools = getRegisteredToolNames(server);
+    // list_tasks/get_task/create_task/etc. require orchestratorWriteEnabled() —
+    // a plain session with no OCTOMUX_ACTION_* env gets neither those nor writes.
+    expect(tools).not.toContain('list_tasks');
+    expect(tools).not.toContain('get_task');
+    expect(tools).not.toContain('create_task');
   });
 
   it('registers report_complete when all three worker env vars are set', async () => {
@@ -122,10 +137,14 @@ describe('createOctomuxMcpServer — tool registration', () => {
     const { createOctomuxMcpServer } = await import('./server.js');
     const server = createOctomuxMcpServer();
     const tools = getRegisteredToolNames(server);
-    // Worker mode: only report_complete, NOT conductor write tools like create_task
+    // Worker mode: only report_complete, NOT conductor write tools like create_task,
+    // NOT the capability-registry tools (list_tasks/get_task included — see the
+    // caller/gating rationale in server.ts's module doc).
     expect(tools).toContain('report_complete');
     expect(tools).not.toContain('create_task');
     expect(tools).not.toContain('send_message');
+    expect(tools).not.toContain('list_tasks');
+    expect(tools).not.toContain('get_task');
   });
 
   it('registers conductor write tools when OCTOMUX_CONVERSATION_ID is set without OCTOMUX_TASK_ID', async () => {
@@ -140,5 +159,12 @@ describe('createOctomuxMcpServer — tool registration', () => {
     // Conductor mode: write tools, NOT report_complete
     expect(tools).not.toContain('report_complete');
     expect(tools).toContain('create_task');
+    expect(tools).toContain('send_message');
+    // Capability-registry tools ride the same gate.
+    expect(tools).toContain('list_tasks');
+    expect(tools).toContain('get_task');
+    expect(tools).toContain('set_task_status');
+    expect(tools).toContain('close_task');
+    expect(tools).toContain('delete_task');
   });
 });

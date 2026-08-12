@@ -172,6 +172,9 @@ export function createClient(serverUrl: string): OctomuxClient {
     baseUrl,
     alwaysJsonContentType: true,
     onFetchError: cliFetchError,
+    // A human at a terminal, not an agent — see the capability gate's caller
+    // classes. Agents reach the server over MCP or with a hook token instead.
+    clientClass: 'cli',
   });
 
   return {

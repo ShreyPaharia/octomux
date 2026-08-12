@@ -9,5 +9,9 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../packages/api-client" }, { "path": "../packages/types" }]
+  "references": [
+    { "path": "../packages/api-client" },
+    { "path": "../packages/capabilities" },
+    { "path": "../packages/types" }
+  ]
 }

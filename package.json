@@ -29,6 +29,7 @@
   ],
   "workspaces": [
     "packages/api-client",
+    "packages/capabilities",
     "packages/diff-engine",
     "packages/types",
     "packages/test-fixtures"
@@ -37,7 +38,7 @@
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite",
-    "build": "bun run build:diff-engine && bun run build:types && bun run build:test-fixtures && bun run build:api-client && vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
+    "build": "bun run build:diff-engine && bun run build:types && bun run build:test-fixtures && bun run build:api-client && bun run build:capabilities && vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
     "build:diff-engine": "tsc -b packages/diff-engine",
     "build:types": "tsc -b packages/types",
     "build:test-fixtures": "tsc -b packages/test-fixtures",
@@ -62,7 +63,8 @@
     "prepare": "husky",
     "changelog": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
     "build:electron": "tsc -p electron/tsconfig.json",
-    "dist:electron": "bun run build && bun run build:electron && electron-builder"
+    "dist:electron": "bun run build && bun run build:electron && electron-builder",
+    "build:capabilities": "tsc -b packages/capabilities"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

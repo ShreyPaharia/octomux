@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRequestCore, qs } from './index.js';
+import { CLIENT_CLASS_HEADER, createRequestCore, qs } from './index.js';
 
 describe('qs', () => {
   it.each([
@@ -88,5 +88,71 @@ describe('createRequestCore', () => {
     expect(onFetchError).toHaveBeenCalledWith(networkErr, {
       baseUrl: 'http://localhost:7777/api',
     });
+  });
+});
+
+describe('createRequestCore — client class header', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function sentHeaders(fetchMock: ReturnType<typeof stubFetch>): Record<string, string> {
+    return fetchMock.mock.calls[0][1].headers as Record<string, string>;
+  }
+
+  it.each([['ui'], ['cli']] as const)(
+    'sends %s as the client class header',
+    async (clientClass) => {
+      const fetchMock = stubFetch();
+      const { request } = createRequestCore({ baseUrl: '/api', clientClass });
+
+      await request('/tasks');
+
+      expect(sentHeaders(fetchMock)[CLIENT_CLASS_HEADER]).toBe(clientClass);
+    },
+  );
+
+  it('omits the header when no client class is given, so the server fails closed', async () => {
+    const fetchMock = stubFetch();
+    const { request } = createRequestCore({ baseUrl: '/api' });
+
+    await request('/tasks');
+
+    expect(sentHeaders(fetchMock)).not.toHaveProperty(CLIENT_CLASS_HEADER);
+  });
+
+  // Regression: `{ headers, ...init }` let a caller's own `headers` replace the
+  // defaults outright, silently dropping Content-Type and the client class.
+  it('merges caller headers with the defaults instead of replacing them', async () => {
+    const fetchMock = stubFetch();
+    const { request } = createRequestCore({ baseUrl: '/api', clientClass: 'cli' });
+
+    await request('/tasks', { method: 'POST', body: '{}', headers: { 'X-Trace': 'abc' } });
+
+    expect(sentHeaders(fetchMock)).toEqual({
+      'Content-Type': 'application/json',
+      [CLIENT_CLASS_HEADER]: 'cli',
+      'X-Trace': 'abc',
+    });
+  });
+
+  it('lets a caller deliberately override a default header', async () => {
+    const fetchMock = stubFetch();
+    const { request } = createRequestCore({ baseUrl: '/api', clientClass: 'cli' });
+
+    await request('/tasks', { headers: { [CLIENT_CLASS_HEADER]: 'ui' } });
+
+    expect(sentHeaders(fetchMock)[CLIENT_CLASS_HEADER]).toBe('ui');
   });
 });

@@ -25,7 +25,9 @@ const apiCases = [
   {
     name: 'listTasks',
     call: () => taskApi.listTasks(),
-    expectedUrl: '/api/tasks',
+    // task.list is lean by default; the dashboard asks for the relations it
+    // renders. See LIST_INCLUDE in src/lib/api/taskApi.ts.
+    expectedUrl: '/api/tasks?include=workers%2Cpending_prompts%2Cuser_terminals',
     expectedMethod: undefined,
     expectedBody: undefined,
     response: [{ id: 't1', title: 'Test' }],
@@ -33,7 +35,8 @@ const apiCases = [
   {
     name: 'getTask',
     call: () => taskApi.getTask('t1'),
-    expectedUrl: '/api/tasks/t1',
+    expectedUrl:
+      '/api/tasks/t1?include=workers,pending_prompts,user_terminals,worktree,existing_review_id',
     expectedMethod: undefined,
     expectedBody: undefined,
     response: { id: 't1' },

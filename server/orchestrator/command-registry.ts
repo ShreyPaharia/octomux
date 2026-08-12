@@ -7,7 +7,7 @@
  *  - name        — MCP tool name (snake_case, e.g. "create_task")
  *  - action      — OrchestratorAction used in the API / switch routing
  *  - summary     — MCP tool description string
- *  - input       — canonical zod schema (from command-schemas.ts; or inline for resume-task)
+ *  - input       — canonical zod schema (from @octomux/capabilities/schemas.ts; or inline for resume-task)
  *  - mcp         — whether to register as an MCP write tool
  *  - handler     — executes the action, returns { result, activity? }
  *
@@ -26,7 +26,7 @@ import {
   addAgentInputSchema,
   closeTaskInputSchema,
   deleteTaskInputSchema,
-} from './command-schemas.js';
+} from '@octomux/capabilities';
 import {
   runCreateTask,
   runSendMessage,
@@ -52,7 +52,7 @@ export type OrchestratorAction =
   | 'resume-task'
   | 'delete-task';
 
-// ─── Minimal schema for resume-task (no canonical schema in command-schemas.ts) ─
+// ─── Minimal schema for resume-task (no canonical schema in @octomux/capabilities/schemas.ts) ─
 
 const resumeTaskInputSchema = z.object({
   task_id: z.string().describe('The octomux task id'),

@@ -1,5 +1,5 @@
 /**
- * server/orchestrator/command-schemas.ts
+ * packages/capabilities/src/schemas.ts
  *
  * SINGLE SOURCE OF TRUTH for orchestrator command inputs (SHR-144).
  *
@@ -18,6 +18,10 @@
  *   --draft         (translated to a truthy draft field on the REST body, not the exec input)
  *   --harness       (translated to harness_id on the REST body)
  *   --fork-from     (resolved to base_branch before the REST call)
+ *
+ * Lives in packages/capabilities (not server/) because it's imported both by
+ * server-side executors and by capability metadata that the CLI generator
+ * consumes — see the note in ./types.ts. Pure zod, no server internals.
  */
 
 import { z } from 'zod';

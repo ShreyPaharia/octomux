@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/api-client" },
+    { "path": "./packages/capabilities" },
     { "path": "./packages/diff-engine" },
     { "path": "./packages/types" },
     { "path": "./packages/test-fixtures" },
