@@ -44,7 +44,6 @@ const PENDING_MIGRATION: string[] = [
   'DELETE /api/kinds/:kind',
   'DELETE /api/learnings/:id',
   'DELETE /api/schedules/:id',
-  'DELETE /api/tasks/:id',
   'DELETE /api/tasks/:id/comments/:cid',
   'DELETE /api/tasks/:id/refs/:integration',
   'DELETE /api/tasks/:id/terminals/:terminalId',
@@ -96,8 +95,6 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/setup/status',
   'GET /api/skills',
   'GET /api/skills/:name',
-  'GET /api/tasks',
-  'GET /api/tasks/:id',
   'GET /api/tasks/:id/branches',
   'GET /api/tasks/:id/comments',
   'GET /api/tasks/:id/commits',
@@ -148,15 +145,12 @@ const PENDING_MIGRATION: string[] = [
   'POST /api/schedules/import',
   'POST /api/setup/apply-recommended-defaults',
   'POST /api/setup/install',
-  'POST /api/tasks',
   'POST /api/tasks/:id/comments',
-  'POST /api/tasks/:id/move',
   'POST /api/tasks/:id/note',
   'POST /api/tasks/:id/publish-review',
   'POST /api/tasks/:id/refs',
   'POST /api/tasks/:id/restore',
   'POST /api/tasks/:id/review-runs',
-  'POST /api/tasks/:id/start',
   'POST /api/tasks/:id/summary',
   'POST /api/tasks/:id/terminals',
   'POST /api/tasks/:id/user-terminal',
@@ -187,12 +181,17 @@ describe('route inventory drift', () => {
     const undeclared = findUndeclaredRoutes(mounted).map(routeKey);
     const pending = new Set(PENDING_MIGRATION);
 
-    // A route here that ISN'T in PENDING_MIGRATION is exactly the gap this
-    // test exists to catch: something new is neither a capability nor a
-    // declared exemption. (Not exact-equality against PENDING_MIGRATION —
-    // routes covered by capabilities added since this list was last trimmed
-    // are expected to disappear from `undeclared`, and that's fine.)
+    // Exact equality, both directions:
+    //  - a route in `undeclared` but not in PENDING_MIGRATION is a NEW surface
+    //    that was added without becoming a capability or a declared exemption;
+    //  - a route in PENDING_MIGRATION but no longer undeclared is a STALE entry
+    //    left behind after a migration, which would quietly overstate how much
+    //    work remains.
+    // The list only ever shrinks, and it shrinks to empty when migration is done.
     const unexpected = undeclared.filter((key) => !pending.has(key));
     expect(unexpected).toEqual([]);
+
+    const stale = PENDING_MIGRATION.filter((key) => !undeclared.includes(key));
+    expect(stale).toEqual([]);
   });
 });
