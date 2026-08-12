@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { registerCapabilityCommands, TASK_CAPABILITY_META } from '@octomux/capabilities';
 import { createClient } from './client.js';
 import { errorMessage } from './format.js';
-import { registerCreateTask } from './commands/create-task.js';
-import { registerListTasks } from './commands/list-tasks.js';
-import { registerGetTask } from './commands/get-task.js';
 import { registerCloseTask } from './commands/close-task.js';
-import { registerDeleteTask } from './commands/delete-task.js';
 import { registerResumeTask } from './commands/resume-task.js';
 import { registerAddAgent } from './commands/add-agent.js';
 import { registerStopAgent } from './commands/stop-agent.js';
@@ -17,7 +14,6 @@ import { registerListSkills } from './commands/list-skills.js';
 import { registerGetSkill } from './commands/get-skill.js';
 import { registerRecentRepos } from './commands/recent-repos.js';
 import { registerDefaultBranch } from './commands/default-branch.js';
-import { registerTaskMove } from './commands/task-move.js';
 import { registerTaskSummary } from './commands/task-summary.js';
 import { registerTaskNote } from './commands/task-note.js';
 import { registerTaskRefAdd } from './commands/task-ref-add.js';
@@ -52,11 +48,12 @@ program
   )
   .option('--json', 'output as JSON (auto-enabled when piped)');
 
-registerCreateTask(program);
-registerListTasks(program);
-registerGetTask(program);
+// Registry-generated `task` commands (list/get/create/start/move/delete) —
+// see @octomux/capabilities/cli.js. Flags are derived from each capability's
+// zod input schema, so this can never drift from the server's own validation.
+registerCapabilityCommands(program, TASK_CAPABILITY_META);
+
 registerCloseTask(program);
-registerDeleteTask(program);
 registerResumeTask(program);
 registerAddAgent(program);
 registerStopAgent(program);
@@ -66,7 +63,6 @@ registerListSkills(program);
 registerGetSkill(program);
 registerRecentRepos(program);
 registerDefaultBranch(program);
-registerTaskMove(program);
 registerTaskSummary(program);
 registerTaskNote(program);
 registerTaskRefAdd(program);

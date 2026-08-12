@@ -15,3 +15,6 @@ export type {
 
 export { registerCapabilityCommands } from './cli.js';
 export type { WriteLine } from './cli.js';
+
+export * from './schemas.js';
+export * from './capabilities/task.js';

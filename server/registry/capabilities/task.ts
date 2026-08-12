@@ -6,6 +6,14 @@
  * `server/registry/mount.ts` dynamically imports — this module does NOT
  * self-register at module load (see the `TODO(registry)` in mount.ts).
  *
+ * METADATA (id, summary, http, cli, cliAliases, mcp, tier, callers, input) for
+ * all seven capabilities lives in `@octomux/capabilities`'s
+ * `TASK_CAPABILITY_META` — pure zod + plain types, importable by the CLI
+ * without dragging in the server. This module pairs each metadata entry with
+ * its handler (below), which needs `db`, `task-engine`, and friends and so
+ * must stay behind in `server/`. See `packages/capabilities/src/types.ts` for
+ * why the split exists.
+ *
  * Design doc: spec/surface-consolidation-and-centaur.md §5.1–5.3
  *
  * ─── Cross-cutting discrepancies from the assigning ticket's table ──────────
@@ -34,7 +42,7 @@
  *    `mount.test.ts`'s own fixtures confirm this convention
  *    (`http: { path: '/api/things/:id' }, input: z.object({ id: z.string() })`).
  *    This is why `task.get` / `task.delete` do NOT reuse the canonical
- *    `task_id`-shaped schemas from `orchestrator/command-schemas.ts` even
+ *    `task_id`-shaped schemas from `@octomux/capabilities`'s schemas.ts even
  *    though those exist — using them would make every real HTTP request to
  *    those routes fail zod validation (`req.params.id` !== `task_id`).
  *    `task.close` has no such constraint (no http projection) and DOES reuse
@@ -59,7 +67,7 @@
  *    the capability version doesn't regress the conductor's lean-summary contract.
  *
  * 5. `task.move`'s `mcp: 'set_task_status'` intentionally does NOT reuse
- *    `setStatusInputSchema` / `runSetStatus` from command-schemas.ts / exec.ts.
+ *    `setStatusInputSchema` / `runSetStatus` from schemas.ts / exec.ts.
  *    That old pair's `{ task_id, status }` shape and handler are a narrow
  *    direct `setWorkflowStatus` write; the real `/move` route (which this
  *    capability mirrors, per the "behaviour preservation outranks reuse"
@@ -93,6 +101,19 @@
  */
 
 import { z } from 'zod';
+import {
+  TASK_CAPABILITY_META,
+  LIST_INCLUDE_VALUES,
+  GET_INCLUDE_VALUES,
+  taskListInputSchema,
+  taskGetInputSchema,
+  taskCreateInputSchema,
+  taskStartInputSchema,
+  taskMoveInputSchema,
+  taskDeleteInputSchema,
+  closeTaskInputSchema,
+} from '@octomux/capabilities';
+import type { CapabilityMeta } from '@octomux/capabilities';
 import { defineCapability } from '../index.js';
 import {
   startTask,
@@ -131,20 +152,7 @@ import {
   throwIfValidationError,
 } from '../../routes/_shared.js';
 import { runCloseTask } from '../../orchestrator/exec.js';
-import { closeTaskInputSchema, createTaskInputSchema } from '../../orchestrator/command-schemas.js';
-import { WORKFLOW_STATUSES } from '../../types.js';
-import type {
-  Task,
-  Worker,
-  UserTerminal,
-  RunMode,
-  WorkflowStatus,
-  CreateTaskRequest,
-} from '../../types.js';
-
-const workflowStatusEnum = z.enum(
-  WORKFLOW_STATUSES as unknown as [WorkflowStatus, ...WorkflowStatus[]],
-);
+import type { Task, Worker, UserTerminal, RunMode, CreateTaskRequest } from '../../types.js';
 
 // ─── include= parsing (shared by task.list / task.get) ────────────────────────
 //
@@ -175,28 +183,6 @@ function parseInclude(raw: string | undefined, allowed: readonly string[]): Set<
 // logic is inline in GET /api/tasks (server/routes/tasks.ts). Mirrored here by
 // calling the same repository functions the route calls (per the ticket's
 // point 4), not reimplemented from scratch.
-
-/** Relations `task.list` can expand into — pull_requests deliberately excluded (see module doc point 6). */
-const LIST_INCLUDE_VALUES = ['workers', 'pending_prompts', 'user_terminals'] as const;
-
-const taskListInputSchema = z.object({
-  repo_path: z.string().optional().describe('Filter by repo path'),
-  // Query-string values are always strings over HTTP; the route itself compares
-  // with `=== 'true'`, so the schema mirrors that instead of declaring
-  // z.boolean() (which a querystring can never satisfy — see mergeInput).
-  trash: z.string().optional().describe("'true' to list trashed tasks"),
-  includeAutomated: z.string().optional().describe("'true' to include automated review tasks"),
-  include: z
-    .string()
-    .optional()
-    .describe(
-      `Comma-separated relations to expand each task to its full row: ${LIST_INCLUDE_VALUES.join(', ')}. ` +
-        'Omit for the lean summary {id, title, runtime_state, workflow_status, created_at, updated_at} ' +
-        '— the default for every caller (dashboard, CLI, and agents alike). pull_requests is not ' +
-        "offered here (would be an N+1 query across every listed task); use task.get's include for " +
-        "a single task's pull_requests.",
-    ),
-});
 
 /** The lean default: id/title/status/timestamps only — no relations, no full task row. */
 function leanTaskSummary(t: Task) {
@@ -280,29 +266,6 @@ function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
 
 // ─── task.get ─────────────────────────────────────────────────────────────────
 
-/** Relations/extras `task.get` can expand into. */
-const GET_INCLUDE_VALUES = [
-  'workers',
-  'pending_prompts',
-  'user_terminals',
-  'pull_requests',
-  'worktree',
-  'existing_review_id',
-] as const;
-
-const taskGetInputSchema = z.object({
-  id: z.string().describe('The octomux task id'),
-  include: z
-    .string()
-    .optional()
-    .describe(
-      `Comma-separated relations to expand to the full task row: ${GET_INCLUDE_VALUES.join(', ')}. ` +
-        'Omit for the lean summary {id, title, runtime_state, workflow_status, created_at, updated_at, ' +
-        'agent_count, phase, current_summary, current_summary_updated_at} — the default for every ' +
-        'caller (dashboard, CLI, and agents alike).',
-    ),
-});
-
 async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
   const task = getTaskRepo(input.id);
   if (!task) throw notFound('Task not found');
@@ -367,27 +330,11 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
 
 // ─── task.create ────────────────────────────────────────────────────────────
 //
-// Extends createTaskInputSchema (command-schemas.ts) with the fields
-// POST /api/tasks accepts that the canonical schema lacks: draft, agent,
-// harness_id, workflow_status (ticket point 3) — added, not dropped. `title`
-// is widened to optional: the live route allows omitting it when
-// initial_prompt is given (validateCreateTaskBody enforces the real rule);
-// the canonical schema requires it unconditionally, which would 400 every
-// initial_prompt-only creation before the handler even ran.
-//
 // NOTE: this reuses createTaskInputSchema's `notify_task` field name (not the
 // wire route's `notify_task_id`) — reuse-over-duplication for a rarely-used
 // field; the real POST /api/tasks route currently reads `notify_task_id` from
 // the body, so an HTTP caller using this capability's generated route must
 // send `notify_task`, not `notify_task_id`. Flagged as a discrepancy.
-
-const taskCreateInputSchema = createTaskInputSchema.extend({
-  title: z.string().optional().describe('Short task title (< 60 chars)'),
-  draft: z.boolean().optional().describe('Create as a draft (idle) task'),
-  agent: z.string().optional().nullable().describe('Agent persona name'),
-  harness_id: z.string().optional().describe('Harness id (default: claude-code)'),
-  workflow_status: workflowStatusEnum.optional().describe('Initial workflow_status override'),
-});
 
 /**
  * Mirrors POST /api/tasks (server/routes/tasks.ts) exactly, including its
@@ -460,10 +407,6 @@ async function createTaskHandler(input: z.infer<typeof taskCreateInputSchema>) {
 
 // ─── task.start ───────────────────────────────────────────────────────────────
 
-const taskStartInputSchema = z.object({
-  id: z.string().describe('The octomux task id'),
-});
-
 // async so a synchronous throw (not-found / not-idle) always surfaces as a
 // rejected promise, consistent with every other handler here and with how
 // http.ts's `await cap.handler(...)` treats it either way.
@@ -493,12 +436,6 @@ async function startTaskHandler(input: z.infer<typeof taskStartInputSchema>) {
 }
 
 // ─── task.move ────────────────────────────────────────────────────────────────
-
-const taskMoveInputSchema = z.object({
-  id: z.string().describe('The octomux task id'),
-  workflow_status: workflowStatusEnum.describe('Target workflow_status'),
-  note: z.string().optional().describe('Note (required when moving to human_review or planned)'),
-});
 
 /** See module doc point 5 for why this does not reuse setStatusInputSchema/runSetStatus. */
 async function moveTaskHandler(input: z.infer<typeof taskMoveInputSchema>) {
@@ -576,16 +513,11 @@ async function closeTaskHandler(input: z.infer<typeof closeTaskInputSchema>) {
 
 // ─── task.delete ──────────────────────────────────────────────────────────────
 
-const taskDeleteInputSchema = z.object({
-  id: z.string().describe('The octomux task id'),
-  purge: z.string().optional().describe("'true' to hard-delete a previously soft-deleted task"),
-});
-
 /**
  * Mirrors DELETE /api/tasks/:id's conditional soft/hard delete exactly — NOT
  * runDeleteTask's unconditional hard delete (ticket point 5). Reuses the SAME
  * functions the route imports (softDeleteTask/deleteTask from task-engine,
- * hardDeleteTask from repositories) rather than deleteTaskInputSchema's
+ * hardDeleteTask from repositories) rather than schemas.ts's deleteTaskInputSchema
  * `{ task_id }` shape — see module doc point 2 for why the `id` field name is
  * required here.
  */
@@ -612,101 +544,54 @@ async function deleteTaskHandler(input: z.infer<typeof taskDeleteInputSchema>) {
 
 // ─── Registration ─────────────────────────────────────────────────────────────
 
+/**
+ * Looks up a capability's METADATA from `TASK_CAPABILITY_META` by id and casts
+ * it to `CapabilityMeta<TInput>`, inferring `TInput` from `schema` (passed only
+ * for inference — never read). `TASK_CAPABILITY_META` is a plain
+ * `CapabilityMeta[]` (TInput widened to `unknown`), so without this the spread
+ * below would produce `{ input: z.ZodType<unknown>, handler: (input: Specific) => ... }`,
+ * which fails `defineCapability`'s generic inference (a handler taking a
+ * specific input type is not assignable where `unknown` is expected).
+ */
+function findMeta<TInput>(id: string, _schema: z.ZodType<TInput>): CapabilityMeta<TInput> {
+  const meta = TASK_CAPABILITY_META.find((m) => m.id === id);
+  if (!meta) throw new Error(`registry: missing capability metadata for '${id}'`);
+  return meta as CapabilityMeta<TInput>;
+}
+
 export function registerTaskCapabilities(): void {
   defineCapability({
-    id: 'task.list',
-    summary:
-      'List tasks (lean summary by default — pass include=workers,pending_prompts,user_terminals ' +
-      'for the full task rows).',
-    http: { method: 'get', path: '/api/tasks' },
-    cli: 'task list',
-    cliAliases: ['list-tasks'],
-    mcp: 'list_tasks',
-    tier: 'auto',
-    callers: ['ui', 'human', 'agent'],
-    input: taskListInputSchema,
+    ...findMeta('task.list', taskListInputSchema),
     handler: listTasksHandler,
   });
 
   defineCapability({
-    id: 'task.get',
-    summary:
-      'Get a single task (lean summary by default — pass include=workers,pending_prompts,' +
-      'user_terminals,pull_requests,worktree,existing_review_id for the full task row).',
-    http: { method: 'get', path: '/api/tasks/:id' },
-    cli: 'task get',
-    cliAliases: ['get-task'],
-    mcp: 'get_task',
-    tier: 'auto',
-    callers: ['ui', 'human', 'agent'],
-    input: taskGetInputSchema,
+    ...findMeta('task.get', taskGetInputSchema),
     handler: getTaskHandler,
   });
 
   defineCapability({
-    id: 'task.create',
-    summary: 'Create a task (and start it immediately unless draft:true).',
-    // 201 matches routes/tasks.ts:253 — see HttpProjection.status.
-    http: { method: 'post', path: '/api/tasks', status: 201 },
-    cli: 'task create',
-    cliAliases: ['create-task'],
-    mcp: 'create_task',
-    tier: 'ask',
-    callers: ['ui', 'human', 'agent'],
-    input: taskCreateInputSchema,
+    ...findMeta('task.create', taskCreateInputSchema),
     handler: createTaskHandler,
   });
 
   defineCapability({
-    id: 'task.start',
-    summary: 'Start a draft task (fires setup + agent launch in the background).',
-    http: { method: 'post', path: '/api/tasks/:id/start' },
-    cli: 'task start',
-    tier: 'ask',
-    callers: ['ui', 'human', 'agent'],
-    input: taskStartInputSchema,
+    ...findMeta('task.start', taskStartInputSchema),
     handler: startTaskHandler,
   });
 
   defineCapability({
-    id: 'task.move',
-    summary: 'Move a task to a new workflow_status (may auto-start/resume/close it).',
-    http: { method: 'post', path: '/api/tasks/:id/move' },
-    cli: 'task move',
-    cliAliases: ['task-move'],
-    mcp: 'set_task_status',
-    tier: 'ask',
-    callers: ['ui', 'human', 'agent'],
-    input: taskMoveInputSchema,
+    ...findMeta('task.move', taskMoveInputSchema),
     handler: moveTaskHandler,
   });
 
   defineCapability({
-    id: 'task.close',
-    summary:
-      'Close a task: stop its agents + kill its tmux session. Preserves the worktree/branch ' +
-      'so it can be resumed.',
-    // No http/cli projection — see module doc point 1.
-    mcp: 'close_task',
-    tier: 'always-ask',
-    callers: ['human', 'agent'],
-    input: closeTaskInputSchema,
+    ...findMeta('task.close', closeTaskInputSchema),
     handler: closeTaskHandler,
   });
 
   defineCapability({
-    id: 'task.delete',
-    summary:
-      'Delete a task: soft-delete by default; purge:true hard-deletes a previously ' +
-      'soft-deleted task (kills tmux + removes worktree + deletes branch + DB rows).',
-    // 204 + empty body matches routes/tasks.ts:348.
-    http: { method: 'delete', path: '/api/tasks/:id', status: 204 },
-    cli: 'task delete',
-    cliAliases: ['delete-task'],
-    mcp: 'delete_task',
-    tier: 'always-ask',
-    callers: ['ui', 'human', 'agent'],
-    input: taskDeleteInputSchema,
+    ...findMeta('task.delete', taskDeleteInputSchema),
     handler: deleteTaskHandler,
   });
 }

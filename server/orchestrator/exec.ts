@@ -46,7 +46,7 @@ import type { RunMode, WorkflowStatus } from '../types.js';
 import type {
   CreateTaskInput as CreateTaskInputFromSchema,
   AddAgentOpts as AddAgentOptsFromSchema,
-} from './command-schemas.js';
+} from '@octomux/capabilities';
 
 const logger = childLogger('orchestrator/exec');
 
@@ -65,7 +65,7 @@ export const WORKFLOW_KIND = 'workflow' as const;
 
 /**
  * Input to runCreateTask.
- * Canonical definition lives in server/orchestrator/command-schemas.ts.
+ * Canonical definition lives in packages/capabilities/src/schemas.ts.
  * Re-exported here so existing imports (gate.ts, actions.ts, etc.) keep working.
  */
 export type CreateTaskInput = CreateTaskInputFromSchema;
@@ -560,7 +560,7 @@ export async function runSendMessage(taskId: string, message: string): Promise<v
 
 /**
  * Options for runAddAgent (task_id is passed separately as the first argument).
- * Canonical definition lives in server/orchestrator/command-schemas.ts as AddAgentOpts.
+ * Canonical definition lives in packages/capabilities/src/schemas.ts as AddAgentOpts.
  * Re-exported here so existing imports keep working.
  */
 export type AddAgentInput = AddAgentOptsFromSchema;

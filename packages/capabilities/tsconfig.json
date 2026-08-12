@@ -13,5 +13,5 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../api-client" }]
+  "references": [{ "path": "../api-client" }, { "path": "../types" }]
 }

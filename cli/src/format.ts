@@ -30,13 +30,6 @@ export function taskDisplayStatus(task: Pick<Task, 'runtime_state' | 'workflow_s
   return task.runtime_state;
 }
 
-export function taskMatchesStatusFilter(
-  task: Pick<Task, 'runtime_state' | 'workflow_status'>,
-  status: string,
-): boolean {
-  return taskDisplayStatus(task) === status;
-}
-
 export function colorAgentStatus(status: string): string {
   const colorFn = AGENT_STATUS_COLORS[status] || chalk.white;
   return colorFn(status);
