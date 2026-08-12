@@ -762,8 +762,9 @@ export function hasTrashedPrReviewTask(repoPath: string, prNumber: number): bool
 
 /**
  * List idle auto-review draft tasks for a given repo_path.
- * Used by cleanupResolvedReviewDrafts to find and purge drafts whose PR is no
- * longer awaiting review.
+ * Used by cleanupResolvedReviews to find and purge drafts whose PR is no
+ * longer awaiting review. "Draft" = never started: a task that has worker rows
+ * is a closed-but-resumable review session, kept until its PR merges/closes.
  */
 export function listAutoReviewDrafts(
   repoPath: string,
@@ -773,9 +774,28 @@ export function listAutoReviewDrafts(
       `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
          LEFT JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
-          AND t.deleted_at IS NULL`,
+          AND t.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM workers wk WHERE wk.task_id = t.id)`,
     )
     .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
+}
+
+/**
+ * List idle (closed or never-started) auto-review tasks that still point at a
+ * PR. Used by cleanupResolvedReviews to trash review sessions once their PR is
+ * merged or closed, so reviews never dangle past the PR's life.
+ */
+export function listIdleAutoReviewTasksWithPr(
+  repoPath: string,
+): Array<{ id: string; pr_number: number }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id AS id, t.pr_number AS pr_number FROM tasks t
+         LEFT JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
+          AND t.pr_number IS NOT NULL AND t.deleted_at IS NULL`,
+    )
+    .all(repoPath) as Array<{ id: string; pr_number: number }>;
 }
 
 /**

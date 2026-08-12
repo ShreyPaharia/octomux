@@ -81,6 +81,7 @@ export async function relaunchStoppedAgents(
   task: Task,
   session: string,
   cwd: string,
+  prompt?: string,
 ): Promise<number> {
   const agents = listStoppedAgents(task.id);
   let sessionCreated = false;
@@ -94,7 +95,15 @@ export async function relaunchStoppedAgents(
     });
     const taskModel = (task as any).model ?? null;
     const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: taskModel, cwd });
-    const startupCmd = buildAgentStartupCommand({ baseCmd });
+    // Deliver the resume prompt through the first agent's startup command
+    // (positional arg) — race-free, unlike send-keys against a booting TUI.
+    const withPrompt = !sessionCreated && !!prompt;
+    const startupCmd = buildAgentStartupCommand({
+      baseCmd,
+      prompt: withPrompt ? prompt : undefined,
+      worktreePath: withPrompt ? cwd : undefined,
+      agentId: withPrompt ? agent.id : undefined,
+    });
     const windowIndex = await launchAgentWindow({
       session,
       cwd,
@@ -122,7 +131,7 @@ export async function relaunchStoppedAgents(
   return agents.length;
 }
 
-export async function resumeTask(task: Task): Promise<void> {
+export async function resumeTask(task: Task, opts?: { prompt?: string }): Promise<void> {
   const session = task.tmux_session!;
   const runMode: RunMode = task.run_mode;
 
@@ -142,7 +151,7 @@ export async function resumeTask(task: Task): Promise<void> {
     await prepareResumeSession(task, session);
     const cwd = task.worktree!;
     await bootstrapResumeHooks(task, cwd, session);
-    const recoveredAgents = await relaunchStoppedAgents(task, session, cwd);
+    const recoveredAgents = await relaunchStoppedAgents(task, session, cwd, opts?.prompt);
 
     logger.info(
       { task_id: task.id, operation: 'resumeTask', recovered_agents: recoveredAgents },
