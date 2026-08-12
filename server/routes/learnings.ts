@@ -4,17 +4,17 @@ import { childLogger } from '../logger.js';
 import { requireBearerHookToken } from './hook-auth.js';
 import {
   addLearning,
-  deleteLearning,
   getLearning,
   laneFor,
   listBenefit,
   listForDigest,
-  listForRead,
   searchForRead,
+  searchShared,
   supersedeLearning,
   touchLearning,
   SHARED_LANE,
 } from '../repositories/agent-learnings.js';
+import type { AgentLearning } from '../types.js';
 import { lintLearning } from '../repositories/learn-lint.js';
 import { getTask } from '../repositories/tasks.js';
 import { revParseHead } from '../task-engine/git.js';
@@ -25,33 +25,52 @@ export const router = express.Router();
 
 // The PR-review learning lane in the shared agent_learnings store (folded in
 // from the old standalone review_learnings table — see spec/agent-learnings-store.md Task 9).
-const REVIEW_LANE = 'review';
-const REVIEW_LIST_LIMIT = 50;
+// Exported: server/registry/capabilities/learning.ts's learning.list handler
+// (the migrated GET /api/repos/:repoPath/learnings) reuses these verbatim.
+export const REVIEW_LANE = 'review';
+export const REVIEW_LIST_LIMIT = 50;
 
-// GET /api/repos/:repoPath/learnings — list review learnings for a repo (frontend Settings panel).
-// Response shape is preserved for the existing frontend consumer (LearningsPanel).
-router.get('/api/repos/:repoPath/learnings', (req: Request, res: Response) => {
-  const repoPath = decodeURIComponent((req.params as Record<string, string>).repoPath);
-  const rows = listForRead(repoPath, REVIEW_LANE, { limit: REVIEW_LIST_LIMIT });
-  res.json(
-    rows.map((r) => ({
-      id: r.id,
-      repo_path: r.repo_path,
-      why: r.lesson,
-      created_from_comment_id: r.evidence === REVIEW_LANE ? null : r.evidence,
-      usage_count: r.usage_count,
-      last_used_at: r.last_used_at,
-      created_at: r.created_at,
-    })),
-  );
-});
+// GET /api/repos/:repoPath/learnings and DELETE /api/learnings/:id now live in
+// server/registry/capabilities/learning.ts (learning.list / learning.delete)
+// — both were unauthenticated, so migrating them onto the capability registry
+// changes nothing about who can call them. See that module's doc comment for
+// why the other four routes below did NOT move: they're gated by
+// requireBearerHookToken, and the registry's HttpProjection has no way to
+// express "reject a missing/invalid bearer token" (resolveCallerFromRequest
+// only classifies caller identity — an unrecognised request still resolves to
+// 'agent' and is authorized, rather than being rejected).
 
-// DELETE /api/learnings/:id — delete a single learning
-router.delete('/api/learnings/:id', (req: Request, res: Response) => {
-  const id = (req.params as Record<string, string>).id;
-  deleteLearning(id);
-  res.status(204).send();
-});
+/**
+ * Recall learnings matching `query`, shared across `GET /api/learnings` (the
+ * bearer-gated agent-recall route, below) and the `search_learnings` MCP tool
+ * (server/orchestrator/mcp/read.ts) — previously two independent
+ * implementations that behaved differently (one lane-aware + usage-tracking,
+ * the other shared-lane-only and silent). Now one function both call
+ * in-process:
+ *
+ *   - `taskId` given (the HTTP route, always): resolves the task's own lane
+ *     via `laneFor`, searches shared + that lane via `searchForRead`, and
+ *     bumps `usage_count` on every returned row via `touchLearning` — exactly
+ *     what the route did inline before.
+ *   - `taskId` omitted (the MCP tool, which has no task context — it's the
+ *     conductor's cross-task search, not a worker's): searches the shared
+ *     lane only via `searchShared`, no usage bump — exactly what
+ *     `handleSearchLearnings` did inline before.
+ */
+export function recallLearnings(input: {
+  taskId?: string;
+  query: string;
+  repo?: string;
+}): AgentLearning[] {
+  if (input.taskId) {
+    const task = getTask(input.taskId);
+    if (!task) throw notFound('Task not found');
+    const rows = searchForRead(task.repo_path, laneFor(task), input.query);
+    for (const r of rows) touchLearning(r.id);
+    return rows;
+  }
+  return searchShared(input.query, input.repo ? { repo: input.repo } : {});
+}
 
 // ── Agent learnings store (octomux learn/recall) ──────────────────────────
 
@@ -100,12 +119,8 @@ router.get('/api/learnings', requireBearerHookToken, (req: Request, res: Respons
   if (typeof q.taskId !== 'string' || !q.taskId) throw badRequest('taskId is required');
   if (typeof q.query !== 'string' || !q.query.trim()) throw badRequest('query is required');
 
-  const task = getTask(q.taskId);
-  if (!task) throw notFound('Task not found');
-
-  const rows = searchForRead(task.repo_path, laneFor(task), q.query);
-  for (const r of rows) touchLearning(r.id);
-  logger.info({ task_id: task.id, count: rows.length }, 'learnings recalled');
+  const rows = recallLearnings({ taskId: q.taskId, query: q.query });
+  logger.info({ task_id: q.taskId, count: rows.length }, 'learnings recalled');
   res.json(rows);
 });
 
