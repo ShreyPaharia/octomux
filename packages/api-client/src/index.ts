@@ -2,6 +2,24 @@
  * @octomux/api-client — isomorphic HTTP request core for CLI and web consumers.
  */
 
+/** Header carrying the caller's client class. See `clientClass` below. */
+export const CLIENT_CLASS_HEADER = 'X-Octomux-Client';
+
+/**
+ * Which kind of client is making the request.
+ *
+ * The server maps this to a caller class to decide whether the capability
+ * gate applies: a human clicking in the dashboard or typing at a terminal has
+ * already expressed intent, whereas an autonomous agent has not.
+ *
+ * ponytail: a header is spoofable, and that is proportionate here — octomux is
+ * a localhost single-user tool, so the failure being prevented is accidental
+ * miscategorisation, not an adversary. An agent has no reason to forge this.
+ * If octomux ever becomes multi-tenant or network-exposed, replace this with a
+ * signed session token; the server-side seam is `resolveCaller()`.
+ */
+export type ClientClass = 'ui' | 'cli';
+
 export interface RequestCoreOptions {
   /** Prefix prepended to every path, e.g. `/api` or `http://localhost:7777/api`. */
   baseUrl: string;
@@ -9,6 +27,11 @@ export interface RequestCoreOptions {
   alwaysJsonContentType?: boolean;
   /** Customize or rethrow fetch network errors (e.g. CLI ECONNREFUSED messaging). */
   onFetchError?: (err: unknown, ctx: { baseUrl: string }) => never;
+  /**
+   * Identifies this client to the server so it is not treated as an agent.
+   * Omit and the server falls back to its fail-closed default (`agent`).
+   */
+  clientClass?: ClientClass;
 }
 
 export interface RequestCore {
@@ -25,7 +48,7 @@ export function qs(params: Record<string, string | undefined>): string {
 
 /** Create an HTTP request core with in-flight GET deduplication. */
 export function createRequestCore(options: RequestCoreOptions): RequestCore {
-  const { baseUrl, alwaysJsonContentType = false, onFetchError } = options;
+  const { baseUrl, alwaysJsonContentType = false, onFetchError, clientClass } = options;
   const inflight = new Map<string, Promise<unknown>>();
 
   async function doRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -33,11 +56,16 @@ export function createRequestCore(options: RequestCoreOptions): RequestCore {
     if (alwaysJsonContentType || init?.body) {
       headers['Content-Type'] = 'application/json';
     }
+    if (clientClass) {
+      headers[CLIENT_CLASS_HEADER] = clientClass;
+    }
     let res: Response;
     try {
       res = await fetch(`${baseUrl}${path}`, {
-        headers,
         ...init,
+        // Merge, don't replace: `{ headers, ...init }` let a caller passing its
+        // own `headers` silently drop Content-Type (and now the client class).
+        headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
       });
     } catch (err) {
       if (onFetchError) {

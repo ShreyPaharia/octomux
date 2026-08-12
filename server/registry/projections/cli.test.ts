@@ -50,7 +50,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   resetRegistry();
-  vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -393,49 +392,63 @@ describe('registerCapabilityCommands — sends parsed options to the server', ()
 });
 
 describe('registerCapabilityCommands — honours the global --json flag', () => {
-  it('prints raw JSON when --json is passed', async () => {
+  /**
+   * Output goes through the injected `write`, not `console.*` — this module
+   * lives under `server/`, where CLAUDE.md forbids console. Collecting lines
+   * also beats a global spy: no cross-test leakage from a stubbed console.
+   */
+  function runWithCollectedOutput(argv: string[], isTTY: boolean): Promise<string[]> {
+    const lines: string[] = [];
     defineCapability(cap());
     const program = buildProgram();
-    registerCapabilityCommands(program);
+    registerCapabilityCommands(program, { write: (line) => lines.push(line) });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ id: 'task-1' })));
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await program.parseAsync(['task', 'create', '--title', 't', '--json'], { from: 'user' });
+    const previousTTY = process.stdout.isTTY;
+    process.stdout.isTTY = isTTY;
+    return program
+      .parseAsync(argv, { from: 'user' })
+      .then(() => lines)
+      .finally(() => {
+        process.stdout.isTTY = previousTTY;
+      });
+  }
 
-    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'task-1' }, null, 2));
+  it.each<[string, string[], boolean, string[]]>([
+    [
+      'raw JSON when --json is passed',
+      ['task', 'create', '--title', 't', '--json'],
+      true,
+      [JSON.stringify({ id: 'task-1' }, null, 2)],
+    ],
+    [
+      'JSON when stdout is not a TTY, even without --json',
+      ['task', 'create', '--title', 't'],
+      false,
+      [JSON.stringify({ id: 'task-1' }, null, 2)],
+    ],
+    [
+      'human-readable key: value lines on a TTY without --json',
+      ['task', 'create', '--title', 't'],
+      true,
+      ['id: task-1'],
+    ],
+  ])('prints %s', async (_label, argv, isTTY, expected) => {
+    await expect(runWithCollectedOutput(argv, isTTY)).resolves.toEqual(expected);
   });
 
-  it('falls back to JSON output when stdout is not a TTY, even without --json', async () => {
+  it('writes to stdout by default when no writer is injected', async () => {
     defineCapability(cap());
     const program = buildProgram();
     registerCapabilityCommands(program);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ id: 'task-1' })));
-    const isTTY = process.stdout.isTTY;
-    process.stdout.isTTY = false;
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
     try {
-      await program.parseAsync(['task', 'create', '--title', 't'], { from: 'user' });
-      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'task-1' }, null, 2));
+      await program.parseAsync(['task', 'create', '--title', 't', '--json'], { from: 'user' });
+      expect(writeSpy).toHaveBeenCalledWith(`${JSON.stringify({ id: 'task-1' }, null, 2)}\n`);
     } finally {
-      process.stdout.isTTY = isTTY;
-    }
-  });
-
-  it('prints human-readable key: value lines when a TTY and --json is absent', async () => {
-    defineCapability(cap());
-    const program = buildProgram();
-    registerCapabilityCommands(program);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ id: 'task-1' })));
-    const isTTY = process.stdout.isTTY;
-    process.stdout.isTTY = true;
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    try {
-      await program.parseAsync(['task', 'create', '--title', 't'], { from: 'user' });
-      expect(logSpy).toHaveBeenCalledWith('id: task-1');
-    } finally {
-      process.stdout.isTTY = isTTY;
+      writeSpy.mockRestore();
     }
   });
 });

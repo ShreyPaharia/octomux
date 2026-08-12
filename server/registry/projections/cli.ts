@@ -179,13 +179,25 @@ function isJsonMode(json: unknown): boolean {
   return json === true || !process.stdout.isTTY;
 }
 
-function printResult(result: unknown, json: boolean): void {
+/**
+ * Emits one line of CLI output. Injectable so this module never calls
+ * `console.*` — CLAUDE.md forbids it under `server/`, and this is command
+ * output rather than a log, so it must not go through pino either. Tests pass
+ * a collector; the CLI entry point can pass its own printer.
+ */
+export type WriteLine = (line: string) => void;
+
+const defaultWriteLine: WriteLine = (line) => {
+  process.stdout.write(`${line}\n`);
+};
+
+function printResult(result: unknown, json: boolean, write: WriteLine): void {
   if (json || result === undefined || typeof result !== 'object' || result === null) {
-    if (result !== undefined) console.log(JSON.stringify(result, null, 2));
+    if (result !== undefined) write(JSON.stringify(result, null, 2));
     return;
   }
   for (const [key, value] of Object.entries(result as Record<string, unknown>)) {
-    console.log(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
+    write(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
   }
 }
 
@@ -217,6 +229,7 @@ function configureLeaf(
   http: NonNullable<Capability['http']>,
   fields: Record<string, z.ZodTypeAny>,
   pathParamFields: Map<string, string>,
+  write: WriteLine,
 ): void {
   cmd.description(cap.summary);
   for (const [fieldName, fieldSchema] of Object.entries(fields)) {
@@ -271,11 +284,16 @@ function configureLeaf(
       });
     }
 
-    printResult(result, json);
+    printResult(result, json, write);
   });
 }
 
-function registerOne(program: Command, groups: Map<string, Command>, cap: Capability): void {
+function registerOne(
+  program: Command,
+  groups: Map<string, Command>,
+  cap: Capability,
+  write: WriteLine,
+): void {
   if (!cap.cli) return;
   if (!cap.http) {
     throw new Error(
@@ -296,7 +314,7 @@ function registerOne(program: Command, groups: Map<string, Command>, cap: Capabi
 
   const group = getOrCreateGroup(program, groups, groupParts);
   const leaf = group.command(leafName);
-  configureLeaf(leaf, cap, cap.http, fields, pathParamFields);
+  configureLeaf(leaf, cap, cap.http, fields, pathParamFields, write);
 
   // Legacy flat names (e.g. 'create-task') are permanent, hidden, top-level
   // aliases — they never move under the noun group because third-party
@@ -305,7 +323,7 @@ function registerOne(program: Command, groups: Map<string, Command>, cap: Capabi
     const [primary, ...rest] = cap.cliAliases;
     const aliasCmd = program.command(primary, { hidden: true });
     for (const extra of rest) aliasCmd.alias(extra);
-    configureLeaf(aliasCmd, cap, cap.http, fields, pathParamFields);
+    configureLeaf(aliasCmd, cap, cap.http, fields, pathParamFields, write);
   }
 }
 
@@ -316,9 +334,13 @@ function registerOne(program: Command, groups: Map<string, Command>, cap: Capabi
  * `cap.input`, so a schema change flows straight into `--help` — there is
  * nothing left to drift.
  */
-export function registerCapabilityCommands(program: Command): void {
+export function registerCapabilityCommands(
+  program: Command,
+  opts: { write?: WriteLine } = {},
+): void {
+  const write = opts.write ?? defaultWriteLine;
   const groups = new Map<string, Command>();
   for (const cap of listCliCapabilities()) {
-    registerOne(program, groups, cap);
+    registerOne(program, groups, cap, write);
   }
 }

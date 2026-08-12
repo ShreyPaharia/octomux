@@ -9,6 +9,7 @@
 import type { Router, Request, Response } from 'express';
 import { authorize, listHttpCapabilities, resolveCaller } from '../index.js';
 import type { Capability, CallerClass } from '../index.js';
+import { CLIENT_CLASS_HEADER } from '@octomux/api-client';
 import { checkAgentTokenExists } from '../../repositories/workers.js';
 import { ServiceError } from '../../services/errors.js';
 import { childLogger } from '../../logger.js';
@@ -39,7 +40,19 @@ export function resolveCallerFromRequest(req: Request): CallerClass {
   const queryToken = typeof req.query.token === 'string' ? req.query.token : undefined;
   const token = bearerMatch?.[1] ?? queryToken;
   const isAgentToken = Boolean(token && checkAgentTokenExists(token));
-  return resolveCaller({ isAgentToken });
+
+  // Positive identification for the two non-agent classes. Without this every
+  // request falls through to the fail-closed `agent` default, which would gate
+  // the dashboard's own calls — safe, but useless. Set by `createRequestCore`
+  // in `@octomux/api-client`, which both the SPA and the CLI go through.
+  const clientClass = req.headers[CLIENT_CLASS_HEADER.toLowerCase()];
+  const client = Array.isArray(clientClass) ? clientClass[0] : clientClass;
+
+  return resolveCaller({
+    isAgentToken,
+    isDashboard: client === 'ui',
+    isInteractiveCli: client === 'cli',
+  });
 }
 
 /**

@@ -5,8 +5,9 @@ import request from 'supertest';
 import { z } from 'zod';
 import type Database from 'better-sqlite3';
 import { mountCapabilities, mergeInput, resolveCallerFromRequest } from './http.js';
+import { CLIENT_CLASS_HEADER } from '@octomux/api-client';
 import { defineCapability, resetRegistry } from '../index.js';
-import type { Capability } from '../index.js';
+import type { Capability, CallerClass } from '../index.js';
 import { errorMiddleware } from '../../error-middleware.js';
 import { createTestDb, insertAgent, insertTestTask } from '../../test-helpers.js';
 
@@ -174,5 +175,32 @@ describe('resolveCallerFromRequest', () => {
     const task = insertTestTask();
     insertAgent(db, { task_id: task.id, hook_token: 'tok-valid' });
     expect(resolveCallerFromRequest(buildReq())).toBe('agent');
+  });
+
+  // Positive identification of the two non-agent classes, via the header
+  // @octomux/api-client sets. Without this the dashboard's own calls resolve
+  // to 'agent' and the gate applies to the UI.
+  it.each<[string, Record<string, unknown>, CallerClass]>([
+    ['ui header', { [CLIENT_CLASS_HEADER.toLowerCase()]: 'ui' }, 'ui'],
+    ['cli header', { [CLIENT_CLASS_HEADER.toLowerCase()]: 'cli' }, 'human'],
+    ['unrecognised header value', { [CLIENT_CLASS_HEADER.toLowerCase()]: 'nonsense' }, 'agent'],
+    ['no header', {}, 'agent'],
+  ])('resolves %s to %s', (_label, headers, expected) => {
+    expect(resolveCallerFromRequest({ headers, query: {} } as unknown as Request)).toBe(expected);
+  });
+
+  // An agent token must win: a compromised or copy-pasted client header must
+  // never let agent traffic present itself as the dashboard.
+  it('prefers the agent token over a ui client header', () => {
+    const task = insertTestTask();
+    insertAgent(db, { task_id: task.id, hook_token: 'tok-valid' });
+    const req = {
+      headers: {
+        authorization: 'Bearer tok-valid',
+        [CLIENT_CLASS_HEADER.toLowerCase()]: 'ui',
+      },
+      query: {},
+    } as unknown as Request;
+    expect(resolveCallerFromRequest(req)).toBe('agent');
   });
 });
