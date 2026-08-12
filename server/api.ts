@@ -7,13 +7,12 @@ import './workflows/index.js';
 
 import { router as miscRouter } from './routes/misc.js';
 import { router as learningsRouter } from './routes/learnings.js';
-import { router as skillsRouter } from './routes/skills.js';
+import { skillsRouter, agentDefsRouter } from './routes/registry-docs.js';
 import { router as savedFilesRouter } from './routes/saved-files.js';
 import { router as setupRouter } from './routes/setup.js';
 import { router as settingsRouter } from './routes/settings.js';
 import { router as hooksRegistryRouter } from './routes/hooks-registry.js';
 import { router as chatsRouter } from './routes/chats.js';
-import { router as agentDefsRouter } from './routes/agent-defs.js';
 import { router as orchestratorRouter } from './routes/orchestrator.js';
 import { router as integrationsRouter } from './routes/integrations.js';
 import { router as loopGroupsRouter } from './routes/loop-groups.js';

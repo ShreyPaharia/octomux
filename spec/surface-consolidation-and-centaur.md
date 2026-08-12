@@ -308,6 +308,32 @@ repo    recent default-branch files branches
 Old flat names (`create-task`, `list-tasks`, …) are kept as permanent hidden
 aliases — they are baked into third-party prompts and configs outside this repo.
 
+### 5.2a Why the CLI is not registry-generated yet
+
+Attempted and reverted. Two blockers, both real:
+
+1. **Package boundary.** `cli/tsconfig.json` sets `rootDir: "src"`. Importing
+   `server/registry/mount.js` from `cli/src/index.ts` drags the whole server
+   tree across that boundary — 113 `TS6059` errors in `cd cli && tsc`, the
+   production build. Neither `tsc -b` nor vitest catches it: `cli/` is not in
+   the root project graph, and vitest transpiles per-file without `rootDir`
+   enforcement. Fixing this means bundling `cli/src` (as `dist-server` already
+   is) or moving the projection into a shared package.
+
+2. **No positional arguments.** The generator turns every schema field into a
+   `--flag <value>`, including path params, so `octomux get-task <id>` becomes
+   `octomux get-task --id <id>`. The legacy `cliAliases` then preserve the
+   _name_ but not the _calling convention_ — worse than not preserving them,
+   because third-party prompts fail exactly where someone assumed compatibility.
+
+Also lost in the attempt, none of which the schema can express today:
+`create-task --fork-from`, `list-tasks --status`, the `ls`/`info` aliases, and
+`delete-task`'s confirmation output (204 -> undefined -> nothing printed).
+
+**The CLI stays hand-written until the generator supports positional arguments
+and the package boundary is resolved.** HTTP and MCP generation do not depend
+on either.
+
 ### 5.3 MCP exposure is narrower than CLI
 
 MCP tools cost context on every agent turn, so `mcp:` is set only where an agent
