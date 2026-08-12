@@ -253,10 +253,16 @@ const taskCreateInputSchema = createTaskInputSchema.extend({
 
 /**
  * Mirrors POST /api/tasks (server/routes/tasks.ts) exactly, including its
- * response envelope (full task + workers + pull_requests) — NOT
- * runCreateTask's narrow `{ task_id, title }`. Behaviour preservation
- * outranks reuse here (ticket point 2): the dashboard depends on the full
- * envelope today.
+ * response envelope — NOT runCreateTask's narrow `{ task_id, title }`.
+ * Behaviour preservation outranks reuse here (ticket point 2).
+ *
+ * Correction to the ticket's prior-research note: the live route responds
+ * `res.status(201).json(created)` with `created` being exactly what
+ * `createTask()` (task-service.ts) returns — that function only sets
+ * `.workers = []` and `.user_terminals = []` on the row, NOT `pull_requests`
+ * / `pending_prompts` / `derived_status` (those come from
+ * `formatTaskResponse`, which POST /api/tasks never calls). So the real
+ * envelope is task + workers + user_terminals, not the fuller GET envelope.
  */
 async function createTaskHandler(input: z.infer<typeof taskCreateInputSchema>) {
   const runMode: RunMode = (input.run_mode as RunMode | undefined) ?? 'new';
@@ -320,7 +326,10 @@ const taskStartInputSchema = z.object({
   id: z.string().describe('The octomux task id'),
 });
 
-function startTaskHandler(input: z.infer<typeof taskStartInputSchema>) {
+// async so a synchronous throw (not-found / not-idle) always surfaces as a
+// rejected promise, consistent with every other handler here and with how
+// http.ts's `await cap.handler(...)` treats it either way.
+async function startTaskHandler(input: z.infer<typeof taskStartInputSchema>) {
   const task = getTaskRepo(input.id);
   if (!task) throw notFound('Task not found');
 

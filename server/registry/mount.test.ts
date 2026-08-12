@@ -13,7 +13,7 @@ import {
   registerCapabilityCli,
   resetInstalled,
 } from './mount.js';
-import { defineCapability, resetRegistry } from './index.js';
+import { defineCapability, resetRegistry, listCapabilities, listExemptions } from './index.js';
 import type { Capability } from './types.js';
 import { errorMiddleware } from '../error-middleware.js';
 import { createTestDb } from '../test-helpers.js';
@@ -72,16 +72,23 @@ afterEach(() => {
 });
 
 describe('installCapabilities', () => {
-  it('does not throw when called twice (idempotent)', async () => {
-    await installCapabilities();
-    await expect(installCapabilities()).resolves.toBeUndefined();
+  it('does not throw when called twice (idempotent)', () => {
+    installCapabilities();
+    expect(() => installCapabilities()).not.toThrow();
   });
 
-  it('does not throw when the concurrently-written capability/exemption modules are absent', async () => {
-    // server/registry/capabilities/task.ts and server/registry/exemptions.ts
-    // may not exist yet — installCapabilities must degrade gracefully rather
-    // than reject.
-    await expect(installCapabilities()).resolves.toBeUndefined();
+  it('registers the real capability and exemption modules', () => {
+    installCapabilities();
+    // Static imports, so this is the actual production set — not a stub.
+    expect(listCapabilities().map((c) => c.id)).toContain('task.create');
+    expect(listExemptions().length).toBeGreaterThan(0);
+  });
+
+  it('registers each capability exactly once across repeated calls', () => {
+    installCapabilities();
+    const first = listCapabilities().length;
+    installCapabilities();
+    expect(listCapabilities()).toHaveLength(first);
   });
 });
 
@@ -92,9 +99,9 @@ describe('mountCapabilityRoutes', () => {
     return app;
   }
 
-  it('is safe to call with zero capabilities registered', async () => {
+  it('mounts without throwing when nothing extra is registered', () => {
     const app = appWithRegistry();
-    await expect(mountCapabilityRoutes(app)).resolves.toBeUndefined();
+    expect(() => mountCapabilityRoutes(app)).not.toThrow();
   });
 
   it('mounts a capability defined before mounting, reachable over HTTP', async () => {
@@ -107,7 +114,7 @@ describe('mountCapabilityRoutes', () => {
     );
 
     const app = appWithRegistry();
-    await mountCapabilityRoutes(app);
+    mountCapabilityRoutes(app);
     app.use(errorMiddleware);
 
     const res = await request(app).get('/api/things/abc');
@@ -117,27 +124,28 @@ describe('mountCapabilityRoutes', () => {
 });
 
 describe('registerCapabilityMcpTools', () => {
-  it('is safe to call with zero capabilities registered', async () => {
+  it('registers without throwing when nothing extra is registered', () => {
     const server = newMcpServer();
-    await expect(registerCapabilityMcpTools(server, 'agent')).resolves.toBeUndefined();
-    expect(registeredToolNames(server)).toEqual([]);
+    expect(() => registerCapabilityMcpTools(server, 'agent')).not.toThrow();
   });
 
-  it('registers a capability defined before mounting as an MCP tool', async () => {
+  it('registers a capability defined before mounting as an MCP tool', () => {
     defineCapability(cap({ mcp: 'get_thing', input: z.object({ id: z.string() }) }));
 
     const server = newMcpServer();
-    await registerCapabilityMcpTools(server, 'agent');
+    registerCapabilityMcpTools(server, 'agent');
 
-    expect(registeredToolNames(server)).toEqual(['get_thing']);
+    // Superset, not equality: installCapabilities() also registers the real
+    // task capabilities, and asserting equality would couple this test to
+    // whichever nouns happen to be migrated.
+    expect(registeredToolNames(server)).toContain('get_thing');
   });
 });
 
 describe('registerCapabilityCli', () => {
-  it('is safe to call with zero capabilities registered', async () => {
+  it('registers without throwing when nothing extra is registered', () => {
     const program = buildProgram();
-    await expect(registerCapabilityCli(program)).resolves.toBeUndefined();
-    expect(program.commands).toEqual([]);
+    expect(() => registerCapabilityCli(program)).not.toThrow();
   });
 
   it('registers a capability defined before mounting as a commander subcommand', async () => {
@@ -150,7 +158,7 @@ describe('registerCapabilityCli', () => {
     );
 
     const program = buildProgram();
-    await registerCapabilityCli(program);
+    registerCapabilityCli(program);
 
     expect(findCommand(program, 'thing', 'get')).toBeDefined();
   });
@@ -172,15 +180,14 @@ describe('cross-transport idempotency', () => {
     const server = newMcpServer();
     const program = buildProgram();
 
-    await mountCapabilityRoutes(app);
-    await registerCapabilityMcpTools(server, 'agent');
-    await registerCapabilityCli(program);
+    mountCapabilityRoutes(app);
+    registerCapabilityMcpTools(server, 'agent');
+    registerCapabilityCli(program);
 
-    // installCapabilities() ran three times (once per call above) but only
-    // installed once — a second run would have re-thrown on any duplicate
-    // capability id defined by the (still-hypothetical) task-capabilities
-    // module, which it didn't.
-    expect(registeredToolNames(server)).toEqual(['get_thing']);
+    // installCapabilities() ran three times but installed once — a second run
+    // would have thrown on the duplicate ids the real task-capabilities module
+    // defines.
+    expect(registeredToolNames(server)).toContain('get_thing');
     expect(findCommand(program, 'thing', 'get')).toBeDefined();
   });
 });
