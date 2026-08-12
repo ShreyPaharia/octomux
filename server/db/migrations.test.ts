@@ -1,4 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { getArtifactSummary } from '../artifact.js';
 import Database from 'better-sqlite3';
 import { SCHEMA, applyPragmas } from './schema.js';
 import { runMigrations } from './migrations.js';
@@ -30,6 +34,8 @@ describe('runMigrations (isolated)', () => {
       expect(taskCols).toContain(col);
     }
     expect(taskCols).not.toContain('status');
+    expect(taskCols).not.toContain('current_summary');
+    expect(taskCols).not.toContain('current_summary_updated_at');
 
     const agentCols = (db.pragma('table_info(workers)') as Array<{ name: string }>).map(
       (c) => c.name,
@@ -81,6 +87,80 @@ describe('runMigrations (isolated)', () => {
     db.exec(SCHEMA);
     runMigrations(db);
     expect(() => runMigrations(db)).not.toThrow();
+  });
+
+  describe('retired current_summary columns', () => {
+    /**
+     * Simulate a pre-retirement DB: SCHEMA no longer creates these columns, so
+     * an upgrade install needs them added back by hand before runMigrations can
+     * exercise the back-fill path.
+     */
+    function oldInstall(worktree: string | null): Database.Database {
+      const instance = new Database(':memory:');
+      applyPragmas(instance);
+      instance.exec(SCHEMA);
+      instance.exec(`ALTER TABLE tasks ADD COLUMN current_summary TEXT`);
+      instance.exec(`ALTER TABLE tasks ADD COLUMN current_summary_updated_at TEXT`);
+      if (worktree) {
+        instance
+          .prepare(
+            `INSERT INTO worktrees (id, path, repo_path, mode)
+             VALUES ('w1', ?, '/tmp/repo', 'worktree')`,
+          )
+          .run(worktree);
+      }
+      instance
+        .prepare(
+          `INSERT INTO tasks (id, title, description, worktree_id,
+                              current_summary, current_summary_updated_at)
+           VALUES ('t1', 'T', 'D', ?, 'old summary', '2026-01-01 00:00:00')`,
+        )
+        .run(worktree ? 'w1' : null);
+      return instance;
+    }
+
+    it('copies an existing summary into the task artifact, keeping its timestamp', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-mig-'));
+      try {
+        db = oldInstall(dir);
+        runMigrations(db);
+
+        const got = getArtifactSummary(dir);
+        expect(got.current_summary).toBe('old summary');
+        // Not restamped to now — a migrated summary that looks freshly written
+        // would defeat the staleness indicator on every upgraded board card.
+        expect(got.current_summary_updated_at).toBe('2026-01-01 00:00:00');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('KEEPS the columns rather than dropping them', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-mig-'));
+      try {
+        db = oldInstall(dir);
+        runMigrations(db);
+
+        // Deliberately not dropped: a task whose worktree is gone has nowhere
+        // to put an artifact, so dropping would destroy that prose forever for
+        // no functional gain — nothing reads the column either way.
+        const taskCols = (db.pragma('table_info(tasks)') as Array<{ name: string }>).map(
+          (c) => c.name,
+        );
+        expect(taskCols).toContain('current_summary');
+        expect(taskCols).toContain('current_summary_updated_at');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not throw for a task with no worktree to write an artifact into', () => {
+      db = oldInstall(null);
+      expect(() => runMigrations(db)).not.toThrow();
+      const row = db.prepare(`SELECT id, current_summary FROM tasks WHERE id = 't1'`).get();
+      // Unmigratable, but preserved in the retired column rather than lost.
+      expect(row).toMatchObject({ id: 't1', current_summary: 'old summary' });
+    });
   });
 
   // ── Schedule kinds as presets (spec/schedule-kinds-as-presets.md §8) ────────

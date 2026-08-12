@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 import { builtInKindsDir } from '../octomux-paths.js';
 import { applyJsonSchemaDefaults } from '../workflows/config.js';
+import { hasArtifactSummary, setArtifactSummary } from '../artifact.js';
 import type { JsonSchema } from '../services/output-contract.js';
 
 const logger = childLogger('db');
@@ -116,6 +117,72 @@ function rebuildAgentsTable(instance: Database.Database): void {
       );
     })
     .default();
+}
+
+/**
+ * One-time copy of the retired `tasks.current_summary` column into each task's
+ * `.octomux/artifact.md`, so existing summaries survive the move to file-backed
+ * storage instead of silently blanking every board card on upgrade.
+ *
+ * Idempotent and non-destructive by construction:
+ *  - skips any task whose artifact already has a Summary section, so a
+ *    post-migration edit is never clobbered by a later restart;
+ *  - preserves the original `current_summary_updated_at` rather than restamping
+ *    to now, which would make stale summaries look fresh;
+ *  - leaves the columns in place (see the call site for why);
+ *  - never throws. A missing or unwritable worktree is expected — a done or
+ *    trashed task has none — and must not take down server startup. Failures
+ *    are counted and logged, not raised.
+ */
+function backfillSummariesIntoArtifacts(instance: Database.Database, taskCols: Set<string>): void {
+  if (!taskCols.has('current_summary')) return;
+  const hasTs = taskCols.has('current_summary_updated_at');
+
+  let migrated = 0;
+  let skippedNoWorktree = 0;
+  let failed = 0;
+  try {
+    const rows = instance
+      .prepare(
+        // The worktree PATH lives on the joined `worktrees` row; `tasks` only
+        // carries the FK. LEFT JOIN so a task whose worktree is gone still
+        // comes back (counted as skipped) rather than vanishing from the scan.
+        `SELECT t.id AS id, w.path AS worktree, t.current_summary AS summary
+              ${hasTs ? ', t.current_summary_updated_at AS updated_at' : ''}
+           FROM tasks t
+           LEFT JOIN worktrees w ON t.worktree_id = w.id
+          WHERE t.current_summary IS NOT NULL AND TRIM(t.current_summary) <> ''`,
+      )
+      .all() as { id: string; worktree: string | null; summary: string; updated_at?: string }[];
+
+    for (const row of rows) {
+      if (!row.worktree) {
+        skippedNoWorktree += 1;
+        continue;
+      }
+      try {
+        if (hasArtifactSummary(row.worktree)) continue;
+        setArtifactSummary(row.worktree, row.summary, row.updated_at ?? undefined);
+        migrated += 1;
+      } catch (err) {
+        failed += 1;
+        logger.warn(
+          { operation: 'backfillSummariesIntoArtifacts', task_id: row.id, err },
+          'could not write artifact for task — its summary stays in the (retired) column',
+        );
+      }
+    }
+  } catch (err) {
+    logger.warn({ operation: 'backfillSummariesIntoArtifacts', err }, 'summary back-fill skipped');
+    return;
+  }
+
+  if (migrated || skippedNoWorktree || failed) {
+    logger.info(
+      { operation: 'backfillSummariesIntoArtifacts', migrated, skippedNoWorktree, failed },
+      'copied retired task summaries into .octomux/artifact.md',
+    );
+  }
 }
 
 /** Run forward-only additive migrations on an initialized database. */
@@ -370,14 +437,22 @@ export function runMigrations(instance: Database.Database): void {
     `workflow_status TEXT NOT NULL DEFAULT 'backlog'`,
     taskColsV2,
   );
-  addColumn(instance, 'tasks', 'current_summary', 'current_summary TEXT', taskColsV2);
-  addColumn(
-    instance,
-    'tasks',
-    'current_summary_updated_at',
-    'current_summary_updated_at TEXT',
-    taskColsV2,
-  );
+  // current_summary / current_summary_updated_at are RETIRED (spec §5.5): the
+  // narrative now lives in each task's `.octomux/artifact.md` (server/artifact.ts).
+  // Nothing reads or writes these columns any more.
+  //
+  // They are deliberately NOT dropped, and the data is copied out first:
+  //
+  //  - Back-fill, not just drop. The artifact lives in the task's WORKTREE, so
+  //    an upgrade that only dropped the columns would blank the summary on
+  //    every existing board card — a visible regression, not just dead storage.
+  //  - Keep the columns. A task whose worktree is gone (done, trashed, or
+  //    created with no_worktree) has nowhere to put its artifact, so its
+  //    summary cannot be migrated at all. Dropping would destroy that text
+  //    irreversibly for zero functional gain, since no code reads it either
+  //    way. Dormant columns are cheap; unrecoverable user prose is not. Drop
+  //    them in a later release once back-fill is confirmed across installs.
+  backfillSummariesIntoArtifacts(instance, taskColsV2);
   addColumn(instance, 'tasks', 'deleted_at', 'deleted_at TEXT', taskColsV2);
   addColumn(instance, 'tasks', 'notify_task_id', 'notify_task_id TEXT', taskColsV2);
 

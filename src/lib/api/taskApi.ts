@@ -18,8 +18,6 @@ import type {
   Worktree,
   WorktreeSummary,
   MoveTaskRequest,
-  SummaryRequest,
-  NoteRequest,
   AddRefRequest,
   TaskExternalRef,
   TaskUpdate,
@@ -302,10 +300,9 @@ export const taskApi = {
   restoreTask: (id: string) => request<Task>(`/tasks/${id}/restore`, { method: 'POST' }),
   moveTask: (id: string, data: MoveTaskRequest) =>
     request<Task>(`/tasks/${id}/move`, { method: 'POST', body: JSON.stringify(data) }),
-  postTaskSummary: (id: string, data: SummaryRequest) =>
-    request<Task>(`/tasks/${id}/summary`, { method: 'POST', body: JSON.stringify(data) }),
-  postTaskNote: (id: string, data: NoteRequest) =>
-    request<TaskUpdate>(`/tasks/${id}/note`, { method: 'POST', body: JSON.stringify(data) }),
+  // postTaskSummary / postTaskNote retired with POST /api/tasks/:id/summary
+  // and /note (spec §5.5) — narrative now lives in the task's
+  // .octomux/artifact.md, with no HTTP write surface in this pass.
   addTaskRef: (id: string, data: AddRefRequest) =>
     request<TaskExternalRef>(`/tasks/${id}/refs`, { method: 'POST', body: JSON.stringify(data) }),
   deleteTaskRef: (id: string, integration: string) =>

@@ -20,21 +20,31 @@ import {
   createConversation,
 } from './repositories/orchestrator.js';
 import { advancePhaseForLabel } from './hooks.js';
+import { getArtifactSummary } from './artifact.js';
 
 describe('Hook endpoints', () => {
   let db: Database.Database;
   let app: ReturnType<typeof createApp>;
+  // Real worktree dir: current_summary now lives in .octomux/artifact.md
+  // (spec §5.5), so post-tool-use / Stop hooks need an actual directory to
+  // write into, not just a DB row.
+  let worktreeDir: string;
 
   beforeEach(() => {
     db = createTestDb();
     app = createApp();
-    insertTask(db, { id: 't1', runtime_state: 'running' });
+    worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-hooks-test-'));
+    insertTask(db, { id: 't1', runtime_state: 'running', worktree: worktreeDir });
     insertAgent(db, {
       id: 'a1',
       task_id: 't1',
       harness_session_id: 'sess-123',
       hook_token: 'tok-test',
     } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
 
   describe('POST /api/hooks/user-prompt-submit', () => {
@@ -223,11 +233,9 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', ...body })
         .expect(200);
 
-      const row = db
-        .prepare(`SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?`)
-        .get('t1') as { current_summary: string | null; current_summary_updated_at: string | null };
-      expect(row.current_summary).toBe(expected);
-      expect(row.current_summary_updated_at).not.toBeNull();
+      const result = getArtifactSummary(worktreeDir);
+      expect(result.current_summary).toBe(expected);
+      expect(result.current_summary_updated_at).not.toBeNull();
     });
 
     it('truncates very long tool details to ≤ 100 chars with ellipsis', async () => {
@@ -237,12 +245,11 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: long } })
         .expect(200);
 
-      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
-        current_summary: string;
-      };
-      expect(row.current_summary.length).toBeLessThanOrEqual(100);
-      expect(row.current_summary.startsWith('Bash: ')).toBe(true);
-      expect(row.current_summary.endsWith('…')).toBe(true);
+      const { current_summary } = getArtifactSummary(worktreeDir);
+      expect(current_summary).not.toBeNull();
+      expect(current_summary!.length).toBeLessThanOrEqual(100);
+      expect(current_summary!.startsWith('Bash: ')).toBe(true);
+      expect(current_summary!.endsWith('…')).toBe(true);
     });
 
     it('leaves current_summary unchanged when tool_name is missing', async () => {
@@ -251,10 +258,7 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_input: { command: 'noop' } })
         .expect(200);
 
-      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
-        current_summary: string | null;
-      };
-      expect(row.current_summary).toBeNull();
+      expect(getArtifactSummary(worktreeDir).current_summary).toBeNull();
     });
   });
 

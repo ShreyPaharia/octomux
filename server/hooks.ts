@@ -7,6 +7,7 @@ import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
+import { setTaskSummary } from './artifact-task.js';
 import { handleLoopIterationBoundary } from './task-engine/loop/engine.js';
 import {
   upsertManagedTask,
@@ -35,7 +36,6 @@ import {
   getWorktreePathForTask,
   setWorkflowStatus,
   addTaskUpdate,
-  setCurrentSummary,
 } from './repositories/tasks.js';
 import {
   insertPermissionPrompt,
@@ -289,11 +289,13 @@ router.post('/post-tool-use', requireHookToken, (req, res) => {
 
     // Only set active if not already idle (Stop hook may have fired first)
     setAgentHookActivityIfNotIdle(agent.id);
-
-    if (summary) {
-      setCurrentSummary(agent.task_id, summary);
-    }
   });
+
+  // Filesystem write (artifact file), not a DB row — kept outside the sqlite
+  // transaction above.
+  if (summary) {
+    setTaskSummary(agent.task_id, summary);
+  }
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
   res.status(200).send();

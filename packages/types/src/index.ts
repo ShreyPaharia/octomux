@@ -281,14 +281,6 @@ export interface MoveTaskRequest {
   note?: string;
 }
 
-export interface SummaryRequest {
-  summary: string;
-}
-
-export interface NoteRequest {
-  body: string;
-}
-
 export interface AddRefRequest {
   integration: string;
   ref: string;

@@ -22,7 +22,6 @@ import {
   touchAllLastViewed,
   touchUpdatedAt,
   setPrHeadSha,
-  setCurrentSummary,
   unlinkWorktree,
   markTaskRunning,
   countTasks,
@@ -384,7 +383,9 @@ describe('repositories/tasks', () => {
     });
   });
 
-  // ─── setPrHeadSha / setCurrentSummary / unlinkWorktree ──────────────────────
+  // ─── setPrHeadSha / unlinkWorktree ──────────────────────────────────────────
+  // current_summary retired (spec §5.5) — see server/artifact.test.ts for its
+  // replacement (setTaskSummary / getArtifactSummary against .octomux/artifact.md).
 
   describe('misc setters', () => {
     it('setPrHeadSha updates the column', () => {
@@ -394,16 +395,6 @@ describe('repositories/tasks', () => {
         pr_head_sha: string | null;
       };
       expect(row.pr_head_sha).toBe('deadbeef');
-    });
-
-    it('setCurrentSummary updates the summary', () => {
-      const id = insertTask({ title: 'T', description: 'D' });
-      setCurrentSummary(id, 'Agent fixed the thing');
-      const row = db
-        .prepare('SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?')
-        .get(id) as { current_summary: string | null; current_summary_updated_at: string | null };
-      expect(row.current_summary).toBe('Agent fixed the thing');
-      expect(row.current_summary_updated_at).not.toBeNull();
     });
 
     it('unlinkWorktree sets worktree_id to NULL', () => {
