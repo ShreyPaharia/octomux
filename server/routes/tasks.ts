@@ -6,11 +6,9 @@ import { getNeedsYou, getActivity } from '../inbox.js';
 import { closeTask, softDeleteTask, resumeTask } from '../task-engine/index.js';
 import { broadcast } from '../events.js';
 import type { UpdateTaskRequest, Task } from '../types.js';
-import { WORKFLOW_STATUSES } from '../types.js';
 import {
   getTask as getTaskRepo,
   listDoneTasks,
-  setWorkflowStatus,
   restoreTask as restoreTaskRepo,
   touchLastViewed,
   touchAllLastViewed,
@@ -105,11 +103,15 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
   } else if (body.runtime_state === 'idle') {
     await closeTask(task);
   } else if (body.workflow_status) {
-    // Direct workflow_status flip (simpler version without note/transition tracking)
-    if (!WORKFLOW_STATUSES.includes(body.workflow_status)) {
-      throw badRequest(`invalid workflow_status: ${body.workflow_status}`);
-    }
-    setWorkflowStatus(task.id, body.workflow_status);
+    // One implementation of "change a task's status", not two. This used to do
+    // a bare setWorkflowStatus, skipping the note requirement, the task_updates
+    // transition row, the workflow_status_changed webhook and the auto-start —
+    // all of which the task.move capability does. A second, quieter path to the
+    // same field is how the two drift apart.
+    throw badRequest(
+      'workflow_status cannot be set via PATCH — use POST /api/tasks/:id/move, ' +
+        'which records the transition and fires workflow_status_changed',
+    );
   }
 
   const updated = fetchTaskBundle(task.id);
