@@ -37,21 +37,46 @@ function reviewTaskIdLines(reviewTaskId: string): string[] {
   ];
 }
 
+/**
+ * Slack ping instruction appended to review prompts. Opt-in: set
+ * OCTOMUX_REVIEW_SLACK_CHANNEL on the server to enable. The agent-side
+ * `OCTOMUX_GATEWAY_SLACK_BOT_TOKEN` is inherited from the octomux-owned tmux
+ * server environment, so no per-agent env plumbing is needed.
+ */
+function reviewSlackPingLines(): string[] {
+  const channel = process.env.OCTOMUX_REVIEW_SLACK_CHANNEL;
+  if (!channel) return [];
+  return [
+    '',
+    `After deploying the artifact, ping Slack channel ${channel} with ONE message: verdict tier,` +
+      ' PR link, artifact URL, and each critical/issue finding on its own line:',
+    '```',
+    'curl -s -X POST https://slack.com/api/chat.postMessage' +
+      ' -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN"' +
+      ` -d "channel=${channel}" --data-urlencode "text=<message>"`,
+    '```',
+  ];
+}
+
 /** Prompt used when the source has an open PR — same shape the poller emits. */
 export function buildPrReviewPrompt(input: PrReviewPromptInput): string {
   const author = input.author ?? 'unknown';
   return [
-    octomuxSkillRef('review-walkthrough'),
-    '',
-    ...reviewTaskIdLines(input.reviewTaskId),
+    `Review task id: ${input.reviewTaskId}`,
     '',
     `PR: ${input.title} (#${input.number}) by @${author}`,
     `URL: ${input.url}`,
     `Head: ${input.headRefOid}`,
     `Review requested: ${input.requestedAt}`,
     '',
-    'Use the review-walkthrough skill to produce the structured walkthrough via the `octomux review` CLI.' +
-      ' Do NOT draft comments or post to GitHub.',
+    `Check out the PR head in this worktree first (\`gh pr checkout ${input.number}\`), then run` +
+      ' the review-artifact skill (/review-artifact) on this PR. This octomux task intentionally' +
+      ' uses the artifact flow — ignore the skill\'s "not for octomux review tasks" caveat.' +
+      ' The artifact report is the deliverable; do NOT draft or post GitHub comments.',
+    ...reviewSlackPingLines(),
+    '',
+    `When the review is delivered, close this task with \`octomux close-task ${input.reviewTaskId}\`` +
+      ' — the closed session stays resumable for re-review rounds and follow-up questions.',
   ].join('\n');
 }
 
