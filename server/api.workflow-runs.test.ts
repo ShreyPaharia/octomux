@@ -66,7 +66,6 @@ describe('GET /api/workflows', () => {
       expect.arrayContaining([
         'daily-plan',
         'doc-drift',
-        'loops',
         'overnight-log-summary',
         'pr-extract',
         'prod-log-triage',
@@ -74,6 +73,10 @@ describe('GET /api/workflows', () => {
         'weekly-update',
       ]),
     );
+    // The 'loops' workflow kind (server/workflows/loops/index.ts, deleted) existed
+    // solely to mount the now-deleted routes/loops.ts as its apiRouter — see
+    // server/routes/runs.ts's module doc for the loop/loop-group route collapse.
+    expect(kinds).not.toContain('loops');
 
     const prExtract = res.body.workflows.find((w: { kind: string }) => w.kind === 'pr-extract');
     expect(prExtract).toMatchObject({
@@ -83,11 +86,6 @@ describe('GET /api/workflows', () => {
       runCount: 2,
     });
     expect(prExtract.output).toBeDefined();
-
-    const loops = res.body.workflows.find((w: { kind: string }) => w.kind === 'loops');
-    expect(loops.runCount).toBe(0);
-    expect(loops.trigger).toEqual({ kind: 'manual' });
-    expect(loops.output).toBeNull();
 
     const overnightLogSummary = res.body.workflows.find(
       (w: { kind: string }) => w.kind === 'overnight-log-summary',

@@ -45,7 +45,9 @@ export interface ServerEvent {
     github_review_url?: string | null;
     phase?: string;
     reason?: string;
+    runId?: string;
     loopRunId?: string;
+    groupId?: string;
     status?: string;
     extractId?: string;
     [key: string]: unknown;

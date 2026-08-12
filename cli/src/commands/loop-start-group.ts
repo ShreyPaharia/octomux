@@ -30,7 +30,7 @@ export function registerLoopStartGroup(program: Command): void {
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      const group = await client.startLoopGroup({
+      const result = await client.startLoopGroup({
         repoPath: opts.repo,
         baseBranch: opts.baseBranch,
         spec: {
@@ -43,14 +43,17 @@ export function registerLoopStartGroup(program: Command): void {
       });
 
       if (json) {
-        outputJson(group);
+        outputJson(result);
         return;
       }
 
-      success(`Started loop group ${group.id} with ${group.n} candidates`);
-      console.log(label('Repo', group.repo_path));
-      console.log(label('Base branch', group.base_branch));
-      for (const run of group.loopRuns) {
+      const group = result.loopGroup;
+      // result.id is a `runs.id` — the id `octomux judge-emit --group <id>` will
+      // report back against, not the nested loop_group's own id.
+      success(`Started loop group ${result.id} with ${group?.n ?? opts.n} candidates`);
+      console.log(label('Repo', group?.repo_path ?? opts.repo));
+      console.log(label('Base branch', group?.base_branch ?? opts.baseBranch));
+      for (const run of group?.candidates ?? []) {
         console.log(label('Candidate', `${run.task_id} (loop run ${run.id})`));
       }
     });

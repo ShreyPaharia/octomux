@@ -23,6 +23,7 @@ import type { RegisterCapabilityToolsOptions } from './projections/mcp.js';
 import { registerCapabilityCommands } from '@octomux/capabilities';
 import { registerTaskCapabilities } from './capabilities/task.js';
 import { registerLearningCapabilities } from './capabilities/learning.js';
+import { registerRunCapabilities } from './capabilities/run.js';
 import { registerRouteExemptions } from './exemptions.js';
 
 const logger = childLogger('registry/mount');
@@ -49,6 +50,7 @@ export function installCapabilities(): void {
 
   registerTaskCapabilities();
   registerLearningCapabilities();
+  registerRunCapabilities();
   registerRouteExemptions();
 
   logger.debug(

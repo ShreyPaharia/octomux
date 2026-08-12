@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '@testing-library/react';
 import { IterationLedger } from './IterationLedger';
-import type { LoopIteration } from '@/lib/api/loopApi';
+import type { LoopIteration } from '@/lib/api/runApi';
 
 const { taskApiProxy, taskApiMock } = await vi.hoisted(async () =>
   (await import('../../test-helpers')).setupApiMock(),

@@ -150,6 +150,9 @@ export interface LoopGroup {
   judge_status: JudgeStatus;
   winner_loop_run_id: string | null;
   judge_rationale: string | null;
+  /** The `runs.id` this group's run row lives under — reverse link, mirrors
+   * `LoopSpec.runId` for a plain loop. Null for pre-migration rows. */
+  run_id: string | null;
   created_at: string;
   updated_at: string;
 }

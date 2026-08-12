@@ -40,16 +40,33 @@ function buildProgram(client: OctomuxClient): Command {
 }
 
 function makeRun(overrides: Partial<{ id: string; task_id: string; status: string }> = {}) {
+  const { id = 'run-1', task_id = 't1', status = 'running' } = overrides;
   return {
-    id: 'run-1',
-    task_id: 't1',
-    status: 'running',
-    iteration: 0,
-    max_iterations: 5,
-    termination_reason: null,
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-    ...overrides,
+    id,
+    workflow_kind: 'loop',
+    trigger: 'manual',
+    schedule_id: null,
+    task_id,
+    chat_id: null,
+    loop_run_id: 'loop-run-1',
+    status,
+    effective_status: status,
+    result_json: null,
+    error: null,
+    started_at: '2026-01-01T00:00:00Z',
+    ended_at: null,
+    loop: {
+      id: 'loop-run-1',
+      task_id,
+      status,
+      iteration: 0,
+      max_iterations: 5,
+      termination_reason: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      iterations: [],
+    },
+    loopGroup: null,
   };
 }
 

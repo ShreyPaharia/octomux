@@ -3,7 +3,7 @@
  *
  * Workflows control-plane API surface: the registry listing (with trigger +
  * run count) and run history (optionally filtered by kind, server-side).
- * Mirrors `server/routes/workflow-runs.ts`.
+ * Mirrors `server/routes/runs.ts`'s `GET /api/runs` and `GET /api/workflows`.
  */
 
 import { request } from './client';
