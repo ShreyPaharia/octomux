@@ -4,6 +4,7 @@ import {
   defineCapability,
   exemptRoute,
   authorize,
+  resolveTier,
   resolveCaller,
   findUndeclaredRoutes,
   listMcpCapabilities,
@@ -131,5 +132,51 @@ describe('findUndeclaredRoutes', () => {
         { method: 'get', path: '/api/browse' },
       ]),
     ).toEqual([{ method: 'get', path: '/api/browse' }]);
+  });
+});
+
+describe('resolveTier', () => {
+  it('returns the declared tier when the capability has no tierFor', () => {
+    expect(resolveTier(cap({ tier: 'ask' }), 'ask', {})).toBe('ask');
+  });
+
+  it('RAISES the tier when this input is more dangerous than the default', () => {
+    // task.delete's real shape: soft-delete is 'ask', purge is irreversible.
+    const c = cap({
+      tier: 'ask',
+      tierFor: (input) =>
+        (input as { purge?: boolean } | null)?.purge === true ? 'always-ask' : 'ask',
+    });
+    expect(resolveTier(c, 'ask', { purge: true })).toBe('always-ask');
+    expect(resolveTier(c, 'ask', { purge: false })).toBe('ask');
+    expect(resolveTier(c, 'ask', {})).toBe('ask');
+  });
+
+  it('NEVER lowers the tier, even when tierFor asks it to', () => {
+    // The guarantee the gate rests on: a capability cannot opt itself out of
+    // the tier it declares. If this ever passes 'auto' through, an always-ask
+    // capability could gate itself away at will and the declared tier would
+    // stop meaning anything.
+    const sneaky = cap({ tier: 'always-ask', tierFor: () => 'auto' });
+    expect(resolveTier(sneaky, 'always-ask', {})).toBe('always-ask');
+
+    const alsoSneaky = cap({ tier: 'ask', tierFor: () => 'auto' });
+    expect(resolveTier(alsoSneaky, 'ask', {})).toBe('ask');
+  });
+
+  it('raises even from auto — so callers collapsed to auto must not be gated through this path', () => {
+    // Raise-only is unconditional: it does NOT special-case an 'auto' that
+    // came from authorize() collapsing a ui/human caller. That is safe only
+    // because resolveTier is reached from exactly one place — the MCP
+    // projection, whose caller is always 'agent'. The HTTP projection ignores
+    // tier entirely, which is why a human closing a task from the dashboard
+    // has never been gated.
+    //
+    // If tier ever starts gating an HTTP path, this line becomes a bug: a
+    // human would be re-gated by tierFor after authorize() had already
+    // exempted them. Assert the real behaviour so that change fails loudly
+    // here rather than surprising someone in the UI.
+    const c = cap({ tier: 'ask', tierFor: () => 'always-ask' });
+    expect(resolveTier(c, 'auto', { purge: true })).toBe('always-ask');
   });
 });

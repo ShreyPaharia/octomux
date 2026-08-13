@@ -23,7 +23,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { childLogger } from '../../logger.js';
-import { listMcpCapabilities, authorize } from '../index.js';
+import { listMcpCapabilities, authorize, resolveTier } from '../index.js';
 import type { Capability, CallerClass, CapabilityContext, PolicyTier } from '../types.js';
 
 const logger = childLogger('registry/projections/mcp');
@@ -126,8 +126,13 @@ function registerOne(
       try {
         const ctx: CapabilityContext = { caller: opts.caller };
         let result: unknown;
-        if (tier !== 'auto' && opts.onGatedInvoke) {
-          const gated = await opts.onGatedInvoke(cap, tier, input);
+        // Registration-time tier, raised if THIS input is more dangerous than
+        // the capability's default (task.delete with purge:true). Resolved
+        // here, per call, because `tier` above was fixed when the tool was
+        // registered and cannot see the arguments.
+        const invocationTier = resolveTier(cap, tier, input);
+        if (invocationTier !== 'auto' && opts.onGatedInvoke) {
+          const gated = await opts.onGatedInvoke(cap, invocationTier, input);
           // undefined → proceed to the real handler; anything else IS the
           // result (ask_human's answer) and short-circuits cap.handler — see
           // the onGatedInvoke doc above.

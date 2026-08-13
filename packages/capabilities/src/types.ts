@@ -129,6 +129,22 @@ export interface CapabilityMeta<TInput = unknown> {
   /** Gate tier applied when `caller === 'agent'`. */
   tier: PolicyTier;
 
+  /**
+   * Raises the tier for a specific invocation, when how dangerous the call is
+   * depends on its INPUT rather than on the capability.
+   *
+   * `task.delete` is the motivating case: by default it soft-deletes (a
+   * `deleted_at` stamp, undone by the restore route), but `purge: true` kills
+   * the tmux session, removes the worktree, deletes the branch and drops the
+   * rows. One static tier cannot describe both — pick `ask` and a stored
+   * permission rule can silently promote an irreversible purge to `auto`; pick
+   * `always-ask` and every routine delete blocks a human.
+   *
+   * Resolved per call, and may only ever RAISE the tier — see `resolveTier`.
+   * A capability cannot use this to gate itself less than it declares.
+   */
+  tierFor?: (input: unknown) => PolicyTier;
+
   /** Caller classes permitted to invoke this at all. */
   callers: CallerClass[];
 

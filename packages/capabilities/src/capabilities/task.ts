@@ -187,7 +187,12 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
       'so it can be resumed.',
     // No http/cli projection — server/registry/capabilities/task.ts module doc point 1.
     mcp: 'close_task',
-    tier: 'always-ask',
+    // Reversible, and the routine end of every task's life — the closed session
+    // stays resumable and the worktree/branch survive, which is exactly what
+    // the summary above promises. Gating it made agents block on a human for
+    // the single most common write they perform, buying no safety: there is
+    // nothing to undo. Deliberately 'auto'.
+    tier: 'auto',
     callers: ['human', 'agent'],
     input: closeTaskInputSchema,
   },
@@ -201,7 +206,14 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
     cli: 'task delete',
     cliAliases: ['delete-task'],
     mcp: 'delete_task',
-    tier: 'always-ask',
+    // Two different operations behind one name. The default soft-delete only
+    // stamps deleted_at and is undone by the restore route, so it rates 'ask' —
+    // one prompt, and promotable to 'auto' with "always allow" if you never
+    // want to see it again. `purge: true` is the irreversible one, so tierFor
+    // raises it to 'always-ask', which no permission rule can promote.
+    tier: 'ask',
+    tierFor: (input) =>
+      (input as { purge?: boolean } | null)?.purge === true ? 'always-ask' : 'ask',
     callers: ['ui', 'human', 'agent'],
     input: taskDeleteInputSchema,
   },

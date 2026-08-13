@@ -104,10 +104,12 @@ describe('createOctomuxMcpServer — tool registration', () => {
     // is nothing for orchestratorWriteEnabled() to protect.
     expect(tools).toContain('list_tasks');
     expect(tools).toContain('get_task');
+    // close_task is 'auto' too: it is reversible (the session stays resumable,
+    // worktree and branch survive) and it is the routine end of a task's life.
+    expect(tools).toContain('close_task');
     // Everything above 'auto' still requires orchestratorWriteEnabled().
     expect(tools).not.toContain('create_task');
     expect(tools).not.toContain('set_task_status');
-    expect(tools).not.toContain('close_task');
     expect(tools).not.toContain('delete_task');
   });
 
@@ -147,10 +149,14 @@ describe('createOctomuxMcpServer — tool registration', () => {
     expect(tools).toContain('report_complete');
     expect(tools).toContain('list_tasks');
     expect(tools).toContain('get_task');
+    // A worker gets close_task because it is 'auto'. That is not a widening of
+    // what a worker can DO — every worker already has Bash and the review
+    // prompts literally instruct it to run `octomux close-task <id>`. This is
+    // the same power by a second route, not a new one.
+    expect(tools).toContain('close_task');
     expect(tools).not.toContain('create_task');
     expect(tools).not.toContain('send_message');
     expect(tools).not.toContain('set_task_status');
-    expect(tools).not.toContain('close_task');
     expect(tools).not.toContain('delete_task');
   });
 
@@ -214,7 +220,7 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
     vi.unstubAllGlobals();
   });
 
-  it('close_task (always-ask) hits onGatedInvoke instead of running immediately', async () => {
+  it('delete_task (ask) hits onGatedInvoke instead of running immediately', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
@@ -225,7 +231,7 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
     const priv = server as unknown as {
       _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
     };
-    const tool = priv._registeredTools['close_task'];
+    const tool = priv._registeredTools['delete_task'];
     expect(tool).toBeDefined();
 
     const result = (await tool.handler({ task_id: 'task-x' }, {})) as {
@@ -233,7 +239,35 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
       isError?: boolean;
     };
 
+    // Card creation fails (no server listening), so the gate denies. The point
+    // is that it never reached the handler — a fail-open gate would have
+    // returned a delete result or a "task not found" error instead.
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/could not create an approval card/);
+  });
+
+  it('close_task (auto) runs immediately — no approval card, no gate', async () => {
+    // The counterpart to the test above, and the reason close was moved off
+    // always-ask: an auto capability must reach its handler with no human in
+    // the loop. Reaching runCloseTask (and failing on a nonexistent task) is
+    // proof the gate was not consulted; a gated call would have failed on
+    // card creation first, exactly as delete_task does above.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
+    );
+
+    const { createOctomuxMcpServer } = await import('./server.js');
+    const server = createOctomuxMcpServer();
+    const priv = server as unknown as {
+      _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
+    };
+    const result = (await priv._registeredTools['close_task'].handler(
+      { task_id: 'task-x' },
+      {},
+    )) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+    expect(result.content[0].text).not.toMatch(/could not create an approval card/);
+    expect(result.content[0].text).toMatch(/task-x/);
   });
 });
