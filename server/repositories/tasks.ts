@@ -317,6 +317,8 @@ export interface InsertTaskInput {
   review_of_task_id?: string | null;
   /** Set on scheduled runs — links back to the `schedules` row that fired them. */
   schedule_id?: string | null;
+  /** Another task's id this one depends on. Caller must have run validateDependsOn first. */
+  depends_on?: string | null;
 }
 
 /** Insert a new task row. Returns the generated id. */
@@ -325,8 +327,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -346,9 +348,83 @@ export function insertTask(input: InsertTaskInput): string {
       input.pr_head_sha ?? null,
       input.review_of_task_id ?? null,
       input.schedule_id ?? null,
+      input.depends_on ?? null,
     );
   logger.info({ task_id: id, operation: 'insertTask' }, 'task inserted');
   return id;
+}
+
+/** Set (or clear, with null) the depends_on link. Caller must have run validateDependsOn first. */
+export function setDependsOn(id: string, dependsOn: string | null): void {
+  getDb()
+    .prepare(`UPDATE tasks SET depends_on = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(dependsOn, id);
+  logger.info({ task_id: id, depends_on: dependsOn, operation: 'setDependsOn' }, 'depends_on set');
+}
+
+/**
+ * Validate that `dependsOn` is safe to store as `taskId`'s depends_on.
+ *
+ * Checks (in order): the target task exists; it isn't `taskId` itself
+ * (self-dependency); and it doesn't transitively depend back on `taskId`
+ * (a longer cycle). Since a task has at most ONE depends_on, the graph is a
+ * forest of chains, so cycle detection is a single forward walk from
+ * `dependsOn` — bounded by a visited set so pre-existing corrupt data can't
+ * spin the walk forever.
+ *
+ * Pure validation, no throwing (repositories don't shape HTTP errors) — returns
+ * an error message on failure, or null when the edge is safe to write.
+ *
+ * `taskId` is null when validating for a not-yet-inserted task (task.create):
+ * a brand-new id can never already appear in a depends_on chain, so only
+ * existence is checked.
+ */
+export function validateDependsOn(taskId: string | null, dependsOn: string): string | null {
+  const target = getTask(dependsOn);
+  if (!target) return `depends_on task not found: ${dependsOn}`;
+  if (taskId === null) return null;
+  if (taskId === dependsOn) return 'a task cannot depend on itself';
+
+  const visited = new Set<string>([taskId]);
+  let current: string | null = dependsOn;
+  while (current) {
+    if (visited.has(current)) return 'depends_on would create a dependency cycle';
+    visited.add(current);
+    const row = getDb().prepare(`SELECT depends_on FROM tasks WHERE id = ?`).get(current) as
+      | { depends_on: string | null }
+      | undefined;
+    current = row?.depends_on ?? null;
+  }
+  return null;
+}
+
+/**
+ * True when `dependsOn` points at a task that has not reached
+ * workflow_status 'done' (or points at a task that no longer exists — treated
+ * as still-blocked, the safe default). False for null (no dependency).
+ */
+export function isDependencyUnmet(dependsOn: string | null): boolean {
+  if (!dependsOn) return false;
+  const dep = getDb().prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get(dependsOn) as
+    | { workflow_status: string }
+    | undefined;
+  return !dep || dep.workflow_status !== 'done';
+}
+
+/**
+ * Tasks that named `dependencyTaskId` as their depends_on and are sitting
+ * idle at workflow_status='in_progress' — the shape a task is left in when
+ * its own start was skipped because this dependency wasn't done yet (see
+ * task-service.ts:createTask and task.move's autoStart gate). Used to
+ * auto-start/resume them once the dependency completes.
+ */
+export function listDependentsAwaitingStart(dependencyTaskId: string): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.depends_on = ? AND t.runtime_state = 'idle'
+                            AND t.workflow_status = 'in_progress' AND t.deleted_at IS NULL`,
+    )
+    .all(dependencyTaskId) as Task[];
 }
 
 /**

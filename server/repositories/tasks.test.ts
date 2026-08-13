@@ -25,6 +25,10 @@ import {
   unlinkWorktree,
   markTaskRunning,
   countTasks,
+  setDependsOn,
+  validateDependsOn,
+  isDependencyUnmet,
+  listDependentsAwaitingStart,
 } from './tasks.js';
 import { inTransaction } from './tx.js';
 
@@ -567,6 +571,113 @@ describe('inTransaction', () => {
       const before = countTasks();
       insertTask({ title: 'New', description: 'D' });
       expect(countTasks()).toBe(before + 1);
+    });
+  });
+
+  // ─── depends_on primitive (agents/task-depends-on) ─────────────────────────
+
+  describe('depends_on', () => {
+    it('insertTask stores and getTask reads back depends_on', () => {
+      const a = insertTask({ title: 'A', description: 'D' });
+      const b = insertTask({ title: 'B', description: 'D', depends_on: a });
+      expect(getTask(b)?.depends_on).toBe(a);
+    });
+
+    it('setDependsOn writes and clears the link', () => {
+      const a = insertTask({ title: 'A', description: 'D' });
+      const b = insertTask({ title: 'B', description: 'D' });
+      setDependsOn(b, a);
+      expect(getTask(b)?.depends_on).toBe(a);
+      setDependsOn(b, null);
+      expect(getTask(b)?.depends_on).toBeNull();
+    });
+
+    describe('validateDependsOn — cycle safety', () => {
+      it('rejects a nonexistent target task', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(a, 'does-not-exist')).toMatch(/not found/);
+      });
+
+      it('rejects self-dependency', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(a, a)).toMatch(/cannot depend on itself/);
+      });
+
+      it('rejects a 2-cycle: A already depends on B, so B -> A is refused', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        expect(validateDependsOn(a, b)).toBeNull();
+        setDependsOn(a, b); // A -> B
+        expect(validateDependsOn(b, a)).toMatch(/cycle/); // B -> A would close the loop
+      });
+
+      it('rejects a 3-cycle: A -> B -> C exists, so C -> A is refused', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        const c = insertTask({ title: 'C', description: 'D' });
+        setDependsOn(a, b); // A -> B
+        setDependsOn(b, c); // B -> C
+        expect(validateDependsOn(c, a)).toMatch(/cycle/); // C -> A would close the loop
+      });
+
+      it('allows a valid non-cyclic chain', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        expect(validateDependsOn(a, b)).toBeNull();
+      });
+
+      it('taskId=null (create-time) only checks existence, never a cycle', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(null, a)).toBeNull();
+        expect(validateDependsOn(null, 'nope')).toMatch(/not found/);
+      });
+    });
+
+    describe('isDependencyUnmet', () => {
+      it('is false when depends_on is null', () => {
+        expect(isDependencyUnmet(null)).toBe(false);
+      });
+
+      it('is true while the dependency has not reached done', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        setWorkflowStatus(a, 'in_progress');
+        expect(isDependencyUnmet(a)).toBe(true);
+      });
+
+      it('is false once the dependency reaches done', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        setWorkflowStatus(a, 'done');
+        expect(isDependencyUnmet(a)).toBe(false);
+      });
+
+      it('treats a dependency task that no longer exists as still unmet (safe default)', () => {
+        expect(isDependencyUnmet('ghost-task')).toBe(true);
+      });
+    });
+
+    describe('listDependentsAwaitingStart', () => {
+      it('finds idle+in_progress tasks blocked on the given dependency', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: dep });
+        setWorkflowStatus(blocked, 'in_progress'); // runtime_state stays 'idle' (default)
+        expect(listDependentsAwaitingStart(dep).map((t) => t.id)).toEqual([blocked]);
+      });
+
+      it('excludes a dependent that is already running', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const running = insertTask({ title: 'Running', description: 'D', depends_on: dep });
+        setWorkflowStatus(running, 'in_progress');
+        setRuntimeState(running, 'running');
+        expect(listDependentsAwaitingStart(dep)).toEqual([]);
+      });
+
+      it('excludes tasks that depend on a different task', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const otherDep = insertTask({ title: 'OtherDep', description: 'D' });
+        const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: otherDep });
+        setWorkflowStatus(blocked, 'in_progress');
+        expect(listDependentsAwaitingStart(dep)).toEqual([]);
+      });
     });
   });
 });

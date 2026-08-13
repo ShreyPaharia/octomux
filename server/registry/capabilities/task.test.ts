@@ -310,6 +310,41 @@ describe('task.create', () => {
       /title and description are required/,
     );
   });
+
+  it('accepts depends_on, storing it and skipping startTask while the dependency is unmet', async () => {
+    insertTestTask({ id: 'dep', workflow_status: 'in_progress' }); // not done yet
+    const cap = getCapability('task.create')!;
+    const result = (await cap.handler(
+      {
+        title: 'T',
+        description: 'D',
+        repo_path: '/tmp/repo',
+        run_mode: 'none',
+        depends_on: 'dep',
+      },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(result.depends_on).toBe('dep');
+    expect(result.runtime_state).toBe('idle');
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects create with a nonexistent depends_on task', async () => {
+    const cap = getCapability('task.create')!;
+    await expect(
+      cap.handler(
+        {
+          title: 'T',
+          description: 'D',
+          repo_path: '/tmp/repo',
+          run_mode: 'none',
+          depends_on: 'ghost',
+        },
+        ctx,
+      ),
+    ).rejects.toThrow(/not found/);
+  });
 });
 
 describe('task.start', () => {
@@ -328,6 +363,22 @@ describe('task.start', () => {
     insertTestTask({ id: 't1', runtime_state: 'running' });
     const cap = getCapability('task.start')!;
     await expect(cap.handler({ id: 't1' }, ctx)).rejects.toThrow('Only draft tasks can be started');
+  });
+
+  it('rejects starting a draft task whose depends_on has not reached done', async () => {
+    insertTestTask({ id: 'dep', workflow_status: 'in_progress' });
+    insertTestTask({ id: 't1', runtime_state: 'idle', depends_on: 'dep' });
+    const cap = getCapability('task.start')!;
+    await expect(cap.handler({ id: 't1' }, ctx)).rejects.toThrow(/waiting on depends_on/);
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it('starts a draft task once its depends_on has reached done', async () => {
+    insertTestTask({ id: 'dep', workflow_status: 'done' });
+    insertTestTask({ id: 't1', runtime_state: 'idle', depends_on: 'dep' });
+    const cap = getCapability('task.start')!;
+    await cap.handler({ id: 't1' }, ctx);
+    expect(startTask).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -362,6 +413,78 @@ describe('task.move', () => {
     await cap.handler({ id: 't1', workflow_status: 'in_progress' }, ctx);
     expect(resumeTask).toHaveBeenCalledTimes(1);
     expect(startTask).not.toHaveBeenCalled();
+  });
+
+  // ─── depends_on: cycle safety + enforcement ────────────────────────────────
+
+  it('rejects setting depends_on to itself', async () => {
+    insertTestTask({ id: 't1', workflow_status: 'in_progress' });
+    const cap = getCapability('task.move')!;
+    await expect(
+      cap.handler({ id: 't1', workflow_status: 'in_progress', depends_on: 't1' }, ctx),
+    ).rejects.toThrow(/cannot depend on itself/);
+  });
+
+  it('rejects a depends_on cycle (t2 already depends on t1)', async () => {
+    insertTestTask({ id: 't1', workflow_status: 'in_progress' });
+    insertTestTask({ id: 't2', workflow_status: 'in_progress' });
+    const cap = getCapability('task.move')!;
+
+    await cap.handler({ id: 't2', workflow_status: 'in_progress', depends_on: 't1' }, ctx);
+
+    await expect(
+      cap.handler({ id: 't1', workflow_status: 'in_progress', depends_on: 't2' }, ctx),
+    ).rejects.toThrow(/cycle/);
+  });
+
+  it('rejects setting depends_on to a nonexistent task', async () => {
+    insertTestTask({ id: 't1', workflow_status: 'in_progress' });
+    const cap = getCapability('task.move')!;
+    await expect(
+      cap.handler({ id: 't1', workflow_status: 'in_progress', depends_on: 'ghost' }, ctx),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it('does NOT auto-start a task moved to in_progress while its depends_on is unmet', async () => {
+    insertTestTask({ id: 'dep', workflow_status: 'in_progress' }); // not done
+    insertTestTask({
+      id: 't1',
+      workflow_status: 'backlog',
+      runtime_state: 'idle',
+      depends_on: 'dep',
+    });
+    const cap = getCapability('task.move')!;
+    await cap.handler({ id: 't1', workflow_status: 'in_progress' }, ctx);
+    expect(startTask).not.toHaveBeenCalled();
+    expect(resumeTask).not.toHaveBeenCalled();
+  });
+
+  it('auto-starts a task moved to in_progress once its depends_on has reached done', async () => {
+    insertTestTask({ id: 'dep', workflow_status: 'done' });
+    insertTestTask({
+      id: 't1',
+      workflow_status: 'backlog',
+      runtime_state: 'idle',
+      depends_on: 'dep',
+      worktree: null,
+    });
+    const cap = getCapability('task.move')!;
+    await cap.handler({ id: 't1', workflow_status: 'in_progress' }, ctx);
+    expect(startTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('unblocks a waiting dependent when its dependency moves to done', async () => {
+    insertTestTask({ id: 'dep', workflow_status: 'in_progress' });
+    insertTestTask({
+      id: 'blocked',
+      workflow_status: 'in_progress',
+      runtime_state: 'idle',
+      depends_on: 'dep',
+    });
+    const cap = getCapability('task.move')!;
+    await cap.handler({ id: 'dep', workflow_status: 'done' }, ctx);
+    // 'blocked' carries the default fixture's worktree, so it resumes rather than starts fresh.
+    expect(resumeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'blocked' }));
   });
 });
 

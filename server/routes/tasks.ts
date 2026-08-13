@@ -12,6 +12,7 @@ import {
   restoreTask as restoreTaskRepo,
   touchLastViewed,
   touchAllLastViewed,
+  isDependencyUnmet,
 } from '../repositories/index.js';
 
 import { badRequest, conflict } from '../services/errors.js';
@@ -89,6 +90,11 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
     // Resume task
     if (task.runtime_state !== 'idle' && task.runtime_state !== 'error') {
       throw badRequest('Can only resume tasks in closed or error state');
+    }
+    if (isDependencyUnmet(task.depends_on)) {
+      throw badRequest(
+        `cannot resume: waiting on depends_on task ${task.depends_on} to reach 'done'`,
+      );
     }
     if (task.run_mode === 'new' || task.run_mode === 'existing' || task.run_mode === 'scratch') {
       if (!task.worktree || !fs.existsSync(task.worktree)) {
