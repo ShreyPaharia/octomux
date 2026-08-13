@@ -100,6 +100,26 @@ export type Decision = { allowed: true; tier: PolicyTier } | { allowed: false; r
  * theatre. Agents get the declared tier; `auto` runs, anything else needs a
  * human decision from the caller's transport.
  */
+/** Tier ordering, least to most restrictive. `resolveTier` never moves left. */
+const TIER_RANK: Record<PolicyTier, number> = { auto: 0, ask: 1, 'always-ask': 2 };
+
+/**
+ * The tier for one specific invocation: the capability's declared tier, raised
+ * if `tierFor` says this particular input is more dangerous than the default.
+ *
+ * RAISE-ONLY, deliberately. If `tierFor` could also lower the tier, a
+ * capability could quietly opt itself out of the gate it declares, and the
+ * declared tier would stop being the guarantee the registry's whole gating
+ * story rests on. `Math.max` over the rank enforces that structurally rather
+ * than by convention, so a `tierFor` that returns 'auto' for an 'always-ask'
+ * capability is simply ignored instead of being trusted.
+ */
+export function resolveTier(cap: Capability, declared: PolicyTier, input: unknown): PolicyTier {
+  if (!cap.tierFor) return declared;
+  const requested = cap.tierFor(input);
+  return TIER_RANK[requested] > TIER_RANK[declared] ? requested : declared;
+}
+
 export function authorize(cap: Capability, caller: CallerClass): Decision {
   if (!cap.callers.includes(caller)) {
     return { allowed: false, reason: `${cap.id} is not available to ${caller} callers` };

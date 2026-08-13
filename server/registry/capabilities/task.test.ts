@@ -81,7 +81,7 @@ describe('registerTaskCapabilities', () => {
     ['task.create', 'post', '/api/tasks', 'task create', 'create_task', 'ask'],
     ['task.start', 'post', '/api/tasks/:id/start', 'task start', undefined, 'ask'],
     ['task.move', 'post', '/api/tasks/:id/move', 'task move', 'set_task_status', 'ask'],
-    ['task.delete', 'delete', '/api/tasks/:id', 'task delete', 'delete_task', 'always-ask'],
+    ['task.delete', 'delete', '/api/tasks/:id', 'task delete', 'delete_task', 'ask'],
   ] as const)('%s has the expected http/cli/mcp/tier shape', (id, method, path, cli, mcp, tier) => {
     const cap = getCapability(id)!;
     expect(cap.http?.method).toBe(method);
@@ -114,7 +114,23 @@ describe('registerTaskCapabilities', () => {
     expect(cap.cli).toBeUndefined();
     expect(cap.cliAliases).toBeUndefined();
     expect(cap.mcp).toBe('close_task');
-    expect(cap.tier).toBe('always-ask');
+    // 'auto', not 'always-ask': closing preserves the worktree and branch and
+    // the session stays resumable, so there is nothing for a human to protect
+    // against — and it is the most common write an agent makes.
+    expect(cap.tier).toBe('auto');
+  });
+
+  it('task.delete raises itself to always-ask when purge is set', () => {
+    // Soft-delete is reversible via the restore route, so it sits at 'ask' and
+    // can be promoted to 'auto' with "always allow". purge:true is the
+    // irreversible one — worktree removed, branch deleted, rows dropped — and
+    // must never be reachable through a stored permission rule.
+    const cap = getCapability('task.delete')!;
+    expect(cap.tier).toBe('ask');
+    expect(cap.tierFor).toBeDefined();
+    expect(cap.tierFor!({ task_id: 't1' })).toBe('ask');
+    expect(cap.tierFor!({ task_id: 't1', purge: false })).toBe('ask');
+    expect(cap.tierFor!({ task_id: 't1', purge: true })).toBe('always-ask');
   });
 
   it.each([
