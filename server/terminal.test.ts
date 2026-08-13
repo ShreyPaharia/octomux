@@ -31,7 +31,11 @@ const mockExecFile = vi.fn(
       if (execFileShouldFail) {
         process.nextTick(() => callback(new Error('tmux failed'), '', ''));
       } else {
-        const stdout = _args?.includes('list-clients') ? '/dev/ttys001\n' : '';
+        const stdout = _args?.includes('list-clients')
+          ? '/dev/ttys001\n'
+          : _args?.includes('capture-pane')
+            ? 'line one\nline two\n'
+            : '';
         process.nextTick(() => callback(null, stdout, ''));
       }
     }
@@ -224,6 +228,29 @@ describe('terminal WebSocket', () => {
     const selIdx = selArgs.indexOf('select-window');
     const selectTarget = selArgs[selIdx + 2] as string; // -t <target>
     expect(selectTarget).toMatch(/:1$/);
+
+    ws.close();
+  });
+
+  it('sends a capture-pane snapshot as the first frame, before any PTY data', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    const frames: string[] = [];
+    ws.on('message', (d) => frames.push(d.toString()));
+    await waitForSetup();
+
+    // Snapshot targets the shared session's window, not the viewer session.
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'tmux',
+      expect.arrayContaining(['capture-pane', '-t', `${DEFAULTS.runningTask.tmux_session}:0`]),
+      expect.any(Function),
+    );
+
+    // First frame paints the pane into the alternate screen with CRLF line ends,
+    // so tmux's own `\e[?1049h\e[H\e[J` + repaint overwrites identical content.
+    expect(frames[0]).toBe('\x1b[?1049h\x1b[H\x1b[J' + 'line one\r\nline two\r\n');
 
     ws.close();
   });

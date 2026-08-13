@@ -111,7 +111,10 @@ export function TerminalView({
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
         setDisconnected(false);
-        setConnecting(false);
+        // Deliberately NOT clearing `connecting` here: the socket opens in ~5ms
+        // but the server's first frame lands later, so clearing on open left the
+        // user staring at a blank black rectangle with no feedback for the rest
+        // of the wait. `onmessage` clears it when there is actually something to see.
         if (countdownTimer.current) {
           clearInterval(countdownTimer.current);
           countdownTimer.current = null;

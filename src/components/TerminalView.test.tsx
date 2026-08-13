@@ -254,7 +254,7 @@ describe('TerminalView', () => {
     expect(queryByTestId('terminal-disconnected-overlay')).not.toBeNull();
   });
 
-  it('shows the connecting placeholder before the first message and hides it once the ws opens', async () => {
+  it('keeps the connecting placeholder up after the ws opens, until data arrives', async () => {
     const TerminalView = await importTerminalView();
     const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
 
@@ -263,8 +263,12 @@ describe('TerminalView', () => {
     expect(ws.readyState).toBe(MockWebSocket.CONNECTING);
     expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
 
-    // Once the ws opens, the placeholder disappears.
+    // The socket opens in a few ms but the server's first frame lands later —
+    // clearing here would leave a blank black rectangle with no feedback.
     act(() => ws._open());
+    expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
+
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
     expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
   });
 
@@ -287,6 +291,7 @@ describe('TerminalView', () => {
 
     const ws = MockWebSocket.instances[0];
     act(() => ws._open());
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
     expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
 
     // Non-normal close triggers a reconnect; advancing past the backoff delay
