@@ -175,3 +175,65 @@ describe('createOctomuxMcpServer — tool registration', () => {
     expect(tools).toContain('delete_task');
   });
 });
+
+// ─── onGatedInvoke wiring (this is the core of the ask/always-ask gate) ──────
+//
+// Proves `onGatedInvoke` is actually PASSED at the registerCapabilityMcpTools
+// call site in server.ts — not just declared as an extension point. Before
+// this wiring, invoking close_task ran cap.handler immediately; now it must
+// hit the gate FIRST. We never let the RPC succeed here (global fetch always
+// rejects), so if the gate is wired we get a distinctive
+// "could not create an approval card" isError — a message that can only come
+// from onGatedInvoke's own catch block (server/orchestrator/mcp/gate.ts). If
+// someone strips the wiring, this test fails because the tool call would
+// instead reach cap.handler's real task.close logic (a different failure, or
+// no failure at all).
+describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv['OCTOMUX_TASK_ID'] = process.env.OCTOMUX_TASK_ID;
+    savedEnv['OCTOMUX_ACTION_TOKEN'] = process.env.OCTOMUX_ACTION_TOKEN;
+    savedEnv['OCTOMUX_ACTION_BASE_URL'] = process.env.OCTOMUX_ACTION_BASE_URL;
+    savedEnv['OCTOMUX_CONVERSATION_ID'] = process.env.OCTOMUX_CONVERSATION_ID;
+    savedEnv['OCTOMUX_CAPABILITY_GATE_ENABLED'] = process.env.OCTOMUX_CAPABILITY_GATE_ENABLED;
+
+    delete process.env.OCTOMUX_TASK_ID;
+    process.env.OCTOMUX_ACTION_TOKEN = 'tok-conductor';
+    process.env.OCTOMUX_ACTION_BASE_URL = 'http://127.0.0.1:7777';
+    process.env.OCTOMUX_CONVERSATION_ID = 'conv-conductor';
+    delete process.env.OCTOMUX_CAPABILITY_GATE_ENABLED;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('close_task (always-ask) hits onGatedInvoke instead of running immediately', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
+    );
+
+    const { createOctomuxMcpServer } = await import('./server.js');
+    const server = createOctomuxMcpServer();
+    const priv = server as unknown as {
+      _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
+    };
+    const tool = priv._registeredTools['close_task'];
+    expect(tool).toBeDefined();
+
+    const result = (await tool.handler({ task_id: 'task-x' }, {})) as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/could not create an approval card/);
+  });
+});

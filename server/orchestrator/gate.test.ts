@@ -73,6 +73,7 @@ vi.mock('./stream.js', () => ({
 // ─── Imports after mocks ──────────────────────────────────────────────────────
 
 import { handlePreToolUse, executeCard, rehydratePendingCards } from './gate.js';
+import { addRule, listRules, capabilityToolName } from './policy.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -815,5 +816,196 @@ describe('gate.executeApprovePlan — stale sentinel reset', () => {
     // Should still succeed
     expect(mockRunSendMessage).toHaveBeenCalledWith(task.id, expect.stringMatching(/implement/i));
     expect(getCard(cardId)!.status).toBe('executed');
+  });
+});
+
+// ─── executeCard: capability-registry gate cards + "always allow" wiring ─────
+//
+// Distinct from the Bash-gate cards above: nothing runs server-side for these
+// (tool_name starts with 'capability:') — the MCP subprocess itself is
+// blocked polling this same row (server/orchestrator/mcp/gate.ts's
+// onGatedInvoke). executeCard's only job is to resolve the row and, on
+// approve + always_allow, persist a permission_rules row — for the `ask` tier
+// ONLY, never `always-ask` (the property under test throughout this block).
+
+describe('gate.executeCard — capability-registry gate cards', () => {
+  let convId: string;
+
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    convId = makeConversation();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function insertCapabilityCard(opts: {
+    capabilityId: string;
+    tier: 'ask' | 'always-ask';
+    kind?: 'action' | 'question';
+    question?: string;
+  }): string {
+    return createCard({
+      conversation_id: convId,
+      tool_use_id: `tu-cap-${opts.capabilityId}`,
+      tool_name: capabilityToolName(opts.capabilityId),
+      input: JSON.stringify({
+        kind: opts.kind ?? 'action',
+        tier: opts.tier,
+        capability_id: opts.capabilityId,
+        args: { task_id: 'task-1' },
+        question: opts.question ?? null,
+      }),
+    });
+  }
+
+  it('Approve resolves the card to "approved" — nothing executes server-side', async () => {
+    const cardId = insertCapabilityCard({ capabilityId: 'task.close', tier: 'always-ask' });
+
+    await executeCard({ card_id: cardId, decision: 'approve' });
+
+    const card = getCard(cardId)!;
+    expect(card.status).toBe('approved');
+    expect(card.decided_at).not.toBeNull();
+    // Never touches the Bash-command executors — this is a different path.
+    expect(mockRunCloseTask).not.toHaveBeenCalled();
+  });
+
+  it('Reject resolves the card to "rejected" — the MCP subprocess reads this as denied', async () => {
+    const cardId = insertCapabilityCard({ capabilityId: 'task.close', tier: 'always-ask' });
+
+    await executeCard({ card_id: cardId, decision: 'reject' });
+
+    expect(getCard(cardId)!.status).toBe('rejected');
+  });
+
+  it("a question card's answer (approve + respond_text) is persisted on the card result", async () => {
+    const cardId = insertCapabilityCard({
+      capabilityId: 'human.ask',
+      tier: 'always-ask',
+      kind: 'question',
+      question: 'Which repo?',
+    });
+
+    await executeCard({ card_id: cardId, decision: 'approve', respond_text: 'octomux-agents' });
+
+    const card = getCard(cardId)!;
+    expect(card.status).toBe('approved');
+    expect(JSON.parse(card.result!)).toEqual({ answer: 'octomux-agents' });
+  });
+
+  it('always_allow on an "ask" tier capability card persists a promotable rule', async () => {
+    const cardId = insertCapabilityCard({ capabilityId: 'task.create', tier: 'ask' });
+
+    await executeCard({ card_id: cardId, decision: 'approve', always_allow: true });
+
+    const rules = listRules();
+    expect(
+      rules.some((r) => r.tool_name === capabilityToolName('task.create') && r.match === null),
+    ).toBe(true);
+  });
+
+  it('always_allow on an "always-ask" tier capability card NEVER persists a rule', async () => {
+    const cardId = insertCapabilityCard({ capabilityId: 'task.close', tier: 'always-ask' });
+
+    await executeCard({ card_id: cardId, decision: 'approve', always_allow: true });
+
+    const rules = listRules();
+    expect(rules.some((r) => r.tool_name === capabilityToolName('task.close'))).toBe(false);
+  });
+
+  it('a permission rule for an always-ask capability, however it got there, is never consulted for promotion by this path either', async () => {
+    // Even if a rule somehow exists (e.g. inserted directly, bypassing addRule's
+    // callers), approving an always-ask card must not treat it as pre-approved —
+    // executeCard resolves explicitly per-decision, it never auto-approves.
+    addRule({ tool_name: capabilityToolName('task.delete'), match: null, effect: 'allow' });
+    const cardId = insertCapabilityCard({ capabilityId: 'task.delete', tier: 'always-ask' });
+
+    await executeCard({ card_id: cardId, decision: 'reject' });
+
+    // Reject must still win — an existing rule does not silently flip a
+    // reject into an approve.
+    expect(getCard(cardId)!.status).toBe('rejected');
+  });
+});
+
+// ─── executeCard: "always allow" wiring for the legacy Bash-gate cards ───────
+
+describe('gate.executeCard — always_allow on Bash-gate cards', () => {
+  let convId: string;
+
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+    convId = makeConversation();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function insertBashCard(command: string): string {
+    return createCard({
+      conversation_id: convId,
+      tool_use_id: 'tu-bash-always-allow',
+      tool_name: 'Bash',
+      input: JSON.stringify({ command }),
+    });
+  }
+
+  it('always_allow on an "ask" tier Bash command persists a promotable rule', async () => {
+    const cardId = insertBashCard('octomux create-task --title "Foo"');
+
+    await executeCard({ card_id: cardId, decision: 'approve', always_allow: true });
+
+    const rules = listRules();
+    expect(
+      rules.some(
+        (r) =>
+          r.tool_name === 'octomux' &&
+          r.match !== null &&
+          JSON.parse(r.match).subcommand === 'create-task',
+      ),
+    ).toBe(true);
+  });
+
+  it('always_allow on an "always-ask" (delete-task) Bash command NEVER persists a rule', async () => {
+    const cardId = insertBashCard('octomux delete-task --task abc123');
+
+    await executeCard({ card_id: cardId, decision: 'approve', always_allow: true });
+
+    const rules = listRules();
+    expect(rules.some((r) => r.tool_name === 'octomux')).toBe(false);
+  });
+
+  it('a rule added via always_allow actually promotes the NEXT identical call to auto (end-to-end)', async () => {
+    const cardId = insertBashCard('octomux create-task --title "Foo"');
+    await executeCard({ card_id: cardId, decision: 'approve', always_allow: true });
+
+    const result = await handlePreToolUse({
+      conversation_id: convId,
+      tool_name: 'Bash',
+      tool_input: { command: 'octomux create-task --title "Bar"' },
+      tool_use_id: 'tu-after-rule',
+    });
+
+    expect(result.decision).toBe('allow');
+  });
+
+  it('always-ask (delete-task) is NEVER promoted to auto even after an always_allow attempt', async () => {
+    const cardId = insertBashCard('octomux delete-task --task abc123');
+    await executeCard({ card_id: cardId, decision: 'approve', always_allow: true });
+
+    const result = await handlePreToolUse({
+      conversation_id: convId,
+      tool_name: 'Bash',
+      tool_input: { command: 'octomux delete-task --task def456' },
+      tool_use_id: 'tu-after-rule-2',
+    });
+
+    // Still denied — a card is still required every single time.
+    expect(result.decision).toBe('deny');
   });
 });

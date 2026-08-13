@@ -206,4 +206,16 @@ export function registerRouteExemptions(): void {
       'callable today because SHR-142 needed a same-process write path, not because it belongs ' +
       'in this file long-term.',
   });
+
+  exemptRoute({
+    method: 'post',
+    path: '/api/hooks/gate-card',
+    reason: 'harness-webhook',
+    justification:
+      'Same shape as /api/hooks/orchestrator-action immediately above: an RPC dispatch from the ' +
+      'conductor’s MCP subprocess (server/orchestrator/mcp/gate.ts’s onGatedInvoke), not a ' +
+      'lifecycle notification. Creates a pending action_cards row and pushes it over the main ' +
+      'process’s live WebSocket clients — something the stdio subprocess cannot do itself. ' +
+      'Shares the same hook_token auth and mount point as the other 8 hook routes.',
+  });
 }

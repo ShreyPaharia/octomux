@@ -32,17 +32,29 @@ export interface RegisterCapabilityToolsOptions {
   /** Caller identity applied to every tool registered in this call. */
   caller: CallerClass;
   /**
-   * Extension point for the future `ask_human` blocking-decision channel
-   * (design doc §5.4). NOT implemented here — this is only the hook a later
-   * change slots an approval step into, without touching registration.
+   * The human-in-the-loop gate (server/orchestrator/mcp/gate.ts's
+   * `onGatedInvoke`, design doc §5.4). Called with the resolved invocation
+   * tier immediately before `cap.handler` runs, for any call whose resolved
+   * tier is not `'auto'` (i.e. an `agent` caller invoking an `ask` or
+   * `always-ask` capability — `authorize()` always resolves `ui`/`human`
+   * callers to `'auto'`). Left unset, non-`'auto'` tools simply run
+   * immediately, same as `'auto'` ones — used by tests and any transport that
+   * genuinely has no human to ask.
    *
-   * When set, called with the resolved invocation tier immediately before
-   * `cap.handler` runs, for any call whose resolved tier is not `'auto'`
-   * (i.e. an `agent` caller invoking an `ask` or `always-ask` capability —
-   * `authorize()` always resolves `ui`/`human` callers to `'auto'`). Left
-   * unset, non-`'auto'` tools simply run immediately, same as `'auto'` ones.
+   * Return-value contract (this is what makes the gate FAIL CLOSED):
+   *  - throws            → the call is denied. The thrown error becomes the
+   *                        tool's `isError` result; `cap.handler` NEVER runs.
+   *                        Distinguish rejection / timeout / card-creation-
+   *                        failure via the error message.
+   *  - resolves `undefined` → proceed: `cap.handler` runs normally (the
+   *                        write-approval case — task.close et al. — where
+   *                        the human's job was only to say yes).
+   *  - resolves any other value → that value IS the tool result; `cap.handler`
+   *                        is never called (the `ask_human` case — the
+   *                        human's ANSWER is the result, not a side effect
+   *                        `cap.handler` would separately produce).
    */
-  onGatedInvoke?: (cap: Capability, tier: PolicyTier, input: unknown) => Promise<void> | void;
+  onGatedInvoke?: (cap: Capability, tier: PolicyTier, input: unknown) => Promise<unknown>;
   /**
    * Restrict registration to capabilities whose RESOLVED tier (post-
    * `authorize()`, so `ui`/`human` callers always resolve to `'auto'`) is in
@@ -112,11 +124,17 @@ function registerOne(
     { description: cap.summary, inputSchema: cap.input },
     async (input: unknown) => {
       try {
-        if (tier !== 'auto' && opts.onGatedInvoke) {
-          await opts.onGatedInvoke(cap, tier, input);
-        }
         const ctx: CapabilityContext = { caller: opts.caller };
-        const result = await cap.handler(input, ctx);
+        let result: unknown;
+        if (tier !== 'auto' && opts.onGatedInvoke) {
+          const gated = await opts.onGatedInvoke(cap, tier, input);
+          // undefined → proceed to the real handler; anything else IS the
+          // result (ask_human's answer) and short-circuits cap.handler — see
+          // the onGatedInvoke doc above.
+          result = gated !== undefined ? gated : await cap.handler(input, ctx);
+        } else {
+          result = await cap.handler(input, ctx);
+        }
         // Matches the JSON-text content shape every tool in mcp/server.ts returns.
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],

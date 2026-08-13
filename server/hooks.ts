@@ -15,6 +15,8 @@ import {
   conversationIdForHookToken,
 } from './repositories/orchestrator.js';
 import { handlePreToolUse } from './orchestrator/gate.js';
+import { pushToConversation } from './orchestrator/stream.js';
+import { createCard } from './repositories/orchestrator.js';
 import {
   runOrchestratorAction,
   ORCHESTRATOR_ACTIONS,
@@ -712,6 +714,75 @@ router.post('/orchestrator-action', requireHookToken, (req: Request, res: Respon
       logger.error({ err, action, conversation_id: conversationId }, 'orchestrator-action failed');
       res.status(200).json({ ok: false, error: message });
     });
+});
+
+// POST /api/hooks/gate-card
+// The conductor's MCP subprocess RPCs here to create a pending action_cards
+// row for a gated (ask/always-ask) CAPABILITY call and push it to the
+// conversation's WS clients — server/orchestrator/mcp/gate.ts's
+// `onGatedInvoke`. Mirrors /orchestrator-action's RPC shape but creates a
+// card instead of running an action; the human's later decision is handled
+// by the existing card_decision WS path → gate.ts's executeCard, same as
+// every other action_cards row. Card creation must happen here (not in the
+// subprocess) because pushToConversation needs the main process's live
+// WebSocket client registry — see write.ts's callGateCard doc.
+// Query: ?token=<conductor hook_token>&conversation_id=<conv_id>
+// Body:  { capability_id, tier, kind, command, args?, question? }
+router.post('/gate-card', requireHookToken, (req: Request, res: Response) => {
+  const conversationId = ((req.query.conversation_id ?? '') as string) || undefined;
+  const { capability_id, tier, kind, command, args, question } = req.body as {
+    capability_id?: string;
+    tier?: 'ask' | 'always-ask';
+    kind?: 'action' | 'question';
+    command?: string;
+    args?: Record<string, unknown>;
+    question?: string;
+  };
+
+  if (!conversationId) {
+    res.status(200).json({ ok: false, error: 'conversation_id is required to create a gate card' });
+    return;
+  }
+  if (!capability_id || !tier || !kind || !command) {
+    res
+      .status(200)
+      .json({ ok: false, error: 'capability_id, tier, kind and command are required' });
+    return;
+  }
+
+  try {
+    const cardId = createCard({
+      conversation_id: conversationId,
+      tool_use_id: `gate-${nanoid(8)}`,
+      tool_name: `capability:${capability_id}`,
+      input: JSON.stringify({
+        kind,
+        tier,
+        capability_id,
+        args: args ?? {},
+        question: question ?? null,
+      }),
+    });
+
+    pushToConversation(
+      conversationId,
+      JSON.stringify({
+        type: 'card',
+        id: cardId,
+        command,
+        args: args ?? {},
+        tier,
+        kind,
+        ...(question !== undefined ? { question } : {}),
+      }),
+    );
+
+    res.status(200).json({ ok: true, result: { card_id: cardId } });
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    logger.error({ err, capability_id }, 'gate-card: failed to create card');
+    res.status(200).json({ ok: false, error: message });
+  }
 });
 
 export { router as hookRoutes };

@@ -39,6 +39,7 @@ import {
   type ActionCardItem,
   type PlanCardItem,
   type SpecCardItem,
+  type QuestionCardItem,
   type ThreadItem,
   type ToolCallItem,
 } from '../components/orchestrator/types';
@@ -202,15 +203,24 @@ export default function OrchestratorPage() {
               if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
               return [...prev, card];
             });
+          } else if (event.kind === 'question') {
+            const card: QuestionCardItem = {
+              kind: 'question-card',
+              id: event.id,
+              question: event.question ?? '',
+              resolved: false,
+            };
+            setItems((prev) => {
+              if (prev.some((i) => 'id' in i && i.id === card.id)) return prev;
+              return [...prev, card];
+            });
           } else {
-            const alwaysAsk = (event.args as { always_ask?: boolean }).always_ask === true;
+            const alwaysAsk = event.tier === 'always-ask';
             const card: ActionCardItem = {
               kind: 'action-card',
               id: event.id,
               command: event.command,
-              args: Object.fromEntries(
-                Object.entries(event.args).filter(([k]) => k !== 'always_ask'),
-              ),
+              args: event.args,
               alwaysAsk,
               resolved: false,
             };
@@ -311,6 +321,10 @@ export default function OrchestratorPage() {
       card_id,
       decision,
       ...(args !== undefined ? { args } : {}),
+      // QuestionCard's "submit answer" sends decision:'approve' + text: <answer>
+      // (see QuestionCard.tsx) — forward it as respond_text, the field
+      // gate.ts's executeCard reads for a card's free-text payload.
+      ...(text !== undefined ? { respond_text: text } : {}),
       ...(always_allow !== undefined ? { always_allow } : {}),
     };
     wsRef.current.send(outgoing);
@@ -319,7 +333,10 @@ export default function OrchestratorPage() {
       prev.map((item) => {
         if (!('kind' in item)) return item;
         if (
-          (item.kind === 'plan-card' || item.kind === 'action-card' || item.kind === 'spec-card') &&
+          (item.kind === 'plan-card' ||
+            item.kind === 'action-card' ||
+            item.kind === 'spec-card' ||
+            item.kind === 'question-card') &&
           item.id === card_id
         ) {
           return { ...item, resolved: true };

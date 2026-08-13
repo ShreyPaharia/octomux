@@ -20,3 +20,4 @@ export * from './schemas.js';
 export * from './capabilities/task.js';
 export * from './capabilities/learning.js';
 export * from './capabilities/run.js';
+export * from './capabilities/ask.js';
