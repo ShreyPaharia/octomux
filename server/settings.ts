@@ -39,6 +39,15 @@ export interface OctomuxSettings {
    * Claude CLI. Overridden by OCTOMUX_AI_TASK_NAMING. Default false.
    */
   aiTaskNaming?: boolean;
+  /**
+   * KILL SWITCH for the capability registry's ask/always-ask gate
+   * (server/orchestrator/mcp/gate.ts). When false, every `ask`/`always-ask`
+   * MCP capability call (task.create/start/move/close/delete, ask_human) runs
+   * immediately with no card and no human decision — same as before this gate
+   * existed. Overridden by OCTOMUX_CAPABILITY_GATE_ENABLED. Default true
+   * (gating ON) when absent.
+   */
+  capabilityGateEnabled?: boolean;
 
   /** @deprecated promoted into harnesses['claude-code'] on next save */
   claudeFlags?: string;
@@ -140,7 +149,28 @@ export async function getSettings(): Promise<OctomuxSettings> {
     approvalTimeoutMs: parsePositiveIntSetting(parsed.approvalTimeoutMs),
     hookTimeoutMs: parsePositiveIntSetting(parsed.hookTimeoutMs),
     aiTaskNaming: typeof parsed.aiTaskNaming === 'boolean' ? parsed.aiTaskNaming : undefined,
+    capabilityGateEnabled:
+      typeof parsed.capabilityGateEnabled === 'boolean' ? parsed.capabilityGateEnabled : undefined,
   };
+}
+
+/**
+ * Synchronous, single-field read of the stored settings.json, for the
+ * capability gate's kill switch (server/orchestrator/mcp/gate.ts), which —
+ * like the approval-timeout sweep — resolves its setting synchronously from
+ * the MCP subprocess and can't await getSettings(). Mirrors
+ * getStoredApprovalTimeoutMs()'s shape for this field only.
+ */
+export function getStoredCapabilityGateEnabled(): boolean | undefined {
+  try {
+    const raw = fs.readFileSync(settingsPath(), 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed.capabilityGateEnabled === 'boolean'
+      ? parsed.capabilityGateEnabled
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -201,6 +231,15 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     throw new Error(`Invalid aiTaskNaming: ${patch.aiTaskNaming}. Must be a boolean.`);
   }
 
+  if (
+    patch.capabilityGateEnabled !== undefined &&
+    typeof patch.capabilityGateEnabled !== 'boolean'
+  ) {
+    throw new Error(
+      `Invalid capabilityGateEnabled: ${patch.capabilityGateEnabled}. Must be a boolean.`,
+    );
+  }
+
   const current = await getSettings();
   const mergedHarnesses = { ...current.harnesses };
   const { listHarnesses, getHarness } = await import('./harnesses/index.js');
@@ -259,6 +298,10 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
       patch.approvalTimeoutMs !== undefined ? patch.approvalTimeoutMs : current.approvalTimeoutMs,
     hookTimeoutMs: patch.hookTimeoutMs !== undefined ? patch.hookTimeoutMs : current.hookTimeoutMs,
     aiTaskNaming: patch.aiTaskNaming !== undefined ? patch.aiTaskNaming : current.aiTaskNaming,
+    capabilityGateEnabled:
+      patch.capabilityGateEnabled !== undefined
+        ? patch.capabilityGateEnabled
+        : current.capabilityGateEnabled,
   };
 
   const filePath = settingsPath();

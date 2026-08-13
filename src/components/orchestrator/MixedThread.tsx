@@ -4,6 +4,7 @@ import { ToolCallCard } from './ToolCallCard';
 import { PlanCard } from './PlanCard';
 import { SpecCard } from './SpecCard';
 import { ActionCard } from './ActionCard';
+import { QuestionCard } from './QuestionCard';
 import { WorkingIndicator } from './WorkingIndicator';
 import type { ActionCardDecision, ThreadItem } from './types';
 
@@ -102,6 +103,13 @@ export function MixedThread({
             alwaysAsk={item.alwaysAsk}
             onDecision={onCardDecision}
           />
+        </div>,
+      );
+    } else if (item.kind === 'question-card' && !item.resolved) {
+      flushBatch();
+      rendered.push(
+        <div key={item.id} className="px-4 py-2">
+          <QuestionCard cardId={item.id} question={item.question} onDecision={onCardDecision} />
         </div>,
       );
     }

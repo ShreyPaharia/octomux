@@ -4,6 +4,7 @@ import {
   updateSettings,
   resolveClaudeFlags,
   getStoredApprovalTimeoutMs,
+  getStoredCapabilityGateEnabled,
   DEFAULT_SETTINGS,
 } from './settings.js';
 import type { OctomuxSettings } from './settings.js';
@@ -453,6 +454,44 @@ describe('getStoredApprovalTimeoutMs', () => {
 
   it('returns undefined when settings.json does not exist', () => {
     expect(getStoredApprovalTimeoutMs()).toBeUndefined();
+  });
+});
+
+describe('getStoredCapabilityGateEnabled (capability-gate kill switch)', () => {
+  // Same real-filesystem pattern as getStoredApprovalTimeoutMs above.
+  let dir: string;
+  let prevDataDir: string | undefined;
+
+  beforeEach(async () => {
+    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const os = await import('os');
+    const path = await import('path');
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'octomux-settings-gate-test-'));
+    prevDataDir = process.env.OCTOMUX_DATA_DIR;
+    process.env.OCTOMUX_DATA_DIR = dir;
+  });
+
+  afterEach(async () => {
+    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    if (prevDataDir === undefined) delete process.env.OCTOMUX_DATA_DIR;
+    else process.env.OCTOMUX_DATA_DIR = prevDataDir;
+    fsSync.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['{"capabilityGateEnabled": false}', false],
+    ['{"capabilityGateEnabled": true}', true],
+    ['{}', undefined],
+    ['not json', undefined],
+  ])('reads %s as %p from settings.json on disk', async (contents, expected) => {
+    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const path = await import('path');
+    fsSync.writeFileSync(path.join(dir, 'settings.json'), contents);
+    expect(getStoredCapabilityGateEnabled()).toBe(expected);
+  });
+
+  it('returns undefined when settings.json does not exist (kill switch defaults ON elsewhere)', () => {
+    expect(getStoredCapabilityGateEnabled()).toBeUndefined();
   });
 });
 

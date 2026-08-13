@@ -138,7 +138,7 @@ describe('registerCapabilityTools', () => {
   describe('onGatedInvoke extension point', () => {
     it('runs before the handler when the resolved tier is not auto', async () => {
       const order: string[] = [];
-      const onGatedInvoke = vi.fn(() => {
+      const onGatedInvoke = vi.fn(async () => {
         order.push('gate');
       });
       const handler = vi.fn(() => {

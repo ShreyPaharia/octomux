@@ -120,6 +120,80 @@ export async function callOrchestratorAction(
   return body.result;
 }
 
+// ─── Gate card RPC (capability registry ask/always-ask gate) ────────────────
+
+export interface CreateGateCardInput {
+  /** Capability id, e.g. 'task.close' or 'human.ask'. */
+  capabilityId: string;
+  tier: 'ask' | 'always-ask';
+  /** 'action' → approve/reject an implied write. 'question' → free-text answer. */
+  kind: 'action' | 'question';
+  /** Display name for the card header (defaults to the capability's MCP tool name). */
+  command: string;
+  /** Displayed as editable-looking fields on an 'action' card. Omitted for 'question'. */
+  args?: Record<string, unknown>;
+  /** The question text for a 'question' card. Omitted for 'action'. */
+  question?: string;
+}
+
+/**
+ * RPC to the main server's POST /api/hooks/gate-card, creating a pending
+ * action_cards row and pushing it to the conductor's conversation. Used by
+ * `onGatedInvoke` (./gate.js) — CREATION must happen in the main process
+ * because pushing the card to the browser needs the main process's live
+ * WebSocket client registry (server/orchestrator/stream.ts's `convClients`),
+ * which this stdio subprocess does not share. Once created, `onGatedInvoke`
+ * polls the card's resolution straight off its OWN `getDb()` connection (WAL
+ * mode makes that safe and cheap) rather than RPCing again.
+ *
+ * Throws on any failure (missing config, network error, non-ok response) —
+ * the caller (`onGatedInvoke`) must treat that as a DISTINCT denial from a
+ * human rejecting or a timeout: the human was never even asked.
+ */
+export async function callGateCard(input: CreateGateCardInput): Promise<{ card_id: string }> {
+  const { baseUrl, token, conversationId } = actionConfig();
+  if (!baseUrl || !token) {
+    throw new Error('orchestrator write tools are not configured (missing base url / token)');
+  }
+  if (!conversationId) {
+    throw new Error('no conversation configured — cannot create a gate approval card');
+  }
+
+  const url =
+    `${baseUrl}/api/hooks/gate-card` +
+    `?token=${encodeURIComponent(token)}` +
+    `&conversation_id=${encodeURIComponent(conversationId)}`;
+
+  logger.debug(
+    { capability_id: input.capabilityId, tier: input.tier, kind: input.kind },
+    'mcp write: RPC gate-card',
+  );
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      capability_id: input.capabilityId,
+      tier: input.tier,
+      kind: input.kind,
+      command: input.command,
+      args: input.args,
+      question: input.question,
+    }),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    result?: { card_id?: string };
+    error?: string;
+  };
+
+  if (!res.ok || body.ok === false || !body.result?.card_id) {
+    throw new Error(body.error ?? `gate-card RPC failed (HTTP ${res.status})`);
+  }
+  return { card_id: body.result.card_id };
+}
+
 /**
  * RPC to the main server's phase-complete endpoint, signalling that this worker
  * has finished a phase. Mirrors callOrchestratorAction but targets the
