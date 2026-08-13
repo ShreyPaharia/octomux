@@ -34,7 +34,8 @@ server/           Express backend (API, terminal streaming, task lifecycle, DB)
 src/              React SPA (pages, components, lib/api.ts)
   workflows/      front-end workflow-UI registry behind the /w/:kind/:id route
 cli/              CLI tool for task management
-packages/         bun workspaces: types, diff-engine, api-client, test-fixtures
+packages/         bun workspaces: types, diff-engine, api-client, test-fixtures,
+                  plus the prebuilt tmux-{darwin,linux}-{arm64,x64} binaries
 plugin/           bundled Claude Code plugin (skills/, agents/) — the only tier agents see
 kinds/            built-in schedule-kind presets (*.json), read by server/workflows/presets.ts
 electron/         macOS desktop shell
@@ -43,13 +44,19 @@ e2e/              Playwright E2E tests
 
 ## Task Lifecycle
 
+A task carries two orthogonal statuses (`packages/types/src/index.ts`):
+
 ```
-draft → setting_up → running → closed / error
+runtime_state:    idle | setting_up | running | error | looping
+workflow_status:  backlog | planned | in_progress | human_review | pr | done
 ```
 
-Each task gets a git worktree at `<repo>/.worktrees/<id>`, a tmux session `octomux-agent-<id>`, and a branch `agents/<id>`. Each agent runs in a tmux window within the session.
+`setting_up → running → idle` is the usual runtime path; errors land in `error` with the
+message in `task.error`.
 
-- **Close** — stops agents and kills the tmux session. Worktree and branch are preserved for resume.
+Each task gets a git worktree at `<repo>/.worktrees/<id>`, a tmux session `octomux-agent-<id>`, and a branch `agents/<id>`. Each worker runs in a tmux window within the session.
+
+- **Close** — stops workers and kills the tmux session. Worktree and branch are preserved for resume.
 - **Delete** — kills tmux session, removes worktree, deletes branch, removes DB rows. Full cleanup.
 
 ## Testing

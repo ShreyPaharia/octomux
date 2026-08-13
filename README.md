@@ -135,9 +135,9 @@ devices can reach the port; the token is a second factor. For HTTPS, front it wi
 octomux keeps a clean line between the **agent backend** (done for you) and the **views**
 (where the value is). Building blocks available today:
 
-- **REST API** (~145 endpoints) over tasks, agents, diffs, reviews, chats, workspaces, skills.
-- **Three live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux, `/ws/orchestrator/:convId` for the orchestrator stream.
-- **A queryable SQLite schema** — tasks, agents, permission prompts, review runs, comments, learnings.
+- **REST API** (~130 endpoints) over tasks, workers, diffs, reviews, chats, workspaces, skills, loops, schedules.
+- **Three live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux, `/ws/orchestrator/:convId` for the orchestrator conversation stream.
+- **A queryable SQLite schema** — tasks, workers, agents, permission prompts, review runs, comments, learnings, loop runs, schedules.
 - **A pluggable harness interface** — add a new agent backend by implementing one interface and registering it.
 - **User hook scripts** — drop executables in `~/.octomux/hooks/<event>.d/` (or `<repo>/.octomux/hooks/<event>.d/` for repo-local ones) to fire on task-lifecycle events.
 
