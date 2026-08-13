@@ -96,7 +96,7 @@ octomux is a bet on what that surface should look like: not a chat box bolted on
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `octomux start`                      | Dashboard at `:7777` (add `--bind 0.0.0.0` for remote)               |
-| `octomux init`                       | Defaults wizard (Jira/Linear, base branch, harness prefs)            |
+| `octomux init`                       | Defaults wizard (Jira URL/project, base branch) + workflow scripts   |
 | `octomux create-task`                | New task (`--harness`, `--model`, `--mode`, `--fork-from`)           |
 | `octomux list-tasks` / `get-task`    | Inspect tasks                                                        |
 | `octomux close-task` / `delete-task` | Stop or fully remove                                                 |

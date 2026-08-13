@@ -28,6 +28,9 @@ server/           Express backend (API, terminal streaming, task lifecycle, DB)
   workflows/      workflow kinds (loops, reviewer, doc-drift, …) + kind presets
   schedules/      cron.ts — isCronDue(), the 5-field cron evaluator behind schedules
   poller/         background pollers (PR detection, merged-PR close, hooks, schedules)
+  orchestrator/   the conductor — command gate/schemas, MCP server, approvals
+  gateway/        Telegram + Slack chat front end onto the conductor (see its README.md)
+  integrations/   provider registry + credential store (jira, linear, *-gateway)
   db.ts           SQLite singleton with getDb() / setDb() / initDb()
   db/             schema.ts + forward-only migrations.ts
   types.ts        re-exports @octomux/types + review-orchestrator types
@@ -38,6 +41,8 @@ packages/         bun workspaces: types, diff-engine, api-client, test-fixtures,
                   plus the prebuilt tmux-{darwin,linux}-{arm64,x64} binaries
 plugin/           bundled Claude Code plugin (skills/, agents/) — the only tier agents see
 kinds/            built-in schedule-kind presets (*.json), read by server/workflows/presets.ts
+workflows/        Claude Code workflow scripts (review-deep.js) — `octomux init` copies these
+                  to ~/.claude/workflows/, since plugins cannot ship them
 electron/         macOS desktop shell
 e2e/              Playwright E2E tests
 ```
