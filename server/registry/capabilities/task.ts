@@ -130,6 +130,9 @@ import {
   listTasks,
   setRuntimeState,
   setWorkflowStatus,
+  setDependsOn,
+  validateDependsOn,
+  isDependencyUnmet,
   addTaskUpdate,
   listAgentsByTasks,
   listPendingPromptsByTasks,
@@ -141,7 +144,7 @@ import {
 import { getManagedTask } from '../../repositories/orchestrator.js';
 import { getArtifactSummary } from '../../artifact.js';
 import type { PermissionPromptRow } from '../../repositories/permission-prompts.js';
-import { createTask } from '../../services/task-service.js';
+import { createTask, unblockDependents } from '../../services/task-service.js';
 import { badRequest, conflict, notFound } from '../../services/errors.js';
 import {
   fetchTaskWithRelations,
@@ -412,6 +415,7 @@ async function createTaskHandler(input: z.infer<typeof taskCreateInputSchema>) {
     model: input.model ?? null,
     notify_task_id: input.notify_task ?? null,
     is_draft: isDraft,
+    depends_on: input.depends_on ?? null,
   });
 }
 
@@ -426,6 +430,9 @@ async function startTaskHandler(input: z.infer<typeof taskStartInputSchema>) {
 
   if (task.runtime_state !== 'idle') {
     throw badRequest('Only draft tasks can be started');
+  }
+  if (isDependencyUnmet(task.depends_on)) {
+    throw badRequest(`cannot start: waiting on depends_on task ${task.depends_on} to reach 'done'`);
   }
 
   setRuntimeState(task.id, 'setting_up');
@@ -459,6 +466,18 @@ async function moveTaskHandler(input: z.infer<typeof taskMoveInputSchema>) {
     throw badRequest(`note is required when moving to ${input.workflow_status}`);
   }
 
+  // Set/clear depends_on before evaluating auto-start, so a depends_on passed
+  // in the SAME call already gates this move's own in_progress transition.
+  let effectiveDependsOn = task.depends_on;
+  if (input.depends_on !== undefined) {
+    if (input.depends_on !== null) {
+      const err = validateDependsOn(task.id, input.depends_on);
+      if (err) throw badRequest(err);
+    }
+    setDependsOn(task.id, input.depends_on);
+    effectiveDependsOn = input.depends_on;
+  }
+
   // Close eagerly on every move to done — idle agents still hold a live claude
   // process (+MCP sidecars); reopening resumes via harness_session_id.
   if (input.workflow_status === 'done' && task.workflow_status !== 'done') {
@@ -476,10 +495,19 @@ async function moveTaskHandler(input: z.infer<typeof taskMoveInputSchema>) {
     body: input.note ?? null,
   });
 
+  // A task becomes eligible to start once its dependency reaches 'done' —
+  // the minimum useful semantics for depends_on (any earlier attempt to
+  // start it was skipped, leaving it idle+in_progress; see
+  // listDependentsAwaitingStart).
+  if (input.workflow_status === 'done' && prevStatus !== 'done') {
+    unblockDependents(task.id);
+  }
+
   let autoStart: 'start' | 'resume' | null = null;
   if (
     input.workflow_status === 'in_progress' &&
-    (task.runtime_state === 'idle' || task.runtime_state === 'error')
+    (task.runtime_state === 'idle' || task.runtime_state === 'error') &&
+    !isDependencyUnmet(effectiveDependsOn)
   ) {
     autoStart = task.worktree ? 'resume' : 'start';
   }

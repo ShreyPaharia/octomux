@@ -1250,6 +1250,32 @@ export function runMigrations(instance: Database.Database): void {
   const loopGroupsCols = columnsOf(instance, 'loop_groups');
   addColumn(instance, 'loop_groups', 'run_id', 'run_id TEXT REFERENCES runs(id)', loopGroupsCols);
   instance.exec(`CREATE INDEX IF NOT EXISTS idx_loop_groups_run ON loop_groups(run_id);`);
+
+  // ── Task dependency primitive (2026-08-14, agents/task-depends-on) ─────────
+  // Promotes `depends_on` off `managed_tasks` (orchestrator-only) onto plain
+  // `tasks`, so any task can depend on any other task, not just ones inside a
+  // conductor conversation. One dependency per task (not the JSON array
+  // `managed_tasks.depends_on` uses for its DAG scheduler — that table is
+  // untouched by this migration and keeps working as-is).
+  //
+  // ON DELETE SET NULL (mirrors review_of_task_id above) so hard-deleting a
+  // dependency unblocks its dependent instead of orphaning the FK.
+  // Cycle safety (self-reference, 2-cycles, longer cycles) is NOT expressible
+  // as a DDL constraint here — SQLite has no CHECK that can walk a
+  // self-referencing chain — so it's enforced at the application layer
+  // (repositories/tasks.ts:validateDependsOn) on every write.
+  const taskColsForDependsOn = columnsOf(instance, 'tasks');
+  addColumn(
+    instance,
+    'tasks',
+    'depends_on',
+    'depends_on TEXT REFERENCES tasks(id) ON DELETE SET NULL',
+    taskColsForDependsOn,
+  );
+  instance.exec(
+    `CREATE INDEX IF NOT EXISTS idx_tasks_depends_on
+       ON tasks(depends_on) WHERE depends_on IS NOT NULL`,
+  );
 }
 
 /**

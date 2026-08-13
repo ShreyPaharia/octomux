@@ -73,6 +73,7 @@ const TASK_FIXTURE_BASE = {
   agent: null,
   model: null,
   notify_task_id: null,
+  depends_on: null,
   error: null,
   current_summary: null,
   current_summary_updated_at: null,

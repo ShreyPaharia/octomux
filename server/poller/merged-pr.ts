@@ -4,6 +4,7 @@ import { broadcast } from '../events.js';
 import { fireHook } from '../hook-dispatcher.js';
 import { childLogger } from '../logger.js';
 import { closeTask } from '../task-engine/index.js';
+import { unblockDependents } from '../services/task-service.js';
 import {
   listRunningTasksWithPr,
   addTaskUpdate,
@@ -63,6 +64,7 @@ export async function checkMergedPRs(): Promise<void> {
         const prevWorkflow = task.workflow_status;
         await closeTask(task);
         setWorkflowStatusDone(task.id);
+        unblockDependents(task.id);
         addTaskUpdate({
           task_id: task.id,
           kind: 'transition',

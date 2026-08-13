@@ -96,6 +96,15 @@ export const taskCreateInputSchema = createTaskInputSchema.extend({
   agent: z.string().optional().nullable().describe('Agent persona name'),
   harness_id: z.string().optional().describe('Harness id (default: claude-code)'),
   workflow_status: workflowStatusEnum.optional().describe('Initial workflow_status override'),
+  depends_on: z
+    .string()
+    .optional()
+    .nullable()
+    .describe(
+      'Id of another task this one depends on. Rejected if that task does not exist. ' +
+        "Unless draft:true, the task still gets created but won't auto-start until the " +
+        "dependency's workflow_status reaches 'done'.",
+    ),
 });
 
 // ─── task.start ───────────────────────────────────────────────────────────────
@@ -110,6 +119,16 @@ export const taskMoveInputSchema = z.object({
   id: z.string().describe('The octomux task id'),
   workflow_status: workflowStatusEnum.describe('Target workflow_status'),
   note: z.string().optional().describe('Note (required when moving to human_review or planned)'),
+  depends_on: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Set (or, with null, clear) the id of another task this one depends on. Rejected on a ' +
+        "self-reference, a cycle, or a nonexistent target. Moving to 'in_progress' while the " +
+        "dependency hasn't reached 'done' skips the auto-start — the task becomes eligible " +
+        'once the dependency finishes.',
+    ),
 });
 
 // ─── task.delete ──────────────────────────────────────────────────────────────
@@ -150,7 +169,8 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
   },
   {
     id: 'task.create',
-    summary: 'Create a task (and start it immediately unless draft:true).',
+    summary:
+      'Create a task (and start it immediately unless draft:true or depends_on is set and unmet).',
     // 201 matches routes/tasks.ts:253 — see HttpProjection.status.
     http: { method: 'post', path: '/api/tasks', status: 201 },
     cli: 'task create',

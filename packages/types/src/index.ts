@@ -145,6 +145,8 @@ export interface Task {
   notify_task_id: string | null;
   /** Set when this task was created by a cron schedule run. */
   schedule_id?: string | null;
+  /** Another task's id this one depends on — must reach 'done' before this task auto-starts. Null = no dependency. */
+  depends_on: string | null;
   harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */

@@ -12,7 +12,7 @@ export const SELECT_TASK_SQL = `
          t.pr_url, t.pr_number, t.pr_head_sha, t.user_window_index,
          t.initial_prompt, t.last_viewed_at, t.deleted_at, t.source, t.worktree_id,
          t.harness_id, t.agent, t.model, t.notify_task_id, t.error,
-         t.schedule_id,
+         t.schedule_id, t.depends_on,
          t.created_at, t.updated_at,
          w.path AS worktree,
          w.repo_path AS repo_path,
