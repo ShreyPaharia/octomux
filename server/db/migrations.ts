@@ -871,7 +871,7 @@ export function runMigrations(instance: Database.Database): void {
       task_id             TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       phase               TEXT NOT NULL DEFAULT 'planning',
       artifacts           TEXT,
-      depends_on          TEXT,
+      depends_on          TEXT, -- retired: dead DAG-scheduler column, unread since server/orchestrator/mcp/verify.ts was deleted; never written by production code either
       attempts            INTEGER NOT NULL DEFAULT 0,
       last_event_seq      INTEGER NOT NULL DEFAULT 0,
       artifact_lock_owner TEXT,

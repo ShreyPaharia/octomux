@@ -675,17 +675,6 @@ export function listManagedTasksForConversation(
     .all(conversationId) as Array<{ task_id: string; last_event_seq: number }>;
 }
 
-/**
- * Return all managed_tasks rows for a conversation that have a non-null depends_on.
- *
- * Verbatim SQL from verify.ts:scheduleDagStep so Pass 2 can swap that getDb() call.
- */
-export function listManagedTasksWithDependsOn(conversationId: string): ManagedTask[] {
-  return getDb()
-    .prepare(`SELECT * FROM managed_tasks WHERE conversation_id = ? AND depends_on IS NOT NULL`)
-    .all(conversationId) as ManagedTask[];
-}
-
 // ─── global-monitor mode ──────────────────────────────────────────────────────
 
 /**
