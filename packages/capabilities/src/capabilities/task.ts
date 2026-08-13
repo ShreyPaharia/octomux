@@ -151,7 +151,10 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
     cliAliases: ['list-tasks'],
     mcp: 'list_tasks',
     tier: 'auto',
-    callers: ['ui', 'human', 'agent'],
+    // 'worker' included: a task worker's MCP session has always had list_tasks
+    // unconditionally (server/orchestrator/mcp/server.ts's module doc) — auto
+    // tier, no blast radius. See CallerClass's doc for the worker/agent split.
+    callers: ['ui', 'human', 'agent', 'worker'],
     input: taskListInputSchema,
   },
   {
@@ -164,7 +167,8 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
     cliAliases: ['get-task'],
     mcp: 'get_task',
     tier: 'auto',
-    callers: ['ui', 'human', 'agent'],
+    // 'worker' included — same reasoning as task.list above.
+    callers: ['ui', 'human', 'agent', 'worker'],
     input: taskGetInputSchema,
   },
   {
@@ -213,7 +217,10 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
     // the single most common write they perform, buying no safety: there is
     // nothing to undo. Deliberately 'auto'.
     tier: 'auto',
-    callers: ['human', 'agent'],
+    // 'worker' included — a worker has always been able to close its own task
+    // this way (server/orchestrator/mcp/server.test.ts's "not a widening of
+    // what a worker can DO" comment); preserved under the new caller class.
+    callers: ['human', 'agent', 'worker'],
     input: closeTaskInputSchema,
   },
   {

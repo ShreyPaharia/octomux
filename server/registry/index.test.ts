@@ -70,8 +70,13 @@ describe('authorize', () => {
     ['agent', 'always-ask', 'always-ask'],
     ['ui', 'always-ask', 'auto'],
     ['human', 'ask', 'auto'],
+    // 'worker' is gated exactly like 'agent' — both are autonomous. What
+    // narrows a worker's reach is `callers` (denying it the capability
+    // outright), never a softer tier — see the next test.
+    ['worker', 'auto', 'auto'],
+    ['worker', 'always-ask', 'always-ask'],
   ])('caller %s on a %s capability resolves to tier %s', (caller, tier, expected) => {
-    const result = authorize(cap({ tier }), caller);
+    const result = authorize(cap({ tier, callers: ['ui', 'human', 'agent', 'worker'] }), caller);
     expect(result).toEqual({ allowed: true, tier: expected });
   });
 
@@ -81,6 +86,15 @@ describe('authorize', () => {
       allowed: false,
       reason: 'task.create is not available to agent callers',
     });
+  });
+
+  it('denies a worker a capability whose callers omit "worker" (e.g. task.create) even though agents may call it', () => {
+    const destructive = cap({ tier: 'ask', callers: ['ui', 'human', 'agent'] });
+    expect(authorize(destructive, 'worker')).toEqual({
+      allowed: false,
+      reason: 'task.create is not available to worker callers',
+    });
+    expect(authorize(destructive, 'agent')).toEqual({ allowed: true, tier: 'ask' });
   });
 });
 

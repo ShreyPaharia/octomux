@@ -144,8 +144,8 @@ describe('createOctomuxMcpServer — tool registration', () => {
     const server = createOctomuxMcpServer();
     const tools = getRegisteredToolNames(server);
     // Worker mode: report_complete plus the 'auto'-tier reads, and nothing
-    // that mutates. The tier filter in server.ts is what draws this line —
-    // see the rationale at that call site.
+    // that mutates. The caller-class 'worker' + each capability's `callers`
+    // list is what draws this line now — see the rationale at that call site.
     expect(tools).toContain('report_complete');
     expect(tools).toContain('list_tasks');
     expect(tools).toContain('get_task');
@@ -154,6 +154,11 @@ describe('createOctomuxMcpServer — tool registration', () => {
     // prompts literally instruct it to run `octomux close-task <id>`. This is
     // the same power by a second route, not a new one.
     expect(tools).toContain('close_task');
+    // NEW: a worker can now block on a human via ask_human (always-ask tier,
+    // but included in human.ask's `callers` — see packages/capabilities/src/
+    // capabilities/ask.ts). This is the capability this test file exists to
+    // guard the boundary of.
+    expect(tools).toContain('ask_human');
     expect(tools).not.toContain('create_task');
     expect(tools).not.toContain('send_message');
     expect(tools).not.toContain('set_task_status');
@@ -269,5 +274,79 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
 
     expect(result.content[0].text).not.toMatch(/could not create an approval card/);
     expect(result.content[0].text).toMatch(/task-x/);
+  });
+});
+
+// ─── Worker can ask_human but cannot create/delete/move a task ──────────────
+//
+// The property the whole change exists to prove: a worker session (caller
+// class 'worker', not 'agent') gets ask_human — including the SAME
+// onGatedInvoke blocking behaviour the conductor's write tools get — while
+// still being denied create_task/delete_task/set_task_status outright. Denied
+// means "never registered as a tool at all" (registerCapabilityTools skips
+// unauthorized capabilities — see projections/mcp.ts's module doc), which
+// this asserts directly by checking the tool is undefined, not merely absent
+// from a name list (belt-and-suspenders against the earlier list-based checks
+// being weakened independently of this one).
+describe('createOctomuxMcpServer — worker ask_human vs. destructive tools', () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv['OCTOMUX_TASK_ID'] = process.env.OCTOMUX_TASK_ID;
+    savedEnv['OCTOMUX_ACTION_TOKEN'] = process.env.OCTOMUX_ACTION_TOKEN;
+    savedEnv['OCTOMUX_ACTION_BASE_URL'] = process.env.OCTOMUX_ACTION_BASE_URL;
+    savedEnv['OCTOMUX_CONVERSATION_ID'] = process.env.OCTOMUX_CONVERSATION_ID;
+    savedEnv['OCTOMUX_CAPABILITY_GATE_ENABLED'] = process.env.OCTOMUX_CAPABILITY_GATE_ENABLED;
+
+    process.env.OCTOMUX_TASK_ID = 'task-worker-ask';
+    process.env.OCTOMUX_ACTION_TOKEN = 'tok-worker';
+    process.env.OCTOMUX_ACTION_BASE_URL = 'http://127.0.0.1:7777';
+    delete process.env.OCTOMUX_CONVERSATION_ID; // workers never have this
+    delete process.env.OCTOMUX_CAPABILITY_GATE_ENABLED;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('a worker session gets ask_human, and it hits onGatedInvoke (blocks) instead of the no-op handler', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
+    );
+
+    const { createOctomuxMcpServer } = await import('./server.js');
+    const server = createOctomuxMcpServer();
+    const priv = server as unknown as {
+      _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
+    };
+    const tool = priv._registeredTools['ask_human'];
+    expect(tool).toBeDefined();
+
+    const result = (await tool.handler({ question: 'which approach?' }, {})) as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
+
+    // Card creation is attempted (proving the gate ran, not the no-op
+    // registry/capabilities/human.ts handler, which would have returned
+    // {answer: null, note: '...gating is disabled...'} instead of an isError).
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/could not create an approval card/);
+  });
+
+  it('a worker session never gets create_task, delete_task, or set_task_status as tools at all', async () => {
+    const { createOctomuxMcpServer } = await import('./server.js');
+    const server = createOctomuxMcpServer();
+    const priv = server as unknown as { _registeredTools: Record<string, unknown> };
+
+    expect(priv._registeredTools['create_task']).toBeUndefined();
+    expect(priv._registeredTools['delete_task']).toBeUndefined();
+    expect(priv._registeredTools['set_task_status']).toBeUndefined();
   });
 });

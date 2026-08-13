@@ -34,7 +34,20 @@ export type CallerClass =
   /** A human at a terminal running `octomux ...`. Trusted. */
   | 'human'
   /** An autonomous agent, via MCP or CLI. Subject to the gate tier. */
-  | 'agent';
+  | 'agent'
+  /**
+   * A task worker's Claude Code session (as opposed to the orchestrator
+   * conductor, which is `'agent'`). Both are autonomous and both are subject
+   * to the gate tier — `authorize()` treats `'worker'` exactly like `'agent'`
+   * for tier resolution — but a worker's REACH is narrower: it is the
+   * `callers` list on each capability, not the tier, that keeps a worker off
+   * `task.create`/`task.delete`/`task.move` while still letting it read
+   * (`task.list`/`task.get`), close its own task (`task.close`), and block on
+   * a human (`human.ask`). Introduced so a worker can reach `ask_human`
+   * without widening what a worker can destroy — see
+   * spec/surface-consolidation-and-centaur.md's centaur section.
+   */
+  | 'worker';
 
 /** Gate classification. Mirrors `orchestrator/policy.ts` tiers. */
 export type PolicyTier =

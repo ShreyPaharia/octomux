@@ -124,7 +124,12 @@ export function authorize(cap: Capability, caller: CallerClass): Decision {
   if (!cap.callers.includes(caller)) {
     return { allowed: false, reason: `${cap.id} is not available to ${caller} callers` };
   }
-  return { allowed: true, tier: caller === 'agent' ? cap.tier : 'auto' };
+  // 'worker' is gated exactly like 'agent' — both are autonomous Claude Code
+  // sessions with no standing human intent behind the call. What keeps a
+  // worker off task.create/task.delete/task.move is `cap.callers` (they don't
+  // list 'worker'), not the tier collapsing here — see CallerClass's doc.
+  const isAutonomous = caller === 'agent' || caller === 'worker';
+  return { allowed: true, tier: isAutonomous ? cap.tier : 'auto' };
 }
 
 /**
