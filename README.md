@@ -135,11 +135,11 @@ devices can reach the port; the token is a second factor. For HTTPS, front it wi
 octomux keeps a clean line between the **agent backend** (done for you) and the **views**
 (where the value is). Building blocks available today:
 
-- **REST API** (~110 endpoints) over tasks, agents, diffs, reviews, chats, workspaces, skills.
-- **Two live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux.
+- **REST API** (~145 endpoints) over tasks, agents, diffs, reviews, chats, workspaces, skills.
+- **Three live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux, `/ws/orchestrator/:convId` for the orchestrator stream.
 - **A queryable SQLite schema** — tasks, agents, permission prompts, review runs, comments, learnings.
 - **A pluggable harness interface** — add a new agent backend by implementing one interface and registering it.
-- **User hook scripts** — drop executables in `~/.octomux/hooks` to fire on task-lifecycle events.
+- **User hook scripts** — drop executables in `~/.octomux/hooks/<event>.d/` (or `<repo>/.octomux/hooks/<event>.d/` for repo-local ones) to fire on task-lifecycle events.
 
 There isn't a drop-in plugin API for custom UI views yet — adding one means building against
 these blocks in the codebase. A first-class way to author and share views is the direction
