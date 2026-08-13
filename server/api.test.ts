@@ -1783,6 +1783,68 @@ describe('GET /api/tasks with permission prompts', () => {
     },
   );
 
+  it.each([
+    {
+      name: 'errored task',
+      runtime_state: 'error',
+      activity: 'idle',
+      prompt: false,
+      expected: true,
+    },
+    {
+      name: 'waiting agent',
+      runtime_state: 'running',
+      activity: 'waiting',
+      prompt: false,
+      expected: true,
+    },
+    {
+      name: 'pending prompt',
+      runtime_state: 'running',
+      activity: 'active',
+      prompt: true,
+      expected: true,
+    },
+    {
+      name: 'busy agent',
+      runtime_state: 'running',
+      activity: 'active',
+      prompt: false,
+      expected: false,
+    },
+    {
+      name: 'idle agent',
+      runtime_state: 'running',
+      activity: 'idle',
+      prompt: false,
+      expected: false,
+    },
+  ])(
+    'needs_you is $expected for a $name',
+    async ({ runtime_state, activity, prompt, expected }) => {
+      insertTask(db, { id: 't1', runtime_state: runtime_state as any });
+      insertAgent(db, {
+        id: 'a1',
+        task_id: 't1',
+        hook_activity: activity as Worker['hook_activity'],
+      });
+      if (prompt) insertPermissionPrompt(db, { id: 'pp1', task_id: 't1', agent_id: 'a1' });
+
+      const res = await request(app).get('/api/tasks?include=workers,pending_prompts').expect(200);
+      expect(res.body[0].needs_you).toBe(expected);
+    },
+  );
+
+  it('omits needs_you when its inputs are not included', async () => {
+    insertTask(db, { id: 't1', runtime_state: 'error' });
+
+    const lean = await request(app).get('/api/tasks?include=workers').expect(200);
+    expect(lean.body[0]).not.toHaveProperty('needs_you');
+
+    const full = await request(app).get('/api/tasks?include=workers,pending_prompts').expect(200);
+    expect(full.body[0].needs_you).toBe(true);
+  });
+
   it('derived_status is done when all agents are stopped', async () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' });

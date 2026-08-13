@@ -117,6 +117,11 @@ export function formatTaskResponse(
       runtime_state: task.runtime_state,
       workers: relations.workers,
     }),
+    needs_you: needsYou({
+      runtime_state: task.runtime_state,
+      workers: relations.workers,
+      pending_prompts: relations.pending_prompts,
+    }),
     user_terminals: relations.user_terminals,
     pull_requests: relations.pull_requests,
     ...(extras?.worktree_row !== undefined ? { worktree_row: extras.worktree_row } : {}),
@@ -144,6 +149,22 @@ export function derivedStatus(task: {
   if (activities.includes('active')) return 'working';
   if (activities.includes('waiting')) return 'needs_attention';
   return 'done';
+}
+
+/**
+ * Does this task want the user right now? The single definition of the rule —
+ * every surface (dashboard tab, CLI, anything later) reads `needs_you` off the
+ * task envelope rather than re-deriving it. Distinct from the inbox's
+ * `listNeedsYouTasks()`, which asks the narrower "…and hasn't been seen yet".
+ */
+export function needsYou(task: {
+  runtime_state: string;
+  workers: Array<{ status: string; hook_activity: string }>;
+  pending_prompts: unknown[];
+}): boolean {
+  if (task.runtime_state === 'error') return true;
+  if (task.pending_prompts.length > 0) return true;
+  return derivedStatus(task) === 'needs_attention';
 }
 
 /** Flat Claude launch aliases for `/api/settings` responses (dashboard reads these keys). */
