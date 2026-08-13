@@ -58,6 +58,15 @@ describe('registerCapabilityTools', () => {
     ['caller is in the callers list', ['ui', 'human', 'agent'], 'agent', true],
     ['caller is missing from the callers list', ['ui', 'human'], 'agent', false],
     ['ui excluded from an agent-only capability', ['agent'], 'ui', false],
+    // 'worker' (task sessions) is its own class, distinct from 'agent' (the
+    // conductor) — a capability must opt a worker in explicitly.
+    ['worker included on human.ask-shaped capability', ['agent', 'worker'], 'worker', true],
+    [
+      'worker excluded from an agent-only capability (e.g. task.create)',
+      ['ui', 'human', 'agent'],
+      'worker',
+      false,
+    ],
   ])('%s → registered=%s', (_label, callers, caller, expected) => {
     defineCapability(cap({ callers }));
     const server = newServer();

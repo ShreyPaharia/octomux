@@ -119,7 +119,7 @@ describe('onGatedInvoke', () => {
     });
 
     await expect(onGatedInvoke(makeCap(), 'always-ask', {})).rejects.toThrow(
-      /rejected by the human/,
+      /rejected by the session's owner/,
     );
   });
 
@@ -133,7 +133,7 @@ describe('onGatedInvoke', () => {
     );
 
     // The distinguishing property under test: this failure mode must never
-    // read like a human decision — assert on the SAME rejection, not a re-run.
+    // read like the owner's decision — assert on the SAME rejection, not a re-run.
     mockCallGateCard.mockRejectedValueOnce(new Error('ECONNREFUSED'));
     await onGatedInvoke(makeCap(), 'always-ask', {}).catch((err: Error) => {
       expect(err.message).not.toMatch(/rejected by the human/);

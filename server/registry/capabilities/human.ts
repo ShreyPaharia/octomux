@@ -14,8 +14,9 @@
  * path. It only runs when the capability gate's kill switch
  * (`OCTOMUX_CAPABILITY_GATE_ENABLED=false`) is off, in which case
  * `onGatedInvoke` returns `undefined` (bypass) and this handler is reached
- * directly — at that point there is no human to ask, so it answers honestly
- * rather than hanging or throwing.
+ * directly — at that point gating is off entirely, so there is no one to
+ * route the question to, and it answers honestly rather than hanging or
+ * throwing.
  */
 
 import { HUMAN_CAPABILITY_META, askHumanInputSchema } from '@octomux/capabilities';
@@ -34,8 +35,8 @@ async function askHumanHandler(_input: z.infer<typeof askHumanInputSchema>) {
   return {
     answer: null,
     note:
-      'human-in-the-loop gating is disabled (OCTOMUX_CAPABILITY_GATE_ENABLED=false) — ' +
-      'no human was asked',
+      'capability gating is disabled (OCTOMUX_CAPABILITY_GATE_ENABLED=false) — ' +
+      'no one was asked',
   };
 }
 

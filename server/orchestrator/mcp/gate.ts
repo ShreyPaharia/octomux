@@ -238,7 +238,7 @@ export async function onGatedInvoke(
     cardId = created.card_id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // DISTINCT from rejection/timeout below: the human was never even asked.
+    // DISTINCT from rejection/timeout below: the owner was never even asked.
     throw new Error(`gate: could not create an approval card for '${cap.id}' — ${message}`);
   }
 
@@ -248,11 +248,11 @@ export async function onGatedInvoke(
 
   if (outcome.kind === 'timeout') {
     throw new Error(
-      `gate: '${cap.id}' timed out waiting for a human decision (card ${cardId}) — denied`,
+      `gate: '${cap.id}' timed out waiting for a decision from the session's owner (card ${cardId}) — denied`,
     );
   }
   if (outcome.kind === 'rejected') {
-    throw new Error(`gate: '${cap.id}' was rejected by the human (card ${cardId})`);
+    throw new Error(`gate: '${cap.id}' was rejected by the session's owner (card ${cardId})`);
   }
 
   // approved

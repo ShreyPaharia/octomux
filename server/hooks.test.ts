@@ -18,6 +18,7 @@ import {
   upsertManagedTask,
   eventsSince,
   createConversation,
+  getCard,
 } from './repositories/orchestrator.js';
 import { advancePhaseForLabel } from './hooks.js';
 import { getArtifactSummary } from './artifact.js';
@@ -1118,4 +1119,130 @@ describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
       expect(payload.phase).toBe(label);
     },
   );
+});
+
+// ─── POST /api/hooks/gate-card ────────────────────────────────────────────
+//
+// Part B of the worker-ask-human change: a worker's MCP subprocess never has
+// OCTOMUX_CONVERSATION_ID (only the conductor does — see
+// orchestrator/mcp/write.ts's module doc), so it sends task_id instead and
+// this route must resolve the OWNING conversation via `managed_tasks`
+// (findConversationForTask) rather than requiring the caller to know its own
+// conversation. This is routing (a worker's question goes to the conductor
+// supervising it), not a lookup for which human to interrupt — see the
+// route's own doc comment in hooks.ts. The conductor's existing
+// conversation_id-direct path must keep working unchanged.
+describe('POST /api/hooks/gate-card', () => {
+  let db: Database.Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 'task-gc', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-gc',
+      task_id: 'task-gc',
+      harness_session_id: 'sess-gc',
+      hook_token: 'tok-gc',
+    } as any);
+  });
+
+  it('conductor path: conversation_id given directly still creates a card', async () => {
+    const convId = createConversation({ title: 'conductor-conv' });
+
+    const res = await request(app)
+      .post(`/api/hooks/gate-card?token=tok-gc&conversation_id=${convId}`)
+      .send({
+        capability_id: 'task.close',
+        tier: 'always-ask',
+        kind: 'action',
+        command: 'close_task',
+        args: { task_id: 'task-gc' },
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+  });
+
+  it('worker path: task_id alone resolves the conversation via managed_tasks (orchestrator-managed task)', async () => {
+    const convId = createConversation({ title: 'worker-owning-conv' });
+    upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'human.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_human',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    // The resolved conversation is the one managed_tasks points at, not one
+    // the worker had to know or supply.
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+  });
+
+  it('plain standalone task (no managed_tasks row): fails CLOSED with a clear, distinct error — never a hang, never a silent card-less 200', async () => {
+    // task-gc exists but has no managed_tasks row — not orchestrator-managed.
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'human.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_human',
+        question: 'which approach?',
+      })
+      .expect(200); // hook endpoints report failure IN the body, not via HTTP status
+
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toMatch(/no owner for this session/);
+    expect(res.body.result).toBeUndefined();
+  });
+
+  it('neither conversation_id nor task_id: fails CLOSED with a clear error', async () => {
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc')
+      .send({
+        capability_id: 'human.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_human',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toBeTruthy();
+    expect(res.body.result).toBeUndefined();
+  });
+
+  it('returns 401 when hook_token is missing or unrecognized', async () => {
+    await request(app)
+      .post('/api/hooks/gate-card?task_id=task-gc')
+      .send({
+        capability_id: 'human.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_human',
+      })
+      .expect(401);
+
+    await request(app)
+      .post('/api/hooks/gate-card?token=bad-token&task_id=task-gc')
+      .send({
+        capability_id: 'human.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_human',
+      })
+      .expect(401);
+  });
 });
