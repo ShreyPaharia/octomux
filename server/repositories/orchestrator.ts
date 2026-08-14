@@ -317,6 +317,34 @@ export function resolveCard(
     .run(status, result, id);
 }
 
+/**
+ * Check whether a card already exists for a given (task, tool_name) pair, in
+ * ANY status — a resolved card (approved/rejected/executed) still proves the
+ * relay already fired once, which is exactly what a re-fire guard needs.
+ *
+ * `action_cards` has no `task_id` column (a card belongs to a conversation,
+ * not a task directly), so this scopes by `conversation_id` (indexed, cheap)
+ * + `tool_name` (not indexed, but conversation-scoped) first, then parses each
+ * row's `input` JSON to match `task_id` exactly — a conversation can own
+ * several managed tasks, so conversation_id + tool_name alone isn't selective
+ * enough. Cost: one scan + JSON.parse per card this conversation has ever
+ * created with this tool_name — bounded by "number of managed tasks this
+ * conductor has ever relayed a plan for", i.e. small in practice.
+ */
+export function hasCardForTask(conversationId: string, taskId: string, toolName: string): boolean {
+  const rows = getDb()
+    .prepare(`SELECT input FROM action_cards WHERE conversation_id = ? AND tool_name = ?`)
+    .all(conversationId, toolName) as Array<{ input: string }>;
+  return rows.some((row) => {
+    try {
+      const parsed = JSON.parse(row.input) as { task_id?: unknown };
+      return parsed.task_id === taskId;
+    } catch {
+      return false;
+    }
+  });
+}
+
 // ─── managed_tasks ────────────────────────────────────────────────────────────
 
 export interface UpsertManagedTaskInput {
@@ -435,6 +463,32 @@ export function eventsSince(sinceSeq: number): StoredEvent[] {
   return getDb()
     .prepare(`SELECT * FROM events WHERE seq > ? ORDER BY seq ASC`)
     .all(sinceSeq) as StoredEvent[];
+}
+
+/**
+ * Check whether a `task:phase_complete` event carrying this phase LABEL
+ * (payload.phase — 'spec'/'plan'/'implement', not a managed_tasks.phase
+ * column value) has already been durably recorded for this task.
+ *
+ * Unlike `managed_tasks.phase` — a mutable "current stage" column that a
+ * later change may delete — `events` is an append-only log: once
+ * `advancePhaseForLabel` broadcasts a label, the row is permanent. So "an
+ * event for this label exists" is exact, durable proof the relay already ran
+ * once, independent of whatever the task's current stage says. Scoped by the
+ * `idx_events_task_id` index, so this is a small per-task scan, not a
+ * table scan.
+ */
+export function hasPhaseCompleteEvent(taskId: string, label: string): boolean {
+  const rows = getDb()
+    .prepare(`SELECT payload FROM events WHERE task_id = ? AND type = 'task:phase_complete'`)
+    .all(taskId) as Array<{ payload: string }>;
+  return rows.some((row) => {
+    try {
+      return (JSON.parse(row.payload) as { phase?: unknown }).phase === label;
+    } catch {
+      return false;
+    }
+  });
 }
 
 // ─── orchestrator_action_results (idempotency cache, SHR-163) ──────────────────
