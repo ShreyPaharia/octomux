@@ -267,6 +267,9 @@ function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
       delete full.derived_status;
     }
     if (!included.has('pending_prompts')) delete full.pending_prompts;
+    // needs_you reads both workers and pending_prompts — drop it unless both are
+    // present, or it silently under-reports rather than being absent.
+    if (!included.has('workers') || !included.has('pending_prompts')) delete full.needs_you;
     if (!included.has('user_terminals')) delete full.user_terminals;
     delete full.pull_requests;
     return full;
@@ -333,6 +336,8 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
     delete full.derived_status;
   }
   if (!included.has('pending_prompts')) delete full.pending_prompts;
+  // needs_you reads both workers and pending_prompts — see listTasksHandler.
+  if (!included.has('workers') || !included.has('pending_prompts')) delete full.needs_you;
   if (!included.has('user_terminals')) delete full.user_terminals;
   if (!included.has('pull_requests')) delete full.pull_requests;
   if (!included.has('worktree')) delete full.worktree_row;

@@ -16,13 +16,6 @@ const RUNNING_STATUSES = ['setting_up', 'running'];
 
 const STATUS_TABS: readonly StatusTab[] = ['all', 'running', 'needs_you', 'closed'];
 
-function isNeedsYou(t: Task): boolean {
-  if (t.runtime_state === 'error') return true;
-  if ((t.pending_prompts?.length ?? 0) > 0) return true;
-  if (t.derived_status === 'needs_attention') return true;
-  return false;
-}
-
 function readStatusTab(): StatusTab {
   const stored = localStorage.getItem(STATUS_FILTER_KEY);
   return stored && (STATUS_TABS as readonly string[]).includes(stored)
@@ -46,7 +39,7 @@ export function useTaskFilters(tasks: Task[]) {
     return {
       all: repoFiltered.length,
       running: repoFiltered.filter((t) => RUNNING_STATUSES.includes(t.runtime_state)).length,
-      needs_you: repoFiltered.filter(isNeedsYou).length,
+      needs_you: repoFiltered.filter((t) => t.needs_you === true).length,
       closed: repoFiltered.filter((t) => t.runtime_state === 'idle').length,
     };
   }, [tasks, filters.repo]);
@@ -59,7 +52,7 @@ export function useTaskFilters(tasks: Task[]) {
       } else if (filters.status === 'running') {
         statusMatch = RUNNING_STATUSES.includes(t.runtime_state);
       } else if (filters.status === 'needs_you') {
-        statusMatch = isNeedsYou(t);
+        statusMatch = t.needs_you === true;
       } else {
         statusMatch = t.runtime_state === 'idle';
       }
