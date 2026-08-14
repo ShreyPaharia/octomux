@@ -50,7 +50,7 @@ export interface RegisterCapabilityToolsOptions {
    *                        write-approval case — task.close et al. — where
    *                        the human's job was only to say yes).
    *  - resolves any other value → that value IS the tool result; `cap.handler`
-   *                        is never called (the `ask_human` case — the
+   *                        is never called (the `ask_owner` case — the
    *                        human's ANSWER is the result, not a side effect
    *                        `cap.handler` would separately produce).
    */
@@ -134,7 +134,7 @@ function registerOne(
         if (invocationTier !== 'auto' && opts.onGatedInvoke) {
           const gated = await opts.onGatedInvoke(cap, invocationTier, input);
           // undefined → proceed to the real handler; anything else IS the
-          // result (ask_human's answer) and short-circuits cap.handler — see
+          // result (ask_owner's answer) and short-circuits cap.handler — see
           // the onGatedInvoke doc above.
           result = gated !== undefined ? gated : await cap.handler(input, ctx);
         } else {

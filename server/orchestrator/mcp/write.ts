@@ -132,7 +132,7 @@ export async function callOrchestratorAction(
 // ─── Gate card RPC (capability registry ask/always-ask gate) ────────────────
 
 export interface CreateGateCardInput {
-  /** Capability id, e.g. 'task.close' or 'human.ask'. */
+  /** Capability id, e.g. 'task.close' or 'owner.ask'. */
   capabilityId: string;
   tier: 'ask' | 'always-ask';
   /** 'action' → approve/reject an implied write. 'question' → free-text answer. */

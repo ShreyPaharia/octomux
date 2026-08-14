@@ -43,7 +43,7 @@ export type CallerClass =
    * `callers` list on each capability, not the tier, that keeps a worker off
    * `task.create`/`task.delete`/`task.move` while still letting it read
    * (`task.list`/`task.get`), close its own task (`task.close`), and block on
-   * a human (`human.ask`). Introduced so a worker can reach `ask_human`
+   * a human (`owner.ask`). Introduced so a worker can reach `ask_owner`
    * without widening what a worker can destroy — see
    * spec/surface-consolidation-and-centaur.md's centaur section.
    */

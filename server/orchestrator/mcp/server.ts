@@ -281,11 +281,11 @@ export function createOctomuxMcpServer(): McpServer {
   );
 
   // ── Capability-registry tools (list_tasks/get_task/create_task/set_task_status/
-  //    close_task/delete_task/ask_human) ─────────────────────────────────────
+  //    close_task/delete_task/ask_owner) ─────────────────────────────────────
   // Registered for BOTH an orchestrator-started (conductor) session and a
   // worker session, but under different caller classes — that is what keeps a
   // worker off task.create/task.move/task.delete while still letting it reach
-  // ask_human (the whole point of this call site's rework).
+  // ask_owner (the whole point of this call site's rework).
   //
   // Caller class: 'agent' for the conductor, 'worker' for a task session.
   // OCTOMUX_TASK_ID is the same signal orchestratorWriteEnabled() /
@@ -294,12 +294,12 @@ export function createOctomuxMcpServer(): McpServer {
   // the split exists: both are autonomous — `authorize()` gates 'worker'
   // exactly like 'agent' — but they have different REACH, and `callers` on
   // each capability (not a tool-name allowlist) is what encodes that reach.
-  // task.list/task.get/task.close/human.ask list 'worker'; task.create/
+  // task.list/task.get/task.close/owner.ask list 'worker'; task.create/
   // task.start/task.move/task.delete do not, so `authorize()` denies those to
   // a worker outright — not registered at all, never registered-then-rejected.
   //
   // No `tiers` filter for the worker branch: `callers` already does the
-  // restricting, and a tier filter would exclude human.ask (always-ask) right
+  // restricting, and a tier filter would exclude owner.ask (always-ask) right
   // alongside the destructive tools it exists to keep out — for a worker, tier
   // and "who may even attempt this" are now orthogonal questions. The
   // conductor branch keeps its tier filter unchanged: a bare MCP session with
@@ -310,11 +310,11 @@ export function createOctomuxMcpServer(): McpServer {
   // and task.close/delete (always-ask) actually block on a human instead of
   // running immediately like the old COMMANDS write loop did (see actions.ts's
   // docblock) — see server/orchestrator/mcp/gate.ts's module doc for the
-  // fail-closed contract. `human.ask` (ask_human) is gated the same way; its
+  // fail-closed contract. `owner.ask` (ask_owner) is gated the same way; its
   // handler never runs for real (onGatedInvoke short-circuits with the human's
   // answer) unless the kill switch is off. This is also what makes a worker's
-  // ask_human call actually BLOCK rather than fall through to the no-op
-  // handler in registry/capabilities/human.ts.
+  // ask_owner call actually BLOCK rather than fall through to the no-op
+  // handler in registry/capabilities/owner.ts.
   const isWorkerSession = Boolean(process.env.OCTOMUX_TASK_ID);
   registerCapabilityMcpTools(server, isWorkerSession ? 'worker' : 'agent', {
     tiers: isWorkerSession || orchestratorWriteEnabled() ? undefined : ['auto'],

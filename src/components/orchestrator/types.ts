@@ -53,7 +53,7 @@ export interface ToolCallItem {
 }
 
 /**
- * A question card for the `ask_human` capability — the agent is blocked
+ * A question card for the `ask_owner` capability — the agent is blocked
  * waiting for a free-text answer, not a write to approve/reject. Rendered by
  * QuestionCard; sibling to ActionCard rather than a variant of it (no arg
  * fields, no always-allow toggle — always-ask is never promotable).

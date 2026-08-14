@@ -42,7 +42,7 @@ export interface OctomuxSettings {
   /**
    * KILL SWITCH for the capability registry's ask/always-ask gate
    * (server/orchestrator/mcp/gate.ts). When false, every `ask`/`always-ask`
-   * MCP capability call (task.create/start/move/close/delete, ask_human) runs
+   * MCP capability call (task.create/start/move/close/delete, ask_owner) runs
    * immediately with no card and no human decision — same as before this gate
    * existed. Overridden by OCTOMUX_CAPABILITY_GATE_ENABLED. Default true
    * (gating ON) when absent.

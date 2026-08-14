@@ -17,7 +17,7 @@
  * FAIL CLOSED — the whole point of this module. Three distinct outcomes, and
  * `cap.handler` runs in exactly one of them:
  *   1. card created, human approves  → resolves (undefined, or {answer} for
- *      ask_human) → the caller (registerOne in projections/mcp.ts) proceeds.
+ *      ask_owner) → the caller (registerOne in projections/mcp.ts) proceeds.
  *   2. card created, human rejects, OR the wait times out → THROWS. Rejection
  *      and timeout get distinct messages (never conflated — a caller reading
  *      the error can tell "no" from "nobody answered").
@@ -100,7 +100,7 @@ function isPromoted(capabilityId: string): boolean {
 /**
  * Resolve a task id from a capability's input, if the shape has one
  * (task.start/move use `id`, task.close uses `task_id`; task.create and
- * human.ask have neither). Best-effort only — used purely to flip a worker's
+ * owner.ask have neither). Best-effort only — used purely to flip a worker's
  * hook_activity so the monitor grid shows "blocked on human"; never affects
  * the gate decision.
  */
@@ -219,7 +219,7 @@ export async function onGatedInvoke(
     return undefined;
   }
 
-  const isQuestion = cap.mcp === 'ask_human';
+  const isQuestion = cap.mcp === 'ask_owner';
   const questionText = isQuestion
     ? (input as { question?: string } | undefined)?.question
     : undefined;

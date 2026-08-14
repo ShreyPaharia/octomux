@@ -1,12 +1,12 @@
 /**
- * server/registry/capabilities/human.ts
+ * server/registry/capabilities/owner.ts
  *
- * Handler for `human.ask` (MCP tool `ask_human`). Pairs
- * `HUMAN_CAPABILITY_META` (packages/capabilities/src/capabilities/ask.ts)
+ * Handler for `owner.ask` (MCP tool `ask_owner`). Pairs
+ * `OWNER_CAPABILITY_META` (packages/capabilities/src/capabilities/ask.ts)
  * with its server-only handler, mirroring `registerTaskCapabilities` /
  * `registerLearningCapabilities`.
  *
- * `human.ask` is `always-ask` tier, so on every real call
+ * `owner.ask` is `always-ask` tier, so on every real call
  * `registerCapabilityTools` (server/registry/projections/mcp.ts) runs
  * `onGatedInvoke` (server/orchestrator/mcp/gate.ts) BEFORE this handler —
  * and `onGatedInvoke` resolves with `{ answer }` for this capability, which
@@ -19,18 +19,18 @@
  * throwing.
  */
 
-import { HUMAN_CAPABILITY_META, askHumanInputSchema } from '@octomux/capabilities';
+import { OWNER_CAPABILITY_META, askOwnerInputSchema } from '@octomux/capabilities';
 import type { CapabilityMeta } from '@octomux/capabilities';
 import { z } from 'zod';
 import { defineCapability } from '../index.js';
 
 function findMeta<TInput>(id: string, _schema: z.ZodType<TInput>): CapabilityMeta<TInput> {
-  const meta = HUMAN_CAPABILITY_META.find((m) => m.id === id);
+  const meta = OWNER_CAPABILITY_META.find((m) => m.id === id);
   if (!meta) throw new Error(`registry: missing capability metadata for '${id}'`);
   return meta as CapabilityMeta<TInput>;
 }
 
-async function askHumanHandler(_input: z.infer<typeof askHumanInputSchema>) {
+async function askOwnerHandler(_input: z.infer<typeof askOwnerInputSchema>) {
   // Reached only when the capability gate kill switch is off — see module doc.
   return {
     answer: null,
@@ -40,9 +40,9 @@ async function askHumanHandler(_input: z.infer<typeof askHumanInputSchema>) {
   };
 }
 
-export function registerHumanCapabilities(): void {
+export function registerOwnerCapabilities(): void {
   defineCapability({
-    ...findMeta('human.ask', askHumanInputSchema),
-    handler: askHumanHandler,
+    ...findMeta('owner.ask', askOwnerInputSchema),
+    handler: askOwnerHandler,
   });
 }

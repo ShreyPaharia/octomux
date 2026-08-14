@@ -327,7 +327,7 @@ describe('OrchestratorPage', () => {
     expect(screen.getByText('First message')).toBeInTheDocument();
   });
 
-  // ── Capability-gate cards (task.close/create/... + ask_human) ────────────
+  // ── Capability-gate cards (task.close/create/... + ask_owner) ────────────
 
   it('renders a question card for a kind:"question" card event and forwards the answer as respond_text', async () => {
     renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
@@ -341,7 +341,7 @@ describe('OrchestratorPage', () => {
       lastWs?.simulateMessage({
         type: 'card',
         id: 'card-q-1',
-        command: 'ask_human',
+        command: 'ask_owner',
         args: {},
         tier: 'always-ask',
         kind: 'question',

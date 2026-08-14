@@ -154,11 +154,11 @@ describe('createOctomuxMcpServer — tool registration', () => {
     // prompts literally instruct it to run `octomux close-task <id>`. This is
     // the same power by a second route, not a new one.
     expect(tools).toContain('close_task');
-    // NEW: a worker can now block on a human via ask_human (always-ask tier,
-    // but included in human.ask's `callers` — see packages/capabilities/src/
+    // NEW: a worker can now block on a human via ask_owner (always-ask tier,
+    // but included in owner.ask's `callers` — see packages/capabilities/src/
     // capabilities/ask.ts). This is the capability this test file exists to
     // guard the boundary of.
-    expect(tools).toContain('ask_human');
+    expect(tools).toContain('ask_owner');
     expect(tools).not.toContain('create_task');
     expect(tools).not.toContain('send_message');
     expect(tools).not.toContain('set_task_status');
@@ -277,10 +277,10 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
   });
 });
 
-// ─── Worker can ask_human but cannot create/delete/move a task ──────────────
+// ─── Worker can ask_owner but cannot create/delete/move a task ──────────────
 //
 // The property the whole change exists to prove: a worker session (caller
-// class 'worker', not 'agent') gets ask_human — including the SAME
+// class 'worker', not 'agent') gets ask_owner — including the SAME
 // onGatedInvoke blocking behaviour the conductor's write tools get — while
 // still being denied create_task/delete_task/set_task_status outright. Denied
 // means "never registered as a tool at all" (registerCapabilityTools skips
@@ -288,7 +288,7 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
 // this asserts directly by checking the tool is undefined, not merely absent
 // from a name list (belt-and-suspenders against the earlier list-based checks
 // being weakened independently of this one).
-describe('createOctomuxMcpServer — worker ask_human vs. destructive tools', () => {
+describe('createOctomuxMcpServer — worker ask_owner vs. destructive tools', () => {
   const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -314,7 +314,7 @@ describe('createOctomuxMcpServer — worker ask_human vs. destructive tools', ()
     vi.unstubAllGlobals();
   });
 
-  it('a worker session gets ask_human, and it hits onGatedInvoke (blocks) instead of the no-op handler', async () => {
+  it('a worker session gets ask_owner, and it hits onGatedInvoke (blocks) instead of the no-op handler', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
@@ -325,7 +325,7 @@ describe('createOctomuxMcpServer — worker ask_human vs. destructive tools', ()
     const priv = server as unknown as {
       _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
     };
-    const tool = priv._registeredTools['ask_human'];
+    const tool = priv._registeredTools['ask_owner'];
     expect(tool).toBeDefined();
 
     const result = (await tool.handler({ question: 'which approach?' }, {})) as {
@@ -334,7 +334,7 @@ describe('createOctomuxMcpServer — worker ask_human vs. destructive tools', ()
     };
 
     // Card creation is attempted (proving the gate ran, not the no-op
-    // registry/capabilities/human.ts handler, which would have returned
+    // registry/capabilities/owner.ts handler, which would have returned
     // {answer: null, note: '...gating is disabled...'} instead of an isError).
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/could not create an approval card/);

@@ -1,7 +1,7 @@
 /**
  * src/components/orchestrator/QuestionCard.tsx
  *
- * Question-shaped card for the `ask_human` capability — the agent is blocked
+ * Question-shaped card for the `ask_owner` capability — the agent is blocked
  * on a free-text ANSWER, not approve/reject of an implied write. Sibling to
  * ActionCard (src/components/orchestrator/ActionCard.tsx), not a variant of
  * it: no arg fields, no "always allow" toggle (always-ask is never

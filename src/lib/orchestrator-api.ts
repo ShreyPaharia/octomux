@@ -67,7 +67,7 @@ export type WsIncomingEvent =
       args: Record<string, unknown>;
       /** Gate tier — drives the alwaysAsk badge / hides "always allow". */
       tier?: 'ask' | 'always-ask';
-      /** 'action' (default) → approve/reject. 'question' → free-text answer (ask_human). */
+      /** 'action' (default) → approve/reject. 'question' → free-text answer (ask_owner). */
       kind?: 'action' | 'question';
       /** The question text, present only when kind === 'question'. */
       question?: string;
