@@ -74,9 +74,8 @@ const {
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
 const { sendMessageToAgent } = await import('./tmux-input.js');
-const { closeTask, deleteTask, softDeleteTask, startTask, resumeTask, addAgent } = await import(
-  './task-engine/index.js'
-);
+const { closeTask, deleteTask, softDeleteTask, startTask, resumeTask, addAgent } =
+  await import('./task-engine/index.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');

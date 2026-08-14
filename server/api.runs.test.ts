@@ -208,15 +208,13 @@ describe('runs API — loop/loop-group surface', () => {
 
   describe('POST /api/runs — workflowKind: loop-group', () => {
     it('creates n candidates sharing one group, and it appears in GET /api/runs (adoption fix)', async () => {
-      const res = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 3,
-        });
+      const res = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 3,
+      });
 
       expect(res.status).toBe(201);
       expect(res.body.workflow_kind).toBe('loop-group');
@@ -241,15 +239,13 @@ describe('runs API — loop/loop-group surface', () => {
     });
 
     it('rejects n outside [2, 8]', async () => {
-      const res = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 1,
-        });
+      const res = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 1,
+      });
       expect(res.status).toBe(400);
     });
 
@@ -276,15 +272,13 @@ describe('runs API — loop/loop-group surface', () => {
 
   describe('POST /api/runs — workflowKind: judge', () => {
     it('409s while any candidate is still running', async () => {
-      const createRes = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 2,
-        });
+      const createRes = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 2,
+      });
 
       const res = await request(app)
         .post('/api/runs')
@@ -293,15 +287,13 @@ describe('runs API — loop/loop-group surface', () => {
     });
 
     it('202s and flips judge_status to running once all candidates are terminal', async () => {
-      const createRes = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 2,
-        });
+      const createRes = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 2,
+      });
       db.prepare(
         `UPDATE loop_runs SET status = 'done' WHERE group_id IN (SELECT id FROM loop_groups WHERE run_id = ?)`,
       ).run(createRes.body.id);
@@ -367,15 +359,13 @@ describe('runs API — loop/loop-group surface', () => {
     });
 
     it('returns a loop-group run with its candidates + judge verdict nested under `loopGroup`', async () => {
-      const createRes = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 2,
-        });
+      const createRes = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 2,
+      });
 
       const res = await request(app).get(`/api/runs/${createRes.body.id}`);
 
@@ -430,15 +420,13 @@ describe('runs API — loop/loop-group surface', () => {
     });
 
     it('stops every running candidate of a loop-group run', async () => {
-      const createRes = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 2,
-        });
+      const createRes = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 2,
+      });
 
       const res = await request(app).post(`/api/runs/${createRes.body.id}/stop`);
 
@@ -525,15 +513,13 @@ describe('runs API — loop/loop-group surface', () => {
     });
 
     it('records exactly one judge verdict for a loop-group run and finishes it', async () => {
-      const createRes = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 2,
-        });
+      const createRes = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 2,
+      });
       const [runA, runB] = createRes.body.loopGroup.candidates;
       db.prepare(`UPDATE loop_runs SET status = 'done' WHERE id IN (?, ?)`).run(runA.id, runB.id);
 
@@ -558,15 +544,13 @@ describe('runs API — loop/loop-group surface', () => {
     });
 
     it('rejects a winnerLoopRunId that is not a member of the group with 400', async () => {
-      const createRes = await request(app)
-        .post('/api/runs')
-        .send({
-          workflowKind: 'loop-group',
-          repoPath: '/repo',
-          baseBranch: 'main',
-          spec: VALID_GROUP_SPEC,
-          n: 2,
-        });
+      const createRes = await request(app).post('/api/runs').send({
+        workflowKind: 'loop-group',
+        repoPath: '/repo',
+        baseBranch: 'main',
+        spec: VALID_GROUP_SPEC,
+        n: 2,
+      });
       const agentRow = db.prepare('SELECT hook_token FROM workers LIMIT 1').get() as {
         hook_token: string;
       };
