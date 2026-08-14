@@ -281,6 +281,58 @@ describe('registerCapabilityCommands — cliAliases', () => {
   });
 });
 
+describe('registerCapabilityCommands — cliEnvDefaults', () => {
+  // Lets an agent run `octomux task rename --title "…"` inside its own task:
+  // the id it doesn't know comes from the env octomux launched it with.
+  const renameCap = (over: Partial<Capability> = {}) =>
+    cap({
+      id: 'task.rename',
+      cli: 'task rename',
+      http: { method: 'post', path: '/api/tasks/:id/rename' },
+      cliEnvDefaults: { id: 'OCTOMUX_TASK_ID' },
+      input: z.object({
+        id: z.string().describe('The octomux task id'),
+        title: z.string().describe('New task title'),
+      }),
+      ...over,
+    } as Partial<Capability>);
+
+  afterEach(() => {
+    delete process.env.OCTOMUX_TASK_ID;
+  });
+
+  it('drops the required flag to optional and defaults it when the env var is set', () => {
+    process.env.OCTOMUX_TASK_ID = 'abc123';
+    defineCapability(renameCap());
+    const program = buildProgram();
+    registerCapabilityCommands(program);
+
+    const leaf = findCommand(program, 'task', 'rename')!;
+    const idOpt = leaf.options.find((o) => o.long === '--id')!;
+    expect(idOpt.mandatory).toBe(false);
+    expect(idOpt.defaultValue).toBe('abc123');
+  });
+
+  it('keeps the flag required when the env var is absent', () => {
+    defineCapability(renameCap());
+    const program = buildProgram();
+    registerCapabilityCommands(program);
+
+    const leaf = findCommand(program, 'task', 'rename')!;
+    expect(leaf.options.find((o) => o.long === '--id')!.mandatory).toBe(true);
+  });
+
+  it('leaves fields not listed in cliEnvDefaults alone', () => {
+    process.env.OCTOMUX_TASK_ID = 'abc123';
+    defineCapability(renameCap());
+    const program = buildProgram();
+    registerCapabilityCommands(program);
+
+    const leaf = findCommand(program, 'task', 'rename')!;
+    expect(leaf.options.find((o) => o.long === '--title')!.mandatory).toBe(true);
+  });
+});
+
 describe('registerCapabilityCommands — sends parsed options to the server', () => {
   it('POSTs remaining fields as a JSON body to cap.http.path', async () => {
     defineCapability(cap());

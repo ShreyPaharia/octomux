@@ -2,12 +2,12 @@
  * server/registry/capabilities/task.ts
  *
  * Defines the `task` noun's capabilities: list, get, create, start, move,
- * close, delete. Registered by `registerTaskCapabilities()`, which
+ * rename, close, delete. Registered by `registerTaskCapabilities()`, which
  * `server/registry/mount.ts` dynamically imports — this module does NOT
  * self-register at module load (see the `TODO(registry)` in mount.ts).
  *
  * METADATA (id, summary, http, cli, cliAliases, mcp, tier, callers, input) for
- * all seven capabilities lives in `@octomux/capabilities`'s
+ * all eight capabilities lives in `@octomux/capabilities`'s
  * `TASK_CAPABILITY_META` — pure zod + plain types, importable by the CLI
  * without dragging in the server. This module pairs each metadata entry with
  * its handler (below), which needs `db`, `task-engine`, and friends and so
@@ -110,6 +110,7 @@ import {
   taskCreateInputSchema,
   taskStartInputSchema,
   taskMoveInputSchema,
+  taskRenameInputSchema,
   taskDeleteInputSchema,
   closeTaskInputSchema,
 } from '@octomux/capabilities';
@@ -140,6 +141,7 @@ import {
   getWorktree,
   hardDeleteTask,
   countAgentsForTask,
+  updateTaskFields,
 } from '../../repositories/index.js';
 import { getManagedTask } from '../../repositories/orchestrator.js';
 import { getArtifactSummary } from '../../artifact.js';
@@ -542,6 +544,43 @@ async function moveTaskHandler(input: z.infer<typeof taskMoveInputSchema>) {
   return updated;
 }
 
+// ─── task.rename ──────────────────────────────────────────────────────────────
+
+/** Title cap — matches resolveTaskTitleAndDescription's fast path (routes/_shared.ts). */
+const TITLE_MAX = 80;
+
+/**
+ * Deliberately NOT routed through `applyDraftUpdates` (routes/_shared.ts): that
+ * helper gates on `runtime_state === 'idle'` because it also carries repo_path /
+ * branch / worktree_path, which must stay frozen once a task is running. A title
+ * is safe to change at any point in the lifecycle, and renaming *while running*
+ * is the entire point — the agent only knows a good title after it has read the
+ * code. Same shape as `task.move`: a dedicated capability for the one mutation
+ * that stays legal after setup.
+ */
+async function renameTaskHandler(input: z.infer<typeof taskRenameInputSchema>) {
+  const task = getTaskRepo(input.id);
+  if (!task) throw notFound('Task not found');
+
+  const title = input.title.trim();
+  if (!title) throw badRequest('title cannot be empty');
+
+  const patch: Record<string, unknown> = { title: title.slice(0, TITLE_MAX) };
+
+  // Omitted description leaves the existing one alone; an explicitly blank one
+  // is a caller error, not a request to wipe it.
+  if (input.description !== undefined) {
+    const description = input.description.trim();
+    if (!description) throw badRequest('description cannot be empty');
+    patch.description = description;
+  }
+
+  updateTaskFields(task.id, patch);
+  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
+
+  return fetchTaskBundle(task.id);
+}
+
 // ─── task.close ───────────────────────────────────────────────────────────────
 //
 // No http/cli projection — see module doc point 1. Reuses closeTaskInputSchema
@@ -626,6 +665,11 @@ export function registerTaskCapabilities(): void {
   defineCapability({
     ...findMeta('task.move', taskMoveInputSchema),
     handler: moveTaskHandler,
+  });
+
+  defineCapability({
+    ...findMeta('task.rename', taskRenameInputSchema),
+    handler: renameTaskHandler,
   });
 
   defineCapability({

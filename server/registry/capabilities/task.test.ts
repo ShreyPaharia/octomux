@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { getCapability, resetRegistry } from '../index.js';
 import type { CapabilityContext } from '../types.js';
-import { createTestDb, insertTestTask, insertAgent } from '../../test-helpers.js';
+import { createTestDb, insertTestTask, insertAgent, getTask } from '../../test-helpers.js';
 
 // ─── Mocks: every side-effecting boundary the handlers cross ──────────────────
 //
@@ -59,7 +59,7 @@ afterEach(() => {
 // ─── Registration + shape ──────────────────────────────────────────────────────
 
 describe('registerTaskCapabilities', () => {
-  it('registers all seven capabilities without throwing', () => {
+  it('registers all eight capabilities without throwing', () => {
     resetRegistry();
     expect(() => registerTaskCapabilities()).not.toThrow();
     for (const id of [
@@ -68,6 +68,7 @@ describe('registerTaskCapabilities', () => {
       'task.create',
       'task.start',
       'task.move',
+      'task.rename',
       'task.close',
       'task.delete',
     ]) {
@@ -81,6 +82,7 @@ describe('registerTaskCapabilities', () => {
     ['task.create', 'post', '/api/tasks', 'task create', 'create_task', 'ask'],
     ['task.start', 'post', '/api/tasks/:id/start', 'task start', undefined, 'ask'],
     ['task.move', 'post', '/api/tasks/:id/move', 'task move', 'set_task_status', 'ask'],
+    ['task.rename', 'post', '/api/tasks/:id/rename', 'task rename', 'rename_task', 'auto'],
     ['task.delete', 'delete', '/api/tasks/:id', 'task delete', 'delete_task', 'ask'],
   ] as const)('%s has the expected http/cli/mcp/tier shape', (id, method, path, cli, mcp, tier) => {
     const cap = getCapability(id)!;
@@ -100,6 +102,7 @@ describe('registerTaskCapabilities', () => {
     ['task.get', undefined],
     ['task.start', undefined],
     ['task.move', undefined],
+    ['task.rename', undefined],
   ] as const)('%s declares success status %s', (id, status) => {
     expect(getCapability(id)!.http?.status).toBe(status);
   });
@@ -405,6 +408,73 @@ describe('task.move', () => {
     await expect(cap.handler({ id: 't1', workflow_status: 'human_review' }, ctx)).rejects.toThrow(
       /note is required/,
     );
+  });
+
+  // ─── task.rename ───────────────────────────────────────────────────────────
+
+  describe('task.rename', () => {
+    const rename = (input: Record<string, unknown>) =>
+      getCapability('task.rename')!.handler(input, ctx);
+
+    // The reason this capability exists at all: applyDraftUpdates (the PATCH
+    // path) refuses anything where runtime_state !== 'idle', so a running agent
+    // could never rename the task it had just figured out.
+    it.each(['running', 'setting_up', 'looping', 'error', 'idle'] as const)(
+      'renames a task in runtime_state=%s',
+      async (runtime_state) => {
+        insertTestTask({ id: 't1', runtime_state, title: 'Investigate the flaky thing that' });
+        await rename({ id: 't1', title: 'Fix auth token refresh race' });
+        expect(getTask(db, 't1')!.title).toBe('Fix auth token refresh race');
+      },
+    );
+
+    it.each([
+      ['empty', ''],
+      ['whitespace-only', '   \n\t '],
+    ])('rejects a %s title', async (_label, title) => {
+      insertTestTask({ id: 't1', title: 'Original' });
+      await expect(rename({ id: 't1', title })).rejects.toThrow(/title cannot be empty/);
+      expect(getTask(db, 't1')!.title).toBe('Original');
+    });
+
+    it('404s on an unknown id', async () => {
+      await expect(rename({ id: 'nope', title: 'x' })).rejects.toThrow(/Task not found/);
+    });
+
+    it('trims and truncates at 80 chars, matching the create-time title cap', async () => {
+      insertTestTask({ id: 't1' });
+      await rename({ id: 't1', title: `  ${'a'.repeat(120)}  ` });
+      expect(getTask(db, 't1')!.title).toBe('a'.repeat(80));
+    });
+
+    it('leaves the existing description alone when description is omitted', async () => {
+      insertTestTask({ id: 't1', description: 'Keep me' });
+      await rename({ id: 't1', title: 'New title' });
+      expect(getTask(db, 't1')!.description).toBe('Keep me');
+    });
+
+    it('updates the description when one is given', async () => {
+      insertTestTask({ id: 't1', description: 'Old' });
+      await rename({ id: 't1', title: 'New title', description: '  New summary  ' });
+      expect(getTask(db, 't1')!.description).toBe('New summary');
+    });
+
+    it('rejects a blank description rather than wiping the existing one', async () => {
+      insertTestTask({ id: 't1', description: 'Keep me' });
+      await expect(rename({ id: 't1', title: 'New title', description: '  ' })).rejects.toThrow(
+        /description cannot be empty/,
+      );
+      expect(getTask(db, 't1')!.description).toBe('Keep me');
+    });
+
+    it('broadcasts task:updated so open boards repaint', async () => {
+      insertTestTask({ id: 't1' });
+      await rename({ id: 't1', title: 'New title' });
+      expect(broadcast).toHaveBeenCalledWith({
+        type: 'task:updated',
+        payload: { taskId: 't1' },
+      });
+    });
   });
 
   it('auto-resumes via resumeTask when moving an idle task with a worktree to in_progress', async () => {

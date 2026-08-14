@@ -189,7 +189,7 @@ describe('buildAgentStartupCommand', () => {
     expect(cmd).toContain('-- "$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
-      'Do the thing',
+      expect.stringContaining('Do the thing'),
       { mode: 0o600 },
     );
   });
@@ -271,7 +271,7 @@ describe('startTask', () => {
     expect(findLaunchCmd()).toContain('$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
-      'Do the thing',
+      expect.stringContaining('Do the thing'),
       { mode: 0o600 },
     );
   });
@@ -1160,7 +1160,7 @@ describe('addAgent', () => {
     expect(findAddAgentLaunchCmd()).toContain('$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
-      'Write tests',
+      expect.stringContaining('Write tests'),
       { mode: 0o600 },
     );
   });

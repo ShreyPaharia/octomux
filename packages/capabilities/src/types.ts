@@ -133,6 +133,20 @@ export interface CapabilityMeta<TInput = unknown> {
   cliAliases?: string[];
 
   /**
+   * Input field → env var supplying the CLI flag's default when it is omitted.
+   * A field defaulted this way stops being a `requiredOption` whenever the env
+   * var is set, so the flag becomes optional exactly where the answer is known.
+   *
+   * Opt-in per capability, never global. Every agent launched into a task has
+   * `OCTOMUX_TASK_ID` in its env (task-engine/launch.ts), which is what lets
+   * `octomux task rename --title "…"` target the task the agent is already
+   * running in — the same trick `octomux learn` / `recall` / `emit` use. It is
+   * deliberately NOT applied to `task.delete` or `task.close`: guessing which
+   * task a destructive verb meant is how you delete the wrong one.
+   */
+  cliEnvDefaults?: Record<string, string>;
+
+  /**
    * MCP tool name, e.g. 'create_task'. Omit → not an MCP tool.
    * The narrowest projection: every tool costs context on every agent turn, so
    * this is set only where an agent genuinely needs it.

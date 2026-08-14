@@ -2,7 +2,7 @@
  * packages/capabilities/src/capabilities/task.ts
  *
  * METADATA for the `task` noun's capabilities: list, get, create, start, move,
- * close, delete. Pure zod + plain types — no server internals, no handlers.
+ * rename, close, delete. Pure zod + plain types — no server internals, no handlers.
  * `server/registry/capabilities/task.ts` pairs each entry here with its
  * (server-only) handler via `defineCapability`, so the CLI can build its
  * command tree from `TASK_CAPABILITY_META` without importing the server.
@@ -131,6 +131,17 @@ export const taskMoveInputSchema = z.object({
     ),
 });
 
+// ─── task.rename ────────────────────────────────────────────────────────────
+
+export const taskRenameInputSchema = z.object({
+  id: z.string().describe('The octomux task id'),
+  title: z.string().describe('New task title (trimmed; truncated at 80 chars)'),
+  description: z
+    .string()
+    .optional()
+    .describe('New task description (trimmed). Omit to leave the existing description unchanged.'),
+});
+
 // ─── task.delete ──────────────────────────────────────────────────────────────
 
 export const taskDeleteInputSchema = z.object({
@@ -203,6 +214,26 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
     tier: 'ask',
     callers: ['ui', 'human', 'agent'],
     input: taskMoveInputSchema,
+  },
+  {
+    id: 'task.rename',
+    summary:
+      'Rename a task (title, optionally description). Works while the task is running, ' +
+      'unlike PATCH /api/tasks/:id.',
+    http: { method: 'post', path: '/api/tasks/:id/rename' },
+    cli: 'task rename',
+    // An agent renaming its own task shouldn't have to know its task id — the
+    // whole point is that it runs `octomux task rename --title "…"` and the id
+    // comes from the env octomux launched it with. See cliEnvDefaults' doc.
+    cliEnvDefaults: { id: 'OCTOMUX_TASK_ID' },
+    mcp: 'rename_task',
+    // A rename is trivially reversible — there's nothing to undo, and the old
+    // title isn't even retained — and it's the single most common cosmetic
+    // write an agent makes on itself. Gating it on a human prompt buys
+    // nothing. Deliberately 'auto'.
+    tier: 'auto',
+    callers: ['ui', 'human', 'agent'],
+    input: taskRenameInputSchema,
   },
   {
     id: 'task.close',

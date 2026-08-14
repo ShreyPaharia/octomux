@@ -135,9 +135,23 @@ describe('buildAgentStartupCommand', () => {
     });
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
-      'Do the thing',
+      expect.stringContaining('Do the thing'),
       { mode: 0o600 },
     );
+  });
+
+  it('appends the rename hint to the written prompt', () => {
+    buildAgentStartupCommand({
+      baseCmd: 'claude --session-id abc',
+      prompt: 'Do the thing',
+      worktreePath: '/tmp/wt',
+      agentId: 'agent123',
+    });
+    const call = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-agent123'));
+    expect(call).toBeDefined();
+    expect(String(call![1])).toContain('octomux task rename');
   });
 
   it('does NOT write a prompt file when prompt is absent', () => {

@@ -72,10 +72,23 @@ function toCamelCase(snake: string): string {
 }
 
 /** Adds one commander option derived from a single zod schema field. */
-function addOption(cmd: Command, capId: string, fieldName: string, schema: z.ZodTypeAny): void {
+function addOption(
+  cmd: Command,
+  capId: string,
+  fieldName: string,
+  schema: z.ZodTypeAny,
+  envDefault?: string,
+): void {
   const flagName = toKebabCase(fieldName);
   const description = describeField(schema) ?? fieldName;
-  const { inner, required } = unwrapSchema(schema);
+  const { inner, required: schemaRequired } = unwrapSchema(schema);
+
+  // A required field with a live env default is no longer required on the
+  // command line — commander must not reject the call before the action handler
+  // ever sees the value. Read at registration time, which for a CLI process is
+  // the same tick as the invocation.
+  const envValue = envDefault ? process.env[envDefault] : undefined;
+  const required = schemaRequired && !envValue;
 
   if (inner instanceof z.ZodBoolean) {
     const flags = `--${flagName}`;
@@ -99,6 +112,7 @@ function addOption(cmd: Command, capId: string, fieldName: string, schema: z.Zod
   ) {
     const flags = `--${flagName} <value>`;
     if (required) cmd.requiredOption(flags, description);
+    else if (envValue !== undefined) cmd.option(flags, description, envValue);
     else cmd.option(flags, description);
     return;
   }
@@ -235,7 +249,7 @@ function configureLeaf(
 ): void {
   cmd.description(cap.summary);
   for (const [fieldName, fieldSchema] of Object.entries(fields)) {
-    addOption(cmd, cap.id, fieldName, fieldSchema);
+    addOption(cmd, cap.id, fieldName, fieldSchema, cap.cliEnvDefaults?.[fieldName]);
   }
 
   const consumed = new Set(pathParamFields.values());

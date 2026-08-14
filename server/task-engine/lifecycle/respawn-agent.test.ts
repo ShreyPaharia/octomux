@@ -180,7 +180,7 @@ describe('respawnAgentFresh', () => {
     const fs = await import('fs');
     expect(fs.writeFileSync).toHaveBeenCalledWith(
       expect.stringContaining(`.claude-prompt-${agent.id}`),
-      'do the loop thing',
+      expect.stringContaining('do the loop thing'),
       expect.anything(),
     );
   });
