@@ -69,9 +69,9 @@ export interface WsCardEvent {
    * the "always allow" toggle for `always-ask` cards.
    */
   tier?: 'ask' | 'always-ask';
-  /** 'action' (default) → approve/reject an implied write. 'question' → free-text answer (ask_human). */
+  /** 'action' (default) → approve/reject an implied write. 'question' → free-text answer (ask_owner). */
   kind?: 'action' | 'question';
-  /** The question text, present only when kind === 'question'. */
+  /** The question text, present only when kind === 'question' (ask_owner). */
   question?: string;
 }
 

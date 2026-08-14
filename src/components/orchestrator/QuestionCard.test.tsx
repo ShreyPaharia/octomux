@@ -1,7 +1,7 @@
 /**
  * src/components/orchestrator/QuestionCard.test.tsx
  *
- * Tests for QuestionCard — the `ask_human` question-shaped card:
+ * Tests for QuestionCard — the `ask_owner` question-shaped card:
  *  - Renders the question text.
  *  - Submitting an answer sends { decision:'approve', text: <answer> }
  *    (forwarded by OrchestratorPage as respond_text — see its handleCardDecision).

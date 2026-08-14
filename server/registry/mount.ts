@@ -24,7 +24,7 @@ import { registerCapabilityCommands } from '@octomux/capabilities';
 import { registerTaskCapabilities } from './capabilities/task.js';
 import { registerLearningCapabilities } from './capabilities/learning.js';
 import { registerRunCapabilities } from './capabilities/run.js';
-import { registerHumanCapabilities } from './capabilities/human.js';
+import { registerOwnerCapabilities } from './capabilities/owner.js';
 import { registerRouteExemptions } from './exemptions.js';
 
 const logger = childLogger('registry/mount');
@@ -52,7 +52,7 @@ export function installCapabilities(): void {
   registerTaskCapabilities();
   registerLearningCapabilities();
   registerRunCapabilities();
-  registerHumanCapabilities();
+  registerOwnerCapabilities();
   registerRouteExemptions();
 
   logger.debug(

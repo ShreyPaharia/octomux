@@ -19,6 +19,7 @@ import { pushToConversation } from './orchestrator/stream.js';
 import {
   createCard,
   findConversationForTask,
+  getGlobalMonitorConversation,
   hasCardForTask,
   hasPhaseCompleteEvent,
 } from './repositories/orchestrator.js';
@@ -803,6 +804,55 @@ router.post('/orchestrator-action', requireHookToken, (req: Request, res: Respon
     });
 });
 
+/**
+ * Resolve which conversation a `/gate-card` request's question or approval
+ * lands in. The ONE place this decision is made — the route handler below is
+ * the only caller — so "where does this go" can never be answered
+ * differently in two places later.
+ *
+ * Resolution order:
+ *   1. OWNER. The conductor sends `conversation_id` directly (it always has
+ *      OCTOMUX_CONVERSATION_ID) — that IS its owner, no lookup needed. A
+ *      worker session never has that env var (write.ts's module doc) but
+ *      sends `task_id` instead, resolved via `managed_tasks`
+ *      (findConversationForTask): a worker's owner is the conductor
+ *      supervising it, and the card lands in that conductor's conversation by
+ *      design, exactly like a conductor-originated card would.
+ *   2. NO owner (a plain, non-orchestrator-managed task, or no identifying
+ *      param at all) → route to a human via the global-monitor conversation
+ *      (getGlobalMonitorConversation, §6/SHR-136 — the same conversation the
+ *      supervisor already falls back to for unowned task events, see
+ *      orchestrator/supervisor.ts's processEvent).
+ *   3. no owner AND no global-monitor configured → FAIL CLOSED with a
+ *      distinct, readable error rather than creating an orphaned card or
+ *      hanging. `action_cards.conversation_id` is `NOT NULL REFERENCES
+ *      orchestrator_conversations(id)`, so there is nowhere to put the row
+ *      even if we wanted to.
+ */
+export function resolveGateCardConversationId(
+  queryConversationId: string | undefined,
+  taskId: string | undefined,
+): { conversationId: string } | { error: string } {
+  const owner = queryConversationId ?? (taskId ? findConversationForTask(taskId) : null);
+  if (owner) return { conversationId: owner };
+
+  const monitor = getGlobalMonitorConversation();
+  if (monitor) return { conversationId: monitor };
+
+  if (taskId) {
+    return {
+      error:
+        `no owner for this session — task '${taskId}' is not orchestrator-managed, and no ` +
+        'global-monitor conversation is configured to route this question to a human',
+    };
+  }
+  return {
+    error:
+      'no owner for this session — no conversation_id or resolvable task_id was given, and no ' +
+      'global-monitor conversation is configured to route this question to a human',
+  };
+}
+
 // POST /api/hooks/gate-card
 // The conductor's (or a worker's) MCP subprocess RPCs here to create a pending
 // action_cards row for a gated (ask/always-ask) CAPABILITY call and push it to
@@ -816,33 +866,17 @@ router.post('/orchestrator-action', requireHookToken, (req: Request, res: Respon
 // Query: ?token=<hook_token>&conversation_id=<conv_id>&task_id=<task_id>
 // Body:  { capability_id, tier, kind, command, args?, question? }
 //
-// conversation_id resolution: the conductor sends conversation_id directly
-// (it always has OCTOMUX_CONVERSATION_ID) — that IS its owner. A worker
-// session never has that env var (write.ts's module doc) but sends task_id
-// instead — resolved here via `managed_tasks` (findConversationForTask)
-// rather than threading a new env var into every worker session.
-// `managed_tasks` (task → conversation) is not a lookup for "which human do
-// we bother" — it IS the routing: a worker's owner is the conductor
-// supervising it, and the card lands in that conductor's conversation by
-// design, exactly like a conductor-originated card would. (Today that still
-// resolves to a human via the dashboard either way — there is no
-// conductor-side MCP tool to answer a card yet, a separate capability for a
-// later change.) This only resolves for an ORCHESTRATOR-MANAGED task (it has
-// a `managed_tasks` row by construction, i.e. it HAS an owner). A plain
-// standalone task has no owning conversation at all — `action_cards.
-// conversation_id` is `NOT NULL REFERENCES orchestrator_conversations(id)`,
-// so there is nowhere to put the row even if we wanted to. FAIL CLOSED:
-// respond with a clear, distinct error rather than creating an orphaned card
-// or hanging. (In practice this worker MCP server is only ever wired up for
+// conversation_id resolution is `resolveGateCardConversationId` above — see
+// its doc for the full owner → global-monitor → fail-closed order. (In
+// practice this worker MCP server is only ever wired up for
 // orchestrator-managed tasks — see task-engine/launch.ts's
 // `applyOrchestratorMcpConfig` — so a resolvable task_id is expected on every
-// real call; this guard is what turns a future wiring change or a stray
-// manual call into a clear error instead of a silent gap or a hang.)
+// real worker call; the fail-closed branch is what turns a future wiring
+// change or a stray manual call into a clear error instead of a silent gap
+// or a hang.)
 router.post('/gate-card', requireHookToken, (req: Request, res: Response) => {
   const queryConversationId = ((req.query.conversation_id ?? '') as string) || undefined;
   const taskId = ((req.query.task_id ?? '') as string) || undefined;
-  const conversationId =
-    queryConversationId ?? (taskId ? findConversationForTask(taskId) : null) ?? undefined;
   const { capability_id, tier, kind, command, args, question } = req.body as {
     capability_id?: string;
     tier?: 'ask' | 'always-ask';
@@ -852,15 +886,13 @@ router.post('/gate-card', requireHookToken, (req: Request, res: Response) => {
     question?: string;
   };
 
-  if (!conversationId) {
-    res.status(200).json({
-      ok: false,
-      error: taskId
-        ? `no owner for this session — task '${taskId}' is not orchestrator-managed (no conversation to route the card to)`
-        : 'conversation_id (or a resolvable task_id) is required to create a gate card',
-    });
+  const resolved = resolveGateCardConversationId(queryConversationId, taskId);
+  if ('error' in resolved) {
+    res.status(200).json({ ok: false, error: resolved.error });
     return;
   }
+  const conversationId = resolved.conversationId;
+
   if (!capability_id || !tier || !kind || !command) {
     res
       .status(200)

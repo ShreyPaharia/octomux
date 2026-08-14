@@ -60,7 +60,7 @@ describe('registerCapabilityTools', () => {
     ['ui excluded from an agent-only capability', ['agent'], 'ui', false],
     // 'worker' (task sessions) is its own class, distinct from 'agent' (the
     // conductor) — a capability must opt a worker in explicitly.
-    ['worker included on human.ask-shaped capability', ['agent', 'worker'], 'worker', true],
+    ['worker included on owner.ask-shaped capability', ['agent', 'worker'], 'worker', true],
     [
       'worker excluded from an agent-only capability (e.g. task.create)',
       ['ui', 'human', 'agent'],

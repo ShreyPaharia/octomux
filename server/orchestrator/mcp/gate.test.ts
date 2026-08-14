@@ -96,13 +96,13 @@ describe('onGatedInvoke', () => {
     expect(result).toBeUndefined();
   });
 
-  it('approve on ask_human short-circuits with the answer — cap.handler never needed', async () => {
+  it('approve on ask_owner short-circuits with the answer — cap.handler never needed', async () => {
     mockCallGateCard.mockImplementation(async () => {
-      const cardId = seedCard('human.ask', 'always-ask', 'question');
+      const cardId = seedCard('owner.ask', 'always-ask', 'question');
       resolveCard(cardId, 'approved', JSON.stringify({ answer: 'do it' }));
       return { card_id: cardId };
     });
-    const askCap = makeCap({ id: 'human.ask', mcp: 'ask_human' });
+    const askCap = makeCap({ id: 'owner.ask', mcp: 'ask_owner' });
 
     const result = await onGatedInvoke(askCap, 'always-ask', { question: 'proceed?' });
 

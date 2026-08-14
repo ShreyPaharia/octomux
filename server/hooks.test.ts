@@ -19,8 +19,10 @@ import {
   eventsSince,
   createConversation,
   getCard,
+  listAllPendingCards,
+  setGlobalMonitor,
 } from './repositories/orchestrator.js';
-import { advancePhaseForLabel } from './hooks.js';
+import { advancePhaseForLabel, resolveGateCardConversationId } from './hooks.js';
 import { getArtifactSummary } from './artifact.js';
 
 describe('Hook endpoints', () => {
@@ -1123,7 +1125,7 @@ describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
 
 // ─── POST /api/hooks/gate-card ────────────────────────────────────────────
 //
-// Part B of the worker-ask-human change: a worker's MCP subprocess never has
+// Part B of the worker-ask-owner change: a worker's MCP subprocess never has
 // OCTOMUX_CONVERSATION_ID (only the conductor does — see
 // orchestrator/mcp/write.ts's module doc), so it sends task_id instead and
 // this route must resolve the OWNING conversation via `managed_tasks`
@@ -1132,6 +1134,11 @@ describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
 // supervising it), not a lookup for which human to interrupt — see the
 // route's own doc comment in hooks.ts. The conductor's existing
 // conversation_id-direct path must keep working unchanged.
+//
+// The routing table (resolveGateCardConversationId's three-branch order) is
+// the deliverable below: owner wins when one exists; the global-monitor
+// conversation is the fallback ONLY when there is no owner; and with neither,
+// the request fails closed instead of hanging or creating an orphaned card.
 describe('POST /api/hooks/gate-card', () => {
   let db: Database.Database;
   let app: ReturnType<typeof createApp>;
@@ -1167,17 +1174,24 @@ describe('POST /api/hooks/gate-card', () => {
     expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
   });
 
-  it('worker path: task_id alone resolves the conversation via managed_tasks (orchestrator-managed task)', async () => {
+  // ── Routing branch 1: OWNER wins ──────────────────────────────────────────
+
+  it('worker with a conductor: task_id resolves the OWNING conversation via managed_tasks (not the global monitor)', async () => {
     const convId = createConversation({ title: 'worker-owning-conv' });
     upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+    // A global monitor is ALSO configured, to prove owner takes precedence —
+    // if resolution ever preferred the monitor, or the owner lookup broke and
+    // fell through, this card would land there instead.
+    const monitorConvId = createConversation({ title: 'global-monitor-conv' });
+    setGlobalMonitor(monitorConvId);
 
     const res = await request(app)
       .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
       .send({
-        capability_id: 'human.ask',
+        capability_id: 'owner.ask',
         tier: 'always-ask',
         kind: 'question',
-        command: 'ask_human',
+        command: 'ask_owner',
         question: 'which approach?',
       })
       .expect(200);
@@ -1185,36 +1199,67 @@ describe('POST /api/hooks/gate-card', () => {
     expect(res.body.ok).toBe(true);
     expect(res.body.result.card_id).toBeTruthy();
     // The resolved conversation is the one managed_tasks points at, not one
-    // the worker had to know or supply.
+    // the worker had to know or supply, and NOT the global monitor.
     expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+    expect(getCard(res.body.result.card_id)!.conversation_id).not.toBe(monitorConvId);
   });
 
-  it('plain standalone task (no managed_tasks row): fails CLOSED with a clear, distinct error — never a hang, never a silent card-less 200', async () => {
-    // task-gc exists but has no managed_tasks row — not orchestrator-managed.
+  // ── Routing branch 2: no owner → the global monitor ───────────────────────
+
+  it('no owner + global monitor configured: card lands in the GLOBAL MONITOR conversation', async () => {
+    // task-gc exists but has no managed_tasks row — not orchestrator-managed,
+    // i.e. no owner.
+    const monitorConvId = createConversation({ title: 'global-monitor-conv' });
+    setGlobalMonitor(monitorConvId);
+
     const res = await request(app)
       .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
       .send({
-        capability_id: 'human.ask',
+        capability_id: 'owner.ask',
         tier: 'always-ask',
         kind: 'question',
-        command: 'ask_human',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(monitorConvId);
+  });
+
+  // ── Routing branch 3: no owner, no monitor → fail closed ──────────────────
+
+  it('plain standalone task (no managed_tasks row) and no global monitor: fails CLOSED with a distinct error — never a hang, never an orphaned card', async () => {
+    // task-gc exists but has no managed_tasks row (no owner), and this test
+    // never calls setGlobalMonitor (no fallback human either).
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
         question: 'which approach?',
       })
       .expect(200); // hook endpoints report failure IN the body, not via HTTP status
 
     expect(res.body.ok).toBe(false);
     expect(res.body.error).toMatch(/no owner for this session/);
+    expect(res.body.error).toMatch(/no.*global-monitor/);
     expect(res.body.result).toBeUndefined();
+    // Never an orphaned card: nothing was written to action_cards.
+    expect(listAllPendingCards()).toEqual([]);
   });
 
-  it('neither conversation_id nor task_id: fails CLOSED with a clear error', async () => {
+  it('neither conversation_id nor task_id, no global monitor: fails CLOSED with a distinct error', async () => {
     const res = await request(app)
       .post('/api/hooks/gate-card?token=tok-gc')
       .send({
-        capability_id: 'human.ask',
+        capability_id: 'owner.ask',
         tier: 'always-ask',
         kind: 'question',
-        command: 'ask_human',
+        command: 'ask_owner',
         question: 'which approach?',
       })
       .expect(200);
@@ -1222,26 +1267,59 @@ describe('POST /api/hooks/gate-card', () => {
     expect(res.body.ok).toBe(false);
     expect(res.body.error).toBeTruthy();
     expect(res.body.result).toBeUndefined();
+    expect(listAllPendingCards()).toEqual([]);
+  });
+
+  // ── resolveGateCardConversationId directly (unit-level, no HTTP) ──────────
+
+  describe('resolveGateCardConversationId', () => {
+    it('owner beats a configured global monitor', () => {
+      // task-gc is inserted by this describe block's beforeEach — managed_tasks
+      // has a FK on task_id, so the owner lookup needs a real task row.
+      const convId = createConversation({ title: 'owner-conv' });
+      upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+      setGlobalMonitor(createConversation({ title: 'monitor-conv' }));
+
+      const result = resolveGateCardConversationId(undefined, 'task-gc');
+
+      expect(result).toEqual({ conversationId: convId });
+    });
+
+    it('falls back to the global monitor when there is no owner', () => {
+      const monitorConvId = createConversation({ title: 'monitor-conv' });
+      setGlobalMonitor(monitorConvId);
+
+      const result = resolveGateCardConversationId(undefined, 'task-unowned');
+
+      expect(result).toEqual({ conversationId: monitorConvId });
+    });
+
+    it('fails closed with a distinct error when there is neither an owner nor a global monitor', () => {
+      const result = resolveGateCardConversationId(undefined, 'task-unowned');
+
+      expect('error' in result).toBe(true);
+      expect((result as { error: string }).error).toMatch(/no owner for this session/);
+    });
   });
 
   it('returns 401 when hook_token is missing or unrecognized', async () => {
     await request(app)
       .post('/api/hooks/gate-card?task_id=task-gc')
       .send({
-        capability_id: 'human.ask',
+        capability_id: 'owner.ask',
         tier: 'always-ask',
         kind: 'question',
-        command: 'ask_human',
+        command: 'ask_owner',
       })
       .expect(401);
 
     await request(app)
       .post('/api/hooks/gate-card?token=bad-token&task_id=task-gc')
       .send({
-        capability_id: 'human.ask',
+        capability_id: 'owner.ask',
         tier: 'always-ask',
         kind: 'question',
-        command: 'ask_human',
+        command: 'ask_owner',
       })
       .expect(401);
   });

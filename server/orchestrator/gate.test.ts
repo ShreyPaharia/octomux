@@ -883,7 +883,7 @@ describe('gate.executeCard — capability-registry gate cards', () => {
 
   it("a question card's answer (approve + respond_text) is persisted on the card result", async () => {
     const cardId = insertCapabilityCard({
-      capabilityId: 'human.ask',
+      capabilityId: 'owner.ask',
       tier: 'always-ask',
       kind: 'question',
       question: 'Which repo?',

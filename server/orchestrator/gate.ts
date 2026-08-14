@@ -276,7 +276,7 @@ export async function executeCard(input: ExecuteCardInput): Promise<void> {
   }
 
   // ── Capability-registry gate card: task.close/create/move/... (`ask`/
-  //    `always-ask` tier) or an ask_human question card. Created by
+  //    `always-ask` tier) or an ask_owner question card. Created by
   //    onGatedInvoke (mcp/gate.ts) via POST /api/hooks/gate-card. Unlike the
   //    Bash-gate cards below, NOTHING runs server-side here — the MCP
   //    subprocess itself is blocked in a poll loop waiting for this card's
