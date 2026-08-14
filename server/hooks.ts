@@ -16,7 +16,12 @@ import {
 } from './repositories/orchestrator.js';
 import { handlePreToolUse } from './orchestrator/gate.js';
 import { pushToConversation } from './orchestrator/stream.js';
-import { createCard, findConversationForTask } from './repositories/orchestrator.js';
+import {
+  createCard,
+  findConversationForTask,
+  hasCardForTask,
+  hasPhaseCompleteEvent,
+} from './repositories/orchestrator.js';
 import {
   runOrchestratorAction,
   ORCHESTRATOR_ACTIONS,
@@ -363,6 +368,48 @@ router.post(
 );
 
 /**
+ * Re-fire guard for the marker-file backstop, keyed on ARTIFACT / CARD / EVENT
+ * EXISTENCE rather than on `managed_tasks.phase`.
+ *
+ * Today `maybeSignalPhaseComplete` only reaches the marker check once
+ * `managed.phase` already matches the expected stage, so this guard is
+ * belt-and-braces — it changes no behaviour on its own. It exists so a LATER
+ * change can delete the `phase` column: `spec.md` and `plan.json` are never
+ * deleted, so once the phase gate is gone the backstop would otherwise
+ * re-detect them (and re-relay) on every subsequent Stop hook for the rest of
+ * the task's life. `implement` needs no such guard — `advancePhaseForLabel`
+ * deletes the `.octomux/implement-done` sentinel on the call that fires it,
+ * so `fs.existsSync` is self-guarding without any extra state.
+ *
+ *   'spec' → already relayed once a `task:phase_complete` event with
+ *            phase='spec' has already been durably recorded for this task.
+ *            NOTE: an earlier draft of this guard checked "does plan.json
+ *            exist" instead (the NEXT artifact), reasoning that the spec
+ *            relay's whole job is prompting the worker to write it. That has
+ *            a real false positive: a worker can write spec.md AND plan.json
+ *            in the very same turn, before the relay has ever run once — the
+ *            existing test 'speccing + BOTH spec.md and plan.json present →
+ *            only spec fires' covers exactly this. The events log has no
+ *            such gap: an event only exists once advancePhaseForLabel has
+ *            actually fired for this label, so it can't false-positive on a
+ *            worker being fast. See hasPhaseCompleteEvent's doc for cost.
+ *   'plan' → already relayed once an `approve-plan` card exists for this
+ *            task, in ANY status — a resolved (approved/rejected/executed)
+ *            card still proves the card was already minted once; only a
+ *            missing card means "never relayed". See hasCardForTask's doc
+ *            for how the lookup is scoped (action_cards has no task_id
+ *            column).
+ */
+export function hasAlreadyRelayed(taskId: string, label: 'spec' | 'plan'): boolean {
+  if (label === 'spec') {
+    return hasPhaseCompleteEvent(taskId, 'spec');
+  }
+  const convId = findConversationForTask(taskId);
+  if (!convId) return false;
+  return hasCardForTask(convId, taskId, 'approve-plan');
+}
+
+/**
  * Backstop: detect phase completion from marker files on the Stop hook.
  *
  * When the worker uses the explicit report_complete MCP tool, advancePhaseForLabel
@@ -377,6 +424,23 @@ router.post(
  * NOTE: managed_tasks.phase COLUMN values ('speccing'/'planning'/...) are
  * DISTINCT from the broadcast payload.phase LABEL ('spec'/'plan'/'implement').
  * The supervisor switches on the LABEL.
+ *
+ * NOT-YET-SAFE TO DELETE THE PHASE GATES. `hasAlreadyRelayed` (added below)
+ * removes one of the two jobs the `managed.phase === ...` checks do — it stops
+ * a relay firing TWICE. But those checks do a second job that nothing has
+ * replaced yet: they SELECT which branch applies. Every branch here ends in an
+ * unconditional `return`, so with the gates naively removed the spec branch
+ * matches first on every Stop hook (spec.md is never deleted), returns, and the
+ * plan branch is never reached — the plan relay would never fire at all.
+ *
+ * Verified by mutation: replacing both gates with `if (true)` makes the
+ * "third, later Stop hook" test in server/orchestrator/refire-guard.test.ts
+ * fail with ZERO approve-plan cards rather than two.
+ *
+ * So deleting the gates also requires restructuring this function so each
+ * label's artifact check and `hasAlreadyRelayed` guard are evaluated
+ * independently, instead of the first matching branch returning for all of
+ * them. That restructure is deliberately NOT in this change.
  */
 function maybeSignalPhaseComplete(taskId: string): void {
   const managed = getManagedTask(taskId);
@@ -390,6 +454,18 @@ function maybeSignalPhaseComplete(taskId: string): void {
     const specPath = path.join(worktree, 'spec.md');
     if (!fs.existsSync(specPath)) return;
 
+    // Redundant with the `phase === 'speccing'` gate today. It stops a REPEAT
+    // spec relay once that gate is gone, but see the NOT-YET-SAFE note on
+    // maybeSignalPhaseComplete: on its own it is not sufficient to delete the
+    // gates, because this branch still `return`s unconditionally.
+    if (hasAlreadyRelayed(taskId, 'spec')) {
+      logger.debug(
+        { task_id: taskId, operation: 'spec_complete_already_relayed' },
+        'Stop hook backstop: spec already relayed — skipping',
+      );
+      return;
+    }
+
     logger.info(
       { task_id: taskId, operation: 'spec_complete_detected' },
       'Stop hook backstop: spec.md present for managed speccing task — advancing via advancePhaseForLabel',
@@ -401,6 +477,17 @@ function maybeSignalPhaseComplete(taskId: string): void {
   if (managed.phase === 'planning') {
     const planPath = path.join(worktree, 'plan.json');
     if (!fs.existsSync(planPath)) return;
+
+    // Redundant with the `phase === 'planning'` gate today; stops a REPEAT
+    // plan relay once that gate is gone. Same caveat as the spec branch — the
+    // unconditional `return`s must go too. See maybeSignalPhaseComplete's doc.
+    if (hasAlreadyRelayed(taskId, 'plan')) {
+      logger.debug(
+        { task_id: taskId, operation: 'plan_complete_already_relayed' },
+        'Stop hook backstop: plan already relayed (approve-plan card exists) — skipping',
+      );
+      return;
+    }
 
     logger.info(
       { task_id: taskId, operation: 'plan_complete_detected' },
