@@ -33,6 +33,27 @@ const logger = childLogger('task-engine/lifecycle');
 // but are no longer used during new-task setup. The format/lint preflight was removed
 // (perf: it blocked agent launch for 30-90s with no agent-observable benefit).
 
+/** Time a startTask stage and log `duration_ms` so slow creates are greppable
+ *  (`grep '"stage_timing":true' ~/.octomux/logs/octomux.log`). Also what
+ *  `scripts/bench-task-create.ts` reads to produce its breakdown. */
+async function timed<T>(taskId: string, stage: string, fn: () => Promise<T>): Promise<T> {
+  const t0 = performance.now();
+  try {
+    return await fn();
+  } finally {
+    logger.info(
+      {
+        task_id: taskId,
+        operation: 'createTask',
+        stage,
+        stage_timing: true,
+        duration_ms: Math.round(performance.now() - t0),
+      },
+      `createTask: stage ${stage}`,
+    );
+  }
+}
+
 function persistWorktreeRow(
   id: string,
   task: Task,
@@ -126,7 +147,9 @@ async function prepareFirstAgentLaunch(
 
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
+  await timed(id, 'install_hooks', () =>
+    harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken),
+  );
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
 
@@ -215,22 +238,21 @@ export async function startTask(task: Task): Promise<void> {
   let stage = 'validate';
   try {
     stage = 'mode_setup';
-    const setup = await runSetup(task);
+    const setup = await timed(id, 'mode_setup', () => runSetup(task));
 
     persistWorktreeRow(id, task, setup, runMode);
-    await inferAndPersistRefs(id, setup, task);
+    await timed(id, 'infer_refs', () => inferAndPersistRefs(id, setup, task));
 
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
-    const { agentId, hookToken, sessionIdForDb, startupCmd } = await prepareFirstAgentLaunch(
-      id,
-      task,
-      setup,
-      harness,
+    const { agentId, hookToken, sessionIdForDb, startupCmd } = await timed(id, 'launch_agent', () =>
+      prepareFirstAgentLaunch(id, task, setup, harness),
     );
 
     stage = 'tmux_session';
-    const windowIndex = await launchFirstWindow(id, session, setup, startupCmd);
+    const windowIndex = await timed(id, 'tmux_session', () =>
+      launchFirstWindow(id, session, setup, startupCmd),
+    );
 
     persistFirstAgentRow(
       id,

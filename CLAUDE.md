@@ -22,6 +22,8 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
 - `bun run test:watch` — vitest in watch mode
 - `bun run test:e2e` — Playwright E2E tests (auto-starts servers)
 - `bun run test:e2e:ui` — Playwright interactive UI mode
+- `bun run bench:task-create [-- --repo <path> --runs N]` — times real `startTask`
+  runs and prints a per-stage breakdown (reads the `stage_timing` log lines)
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
 - `bun run typecheck` — `tsc -b` (project references across `packages/*`)
@@ -122,6 +124,9 @@ branch `agents/<id>`. Each **worker** = tmux window within the session.
 
 - **close** = stop workers + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
+
+`startTask` logs a `duration_ms` per stage (`stage_timing: true`); `bun run
+bench:task-create` reports the breakdown. `git worktree add` dominates.
 
 ## Per-task model override
 

@@ -299,6 +299,15 @@ describe('startTask', () => {
     expect(findLaunchCmd()).toContain("--model '\\''claude-sonnet-4-6'\\''");
   });
 
+  // ─── No format/lint preflight (it was ~87% of task-creation wall clock) ──
+
+  it('runs no format/lint preflight before launching the agent', async () => {
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    expect(findExecCall(vi.mocked(execFile), { cmd: 'sh' })).toBeUndefined();
+  });
+
   // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
 
   it('writes worker-mcp-config.json and adds --mcp-config flag for managed tasks', async () => {
