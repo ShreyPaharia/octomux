@@ -79,7 +79,9 @@ vi.mock('child_process', () => ({
           );
         }
         tmuxSessions.add(sess);
-        return cb(null, { stdout: '', stderr: '' });
+        // new-session chains set-option + display-message in one invocation, so
+        // the window index comes back on this call's stdout.
+        return cb(null, { stdout: String(nextWindowIndex), stderr: '' });
       }
       if (args.includes('display-message') || args.includes('list-windows')) {
         return cb(null, { stdout: String(nextWindowIndex), stderr: '' });
