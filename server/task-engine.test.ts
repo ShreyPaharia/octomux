@@ -298,6 +298,33 @@ describe('startTask', () => {
     expect(findLaunchCmd()).toContain('--model claude-sonnet-4-6');
   });
 
+  // ─── Preflight is opt-in (it was 87% of task-creation wall clock) ──────
+
+  it('skips the format/lint preflight by default', async () => {
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    expect(findExecCall(vi.mocked(execFile), { cmd: 'sh' })).toBeUndefined();
+  });
+
+  it('runs the format/lint preflight when preflightOnCreate is set', async () => {
+    vi.mocked(getSettings).mockResolvedValueOnce({
+      editor: 'nvim',
+      defaultHarnessId: 'claude-code',
+      harnesses: { 'claude-code': { dangerouslySkipPermissions: false, flags: '' } },
+      preflightOnCreate: true,
+    });
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'sh', argsInclude: ['bun run format'] }),
+    ).toBeDefined();
+    expect(
+      findExecCall(vi.mocked(execFile), { cmd: 'sh', argsInclude: ['bun run lint'] }),
+    ).toBeDefined();
+  });
+
   // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
 
   it('writes worker-mcp-config.json and adds --mcp-config flag for managed tasks', async () => {

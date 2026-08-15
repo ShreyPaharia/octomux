@@ -24,6 +24,10 @@ export interface OctomuxSettings {
   /** Hours a soft-deleted task waits before permanent purge. Default 6 when absent. */
   deleteGraceHours?: number;
 
+  /** Run format+lint on the fresh worktree before launching the first agent.
+   *  Default false — it costs ~10s and is a no-op on an already-formatted base. */
+  preflightOnCreate?: boolean;
+
   /** @deprecated promoted into harnesses['claude-code'] on next save */
   claudeFlags?: string;
   /** @deprecated */
@@ -116,6 +120,7 @@ export async function getSettings(): Promise<OctomuxSettings> {
       typeof parsed.onboardingCompletedAt === 'string' ? parsed.onboardingCompletedAt : undefined,
     deleteGraceHours:
       typeof parsed.deleteGraceHours === 'number' ? parsed.deleteGraceHours : undefined,
+    preflightOnCreate: parsed.preflightOnCreate === true,
   };
 }
 
@@ -194,6 +199,8 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
         : current.onboardingCompletedAt,
     deleteGraceHours:
       patch.deleteGraceHours !== undefined ? patch.deleteGraceHours : current.deleteGraceHours,
+    preflightOnCreate:
+      patch.preflightOnCreate !== undefined ? patch.preflightOnCreate : current.preflightOnCreate,
   };
 
   const filePath = settingsPath();

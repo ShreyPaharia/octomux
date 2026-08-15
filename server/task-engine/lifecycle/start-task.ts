@@ -33,6 +33,27 @@ import { runSetup } from '../setup/index.js';
 const logger = childLogger('task-engine/lifecycle');
 const execFile = promisify(execFileCb);
 
+/** Time a startTask stage and log `duration_ms` so slow creates are greppable
+ *  (`grep '"stage_timing":true' ~/.octomux/logs/octomux.log`). Also what
+ *  `scripts/bench-task-create.ts` reads to produce its breakdown. */
+async function timed<T>(taskId: string, stage: string, fn: () => Promise<T>): Promise<T> {
+  const t0 = performance.now();
+  try {
+    return await fn();
+  } finally {
+    logger.info(
+      {
+        task_id: taskId,
+        operation: 'createTask',
+        stage,
+        stage_timing: true,
+        duration_ms: Math.round(performance.now() - t0),
+      },
+      `createTask: stage ${stage}`,
+    );
+  }
+}
+
 export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
   try {
     await execFile('sh', ['-c', config.format_command], { cwd: worktreePath });
@@ -124,11 +145,24 @@ async function inferAndPersistRefs(
   }
 }
 
+/**
+ * Format + lint the fresh worktree before the agent starts.
+ *
+ * Off by default: the worktree is a clean checkout of an already-formatted
+ * branch, so this is ~10s of prettier+eslint that produces nothing on nearly
+ * every task — it was 87% of task-creation wall clock. Opt in with
+ * `preflightOnCreate: true` in settings.json when a repo's base branch really
+ * is unformatted.
+ *
+ * ponytail: opt-in flag, not a cache. If someone enables it and the 10s hurts,
+ * key a "clean" marker on (repo_path, base_sha) and skip repeat runs.
+ */
 async function runPreflight(
   setup: import('../setup/types.js').SetupResult,
   task: Task,
 ): Promise<void> {
   if (!setup.runPreflight) return;
+  if (!(await getSettings()).preflightOnCreate) return;
   const repoConfig = await getOrCreateRepoConfig(task.repo_path);
   await preflightWorktree(setup.worktreePath, repoConfig);
 }
@@ -153,9 +187,11 @@ async function prepareFirstAgentLaunch(
 
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.syncAgents(setup.worktreePath);
-  await syncSkills(setup.worktreePath);
-  await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
+  await timed(id, 'sync_agents', () => harness.syncAgents(setup.worktreePath));
+  await timed(id, 'sync_skills', () => syncSkills(setup.worktreePath));
+  await timed(id, 'install_hooks', () =>
+    harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken),
+  );
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
 
@@ -244,27 +280,26 @@ export async function startTask(task: Task): Promise<void> {
   let stage = 'validate';
   try {
     stage = 'mode_setup';
-    const setup = await runSetup(task);
+    const setup = await timed(id, 'mode_setup', () => runSetup(task));
 
     persistWorktreeRow(id, task, setup, runMode);
-    await inferAndPersistRefs(id, setup, task);
+    await timed(id, 'infer_refs', () => inferAndPersistRefs(id, setup, task));
 
     if (setup.runPreflight) {
       stage = 'preflight';
     }
-    await runPreflight(setup, task);
+    await timed(id, 'preflight', () => runPreflight(setup, task));
 
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
-    const { agentId, hookToken, sessionIdForDb, startupCmd } = await prepareFirstAgentLaunch(
-      id,
-      task,
-      setup,
-      harness,
+    const { agentId, hookToken, sessionIdForDb, startupCmd } = await timed(id, 'launch_agent', () =>
+      prepareFirstAgentLaunch(id, task, setup, harness),
     );
 
     stage = 'tmux_session';
-    const windowIndex = await launchFirstWindow(id, session, setup, startupCmd);
+    const windowIndex = await timed(id, 'tmux_session', () =>
+      launchFirstWindow(id, session, setup, startupCmd),
+    );
 
     persistFirstAgentRow(
       id,

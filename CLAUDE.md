@@ -21,6 +21,8 @@ Single binary: `octomux <command>`. Data stored at `~/.octomux/` in production,
 - `bun run test:watch` — vitest in watch mode
 - `bun run test:e2e` — Playwright E2E tests (auto-starts servers)
 - `bun run test:e2e:ui` — Playwright interactive UI mode
+- `bun run bench:task-create [-- --repo <path> --runs N]` — times real `startTask`
+  runs and prints a per-stage breakdown (reads the `stage_timing` log lines)
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
 - `bun run typecheck` — tsc --noEmit
@@ -77,6 +79,11 @@ branch `agents/<id>`. Each agent = tmux window within the session.
 
 - **close** = stop agents + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
+
+`startTask` logs a `duration_ms` per stage (`stage_timing: true`) — median is ~1.2s,
+dominated by `git worktree add`. The format+lint preflight on the fresh worktree is
+**off by default** (it was ~10s of the old ~12s and a no-op on an already-formatted
+base); set `preflightOnCreate: true` in settings.json to re-enable it.
 
 ## Agent Teams
 
