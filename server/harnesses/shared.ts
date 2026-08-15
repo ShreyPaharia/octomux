@@ -75,7 +75,7 @@ export function validateSettingsObject(
 /** Normalize resolved flags to a single leading-space-separated string (or ''),
  *  so callers can't accidentally glue flags onto the preceding token (e.g. the
  *  session id) by passing flags without/with-stray leading whitespace. */
-function flagsSuffix(flags: string, model: string | null | undefined): string {
+export function flagsSuffix(flags: string, model?: string | null): string {
   const resolved = applyModel(flags, model).trim();
   return resolved ? ` ${resolved}` : '';
 }

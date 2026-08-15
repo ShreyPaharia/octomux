@@ -62,6 +62,19 @@ describe('cursorHarness', () => {
       expect(cursorHarness.buildLaunchCommand(opts)).toBe(expected);
     });
 
+    // resolveHarnessFlags → appendOctomuxPluginFlags trims the leading space,
+    // which used to glue the first flag onto the quoted --workspace value:
+    // `--workspace '/tmp/wt/a'--force` → "Workspace directory does not exist".
+    it('separates flags that arrive without a leading space', () => {
+      expect(
+        cursorHarness.buildLaunchCommand({
+          sessionId: 's1',
+          workspacePath: '/tmp/wt/a',
+          flags: '--force --model composer-2.5',
+        }),
+      ).toBe(`cursor-agent --workspace '/tmp/wt/a' --force --model composer-2.5`);
+    });
+
     it('quotes workspace paths that contain apostrophes', () => {
       expect(
         cursorHarness.buildLaunchCommand({

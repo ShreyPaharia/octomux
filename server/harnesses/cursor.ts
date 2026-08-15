@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import {
+  flagsSuffix,
   formatHarnessFlags,
   formatJsonConfig,
   validateSettingsObject,
@@ -93,12 +94,12 @@ export const cursorHarness: Harness = {
 
   buildLaunchCommand({ flags = '', workspacePath }: HarnessLaunchOpts): string {
     const ws = workspacePath ? workspaceCliArg(workspacePath) : '';
-    return `cursor-agent${ws}${flags}`;
+    return `cursor-agent${ws}${flagsSuffix(flags)}`;
   },
 
   buildResumeCommand({ sessionId, flags = '', workspacePath }: HarnessResumeOpts): string {
     const ws = workspacePath ? workspaceCliArg(workspacePath) : '';
-    return `cursor-agent${ws} --resume ${sessionId}${flags}`;
+    return `cursor-agent${ws} --resume ${sessionId}${flagsSuffix(flags)}`;
   },
 
   buildContinueCommand(_opts: HarnessResumeOpts): null {
