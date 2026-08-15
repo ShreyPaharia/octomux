@@ -55,6 +55,12 @@ prerequisite that makes the rest of this plan verifiable rather than hopeful —
 it retroactively invalidates the demand signal this plan leans on, because the 546
 downloads/month since 1.1.0 have all landed on a broken tarball.
 
+**Two things narrow the fix considerably**, both settled after the reviews ran:
+publishing is already token-free via OIDC trusted publishing, so nothing here is
+blocked on credentials; and distribution is moving to a `bun --compile` single
+binary, which makes the recommended fix "ship a dependency-free installer shim"
+rather than "untangle the workspace graph". See WAVE-0.
+
 ---
 
 ## The envelope
@@ -310,30 +316,64 @@ single-package, `server/registry/mount.ts` is untouched.
 
 Not a plugin phase. A production fix.
 
-- Rewrite `workspace:*` → exact versions at publish. Either publish with `npm`
-  end-to-end or add a prepack step. **Verify with `npm pack` + inspection of the
-  tarball manifest, not by trusting the tool.**
-- Decide bundled-or-external per package and make tsup agree with `dependencies`:
-  `@octomux/types` and `@octomux/diff-engine` → `noExternal`, move to
-  `devDependencies`, publish separately for plugin authors. `@octomux/api-client`
-  → real published dependency (`cli/dist` is tsc output, not bundled).
-  `@octomux/test-fixtures` → drop from `dependencies` entirely.
-- `@octomux/capabilities` is the real circularity: it is currently inlined into
-  `dist-server`. The moment a plugin imports it, the plugin gets its own copy —
-  different zod schema objects, different consts. Either mark it external, declare
-  it, and publish it; or state that plugins may never import it. **Pick one and
-  write it down.**
-- `zod` is an undeclared runtime dependency (`packages/capabilities` imports it;
-  it appears in the lockfile only transitively). Add it with a real range.
-  Related: `build:server` bundles zod, so a plugin importing zod gets its own
-  instance and `instanceof` checks fail across the boundary. Document it.
-- **`npm pack` + install smoke test in `ci.yml`** — pack, install the tarball into
-  a clean dir with real `npm` (not bun, not the workspace), boot
-  `dist-server/index.js`, run `octomux --help`. One job, ~20 lines. It catches all
-  of the above and every future dependency-graph regression, and would have caught
-  all three broken releases.
-- Matrix it: ubuntu + macos × node 20/24 (`engines` says ≥20, `publish.yml` builds
-  on 24, `ci.yml` runs 20), with both `npm` and `bun` as install clients.
+### Auth is already solved — do not add a token back
+
+`publish.yml` publishes **without any npm token**: `permissions: id-token: write`,
+`npm install -g npm@latest` (trusted publishing needs npm ≥ 11.5.1), then
+`npm publish --provenance --access public`. `build-binaries.yml` does the same
+per tmux package. Removing `NPM_TOKEN` from CI changed nothing — neither workflow
+ever read one.
+
+**The one gap:** trusted publishing is configured per package in npmjs.com's
+package settings, which requires the package to already exist. A brand-new package
+(`@octomux/plugin-api`) cannot be OIDC-published on its first release. Bootstrap it
+once from a laptop with an interactive `npm login` — no stored credential anywhere —
+then configure trusted publishing and let CI own every subsequent version.
+
+### Pick the distribution channel first — `bun --compile` changes the answer
+
+With a compiled single binary, the `workspace:*` defect stops mattering for the
+_product_ and only matters for the _plugin-facing packages_. Three options:
+
+| Option                                                       | `workspace:*` fix needed? | `npm i -g octomux` |
+| ------------------------------------------------------------ | ------------------------- | ------------------ |
+| (a) Binary only, deprecate the npm package                   | no                        | stays broken       |
+| (b) Keep both channels fully                                 | yes, in full              | works              |
+| (c) **npm package becomes a thin installer** _(recommended)_ | no — deps disappear       | works              |
+
+**Recommendation: (c).** The published `octomux` package becomes a few files —
+`bin/octomux.js` plus a postinstall that fetches the right prebuilt binary for the
+platform — with **zero runtime `dependencies`**, which deletes the entire
+`workspace:*` and bundled-vs-external problem rather than solving it. It is how
+esbuild, swc, and every other compiled CLI ships on npm, it keeps the documented
+`npm i -g octomux` install path working for the people currently hitting a broken
+tarball, and it forecloses nothing.
+
+Under (c) the rest of this section collapses to: publish `1.3.1` as the installer
+shim, and publish `@octomux/plugin-api` (types-only) for plugin authors. Nothing
+else needs a manifest fix, because nothing else ships through npm.
+
+Under (b), all of the following still apply — keep them for reference:
+
+- Rewrite `workspace:*` → exact versions at publish; verify by inspecting the
+  packed tarball manifest, not by trusting the tool.
+- Make tsup agree with `dependencies`: `@octomux/types` and `@octomux/diff-engine`
+  → `noExternal` + `devDependencies`; `@octomux/api-client` → real published
+  dependency (`cli/dist` is tsc output, not bundled); `@octomux/test-fixtures` →
+  drop from `dependencies` entirely.
+- `@octomux/capabilities` is the real circularity — currently inlined into
+  `dist-server`, so a plugin importing it gets its own copy with different zod
+  schema objects. Mark it external and publish it, or state that plugins may never
+  import it.
+- `zod` is an undeclared runtime dependency. Add it with a real range.
+
+### Regardless of option: the smoke test
+
+**`npm pack` + install smoke test in `ci.yml`** — pack, install the tarball into a
+clean dir with real `npm` (not bun, not the workspace), then run the installed
+binary's `--help` and boot it. One job, ~20 lines. It catches every future
+dependency-graph regression and would have caught all three broken releases.
+Matrix ubuntu + macos, with both `npm` and `bun` as install clients.
 
 **Exit test:** the smoke job above, green, on a PR.
 
@@ -737,29 +777,61 @@ no exceptions, because there is no legacy backlog for code that doesn't exist ye
 
 ---
 
-## Electron — plugins are CLI-only
+## `bun --compile` — verified, and it makes the envelope mandatory
 
-`electron-builder.yml`'s `files:` list is `dist/**`, `dist-server/**`,
-`dist-electron/**`, `node_modules/**`, `package.json`. electron-builder **replaces**
-the default patterns rather than extending them, so `plugin/`, `kinds/`,
-`templates/`, `workflows/`, `bin/`, and `scripts/` are not in the app bundle.
+Distribution is moving to a compiled single binary. That was tested against this
+plan's contract, not assumed:
 
-If that reading is right, the packaged app is already broken before any plugin work:
-`bundledOctomuxPluginDir()` walks up six levels for `plugin/.claude-plugin/plugin.json`
-and **throws**, and it is called unconditionally from `appendOctomuxPluginFlags` on
-every task launch. `builtInKindsDir()` would resolve into `app.asar` and find
-nothing. **Confirm against a real `.dmg` before believing it — but the config says
-what it says, and if true it is a second P0 alongside WAVE-0.**
+```
+bun 1.3.14 · bun build ./host.ts --compile --outfile hostbin   (63 MB)
+./hostbin /abs/path/plug/index.js
+  → [host] plugin ran, loaded from disk outside the compiled binary
+```
 
-For plugins specifically: `octomuxRoot()` honours `OCTOMUX_DATA_DIR`, so the install
-location is correct and per-app. But `npm` is not guaranteed to exist for a `.dmg`
-user, and any plugin with a native module cannot work at all — Electron's ABI differs
-from Node's and `@electron/rebuild` runs at package time on the maintainer's runner,
-not at plugin-install time on the user's machine.
+A compiled binary **can** `await import(<runtime absolute path>)` and call
+`apply(ctx)` on the result. The plugin architecture survives the move intact.
 
-**Release position: plugins are a CLI-only feature. The Electron app boots with an
-empty manifest and no install UI.** State it in the docs. Anything else promises a
-channel that cannot be delivered.
+More than survives — it becomes structurally enforced. A compiled binary has no
+on-disk module tree, so a plugin **cannot** import a runtime value from the host
+even by accident. The "types-only `@octomux/plugin-api`, host passes `ctx`" rule
+stops being a convention that reviewers have to police and becomes the only thing
+that can possibly work. This is the plan's most-contested decision, settled for free.
+
+Three consequences to carry into the waves:
+
+- **`resolveFrom` semantics change.** There is no host `node_modules` to resolve
+  bare specifiers against. `loadPlugins` resolves a manifest row to an **absolute
+  path** and imports that. A plugin's _own_ dependencies must sit in its own
+  directory tree, so `octomux plugin add` installs into the plugin's directory —
+  not a shared prefix. (`--ignore-scripts` still applies.)
+- **The dual-instance problem is now certain, not merely likely.** The host's zod
+  is inside the binary; a plugin's zod is on disk. They are different instances and
+  `instanceof` fails across the boundary. Any cross-boundary contract must be plain
+  data or a structural interface — never a class, never an `instanceof` check. Add
+  this to the `@octomux/plugin-api` review checklist.
+- **Native modules are the real blocker, and they are not a plugin problem.**
+  `build:server` externalises `better-sqlite3` and `node-pty`. `bun:sqlite` replaces
+  the former (a real migration — the `prepare`/`pragma` surface differs at every
+  `getDb()` call site). `node-pty` has no Bun equivalent and is the load-bearing
+  dependency of the entire tmux/terminal layer. Settle that before compile ships;
+  it does not affect anything in this plan.
+
+## Electron — deprioritised
+
+The `.dmg` is real and builds. It is also not worth spending on if the compiled
+binary becomes the distribution story.
+
+Recorded for whoever picks it up: `electron-builder.yml`'s `files:` list omits
+`plugin/`, `kinds/`, `templates/`, `workflows/`, `bin/`, and `scripts/`, and
+electron-builder **replaces** rather than extends the default patterns. If that
+reading holds, `bundledOctomuxPluginDir()` throws on every task launch in the
+packaged app and `builtInKindsDir()` resolves into `app.asar` and finds nothing.
+Worth ten minutes against a real `.dmg` to confirm or dismiss.
+
+For plugins specifically the answer is simpler: `npm` is not guaranteed to exist for
+a `.dmg` user, and a plugin with a native module cannot work at all under Electron's
+ABI. **Release position: plugins are a CLI/binary feature. The Electron app boots
+with an empty manifest and no install UI.**
 
 ---
 
@@ -804,10 +876,39 @@ After WAVE-2 and WAVE-5 only: the built-artifact smoke test.
 
 ## Open decisions — settle before the wave that needs them
 
-| Decision                                                                                                            | Blocks        |
-| ------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `@octomux/capabilities`: external+published, or bundled and off-limits to plugins?                                  | WAVE-0        |
-| Does the read-side of `IntegrationProvider` change (`handler(envelope, config, http)` vs a `trusted` discriminant)? | W3-A          |
-| Which `detectActivity` design — publish the hook contract, output-stability polling, or explicit `task done`?       | W4-D          |
-| Does anything read `user_version`? If not, cut it.                                                                  | W1-D          |
-| Electron `files:` — confirm against a real `.dmg`.                                                                  | release scope |
+| Decision                                                                                                            | Blocks         |
+| ------------------------------------------------------------------------------------------------------------------- | -------------- |
+| npm channel: installer shim (recommended), full dual-channel, or deprecate?                                         | WAVE-0         |
+| `node-pty` under `bun --compile` — no Bun equivalent, and the terminal layer rests on it                            | compile ships  |
+| Does the read-side of `IntegrationProvider` change (`handler(envelope, config, http)` vs a `trusted` discriminant)? | W3-A           |
+| Which `detectActivity` design — publish the hook contract, output-stability polling, or explicit `task done`?       | W4-D           |
+| Does anything read `user_version`? If not, cut it.                                                                  | W1-D           |
+| ~~`@octomux/capabilities` external or bundled?~~                                                                    | moot under (c) |
+| ~~Electron `files:`~~                                                                                               | deprioritised  |
+
+## End state: everything plugin-driven
+
+Confirmed as the direction. It does not change the sequence — it changes what
+"done" looks like, and it strengthens the acceptance test.
+
+The in-tree registries stop being a special case and become the loader's **first
+consumers**: the nine workflow kinds, the four integration providers, and the two
+harnesses all load through the same manifest as a third party's would, with core
+rows shipped as defaults and frozen before plugin rows load. `--dump-config` then
+prints one tree with no privileged entries in it, which is the honest test of
+"everything is a plugin" and the same one dsh applies to itself.
+
+Two guardrails, both already argued above and neither weakened by this:
+
+- Core rows still register **before** plugin rows, and the core set is frozen.
+  "Everything is a plugin" is a composition property, not a permission property —
+  a third party must never be able to replace `claude-code` or `jira` by
+  registering over it.
+- Core registration for harnesses stays a side-effect import until W2-A can
+  replace it wholesale. The module-identity bug is about _plugins_; converting core
+  early breaks `settings.ts` on both the read and write paths.
+
+Sequence it as the last step of each wave, not a wave of its own: whichever seam a
+wave opens, move the in-tree implementations onto it in that wave's integration
+pass. If moving them needs any special-casing, the seam is decorative and the wave
+is not done.
