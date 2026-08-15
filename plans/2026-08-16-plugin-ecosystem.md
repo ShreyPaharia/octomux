@@ -809,12 +809,44 @@ Three consequences to carry into the waves:
   `instanceof` fails across the boundary. Any cross-boundary contract must be plain
   data or a structural interface — never a class, never an `instanceof` check. Add
   this to the `@octomux/plugin-api` review checklist.
-- **Native modules are the real blocker, and they are not a plugin problem.**
-  `build:server` externalises `better-sqlite3` and `node-pty`. `bun:sqlite` replaces
-  the former (a real migration — the `prepare`/`pragma` surface differs at every
-  `getDb()` call site). `node-pty` has no Bun equivalent and is the load-bearing
-  dependency of the entire tmux/terminal layer. Settle that before compile ships;
-  it does not affect anything in this plan.
+- **Native modules — one real migration, one solved.** `build:server` externalises
+  `better-sqlite3` and `node-pty`. `bun:sqlite` replaces the former (a real
+  migration; the `prepare`/`pragma` surface differs at every `getDb()` call site).
+  `node-pty` is **solved by `Bun.Terminal`** — see below. Neither affects anything
+  else in this plan.
+
+### `Bun.Terminal` replaces `node-pty` — verified, including compiled
+
+Bun 1.3.5+ ships a built-in PTY. Tested against the exact surface
+`server/terminal.ts` uses, both interpreted and as a `--compile`d binary, with
+identical results: a real tty (`/dev/ttysNNN`), correct `stty size`, `write()`
+reaching the child, `resize()` and `close()` working.
+
+Being built in rather than a native addon is the whole point — it is the one
+dependency that would otherwise have blocked `--compile`.
+
+| `node-pty` (today)                            | `Bun.Terminal`                                                                                                                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spawn(file, args, { cwd, env, cols, rows })` | `new Bun.Terminal({ cols, rows, data })` **then** `Bun.spawn(argv, { terminal, cwd, env })`                                                                               |
+| `pty.onData((s: string) => …)`                | `data(term, chunk: Uint8Array)` callback **in the constructor**                                                                                                           |
+| `pty.onExit(cb)`                              | `await proc.exited`                                                                                                                                                       |
+| `pty.resize(cols, rows)`                      | `term.resize(cols, rows)` — identical                                                                                                                                     |
+| `pty.write(s)`                                | `term.write(s)` — identical                                                                                                                                               |
+| `pty.kill()`                                  | `proc.kill()` + `term.close()` — splits in two                                                                                                                            |
+| `pty.pause()`                                 | **absent — and already unused.** `server/terminal.ts` discards at the app level on purpose, "so a stalled viewer can never backpressure tmux and stall the agent's pane." |
+
+Three things to carry into the migration:
+
+- **Construction inverts.** The Terminal exists first and the process is spawned
+  _into_ it, rather than the pty being a product of the spawn. A Terminal can also
+  be reused across spawns, which suits `respawn-agent` and `hop-agent`.
+- **`data` delivers `Uint8Array`, not `string`.** `terminal.ts`'s handler is typed
+  `(data: string)`. Decode with a single `TextDecoder` carried across chunks
+  (`{ stream: true }`) or multi-byte UTF-8 will split across reads and corrupt
+  output mid-glyph.
+- **Teardown is two calls.** Everywhere `pty.kill()` appears — including the
+  disconnect and cleanup paths — needs both the process kill and the fd close, or
+  the pty leaks.
 
 ## Electron — deprioritised
 
@@ -879,7 +911,8 @@ After WAVE-2 and WAVE-5 only: the built-artifact smoke test.
 | Decision                                                                                                            | Blocks         |
 | ------------------------------------------------------------------------------------------------------------------- | -------------- |
 | npm channel: installer shim (recommended), full dual-channel, or deprecate?                                         | WAVE-0         |
-| `node-pty` under `bun --compile` — no Bun equivalent, and the terminal layer rests on it                            | compile ships  |
+| `better-sqlite3` → `bun:sqlite` — the surface differs at every `getDb()` call site                                  | compile ships  |
+| ~~`node-pty` under `bun --compile`~~ — `Bun.Terminal` covers it, verified compiled                                  | closed         |
 | Does the read-side of `IntegrationProvider` change (`handler(envelope, config, http)` vs a `trusted` discriminant)? | W3-A           |
 | Which `detectActivity` design — publish the hook contract, output-stability polling, or explicit `task done`?       | W4-D           |
 | Does anything read `user_version`? If not, cut it.                                                                  | W1-D           |
