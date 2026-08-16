@@ -80,7 +80,6 @@ function makeStubHarness(): Harness {
     buildContinueCommand: vi.fn().mockReturnValue(null),
     installHooks: vi.fn().mockResolvedValue(undefined),
     uninstallHooks: vi.fn().mockResolvedValue(undefined),
-    syncAgents: vi.fn().mockResolvedValue(undefined),
     resolveFlags: vi.fn().mockReturnValue(''),
     validateSettings: vi.fn().mockReturnValue({}),
     validateAgentName: vi.fn().mockImplementation((n: string) => n),

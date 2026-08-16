@@ -165,10 +165,6 @@ export const cursorHarness: Harness = {
     fs.rmSync(path.join(dirPath, '.octomux-hooks'), { recursive: true, force: true });
   },
 
-  async syncAgents(_worktreePath: string): Promise<void> {
-    // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
-  },
-
   async postLaunch(target: string): Promise<void> {
     if (process.env.NODE_ENV === 'test') return;
     const start = Date.now();
@@ -271,3 +267,5 @@ export const cursorHarness: Harness = {
 };
 
 registerHarness(cursorHarness);
+
+export default cursorHarness;

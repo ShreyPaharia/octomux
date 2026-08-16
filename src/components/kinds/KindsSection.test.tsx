@@ -18,6 +18,13 @@ const { kindsApiProxy, kindsApiMock } = await vi.hoisted(async () => {
         prompt: 'Do the thing.',
         defaultCron: '0 9 * * *',
       },
+      {
+        kind: 'demo:changelog',
+        displayName: 'Demo Changelog',
+        execution: 'session',
+        source: 'plugin',
+        prompt: 'Summarize the changelog.',
+      },
     ],
   });
   const savePreset = vi.fn().mockResolvedValue({
@@ -61,6 +68,13 @@ describe('KindsSection', () => {
           prompt: 'Do the thing.',
           defaultCron: '0 9 * * *',
         },
+        {
+          kind: 'demo:changelog',
+          displayName: 'Demo Changelog',
+          execution: 'session',
+          source: 'plugin',
+          prompt: 'Summarize the changelog.',
+        },
       ],
     });
   });
@@ -84,6 +98,16 @@ describe('KindsSection', () => {
       'Copy to custom',
     );
     expect(within(row).queryByTestId('kind-delete-prod-log-triage')).not.toBeInTheDocument();
+  });
+
+  it('plugin preset renders its own badge with no Edit or Delete', async () => {
+    renderSection();
+    const row = await screen.findByTestId('kind-row-demo:changelog');
+    expect(within(row).getByText('plugin')).toBeInTheDocument();
+    expect(within(row).queryByText('built-in')).not.toBeInTheDocument();
+    expect(within(row).queryByText('custom')).not.toBeInTheDocument();
+    expect(within(row).getByTestId('kind-edit-demo:changelog')).toHaveTextContent('Copy to custom');
+    expect(within(row).queryByTestId('kind-delete-demo:changelog')).not.toBeInTheDocument();
   });
 
   it('home-tier preset offers Edit and Delete', async () => {
@@ -115,6 +139,18 @@ describe('KindsSection', () => {
         }),
       ),
     );
+  });
+
+  it('"Copy to custom" on a plugin preset sanitizes the namespaced id (no colon)', async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    const row = await screen.findByTestId('kind-row-demo:changelog');
+    await user.click(within(row).getByTestId('kind-edit-demo:changelog'));
+
+    const kindInput = await screen.findByTestId('kind-editor-id');
+    expect(kindInput).toHaveValue('demo-changelog-custom');
+    expect(kindInput).not.toBeDisabled();
   });
 
   it('editing a home-tier preset locks the kind id field', async () => {

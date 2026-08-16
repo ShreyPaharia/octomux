@@ -13,6 +13,13 @@ export interface OctomuxSettings {
   editor: EditorChoice;
   defaultHarnessId: string;
   harnesses: Record<string, Record<string, unknown>>;
+  /**
+   * Per-plugin settings, keyed by plugin id. Opaque to the host — octomux
+   * never schema-checks a plugin's blob (unlike harnesses' validateSettings)
+   * and never drops a plugin's config just because that plugin isn't
+   * currently installed, so uninstall/reinstall doesn't lose it.
+   */
+  plugins: Record<string, Record<string, unknown>>;
 
   defaultTracker?: DefaultTracker;
   defaultJiraBaseUrl?: string;
@@ -60,10 +67,30 @@ function parsePositiveIntSetting(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * Sets an own data property keyed by an arbitrary, caller-controlled string
+ * (a plugin or harness id). Plain `obj[key] = value` is unsafe here: for the
+ * literal key `__proto__`, bracket assignment on a normal object invokes
+ * `Object.prototype`'s `__proto__` setter and reparents `obj` instead of
+ * creating a property — the value silently never lands. `defineProperty`
+ * always creates/overwrites an own property regardless of key, so ids like
+ * `__proto__`, `constructor`, `prototype` round-trip correctly. Not a
+ * prototype-pollution concern — `obj`'s prototype chain is never touched.
+ */
+function setOwn<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 export const DEFAULT_SETTINGS: OctomuxSettings = {
   editor: 'nvim',
   defaultHarnessId: 'claude-code',
   harnesses: {},
+  plugins: {},
 };
 
 const VALID_EDITORS: EditorChoice[] = ['nvim', 'vscode', 'cursor'];
@@ -83,6 +110,10 @@ export async function getSettings(): Promise<OctomuxSettings> {
     if (err.code === 'ENOENT') return { ...DEFAULT_SETTINGS };
     throw err;
   }
+
+  // Preserved verbatim, no validation — a plugin's config is opaque to the
+  // host (see the OctomuxSettings.plugins doc comment).
+  const plugins = (parsed.plugins as Record<string, Record<string, unknown>>) ?? {};
 
   const harnesses = (parsed.harnesses as Record<string, Record<string, unknown>>) ?? {};
   const cc = { ...(harnesses['claude-code'] ?? {}) };
@@ -130,6 +161,7 @@ export async function getSettings(): Promise<OctomuxSettings> {
     editor: (parsed.editor as EditorChoice) ?? DEFAULT_SETTINGS.editor,
     defaultHarnessId: (parsed.defaultHarnessId as string) ?? DEFAULT_SETTINGS.defaultHarnessId,
     harnesses: mergedHarnesses,
+    plugins,
     defaultTracker:
       parsed.defaultTracker === 'jira' || parsed.defaultTracker === 'linear'
         ? parsed.defaultTracker
@@ -248,11 +280,20 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     const registered = new Set(listHarnesses().map((h) => h.id));
     for (const [id, blob] of Object.entries(patch.harnesses)) {
       if (registered.has(id)) {
-        mergedHarnesses[id] = getHarness(id).validateSettings(blob);
+        setOwn(mergedHarnesses, id, getHarness(id).validateSettings(blob));
       } else {
         // Unknown harness blob — preserve verbatim, do not validate.
-        mergedHarnesses[id] = blob;
+        setOwn(mergedHarnesses, id, blob);
       }
+    }
+  }
+
+  const mergedPlugins = { ...current.plugins };
+  if (patch.plugins) {
+    for (const [id, blob] of Object.entries(patch.plugins)) {
+      // Plugin config is opaque to the host — preserve verbatim, no
+      // validation, regardless of whether the plugin id is installed.
+      setOwn(mergedPlugins, id, blob);
     }
   }
 
@@ -272,6 +313,7 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     editor: patch.editor ?? current.editor,
     defaultHarnessId: patch.defaultHarnessId ?? current.defaultHarnessId,
     harnesses: mergedHarnesses,
+    plugins: mergedPlugins,
     defaultTracker:
       patch.defaultTracker !== undefined ? patch.defaultTracker : current.defaultTracker,
     defaultJiraBaseUrl:
@@ -310,25 +352,22 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
   return merged;
 }
 
+/** A plugin's settings blob, or {} if it has none saved. Never validated. */
+export async function getPluginSettings(id: string): Promise<Record<string, unknown>> {
+  const settings = await getSettings();
+  return settings.plugins[id] ?? {};
+}
+
 /**
- * @deprecated use claudeCodeHarness.resolveFlags instead.
- * Kept until Tasks 14-17 update the callers (task-runner.ts, chats.ts).
- *
- * Reads flags from the new harnesses['claude-code'] sub-object. Falls back
- * gracefully to an empty string for settings that have neither key set.
+ * Shallow-merges `patch` onto the plugin's existing settings blob (matches
+ * updateSettings' merge-by-field behaviour elsewhere in this file) and
+ * persists it. Never validated — a plugin's config is opaque to the host.
  */
-export function resolveClaudeFlags(settings: OctomuxSettings): string {
-  const envFlagsRaw = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
-  if (envFlagsRaw) return ` ${envFlagsRaw}`;
-
-  const sub = (settings.harnesses?.['claude-code'] ?? {}) as {
-    flags?: string;
-    dangerouslySkipPermissions?: boolean;
-  };
-
-  const parts: string[] = [];
-  if (sub.dangerouslySkipPermissions) parts.push('--dangerously-skip-permissions');
-  const trimmed = (sub.flags ?? '').trim();
-  if (trimmed) parts.push(trimmed);
-  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+export async function updatePluginSettings(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const current = await getSettings();
+  const existing = current.plugins[id] ?? {};
+  await updateSettings({ plugins: { [id]: { ...existing, ...patch } } });
 }

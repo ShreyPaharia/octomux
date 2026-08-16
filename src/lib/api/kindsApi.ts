@@ -20,7 +20,7 @@ export interface Preset {
 }
 
 export interface PresetWithSource extends Preset {
-  source: 'builtin' | 'home';
+  source: 'builtin' | 'plugin' | 'home';
 }
 
 export const kindsApi = {

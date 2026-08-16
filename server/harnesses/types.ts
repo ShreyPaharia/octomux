@@ -76,7 +76,6 @@ export interface Harness {
    * user's own hooks and permissions intact, and no-op when nothing is there.
    */
   uninstallHooks(dirPath: string): Promise<void>;
-  syncAgents(worktreePath: string): Promise<void>;
   /**
    * Optional post-launch hook called after the launch command is sent to the
    * tmux pane. Used by harnesses with an interactive first-run gate (e.g.
@@ -87,4 +86,42 @@ export interface Harness {
   resolveFlags(settings: OctomuxSettings): string;
   validateSettings(blob: unknown): Record<string, unknown>;
   validateAgentName(name: string): string;
+
+  /**
+   * Whether this harness supports Claude Code's plugin ecosystem
+   * (`--plugin-dir`, marketplaces, skills/agents delivery). Purely
+   * descriptive today — nothing reads it yet.
+   */
+  readonly supportsClaudePlugins?: boolean;
+  /**
+   * Will replace the hardcoded prompt-delivery construction in
+   * `task-engine/launch.ts::buildAgentStartupCommand` (how the initial
+   * prompt file gets appended to the launch command). Currently unwired —
+   * no call site reads this member yet.
+   */
+  buildPromptDelivery?(baseCmd: string, promptFile: string): string;
+  /**
+   * Will replace the hardcoded MCP config wiring in
+   * `task-engine/launch.ts::applyOrchestratorMcpConfig`. Currently unwired —
+   * no call site reads this member yet. A harness implementing this builds a
+   * shell command string from `worktreePath`/`configPath` and MUST quote its
+   * own inputs (core uses `shellQuoteSingle` from `server/shell-quote.ts`,
+   * verified sound) — an implementation that skips quoting is a real shell
+   * injection surface.
+   */
+  attachMcp?(flags: string, worktreePath: string, configPath: string): string;
+  /**
+   * Will replace the harness-specific message-sending path used to talk to
+   * a running agent (currently hardcoded per-harness in the task engine).
+   * Currently unwired — no call site reads this member yet. An
+   * implementation that shells out MUST quote `target`/`text` itself (see
+   * `attachMcp` above for the same caveat).
+   */
+  sendMessage?(target: string, text: string): Promise<void>;
+  /**
+   * Will replace the harness-specific idle/active detection currently
+   * hardcoded in the task engine. Currently unwired — no call site reads
+   * this member yet.
+   */
+  detectActivity?(target: string): Promise<'active' | 'idle'>;
 }

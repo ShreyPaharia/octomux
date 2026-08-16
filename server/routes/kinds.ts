@@ -57,8 +57,12 @@ router.delete('/api/kinds/:kind', (req: Request, res: Response) => {
 
   const existing = getPreset(kind);
   if (!existing) throw notFound(`Unknown kind: ${kind}`);
-  if (existing.source === 'builtin') {
-    throw badRequest(`"${kind}" is a built-in kind — cannot be deleted`);
+  if (existing.source === 'builtin' || existing.source === 'plugin') {
+    // Plugin kinds are read-only from this API — structurally unreachable
+    // anyway (their id is always `<pkg>:<kind>`, which contains `:` and can
+    // never pass the KIND_NAME_RE param check above), but guarded explicitly
+    // so that invariant isn't only implicit in the regex.
+    throw badRequest(`"${kind}" is a ${existing.source} kind — cannot be deleted`);
   }
 
   const file = path.join(homeKindsDir(), `${kind}.json`);

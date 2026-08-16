@@ -17,6 +17,9 @@
       "path": "./packages/diff-engine"
     },
     {
+      "path": "./packages/plugin-api"
+    },
+    {
       "path": "./packages/types"
     },
     {
