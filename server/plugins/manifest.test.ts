@@ -134,6 +134,116 @@ plugins:
 `;
     expect(() => parseManifest(text)).toThrow();
   });
+
+  // `import()` natively resolves data:/http(s):/file: URLs — a `name` shaped
+  // like one of these is direct code execution once the STEP-2 loader imports
+  // it. Only an npm package name or an absolute path may pass.
+  it.each([
+    ['a data: URL', 'data:text/javascript,globalThis.pwned=1'],
+    ['an http: URL', 'http://evil/x.js'],
+    ['a file: URL', 'file:///tmp/evil.js'],
+    ['a relative traversal path', '../../../etc/passwd'],
+    ['an embedded NUL', 'x\0y'],
+  ])('rejects a plugin name that is %s', (_label, name) => {
+    const text = `
+plugins:
+  - id: demo
+    name: ${JSON.stringify(name)}
+`;
+    expect(() => parseManifest(text)).toThrow();
+  });
+
+  it.each([
+    ['an unscoped npm package name', 'octomux-plugin-demo'],
+    ['a scoped npm package name', '@octomux/plugin-demo'],
+    ['an absolute path', '/Users/dev/my-plugin'],
+  ])('accepts a plugin name that is %s', (_label, name) => {
+    const text = `
+plugins:
+  - id: demo
+    name: ${JSON.stringify(name)}
+`;
+    expect(() => parseManifest(text)).not.toThrow();
+  });
+
+  // js-yaml has no `maxAliasCount`. A short anchor/alias chain shares object
+  // references during parsing itself (cheap), but blows up to tens of MB the
+  // moment anything downstream walks or serializes the tree — so this must be
+  // rejected before `yaml.load` runs at all, not measured after the fact.
+  // This fixture is intentionally tiny (no exponential allocation happens here
+  // — the assertion is that it's rejected, never that it OOMs).
+  it('rejects a YAML anchor/alias bomb before parsing it', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    config:
+      a: &a ["x","x","x","x","x","x","x","x","x"]
+      b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+      c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+      d: [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+`;
+    expect(() => parseManifest(text)).toThrow();
+  });
+
+  it('rejects a bare anchor definition with no alias use at all', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    config:
+      a: &anchor
+        foo: bar
+`;
+    expect(() => parseManifest(text)).toThrow();
+  });
+
+  it('does not false-positive on `&`/`*` inside a quoted scalar', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    config:
+      pattern: "*.ts"
+      company: "Foo & Bar"
+`;
+    expect(() => parseManifest(text)).not.toThrow();
+  });
+
+  // §Fix 6 negative tests: hostile YAML mapping shapes.
+  it('does not let a `__proto__` key pollute the prototype', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    config:
+      __proto__:
+        polluted: true
+`;
+    const m = parseManifest(text);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(m.plugins[0].config).toBeDefined();
+  });
+
+  it('rejects duplicate mapping keys within a row', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    name: octomux-plugin-other
+`;
+    expect(() => parseManifest(text)).toThrow();
+  });
+
+  it('rejects a row using a YAML merge key (`<<:`) — unknown key, not merged', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    <<: { version: "1.0.0" }
+`;
+    expect(() => parseManifest(text)).toThrow();
+  });
 });
 
 describe('readManifest', () => {
