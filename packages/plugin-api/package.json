@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
+  "// private": "publish task removes this once the package is ready to ship",
+  "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

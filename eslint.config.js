@@ -134,7 +134,10 @@ export default tseslint.config(
       '*.config.js',
       '*.config.ts',
       // Per-platform tmux packages are pure CJS modules published separately.
-      'packages/',
+      // plugin-api is TS source lintable like the rest of the app — not excluded.
+      'packages/*/',
+      '!packages/plugin-api/',
+      'packages/plugin-api/dist/',
       // electron/ has its own tsconfig and uses Electron types not in the main project.
       'electron/',
       'dist-electron/',
