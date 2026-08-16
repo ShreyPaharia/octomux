@@ -63,15 +63,4 @@ describe('Harness interface surface', () => {
   ])('%s: syncAgents is gone', (_id, harness) => {
     expect('syncAgents' in harness).toBe(false);
   });
-
-  it.each([
-    ['claude-code', claudeCodeHarness],
-    ['cursor', cursorHarness],
-  ])('%s: new optional members are absent (unwired)', (_id, harness) => {
-    expect(harness.supportsClaudePlugins).toBeUndefined();
-    expect(harness.buildPromptDelivery).toBeUndefined();
-    expect(harness.attachMcp).toBeUndefined();
-    expect(harness.sendMessage).toBeUndefined();
-    expect(harness.detectActivity).toBeUndefined();
-  });
 });

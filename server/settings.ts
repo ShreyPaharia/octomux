@@ -67,6 +67,25 @@ function parsePositiveIntSetting(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/**
+ * Sets an own data property keyed by an arbitrary, caller-controlled string
+ * (a plugin or harness id). Plain `obj[key] = value` is unsafe here: for the
+ * literal key `__proto__`, bracket assignment on a normal object invokes
+ * `Object.prototype`'s `__proto__` setter and reparents `obj` instead of
+ * creating a property — the value silently never lands. `defineProperty`
+ * always creates/overwrites an own property regardless of key, so ids like
+ * `__proto__`, `constructor`, `prototype` round-trip correctly. Not a
+ * prototype-pollution concern — `obj`'s prototype chain is never touched.
+ */
+function setOwn<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 export const DEFAULT_SETTINGS: OctomuxSettings = {
   editor: 'nvim',
   defaultHarnessId: 'claude-code',
@@ -261,10 +280,10 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     const registered = new Set(listHarnesses().map((h) => h.id));
     for (const [id, blob] of Object.entries(patch.harnesses)) {
       if (registered.has(id)) {
-        mergedHarnesses[id] = getHarness(id).validateSettings(blob);
+        setOwn(mergedHarnesses, id, getHarness(id).validateSettings(blob));
       } else {
         // Unknown harness blob — preserve verbatim, do not validate.
-        mergedHarnesses[id] = blob;
+        setOwn(mergedHarnesses, id, blob);
       }
     }
   }
@@ -274,7 +293,7 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     for (const [id, blob] of Object.entries(patch.plugins)) {
       // Plugin config is opaque to the host — preserve verbatim, no
       // validation, regardless of whether the plugin id is installed.
-      mergedPlugins[id] = blob;
+      setOwn(mergedPlugins, id, blob);
     }
   }
 

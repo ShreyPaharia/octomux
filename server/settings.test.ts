@@ -586,6 +586,27 @@ describe('settings.plugins', () => {
       const result = await updateSettings({ plugins: { b: { y: 3 } } });
       expect(result.plugins).toEqual({ a: { x: 1 }, b: { y: 3 } });
     });
+
+    it.each(['__proto__', 'constructor', 'prototype'])(
+      'round-trips a plugin literally named %s without reparenting the merge object',
+      async (id) => {
+        const result = await updateSettings({ plugins: { [id]: { keep: 'me' } } });
+
+        // The write must not vanish: the blob is an own property of the
+        // result, not lost via prototype reparenting.
+        expect(Object.prototype.hasOwnProperty.call(result.plugins, id)).toBe(true);
+        expect(result.plugins[id]).toEqual({ keep: 'me' });
+        // The merge object's own prototype must be untouched.
+        expect(Object.getPrototypeOf(result.plugins)).toBe(Object.prototype);
+
+        const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+        expect(JSON.parse(writtenJson).plugins[id]).toEqual({ keep: 'me' });
+
+        mockFs.readFile.mockResolvedValue(writtenJson);
+        const reread = await getSettings();
+        expect(reread.plugins[id]).toEqual({ keep: 'me' });
+      },
+    );
   });
 
   describe('getPluginSettings / updatePluginSettings', () => {
