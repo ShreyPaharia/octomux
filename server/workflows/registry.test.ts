@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from '../bun-test.js';
+import type { WorkflowType } from './types.js';
 import {
   registerWorkflow,
   registerPluginWorkflow,
@@ -79,5 +80,13 @@ describe('registerPluginWorkflow', () => {
     ).toThrow();
     // untouched — the throw happened before any Map.set
     expect(getWorkflow('weekly-update')?.displayName).toBe('Weekly Update');
+  });
+});
+
+describe('registerPluginWorkflow key/kind agreement', () => {
+  it('overwrites a bare wf.kind with the qualified id so key and kind agree', () => {
+    registerPluginWorkflow('demo:changelog', { kind: 'changelog' } as WorkflowType);
+    expect(getWorkflow('demo:changelog')?.kind).toBe('demo:changelog');
+    expect(getWorkflow('changelog')).toBeUndefined();
   });
 });

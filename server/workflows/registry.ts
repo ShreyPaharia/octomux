@@ -32,6 +32,11 @@ export function registerWorkflow(wf: WorkflowType): void {
  * `<pkg>:<local>` (see `qualify()`) — core kinds are always bare (no `:`), so
  * the one format check below rejects both an unqualified id AND any attempt to
  * register under a core kind's literal name in a single guard.
+ *
+ * The stored object's `kind` is overwritten with the qualified id rather than
+ * trusted: a plugin declares a LOCAL kind and never sees the qualified form, so
+ * `wf.kind` arrives bare. Storing it as-is would leave the map key and the
+ * workflow's own `kind` disagreeing, and `getWorkflow()` callers read both.
  */
 export function registerPluginWorkflow(qualifiedKind: string, wf: WorkflowType): void {
   if (!QUALIFIED_KIND_RE.test(qualifiedKind)) {
@@ -39,7 +44,7 @@ export function registerPluginWorkflow(qualifiedKind: string, wf: WorkflowType):
       `registerPluginWorkflow: "${qualifiedKind}" must be a qualified "<pkg>:<kind>" id (core kinds are never allowed here)`,
     );
   }
-  workflows.set(qualifiedKind, wf);
+  workflows.set(qualifiedKind, { ...wf, kind: qualifiedKind });
 }
 
 export function getWorkflow(kind: string): WorkflowType | undefined {
