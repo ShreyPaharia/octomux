@@ -136,10 +136,6 @@ export const claudeCodeHarness: Harness = {
     writeJsonConfig(settingsPath, next);
   },
 
-  async syncAgents(_worktreePath: string) {
-    // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
-  },
-
   resolveFlags(settings: OctomuxSettings): string {
     const envFlagsRaw = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
     if (envFlagsRaw) {
@@ -178,3 +174,5 @@ export const claudeCodeHarness: Harness = {
 };
 
 registerHarness(claudeCodeHarness);
+
+export default claudeCodeHarness;
