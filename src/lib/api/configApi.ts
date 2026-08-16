@@ -35,6 +35,8 @@ export interface OctomuxSettings {
   claudeFlags: string;
   defaultHarnessId?: string;
   harnesses?: Record<string, Record<string, unknown>>;
+  /** Per-plugin settings, keyed by plugin id. Opaque to the host. */
+  plugins?: Record<string, Record<string, unknown>>;
   defaultJiraBaseUrl?: string;
   defaultJiraProjectKey?: string;
   defaultBaseBranch?: string;
