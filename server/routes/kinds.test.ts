@@ -26,11 +26,16 @@ function makeApp() {
 describe('kinds routes — plugin tier', () => {
   let pluginPrefix: string;
   let homeDir: string;
+  let manifestFile: string;
+  let listed: string[];
 
   beforeEach(() => {
     pluginPrefix = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-prefix-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-kinds-'));
+    manifestFile = path.join(pluginPrefix, 'octomux.yml');
+    listed = [];
     vi.stubEnv('OCTOMUX_PLUGIN_PREFIX', pluginPrefix);
+    vi.stubEnv('OCTOMUX_PLUGIN_MANIFEST', manifestFile);
     vi.stubEnv('OCTOMUX_KINDS_DIR', homeDir);
   });
 
@@ -41,10 +46,19 @@ describe('kinds routes — plugin tier', () => {
     reloadPresets();
   });
 
+  /**
+   * Installs a plugin kind AND lists its package in the manifest — the tier
+   * only scans packages with an enabled `octomux.yml` row, so writing the
+   * files alone contributes nothing. The row `id` is the namespace, so this
+   * package's kinds qualify as `<pkg>:<kind>`.
+   */
   function writePluginKind(pkg: string, name: string, body: unknown): void {
     const dir = path.join(pluginPrefix, 'node_modules', pkg, 'kinds');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(body), 'utf-8');
+    if (!listed.includes(pkg)) listed.push(pkg);
+    const rows = listed.map((p) => `  - id: ${p}\n    name: ${p}`).join('\n');
+    fs.writeFileSync(manifestFile, `plugins:\n${rows}\n`, 'utf-8');
   }
 
   it('GET /api/kinds includes a plugin-tier kind, qualified and tagged', async () => {
