@@ -1,15 +1,26 @@
-# build-binaries.yml — Build and publish per-platform static tmux binaries.
+# build-binaries.yml — Build per-platform static tmux binaries. Does NOT publish.
 #
 # Triggers:
-#   - push to main / PRs to main: build only (verify the static tmux compiles)
-#   - release tag (v*): build + publish each @octomux/tmux-* package to npm
-#   - workflow_dispatch: build + publish at the current package.json version
-#     (used to publish platforms whose runner was unavailable at tag time)
+#   - PRs to main: build only (verify the static tmux still compiles)
+#   - release tag (v*): build, so the artifacts exist when you publish
+#   - workflow_dispatch: build on demand
 #
-# Each matrix job builds tmux for ITS platform AND publishes ITS OWN package.
-# Publishing is per-platform and independent, so an unavailable runner (e.g. the
-# macos-13 Intel runner) only delays its own package — it never blocks the
-# others. Re-running publishes any platform not yet on npm (idempotent).
+# Each matrix job builds tmux for ITS platform and uploads it as an artifact.
+# There is no cross-compiling these locally, which is the whole point of the
+# matrix — a macOS runner cannot produce the Linux binaries and vice versa.
+#
+# Publishing @octomux/tmux-* is manual, same as the CLI packages (see
+# CONTRIBUTING.md → Publishing). To ship a platform:
+#
+#   gh run download <run-id> -n tmux-linux-x64 -D packages/tmux-linux-x64
+#   cd packages/tmux-linux-x64
+#   chmod +x bin/tmux
+#   npm version <x.y.z> --no-git-tag-version --allow-same-version
+#   npm publish --access public
+#
+# Each package is independent — an unavailable runner (e.g. macos-13 Intel) only
+# holds up its own platform. Publishing is idempotent in the sense that npm
+# refuses a version that already exists, so re-running a partial release is safe.
 #
 # NOTE: node-pty delivery is intentionally NOT handled here. npm/CLI users get
 # node-pty from upstream (Linux compiles from source — a known gap), and the
@@ -20,7 +31,6 @@
 name: Build Binaries
 
 on:
-  # Tags publish; PRs build-verify; dispatch re-publishes a missed platform.
   # Deliberately NO 'push: branches: [main]' — PRs already verify the tmux build,
   # and a 4-platform matrix on every main commit just floods the (concurrency-
   # capped) macOS/arm64 runner queue for no added signal.
@@ -38,7 +48,6 @@ jobs:
 
     permissions:
       contents: read
-      id-token: write # npm provenance
 
     strategy:
       fail-fast: false
@@ -70,16 +79,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      # Trusted publishing (OIDC) needs npm >= 11.5.1; the bundled npm is older.
-      - name: Upgrade npm
-        run: npm install -g npm@latest
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
@@ -102,33 +101,11 @@ jobs:
       - name: Build tmux binary
         run: bash scripts/build-tmux.sh
 
+      # Retained long enough to outlive a release that gets published by hand
+      # days after the tag — these are the only copies of the Linux builds.
       - name: Upload tmux package artifact
         uses: actions/upload-artifact@v4
         with:
           name: tmux-${{ matrix.platform }}-${{ matrix.arch }}
           path: packages/tmux-${{ matrix.platform }}-${{ matrix.arch }}/
-          retention-days: 30
-
-      # Publish THIS platform's package — on a tag or a manual dispatch.
-      # Independent per-platform: a stuck runner can't block the other packages.
-      - name: Publish @octomux/tmux-${{ matrix.platform }}-${{ matrix.arch }}
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        working-directory: packages/tmux-${{ matrix.platform }}-${{ matrix.arch }}
-        # No token: OIDC trusted publishing, configured per package on npmjs.com.
-        run: |
-          set -euo pipefail
-          PKG="@octomux/tmux-${{ matrix.platform }}-${{ matrix.arch }}"
-          # Version: from the tag (v1.2.3 -> 1.2.3), else the repo package.json.
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            VER="$(node -p "require('../../package.json').version")"
-          fi
-          echo "Target: $PKG@$VER"
-          chmod +x bin/tmux
-          npm version "$VER" --no-git-tag-version --allow-same-version
-          if npm view "$PKG@$VER" version >/dev/null 2>&1; then
-            echo "$PKG@$VER already on npm — skipping publish"
-          else
-            npm publish --provenance --access public
-          fi
+          retention-days: 90

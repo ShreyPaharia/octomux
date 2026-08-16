@@ -199,6 +199,30 @@ not a protocol npm can resolve, and it made every published version through
 CI does **not** publish. `.github/workflows/publish.yml` only creates the
 GitHub release for the tag.
 
+#### The bundled tmux packages
+
+`@octomux/tmux-<platform>-<arch>` is a separate set from the CLI binaries and
+ships on its own cadence — the root manifest pins an exact version that rarely
+moves. They can't be built locally: a macOS host cannot produce the Linux
+binaries, which is why `build-binaries.yml` runs a 4-platform matrix. It builds
+and uploads artifacts only; publishing is manual, as above.
+
+```bash
+gh run download <run-id> -n tmux-linux-x64 -D packages/tmux-linux-x64
+cd packages/tmux-linux-x64
+chmod +x bin/tmux
+npm version <x.y.z> --no-git-tag-version --allow-same-version
+npm publish --access public
+```
+
+Artifacts are kept 90 days. `@octomux/tmux-darwin-x64` and
+`@octomux/tmux-linux-arm64` have never been published — their runners were
+unavailable at tag time and nobody went back for them, so the root package's
+`optionalDependencies` 404 on those two platforms and npm skips them silently.
+
+The macOS Electron app is a third track: `electron-release.yml` still uploads it
+to the GitHub Release on a tag. That one is not npm and is unaffected.
+
 Those pins are **not** in the checked-in `package.json`: the `@octomux/cli-*`
 packages only exist on npm once a release has published them, so pinning them in
 the repo would make `bun install` 404 on a fresh clone. `build:npm` writes them
