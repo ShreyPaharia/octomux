@@ -83,8 +83,7 @@ vi.mock('./skills.js', (importOriginal) => {
 });
 
 vi.mock('./harnesses/index.js', () => {
-  const actual =
-    vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
+  const actual = vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
   const claudeCode = {
     ...actual.getHarness('claude-code'),
     installHooks: vi.fn().mockResolvedValue(undefined),
@@ -113,7 +112,6 @@ vi.mock('./settings.js', () => {
 
 let nextWindowIndex = 0;
 const tmuxSessions = new Set<string>();
-
 
 const { createTestDb, getTask, DEFAULTS } = await import('./test-helpers.js');
 

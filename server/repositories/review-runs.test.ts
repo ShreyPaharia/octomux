@@ -3,9 +3,9 @@ import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 vi.mock('../events.js', () => ({ broadcast: vi.fn() }));
 
 const { createTestDb } = await import('../test-helpers.js');
-const { createReviewRun, getReviewRun, getCurrentRun, getLatestRun, completeRun } = await import('./review-runs.js');
+const { createReviewRun, getReviewRun, getCurrentRun, getLatestRun, completeRun } =
+  await import('./review-runs.js');
 const { broadcast } = await import('../events.js');
-
 
 const TASK_ID = 't_task1';
 

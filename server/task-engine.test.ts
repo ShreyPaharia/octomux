@@ -87,7 +87,20 @@ vi.mock('child_process', () => ({
 }));
 
 const { default: pino } = await import('pino');
-const { createTestDb, insertTask, insertAgent, insertPermissionPrompt, insertUserTerminal, getUserTerminals, getTask, getAgents, getPermissionPrompts, findExecCall, countExecCalls, DEFAULTS } = await import('./test-helpers.js');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getUserTerminals,
+  getTask,
+  getAgents,
+  getPermissionPrompts,
+  findExecCall,
+  countExecCalls,
+  DEFAULTS,
+} = await import('./test-helpers.js');
 const { getSettings } = await import('./settings.js');
 
 const {

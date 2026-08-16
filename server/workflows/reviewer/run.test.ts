@@ -30,10 +30,10 @@ vi.mock('../../events.js', () => ({
 const { createTestDb, insertTestTask, insertAgent } = await import('../../test-helpers.js');
 const { getDb } = await import('../../db.js');
 const { listRunsForWorkflow } = await import('../../repositories/runs.js');
-const { createReviewTaskFromPr, createManualReview, triggerReviewRun, manualReRunNudge } = await import('./run.js');
+const { createReviewTaskFromPr, createManualReview, triggerReviewRun, manualReRunNudge } =
+  await import('./run.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
-
 
 /** Let the fire-and-forget startTask().then() chain settle. */
 async function flush() {

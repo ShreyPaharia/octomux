@@ -55,7 +55,16 @@ const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.
 const { createApp } = await import('../app.js');
 const { subscribeServerEvents } = await import('../events.js');
 const { createSupervisor } = await import('./supervisor.js');
-const { createConversation, upsertManagedTask, getManagedTask, eventsSince, listPendingCards, createCard, resolveCard, appendEvent } = await import('../repositories/orchestrator.js');
+const {
+  createConversation,
+  upsertManagedTask,
+  getManagedTask,
+  eventsSince,
+  listPendingCards,
+  createCard,
+  resolveCard,
+  appendEvent,
+} = await import('../repositories/orchestrator.js');
 const { hasAlreadyRelayed } = await import('../hooks.js');
 
 describe('re-fire guard (hasAlreadyRelayed) — spec/plan relay does not double-fire', () => {

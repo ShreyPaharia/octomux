@@ -23,7 +23,7 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
 );
 
 vi.mock('@/lib/api/taskApi', () => {
-  const actual = (vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+  const actual = vi.importActual('@/lib/api/taskApi') as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };
 });
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));

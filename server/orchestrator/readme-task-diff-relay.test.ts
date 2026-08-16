@@ -66,7 +66,8 @@ vi.mock('./exec.js', () => ({
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
 const { createSupervisor } = await import('./supervisor.js');
-const { createConversation, upsertManagedTask, getManagedTask } = await import('../repositories/orchestrator.js');
+const { createConversation, upsertManagedTask, getManagedTask } =
+  await import('../repositories/orchestrator.js');
 const { advancePhaseForLabel } = await import('../hooks.js');
 const { broadcast, subscribeServerEvents } = await import('../events.js');
 

@@ -77,8 +77,27 @@ const { default: request } = await import('supertest');
 const { createServer } = await import('http');
 const { createApp } = await import('../app.js');
 const { createTestDb } = await import('../test-helpers.js');
-const { createConversation, getConversation, listMessages, appendMessage, createCard, resolveCard } = await import('../repositories/orchestrator.js');
-const { dispatchUserTurn, persistAndPush, setupOrchestratorWebSocket, handleOrchestratorUpgrade, chatEventToWsEvent, cardRowToWsEvent, replayConnectionState, registerTranscriptConsumer, registerConversationMessageListener, pushToConversation, cleanupOrchestratorClients } = await import('./stream.js');
+const {
+  createConversation,
+  getConversation,
+  listMessages,
+  appendMessage,
+  createCard,
+  resolveCard,
+} = await import('../repositories/orchestrator.js');
+const {
+  dispatchUserTurn,
+  persistAndPush,
+  setupOrchestratorWebSocket,
+  handleOrchestratorUpgrade,
+  chatEventToWsEvent,
+  cardRowToWsEvent,
+  replayConnectionState,
+  registerTranscriptConsumer,
+  registerConversationMessageListener,
+  pushToConversation,
+  cleanupOrchestratorClients,
+} = await import('./stream.js');
 const { tailTranscript } = await import('./transcript.js');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

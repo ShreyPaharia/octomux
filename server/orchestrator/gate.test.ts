@@ -61,12 +61,19 @@ const { default: path } = await import('path');
 const { default: os } = await import('os');
 const { createApp } = await import('../app.js');
 const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.js');
-const { createConversation, getCard, listPendingCards, createCard, resolveCard, upsertManagedTask, getManagedTask } = await import('../repositories/orchestrator.js');
+const {
+  createConversation,
+  getCard,
+  listPendingCards,
+  createCard,
+  resolveCard,
+  upsertManagedTask,
+  getManagedTask,
+} = await import('../repositories/orchestrator.js');
 const { handlePreToolUse, executeCard, rehydratePendingCards } = await import('./gate.js');
 const { addRule, listRules, capabilityToolName } = await import('./policy.js');
 
 // ─── Imports after mocks ──────────────────────────────────────────────────────
-
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

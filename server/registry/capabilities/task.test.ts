@@ -26,15 +26,16 @@ vi.mock('../../orchestrator/exec.js', (importOriginal) => {
 });
 
 const { getCapability, resetRegistry } = await import('../index.js');
-const { createTestDb, insertTestTask, insertAgent, getTask } = await import('../../test-helpers.js');
+const { createTestDb, insertTestTask, insertAgent, getTask } =
+  await import('../../test-helpers.js');
 const { registerTaskCapabilities } = await import('./task.js');
-const { startTask, closeTask, resumeTask, softDeleteTask, deleteTask } = await import('../../task-engine/index.js');
+const { startTask, closeTask, resumeTask, softDeleteTask, deleteTask } =
+  await import('../../task-engine/index.js');
 const { broadcast } = await import('../../events.js');
 const { ensureHookToken } = await import('../../hook-token.js');
 const { fireHook } = await import('../../hook-dispatcher.js');
 const { runCloseTask } = await import('../../orchestrator/exec.js');
 const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
-
 
 const ctx: CapabilityContext = { caller: 'agent' };
 

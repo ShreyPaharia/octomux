@@ -14,7 +14,6 @@ const { createTestDb } = await import('../test-helpers.js');
 const { createIntegration, setEnabled } = await import('../integrations/store.js');
 const { startGatewayIfConfigured } = await import('./boot.js');
 
-
 function fakeAdapter(id: string) {
   return { id, start: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}), send: vi.fn() };
 }

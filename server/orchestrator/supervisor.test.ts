@@ -53,7 +53,15 @@ vi.mock('./exec.js', () => ({
 
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
-const { createConversation, upsertManagedTask, appendEvent, getManagedTask, setGlobalMonitor, clearGlobalMonitor, getGlobalMonitorConversation } = await import('../repositories/orchestrator.js');
+const {
+  createConversation,
+  upsertManagedTask,
+  appendEvent,
+  getManagedTask,
+  setGlobalMonitor,
+  clearGlobalMonitor,
+  getGlobalMonitorConversation,
+} = await import('../repositories/orchestrator.js');
 const { createSupervisor } = await import('./supervisor.js');
 const { pushToConversation } = await import('./stream.js');
 

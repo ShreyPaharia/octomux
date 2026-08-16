@@ -14,7 +14,6 @@ const { ingestReviewComments } = await import('./comment-feedback.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-
 describe('ingestReviewComments', () => {
   let repoPath: string;
 

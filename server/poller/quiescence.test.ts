@@ -5,12 +5,7 @@ import { upsertManagedTask, createConversation } from '../repositories/orchestra
 import { pollQuiescence } from './quiescence.js';
 
 // Helper to set hook_activity and hook_activity_updated_at directly
-function setWorkerActivity(
-  db: Database,
-  agentId: string,
-  activity: string,
-  updatedAtExpr: string,
-) {
+function setWorkerActivity(db: Database, agentId: string, activity: string, updatedAtExpr: string) {
   db.prepare(
     `UPDATE workers SET hook_activity = ?, hook_activity_updated_at = ${updatedAtExpr} WHERE id = ?`,
   ).run(activity, agentId);

@@ -12,7 +12,8 @@ vi.mock('child_process', () => ({
 }));
 
 const { default: request } = await import('supertest');
-const { createTestDb, insertTask, insertAgent, DEFAULTS, findCallback } = await import('./test-helpers.js');
+const { createTestDb, insertTask, insertAgent, DEFAULTS, findCallback } =
+  await import('./test-helpers.js');
 const { getLearning, listForRead } = await import('./repositories/agent-learnings.js');
 
 const { execFile } = await import('child_process');

@@ -83,7 +83,8 @@ vi.mock('../../logger.js', (importOriginal) => {
   };
 });
 
-const { createTestDb, insertTask, DEFAULTS, findExecCall, countExecCalls } = await import('../../test-helpers.js');
+const { createTestDb, insertTask, DEFAULTS, findExecCall, countExecCalls } =
+  await import('../../test-helpers.js');
 
 const { setupNew } = await import('./new.js');
 const { setupExisting } = await import('./existing.js');

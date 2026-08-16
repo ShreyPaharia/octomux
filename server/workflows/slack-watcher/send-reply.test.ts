@@ -11,7 +11,6 @@ const { getWorkflow, listCronWorkflowKinds } = await import('../registry.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-
 describe('sendWatcherReply', () => {
   beforeEach(() => {
     mockRunSessionVertical.mockReset();

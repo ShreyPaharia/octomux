@@ -43,11 +43,11 @@ vi.mock('../../integrations/linear/graphql.js', (importOriginal) => {
 
 const { createTestDb, insertTask } = await import('../../test-helpers.js');
 const { getDb } = await import('../../db.js');
-const { createConversation, upsertManagedTask } = await import('../../repositories/orchestrator.js');
+const { createConversation, upsertManagedTask } =
+  await import('../../repositories/orchestrator.js');
 const { handlePullLinearIssue, buildBatchPlanCard, LinearApiError } = await import('./seed.js');
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
-
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

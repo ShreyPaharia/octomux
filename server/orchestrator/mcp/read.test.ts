@@ -25,11 +25,17 @@ vi.mock('../../tmux-bin.js', () => ({
 
 const { createTestDb, insertTask, insertAgent } = await import('../../test-helpers.js');
 const { getDb } = await import('../../db.js');
-const { handleMonitorStatus, handleGetTaskOutput, handleGetAgentOutput, handleRecentRepos, handleDefaultBranch, handleSearchLearnings } = await import('./read.js');
+const {
+  handleMonitorStatus,
+  handleGetTaskOutput,
+  handleGetAgentOutput,
+  handleRecentRepos,
+  handleDefaultBranch,
+  handleSearchLearnings,
+} = await import('./read.js');
 const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
 const { addLearning, SHARED_LANE } = await import('../../repositories/agent-learnings.js');
 const { POLICY_ONLY_COMMANDS } = await import('../command-registry.js');
-
 
 describe('orchestrator mcp read tools', () => {
   beforeEach(() => {

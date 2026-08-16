@@ -19,7 +19,6 @@ const { createSchedule } = await import('../repositories/schedules.js');
 const { insertRun, listRunsForSchedule } = await import('../repositories/runs.js');
 const { executeScheduleRun } = await import('./execute-schedule-run.js');
 
-
 /** Collect pino JSON log lines into memory for assertions. */
 function bufferStream() {
   const chunks: string[] = [];

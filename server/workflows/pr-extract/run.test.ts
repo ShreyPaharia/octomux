@@ -16,7 +16,6 @@ const { createExtractTaskFromMergedPr } = await import('./run.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-
 describe('createExtractTaskFromMergedPr', () => {
   beforeEach(() => {
     createTestDb();

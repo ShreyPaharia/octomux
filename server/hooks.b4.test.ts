@@ -17,7 +17,8 @@ vi.mock('./hook-dispatcher.js', () => ({
 }));
 
 const { default: request } = await import('supertest');
-const { createTestDb, insertTask, insertAgent, insertPermissionPrompt } = await import('./test-helpers.js');
+const { createTestDb, insertTask, insertAgent, insertPermissionPrompt } =
+  await import('./test-helpers.js');
 const { createApp } = await import('./app.js');
 
 describe('B4 (removed): POST /api/hooks/stop no longer synchronously transitions to human_review', () => {

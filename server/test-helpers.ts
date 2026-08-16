@@ -256,10 +256,7 @@ export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallM
 
 // ─── Agent Activity Helper ───────────────────────────────────────────────────
 
-export function getAgentActivity(
-  db: Database,
-  agentId: string,
-): { hook_activity: string } {
+export function getAgentActivity(db: Database, agentId: string): { hook_activity: string } {
   return db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get(agentId) as {
     hook_activity: string;
   };

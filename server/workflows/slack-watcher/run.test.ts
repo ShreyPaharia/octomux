@@ -14,7 +14,6 @@ const { SLACK_WATCHER_SCHEMA } = await import('./schema.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-
 const SKILL_BODY =
   'Watch {{slackUserId}} back {{lookbackMinutes}}m, via {{digestTarget}} tg:{{telegramChatId}} DM {{digestUserId}} at "{{digestChannel}}", skip {{previousItems}}.';
 

@@ -27,9 +27,10 @@ vi.mock('../settings.js', () => ({
 
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
-const { createConversation, createCard, getCard, resolveCard, upsertManagedTask, getManagedTask } = await import('../repositories/orchestrator.js');
-const { sweepExpiredApprovalCards, approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS } = await import('./approval-timeout.js');
-
+const { createConversation, createCard, getCard, resolveCard, upsertManagedTask, getManagedTask } =
+  await import('../repositories/orchestrator.js');
+const { sweepExpiredApprovalCards, approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS } =
+  await import('./approval-timeout.js');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

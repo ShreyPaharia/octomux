@@ -13,7 +13,8 @@ import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('./task-engine/index.js', () => {
   const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
-  const { insertAgent: insertAgentHelper } = vi.importActual<typeof import('./test-helpers.js')>('./test-helpers.js');
+  const { insertAgent: insertAgentHelper } =
+    vi.importActual<typeof import('./test-helpers.js')>('./test-helpers.js');
   const { nanoid } = vi.importActual<typeof import('nanoid')>('nanoid');
   return {
     // Fakes the worktree/tmux/first-agent setup real startTask performs, so
@@ -342,7 +343,8 @@ describe('runs API — loop/loop-group surface', () => {
       const run = createLoopRun({ task_id: 't1', spec_json: '{}' });
       appendIteration(run.id, { sha_from: 'a1', sha_to: 'a2' });
       appendIteration(run.id, { sha_from: 'a2', sha_to: 'a3' });
-      const { insertRun } = vi.importActual<typeof import('./repositories/runs.js')>('./repositories/runs.js');
+      const { insertRun } =
+        vi.importActual<typeof import('./repositories/runs.js')>('./repositories/runs.js');
       const runsRow = insertRun({
         workflowKind: 'loop',
         trigger: 'manual',

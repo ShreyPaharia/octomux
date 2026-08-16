@@ -10,7 +10,6 @@ const { checkTriagePrComments, pollTriagePrComments } = await import('./triage-p
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-
 describe('checkTriagePrComments', () => {
   beforeEach(() => {
     createTestDb();

@@ -17,7 +17,6 @@ const { createTestDb } = await import('../test-helpers.js');
 const { createSchedule, listEnabledSchedules } = await import('../repositories/schedules.js');
 const { pollSchedules } = await import('./schedule-cron.js');
 
-
 describe('pollSchedules', () => {
   beforeEach(() => {
     createTestDb();

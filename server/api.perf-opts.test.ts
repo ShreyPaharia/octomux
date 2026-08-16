@@ -50,8 +50,7 @@ vi.mock('./diff-review-state.js', () => ({
 }));
 
 vi.mock('@octomux/diff-engine', () => {
-  const actual =
-    vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),

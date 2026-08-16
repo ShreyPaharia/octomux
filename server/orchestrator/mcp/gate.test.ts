@@ -35,7 +35,8 @@ vi.mock('./write.js', () => ({
 }));
 
 const { createTestDb } = await import('../../test-helpers.js');
-const { createConversation, createCard, resolveCard } = await import('../../repositories/orchestrator.js');
+const { createConversation, createCard, resolveCard } =
+  await import('../../repositories/orchestrator.js');
 const { addRule, capabilityToolName } = await import('../policy.js');
 const { onGatedInvoke } = await import('./gate.js');
 

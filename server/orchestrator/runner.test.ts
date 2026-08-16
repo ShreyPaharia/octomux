@@ -73,8 +73,16 @@ vi.mock('fs', (importOriginal) => {
 
 const { execFile } = await import('child_process');
 const { createTestDb } = await import('../test-helpers.js');
-const { startConversation, sendTurn, interruptTurn, stopConversation, resumeConversation, conversationTmuxTarget } = await import('./runner.js');
-const { createConversation, getConversation, updateConversation } = await import('../repositories/orchestrator.js');
+const {
+  startConversation,
+  sendTurn,
+  interruptTurn,
+  stopConversation,
+  resumeConversation,
+  conversationTmuxTarget,
+} = await import('./runner.js');
+const { createConversation, getConversation, updateConversation } =
+  await import('../repositories/orchestrator.js');
 const { ORCHESTRATOR_SYSTEM_PROMPT } = await import('./conductor-flags.js');
 
 const mockedExecFile = vi.mocked(execFile);

@@ -160,7 +160,6 @@ vi.mock('./chats.js', () => {
   };
 });
 
-
 vi.mock('./skills.js', () => ({
   listSkills: vi.fn(),
   getSkill: vi.fn(),
@@ -202,8 +201,7 @@ vi.mock('./diff-review-state.js', () => ({
 }));
 
 vi.mock('@octomux/diff-engine', () => {
-  const actual =
-    vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
@@ -212,7 +210,15 @@ vi.mock('@octomux/diff-engine', () => {
 });
 
 const { default: request } = await import('supertest');
-const { createTestDb, insertTask, insertAgent, insertPermissionPrompt, insertUserTerminal, getTask, DEFAULTS } = await import('./test-helpers.js');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getTask,
+  DEFAULTS,
+} = await import('./test-helpers.js');
 
 const fs = (await import('fs')).default;
 const diffModule = await import('@octomux/diff-engine');

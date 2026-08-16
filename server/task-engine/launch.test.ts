@@ -53,7 +53,8 @@ vi.mock('../hook-base-url.js', () => ({
   hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777'),
 }));
 
-const { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } = await import('../test-helpers.js');
+const { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } =
+  await import('../test-helpers.js');
 
 const {
   buildAgentStartupCommand,

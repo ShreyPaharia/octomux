@@ -25,7 +25,6 @@ vi.mock('fs', () => {
 
 // Mock the harnesses index so tests don't depend on the full harness chain.
 vi.mock('./harnesses/index.js', () => ({
-
   listHarnesses: vi.fn(() => [
     {
       id: 'claude-code',
@@ -90,7 +89,14 @@ vi.mock('./harnesses/index.js', () => ({
   }),
 }));
 
-const { getSettings, updateSettings, resolveClaudeFlags, getStoredApprovalTimeoutMs, getStoredCapabilityGateEnabled, DEFAULT_SETTINGS } = await import('./settings.js');
+const {
+  getSettings,
+  updateSettings,
+  resolveClaudeFlags,
+  getStoredApprovalTimeoutMs,
+  getStoredCapabilityGateEnabled,
+  DEFAULT_SETTINGS,
+} = await import('./settings.js');
 const { default: fs } = await import('fs');
 
 const mockFs = vi.mocked(fs.promises);

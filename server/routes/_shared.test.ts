@@ -15,7 +15,6 @@ const { resolveAiTaskNamingEnabled, lookupExistingReviewId } = await import('./_
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
 
-
 describe('resolveAiTaskNamingEnabled', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -58,7 +58,6 @@ const { createApp } = await import('../app.js');
 
 // ─── Lazy import after mocks ──────────────────────────────────────────────────
 
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 let tmpDir: string;

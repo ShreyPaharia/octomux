@@ -17,7 +17,6 @@ const { runSessionVertical } = await import('./session-vertical-service.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-
 describe('runSessionVertical', () => {
   beforeEach(() => {
     mockRunAgentSession.mockReset();

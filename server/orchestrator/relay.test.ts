@@ -44,13 +44,13 @@ vi.mock('./exec.js', () => ({
 
 const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
-const { createConversation, upsertManagedTask, appendEvent, getManagedTask } = await import('../repositories/orchestrator.js');
+const { createConversation, upsertManagedTask, appendEvent, getManagedTask } =
+  await import('../repositories/orchestrator.js');
 const { createSupervisor } = await import('./supervisor.js');
 const { pushToConversation } = await import('./stream.js');
 const { runSendMessage } = await import('./exec.js');
 
 // ─── Imports (after mocks) ─────────────────────────────────────────────────
-
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
