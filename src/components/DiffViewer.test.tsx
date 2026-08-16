@@ -1,14 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useRef } from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { diffExpandedKey, reviewedKey } from '@/lib/diff-state';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api/taskApi', async () => {
-  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+vi.mock('@/lib/api/taskApi', () => {
+  const actual = vi.importActual('@/lib/api/taskApi') as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };
 });
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
@@ -43,8 +39,12 @@ vi.mock('@monaco-editor/react', () => ({
   },
 }));
 
-import { DiffViewer } from './DiffViewer';
+const { useRef } = await import('react');
+const { render, screen, waitFor, within } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { diffExpandedKey, reviewedKey } = await import('@/lib/diff-state');
 
+const { DiffViewer } = await import('./DiffViewer');
 beforeEach(() => {
   // Reset mocks (clears call history AND queued mockResolvedValueOnce) and
   // re-establish defaults so cross-test state doesn't leak.

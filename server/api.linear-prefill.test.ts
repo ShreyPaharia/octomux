@@ -1,19 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import request from 'supertest';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 const mockInvokeLinear = vi.fn();
 
-vi.mock('./integrations/linear/graphql.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./integrations/linear/graphql.js')>();
+vi.mock('./integrations/linear/graphql.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./integrations/linear/graphql.js')>();
   return {
     ...actual,
     invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
   };
 });
 
-import { createApp } from './app.js';
-import { createTestDb } from './test-helpers.js';
-import { LinearApiError } from './integrations/linear/graphql.js';
+const { default: request } = await import('supertest');
+
+const { createApp } = await import('./app.js');
+const { createTestDb } = await import('./test-helpers.js');
+const { LinearApiError } = await import('./integrations/linear/graphql.js');
 
 describe('POST /api/integrations/linear/prefill', () => {
   beforeEach(() => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import { HttpIntegrationClient, HttpIntegrationError } from './http-client.js';
 
 const mockFetch = vi.fn();

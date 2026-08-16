@@ -1,13 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from './test-helpers.js';
-import { ensureHookToken } from './hook-token.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 import type { Agent } from './types.js';
 
 // Stub the harness's installHooks so the test doesn't write real files.
-vi.mock('./harnesses/index.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
+vi.mock('./harnesses/index.js', () => {
+  const actual = vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
   return {
     ...actual,
     getHarness: () => ({
@@ -16,6 +12,10 @@ vi.mock('./harnesses/index.js', async () => {
     }),
   };
 });
+
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('./test-helpers.js');
+const { ensureHookToken } = await import('./hook-token.js');
+const { getDb } = await import('./db.js');
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {

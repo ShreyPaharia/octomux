@@ -5,7 +5,7 @@
  * prose, with task IDs linking into /tasks/:id.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { screen } from '@testing-library/react';
 import { renderWithRouter } from '../../test-helpers';
 import { ToolCallCard } from './ToolCallCard';

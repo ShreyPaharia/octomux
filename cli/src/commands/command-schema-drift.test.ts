@@ -26,7 +26,7 @@
  *                              (notifyAgent)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import {
   createTaskInputSchema,

@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { render } from '@testing-library/react';
-import { IterationLedger } from './IterationLedger';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { LoopIteration } from '@/lib/api/loopApi';
 
 const { taskApiProxy, taskApiMock } = await vi.hoisted(async () =>
   (await import('../../test-helpers')).setupApiMock(),
 );
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { render } = await import('@testing-library/react');
+const { IterationLedger } = await import('./IterationLedger');
 
 function makeIteration(overrides: Partial<LoopIteration> = {}): LoopIteration {
   return {

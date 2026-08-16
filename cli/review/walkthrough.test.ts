@@ -1,18 +1,19 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { createTestDb } from '../../server/test-helpers.js';
-import { runWalkthrough } from './walkthrough.js';
-import { getReviewRun } from '../../server/repositories/review-runs.js';
+import { describe, it, expect, beforeEach, vi } from '../../server/bun-test.js';
 
-vi.mock('@octomux/diff-engine', async (importOriginal) => {
-  const actual = (await importOriginal()) as object;
+vi.mock('@octomux/diff-engine', (importOriginal) => {
+  const actual = importOriginal() as object;
   return {
     ...actual,
     listChangedFiles: vi.fn(async () => ['server/db.ts', 'package-lock.json']),
   };
 });
+
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createTestDb } = await import('../../server/test-helpers.js');
+const { runWalkthrough } = await import('./walkthrough.js');
+const { getReviewRun } = await import('../../server/repositories/review-runs.js');
 
 let tmpDir: string;
 let stderrBuf = '';

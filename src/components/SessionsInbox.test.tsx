@@ -1,10 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
-import { SessionsInbox } from './SessionsInbox';
-import { _resetInboxStore } from '@/lib/inbox';
-import { makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -34,6 +28,13 @@ const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { render, screen, waitFor, act } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { MemoryRouter } = await import('react-router-dom');
+const { SessionsInbox } = await import('./SessionsInbox');
+const { _resetInboxStore } = await import('@/lib/inbox');
+const { makeTask } = await import('../test-helpers');
 
 function renderInbox() {
   return render(

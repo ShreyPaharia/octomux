@@ -7,9 +7,7 @@
  *  - triggerReviewRun: start when idle, nudge the active agent when running
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb, insertTestTask, insertAgent } from '../test-helpers.js';
-import { getDb } from '../db.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 import type { Task } from '../types.js';
 
 // ─── Mock side-effecting deps ───────────────────────────────────────────────
@@ -29,14 +27,12 @@ vi.mock('../events.js', () => ({
   broadcast: vi.fn((...args: unknown[]) => mockBroadcast(...args)),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { createTestDb, insertTestTask, insertAgent } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
 
-import {
-  createReviewTaskFromPr,
-  createManualReview,
-  triggerReviewRun,
-  manualReRunNudge,
-} from './review-service.js';
+const { createReviewTaskFromPr, createManualReview, triggerReviewRun, manualReRunNudge } =
+  await import('./review-service.js');
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 /** Let the fire-and-forget startTask().then() chain settle. */
 async function flush() {

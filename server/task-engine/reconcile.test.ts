@@ -1,14 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, DEFAULTS } from '../test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
+import Database from '../sqlite.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 // recoverTasks() only needs to route each stale task to the right resume
 // path — the internals of resumeTask (--resume/--continue ladder) and
 // resumeLoopOnStartup (fresh respawn) are covered by their own test files.
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = { ...actual, existsSync: vi.fn(() => true) };
   return { ...mocked, default: mocked };
 });
@@ -25,6 +24,8 @@ vi.mock('./loop/engine.js', () => ({
   resumeLoopOnStartup: vi.fn(async () => undefined),
 }));
 
+const { createTestDb, insertTask, DEFAULTS } = await import('../test-helpers.js');
+
 const { recoverTasks } = await import('./reconcile.js');
 const { checkTaskStatus } = await import('../poller/status.js');
 const { resumeTask } = await import('./lifecycle.js');
@@ -32,7 +33,7 @@ const { resumeLoopOnStartup } = await import('./loop/engine.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

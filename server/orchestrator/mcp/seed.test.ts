@@ -1,3 +1,4 @@
+import type { LinearIssueSummary, SubTaskItem } from './seed.js';
 /**
  * server/orchestrator/mcp/seed.test.ts
  *
@@ -10,10 +11,7 @@
  * Spec refs: §5 #4 (plan-first batch card), §12 Phase 4.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb, insertTask } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
-import { createConversation, upsertManagedTask } from '../store.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../../bun-test.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -34,23 +32,20 @@ vi.mock('../runner.js', () => ({
 
 const mockInvokeLinear = vi.fn();
 
-vi.mock('../../integrations/linear/graphql.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../integrations/linear/graphql.js')>();
+vi.mock('../../integrations/linear/graphql.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../../integrations/linear/graphql.js')>();
   return {
     ...actual,
     invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
   };
 });
 
-// ─── Imports (after mocks) ────────────────────────────────────────────────────
+const { createTestDb, insertTask } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const { createConversation, upsertManagedTask } = await import('../store.js');
 
-import {
-  handlePullLinearIssue,
-  buildBatchPlanCard,
-  LinearApiError,
-  type LinearIssueSummary,
-  type SubTaskItem,
-} from './seed.js';
+const { handlePullLinearIssue, buildBatchPlanCard, LinearApiError } = await import('./seed.js');
+// ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

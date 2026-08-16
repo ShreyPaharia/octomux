@@ -1,3 +1,4 @@
+import type { Supervisor } from './supervisor.js';
 /**
  * server/orchestrator/relay.test.ts
  *
@@ -13,10 +14,7 @@
  *  - The relay is idempotent: a duplicate phase_complete event does not re-fire.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb, insertTask, insertAgent } from '../test-helpers.js';
-import { getDb } from '../db.js';
-import { createConversation, upsertManagedTask, appendEvent, getManagedTask } from './store.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -44,11 +42,16 @@ vi.mock('./exec.js', () => ({
   PLAN_KIND: 'plan',
 }));
 
+const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const { createConversation, upsertManagedTask, appendEvent, getManagedTask } =
+  await import('./store.js');
+
 // ─── Imports (after mocks) ─────────────────────────────────────────────────
 
-import { createSupervisor, type Supervisor } from './supervisor.js';
-import { pushToConversation } from './stream.js';
-import { runSendMessage } from './exec.js';
+const { createSupervisor } = await import('./supervisor.js');
+const { pushToConversation } = await import('./stream.js');
+const { runSendMessage } = await import('./exec.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

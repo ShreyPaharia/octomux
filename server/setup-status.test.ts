@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 vi.mock('./binary-check.js', () => ({
   probeBinary: vi.fn(() => ({ ok: true, version: '1.0' })),
@@ -29,8 +29,8 @@ vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => 'NVIM v0.10.0'),
 }));
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   return {
     ...actual,
     existsSync: vi.fn((p: string) => {

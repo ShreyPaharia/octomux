@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { listProviders } from './registry.js';
 import './index.js';
 

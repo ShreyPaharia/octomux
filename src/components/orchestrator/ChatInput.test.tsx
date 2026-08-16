@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../../bun-test.js';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ChatInput } from './ChatInput';
 

@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import type { Integration } from './types.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 
 function rowToIntegration(row: {
   id: string;
@@ -65,7 +66,7 @@ export interface IntegrationPatch {
 export function updateIntegration(id: string, patch: IntegrationPatch): Integration | undefined {
   const db = getDb();
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLQueryBindings[] = [];
 
   if (patch.name !== undefined) {
     fields.push('name = ?');

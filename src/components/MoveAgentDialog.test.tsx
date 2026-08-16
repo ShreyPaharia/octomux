@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { renderWithRouter, makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
@@ -13,6 +11,9 @@ vi.mock('react-router-dom', routerMockFactory);
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+
+const { screen, waitFor, fireEvent } = await import('@testing-library/react');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
 
 const { MoveAgentDialog } = await import('./MoveAgentDialog');
 

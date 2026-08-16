@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
-import { OfflineBanner } from './OfflineBanner';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 type StateCb = (connected: boolean) => void;
 const subscribers = new Set<StateCb>();
@@ -12,6 +10,9 @@ vi.mock('@/lib/event-source', () => ({
     return () => subscribers.delete(cb);
   },
 }));
+
+const { render, screen, act } = await import('@testing-library/react');
+const { OfflineBanner } = await import('./OfflineBanner');
 
 beforeEach(() => {
   vi.useFakeTimers();

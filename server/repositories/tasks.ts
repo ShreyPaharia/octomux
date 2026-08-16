@@ -9,6 +9,7 @@ import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
 import { SQL_EXCLUDE_AUTO_REVIEW } from '../task-query.js';
 import type { Task, TaskUpdate, TaskExternalRef } from '../types.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 
 const logger = childLogger('repositories/tasks');
 
@@ -371,14 +372,14 @@ export function insertTask(input: InsertTaskInput): string {
  */
 export function updateTaskFields(id: string, patch: Partial<Record<string, unknown>>): void {
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLQueryBindings[] = [];
 
   for (const [key, value] of Object.entries(patch)) {
     if (!TASK_WRITABLE_COLUMNS.has(key)) {
       throw new Error(`updateTaskFields: column '${key}' is not in the writable allowlist`);
     }
     fields.push(`${key} = ?`);
-    values.push(value);
+    values.push(value as SQLQueryBindings);
   }
 
   if (fields.length === 0) return;

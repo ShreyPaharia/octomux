@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { renderWithRouter, makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { Worktree } from '@octomux/types';
 import type { WorktreeDetail } from '@/lib/api/taskApi';
 
@@ -15,6 +13,9 @@ vi.mock('react-router-dom', routerMockFactory);
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+
+const { screen, waitFor, fireEvent } = await import('@testing-library/react');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
 
 const WorkspaceDetailPage = (await import('./WorkspaceDetailPage')).default;
 

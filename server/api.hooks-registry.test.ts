@@ -4,11 +4,8 @@
  * GET  /api/hooks/registry   → returns built-in + FS hooks with enabled state
  * PATCH /api/hooks/registry/:scope/:key → upserts hook_settings + invalidates cache
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import { createTestDb } from './test-helpers.js';
-import { createApp } from './app.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 
 vi.mock('./hook-dispatcher.js', () => ({
   fireHook: vi.fn(),
@@ -30,8 +27,12 @@ vi.mock('./task-engine/index.js', () => ({
   hopAgent: vi.fn(),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 describe('C4: GET /api/hooks/registry', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -114,7 +115,7 @@ describe('C4: GET /api/hooks/registry', () => {
 });
 
 describe('C4: PATCH /api/hooks/registry/:scope/:key', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

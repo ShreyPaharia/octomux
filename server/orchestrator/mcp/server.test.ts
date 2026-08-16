@@ -8,7 +8,7 @@
  *  - Worker mode (OCTOMUX_TASK_ID) disables conductor write tools
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 
 // Mock the DB and store so the server module can be imported without a real DB
 vi.mock('../../db.js', () => ({
@@ -21,8 +21,8 @@ vi.mock('../../db.js', () => ({
   })),
 }));
 
-vi.mock('../store.js', async () => {
-  const actual = await vi.importActual<typeof import('../store.js')>('../store.js');
+vi.mock('../store.js', () => {
+  const actual = vi.importActual<typeof import('../store.js')>('../store.js');
   return {
     ...actual,
     getManagedTask: vi.fn(() => undefined),

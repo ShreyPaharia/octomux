@@ -1,30 +1,31 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { createTestDb } from '../../server/test-helpers.js';
-import { runDraftComment } from './draft-comment.js';
-import { getDb } from '../../server/db.js';
+import { describe, it, expect, beforeEach, vi } from '../../server/bun-test.js';
 
 let tmpDir: string;
 let stdoutBuf = '';
 let stderrBuf = '';
 
-vi.mock('../../server/inline-comments-outdated.js', async (importOriginal) => {
-  const actual = (await importOriginal()) as object;
+vi.mock('../../server/inline-comments-outdated.js', (importOriginal) => {
+  const actual = importOriginal() as object;
   return {
     ...actual,
     isAnchorOutdated: vi.fn(async () => false),
   };
 });
 
-vi.mock('@octomux/diff-engine', async (importOriginal) => {
-  const actual = (await importOriginal()) as object;
+vi.mock('@octomux/diff-engine', (importOriginal) => {
+  const actual = importOriginal() as object;
   return {
     ...actual,
     showFileAtSha: vi.fn(async () => 'line1\nline2\nline3\nline4\nline5\n'),
   };
 });
+
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createTestDb } = await import('../../server/test-helpers.js');
+const { runDraftComment } = await import('./draft-comment.js');
+const { getDb } = await import('../../server/db.js');
 
 beforeEach(() => {
   stdoutBuf = '';

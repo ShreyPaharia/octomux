@@ -1,15 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor, act } from '@testing-library/react';
-import {
-  useTasks,
-  useTask,
-  useGraceHours,
-  useProviders,
-  useIntegrations,
-  useHookTemplates,
-  useSettings,
-  useReviewDetail,
-} from './hooks';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 // ─── Mock API ────────────────────────────────────────────────────────────────
 
@@ -32,6 +21,18 @@ vi.mock('./event-source', () => ({
     return unsubscribe;
   }),
 }));
+
+const { renderHook, waitFor, act } = await import('@testing-library/react');
+const {
+  useTasks,
+  useTask,
+  useGraceHours,
+  useProviders,
+  useIntegrations,
+  useHookTemplates,
+  useSettings,
+  useReviewDetail,
+} = await import('./hooks');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -62,7 +63,7 @@ const hookCases = [
   },
 ];
 
-describe.each(hookCases)(
+describe.each([...hookCases])(
   '$name',
   ({ renderFn, mockFn, successValue, resultKey, emptyValue, callsPerRefresh }) => {
     it('starts in loading state', async () => {
@@ -235,7 +236,7 @@ const resourceHookCases = [
   },
 ];
 
-describe.each(resourceHookCases)(
+describe.each([...resourceHookCases])(
   '$name',
   ({ renderFn, mockFn, successValue, resultKey, expectedValue, fallbackValue }) => {
     it('returns data after fetch', async () => {

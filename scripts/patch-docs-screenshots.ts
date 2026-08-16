@@ -2,7 +2,7 @@
  * Post-start patches for README screenshots (after initDb resolves stale permission prompts).
  */
 import { execSync } from 'child_process';
-import Database from 'better-sqlite3';
+import Database from '../server/sqlite.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 

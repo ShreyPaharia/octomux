@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, waitFor, act, render } from '@testing-library/react';
-import { useInbox, _resetInboxStore } from './inbox';
-import { TasksProvider } from './tasks-context';
-import { makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 const { taskApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -20,6 +16,11 @@ vi.mock('./event-source', () => ({
     };
   }),
 }));
+
+const { renderHook, waitFor, act, render } = await import('@testing-library/react');
+const { useInbox, _resetInboxStore } = await import('./inbox');
+const { TasksProvider } = await import('./tasks-context');
+const { makeTask } = await import('../test-helpers');
 
 function fireEvent(event: any): void {
   for (const cb of eventCallbacks) cb(event);

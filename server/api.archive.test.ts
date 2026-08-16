@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, getTask } from './test-helpers.js';
-import { createApp } from './app.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 
 // ─── Title-gen mock ───────────────────────────────────────────────────────────
 
@@ -10,8 +7,8 @@ import { createApp } from './app.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-engine/index.js', async () => {
-  const { getDb } = await import('./db.js');
+vi.mock('./task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -62,10 +59,14 @@ vi.mock('./title-gen.js', () => ({
   })),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, insertAgent, getTask } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('POST /api/tasks/delete-done', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -118,7 +119,8 @@ describe('POST /api/tasks/delete-done', () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { closeTask } =
+      vi.importActual<typeof import('./task-engine/index.js')>('./task-engine/index.js');
 
     const res = await request(app).post('/api/tasks/delete-done').expect(200);
     expect(res.body).toEqual({ deleted: 1 });
@@ -129,7 +131,8 @@ describe('POST /api/tasks/delete-done', () => {
   it('does not call closeTask for done tasks that are idle', async () => {
     insertTask(db, { id: 't1', workflow_status: 'done', runtime_state: 'idle' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { closeTask } =
+      vi.importActual<typeof import('./task-engine/index.js')>('./task-engine/index.js');
 
     await request(app).post('/api/tasks/delete-done').expect(200);
     expect(closeTask).not.toHaveBeenCalled();
@@ -137,7 +140,7 @@ describe('POST /api/tasks/delete-done', () => {
 });
 
 describe('POST /api/tasks/:id/move to done', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -150,7 +153,8 @@ describe('POST /api/tasks/:id/move to done', () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'running' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { closeTask } =
+      vi.importActual<typeof import('./task-engine/index.js')>('./task-engine/index.js');
 
     const res = await request(app)
       .post('/api/tasks/t1/move')
@@ -164,7 +168,8 @@ describe('POST /api/tasks/:id/move to done', () => {
   it('calls closeTask when moving a setting_up task to done', async () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'setting_up' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { closeTask } =
+      vi.importActual<typeof import('./task-engine/index.js')>('./task-engine/index.js');
 
     await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
 
@@ -174,7 +179,8 @@ describe('POST /api/tasks/:id/move to done', () => {
   it('does not call closeTask when moving an idle task to done', async () => {
     insertTask(db, { id: 't1', workflow_status: 'in_progress', runtime_state: 'idle' });
 
-    const { closeTask } = await import('./task-engine/index.js');
+    const { closeTask } =
+      vi.importActual<typeof import('./task-engine/index.js')>('./task-engine/index.js');
 
     await request(app).post('/api/tasks/t1/move').send({ workflow_status: 'done' }).expect(200);
 
@@ -183,7 +189,7 @@ describe('POST /api/tasks/:id/move to done', () => {
 });
 
 describe('POST /api/tasks createTask with title-gen (B5)', () => {
-  let _db: Database.Database;
+  let _db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

@@ -11,15 +11,7 @@
  * Spec refs: §6.4 (verification gate), §9.1 (DAG scheduling), §10 (loop safety).
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTask } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
-import {
-  createConversation,
-  upsertManagedTask,
-  getManagedTask,
-  incrementConversationUsage,
-} from '../store.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -38,9 +30,12 @@ vi.mock('../runner.js', () => ({
   conversationTmuxTarget: vi.fn().mockReturnValue('mock-session:1'),
 }));
 
-// ─── Imports (after mocks) ─────────────────────────────────────────────────
+const { createTestDb, insertTask } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const { createConversation, upsertManagedTask, getManagedTask, incrementConversationUsage } =
+  await import('../store.js');
 
-import {
+const {
   handleRequestReview,
   scheduleDagStep,
   checkUsageGuardrail,
@@ -48,8 +43,10 @@ import {
   MAX_BATCH_SIZE,
   USAGE_TASKS_SOFT_LIMIT,
   USAGE_TOOL_CALLS_SOFT_LIMIT,
-} from './verify.js';
-import { pushToConversation } from '../stream.js';
+} = await import('./verify.js');
+// ─── Imports (after mocks) ─────────────────────────────────────────────────
+
+const { pushToConversation } = await import('../stream.js');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

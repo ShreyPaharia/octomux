@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { renderWithRouter, setupApiMock, setupRouterNavigateMock } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { WorktreeSummary } from '@octomux/types';
 
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
@@ -14,6 +12,9 @@ vi.mock('react-router-dom', routerMockFactory);
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+
+const { screen, waitFor, fireEvent } = await import('@testing-library/react');
+const { renderWithRouter, setupApiMock, setupRouterNavigateMock } = await import('../test-helpers');
 
 void setupApiMock;
 void setupRouterNavigateMock;

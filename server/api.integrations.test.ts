@@ -1,7 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb } from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 
 // Mock the task-runner so app creation doesn't fail on server-level setup
 vi.mock('./task-engine/index.js', () => ({
@@ -25,6 +22,10 @@ vi.mock('./events.js', () => ({
   broadcast: vi.fn(),
   setupWs: vi.fn(),
 }));
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb } = await import('./test-helpers.js');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

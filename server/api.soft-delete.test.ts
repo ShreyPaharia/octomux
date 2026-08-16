@@ -1,13 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask } from './test-helpers.js';
-import { createApp } from './app.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-engine/index.js', async () => {
-  const { getDb } = await import('./db.js');
+vi.mock('./task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   return {
     startTask: vi.fn(),
     closeTask: vi.fn(),
@@ -57,10 +54,14 @@ vi.mock('./title-gen.js', () => ({
   })),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('DELETE /api/tasks/:id (soft delete)', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -91,7 +92,7 @@ describe('DELETE /api/tasks/:id (soft delete)', () => {
 });
 
 describe('POST /api/tasks/:id/restore', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -115,7 +116,7 @@ describe('POST /api/tasks/:id/restore', () => {
 });
 
 describe('GET /api/tasks trash filtering', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

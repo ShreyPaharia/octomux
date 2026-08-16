@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { getHarness, listHarnesses, DEFAULT_HARNESS_ID } from './index.js';
 
 describe('registry', () => {

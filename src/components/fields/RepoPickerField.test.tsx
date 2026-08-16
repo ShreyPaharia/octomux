@@ -1,8 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RepoPickerField } from './RepoPickerField';
-import { renderWithRouter } from '../../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { RecentRepo } from '@/lib/api/taskApi';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -11,6 +7,11 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { RepoPickerField } = await import('./RepoPickerField');
+const { renderWithRouter } = await import('../../test-helpers');
 
 function makeRecent(repo_path: string, last_used = '2026-01-01 00:00:00'): RecentRepo {
   return { repo_path, last_used };

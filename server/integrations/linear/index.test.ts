@@ -1,18 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { HookEnvelope } from '../../hook-types.js';
 
 const mockInvokeLinear = vi.fn();
 
-vi.mock('./graphql.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./graphql.js')>();
+vi.mock('./graphql.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./graphql.js')>();
   return {
     ...actual,
     invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
   };
 });
 
-import { linearProvider } from './index.js';
-import { LinearApiError } from './graphql.js';
+const { linearProvider } = await import('./index.js');
+const { LinearApiError } = await import('./graphql.js');
 
 const VALID_CONFIG = {
   api_key: 'lin_api_xyz',

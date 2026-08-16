@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 import { screen, act } from '@testing-library/react';
 import { BoardCard } from './BoardCard';
 import { makeTask, renderWithRouter } from '../test-helpers';

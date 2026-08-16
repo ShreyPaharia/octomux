@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import path from 'path';
-import os from 'os';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 import type { HookEnvelope } from './hook-types.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -29,6 +27,9 @@ vi.mock('fs', () => ({
     constants: { X_OK: 1 },
   },
 }));
+
+const { default: path } = await import('path');
+const { default: os } = await import('os');
 
 // ─── Fake Process ─────────────────────────────────────────────────────────────
 

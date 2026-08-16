@@ -8,7 +8,7 @@
  *
  * Tests call the handler functions directly; no MCP transport is exercised here.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../../bun-test.js';
 import { createTestDb, insertTask, insertAgent } from '../../test-helpers.js';
 import { getDb } from '../../db.js';
 import {

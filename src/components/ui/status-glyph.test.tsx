@@ -1,6 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { render, screen } from '@testing-library/react';
 import { StatusGlyph } from './status-glyph';
+
+/**
+ * happy-dom hands back the inline style verbatim; jsdom normalised hex to
+ * `rgb()`. Normalise here so the expectations stay readable either way.
+ */
+function toRgb(color: string): string {
+  const hex = color.trim();
+  if (!hex.startsWith('#')) return hex;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 describe('StatusGlyph', () => {
   const cases: [string, string, string][] = [
@@ -15,13 +26,13 @@ describe('StatusGlyph', () => {
     ['draft', '○', 'rgb(106, 106, 106)'],
   ];
 
-  it.each(cases)('renders status "%s" as glyph "%s" in color %s', (status, glyph, rgb) => {
+  it.each([...cases])('renders status "%s" as glyph "%s" in color %s', (status, glyph, rgb) => {
     render(<StatusGlyph status={status} />);
     const el = screen.getByRole('img');
     expect(el.textContent).toBe(glyph);
     expect(el.dataset.glyph).toBe(glyph);
     expect(el.dataset.status).toBe(status);
-    expect(el.style.color).toBe(rgb);
+    expect(toRgb(el.style.color)).toBe(rgb);
   });
 
   it('falls back to grey ○ for unknown status', () => {

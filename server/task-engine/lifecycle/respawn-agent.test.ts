@@ -1,12 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
+import Database from '../../sqlite.js';
 import type { Task, Agent } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -36,8 +35,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../../orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../orchestrator/store.js')>();
+vi.mock('../../orchestrator/store.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../../orchestrator/store.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 
@@ -79,13 +78,15 @@ vi.mock('../../harnesses/index.js', () => ({
   })),
 }));
 
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('../../test-helpers.js');
+
 const { respawnAgentFresh } = await import('./respawn-agent.js');
 const { execFile } = await import('child_process');
 const { broadcast } = await import('../../events.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

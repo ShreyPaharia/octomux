@@ -1,11 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { render } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { TasksProvider } from '@/lib/tasks-context';
-import { Composer } from './Composer';
-import { makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 import type { Task } from '@octomux/types';
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────
@@ -49,6 +42,14 @@ const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { render } = await import('@testing-library/react');
+const { MemoryRouter } = await import('react-router-dom');
+const { TasksProvider } = await import('@/lib/tasks-context');
+const { Composer } = await import('./Composer');
+const { makeTask } = await import('../test-helpers');
 
 // ─── Test harness ─────────────────────────────────────────────────────────
 

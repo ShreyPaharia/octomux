@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { InlineCommentCard } from './InlineCommentCard';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { InlineCommentDTO } from '@/lib/api/reviewApi';
 
 const { mockPatchComment } = await vi.hoisted(async () => {
@@ -30,6 +27,10 @@ vi.mock('./RejectDialog', () => ({
       </div>
     ) : null,
 }));
+
+const { render, screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { InlineCommentCard } = await import('./InlineCommentCard');
 
 function makeDraftComment(overrides: Partial<InlineCommentDTO> = {}): InlineCommentDTO {
   return {

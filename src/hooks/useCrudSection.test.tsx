@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../bun-test.js';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useCrudSection } from './useCrudSection';
 

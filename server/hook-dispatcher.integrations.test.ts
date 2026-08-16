@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 import type { HookEnvelope } from './hook-types.js';
 import type { IntegrationProvider, Integration } from './integrations/types.js';
 

@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 import type {
   CommentBucket,
   CommentKind,
@@ -166,7 +167,7 @@ export function updateCommentFields(
   fields: UpdateCommentFields,
 ): InlineCommentRow | null {
   const sets: string[] = [];
-  const vals: unknown[] = [];
+  const vals: SQLQueryBindings[] = [];
 
   if (fields.status !== undefined) {
     sets.push('status = ?');

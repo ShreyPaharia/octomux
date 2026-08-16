@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createTestDb, insertTestTask, findCallback } from './test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('fs', () => ({
   default: {
@@ -19,15 +17,17 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
-vi.mock('@octomux/diff-engine', async () => {
-  const actual =
-    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+vi.mock('@octomux/diff-engine', () => {
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
     getFileDiff: vi.fn(),
   };
 });
+
+const { default: request } = await import('supertest');
+const { createTestDb, insertTestTask, findCallback } = await import('./test-helpers.js');
 
 const { execFile } = await import('child_process');
 const diffMod = await import('@octomux/diff-engine');

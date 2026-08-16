@@ -1,20 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertUserTerminal,
-  getTask,
-  getAgents,
-  getUserTerminals,
-  findCallback,
-  deadSessionMock,
-  execFileOk,
-  execFileFail,
-  DEFAULTS,
-} from './test-helpers.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -57,6 +42,22 @@ vi.mock('./github-login.js', () => ({
 }));
 
 const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertUserTerminal,
+  getTask,
+  getAgents,
+  getUserTerminals,
+  findCallback,
+  deadSessionMock,
+  execFileOk,
+  execFileFail,
+  DEFAULTS,
+} = await import('./test-helpers.js');
+const { getDb } = await import('./db.js');
+
+const {
   checkTaskStatus,
   pollStatuses,
   pollTerminalActivity,
@@ -80,7 +81,7 @@ const { getSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();
@@ -139,7 +140,7 @@ describe('pollStatuses', () => {
     },
   ];
 
-  describe.each(sessionDeathCases)(
+  describe.each([...sessionDeathCases])(
     'when $taskState task session dies',
     ({ taskState, expectedState, expectedError }) => {
       beforeEach(() => {
@@ -257,7 +258,7 @@ describe('pollStatuses', () => {
 
   const ignoredStates = ['idle', 'error'] as const;
 
-  it.each(ignoredStates)('ignores tasks with runtime_state "%s"', async (state) => {
+  it.each([...ignoredStates])('ignores tasks with runtime_state "%s"', async (state) => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
 
     vi.mocked(execFile).mockImplementation(deadSessionMock as any);
@@ -388,7 +389,7 @@ describe('ensureHooksInstalled', () => {
     { name: 'tasks without worktree', overrides: { worktree: null } },
   ];
 
-  it.each(skipCases)('skips $name', async ({ overrides }) => {
+  it.each([...skipCases])('skips $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
     await ensureHooksInstalled();
@@ -412,7 +413,7 @@ describe('ensureHooksInstalled', () => {
       throw new Error('permission denied');
     });
 
-    await expect(ensureHooksInstalled()).resolves.not.toThrow();
+    await expect(ensureHooksInstalled()).resolves.toBeUndefined();
   });
 });
 
@@ -442,7 +443,7 @@ describe('detectPR', () => {
     { name: 'repo_path is empty', setup: () => {}, overrides: { repo_path: '' } },
   ];
 
-  it.each(nullReturnCases)('returns null when $name', async ({ setup, overrides }) => {
+  it.each([...nullReturnCases])('returns null when $name', async ({ setup, overrides }) => {
     setup?.();
     const result = await detectPR({ ...DEFAULTS.runningTask, ...overrides } as Task);
     expect(result).toBeNull();
@@ -505,7 +506,7 @@ describe('pollPRs', () => {
     { name: 'has no branch', overrides: { branch: null } },
   ];
 
-  it.each(pollPRSkipCases)('skips tasks that $name', async ({ overrides }) => {
+  it.each([...pollPRSkipCases])('skips tasks that $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
     await pollPRs();
@@ -522,7 +523,7 @@ describe('pollPRs', () => {
     { state: 'error', shouldPoll: false },
   ] as const;
 
-  it.each(prPollStates)(
+  it.each([...prPollStates])(
     'runtime_state "$state" → shouldPoll=$shouldPoll',
     async ({ state, shouldPoll }) => {
       insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
@@ -614,7 +615,7 @@ describe('checkMergedPRs', () => {
       return undefined as any;
     });
 
-    await expect(checkMergedPRs()).resolves.not.toThrow();
+    await expect(checkMergedPRs()).resolves.toBeUndefined();
     expect(closeTask).not.toHaveBeenCalled();
   });
 
@@ -643,7 +644,7 @@ describe('checkMergedPRs', () => {
 
   const nonRunningStates = ['idle', 'error', 'setting_up'] as const;
 
-  it.each(nonRunningStates)('skips tasks with runtime_state "%s"', async (state) => {
+  it.each([...nonRunningStates])('skips tasks with runtime_state "%s"', async (state) => {
     insertTask(db, {
       ...DEFAULTS.runningTask,
       runtime_state: state,
@@ -1203,7 +1204,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     vi.mocked(execFile).mockImplementation(execFileFail('gh not found') as any);
 
-    await expect(pollReviewerRequests()).resolves.not.toThrow();
+    await expect(pollReviewerRequests()).resolves.toBeUndefined();
     const autos = db.prepare(`SELECT id FROM tasks WHERE source = 'auto_review'`).all();
     expect(autos).toHaveLength(0);
   });

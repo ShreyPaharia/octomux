@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, vi, beforeEach } from '../bun-test.js';
 import { installTerminalVisualViewport } from './terminal-visual-viewport';
 
 describe('installTerminalVisualViewport', () => {

@@ -10,17 +10,7 @@
  *  - A card without a task_id still auto-rejects (no lock to release, no throw).
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTask } from '../test-helpers.js';
-import { getDb } from '../db.js';
-import {
-  createConversation,
-  createCard,
-  getCard,
-  resolveCard,
-  upsertManagedTask,
-  getManagedTask,
-} from './store.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 // Capture conversation pushes without a ws.
 const mockPush = vi.fn();
@@ -28,12 +18,13 @@ vi.mock('./stream.js', () => ({
   pushToConversation: vi.fn((_convId: string, msg: string) => mockPush(msg)),
 }));
 
-import {
-  sweepExpiredApprovalCards,
-  approvalTimeoutMs,
-  DEFAULT_APPROVAL_TIMEOUT_MS,
-} from './approval-timeout.js';
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const { createConversation, createCard, getCard, resolveCard, upsertManagedTask, getManagedTask } =
+  await import('./store.js');
 
+const { sweepExpiredApprovalCards, approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS } =
+  await import('./approval-timeout.js');
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function backdateCard(cardId: string, seconds: number): void {

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
+import Database from './sqlite.js';
 import {
   createTestDb,
   insertTask,
@@ -20,7 +20,7 @@ import {
 import { getDb, initDb } from './db.js';
 
 describe('Database', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -32,12 +32,12 @@ describe('Database', () => {
   // ─── Schema Tests (table-driven) ────────────────────────────────────────
 
   describe('schema', () => {
-    it.each(TASKS_TABLE_COLUMNS)('tasks table has column: %s', (col) => {
+    it.each([...TASKS_TABLE_COLUMNS])('tasks table has column: %s', (col) => {
       const columns = db.pragma('table_info(tasks)') as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(col);
     });
 
-    it.each(AGENTS_TABLE_COLUMNS)('agents table has column: %s', (col) => {
+    it.each([...AGENTS_TABLE_COLUMNS])('agents table has column: %s', (col) => {
       const columns = db.pragma('table_info(agents)') as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(col);
     });
@@ -47,7 +47,7 @@ describe('Database', () => {
       { table: 'agents', index: 'idx_agents_task' },
     ];
 
-    it.each(indexCases)('creates $index on $table', ({ table, index }) => {
+    it.each([...indexCases])('creates $index on $table', ({ table, index }) => {
       const indexes = db
         .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='${table}'`)
         .all() as { name: string }[];
@@ -84,14 +84,17 @@ describe('Database', () => {
       { table: 'agent', field: 'status', expected: 'running' },
     ] as const;
 
-    it.each(defaultCases)('$table.$field defaults to $expected', ({ table, field, expected }) => {
-      insertTask(db);
-      if (table === 'agent') insertAgent(db);
+    it.each([...defaultCases])(
+      '$table.$field defaults to $expected',
+      ({ table, field, expected }) => {
+        insertTask(db);
+        if (table === 'agent') insertAgent(db);
 
-      const row =
-        table === 'task' ? getTask(db, DEFAULTS.task.id) : getAgents(db, DEFAULTS.task.id)[0];
-      expect((row as any)[field]).toBe(expected);
-    });
+        const row =
+          table === 'task' ? getTask(db, DEFAULTS.task.id) : getAgents(db, DEFAULTS.task.id)[0];
+        expect((row as any)[field]).toBe(expected);
+      },
+    );
 
     it('auto-populates created_at and updated_at on tasks', () => {
       db.prepare('INSERT INTO tasks (id, title, description) VALUES (?, ?, ?)').run(
@@ -176,7 +179,7 @@ describe('Database', () => {
       { table: 'agents', column: 'harness_session_id' },
     ];
 
-    it.each(migrationColumns)('$table has $column column (migration)', ({ table, column }) => {
+    it.each([...migrationColumns])('$table has $column column (migration)', ({ table, column }) => {
       const columns = db.pragma(`table_info(${table})`) as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(column);
     });
@@ -226,7 +229,7 @@ describe('Database', () => {
       },
     ];
 
-    it.each(startupActivityCases)('$desc on startup', ({ initial, status, expected }) => {
+    it.each([...startupActivityCases])('$desc on startup', ({ initial, status, expected }) => {
       insertTask(db, { id: 't1', runtime_state: 'running' });
       insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: initial, status });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from '../server/bun-test.js';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';

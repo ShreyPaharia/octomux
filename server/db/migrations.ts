@@ -1,16 +1,16 @@
-import type Database from 'better-sqlite3';
+import type Database from '../sqlite.js';
 import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 
 const logger = childLogger('db');
 
-export function columnsOf(instance: Database.Database, table: string): Set<string> {
+export function columnsOf(instance: Database, table: string): Set<string> {
   const rows = instance.pragma(`table_info(${table})`) as Array<{ name: string }>;
   return new Set(rows.map((c) => c.name));
 }
 
 export function addColumn(
-  instance: Database.Database,
+  instance: Database,
   table: string,
   name: string,
   ddl: string,
@@ -22,7 +22,7 @@ export function addColumn(
   }
 }
 
-function agentFkIsNotNull(instance: Database.Database): boolean {
+function agentFkIsNotNull(instance: Database): boolean {
   const rows = instance.pragma('table_info(agents)') as Array<{
     name: string;
     notnull: number;
@@ -36,16 +36,15 @@ function agentFkIsNotNull(instance: Database.Database): boolean {
  * FK, cascade behaviour, and indexes. SQLite < 3.35 can't ALTER a column's
  * NOT NULL in place; a table rebuild is the supported path.
  */
-function rebuildAgentsTable(instance: Database.Database): void {
-  instance
-    .transaction(() => {
-      // Capture dynamically-added columns that may not exist in the CREATE.
-      const oldCols = (instance.pragma('table_info(agents)') as Array<{ name: string }>).map(
-        (c) => c.name,
-      );
-      const has = (c: string) => oldCols.includes(c);
+function rebuildAgentsTable(instance: Database): void {
+  instance.transaction(() => {
+    // Capture dynamically-added columns that may not exist in the CREATE.
+    const oldCols = (instance.pragma('table_info(agents)') as Array<{ name: string }>).map(
+      (c) => c.name,
+    );
+    const has = (c: string) => oldCols.includes(c);
 
-      instance.exec(`
+    instance.exec(`
         CREATE TABLE agents_new (
           id                       TEXT PRIMARY KEY,
           task_id                  TEXT REFERENCES tasks(id) ON DELETE CASCADE,
@@ -61,37 +60,36 @@ function rebuildAgentsTable(instance: Database.Database): void {
         );
       `);
 
-      const selectCols = [
-        'id',
-        'task_id',
-        'window_index',
-        'label',
-        'status',
-        has('harness_session_id') ? 'harness_session_id' : 'NULL AS harness_session_id',
-        has('hook_activity') ? 'hook_activity' : `'active' AS hook_activity`,
-        has('hook_activity_updated_at')
-          ? 'hook_activity_updated_at'
-          : 'NULL AS hook_activity_updated_at',
-        has('harness_id') ? 'harness_id' : `'claude-code' AS harness_id`,
-        has('hook_token') ? 'hook_token' : `'' AS hook_token`,
-        'created_at',
-      ].join(', ');
+    const selectCols = [
+      'id',
+      'task_id',
+      'window_index',
+      'label',
+      'status',
+      has('harness_session_id') ? 'harness_session_id' : 'NULL AS harness_session_id',
+      has('hook_activity') ? 'hook_activity' : `'active' AS hook_activity`,
+      has('hook_activity_updated_at')
+        ? 'hook_activity_updated_at'
+        : 'NULL AS hook_activity_updated_at',
+      has('harness_id') ? 'harness_id' : `'claude-code' AS harness_id`,
+      has('hook_token') ? 'hook_token' : `'' AS hook_token`,
+      'created_at',
+    ].join(', ');
 
-      instance.exec(`INSERT INTO agents_new SELECT ${selectCols} FROM agents`);
-      instance.exec(`DROP TABLE agents`);
-      instance.exec(`ALTER TABLE agents_new RENAME TO agents`);
+    instance.exec(`INSERT INTO agents_new SELECT ${selectCols} FROM agents`);
+    instance.exec(`DROP TABLE agents`);
+    instance.exec(`ALTER TABLE agents_new RENAME TO agents`);
 
-      // Recreate indexes (idempotent CREATE IF NOT EXISTS).
-      instance.exec(`CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id)`);
-      instance.exec(
-        `CREATE INDEX IF NOT EXISTS idx_agents_harness_session_id ON agents(harness_session_id)`,
-      );
-    })
-    .default();
+    // Recreate indexes (idempotent CREATE IF NOT EXISTS).
+    instance.exec(`CREATE INDEX IF NOT EXISTS idx_agents_task ON agents(task_id)`);
+    instance.exec(
+      `CREATE INDEX IF NOT EXISTS idx_agents_harness_session_id ON agents(harness_session_id)`,
+    );
+  })();
 }
 
 /** Run forward-only additive migrations on an initialized database. */
-export function runMigrations(instance: Database.Database): void {
+export function runMigrations(instance: Database): void {
   // Additive migrations — idempotent, one read per table.
   // Columns added here are ones still present on the current schema; legacy
   // columns (worktree, run_mode, repo_path, branch, base_branch, base_sha)
@@ -162,11 +160,10 @@ export function runMigrations(instance: Database.Database): void {
   // Needed only for very old DBs that predate run_mode. The Phase 2a backfill
   // below expects tasks.run_mode to exist.
   if (taskCols.has('no_worktree') && !taskCols.has('run_mode')) {
-    instance
-      .transaction(() => {
-        instance.exec(`ALTER TABLE tasks ADD COLUMN run_mode TEXT`);
-        taskCols.add('run_mode');
-        instance.exec(`
+    instance.transaction(() => {
+      instance.exec(`ALTER TABLE tasks ADD COLUMN run_mode TEXT`);
+      taskCols.add('run_mode');
+      instance.exec(`
           UPDATE tasks SET run_mode = CASE
             WHEN no_worktree = 1 AND (repo_path IS NULL OR repo_path = '') THEN 'scratch'
             WHEN no_worktree = 1                                            THEN 'none'
@@ -174,16 +171,14 @@ export function runMigrations(instance: Database.Database): void {
           END
           WHERE run_mode IS NULL
         `);
-        instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
-        taskCols.delete('no_worktree');
-      })
-      .default();
+      instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
+      taskCols.delete('no_worktree');
+    })();
   } else if (taskCols.has('no_worktree')) {
     // run_mode already exists; backfill it from no_worktree for any NULL rows,
     // then drop the dead column.
-    instance
-      .transaction(() => {
-        instance.exec(`
+    instance.transaction(() => {
+      instance.exec(`
           UPDATE tasks SET run_mode = CASE
             WHEN no_worktree = 1 AND (repo_path IS NULL OR repo_path = '') THEN 'scratch'
             WHEN no_worktree = 1                                            THEN 'none'
@@ -191,10 +186,9 @@ export function runMigrations(instance: Database.Database): void {
           END
           WHERE run_mode IS NULL
         `);
-        instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
-        taskCols.delete('no_worktree');
-      })
-      .default();
+      instance.exec(`ALTER TABLE tasks DROP COLUMN no_worktree`);
+      taskCols.delete('no_worktree');
+    })();
   }
 
   // ─── Phase 2a migration: worktrees entity + agents.task_id nullable ──────
@@ -207,61 +201,50 @@ export function runMigrations(instance: Database.Database): void {
   // tasks — on fresh DBs it's already gone and there's nothing to backfill.
   const canBackfill = taskCols.has('worktree');
   {
-    instance
-      .transaction(() => {
-        if (!taskCols.has('worktree_id')) {
-          instance.exec(`ALTER TABLE tasks ADD COLUMN worktree_id TEXT REFERENCES worktrees(id)`);
-          taskCols.add('worktree_id');
-        }
+    instance.transaction(() => {
+      if (!taskCols.has('worktree_id')) {
+        instance.exec(`ALTER TABLE tasks ADD COLUMN worktree_id TEXT REFERENCES worktrees(id)`);
+        taskCols.add('worktree_id');
+      }
 
-        if (!canBackfill) return;
+      if (!canBackfill) return;
 
-        // Backfill worktrees for any task that has a worktree path but no link.
-        const rows = instance
-          .prepare(
-            `SELECT id, repo_path, branch, base_branch, base_sha, worktree, run_mode, created_at
+      // Backfill worktrees for any task that has a worktree path but no link.
+      const rows = instance
+        .prepare(
+          `SELECT id, repo_path, branch, base_branch, base_sha, worktree, run_mode, created_at
                FROM tasks
               WHERE worktree IS NOT NULL AND worktree_id IS NULL`,
-          )
-          .all() as Array<{
-          id: string;
-          repo_path: string | null;
-          branch: string | null;
-          base_branch: string | null;
-          base_sha: string | null;
-          worktree: string | null;
-          run_mode: string | null;
-          created_at: string;
-        }>;
+        )
+        .all() as Array<{
+        id: string;
+        repo_path: string | null;
+        branch: string | null;
+        base_branch: string | null;
+        base_sha: string | null;
+        worktree: string | null;
+        run_mode: string | null;
+        created_at: string;
+      }>;
 
-        const insertWt = instance.prepare(
-          `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status, created_at)
+      const insertWt = instance.prepare(
+        `INSERT INTO worktrees (id, path, repo_path, branch, base_branch, base_sha, mode, status, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'in_use', ?)`,
-        );
-        const linkTask = instance.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`);
+      );
+      const linkTask = instance.prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`);
 
-        for (const r of rows) {
-          const wtId = nanoid(12);
-          const mode = r.run_mode || 'new';
-          // scratch tasks: repo_path/branch/etc may be absent by design.
-          const repoPath = mode === 'scratch' ? null : r.repo_path;
-          const branch = mode === 'scratch' ? null : r.branch;
-          const baseBranch = mode === 'scratch' ? null : r.base_branch;
-          const baseSha = mode === 'scratch' ? null : r.base_sha;
-          insertWt.run(
-            wtId,
-            r.worktree!,
-            repoPath,
-            branch,
-            baseBranch,
-            baseSha,
-            mode,
-            r.created_at,
-          );
-          linkTask.run(wtId, r.id);
-        }
-      })
-      .default();
+      for (const r of rows) {
+        const wtId = nanoid(12);
+        const mode = r.run_mode || 'new';
+        // scratch tasks: repo_path/branch/etc may be absent by design.
+        const repoPath = mode === 'scratch' ? null : r.repo_path;
+        const branch = mode === 'scratch' ? null : r.branch;
+        const baseBranch = mode === 'scratch' ? null : r.base_branch;
+        const baseSha = mode === 'scratch' ? null : r.base_sha;
+        insertWt.run(wtId, r.worktree!, repoPath, branch, baseBranch, baseSha, mode, r.created_at);
+        linkTask.run(wtId, r.id);
+      }
+    })();
   }
 
   // Make agents.task_id nullable via table rebuild if currently NOT NULL.
@@ -305,17 +288,15 @@ export function runMigrations(instance: Database.Database): void {
     'base_sha',
   ] as const;
   if (legacyCols.some((c) => currentTaskCols.has(c))) {
-    instance
-      .transaction(() => {
-        instance.exec(`DROP INDEX IF EXISTS idx_tasks_existing_path`);
-        instance.exec(`DROP INDEX IF EXISTS idx_tasks_none_repo`);
-        for (const col of legacyCols) {
-          if (currentTaskCols.has(col)) {
-            instance.exec(`ALTER TABLE tasks DROP COLUMN ${col}`);
-          }
+    instance.transaction(() => {
+      instance.exec(`DROP INDEX IF EXISTS idx_tasks_existing_path`);
+      instance.exec(`DROP INDEX IF EXISTS idx_tasks_none_repo`);
+      for (const col of legacyCols) {
+        if (currentTaskCols.has(col)) {
+          instance.exec(`ALTER TABLE tasks DROP COLUMN ${col}`);
         }
-      })
-      .default();
+      }
+    })();
   }
 
   // Drop old partial unique index first (it referenced status; we'll recreate
@@ -478,10 +459,9 @@ export function runMigrations(instance: Database.Database): void {
   // column (one-shot safety net for very old DBs), then drop the column.
   const taskColsV4 = columnsOf(instance, 'tasks');
   if (taskColsV4.has('status')) {
-    instance
-      .transaction(() => {
-        // Safety backfill: if runtime_state somehow got NULL, restore from status.
-        instance.exec(`
+    instance.transaction(() => {
+      // Safety backfill: if runtime_state somehow got NULL, restore from status.
+      instance.exec(`
           UPDATE tasks SET runtime_state = CASE
             WHEN status = 'setting_up' THEN 'setting_up'
             WHEN status = 'running'    THEN 'running'
@@ -490,11 +470,10 @@ export function runMigrations(instance: Database.Database): void {
           END
           WHERE runtime_state IS NULL
         `);
-        // Drop the index that referenced status, then the column itself.
-        instance.exec(`DROP INDEX IF EXISTS idx_tasks_status`);
-        instance.exec(`ALTER TABLE tasks DROP COLUMN status`);
-      })
-      .default();
+      // Drop the index that referenced status, then the column itself.
+      instance.exec(`DROP INDEX IF EXISTS idx_tasks_status`);
+      instance.exec(`ALTER TABLE tasks DROP COLUMN status`);
+    })();
   }
 
   // Partial unique index keyed to worktree_id — now uses runtime_state.
@@ -516,10 +495,9 @@ export function runMigrations(instance: Database.Database): void {
   }>;
   const sidCol = ppCols.find((c) => c.name === 'session_id');
   if (sidCol && sidCol.notnull === 1) {
-    instance
-      .transaction(() => {
-        instance.exec(`ALTER TABLE permission_prompts RENAME TO permission_prompts_old`);
-        instance.exec(`
+    instance.transaction(() => {
+      instance.exec(`ALTER TABLE permission_prompts RENAME TO permission_prompts_old`);
+      instance.exec(`
           CREATE TABLE permission_prompts (
             id          TEXT PRIMARY KEY,
             task_id     TEXT NOT NULL,
@@ -534,22 +512,21 @@ export function runMigrations(instance: Database.Database): void {
             FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
           )
         `);
-        instance.exec(`INSERT INTO permission_prompts SELECT * FROM permission_prompts_old`);
-        instance.exec(`DROP TABLE permission_prompts_old`);
-        instance.exec(
-          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id)`,
-        );
-        instance.exec(
-          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status)`,
-        );
-        instance.exec(
-          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status)`,
-        );
-        instance.exec(
-          `CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status_created ON permission_prompts(agent_id, status, created_at)`,
-        );
-      })
-      .default();
+      instance.exec(`INSERT INTO permission_prompts SELECT * FROM permission_prompts_old`);
+      instance.exec(`DROP TABLE permission_prompts_old`);
+      instance.exec(
+        `CREATE INDEX IF NOT EXISTS idx_permission_prompts_task_id ON permission_prompts(task_id)`,
+      );
+      instance.exec(
+        `CREATE INDEX IF NOT EXISTS idx_permission_prompts_status ON permission_prompts(status)`,
+      );
+      instance.exec(
+        `CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status ON permission_prompts(agent_id, status)`,
+      );
+      instance.exec(
+        `CREATE INDEX IF NOT EXISTS idx_permission_prompts_agent_status_created ON permission_prompts(agent_id, status, created_at)`,
+      );
+    })();
   }
 
   // Resolve stale pending prompts and reset agents stuck in 'waiting'

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import {
   reduce,
   hydrateFromUrl,
@@ -55,7 +55,7 @@ describe('reduce / pickRepo', () => {
     { from: noneState, expectedMode: 'none' },
     { from: existingState, expectedMode: 'existing' },
   ];
-  it.each(cases)('$from.mode → $expectedMode on pickRepo', ({ from, expectedMode }) => {
+  it.each([...cases])('$from.mode → $expectedMode on pickRepo', ({ from, expectedMode }) => {
     const next = reduce(from, { type: 'pickRepo', repo: '/r2', defaultBranch: 'dev' });
     expect(next.mode).toBe(expectedMode);
   });
@@ -438,7 +438,7 @@ describe('hydrateFromUrl', () => {
     },
   ];
 
-  it.each(table)('$name', ({ qs, expected }) => {
+  it.each([...table])('$name', ({ qs, expected }) => {
     const state = hydrateFromUrl(new URLSearchParams(qs));
     expect(state).toEqual(expected);
   });
@@ -477,7 +477,7 @@ describe('stateToUrlParams', () => {
     { mode: 'scratch', isDraft: false, agent: 'orchestrator' },
   ];
 
-  it.each(roundtrips)('$mode round-trips through URL', (state) => {
+  it.each([...roundtrips])('$mode round-trips through URL', (state) => {
     const params = stateToUrlParams(state);
     const parsed = hydrateFromUrl(params);
     // lastBranch/isDraft are transient; core identity must match.
@@ -591,7 +591,7 @@ describe('reduce / exhaustiveness (action × mode)', () => {
     { type: 'toggleDraft' },
   ];
   const matrix = modes.flatMap((m) => actions.map((a) => ({ mode: m.mode, type: a.type, m, a })));
-  it.each(matrix)('reduce($mode, $type) returns a valid state', ({ m, a }) => {
+  it.each([...matrix])('reduce($mode, $type) returns a valid state', ({ m, a }) => {
     const next = reduce(m, a);
     expect(next).toBeTruthy();
     expect(typeof next.mode).toBe('string');

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const { LinearClientMock, MockLinearError } = vi.hoisted(() => {
   class MockLinearError extends Error {
@@ -27,7 +27,8 @@ vi.mock('@linear/sdk', () => ({
   },
 }));
 
-import { createLinearClient, invokeLinear, LinearApiError, toLinearApiError } from './graphql.js';
+const { createLinearClient, invokeLinear, LinearApiError, toLinearApiError } =
+  await import('./graphql.js');
 
 describe('createLinearClient', () => {
   beforeEach(() => {
@@ -40,7 +41,7 @@ describe('createLinearClient', () => {
   it('instantiates LinearClient with the bare api key', () => {
     const client = createLinearClient('lin_api_xyz');
     expect(LinearClientMock).toHaveBeenCalledWith({ apiKey: 'lin_api_xyz' });
-    expect(client).toEqual({ apiKey: 'lin_api_xyz' });
+    expect(client as unknown as Record<string, unknown>).toEqual({ apiKey: 'lin_api_xyz' });
   });
 });
 
@@ -80,7 +81,7 @@ describe('invokeLinear', () => {
 
   it('returns the callback result on success', async () => {
     const result = await invokeLinear('key', async (client) => {
-      expect(client).toEqual({ apiKey: 'key' });
+      expect(client as unknown as Record<string, unknown>).toEqual({ apiKey: 'key' });
       return { ok: true };
     });
     expect(result).toEqual({ ok: true });

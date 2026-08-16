@@ -1,9 +1,7 @@
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
 import { octomuxRoot } from './octomux-root.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { assetRoot } from './assets.js';
 
 /** Repo-local octomux config root: `<repo>/.octomux/`. */
 export function repoOctomuxDir(repoPath: string): string {
@@ -32,9 +30,9 @@ export function homeAgentsDir(): string {
 }
 
 export function builtInSkillsDir(): string {
-  return path.resolve(__dirname, '..', 'skills');
+  return path.join(assetRoot(), 'skills');
 }
 
 export function builtInAgentsDir(): string {
-  return path.resolve(__dirname, '..', 'agents');
+  return path.join(assetRoot(), 'agents');
 }

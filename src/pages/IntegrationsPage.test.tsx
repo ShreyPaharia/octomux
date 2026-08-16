@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import IntegrationsPage from './IntegrationsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const apiMock = vi.hoisted(() => ({
   listProviders: vi.fn(),
@@ -20,6 +16,11 @@ const apiMock = vi.hoisted(() => ({
 vi.mock('@/lib/api/configApi', () => ({ configApi: apiMock }));
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: {} }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: {} }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: IntegrationsPage } = await import('./IntegrationsPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 describe('IntegrationsPage', () => {
   beforeEach(() => {

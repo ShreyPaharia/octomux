@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import { registerAddAgent } from './add-agent.js';
 import type { Agent } from '@octomux/types';

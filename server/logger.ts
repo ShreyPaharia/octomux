@@ -1,4 +1,6 @@
-import pino, { type Logger, type TransportTargetOptions } from 'pino';
+import pino, { type Logger } from 'pino';
+import roll from 'pino-roll';
+import pretty from 'pino-pretty';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -25,16 +27,34 @@ function defaultLevel(): string {
   return isProduction ? 'info' : 'debug';
 }
 
-function rollTarget(level: string): TransportTargetOptions {
+/**
+ * The rotating log file, as an in-process stream.
+ *
+ * pino's `transport:` option spawns a worker thread that resolves the target by
+ * module path at runtime — which `bun build --compile` can't satisfy ("unable to
+ * determine transport target for pino-roll"). pino-roll's default export is also
+ * a plain stream factory, so we call it directly and skip the worker entirely.
+ *
+ * That factory is async while `getLogger()` is sync, so writes are buffered until
+ * it resolves. ponytail: unbounded buffer, but it drains within milliseconds of
+ * boot — revisit only if something logs heavily before the first tick.
+ */
+function rollingDestination(file: string): { write(line: string): void } {
+  let out: { write(line: string): void } | null = null;
+  const pending: string[] = [];
+
+  void roll({ file, frequency: 'daily', size: '10m', mkdir: true, limit: { count: 7 } }).then(
+    (stream) => {
+      out = stream as unknown as { write(line: string): void };
+      for (const line of pending) out.write(line);
+      pending.length = 0;
+    },
+  );
+
   return {
-    target: 'pino-roll',
-    level,
-    options: {
-      file: resolveLogFile(),
-      frequency: 'daily',
-      size: '10m',
-      mkdir: true,
-      limit: { count: 7 },
+    write(line: string): void {
+      if (out) out.write(line);
+      else pending.push(line);
     },
   };
 }
@@ -46,29 +66,21 @@ function buildLogger(): Logger {
   if (isTest) return pino({ level });
 
   fs.mkdirSync(resolveLogDir(), { recursive: true });
+  const file = rollingDestination(resolveLogFile());
 
   if (isProduction) {
     // Prod: JSON to file only
-    return pino({
-      level,
-      transport: rollTarget(level),
-    });
+    return pino({ level }, file as unknown as pino.DestinationStream);
   }
 
   // Dev: pretty-printed stdout + JSON rotated file
-  return pino({
-    level,
-    transport: {
-      targets: [
-        {
-          target: 'pino-pretty',
-          level,
-          options: { colorize: true, translateTime: 'SYS:HH:MM:ss.l' },
-        },
-        rollTarget(level),
-      ],
-    },
-  });
+  return pino(
+    { level },
+    pino.multistream([
+      { level, stream: pretty({ colorize: true, translateTime: 'SYS:HH:MM:ss.l' }) },
+      { level, stream: file as unknown as pino.DestinationStream },
+    ]),
+  );
 }
 
 let rootLogger: Logger | null = null;

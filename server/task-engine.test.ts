@@ -1,27 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import pino from 'pino';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertPermissionPrompt,
-  insertUserTerminal,
-  getUserTerminals,
-  getTask,
-  getAgents,
-  getPermissionPrompts,
-  findExecCall,
-  countExecCalls,
-  DEFAULTS,
-} from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 import type { Task, Agent } from './types.js';
-import { getSettings } from './settings.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -42,8 +26,8 @@ vi.mock('./hook-settings.js', () => ({
   DENIED_TOOLS: [],
 }));
 
-vi.mock('./settings.js', async () => {
-  const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
+vi.mock('./settings.js', () => {
+  const actual = vi.importActual<typeof import('./settings.js')>('./settings.js');
   return {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
@@ -102,6 +86,23 @@ vi.mock('child_process', () => ({
   ),
 }));
 
+const { default: pino } = await import('pino');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getUserTerminals,
+  getTask,
+  getAgents,
+  getPermissionPrompts,
+  findExecCall,
+  countExecCalls,
+  DEFAULTS,
+} = await import('./test-helpers.js');
+const { getSettings } = await import('./settings.js');
+
 const {
   startTask,
   closeTask,
@@ -125,7 +126,7 @@ const { setLogger, getLogger } = await import('./logger.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();
@@ -151,7 +152,7 @@ describe('slugifyTitle', () => {
     { title: '日本語タイトル only ascii kept', id: 'uni123', expected: 'only-ascii-kept-uni123' },
   ];
 
-  it.each(cases)('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
+  it.each([...cases])('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
     expect(slugifyTitle(title, id)).toBe(expected);
   });
 });
@@ -230,7 +231,7 @@ describe('startTask', () => {
       },
     ];
 
-    it.each(expectedFields)('sets $field to $expected', ({ field, expected }) => {
+    it.each([...expectedFields])('sets $field to $expected', ({ field, expected }) => {
       expect((updated as any)[field]).toBe(expected);
     });
 
@@ -251,7 +252,7 @@ describe('startTask', () => {
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['display-message'] },
   ];
 
-  it.each(expectedShellCalls)('$name', async ({ cmd, argsInclude }) => {
+  it.each([...expectedShellCalls])('$name', async ({ cmd, argsInclude }) => {
     insertTask(db, { initial_prompt: 'Do the thing' });
     await startTask({ ...DEFAULTS.task, initial_prompt: 'Do the thing' } as Task);
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
@@ -543,7 +544,7 @@ describe('startTask', () => {
     },
   ];
 
-  it.each(errorCases)('sets error when $name', async ({ setup, errorContains }) => {
+  it.each([...errorCases])('sets error when $name', async ({ setup, errorContains }) => {
     setup();
     insertTask(db);
     await startTask({ ...DEFAULTS.task } as Task);
@@ -1097,7 +1098,7 @@ describe('addAgent', () => {
     },
   ];
 
-  it.each(agentLabelCases)(
+  it.each([...agentLabelCases])(
     'creates $name with label "$expectedLabel"',
     async ({ existingAgents, expectedLabel }) => {
       insertTask(db, { ...DEFAULTS.runningTask });
@@ -1130,7 +1131,7 @@ describe('addAgent', () => {
     { name: 'queries window index', cmd: 'tmux', argsInclude: ['list-windows'] },
   ];
 
-  it.each(addAgentShellCalls)('$name', async ({ cmd, argsInclude }) => {
+  it.each([...addAgentShellCalls])('$name', async ({ cmd, argsInclude }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await addAgent(runningTask);
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
@@ -1316,7 +1317,7 @@ describe('closeTask', () => {
     { name: 'branch', cmd: 'git', argsInclude: ['branch', '-D'] },
   ];
 
-  it.each(closePreservedResources)(
+  it.each([...closePreservedResources])(
     'does NOT remove $name (preserved for resume)',
     async ({ cmd, argsInclude }) => {
       insertTask(db, { ...DEFAULTS.runningTask });
@@ -1336,7 +1337,7 @@ describe('closeTask', () => {
 
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.toBeUndefined();
   });
 
   it('logs tmux "session not found" at debug, not warn', async () => {
@@ -1415,7 +1416,7 @@ describe('deleteTask', () => {
     { name: 'deletes branch', cmd: 'git', argsInclude: ['branch', '-D'] },
   ];
 
-  it.each(deleteCalls)('$name', async ({ cmd, argsInclude }) => {
+  it.each([...deleteCalls])('$name', async ({ cmd, argsInclude }) => {
     insertTask(db, { ...DEFAULTS.runningTask });
     await deleteTask({ ...DEFAULTS.runningTask } as Task);
     expect(findExecCall(vi.mocked(execFile), { cmd, argsInclude })).toBeDefined();
@@ -1439,7 +1440,7 @@ describe('deleteTask', () => {
     },
   ];
 
-  it.each(nullFieldCases)('$name', async ({ overrides, shouldNotCall }) => {
+  it.each([...nullFieldCases])('$name', async ({ overrides, shouldNotCall }) => {
     const task = { ...DEFAULTS.runningTask, ...overrides } as Task;
     insertTask(db, task);
     await deleteTask(task);
@@ -1618,7 +1619,7 @@ describe('resumeTask', () => {
     { name: 'creates fresh tmux session', cmd: 'tmux', argsInclude: ['new-session'] },
   ];
 
-  it.each(resumeShellCalls)('$name', async ({ cmd, argsInclude }) => {
+  it.each([...resumeShellCalls])('$name', async ({ cmd, argsInclude }) => {
     insertTask(db, { ...closedTask });
     insertAgent(db, { status: 'stopped' });
 
@@ -1637,7 +1638,7 @@ describe('resumeTask', () => {
     { name: 'session_id null', sessionId: null, expectedFlag: '--continue', expectedId: undefined },
   ];
 
-  it.each(resumeFlagCases)(
+  it.each([...resumeFlagCases])(
     'uses $expectedFlag when $name',
     async ({ sessionId, expectedFlag, expectedId }) => {
       insertTask(db, { ...closedTask });
@@ -2255,7 +2256,7 @@ describe('cleanupLinkedSessions', () => {
       cb(new Error('no server running'), null);
     }) as any);
 
-    await expect(cleanupLinkedSessions('any-session')).resolves.not.toThrow();
+    await expect(cleanupLinkedSessions('any-session')).resolves.toBeUndefined();
   });
 });
 

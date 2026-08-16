@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { claudeCodeHarness } from '../harnesses/claude-code.js';
 import { buildOrchestratorConductorFlags, ORCHESTRATOR_SYSTEM_PROMPT } from './conductor-flags.js';
 

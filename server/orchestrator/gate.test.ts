@@ -16,22 +16,7 @@
  * 10. POST /api/hooks/pre-tool-use: full HTTP round-trip (supertest).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import request from 'supertest';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { createApp } from '../app.js';
-import { createTestDb, insertTask, insertAgent } from '../test-helpers.js';
-import {
-  createConversation,
-  getCard,
-  listPendingCards,
-  createCard,
-  resolveCard,
-  upsertManagedTask,
-  getManagedTask,
-} from './store.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -70,9 +55,25 @@ vi.mock('./stream.js', () => ({
   chatEventToWsEvent: vi.fn(),
 }));
 
+const { default: request } = await import('supertest');
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createApp } = await import('../app.js');
+const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.js');
+const {
+  createConversation,
+  getCard,
+  listPendingCards,
+  createCard,
+  resolveCard,
+  upsertManagedTask,
+  getManagedTask,
+} = await import('./store.js');
+
 // ─── Imports after mocks ──────────────────────────────────────────────────────
 
-import { handlePreToolUse, executeCard, rehydratePendingCards } from './gate.js';
+const { handlePreToolUse, executeCard, rehydratePendingCards } = await import('./gate.js');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -314,7 +315,7 @@ describe('gate.executeCard', () => {
   it('no-ops gracefully when card_id does not exist', async () => {
     await expect(
       executeCard({ card_id: 'nonexistent', decision: 'approve' }),
-    ).resolves.not.toThrow();
+    ).resolves.toBeUndefined();
     expect(mockRunCreateTask).not.toHaveBeenCalled();
   });
 

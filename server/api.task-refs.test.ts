@@ -1,7 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createTestDb, insertTask } from './test-helpers.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
@@ -25,6 +22,10 @@ vi.mock('./events.js', () => ({
   broadcast: vi.fn(),
   setupWs: vi.fn(),
 }));
+
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask } = await import('./test-helpers.js');
+const { getDb } = await import('./db.js');
 
 const { createApp } = await import('./app.js');
 

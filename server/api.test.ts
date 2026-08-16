@@ -1,21 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertPermissionPrompt,
-  insertUserTerminal,
-  getTask,
-  DEFAULTS,
-} from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 import type { Task, Agent } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-engine/index.js', async () => {
-  const { getDb } = await import('./db.js');
+vi.mock('./task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -72,7 +62,7 @@ vi.mock('./task-engine/index.js', async () => {
       return { editor: 'nvim', windowIndex: 5 };
     }),
     createShellTerminal: vi.fn(async (task: any) => {
-      const { getDb } = await import('./db.js');
+      const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
       const db = getDb();
       db.prepare(
         `INSERT INTO user_terminals (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)`,
@@ -88,7 +78,7 @@ vi.mock('./task-engine/index.js', async () => {
     }),
     closeShellTerminal: vi.fn(),
     hopAgent: vi.fn(async (agent: any, toTaskId: string | null) => {
-      const { getDb } = await import('./db.js');
+      const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
       const db = getDb();
       db.prepare(
         `UPDATE agents SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running' WHERE id = ?`,
@@ -116,8 +106,8 @@ vi.mock('fs', () => ({
   },
 }));
 
-vi.mock('./chats.js', async () => {
-  const { getDb } = await import('./db.js');
+vi.mock('./chats.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   let counter = 0;
   return {
     createChat: vi.fn(
@@ -208,15 +198,25 @@ vi.mock('./diff-review-state.js', () => ({
   })),
 }));
 
-vi.mock('@octomux/diff-engine', async () => {
-  const actual =
-    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+vi.mock('@octomux/diff-engine', () => {
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
     getFileDiff: vi.fn(),
   };
 });
+
+const { default: request } = await import('supertest');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getTask,
+  DEFAULTS,
+} = await import('./test-helpers.js');
 
 const fs = (await import('fs')).default;
 const diffModule = await import('@octomux/diff-engine');
@@ -238,7 +238,7 @@ const { updateSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {
@@ -293,7 +293,7 @@ const notFoundCases = [
 ];
 
 describe('404 for nonexistent resources', () => {
-  it.each(notFoundCases)('$name → 404', async ({ method, url, body }) => {
+  it.each([...notFoundCases])('$name → 404', async ({ method, url, body }) => {
     const res = body ? await request(app)[method](url).send(body) : await request(app)[method](url);
     expect(res.status).toBe(404);
   });
@@ -521,7 +521,7 @@ describe('POST /api/tasks', () => {
     { name: 'title empty string', body: { title: '', description: 'D', repo_path: '/tmp' } },
   ];
 
-  it.each(missingFieldCases)('returns 400 when $name', async ({ body }) => {
+  it.each([...missingFieldCases])('returns 400 when $name', async ({ body }) => {
     const res = await request(app).post('/api/tasks').send(body);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('required');
@@ -668,7 +668,7 @@ describe('POST /api/tasks/:id/start', () => {
 
   const nonDraftStates = ['setting_up', 'running', 'error'];
 
-  it.each(nonDraftStates)('returns 400 when task runtime_state is %s', async (state) => {
+  it.each([...nonDraftStates])('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { runtime_state: state as any });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/start`);
     expect(res.status).toBe(400);
@@ -739,7 +739,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   const resumableStates = ['idle', 'error'] as const;
 
-  it.each(resumableStates)('returns 400 when worktree missing for %s task', async (state) => {
+  it.each([...resumableStates])('returns 400 when worktree missing for %s task', async (state) => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app)
@@ -749,32 +749,38 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.body.error).toContain('Worktree');
   });
 
-  it.each(resumableStates)('calls resumeTask for %s task with valid worktree', async (state) => {
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
-    const res = await request(app)
-      .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ runtime_state: 'running' });
-    expect(res.status).toBe(200);
-    expect(resumeTask).toHaveBeenCalledOnce();
-  });
+  it.each([...resumableStates])(
+    'calls resumeTask for %s task with valid worktree',
+    async (state) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
+      const res = await request(app)
+        .patch(`/api/tasks/${DEFAULTS.task.id}`)
+        .send({ runtime_state: 'running' });
+      expect(res.status).toBe(200);
+      expect(resumeTask).toHaveBeenCalledOnce();
+    },
+  );
 
-  it.each(resumableStates)('resumes run_mode=none %s task when repo_path exists', async (state) => {
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    insertTask(db, {
-      ...DEFAULTS.runningTask,
-      runtime_state: state,
-      run_mode: 'none',
-      worktree: DEFAULTS.runningTask.repo_path,
-    });
-    const res = await request(app)
-      .patch(`/api/tasks/${DEFAULTS.task.id}`)
-      .send({ runtime_state: 'running' });
-    expect(res.status).toBe(200);
-    expect(resumeTask).toHaveBeenCalledOnce();
-  });
+  it.each([...resumableStates])(
+    'resumes run_mode=none %s task when repo_path exists',
+    async (state) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        runtime_state: state,
+        run_mode: 'none',
+        worktree: DEFAULTS.runningTask.repo_path,
+      });
+      const res = await request(app)
+        .patch(`/api/tasks/${DEFAULTS.task.id}`)
+        .send({ runtime_state: 'running' });
+      expect(res.status).toBe(200);
+      expect(resumeTask).toHaveBeenCalledOnce();
+    },
+  );
 
-  it.each(resumableStates)(
+  it.each([...resumableStates])(
     'refuses resume of run_mode=none %s task when repo_path missing',
     async (state) => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
@@ -1327,7 +1333,7 @@ describe('POST /api/tasks/:id/agents', () => {
 
   const nonRunningStates = ['idle', 'setting_up', 'error'];
 
-  it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
+  it.each([...nonRunningStates])('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { runtime_state: state as any });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/agents`).send({});
     expect(res.status).toBe(400);
@@ -1627,7 +1633,7 @@ describe('POST /api/tasks/:id/user-terminal', () => {
 
   const nonRunningStates = ['idle', 'setting_up', 'error'] as const;
 
-  it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
+  it.each([...nonRunningStates])('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
     const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
     expect(res.status).toBe(400);
@@ -2430,7 +2436,7 @@ describe('agent name validation', () => {
   ];
 
   describe('POST /api/tasks', () => {
-    it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
+    it.each([...invalidAgentCases])('rejects $name as agent → 400', async ({ agent }) => {
       const res = await request(app)
         .post('/api/tasks')
         .send({ title: 'T', description: 'D', repo_path: '/tmp', agent });
@@ -2440,7 +2446,7 @@ describe('agent name validation', () => {
   });
 
   describe('POST /api/tasks/:id/agents', () => {
-    it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
+    it.each([...invalidAgentCases])('rejects $name as agent → 400', async ({ agent }) => {
       insertTask(db, { ...DEFAULTS.runningTask });
       const res = await request(app)
         .post(`/api/tasks/${DEFAULTS.runningTask.id}/agents`)
@@ -2451,7 +2457,7 @@ describe('agent name validation', () => {
   });
 
   describe('POST /api/chats', () => {
-    it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
+    it.each([...invalidAgentCases])('rejects $name as agent → 400', async ({ agent }) => {
       const res = await request(app).post('/api/chats').send({ agent });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/Invalid agent name/);

@@ -39,9 +39,24 @@ jobs:
             echo "package.json already at $PKG_VERSION; skipping bump"
           fi
 
-      - run: bun run build
+      # Builds all six platform binaries and stages one npm package per target
+      # in dist-npm/. Signing is skipped on Linux (codesign is macOS-only) — run
+      # `bun run sign:macos` on a macOS runner if you ship outside npm.
+      - run: bun run build:npm
 
-      - run: npm publish --access public
+      # Platform packages first: the root package's optionalDependencies pin this
+      # exact version, so publishing it before them would resolve to nothing.
+      - name: Publish platform packages
+        run: |
+          for pkg in dist-npm/*/; do
+            echo "publishing $pkg"
+            npm publish "$pkg" --access public
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+      - name: Publish root package
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
 

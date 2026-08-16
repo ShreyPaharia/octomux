@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from '../bun-test.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -175,7 +175,7 @@ describe('cursorHarness', () => {
       expect(() => cursorHarness.validateSettings({ unknown: 'x' })).toThrow(/unknown/);
     });
 
-    it.each([null, 42, 'string', []])('throws on non-object: %j', (val) => {
+    it.each([[null], [42], ['string'], [[]]])('throws on non-object: %j', (val) => {
       expect(() => cursorHarness.validateSettings(val)).toThrow();
     });
   });

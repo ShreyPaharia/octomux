@@ -1,19 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, spyOn, vi } from './bun-test.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { readPlaybook, appendPlaybookNote, playbookDir } from './review-playbook.js';
 
 let tmpHome: string;
-let origHome: string | undefined;
 
+// Spy on homedir rather than setting $HOME: bun resolves os.homedir() once at
+// startup and ignores later env changes, so the env trick would let these tests
+// read — and appendPlaybookNote write — the developer's real ~/.octomux.
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-pb-'));
-  origHome = process.env.HOME;
-  process.env.HOME = tmpHome;
+  spyOn(os, 'homedir').mockReturnValue(tmpHome);
 });
 afterEach(() => {
-  process.env.HOME = origHome;
+  vi.restoreAllMocks();
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 

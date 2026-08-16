@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, afterEach } from '../bun-test.js';
+import Database from '../sqlite.js';
 import { SCHEMA, applyPragmas } from './schema.js';
 import { runMigrations } from './migrations.js';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../test-helpers.js';
 
 describe('runMigrations (isolated)', () => {
-  let db: Database.Database;
+  let db: Database;
 
   afterEach(() => {
     db?.close();

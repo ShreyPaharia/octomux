@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { render, screen } from '@testing-library/react';
 import { ReviewContextStrip } from './ReviewContextStrip';
 import type { RenderGroup } from '@/lib/review-file-groups';

@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
 import type { Worktree, RunMode, WorktreeStatus, WorktreeSummary } from '../types.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 
 const logger = childLogger('repositories/worktrees');
 
@@ -253,14 +254,14 @@ export function updateWorktreeFields(
   touchUsed = false,
 ): void {
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLQueryBindings[] = [];
 
   for (const [key, value] of Object.entries(patch)) {
     if (!WORKTREE_WRITABLE_COLUMNS.has(key)) {
       throw new Error(`updateWorktreeFields: column '${key}' is not in the writable allowlist`);
     }
     fields.push(`${key} = ?`);
-    values.push(value);
+    values.push(value as SQLQueryBindings);
   }
 
   if (touchUsed) {

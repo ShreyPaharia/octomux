@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 import { Readable } from 'stream';
 import { Command } from 'commander';
 import { registerPostReview } from './post-review.js';

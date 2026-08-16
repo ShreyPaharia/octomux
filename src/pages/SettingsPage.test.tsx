@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import SettingsPage from './SettingsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () => {
   const { vi } = await import('vitest');
@@ -28,8 +24,8 @@ vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
-vi.mock('../lib/hooks', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock('../lib/hooks', (importOriginal) => {
+  const actual = importOriginal() as Record<string, unknown>;
   return {
     ...actual,
     useSkills: () => ({ skills: [], loading: false, error: null, refresh: vi.fn() }),
@@ -41,6 +37,11 @@ vi.mock('../lib/hooks', async (importOriginal) => {
 vi.mock('@/lib/tasks-context', () => ({
   useTasksContextOptional: () => null,
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: SettingsPage } = await import('./SettingsPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 describe('SettingsPage', () => {
   beforeEach(() => {

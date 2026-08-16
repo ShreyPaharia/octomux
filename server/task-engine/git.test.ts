@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { findExecCall } from '../test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -41,6 +40,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
+const { findExecCall } = await import('../test-helpers.js');
+
 const {
   addWorktreeWithBranch,
   slugifyTitle,
@@ -73,7 +74,7 @@ describe('slugifyTitle', () => {
     { title: 'UPPERCASE TITLE', id: 'upprc1', expected: 'uppercase-title-upprc1' },
   ];
 
-  it.each(cases)('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
+  it.each([...cases])('slugifies "$title" → "$expected"', ({ title, id, expected }) => {
     expect(slugifyTitle(title, id)).toBe(expected);
   });
 

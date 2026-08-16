@@ -1,9 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
+import Database from '../../sqlite.js';
 import type { LoopRun, LoopSpec, Task } from '../../types.js';
 
 vi.mock('../git.js', () => ({
@@ -23,6 +19,11 @@ vi.mock('../../events.js', () => ({
 vi.mock('../../hook-base-url.js', () => ({
   hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777'),
 }));
+
+const { default: fs } = await import('fs');
+const { default: os } = await import('os');
+const { default: path } = await import('path');
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('../../test-helpers.js');
 
 const {
   buildLoopPrompt,
@@ -146,7 +147,7 @@ describe('evaluateTermination', () => {
 const LOOP_SPEC: LoopSpec = { prompt: 'fix the bug', verify: 'bun run test', maxIterations: 5 };
 
 describe('startLoop', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -179,7 +180,7 @@ describe('startLoop', () => {
 });
 
 describe('handleLoopIterationBoundary', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -276,7 +277,7 @@ describe('handleLoopIterationBoundary', () => {
 });
 
 describe('loop playbook', () => {
-  let db: Database.Database;
+  let db: Database;
   let worktree: string;
 
   beforeEach(() => {
@@ -342,7 +343,7 @@ describe('loop playbook', () => {
 });
 
 describe('resumeLoopOnStartup', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

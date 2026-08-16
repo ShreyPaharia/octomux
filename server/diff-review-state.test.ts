@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';

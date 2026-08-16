@@ -37,3 +37,6 @@ packages/*/bin/*
 packages/*/share/terminfo/*
 !packages/*/share/terminfo/.gitkeep
 *.tsbuildinfo
+dist-bin/
+server/assets.generated.json
+dist-npm/

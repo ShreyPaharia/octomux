@@ -7,9 +7,7 @@
  * verify the right tmux + claude commands are issued without touching real tmux
  * or the filesystem. Pattern mirrors server/task-runner.test.ts.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { execFile } from 'child_process';
-import { createTestDb } from '../test-helpers.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 // ─── Mock child_process ───────────────────────────────────────────────────────
 
@@ -50,8 +48,8 @@ vi.mock('child_process', () => ({
 
 // ─── Mock fs ─────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -63,17 +61,20 @@ vi.mock('fs', async (importOriginal) => {
   return { ...mocked, default: mocked };
 });
 
-const mockedExecFile = vi.mocked(execFile);
+const { execFile } = await import('child_process');
+const { createTestDb } = await import('../test-helpers.js');
 
-// Import runner under test AFTER mocks are set up
-import {
+const {
   startConversation,
   sendTurn,
   stopConversation,
   resumeConversation,
   conversationTmuxTarget,
-} from './runner.js';
-import { createConversation, getConversation, updateConversation } from './store.js';
+} = await import('./runner.js');
+const mockedExecFile = vi.mocked(execFile);
+
+// Import runner under test AFTER mocks are set up
+const { createConversation, getConversation, updateConversation } = await import('./store.js');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,8 @@ describe('orchestrator runner', () => {
     mockedExecFile.mockClear();
     _lastPastedText = '';
     _windowIndex = '1';
-    vi.useFakeTimers();
+    // Fake timers are opt-in per test (see the sendTurn cases) — faking them
+    // for every test stalls any code that awaits a real delay.
   });
 
   afterEach(() => {
@@ -352,6 +354,7 @@ describe('orchestrator runner', () => {
 
   describe('sendTurn', () => {
     it('sends the text via bracketed paste then Enter (two separate send-keys calls)', async () => {
+      vi.useFakeTimers();
       const convId = createConversation({ title: 'SendTurn test' });
       updateConversation(convId, { tmux_window: 'octomux-orch-send:1' });
 
@@ -376,6 +379,7 @@ describe('orchestrator runner', () => {
     });
 
     it('uses capture-pane to confirm text is in the pane before sending Enter', async () => {
+      vi.useFakeTimers();
       const convId = createConversation({ title: 'CapturePane confirm test' });
       updateConversation(convId, { tmux_window: 'octomux-orch-cap:1' });
 
@@ -389,6 +393,7 @@ describe('orchestrator runner', () => {
     });
 
     it('handles multi-line turns (passes the full text including newlines)', async () => {
+      vi.useFakeTimers();
       const convId = createConversation({ title: 'Multi-line turn' });
       updateConversation(convId, { tmux_window: 'octomux-orch-ml:1' });
       const multiLine = 'line one\nline two\nline three';
@@ -408,6 +413,7 @@ describe('orchestrator runner', () => {
     });
 
     it('resumes a dead session (--resume) then delivers the turn', async () => {
+      vi.useFakeTimers();
       // A conversation whose tmux session is gone (server restart / crash / stop):
       // no tmux_window → not alive → sendTurn must resume the SAME claude session
       // and then deliver, instead of throwing.

@@ -1,11 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
-import { createLoopRun, appendIteration } from './repositories/loop-runs.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -34,8 +30,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('./orchestrator/store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./orchestrator/store.js')>();
+vi.mock('./orchestrator/store.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./orchestrator/store.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 vi.mock('./orchestrator/runner.js', () => ({ mcpServerInvocation: vi.fn(() => null) }));
@@ -55,6 +51,11 @@ vi.mock('./harnesses/index.js', () => ({
     postLaunch: vi.fn(async () => undefined),
   })),
 }));
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb, insertTask, insertAgent } = await import('./test-helpers.js');
+const { createLoopRun, appendIteration } = await import('./repositories/loop-runs.js');
 
 describe('loop routes', () => {
   let app: ReturnType<typeof createApp>;

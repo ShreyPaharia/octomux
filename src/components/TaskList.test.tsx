@@ -1,12 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
-import { TaskList } from './TaskList';
-import { renderWithRouter, makeTask } from '../test-helpers';
+import { describe, it, expect, vi } from '../bun-test.js';
 
 const { routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen } = await import('@testing-library/react');
+const { TaskList } = await import('./TaskList');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
 
 describe('TaskList', () => {
   const onClose = vi.fn();

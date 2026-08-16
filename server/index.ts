@@ -4,6 +4,7 @@ import path from 'path';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
+import { assetRoot } from './assets.js';
 import { getBindHost, isRemoteMode, isUpgradeAuthorized, ensureToken } from './remote-auth.js';
 import {
   setupTerminalWebSocket,
@@ -116,7 +117,7 @@ startPolling();
 
 // Serve SPA in production
 if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '..', 'dist');
+  const distPath = path.join(assetRoot(), 'dist');
   app.use(express.static(distPath));
   app.get('/{*path}', (_req, res) => {
     res.sendFile('index.html', { root: distPath });

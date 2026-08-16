@@ -1,5 +1,5 @@
-import Database from 'better-sqlite3';
-import { vi } from 'vitest';
+import Database from './sqlite.js';
+import { vi } from './bun-test.js';
 import {
   IDLE_TASK_FIXTURE,
   RUNNING_TASK_FIXTURE,
@@ -28,14 +28,14 @@ export { SESSION_PREFIX, BRANCH_PREFIX, WORKTREE_DIR };
 
 // ─── Database Helpers ────────────────────────────────────────────────────────
 
-export function createTestDb(): Database.Database {
+export function createTestDb(): Database {
   const db = new Database(':memory:');
   initDb(db);
   setDb(db);
   return db;
 }
 
-export function insertTask(db: Database.Database, overrides: Partial<Task> = {}): Task {
+export function insertTask(db: Database, overrides: Partial<Task> = {}): Task {
   const task: Task = {
     ...DEFAULTS.task,
     agents: undefined,
@@ -103,7 +103,7 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   return task;
 }
 
-export function insertAgent(db: Database.Database, overrides: Partial<Agent> = {}): Agent {
+export function insertAgent(db: Database, overrides: Partial<Agent> = {}): Agent {
   const agent: Agent = {
     ...DEFAULTS.agent,
     ...overrides,
@@ -134,16 +134,16 @@ export function insertTestTask(overrides: Partial<Task> = {}): Task {
   return insertTask(getDb(), { ...DEFAULTS.runningTask, ...overrides });
 }
 
-export function getTask(db: Database.Database, id: string): Task | undefined {
+export function getTask(db: Database, id: string): Task | undefined {
   return db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-export function getAgents(db: Database.Database, taskId: string): Agent[] {
+export function getAgents(db: Database, taskId: string): Agent[] {
   return db.prepare('SELECT * FROM agents WHERE task_id = ?').all(taskId) as Agent[];
 }
 
 export function insertPermissionPrompt(
-  db: Database.Database,
+  db: Database,
   overrides: Partial<Omit<typeof DEFAULTS.permissionPrompt, 'agent_id'>> & {
     agent_id?: string | null;
   } = {},
@@ -166,14 +166,14 @@ export function insertPermissionPrompt(
   return pp;
 }
 
-export function getPermissionPrompts(db: Database.Database, taskId: string) {
+export function getPermissionPrompts(db: Database, taskId: string) {
   return db
     .prepare('SELECT * FROM permission_prompts WHERE task_id = ? ORDER BY created_at ASC')
     .all(taskId) as Array<Record<string, unknown>>;
 }
 
 export function insertUserTerminal(
-  db: Database.Database,
+  db: Database,
   overrides: Partial<UserTerminal> = {},
 ): UserTerminal {
   const ut: UserTerminal = { ...DEFAULTS.userTerminal, ...overrides } as UserTerminal;
@@ -183,7 +183,7 @@ export function insertUserTerminal(
   return ut;
 }
 
-export function getUserTerminals(db: Database.Database, taskId: string): UserTerminal[] {
+export function getUserTerminals(db: Database, taskId: string): UserTerminal[] {
   return db
     .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
     .all(taskId) as UserTerminal[];
@@ -257,10 +257,7 @@ export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallM
 
 // ─── Agent Activity Helper ───────────────────────────────────────────────────
 
-export function getAgentActivity(
-  db: Database.Database,
-  agentId: string,
-): { hook_activity: string } {
+export function getAgentActivity(db: Database, agentId: string): { hook_activity: string } {
   return db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get(agentId) as {
     hook_activity: string;
   };

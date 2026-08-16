@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, act } from '@testing-library/react';
-import { renderWithRouter, makeTask, makeAgent } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 // Stub TerminalView — the WebSocket/xterm wiring is tested elsewhere; here we
 // just want to count panes by their data-testid wrapper from AgentGridCell.
@@ -17,6 +15,9 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+
+const { screen, waitFor, act } = await import('@testing-library/react');
+const { renderWithRouter, makeTask, makeAgent } = await import('../test-helpers');
 
 const GridMonitor = (await import('./GridMonitor')).default;
 const { gridColumns, flattenRunningAgents } = await import('./GridMonitor');

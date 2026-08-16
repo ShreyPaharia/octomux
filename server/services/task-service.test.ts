@@ -1,3 +1,5 @@
+import type { ServiceError as ServiceErrorType } from './errors.js';
+import type { CreateTaskServiceInput } from './task-service.js';
 /**
  * Unit tests for the task-creation service (SHR-176).
  *
@@ -8,9 +10,7 @@
  *  - UNIQUE constraint → ServiceError(409).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb } from '../test-helpers.js';
-import { getDb } from '../db.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mock side-effecting deps (mirror orchestrator/exec.test.ts) ────────────
 
@@ -31,10 +31,13 @@ vi.mock('nanoid', () => ({
   nanoid: (...args: unknown[]) => mockNanoid(...args),
 }));
 
+const { createTestDb } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { createTask, type CreateTaskServiceInput } from './task-service.js';
-import { ServiceError } from './errors.js';
+const { createTask } = await import('./task-service.js');
+const { ServiceError } = await import('./errors.js');
 
 let seq = 0;
 function uniqueId(): string {
@@ -132,7 +135,7 @@ describe('task-service.createTask', () => {
     }
 
     expect(caught).toBeInstanceOf(ServiceError);
-    expect((caught as ServiceError).status).toBe(409);
-    expect((caught as ServiceError).message).toMatch(/UNIQUE constraint/);
+    expect((caught as ServiceErrorType).status).toBe(409);
+    expect((caught as ServiceErrorType).message).toMatch(/UNIQUE constraint/);
   });
 });

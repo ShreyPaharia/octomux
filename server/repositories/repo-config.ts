@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { getDb } from '../db.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 
 const execFile = promisify(execFileCb);
 
@@ -71,7 +72,7 @@ export function updateRepoConfig(
   }
 
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLQueryBindings[] = [];
 
   for (const [key, value] of Object.entries(updates)) {
     if (value !== undefined) {

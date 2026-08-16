@@ -1,8 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { Suspense, lazy } from 'react';
-import HomePage from './pages/HomePage';
+import { describe, it, expect, vi } from './bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('./test-helpers')).setupApiMock(),
@@ -15,6 +11,11 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
+
+const { render, screen, waitFor } = await import('@testing-library/react');
+const { MemoryRouter, Routes, Route } = await import('react-router-dom');
+const { Suspense, lazy } = await import('react');
+const { default: HomePage } = await import('./pages/HomePage');
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 
 async function renderAt(route: string) {

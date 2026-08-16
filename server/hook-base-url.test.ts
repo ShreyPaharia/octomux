@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
 import { hookBaseUrl } from './hook-base-url.js';
 
 describe('hookBaseUrl', () => {

@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getSettings, updateSettings, resolveClaudeFlags, DEFAULT_SETTINGS } from './settings.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 import type { OctomuxSettings } from './settings.js';
 
 // Mock fs
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
+vi.mock('fs', () => {
+  const actual = vi.importActual<typeof import('fs')>('fs');
   return {
     ...actual,
     default: {
@@ -90,7 +89,10 @@ vi.mock('./harnesses/index.js', () => ({
   }),
 }));
 
-import fs from 'fs';
+const { getSettings, updateSettings, resolveClaudeFlags, DEFAULT_SETTINGS } =
+  await import('./settings.js');
+
+const { default: fs } = await import('fs');
 const mockFs = vi.mocked(fs.promises);
 
 describe('settings', () => {

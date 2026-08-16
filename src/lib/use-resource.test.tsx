@@ -1,7 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { ServerEvent } from './event-source';
-import { useResource } from './use-resource';
 
 // ─── Mock event-source ──────────────────────────────────────────────────────
 
@@ -15,6 +13,9 @@ const subscribeMock = vi.fn((cb: (event: ServerEvent) => void) => {
 vi.mock('./event-source', () => ({
   subscribe: (cb: (event: ServerEvent) => void) => subscribeMock(cb),
 }));
+
+const { renderHook, waitFor, act } = await import('@testing-library/react');
+const { useResource } = await import('./use-resource');
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -1,16 +1,26 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
-import { execFileSync, exec as execCb } from 'child_process';
-import { readFileSync, existsSync, mkdirSync, readdirSync, cpSync, rmSync } from 'fs';
+/**
+ * The octomux application entry — this is what `bun build --compile` bundles
+ * into the single-file binary (see `build:binary`).
+ *
+ * It is NOT the npm `bin` target: that's `bin/octomux.js`, a plain-Node
+ * launcher, because this file imports TypeScript sources directly.
+ */
+
+import { exec as execCb } from 'child_process';
+import { existsSync, mkdirSync, readdirSync, cpSync, rmSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import path from 'path';
 import os from 'os';
+import pkg from '../package.json';
+import { assetRoot } from '../server/assets.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Read version from package.json at runtime
-const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+// Imported, not read from disk: inside a compiled binary there is no
+// package.json next to __dirname, and a static import gets bundled.
 const version = pkg.version;
 
 // ─── Argument parsing ────────────────────────────────────────────────────────
@@ -24,7 +34,7 @@ if (command === 'start') {
   await runReview(args.slice(1));
 } else {
   // Delegate to CLI (commander-based) for all other commands
-  await import('../cli/dist/index.js');
+  await import('../cli/src/index.ts');
 }
 
 // ─── tmux binary resolver ────────────────────────────────────────────────────
@@ -36,8 +46,8 @@ const _require = createRequire(import.meta.url);
 function resolveTmuxBin() {
   if (process.env.OCTOMUX_TMUX_BIN) return process.env.OCTOMUX_TMUX_BIN;
   try {
-    const pkg = `@octomux/tmux-${process.platform}-${process.arch}`;
-    const { tmuxBin } = _require(pkg);
+    const tmuxPkg = `@octomux/tmux-${process.platform}-${process.arch}`;
+    const { tmuxBin } = _require(tmuxPkg);
     if (tmuxBin) return tmuxBin;
   } catch {
     /* not installed yet — fall back to PATH */
@@ -72,14 +82,8 @@ async function runStart(startArgs) {
   installWorkflows();
   installLazygitConfig();
 
-  // Ensure cli/ dependencies are installed
-  ensureCliDeps();
-
-  // Fix node-pty spawn-helper permissions (may have been missed if postinstall didn't run)
-  fixNodePtyPermissions();
-
   // Preflight: warn about missing tools (install from dashboard Setup — no blocking exit)
-  const { warnBinary, checkNeovimVersion } = await import('../dist-server/startup.js');
+  const { warnBinary, checkNeovimVersion } = await import('../server/startup.ts');
 
   const resolvedTmux = resolveTmuxBin();
   const preflight = [
@@ -120,7 +124,7 @@ async function runStart(startArgs) {
   process.env.NODE_ENV = 'production';
   process.env.PORT = String(port);
 
-  const { server } = await import('../dist-server/index.js');
+  const { server } = await import('../server/index.ts');
 
   // The server is already listening (listen called in index.js).
   // Attach handler for auto-open and status message.
@@ -143,84 +147,14 @@ async function runStart(startArgs) {
 // ─── review subcommand ───────────────────────────────────────────────────────
 
 async function runReview(reviewArgs) {
-  // Prefer the compiled dist build when present; fall back to running the
-  // TypeScript source directly via tsx in dev. tsx is a project devDependency.
-  const distEntry = path.join(__dirname, '..', 'dist-server', 'cli-review.js');
-  if (existsSync(distEntry)) {
-    const { runReview: handler } = await import(distEntry);
-    await handler(reviewArgs);
-    return;
-  }
-
-  // Dev path: locate tsx (local node_modules first, then walk up for git worktrees
-  // sharing a parent install, then fall back to `npx tsx` which respects PATH).
-  const entry = path.join(__dirname, '..', 'cli', 'review', 'index.ts');
-  const candidates = [path.join(__dirname, '..', 'node_modules', '.bin', 'tsx')];
-  let dir = path.resolve(__dirname, '..', '..');
-  for (let i = 0; i < 5; i++) {
-    candidates.push(path.join(dir, 'node_modules', '.bin', 'tsx'));
-    dir = path.dirname(dir);
-  }
-  const tsxBin = candidates.find((p) => existsSync(p));
-  try {
-    if (tsxBin) {
-      execFileSync(tsxBin, [entry, ...reviewArgs], { stdio: 'inherit' });
-    } else {
-      execFileSync('npx', ['--yes', 'tsx', entry, ...reviewArgs], { stdio: 'inherit' });
-    }
-  } catch (err) {
-    // Propagate the child's exit code without dumping a stack trace.
-    process.exit(typeof err.status === 'number' ? err.status : 1);
-  }
-}
-
-// ─── cli dependency installer ────────────────────────────────────────────────
-
-function ensureCliDeps() {
-  const cliDir = path.join(__dirname, '..', 'cli');
-  const cliPkg = path.join(cliDir, 'package.json');
-  if (!existsSync(cliPkg)) return;
-
-  // Check if cli has dependencies that need installing
-  const pkg = JSON.parse(readFileSync(cliPkg, 'utf8'));
-  const hasDeps =
-    (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) ||
-    (pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0);
-  if (!hasDeps) return;
-
-  const cliModules = path.join(cliDir, 'node_modules');
-  if (existsSync(cliModules)) return;
-
-  console.log('Installing cli/ dependencies...');
-  try {
-    execFileSync('npm', ['install', '--ignore-scripts'], { cwd: cliDir, stdio: 'ignore' });
-  } catch {
-    console.warn('⚠  Could not install cli/ dependencies. Run manually: cd cli && npm install');
-  }
-}
-
-// ─── node-pty permissions fix ────────────────────────────────────────────────
-
-function fixNodePtyPermissions() {
-  try {
-    const nodePtyDir = path.join(__dirname, '..', 'node_modules', 'node-pty', 'prebuilds');
-    if (!existsSync(nodePtyDir)) return;
-    const entries = readdirSync(nodePtyDir).filter((e) => e.startsWith('darwin-'));
-    for (const entry of entries) {
-      const helper = path.join(nodePtyDir, entry, 'spawn-helper');
-      if (existsSync(helper)) {
-        execFileSync('chmod', ['+x', helper], { stdio: 'ignore' });
-      }
-    }
-  } catch {
-    // Non-critical — node-pty may still work without this
-  }
+  const { runReview: handler } = await import('../cli/review/index.ts');
+  await handler(reviewArgs);
 }
 
 // ─── skill installer ─────────────────────────────────────────────────────────
 
 function installLazygitConfig() {
-  const source = path.join(__dirname, '..', '.config', 'lazygit', 'config.yml');
+  const source = path.join(assetRoot(), '.config', 'lazygit', 'config.yml');
   if (!existsSync(source)) return;
 
   const configDir =
@@ -237,7 +171,7 @@ function installLazygitConfig() {
 }
 
 function installSkills() {
-  const skillsSource = path.join(__dirname, '..', 'skills');
+  const skillsSource = path.join(assetRoot(), 'skills');
   const skillsTarget = path.join(os.homedir(), '.claude', 'skills');
 
   if (!existsSync(skillsSource)) return;
@@ -271,7 +205,7 @@ function installSkills() {
 }
 
 function installWorkflows() {
-  const src = path.join(__dirname, '..', 'workflows');
+  const src = path.join(assetRoot(), 'workflows');
   const target = path.join(os.homedir(), '.claude', 'workflows');
   if (!existsSync(src)) return;
 

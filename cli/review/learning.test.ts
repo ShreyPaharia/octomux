@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from '../../server/bun-test.js';
 import { createTestDb } from '../../server/test-helpers.js';
 import { runLearning } from './learning.js';
 import { getDb } from '../../server/db.js';

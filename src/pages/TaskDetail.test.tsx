@@ -1,8 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
-import { renderWithRouter, makeTask, makeAgent } from '../test-helpers';
 import type { Task } from '@octomux/types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -25,8 +22,8 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
   (await import('../test-helpers')).setupApiMock(),
 );
 
-vi.mock('@/lib/api/taskApi', async () => {
-  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+vi.mock('@/lib/api/taskApi', () => {
+  const actual = vi.importActual('@/lib/api/taskApi') as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };
 });
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
@@ -61,6 +58,10 @@ vi.mock('@/components/TerminalView', () => ({
 vi.mock('@monaco-editor/react', () => ({
   DiffEditor: () => <div data-testid="monaco-diff" />,
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { renderWithRouter, makeTask, makeAgent } = await import('../test-helpers');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -229,7 +230,7 @@ describe('TaskDetail', () => {
 
   const nonRunningStates = ['idle', 'error'] as const;
 
-  it.each(nonRunningStates)('hides Close button when runtime_state is "%s"', async (state) => {
+  it.each([...nonRunningStates])('hides Close button when runtime_state is "%s"', async (state) => {
     apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, agents: [] }));
     renderDetail();
     await waitFor(() => {
@@ -410,14 +411,17 @@ describe('TaskDetail', () => {
 
     const noEditorStates = ['idle', 'setting_up', 'error'] as const;
 
-    it.each(noEditorStates)('hides Editor button when runtime_state is "%s"', async (state) => {
-      apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, agents: [] }));
-      renderDetail();
-      await waitFor(() => {
-        expect(screen.getByText('Fix order validation')).toBeInTheDocument();
-      });
-      expect(screen.queryByRole('button', { name: /editor/i })).not.toBeInTheDocument();
-    });
+    it.each([...noEditorStates])(
+      'hides Editor button when runtime_state is "%s"',
+      async (state) => {
+        apiMock.getTask.mockResolvedValue(makeTask({ runtime_state: state, agents: [] }));
+        renderDetail();
+        await waitFor(() => {
+          expect(screen.getByText('Fix order validation')).toBeInTheDocument();
+        });
+        expect(screen.queryByRole('button', { name: /editor/i })).not.toBeInTheDocument();
+      },
+    );
 
     it('toggles to editor mode on click', async () => {
       const user = userEvent.setup();
@@ -691,7 +695,7 @@ describe('TaskDetail', () => {
       },
     ];
 
-    it.each(modeCases)(
+    it.each([...modeCases])(
       '$mode mode: badge=$badge, showsDiff=$showsDiff, showsBranchInfo=$showsBranchInfo',
       async ({ mode, badge, tooltip, showsDiff, showsBranchInfo }) => {
         apiMock.getTask.mockResolvedValue(

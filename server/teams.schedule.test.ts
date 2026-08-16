@@ -1,13 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import Database from 'better-sqlite3';
-import { createTestDb } from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-engine/index.js', async () => ({
+vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(async (task: any) => {
     const { getDb } = await import('./db.js');
     const db = getDb();
@@ -19,7 +15,12 @@ vi.mock('./task-engine/index.js', async () => ({
   deleteTask: vi.fn(),
 }));
 
-let db: Database.Database;
+const { default: fs } = await import('fs');
+const { default: os } = await import('os');
+const { default: path } = await import('path');
+const { createTestDb } = await import('./test-helpers.js');
+
+let db: Database;
 let tmpDir: string;
 
 const VALID_YAML = `
@@ -75,7 +76,7 @@ describe('isCronDue', () => {
     { expr: '0 7 * * mon-fri', date: '2026-06-07T07:00:00Z', expected: false }, // Sunday
   ];
 
-  it.each(cases)('expr="$expr" @ $date → $expected', ({ expr, date, expected }) => {
+  it.each([...cases])('expr="$expr" @ $date → $expected', ({ expr, date, expected }) => {
     expect(isCronDue(expr, new Date(date))).toBe(expected);
   });
 });

@@ -3,8 +3,7 @@
  *
  * Covers: empty-prompt fallback, CLI error fallback, success path, invalid JSON fallback.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { findCallback } from './test-helpers.js';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 // ─── child_process mock ──────────────────────────────────────────────────────
 
@@ -16,8 +15,10 @@ vi.mock('child_process', () => ({
   }),
 }));
 
-import { generateTitleAndDescription } from './title-gen.js';
-import { execFile } from 'child_process';
+const { findCallback } = await import('./test-helpers.js');
+
+const { generateTitleAndDescription } = await import('./title-gen.js');
+const { execFile } = await import('child_process');
 const mockedExecFile = vi.mocked(execFile);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
