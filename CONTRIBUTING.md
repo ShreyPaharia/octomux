@@ -173,12 +173,31 @@ fallback for installs that skipped postinstall.
 
 ```bash
 bun run build:npm
-npm publish dist-npm/cli-darwin-arm64      # …and the other five
-npm publish                                # root package last
+npm publish dist-npm/cli-darwin-arm64/     # …and the other five
+npm publish --ignore-scripts               # root package last
+git checkout package.json                  # drop the release-time pins
 ```
 
+Keep the **trailing slash** on the directory. Without it npm reads
+`dist-npm/cli-darwin-arm64` as a GitHub shorthand and fails with
+`git ls-remote ssh://git@github.com/dist-npm/cli-darwin-arm64.git`.
+
 Publish the platform packages **before** the root package — its
-`optionalDependencies` pin the exact version.
+`optionalDependencies` pin the exact version. Then verify with a real install,
+not the publish log: the registry read path 404s for a few minutes after a
+large tarball lands, so `npm view` lies in both directions right after a push.
+
+```bash
+npm i --prefix /tmp/smoke octomux@latest && /tmp/smoke/node_modules/.bin/octomux --help
+```
+
+Nothing in `files` may reference a workspace package. `build:npm` strips
+`dependencies` from the published manifest for this reason — `workspace:*` is
+not a protocol npm can resolve, and it made every published version through
+1.4.0 uninstallable with `EUNSUPPORTEDPROTOCOL`.
+
+CI does **not** publish. `.github/workflows/publish.yml` only creates the
+GitHub release for the tag.
 
 Those pins are **not** in the checked-in `package.json`: the `@octomux/cli-*`
 packages only exist on npm once a release has published them, so pinning them in

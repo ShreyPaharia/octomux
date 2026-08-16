@@ -1,4 +1,28 @@
-name: Publish
+# Creates the GitHub release for a v* tag. It does NOT publish to npm.
+#
+# npm publishing is manual and deliberately so — OIDC trusted publishing never
+# worked here, and a half-finished automated run is worse than none: the root
+# package landed on npm ahead of its platform binaries in 1.4.0 and every
+# non-arm64-mac install broke until the rest caught up.
+#
+# To cut a release:
+#
+#   npm version <x.y.z> --no-git-tag-version && git commit -am "chore(release): <x.y.z>"
+#   bun run build:npm                   # 6 binaries -> dist-npm/, pins the root manifest
+#   for d in dist-npm/*/; do npm publish "$d" --access public; done
+#   npm publish --ignore-scripts        # root LAST: its optionalDependencies pin the above
+#   git checkout package.json           # drop the release-time pins
+#   git tag -a v<x.y.z> -m "..." && git push origin main v<x.y.z>
+#
+# Then verify before calling it done — `npm publish` reports success while the
+# registry read path 404s for a few minutes, so check the install, not the log:
+#
+#   npm i --prefix /tmp/smoke octomux@latest && /tmp/smoke/node_modules/.bin/octomux --help
+#
+# Note: build-binaries.yml still auto-publishes the @octomux/tmux-* packages on
+# the same v* tag. That is a separate set of packages from the CLI binaries.
+
+name: Release
 
 on:
   push:
@@ -6,61 +30,12 @@ on:
       - 'v*'
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      # Trusted publishing (OIDC) needs npm >= 11.5.1; the bundled npm is older.
-      - run: npm install -g npm@latest
-
-      - run: bun install
-
-      - run: bun run lint
-
-      - run: bun run typecheck
-
-      - run: bun run test
-
-      - name: Sync version from git tag
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            npm version "$TAG_VERSION" --no-git-tag-version
-          else
-            echo "package.json already at $PKG_VERSION; skipping bump"
-          fi
-
-      # Builds all six platform binaries and stages one npm package per target
-      # in dist-npm/. Signing is skipped on Linux (codesign is macOS-only) — run
-      # `bun run sign:macos` on a macOS runner if you ship outside npm.
-      - run: bun run build:npm
-
-      # No token: authenticated via OIDC trusted publishing configured on
-      # npmjs.com (package settings -> Publishing access -> GitHub Actions).
-      #
-      # Platform packages go first: the root package's optionalDependencies pin
-      # this exact version, so publishing it before them would resolve to nothing.
-      - name: Publish platform packages
-        run: |
-          for pkg in dist-npm/*/; do
-            echo "publishing $pkg"
-            npm publish "$pkg" --provenance --access public
-          done
-
-      - name: Publish root package
-        run: npm publish --provenance --access public
 
       # electron-release.yml runs on the same v* tag and its
       # `electron-builder --publish always` (releaseType: release) creates the
