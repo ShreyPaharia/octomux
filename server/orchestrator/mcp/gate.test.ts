@@ -146,9 +146,12 @@ describe('onGatedInvoke', () => {
   // ── Timeout → handler does NOT run, distinct from reject/creation-failure ──
 
   it('timeout (card never resolved) THROWS a distinct "timed out" error', async () => {
-    // Real timers on purpose: the poll loop gives up after 100ms + grace, so this
-    // costs a fraction of a second. Faking them means driving a Date.now()-based
-    // deadline by hand, which is slower and easy to get subtly wrong.
+    // Real timers, with the generous per-test timeout below.
+    //
+    // The poll loop's deadline is approvalTimeoutMs + a fixed POLL_GRACE_MS of
+    // 10s, ticking once a second, so this genuinely costs ~10s of wall clock.
+    // Driving it with fake timers instead means advancing a Date.now() deadline
+    // across an async tick that awaits real DB work — which never converges.
     process.env.OCTOMUX_APPROVAL_TIMEOUT_MS = '100';
     mockCallGateCard.mockImplementation(async () => {
       const cardId = seedCard('task.close', 'always-ask', 'action');
@@ -159,7 +162,7 @@ describe('onGatedInvoke', () => {
 
     const pending = onGatedInvoke(makeCap(), 'always-ask', {});
     await expect(pending).rejects.toThrow(/timed out/);
-  });
+  }, 30_000);
 
   // ── The security property: always-ask is NEVER promotable ────────────────
 
