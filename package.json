@@ -121,13 +121,7 @@
     "@octomux/tmux-darwin-arm64": "1.0.34",
     "@octomux/tmux-darwin-x64": "1.0.34",
     "@octomux/tmux-linux-x64": "1.0.34",
-    "@octomux/tmux-linux-arm64": "1.0.34",
-    "@octomux/cli-darwin-arm64": "1.2.0",
-    "@octomux/cli-darwin-x64": "1.2.0",
-    "@octomux/cli-linux-arm64": "1.2.0",
-    "@octomux/cli-linux-x64": "1.2.0",
-    "@octomux/cli-linux-arm64-musl": "1.2.0",
-    "@octomux/cli-linux-x64-musl": "1.2.0"
+    "@octomux/tmux-linux-arm64": "1.0.34"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.0.0",

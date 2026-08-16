@@ -157,6 +157,12 @@ npm publish                                # root package last
 Publish the platform packages **before** the root package — its
 `optionalDependencies` pin the exact version.
 
+Those pins are **not** in the checked-in `package.json`: the `@octomux/cli-*`
+packages only exist on npm once a release has published them, so pinning them in
+the repo would make `bun install` 404 on a fresh clone. `build:npm` writes them
+into the manifest at release time, which is why it leaves `package.json`
+showing a local edit.
+
 ### Signing
 
 `bun run sign:macos` ad-hoc signs the macOS binaries. This is not optional: a

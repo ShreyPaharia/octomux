@@ -84,24 +84,29 @@ for (const { platform, arch, libc } of TARGETS) {
   console.log(`  staged @octomux/${name}`);
 }
 
-// Keep the root package's pins in step with the version just staged. They are
-// exact pins, so a release bump would otherwise leave them pointing at the
-// previous version and npm would install a stale binary.
+// Inject the platform pins into the root manifest.
+//
+// They are deliberately absent from the checked-in package.json: these packages
+// only exist on npm once a release has published them, so pinning them in the
+// repo makes every `bun install` 404 on a fresh clone. The published root
+// manifest does need them, and they are exact pins, so write them here against
+// the version actually staged.
 const rootPkgPath = path.join(root, 'package.json');
 const rootManifest = JSON.parse(readFileSync(rootPkgPath, 'utf8'));
-let repinned = 0;
-for (const name of Object.keys(rootManifest.optionalDependencies ?? {})) {
-  if (
-    name.startsWith('@octomux/cli-') &&
-    rootManifest.optionalDependencies[name] !== rootPkg.version
-  ) {
-    rootManifest.optionalDependencies[name] = rootPkg.version;
-    repinned++;
+const optional = rootManifest.optionalDependencies ?? {};
+let pinned = 0;
+for (const { platform, arch } of TARGETS) {
+  const name = `@octomux/cli-${platform}-${arch}`;
+  if (optional[name] !== rootPkg.version) {
+    optional[name] = rootPkg.version;
+    pinned++;
   }
 }
-if (repinned > 0) {
+if (pinned > 0) {
+  rootManifest.optionalDependencies = optional;
   writeFileSync(rootPkgPath, JSON.stringify(rootManifest, null, 2) + '\n');
-  console.log(`\n  re-pinned ${repinned} optionalDependencies to ${rootPkg.version}`);
+  console.log(`\n  pinned ${pinned} platform package(s) at ${rootPkg.version} in package.json`);
+  console.log('  (expected to show as a local edit — it is a release-time change)');
 }
 
 if (staged === 0) {
