@@ -111,6 +111,40 @@ describe('registerProvider guard', () => {
     expect(warnLine!.kind).toBe('jira');
   });
 
+  it('refuses a plugin re-registering an already-registered core kind — via the specific freeze diagnostic, not the generic duplicate one', () => {
+    // The real boot scenario: jira is already registered (restored from the
+    // barrel's real registration by the outer afterEach) and core kinds are
+    // frozen, same as `index.js`'s own boot sequence — register, then freeze.
+    // A post-boot plugin trying to hijack 'jira' is simultaneously a
+    // duplicate AND a frozen core kind — assert the specific freeze message
+    // fired, not the generic "duplicate ... ignored" one. This is what
+    // pinned the bug: the duplicate check ran first and always won, so the
+    // freeze diagnostic never appeared for exactly this case.
+    const realJira = getProvider('jira');
+    expect(realJira).toBeDefined();
+    freezeCoreProviders();
+
+    const original = getLogger();
+    const buf = bufferStream();
+    setLogger(pino({ level: 'trace' }, buf.stream));
+    try {
+      registerProvider(fakeProvider('jira'));
+    } finally {
+      setLogger(original);
+    }
+
+    expect(getProvider('jira')).toBe(realJira);
+    const freezeLine = buf
+      .lines()
+      .find((l) => l.msg === 'refusing plugin registration of a reserved core provider kind');
+    expect(freezeLine).toBeDefined();
+    expect(freezeLine!.kind).toBe('jira');
+    const dupLine = buf
+      .lines()
+      .find((l) => l.msg === 'duplicate provider registration ignored, keeping first');
+    expect(dupLine).toBeUndefined();
+  });
+
   it('resetProviders clears the map and unfreezes core', () => {
     resetProviders();
     registerProvider(fakeProvider('temp'));

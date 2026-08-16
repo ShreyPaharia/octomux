@@ -24,12 +24,17 @@ export function freezeCoreProviders(): void {
  * plugin authors have had a release to see the warning and fix their manifest.
  */
 export function registerProvider(p: IntegrationProvider): void {
-  if (providers.has(p.kind)) {
-    logger.warn({ kind: p.kind }, 'duplicate provider registration ignored, keeping first');
-    return;
-  }
+  // Check the freeze guard first: it's the more specific diagnostic, and in
+  // the real boot sequence (all four core providers register, then
+  // freezeCoreProviders() runs) a core kind is always ALSO a duplicate by the
+  // time a plugin can reach this function — so if the duplicate check ran
+  // first it would win every time and this branch would never fire.
   if (coreFrozen && (CORE_PROVIDER_KINDS as readonly string[]).includes(p.kind)) {
     logger.warn({ kind: p.kind }, 'refusing plugin registration of a reserved core provider kind');
+    return;
+  }
+  if (providers.has(p.kind)) {
+    logger.warn({ kind: p.kind }, 'duplicate provider registration ignored, keeping first');
     return;
   }
   providers.set(p.kind, p);
