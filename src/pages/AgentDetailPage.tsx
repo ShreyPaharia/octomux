@@ -11,7 +11,7 @@
  * Standalone page — does not import from OrchestratorPage.tsx (kept untouched).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { agentsApi, type AgentStatus, type AgentWithStatus } from '@/lib/api/agentsApi';
 import { useResource } from '@/lib/use-resource';
@@ -63,7 +63,15 @@ function ConfigTab({ agent, onSaved, onDeleted }: ConfigTabProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Refill the form only when this is genuinely a different agent. The state
+  // above already seeds from `agent`, so the mount pass had nothing to do but
+  // overwrite whatever had been typed in the meantime — and `useResource` hands
+  // back a fresh object on every event-driven refetch, so keying on identity
+  // stomped in-progress edits again on each one.
+  const loadedIdRef = useRef(agent.id);
   useEffect(() => {
+    if (loadedIdRef.current === agent.id) return;
+    loadedIdRef.current = agent.id;
     setName(agent.name);
     setSystemPrompt(agent.system_prompt);
     setChannel(agent.channel ?? '');

@@ -22,7 +22,7 @@ vi.mock('react-router-dom', (importOriginal) => {
   return { ...withNav, useParams: () => ({ id: 'agent-1' }) };
 });
 
-const { screen, waitFor } = await import('@testing-library/react');
+const { screen, waitFor, fireEvent } = await import('@testing-library/react');
 const { default: userEvent } = await import('@testing-library/user-event');
 const { default: AgentDetailPage } = await import('./AgentDetailPage');
 const { renderWithRouter } = await import('../test-helpers');
@@ -120,8 +120,18 @@ describe('AgentDetailPage', () => {
         expect(screen.getByTestId('agent-detail-name')).toHaveValue('support-bot'),
       );
 
-      await user.clear(screen.getByTestId('agent-detail-name'));
-      await user.type(screen.getByTestId('agent-detail-name'), 'renamed-bot');
+      // fireEvent, not user.clear() + user.type(): under the parallel suite the
+      // clear intermittently didn't land and the typing appended, so update()
+      // was called with "support-botrenamed-bot". One atomic change event can't
+      // interleave. What's under test is the save payload, not the keystrokes.
+      fireEvent.change(screen.getByTestId('agent-detail-name'), {
+        target: { value: 'renamed-bot' },
+      });
+      // Wait for the commit before clicking: handleSave closes over `name`, so a
+      // click on the pre-change render posts the old value.
+      await waitFor(() =>
+        expect(screen.getByTestId('agent-detail-name')).toHaveValue('renamed-bot'),
+      );
       await user.click(screen.getByTestId('agent-detail-save'));
 
       await waitFor(() =>
