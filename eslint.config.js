@@ -117,6 +117,8 @@ export default tseslint.config(
     ignores: [
       'dist/',
       'dist-bin/',
+      'cli/dist/',
+      'dist-server/',
       'dist-npm/',
       'node_modules/',
       'data/',
