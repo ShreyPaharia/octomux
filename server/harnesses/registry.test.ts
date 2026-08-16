@@ -10,7 +10,41 @@ import {
   claudeCodeHarness,
   cursorHarness,
 } from './index.js';
+import { getLogger, setLogger } from '../logger.js';
+import pino from 'pino';
 import type { Harness } from './types.js';
+
+/** Collect pino JSON log lines into memory for assertions. */
+function bufferStream() {
+  const chunks: string[] = [];
+  return {
+    stream: {
+      write(chunk: string) {
+        chunks.push(chunk);
+      },
+    },
+    lines(): Array<Record<string, unknown>> {
+      return chunks
+        .join('')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+    },
+  };
+}
+
+/** Run `fn` with the root logger swapped for a buffered one, then restore it. */
+function withCapturedLogs(fn: () => void): Array<Record<string, unknown>> {
+  const original = getLogger();
+  const buf = bufferStream();
+  setLogger(pino({ level: 'trace' }, buf.stream));
+  try {
+    fn();
+  } finally {
+    setLogger(original);
+  }
+  return buf.lines();
+}
 
 describe('registry', () => {
   it('returns claude-code by id', () => {
@@ -83,24 +117,51 @@ describe('registry guards', () => {
     expect(getHarness('dup-test')).toBe(first);
   });
 
-  it('a core id cannot be redefined after freeze', () => {
+  it('a core id cannot be redefined after freeze — via the specific freeze diagnostic, not the generic duplicate one', () => {
     resetHarnesses();
     registerHarness(claudeCodeHarness);
     registerHarness(cursorHarness);
     freezeCoreHarnesses();
 
-    registerHarness(fakeHarness('claude-code'));
+    // The real boot scenario: a post-boot plugin tries to hijack an already-
+    // registered core id. Both guards could technically catch this (it's a
+    // duplicate AND a frozen core id) — assert the specific freeze message
+    // fired, not the generic "already registered" one. This is what pinned
+    // the bug: the duplicate check ran first and always won, so the freeze
+    // diagnostic never appeared for exactly this case.
+    const lines = withCapturedLogs(() => {
+      registerHarness(fakeHarness('claude-code'));
+    });
 
     expect(getHarness('claude-code')).toBe(claudeCodeHarness);
+    const freezeLine = lines.find(
+      (l) => l.msg === 'refusing to redefine core harness after freeze',
+    );
+    expect(freezeLine).toBeDefined();
+    expect(freezeLine!.harness_id).toBe('claude-code');
+    const dupLine = lines.find(
+      (l) => l.msg === 'harness already registered, keeping first registration',
+    );
+    expect(dupLine).toBeUndefined();
   });
 
   it('freeze refuses a core id even if it was never registered', () => {
     resetHarnesses();
     freezeCoreHarnesses();
 
-    registerHarness(fakeHarness('claude-code'));
+    // Simulates a core module that failed to import at boot (e.g. cursor.ts
+    // throws): the id is absent from the map, so the duplicate check alone
+    // would let a plugin claim it. Only the freeze branch stops this.
+    const lines = withCapturedLogs(() => {
+      registerHarness(fakeHarness('claude-code'));
+    });
 
     expect(() => getHarness('claude-code')).toThrow(/Unknown harness/);
+    const freezeLine = lines.find(
+      (l) => l.msg === 'refusing to redefine core harness after freeze',
+    );
+    expect(freezeLine).toBeDefined();
+    expect(freezeLine!.harness_id).toBe('claude-code');
   });
 
   it('resetHarnesses restores a usable, unfrozen registry', () => {
@@ -121,8 +182,14 @@ describe('registry guards', () => {
     freezeCoreHarnesses();
     freezeCoreHarnesses();
 
-    registerHarness(fakeHarness('claude-code'));
+    const lines = withCapturedLogs(() => {
+      registerHarness(fakeHarness('claude-code'));
+    });
 
     expect(getHarness('claude-code')).toBe(claudeCodeHarness);
+    const freezeLine = lines.find(
+      (l) => l.msg === 'refusing to redefine core harness after freeze',
+    );
+    expect(freezeLine).toBeDefined();
   });
 });
