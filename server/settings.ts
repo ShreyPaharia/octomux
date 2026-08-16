@@ -13,6 +13,13 @@ export interface OctomuxSettings {
   editor: EditorChoice;
   defaultHarnessId: string;
   harnesses: Record<string, Record<string, unknown>>;
+  /**
+   * Per-plugin settings, keyed by plugin id. Opaque to the host — octomux
+   * never schema-checks a plugin's blob (unlike harnesses' validateSettings)
+   * and never drops a plugin's config just because that plugin isn't
+   * currently installed, so uninstall/reinstall doesn't lose it.
+   */
+  plugins: Record<string, Record<string, unknown>>;
 
   defaultTracker?: DefaultTracker;
   defaultJiraBaseUrl?: string;
@@ -64,6 +71,7 @@ export const DEFAULT_SETTINGS: OctomuxSettings = {
   editor: 'nvim',
   defaultHarnessId: 'claude-code',
   harnesses: {},
+  plugins: {},
 };
 
 const VALID_EDITORS: EditorChoice[] = ['nvim', 'vscode', 'cursor'];
@@ -83,6 +91,10 @@ export async function getSettings(): Promise<OctomuxSettings> {
     if (err.code === 'ENOENT') return { ...DEFAULT_SETTINGS };
     throw err;
   }
+
+  // Preserved verbatim, no validation — a plugin's config is opaque to the
+  // host (see the OctomuxSettings.plugins doc comment).
+  const plugins = (parsed.plugins as Record<string, Record<string, unknown>>) ?? {};
 
   const harnesses = (parsed.harnesses as Record<string, Record<string, unknown>>) ?? {};
   const cc = { ...(harnesses['claude-code'] ?? {}) };
@@ -130,6 +142,7 @@ export async function getSettings(): Promise<OctomuxSettings> {
     editor: (parsed.editor as EditorChoice) ?? DEFAULT_SETTINGS.editor,
     defaultHarnessId: (parsed.defaultHarnessId as string) ?? DEFAULT_SETTINGS.defaultHarnessId,
     harnesses: mergedHarnesses,
+    plugins,
     defaultTracker:
       parsed.defaultTracker === 'jira' || parsed.defaultTracker === 'linear'
         ? parsed.defaultTracker
@@ -256,6 +269,15 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     }
   }
 
+  const mergedPlugins = { ...current.plugins };
+  if (patch.plugins) {
+    for (const [id, blob] of Object.entries(patch.plugins)) {
+      // Plugin config is opaque to the host — preserve verbatim, no
+      // validation, regardless of whether the plugin id is installed.
+      mergedPlugins[id] = blob;
+    }
+  }
+
   if (patch.claudeFlags !== undefined || patch.dangerouslySkipPermissions !== undefined) {
     const prev = mergedHarnesses['claude-code'] ?? {};
     const candidate = { ...prev } as Record<string, unknown>;
@@ -272,6 +294,7 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     editor: patch.editor ?? current.editor,
     defaultHarnessId: patch.defaultHarnessId ?? current.defaultHarnessId,
     harnesses: mergedHarnesses,
+    plugins: mergedPlugins,
     defaultTracker:
       patch.defaultTracker !== undefined ? patch.defaultTracker : current.defaultTracker,
     defaultJiraBaseUrl:
@@ -310,25 +333,22 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
   return merged;
 }
 
+/** A plugin's settings blob, or {} if it has none saved. Never validated. */
+export async function getPluginSettings(id: string): Promise<Record<string, unknown>> {
+  const settings = await getSettings();
+  return settings.plugins[id] ?? {};
+}
+
 /**
- * @deprecated use claudeCodeHarness.resolveFlags instead.
- * Kept until Tasks 14-17 update the callers (task-runner.ts, chats.ts).
- *
- * Reads flags from the new harnesses['claude-code'] sub-object. Falls back
- * gracefully to an empty string for settings that have neither key set.
+ * Shallow-merges `patch` onto the plugin's existing settings blob (matches
+ * updateSettings' merge-by-field behaviour elsewhere in this file) and
+ * persists it. Never validated — a plugin's config is opaque to the host.
  */
-export function resolveClaudeFlags(settings: OctomuxSettings): string {
-  const envFlagsRaw = process.env.OCTOMUX_CLAUDE_FLAGS?.trim();
-  if (envFlagsRaw) return ` ${envFlagsRaw}`;
-
-  const sub = (settings.harnesses?.['claude-code'] ?? {}) as {
-    flags?: string;
-    dangerouslySkipPermissions?: boolean;
-  };
-
-  const parts: string[] = [];
-  if (sub.dangerouslySkipPermissions) parts.push('--dangerously-skip-permissions');
-  const trimmed = (sub.flags ?? '').trim();
-  if (trimmed) parts.push(trimmed);
-  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+export async function updatePluginSettings(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const current = await getSettings();
+  const existing = current.plugins[id] ?? {};
+  await updateSettings({ plugins: { [id]: { ...existing, ...patch } } });
 }

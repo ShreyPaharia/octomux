@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
-import type { OctomuxSettings } from './settings.js';
 
 // Mock fs
 vi.mock('fs', () => {
@@ -92,7 +91,8 @@ vi.mock('./harnesses/index.js', () => ({
 const {
   getSettings,
   updateSettings,
-  resolveClaudeFlags,
+  getPluginSettings,
+  updatePluginSettings,
   getStoredApprovalTimeoutMs,
   getStoredCapabilityGateEnabled,
   DEFAULT_SETTINGS,
@@ -111,6 +111,7 @@ describe('settings', () => {
       expect(DEFAULT_SETTINGS.editor).toBe('nvim');
       expect(DEFAULT_SETTINGS.defaultHarnessId).toBe('claude-code');
       expect(DEFAULT_SETTINGS.harnesses).toEqual({});
+      expect(DEFAULT_SETTINGS.plugins).toEqual({});
     });
   });
 
@@ -532,55 +533,89 @@ describe('OctomuxSettings tracker fields', () => {
   });
 });
 
-describe('resolveClaudeFlags', () => {
-  afterEach(() => {
-    delete process.env.OCTOMUX_CLAUDE_FLAGS;
+describe('settings.plugins', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFs.mkdir.mockResolvedValue(undefined);
+    mockFs.writeFile.mockResolvedValue(undefined);
   });
 
-  it('returns empty string when nothing configured', () => {
-    const settings: OctomuxSettings = { ...DEFAULT_SETTINGS };
-    expect(resolveClaudeFlags(settings)).toBe('');
+  describe('getSettings', () => {
+    it('defaults to {} when absent from disk', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify({ editor: 'nvim', harnesses: {} }));
+      const settings = await getSettings();
+      expect(settings.plugins).toEqual({});
+    });
+
+    it('preserves an unknown plugin id verbatim, no validation', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ plugins: { 'some-plugin': { anything: [1, 2, { nested: true }] } } }),
+      );
+      const settings = await getSettings();
+      expect(settings.plugins['some-plugin']).toEqual({ anything: [1, 2, { nested: true }] });
+    });
   });
 
-  it('prefixes with a single space when dangerouslySkipPermissions is set in harness', () => {
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { dangerouslySkipPermissions: true } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --dangerously-skip-permissions');
+  describe('updateSettings', () => {
+    beforeEach(() => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+    });
+
+    it('a write to an unrelated key does not wipe plugins', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ ...DEFAULT_SETTINGS, plugins: { demo: { foo: 'bar' } } }),
+      );
+      const result = await updateSettings({ editor: 'vscode' });
+      expect(result.plugins).toEqual({ demo: { foo: 'bar' } });
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      expect(JSON.parse(writtenJson).plugins).toEqual({ demo: { foo: 'bar' } });
+    });
+
+    it('an unknown plugin id survives a round-trip through a patch', async () => {
+      const result = await updateSettings({ plugins: { 'not-installed': { keep: 'me' } } });
+      expect(result.plugins['not-installed']).toEqual({ keep: 'me' });
+      mockFs.readFile.mockResolvedValue(JSON.stringify(result));
+      const reread = await getSettings();
+      expect(reread.plugins['not-installed']).toEqual({ keep: 'me' });
+    });
+
+    it('preserves other plugin ids when patching one', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ ...DEFAULT_SETTINGS, plugins: { a: { x: 1 }, b: { y: 2 } } }),
+      );
+      const result = await updateSettings({ plugins: { b: { y: 3 } } });
+      expect(result.plugins).toEqual({ a: { x: 1 }, b: { y: 3 } });
+    });
   });
 
-  it('composes dangerouslySkipPermissions before flags', () => {
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { dangerouslySkipPermissions: true, flags: '--model opus' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --dangerously-skip-permissions --model opus');
-  });
+  describe('getPluginSettings / updatePluginSettings', () => {
+    it('getPluginSettings returns {} for a plugin with no saved settings', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+      expect(await getPluginSettings('fresh-id')).toEqual({});
+    });
 
-  it('appends only flags when dangerouslySkipPermissions is false', () => {
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { flags: '--model opus' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --model opus');
-  });
+    it('updatePluginSettings on a fresh id creates it', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+      await updatePluginSettings('fresh-id', { enabled: true });
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      expect(JSON.parse(writtenJson).plugins['fresh-id']).toEqual({ enabled: true });
+    });
 
-  it('uses OCTOMUX_CLAUDE_FLAGS env var verbatim when set', () => {
-    process.env.OCTOMUX_CLAUDE_FLAGS = '--env-only';
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { dangerouslySkipPermissions: true, flags: '--from-settings' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --env-only');
-  });
+    it('updatePluginSettings shallow-merges onto the existing blob', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ ...DEFAULT_SETTINGS, plugins: { demo: { a: 1, b: 2 } } }),
+      );
+      await updatePluginSettings('demo', { b: 3, c: 4 });
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      expect(JSON.parse(writtenJson).plugins.demo).toEqual({ a: 1, b: 3, c: 4 });
+    });
 
-  it('treats whitespace-only env var as unset', () => {
-    process.env.OCTOMUX_CLAUDE_FLAGS = '   ';
-    const settings: OctomuxSettings = {
-      ...DEFAULT_SETTINGS,
-      harnesses: { 'claude-code': { flags: '--from-settings' } },
-    };
-    expect(resolveClaudeFlags(settings)).toBe(' --from-settings');
+    it('plugin config contents are never validated (arbitrary shapes pass through)', async () => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+      const weird = { fn: 'not-actually-a-function-just-a-string', deep: { a: { b: { c: [] } } } };
+      await updatePluginSettings('weird-plugin', weird);
+      const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
+      expect(JSON.parse(writtenJson).plugins['weird-plugin']).toEqual(weird);
+    });
   });
 });
