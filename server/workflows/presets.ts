@@ -7,38 +7,50 @@
  * of `executeScheduleRun`, which reads only the schedule row (§1).
  *
  * Three tiers: built-in (`<pkg>/kinds/*.json`, read-only) → plugin
- * (`<pluginModulesDir()>/<pkg>/kinds/*.json`, read-only, one dir per
- * installed package) → home (`~/.octomux/kinds/*.json`, writable via the
- * UI). Home wins on `kind` collision. A file that fails validation is
+ * (one `kinds/*.json` dir per package that has an **enabled** row in
+ * `octomux.yml`, read-only) → home (`~/.octomux/kinds/*.json`, writable via
+ * the UI). Home wins on `kind` collision. A file that fails validation is
  * skipped with a `logger.warn` — never a boot crash (§3.2).
+ *
+ * The plugin tier is gated on the manifest (`server/plugins/manifest.ts`),
+ * not on a directory listing: only packages with an enabled row are scanned,
+ * so `disabled: true` actually disables a package, an installed-but-unlisted
+ * package (including an npm-hoisted transitive dependency that happens to
+ * ship a `kinds/` dir) contributes nothing, and a manifest that fails to
+ * read/parse is a `logger.warn` + zero plugins, never a boot crash — same
+ * policy as a malformed preset file.
  *
  * A plugin's `kinds/*.json` declares a **bare** kind matching its filename
  * stem, exactly like the other two tiers — `checkPresetShape`/`KIND_NAME_RE`
  * reject a `pkg:kind` string outright (plan "S3"). The loader calls
  * `qualify()` *after* shape validation passes, so the registered/returned
- * `kind` is always `<pkg>:<kind>`. That namespacing is what makes a plugin
- * kind structurally unable to shadow a built-in or home id — no dedicated
- * collision check is needed, only a test proving it.
+ * `kind` is always `<row.id>:<kind>`. That namespacing is what makes a
+ * plugin kind structurally unable to shadow a built-in or home id — no
+ * dedicated collision check is needed, only a test proving it.
  */
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from '../logger.js';
 import { builtInKindsDir, homeKindsDir } from '../octomux-paths.js';
-import { pluginKindsDir, pluginModulesDir } from '../plugins/paths.js';
-import { qualify } from '../plugins/qualify.js';
+import { pluginKindsDir, manifestPath } from '../plugins/paths.js';
+import { readManifest } from '../plugins/manifest.js';
+import { qualify, KIND_NAME_RE } from '../plugins/qualify.js';
 import { registerWorkflow, getWorkflow } from './registry.js';
 import { isValidJsonSchema } from './config.js';
 import { isValidCronExpression } from '../schedules/cron.js';
 import { runSession } from './session-runner.js';
 import type { JsonSchema } from '../services/output-contract.js';
+import type { PluginRow } from '@octomux/plugin-api';
 
 const logger = childLogger('workflows/presets');
 
-/** Kind names: lowercase alnum + hyphen, must start alnum — same shape used
- * for skill/agent names elsewhere in the codebase. Also doubles as the
- * traversal guard for `/api/kinds/:kind` (§4/security note): a name that
- * matches this can never contain `..` or a path separator. */
-export const KIND_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+// Re-exported so `server/routes/kinds.ts` — the path-traversal guard for
+// `PUT`/`DELETE /api/kinds/:kind` — keeps importing it from here unchanged.
+// The definition now lives in `server/plugins/qualify.ts` so that
+// `server/plugins/manifest.ts` (the YAML trust boundary) doesn't have to
+// import through this file, which pulls in `db.ts`, `pty.ts`,
+// `session-runner.ts`, `croner`, and ~25 other modules transitively.
+export { KIND_NAME_RE };
 
 export type PresetTier = 'builtin' | 'plugin' | 'home';
 
@@ -159,42 +171,71 @@ function validatePreset(file: string, data: unknown, tier: PresetTier): PresetWi
 }
 
 /**
- * Installed plugin package directory names under `pluginModulesDir()`.
- *
- * Scoped packages (`@scope/name`) live two directory levels deep on npm —
- * `pluginModulesDir()/@scope/name/kinds`, not `pluginModulesDir()/@scope/kinds`.
- * No shipped plugin uses a scoped name yet, so scoped top-level dirs are
- * skipped here rather than special-cased; revisit if one ships.
+ * Enabled plugin rows from `octomux.yml` (`disabled: true` rows excluded). A
+ * manifest that doesn't exist yields `{ plugins: [] }` (see
+ * `readManifest`) — that's the normal fresh-install state, not a warning. A
+ * manifest that exists but fails to read/parse is a `logger.warn` + zero
+ * plugins, matching the "never a boot crash" policy every other tier here
+ * already follows.
  */
-function listPluginPackages(): string[] {
-  let entries: fs.Dirent[];
+function listEnabledPluginRows(): PluginRow[] {
   try {
-    entries = fs.readdirSync(pluginModulesDir(), { withFileTypes: true });
-  } catch {
+    return readManifest(manifestPath()).plugins.filter((row) => !row.disabled);
+  } catch (err) {
+    logger.warn({ err }, 'plugin manifest: read/parse failed — treating as zero plugins');
     return [];
   }
-  return entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith('@') && !e.name.startsWith('.'))
-    .map((e) => e.name);
 }
 
 /**
- * Validate + qualify every kind preset shipped by one installed plugin
- * package. The file on disk declares a bare kind matching its filename stem
- * (checked against `tier: 'plugin'`, same shape rules as built-in/home);
- * `qualify()` runs only after that passes, so a malformed package name is a
- * `logger.warn` + skip here too — never a boot crash.
+ * A row's `kinds/*.json` directory. `row.name` is either an npm package name
+ * (resolved under `pluginModulesDir()`, via `pluginKindsDir()` from
+ * `server/plugins/paths.ts` — reused as-is, not recomputed here) or an
+ * absolute local path (dev loop, `octomux plugins link`-style), which lives
+ * outside `pluginModulesDir()` entirely and is used directly.
+ *
+ * Scoped packages (`@scope/name`) fall out of this for free: `path.join`
+ * treats `row.name` as one string, so `pluginKindsDir('@scope/name')` already
+ * produces the correct two-level `pluginModulesDir()/@scope/name/kinds` path
+ * — no special-casing needed once enumeration is manifest-driven instead of
+ * a directory listing (the old `listPluginPackages()` had to filter `@`
+ * prefixes out because it couldn't otherwise tell a scope directory from a
+ * package directory; that problem doesn't exist when the manifest already
+ * names the exact package).
+ *
+ * The symlink bug (`e.isDirectory()` false for a symlink — breaks `npm link`
+ * and makes the whole tier a no-op under pnpm) is moot for the same reason:
+ * there is no top-level `fs.readdirSync(..., { withFileTypes: true })` scan
+ * left to filter. `readJsonFilesInDir` below calls plain `fs.readdirSync`
+ * on the resolved `kinds` dir, which follows symlinks transparently.
  */
-function loadPluginPresetsFor(pkg: string): PresetWithSource[] {
+function pluginKindsDirFor(row: PluginRow): string {
+  return path.isAbsolute(row.name) ? path.join(row.name, 'kinds') : pluginKindsDir(row.name);
+}
+
+/**
+ * Validate + qualify every kind preset shipped by one enabled plugin row.
+ * The file on disk declares a bare kind matching its filename stem (checked
+ * against `tier: 'plugin'`, same shape rules as built-in/home); `qualify()`
+ * runs only after that passes, so a malformed id is a `logger.warn` + skip
+ * here too — never a boot crash.
+ *
+ * Qualifies against `row.id` (the manifest's own bare, `KIND_NAME_RE`
+ * -validated identifier — already checked by `manifest.ts`), not `row.name`.
+ * `row.name` can be an absolute path or contain `/` (scoped packages), neither
+ * of which is a safe or meaningful namespace segment; `row.id` is guaranteed
+ * to already be exactly that.
+ */
+function loadPluginPresetsFor(row: PluginRow): PresetWithSource[] {
   const out: PresetWithSource[] = [];
-  for (const { file, data } of readJsonFilesInDir(pluginKindsDir(pkg))) {
+  for (const { file, data } of readJsonFilesInDir(pluginKindsDirFor(row))) {
     const preset = validatePreset(file, data, 'plugin');
     if (!preset) continue;
     let qualifiedKind: string;
     try {
-      qualifiedKind = qualify(pkg, preset.kind);
+      qualifiedKind = qualify(row.id, preset.kind);
     } catch (err) {
-      logger.warn({ pkg, file, err }, 'preset: plugin kind qualification failed — skipped');
+      logger.warn({ id: row.id, file, err }, 'preset: plugin kind qualification failed — skipped');
       continue;
     }
     out.push({ ...preset, kind: qualifiedKind });
@@ -215,9 +256,9 @@ export function loadPresets(): Map<string, PresetWithSource> {
     const preset = validatePreset(file, data, 'builtin');
     if (preset) map.set(preset.kind, preset);
   }
-  for (const pkg of listPluginPackages()) {
-    for (const preset of loadPluginPresetsFor(pkg)) {
-      map.set(preset.kind, preset); // always `<pkg>:<kind>` — can't collide with builtin/home
+  for (const row of listEnabledPluginRows()) {
+    for (const preset of loadPluginPresetsFor(row)) {
+      map.set(preset.kind, preset); // always `<id>:<kind>` — can't collide with builtin/home
     }
   }
   for (const { file, data } of readJsonFilesInDir(homeKindsDir())) {

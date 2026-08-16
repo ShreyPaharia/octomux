@@ -12,8 +12,9 @@
  * do not switch this to `yaml.DEFAULT_SCHEMA` or plain `yaml.load(text)`.
  */
 import fs from 'fs';
+import path from 'path';
 import yaml from 'js-yaml';
-import { KIND_NAME_RE } from '../workflows/presets.js';
+import { KIND_NAME_RE } from './qualify.js';
 import type { PluginManifest, PluginRow } from '@octomux/plugin-api';
 
 function fail(msg: string): never {
@@ -26,6 +27,45 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 const ALLOWED_TOP_LEVEL_KEYS = new Set(['plugins']);
 const ALLOWED_ROW_KEYS = new Set(['id', 'name', 'version', 'integrity', 'config', 'disabled']);
+
+// npm package name shape (scoped or unscoped) — deliberately stricter than npm's
+// own rules (no dots-only segments, no leading dot/underscore weirdness) since
+// this only needs to admit real package names, not validate npm's full grammar.
+const NPM_PACKAGE_NAME_RE = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/;
+
+/**
+ * `import()`-safe: an npm package name or an absolute filesystem path, nothing
+ * else. `import()` natively resolves `data:`, `http(s):`, `file:` — a `name`
+ * that parses as any of those (or as a relative/traversal-shaped path) is
+ * direct code execution once the loader (`server/plugins/loader.ts`) imports
+ * it. `path.isAbsolute` alone is not enough: it also accepts `\0` mid-string on
+ * POSIX, so NUL is rejected explicitly.
+ */
+function isSafePluginName(name: string): boolean {
+  if (name.includes('\0')) return false;
+  return NPM_PACKAGE_NAME_RE.test(name) || path.isAbsolute(name);
+}
+
+// A config manifest has no legitimate need for YAML anchors/aliases. Per the
+// YAML spec, `&`/`*` are only ever anchor/alias indicators when they are the
+// FIRST character of a node — i.e. immediately after another node-start token
+// (`:`, `,`, `[`, `{`, whitespace) or at the start of a line — a plain scalar
+// can never begin with them unquoted. So this is a precise (not heuristic)
+// detector, not a best-effort scan, once quoted spans are blanked out first.
+// A ~560-byte manifest chaining anchors/aliases can expand to 60+ MB in the
+// low tens of milliseconds (shared-reference blowup once anything walks or
+// serializes the tree) — reject before `yaml.load` ever runs, not after.
+const ANCHOR_OR_ALIAS_RE = /(^|[\s,:[{])[&*][^\s,}\]]+/m;
+
+function blankQuotedSpans(text: string): string {
+  return text.replace(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'/g, (m) => ' '.repeat(m.length));
+}
+
+function rejectAnchorsAndAliases(text: string): void {
+  if (ANCHOR_OR_ALIAS_RE.test(blankQuotedSpans(text))) {
+    fail('YAML anchors/aliases are not allowed (no legitimate use in a plugin manifest)');
+  }
+}
 
 function checkRow(row: unknown, index: number): PluginRow {
   if (!isPlainObject(row)) {
@@ -44,11 +84,13 @@ function checkRow(row: unknown, index: number): PluginRow {
     fail(`plugins[${index}].id must match ${KIND_NAME_RE} (got ${JSON.stringify(id)})`);
   }
   // A row identifies its source by either an npm package name or an absolute
-  // local path (dev loop) — both are just a non-empty `name` string. Only the
-  // "neither" case (missing/blank name) is a parse-time rejection; distinguishing
-  // package-name-shaped from path-shaped is the loader's resolve step, not ours.
-  if (typeof name !== 'string' || name.trim().length === 0) {
-    fail(`plugins[${index}].name must be a non-empty string (package name or absolute path)`);
+  // local path (dev loop). The loader (`server/plugins/loader.ts`) will
+  // `import()` this value, and `import()` natively resolves `data:`,
+  // `http(s):`, `file:` URLs — so this is a parse-time security boundary, not
+  // just a shape check. Anything that isn't one of those two forms (a URL
+  // scheme, a relative/traversal path, an embedded NUL) is rejected here.
+  if (typeof name !== 'string' || !isSafePluginName(name)) {
+    fail(`plugins[${index}].name must be an npm package name or an absolute path`);
   }
   if (version !== undefined && typeof version !== 'string') {
     fail(`plugins[${index}].version must be a string`);
@@ -75,6 +117,8 @@ function checkRow(row: unknown, index: number): PluginRow {
 
 /** Parses and validates manifest YAML. Throws on any shape violation. */
 export function parseManifest(text: string): PluginManifest {
+  rejectAnchorsAndAliases(text);
+
   let doc: unknown;
   try {
     doc = yaml.load(text, { schema: yaml.JSON_SCHEMA });

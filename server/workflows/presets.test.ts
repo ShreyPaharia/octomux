@@ -86,6 +86,20 @@ describe('checkPresetShape', () => {
       'my-kind',
     ],
     [
+      'plugin tier',
+      'plugin-tier task rejected',
+      { ...VALID_SESSION, execution: 'task' },
+      'plugin',
+      'my-kind',
+    ],
+    [
+      'plugin tier',
+      'plugin-tier chat rejected',
+      { ...VALID_SESSION, execution: 'chat' },
+      'plugin',
+      'my-kind',
+    ],
+    [
       'schema',
       'invalid config schema',
       { ...VALID_SESSION, config: { type: 'not-a-type' } },
@@ -115,7 +129,7 @@ describe('checkPresetShape', () => {
       'no-handler-kind',
     ],
   ])('rejects [%s] %s', (_group, _label, data, tier, expectedKind) => {
-    const r = checkPresetShape(data, tier as 'builtin' | 'home', expectedKind as string);
+    const r = checkPresetShape(data, tier as 'builtin' | 'home' | 'plugin', expectedKind as string);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(typeof r.error).toBe('string');
   });
@@ -132,7 +146,15 @@ describe('checkPresetShape', () => {
 
 describe('shipped presets', () => {
   beforeEach(() => {
+    // Point the manifest at a file that never exists so this describe block
+    // is hermetic regardless of whatever real `~/.octomux/octomux.yml` (if
+    // any) exists on the machine running the tests.
+    vi.stubEnv('OCTOMUX_PLUGIN_MANIFEST', path.join(os.tmpdir(), 'octomux-no-such-manifest.yml'));
     reloadPresets();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('loads all seven shipped kinds', () => {
@@ -192,6 +214,7 @@ describe('home tier', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-kinds-'));
     vi.stubEnv('OCTOMUX_KINDS_DIR', tmpDir);
+    vi.stubEnv('OCTOMUX_PLUGIN_MANIFEST', path.join(os.tmpdir(), 'octomux-no-such-manifest.yml'));
   });
 
   afterEach(() => {
@@ -275,11 +298,14 @@ describe('home tier', () => {
 describe('plugin tier', () => {
   let tmpDir: string;
   let homeDir: string;
+  let manifestFile: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-prefix-'));
     homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-kinds-'));
+    manifestFile = path.join(tmpDir, 'octomux.yml');
     vi.stubEnv('OCTOMUX_PLUGIN_PREFIX', tmpDir);
+    vi.stubEnv('OCTOMUX_PLUGIN_MANIFEST', manifestFile);
     vi.stubEnv('OCTOMUX_KINDS_DIR', homeDir);
   });
 
@@ -300,13 +326,29 @@ describe('plugin tier', () => {
     fs.writeFileSync(path.join(homeDir, `${name}.json`), JSON.stringify(body), 'utf-8');
   }
 
-  it('registers a kind from a plugin dir, qualified to <pkg>:<kind>', () => {
+  // The plugin tier is gated on the manifest, not a directory listing — a row
+  // is required, `id: name` unless a test needs them to differ.
+  function writeManifest(rows: Array<{ id: string; name: string; disabled?: boolean }>): void {
+    const lines = ['plugins:'];
+    for (const r of rows) {
+      lines.push(`  - id: ${r.id}`);
+      // quoted: `@` and `/` are YAML-significant unquoted (scoped package
+      // names, absolute paths) — quoting matches how a real manifest author
+      // would write these.
+      lines.push(`    name: ${JSON.stringify(r.name)}`);
+      if (r.disabled) lines.push(`    disabled: true`);
+    }
+    fs.writeFileSync(manifestFile, lines.join('\n') + '\n', 'utf-8');
+  }
+
+  it('registers a kind from a plugin dir, qualified to <id>:<kind>', () => {
     writePluginKind('demo', 'changelog', {
       kind: 'changelog',
       displayName: 'Changelog',
       execution: 'session',
       prompt: 'summarize the changelog',
     });
+    writeManifest([{ id: 'demo', name: 'demo' }]);
 
     const presets = loadPresets();
     const added = presets.get('demo:changelog');
@@ -329,6 +371,7 @@ describe('plugin tier', () => {
       displayName: 'Changelog',
       execution: 'session',
     });
+    writeManifest([{ id: 'demo', name: 'demo' }]);
 
     const presets = loadPresets();
     expect(presets.get('weekly-update')!.source).toBe('home'); // home still wins
@@ -345,6 +388,7 @@ describe('plugin tier', () => {
       displayName: 'Changelog',
       execution: 'session',
     });
+    writeManifest([{ id: 'demo', name: 'demo' }]);
 
     expect(() => loadPresets()).not.toThrow();
     const presets = loadPresets();
@@ -354,22 +398,10 @@ describe('plugin tier', () => {
 
   it('skips a plugin kind whose filename does not match its declared kind', () => {
     writePluginKind('demo', 'mismatch', { kind: 'other', displayName: 'X', execution: 'session' });
+    writeManifest([{ id: 'demo', name: 'demo' }]);
 
     expect(() => loadPresets()).not.toThrow();
     expect(loadPresets().get('demo:other')).toBeUndefined();
-  });
-
-  it('rejects a traversal-shaped package name without throwing', () => {
-    // filesystem-legal directory name, invalid per KIND_NAME_RE (contains `.`)
-    writePluginKind('evil..pkg', 'changelog', {
-      kind: 'changelog',
-      displayName: 'Changelog',
-      execution: 'session',
-    });
-
-    expect(() => loadPresets()).not.toThrow();
-    const presets = loadPresets();
-    expect([...presets.keys()].some((k) => k.includes('evil'))).toBe(false);
   });
 
   it('cannot shadow a built-in id — qualification namespaces it away', () => {
@@ -379,11 +411,109 @@ describe('plugin tier', () => {
       displayName: 'Fake Weekly Update',
       execution: 'session',
     });
+    writeManifest([{ id: 'demo', name: 'demo' }]);
 
     const presets = loadPresets();
     expect(presets.get('weekly-update')!.source).toBe('builtin');
     expect(presets.get('weekly-update')!.displayName).not.toBe('Fake Weekly Update');
     expect(presets.get('demo:weekly-update')!.source).toBe('plugin');
     expect(presets.get('demo:weekly-update')!.displayName).toBe('Fake Weekly Update');
+  });
+
+  // --- manifest gate (the plugin tier no longer trusts a directory listing) ---
+
+  it('a plugin directory on disk with no manifest row contributes nothing', () => {
+    // no writeManifest() call at all — an installed-but-unlisted package
+    // (or an npm-hoisted transitive dependency that happens to ship a
+    // `kinds/` dir) must not be scanned just because it exists on disk.
+    writePluginKind('demo', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+    });
+
+    const presets = loadPresets();
+    expect(presets.get('demo:changelog')).toBeUndefined();
+  });
+
+  it('a manifest row marked disabled contributes nothing', () => {
+    writePluginKind('demo', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+    });
+    writeManifest([{ id: 'demo', name: 'demo', disabled: true }]);
+
+    const presets = loadPresets();
+    expect(presets.get('demo:changelog')).toBeUndefined();
+  });
+
+  it('a manifest that fails to parse yields zero plugins, never a boot crash', () => {
+    writePluginKind('demo', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+    });
+    fs.writeFileSync(manifestFile, 'plugins: not-an-array\n', 'utf-8');
+
+    expect(() => loadPresets()).not.toThrow();
+    const presets = loadPresets();
+    expect(presets.get('demo:changelog')).toBeUndefined();
+    expect(presets.get('doc-drift')!.source).toBe('builtin'); // built-in tier unaffected
+  });
+
+  it('a scoped package name resolves two directory levels deep', () => {
+    const dir = path.join(tmpDir, 'node_modules', '@scope', 'demo', 'kinds');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'changelog.json'),
+      JSON.stringify({ kind: 'changelog', displayName: 'Changelog', execution: 'session' }),
+      'utf-8',
+    );
+    writeManifest([{ id: 'scoped', name: '@scope/demo' }]);
+
+    const presets = loadPresets();
+    expect(presets.get('scoped:changelog')).toBeDefined();
+    expect(presets.get('scoped:changelog')!.source).toBe('plugin');
+  });
+
+  it('a symlinked package directory (npm link / pnpm) is still scanned', () => {
+    const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-real-'));
+    fs.mkdirSync(path.join(realDir, 'kinds'), { recursive: true });
+    fs.writeFileSync(
+      path.join(realDir, 'kinds', 'changelog.json'),
+      JSON.stringify({ kind: 'changelog', displayName: 'Changelog', execution: 'session' }),
+      'utf-8',
+    );
+    const modulesDir = path.join(tmpDir, 'node_modules');
+    fs.mkdirSync(modulesDir, { recursive: true });
+    fs.symlinkSync(realDir, path.join(modulesDir, 'demo'), 'dir');
+    writeManifest([{ id: 'demo', name: 'demo' }]);
+
+    try {
+      const presets = loadPresets();
+      expect(presets.get('demo:changelog')).toBeDefined();
+    } finally {
+      fs.rmSync(realDir, { recursive: true, force: true });
+    }
+  });
+
+  it('an absolute-path row (dev loop) resolves outside pluginModulesDir', () => {
+    const devDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-dev-'));
+    fs.mkdirSync(path.join(devDir, 'kinds'), { recursive: true });
+    fs.writeFileSync(
+      path.join(devDir, 'kinds', 'changelog.json'),
+      JSON.stringify({ kind: 'changelog', displayName: 'Changelog', execution: 'session' }),
+      'utf-8',
+    );
+    writeManifest([{ id: 'devplugin', name: devDir }]);
+
+    try {
+      const presets = loadPresets();
+      expect(presets.get('devplugin:changelog')).toBeDefined();
+      expect(presets.get('devplugin:changelog')!.source).toBe('plugin');
+    } finally {
+      fs.rmSync(devDir, { recursive: true, force: true });
+    }
   });
 });

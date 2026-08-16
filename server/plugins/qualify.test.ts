@@ -1,6 +1,5 @@
 import { describe, it, expect } from '../bun-test.js';
-import { KIND_NAME_RE } from '../workflows/presets.js';
-import { QUALIFIED_KIND_RE, sanitizePackageName, qualify } from './qualify.js';
+import { KIND_NAME_RE, QUALIFIED_KIND_RE, sanitizePackageName, qualify } from './qualify.js';
 
 describe('sanitizePackageName', () => {
   it.each([
@@ -43,5 +42,11 @@ describe('qualify', () => {
     const qualified = qualify('@foo/bar', 'changelog');
     expect(QUALIFIED_KIND_RE.test(qualified)).toBe(true);
     expect(KIND_NAME_RE.test(qualified)).toBe(false);
+  });
+
+  it('rejects a namespace-squat attempt (a local id that embeds another qualifier)', () => {
+    // `other:kind` fails KIND_NAME_RE (no `:` allowed), so this can never
+    // produce `demo:other:kind` and pretend to be plugin "other"'s kind.
+    expect(() => qualify('demo', 'other:kind')).toThrow();
   });
 });

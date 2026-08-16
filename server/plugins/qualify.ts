@@ -3,13 +3,17 @@
  * provider kind, …) into the one qualified form every registry stores it under:
  * `<pkg>:<local>`.
  *
- * `KIND_NAME_RE` (`server/workflows/presets.ts`) is the path-traversal guard for
- * `PUT`/`DELETE /api/kinds/:kind` — it stays exactly as-is and is imported here,
- * never edited. `QUALIFIED_KIND_RE` is a registry-key shape only: it is never a
- * path component or a filename, so widening it to allow `:` is safe precisely
- * because nothing here ever writes a qualified string to disk.
+ * `KIND_NAME_RE` lives here (not in `server/workflows/presets.ts`) so that
+ * `server/plugins/manifest.ts` — the YAML **trust boundary** — never has to
+ * import through `presets.ts`, which pulls in `db.ts`, `pty.ts`,
+ * `session-runner.ts`, `croner`, and ~25 other modules transitively.
+ * `presets.ts` re-exports it from here so `server/routes/kinds.ts` (which
+ * imports it from `presets.js`) keeps working unchanged. It is the
+ * path-traversal guard for `PUT`/`DELETE /api/kinds/:kind` — a name that
+ * matches it can never contain `..` or a path separator. Do not edit its
+ * shape without checking that route.
  */
-import { KIND_NAME_RE } from '../workflows/presets.js';
+export const KIND_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 export const QUALIFIED_KIND_RE = /^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$/;
 
