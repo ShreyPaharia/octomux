@@ -1,5 +1,13 @@
 import express from 'express';
 import compression from 'compression';
+// Registration is a side effect of these barrels — importing the bare
+// `registry.js` gets you an empty Map. Both had exactly one importer buried in
+// a route module, so consumers that reached a registry by another path saw it
+// unpopulated (hook-dispatcher silently dropped every integration that way).
+// Anchoring them here makes boot order explicit: every server entry point,
+// including the supertest suites, goes through createApp().
+import './harnesses/index.js';
+import './integrations/index.js';
 import { setupRoutes } from './api.js';
 import { errorMiddleware } from './error-middleware.js';
 import { childLogger } from './logger.js';

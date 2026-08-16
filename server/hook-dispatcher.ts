@@ -299,17 +299,6 @@ async function fireIntegrationProviders(
   let getProvider: typeof import('./integrations/registry.js').getProvider;
   try {
     ({ listIntegrations } = await import('./integrations/store.js'));
-    try {
-      // Side-effect only: the barrel is what actually registers
-      // jira/linear/slack/telegram (`registry.js` alone stays empty unless
-      // some other module happened to load the barrel first — it silently
-      // dropped every integration below). Best-effort: if a provider fails to
-      // import, fall through to whatever the registry already has instead of
-      // treating integrations as unavailable.
-      await import('./integrations/index.js');
-    } catch {
-      /* barrel unavailable — registry.js below still has whatever registered */
-    }
     ({ getProvider } = await import('./integrations/registry.js'));
   } catch {
     // integrations module not available (e.g. test env without DB)

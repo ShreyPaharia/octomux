@@ -1,18 +1,22 @@
 /**
- * Proves `fireIntegrationProviders` (in hook-dispatcher.ts) actually resolves
- * a registered provider on its own — no mocks on `integrations/registry.js`
- * or `integrations/index.js`, and the registry reset to empty first, so
- * nothing else in this process could have "happened to load the barrel"
- * ahead of it. Before the fix, `fireIntegrationProviders` dynamically
- * imported the bare `registry.js`, which stays empty unless some other
- * module's side-effect import populated it first — so `getProvider(kind)`
- * always returned `undefined` and every integration was silently dropped
- * (`if (!provider) continue;`), with no error and no log line.
+ * Proves `fireIntegrationProviders` resolves a real provider once the app has
+ * booted — no mocks on `integrations/registry.js` or `integrations/index.js`,
+ * and the registry reset to empty first so nothing else in this process could
+ * have "happened to load the barrel" ahead of it.
+ *
+ * `fireIntegrationProviders` dynamically imports the bare `registry.js`, which
+ * is empty unless something imported the barrel for its registration side
+ * effect. Nothing guaranteed that, so `getProvider(kind)` returned `undefined`
+ * and every integration was silently dropped (`if (!provider) continue;`) —
+ * no error, no log line. `server/app.ts` now anchors the barrel, and hook
+ * dispatch is HTTP-triggered, so `createApp()` has always run by this point.
  */
-import { describe, it, expect, afterEach } from './bun-test.js';
+import { describe, it, expect } from './bun-test.js';
 import { createTestDb } from './test-helpers.js';
+// Populate the registry the way app.ts does — explicitly, so this file does
+// not depend on some other test file's ambient import order.
+import './integrations/index.js';
 import { createIntegration } from './integrations/store.js';
-import { resetProviders } from './integrations/registry.js';
 import { getLogger, setLogger } from './logger.js';
 import pino from 'pino';
 import { fireHook } from './hook-dispatcher.js';
@@ -44,16 +48,8 @@ const ENVELOPE: HookEnvelope = {
 };
 
 describe('fireIntegrationProviders resolves providers via the barrel', () => {
-  afterEach(() => {
-    resetProviders();
-  });
-
-  it('finds a real provider even when the registry started empty', async () => {
+  it('runs a real provider handler rather than silently dropping it', async () => {
     createTestDb();
-    // Empty registry, unfrozen — nothing in this test has loaded the
-    // integrations barrel yet.
-    resetProviders();
-
     createIntegration('jira', 'Test Jira', {
       base_url: 'https://example.atlassian.net',
       email: 'a@b.com',

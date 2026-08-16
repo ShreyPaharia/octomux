@@ -24,17 +24,6 @@ export interface RunSessionVerticalInput {
 export async function runSessionVertical<T = unknown>(
   i: RunSessionVerticalInput,
 ): Promise<{ result: T }> {
-  // Side-effect only: the barrel is what actually registers claude-code and
-  // cursor into the bare registry above. Importing only `registry.js` left it
-  // permanently empty unless some other module happened to load the barrel
-  // first — `getHarness(null)` would then throw "Unknown harness: claude-code".
-  // Best-effort: harmless to skip (e.g. under a test mock that stubs the bare
-  // registry directly) since the barrel would have nothing new to add there.
-  try {
-    await import('../harnesses/index.js');
-  } catch {
-    /* barrel unavailable — registry.js above still has whatever registered */
-  }
   return runAgentSession<T>({
     workspaceDir: i.workspaceDir,
     harness: getHarness(null),
