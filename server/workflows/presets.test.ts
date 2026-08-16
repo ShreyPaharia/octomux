@@ -271,3 +271,119 @@ describe('home tier', () => {
     expect(loadPresets().get('weekly-update')).toBeDefined();
   });
 });
+
+describe('plugin tier', () => {
+  let tmpDir: string;
+  let homeDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-prefix-'));
+    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-kinds-'));
+    vi.stubEnv('OCTOMUX_PLUGIN_PREFIX', tmpDir);
+    vi.stubEnv('OCTOMUX_KINDS_DIR', homeDir);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    reloadPresets();
+  });
+
+  function writePluginKind(pkg: string, name: string, body: unknown): void {
+    const dir = path.join(tmpDir, 'node_modules', pkg, 'kinds');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(body), 'utf-8');
+  }
+
+  function writeHomeKind(name: string, body: unknown): void {
+    fs.writeFileSync(path.join(homeDir, `${name}.json`), JSON.stringify(body), 'utf-8');
+  }
+
+  it('registers a kind from a plugin dir, qualified to <pkg>:<kind>', () => {
+    writePluginKind('demo', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+      prompt: 'summarize the changelog',
+    });
+
+    const presets = loadPresets();
+    const added = presets.get('demo:changelog');
+    expect(added).toBeDefined();
+    expect(added!.source).toBe('plugin');
+    expect(added!.kind).toBe('demo:changelog');
+    // the bare, unqualified form never appears in the map
+    expect(presets.get('changelog')).toBeUndefined();
+  });
+
+  it('coexists with built-in and home tiers at once (precedence across all three)', () => {
+    writeHomeKind('weekly-update', {
+      kind: 'weekly-update',
+      displayName: 'My Weekly Update',
+      execution: 'session',
+      prompt: 'my own body',
+    });
+    writePluginKind('demo', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+    });
+
+    const presets = loadPresets();
+    expect(presets.get('weekly-update')!.source).toBe('home'); // home still wins
+    expect(presets.get('demo:changelog')!.source).toBe('plugin');
+    expect(presets.get('doc-drift')!.source).toBe('builtin'); // untouched built-in
+  });
+
+  it('skips malformed plugin JSON with a warn, keeping other plugin kinds', () => {
+    const dir = path.join(tmpDir, 'node_modules', 'demo', 'kinds');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'broken.json'), '{ not json', 'utf-8');
+    writePluginKind('demo', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+    });
+
+    expect(() => loadPresets()).not.toThrow();
+    const presets = loadPresets();
+    expect(presets.get('demo:broken')).toBeUndefined();
+    expect(presets.get('demo:changelog')).toBeDefined();
+  });
+
+  it('skips a plugin kind whose filename does not match its declared kind', () => {
+    writePluginKind('demo', 'mismatch', { kind: 'other', displayName: 'X', execution: 'session' });
+
+    expect(() => loadPresets()).not.toThrow();
+    expect(loadPresets().get('demo:other')).toBeUndefined();
+  });
+
+  it('rejects a traversal-shaped package name without throwing', () => {
+    // filesystem-legal directory name, invalid per KIND_NAME_RE (contains `.`)
+    writePluginKind('evil..pkg', 'changelog', {
+      kind: 'changelog',
+      displayName: 'Changelog',
+      execution: 'session',
+    });
+
+    expect(() => loadPresets()).not.toThrow();
+    const presets = loadPresets();
+    expect([...presets.keys()].some((k) => k.includes('evil'))).toBe(false);
+  });
+
+  it('cannot shadow a built-in id — qualification namespaces it away', () => {
+    // same bare kind as a shipped built-in preset
+    writePluginKind('demo', 'weekly-update', {
+      kind: 'weekly-update',
+      displayName: 'Fake Weekly Update',
+      execution: 'session',
+    });
+
+    const presets = loadPresets();
+    expect(presets.get('weekly-update')!.source).toBe('builtin');
+    expect(presets.get('weekly-update')!.displayName).not.toBe('Fake Weekly Update');
+    expect(presets.get('demo:weekly-update')!.source).toBe('plugin');
+    expect(presets.get('demo:weekly-update')!.displayName).toBe('Fake Weekly Update');
+  });
+});

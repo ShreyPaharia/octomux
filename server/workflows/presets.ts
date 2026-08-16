@@ -6,15 +6,26 @@
  * at boot to populate the workflow registry. It is not a runtime dependency
  * of `executeScheduleRun`, which reads only the schedule row (§1).
  *
- * Two tiers (§3.1): built-in (`<pkg>/kinds/*.json`, read-only) and home
- * (`~/.octomux/kinds/*.json`, writable via the UI). Home wins on `kind`
- * collision. A file that fails validation is skipped with a `logger.warn` —
- * never a boot crash (§3.2).
+ * Three tiers: built-in (`<pkg>/kinds/*.json`, read-only) → plugin
+ * (`<pluginModulesDir()>/<pkg>/kinds/*.json`, read-only, one dir per
+ * installed package) → home (`~/.octomux/kinds/*.json`, writable via the
+ * UI). Home wins on `kind` collision. A file that fails validation is
+ * skipped with a `logger.warn` — never a boot crash (§3.2).
+ *
+ * A plugin's `kinds/*.json` declares a **bare** kind matching its filename
+ * stem, exactly like the other two tiers — `checkPresetShape`/`KIND_NAME_RE`
+ * reject a `pkg:kind` string outright (plan "S3"). The loader calls
+ * `qualify()` *after* shape validation passes, so the registered/returned
+ * `kind` is always `<pkg>:<kind>`. That namespacing is what makes a plugin
+ * kind structurally unable to shadow a built-in or home id — no dedicated
+ * collision check is needed, only a test proving it.
  */
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from '../logger.js';
 import { builtInKindsDir, homeKindsDir } from '../octomux-paths.js';
+import { pluginKindsDir, pluginModulesDir } from '../plugins/paths.js';
+import { qualify } from '../plugins/qualify.js';
 import { registerWorkflow, getWorkflow } from './registry.js';
 import { isValidJsonSchema } from './config.js';
 import { isValidCronExpression } from '../schedules/cron.js';
@@ -29,7 +40,7 @@ const logger = childLogger('workflows/presets');
  * matches this can never contain `..` or a path separator. */
 export const KIND_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
-export type PresetTier = 'builtin' | 'home';
+export type PresetTier = 'builtin' | 'plugin' | 'home';
 
 export interface Preset {
   kind: string;
@@ -97,8 +108,8 @@ export function checkPresetShape(
   if (p.execution !== 'session' && p.execution !== 'task' && p.execution !== 'chat') {
     return { ok: false, error: 'missing or invalid `execution` (session|task|chat)' };
   }
-  if (tier === 'home' && p.execution !== 'session') {
-    return { ok: false, error: 'home-tier presets must be execution:session' };
+  if ((tier === 'home' || tier === 'plugin') && p.execution !== 'session') {
+    return { ok: false, error: `${tier}-tier presets must be execution:session` };
   }
   if (p.config !== undefined && !isValidJsonSchema(p.config)) {
     return { ok: false, error: 'invalid `config` JSON Schema' };
@@ -148,10 +159,54 @@ function validatePreset(file: string, data: unknown, tier: PresetTier): PresetWi
 }
 
 /**
- * Load built-in then home presets into the in-memory map (home wins on
- * `kind`). Call once at boot (after every side-effect workflow import has
- * registered its code handler — task/chat validation depends on it) and
- * again whenever the UI writes a home preset.
+ * Installed plugin package directory names under `pluginModulesDir()`.
+ *
+ * Scoped packages (`@scope/name`) live two directory levels deep on npm —
+ * `pluginModulesDir()/@scope/name/kinds`, not `pluginModulesDir()/@scope/kinds`.
+ * No shipped plugin uses a scoped name yet, so scoped top-level dirs are
+ * skipped here rather than special-cased; revisit if one ships.
+ */
+function listPluginPackages(): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(pluginModulesDir(), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('@') && !e.name.startsWith('.'))
+    .map((e) => e.name);
+}
+
+/**
+ * Validate + qualify every kind preset shipped by one installed plugin
+ * package. The file on disk declares a bare kind matching its filename stem
+ * (checked against `tier: 'plugin'`, same shape rules as built-in/home);
+ * `qualify()` runs only after that passes, so a malformed package name is a
+ * `logger.warn` + skip here too — never a boot crash.
+ */
+function loadPluginPresetsFor(pkg: string): PresetWithSource[] {
+  const out: PresetWithSource[] = [];
+  for (const { file, data } of readJsonFilesInDir(pluginKindsDir(pkg))) {
+    const preset = validatePreset(file, data, 'plugin');
+    if (!preset) continue;
+    let qualifiedKind: string;
+    try {
+      qualifiedKind = qualify(pkg, preset.kind);
+    } catch (err) {
+      logger.warn({ pkg, file, err }, 'preset: plugin kind qualification failed — skipped');
+      continue;
+    }
+    out.push({ ...preset, kind: qualifiedKind });
+  }
+  return out;
+}
+
+/**
+ * Load built-in, then plugin, then home presets into the in-memory map
+ * (home wins on `kind`). Call once at boot (after every side-effect workflow
+ * import has registered its code handler — task/chat validation depends on
+ * it) and again whenever the UI writes a home preset.
  */
 export function loadPresets(): Map<string, PresetWithSource> {
   const map = new Map<string, PresetWithSource>();
@@ -159,6 +214,11 @@ export function loadPresets(): Map<string, PresetWithSource> {
   for (const { file, data } of readJsonFilesInDir(builtInKindsDir())) {
     const preset = validatePreset(file, data, 'builtin');
     if (preset) map.set(preset.kind, preset);
+  }
+  for (const pkg of listPluginPackages()) {
+    for (const preset of loadPluginPresetsFor(pkg)) {
+      map.set(preset.kind, preset); // always `<pkg>:<kind>` — can't collide with builtin/home
+    }
   }
   for (const { file, data } of readJsonFilesInDir(homeKindsDir())) {
     const preset = validatePreset(file, data, 'home');
