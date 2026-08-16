@@ -1,21 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertPermissionPrompt,
-  insertUserTerminal,
-  getTask,
-  DEFAULTS,
-} from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 import type { Task, Worker } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-engine/index.js', async () => {
-  const { getDb } = await import('./db.js');
+// Mocked first on purpose: the ./task-engine mock below loads real modules,
+// and git-commits captures promisify(execFile) at module scope. That capture
+// must see the mock or the git routes shell out for real.
+vi.mock('child_process', () => ({
+  execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
+    const cb = _rest.find((a: any) => typeof a === 'function');
+    if (cb) cb(null, { stdout: '', stderr: '' });
+    return undefined;
+  }),
+}));
+
+vi.mock('./task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -72,7 +73,7 @@ vi.mock('./task-engine/index.js', async () => {
       return { editor: 'nvim', windowIndex: 5 };
     }),
     createShellTerminal: vi.fn(async (task: any) => {
-      const { getDb } = await import('./db.js');
+      const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
       const db = getDb();
       db.prepare(
         `INSERT INTO user_terminals (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)`,
@@ -88,7 +89,7 @@ vi.mock('./task-engine/index.js', async () => {
     }),
     closeShellTerminal: vi.fn(),
     hopAgent: vi.fn(async (agent: any, toTaskId: string | null) => {
-      const { getDb } = await import('./db.js');
+      const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
       const db = getDb();
       db.prepare(
         `UPDATE workers SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running' WHERE id = ?`,
@@ -116,8 +117,8 @@ vi.mock('fs', () => ({
   },
 }));
 
-vi.mock('./chats.js', async () => {
-  const { getDb } = await import('./db.js');
+vi.mock('./chats.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   let counter = 0;
   return {
     createChat: vi.fn(
@@ -159,14 +160,6 @@ vi.mock('./chats.js', async () => {
   };
 });
 
-vi.mock('child_process', () => ({
-  execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
-    const cb = _rest.find((a: any) => typeof a === 'function');
-    if (cb) cb(null, { stdout: '', stderr: '' });
-    return undefined;
-  }),
-}));
-
 vi.mock('./skills.js', () => ({
   listSkills: vi.fn(),
   getSkill: vi.fn(),
@@ -207,9 +200,8 @@ vi.mock('./diff-review-state.js', () => ({
   })),
 }));
 
-vi.mock('@octomux/diff-engine', async () => {
-  const actual =
-    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+vi.mock('@octomux/diff-engine', () => {
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
@@ -217,10 +209,21 @@ vi.mock('@octomux/diff-engine', async () => {
   };
 });
 
+const { default: request } = await import('supertest');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getTask,
+  DEFAULTS,
+} = await import('./test-helpers.js');
+
 const fs = (await import('fs')).default;
 const diffModule = await import('@octomux/diff-engine');
 
-const { createApp } = await import('./app.js');
+const { createApp } = vi.importActual<typeof import('./app.js')>('./app.js');
 const {
   startTask,
   closeTask,
@@ -237,7 +240,7 @@ const { updateSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {
@@ -311,7 +314,7 @@ describe('GET /api/tasks', () => {
     insertTask(db);
     insertAgent(db);
 
-    const res = await request(app).get('/api/tasks');
+    const res = await request(app).get('/api/tasks?include=workers');
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe(DEFAULTS.task.id);
     expect(res.body[0].workers).toHaveLength(1);
@@ -328,7 +331,7 @@ describe('GET /api/tasks', () => {
 
   it('returns empty agents array for tasks without agents', async () => {
     insertTask(db);
-    const res = await request(app).get('/api/tasks');
+    const res = await request(app).get('/api/tasks?include=workers');
     expect(res.body[0].workers).toEqual([]);
   });
 
@@ -340,7 +343,9 @@ describe('GET /api/tasks', () => {
     const res = await request(app).get('/api/tasks?repo_path=/repo/alpha');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
-    expect(res.body.every((t: Task) => t.repo_path === '/repo/alpha')).toBe(true);
+    // repo_path itself isn't in the lean default shape — the filter's effect is
+    // observed via which task ids come back, not via a field on the response.
+    expect(res.body.map((t: Task) => t.id).sort()).toEqual(['task-a', 'task-c']);
   });
 
   it('returns all tasks when repo_path is not provided', async () => {
@@ -476,7 +481,7 @@ describe('GET /api/tasks/:id', () => {
     insertTask(db);
     insertAgent(db);
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}?include=workers`);
     expect(res.status).toBe(200);
     expect(res.body.title).toBe(DEFAULTS.task.title);
     expect(res.body.workers).toHaveLength(1);
@@ -489,7 +494,9 @@ describe('GET /api/tasks/:id', () => {
       pr_number: 42,
     });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}`);
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.task.id}?include=workers,pull_requests,user_terminals`,
+    );
     expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
     expect(res.body.pr_number).toBe(42);
     expect(res.body.branch).toBe(DEFAULTS.runningTask.branch);
@@ -1708,7 +1715,9 @@ describe('GET /api/tasks/:id — user_terminals', () => {
     insertTask(db, DEFAULTS.runningTask);
     insertAgent(db);
     insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}?include=user_terminals`,
+    );
     expect(res.status).toBe(200);
     expect(res.body.user_terminals).toHaveLength(1);
     expect(res.body.user_terminals[0].label).toBe('Terminal 1');
@@ -1729,7 +1738,7 @@ describe('GET /api/tasks with permission prompts', () => {
       tool_input: '{"command":"npm test"}',
     });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=pending_prompts').expect(200);
     const task = res.body[0];
     expect(task.pending_prompts).toHaveLength(1);
     expect(task.pending_prompts[0].tool_name).toBe('Bash');
@@ -1747,7 +1756,7 @@ describe('GET /api/tasks with permission prompts', () => {
       status: 'resolved' as any,
     });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=pending_prompts').expect(200);
     expect(res.body[0].pending_prompts).toHaveLength(0);
   });
 
@@ -1772,23 +1781,85 @@ describe('GET /api/tasks with permission prompts', () => {
         });
       });
 
-      const res = await request(app).get('/api/tasks').expect(200);
+      const res = await request(app).get('/api/tasks?include=workers').expect(200);
       expect(res.body[0].derived_status).toBe(expected);
     },
   );
+
+  it.each([
+    {
+      name: 'errored task',
+      runtime_state: 'error',
+      activity: 'idle',
+      prompt: false,
+      expected: true,
+    },
+    {
+      name: 'waiting agent',
+      runtime_state: 'running',
+      activity: 'waiting',
+      prompt: false,
+      expected: true,
+    },
+    {
+      name: 'pending prompt',
+      runtime_state: 'running',
+      activity: 'active',
+      prompt: true,
+      expected: true,
+    },
+    {
+      name: 'busy agent',
+      runtime_state: 'running',
+      activity: 'active',
+      prompt: false,
+      expected: false,
+    },
+    {
+      name: 'idle agent',
+      runtime_state: 'running',
+      activity: 'idle',
+      prompt: false,
+      expected: false,
+    },
+  ])(
+    'needs_you is $expected for a $name',
+    async ({ runtime_state, activity, prompt, expected }) => {
+      insertTask(db, { id: 't1', runtime_state: runtime_state as any });
+      insertAgent(db, {
+        id: 'a1',
+        task_id: 't1',
+        hook_activity: activity as Worker['hook_activity'],
+      });
+      if (prompt) insertPermissionPrompt(db, { id: 'pp1', task_id: 't1', agent_id: 'a1' });
+
+      const res = await request(app).get('/api/tasks?include=workers,pending_prompts').expect(200);
+      expect(res.body[0].needs_you).toBe(expected);
+    },
+  );
+
+  it('omits needs_you when its inputs are not included', async () => {
+    insertTask(db, { id: 't1', runtime_state: 'error' });
+
+    const lean = await request(app).get('/api/tasks?include=workers').expect(200);
+    expect(lean.body[0]).not.toHaveProperty('needs_you');
+
+    const full = await request(app).get('/api/tasks?include=workers,pending_prompts').expect(200);
+    expect(full.body[0].needs_you).toBe(true);
+  });
 
   it('derived_status is done when all agents are stopped', async () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
   it('derived_status is done when task has no agents', async () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
@@ -1797,7 +1868,7 @@ describe('GET /api/tasks with permission prompts', () => {
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'active' });
     insertAgent(db, { id: 'a2', task_id: 't1', window_index: 1, hook_activity: 'waiting' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     // Stopped agent's 'active' is ignored; only running agent's 'waiting' counts
     expect(res.body[0].derived_status).toBe('needs_attention');
   });
@@ -1805,7 +1876,7 @@ describe('GET /api/tasks with permission prompts', () => {
   it('derived_status is null for non-running tasks', async () => {
     insertTask(db, { id: 't1', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/tasks').expect(200);
+    const res = await request(app).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBeNull();
   });
 
@@ -1820,7 +1891,7 @@ describe('GET /api/tasks with permission prompts', () => {
       tool_input: '{"file_path":"server/api.ts"}',
     });
 
-    const res = await request(app).get('/api/tasks/t1').expect(200);
+    const res = await request(app).get('/api/tasks/t1?include=workers,pending_prompts').expect(200);
     expect(res.body.pending_prompts).toHaveLength(1);
     expect(res.body.derived_status).toBe('working');
   });
@@ -2328,7 +2399,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt2','/tmp/wt2','existing','in_use')`,
     ).run();
     insertTask(db, { id: 'tJ', worktree_id: 'wt2' });
-    const res = await request(app).get('/api/tasks/tJ');
+    const res = await request(app).get('/api/tasks/tJ?include=worktree');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeTruthy();
     expect(res.body.worktree_row.id).toBe('wt2');
@@ -2338,7 +2409,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
   it('worktree_row is null when task has no worktree_id', async () => {
     insertTask(db, { id: 'tK' });
     db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = 'tK'`).run();
-    const res = await request(app).get('/api/tasks/tK');
+    const res = await request(app).get('/api/tasks/tK?include=worktree');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeNull();
   });

@@ -3,40 +3,37 @@
  *
  * CLI DRIFT TEST (SHR-144).
  *
- * Asserts that the canonical zod schemas in server/orchestrator/command-schemas.ts
- * stay in sync with the CLI commander option definitions. If a flag is added to
- * the CLI but not to the schema (or vice-versa), this test fails — ensuring the
- * MCP tools, the executor, and the CLI can never silently diverge again.
+ * Asserts that the canonical zod schemas in `@octomux/capabilities` (schemas.ts)
+ * stay in sync with the hand-written CLI commander option definitions that
+ * remain in `cli/src/commands/`. If a flag is added to the CLI but not to the
+ * schema (or vice-versa), this test fails — ensuring the MCP tools, the
+ * executor, and the CLI can never silently diverge again.
+ *
+ * `create-task` / `list-tasks` / `get-task` / `delete-task` / `task-move` are no
+ * longer hand-written commander commands — they're generated straight from
+ * `TASK_CAPABILITY_META`'s zod schemas by `registerCapabilityCommands`
+ * (`packages/capabilities/src/cli.ts`), so there is nothing left to drift for
+ * those: the flags ARE the schema. Only `add-agent` remains hand-written and
+ * therefore still needs this test.
  *
  * How the mapping works:
  *   Commander kebab-case flag  →  camelCase opt   →  schema snake_case field
  *   --repo-path                →  repoPath        →  repo_path
- *   --base-branch              →  baseBranch      →  base_branch
- *   --initial-prompt           →  initialPrompt   →  initial_prompt
- *   --mode                     →  mode            →  run_mode (explicit rename)
- *   --worktree-path            →  worktreePath    →  worktree_path
- *   --notify-task              →  notifyTask      →  notify_task
  *
- * Exclusion allowlists:
- *   CREATE_TASK_SCHEMA_ONLY  — orchestrator-only extensions not on the CLI
- *                              (kind, effort, conversation_id)
- *   CREATE_TASK_CLI_ONLY     — CLI-specific flags that the server never sees
- *                              (draft, harness, forkFrom)
+ * Exclusion allowlist:
  *   ADD_AGENT_CLI_ONLY       — CLI-specific add-agent flags
  *                              (notifyAgent)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import {
-  createTaskInputSchema,
   sendMessageInputSchema,
   setStatusInputSchema,
   addAgentInputSchema,
   closeTaskInputSchema,
   deleteTaskInputSchema,
-} from '../../../server/orchestrator/command-schemas.js';
-import { registerCreateTask } from './create-task.js';
+} from '@octomux/capabilities';
 import { registerAddAgent } from './add-agent.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,101 +62,6 @@ function buildProgram(register: (p: Command) => void): Command {
   register(program);
   return program;
 }
-
-// ─── create_task ──────────────────────────────────────────────────────────────
-
-/**
- * Orchestrator-only extensions not present on the CLI. Excluding these keeps the
- * drift test focused on fields that MUST match between CLI and schema. These are
- * injected by the server or provided only by the conductor session, never by CLI users.
- */
-const CREATE_TASK_SCHEMA_ONLY: ReadonlySet<string> = new Set([
-  'kind', // orchestrator workflow kind: plan / implement / workflow
-  'effort', // model right-sizing advisory hint
-  'conversation_id', // server-injected; conductor conversation that owns the task
-]);
-
-/**
- * CLI-specific flags that are resolved/translated before the REST call reaches
- * the executor, so they are intentionally absent from the schema:
- *
- *   draft     → CLI passes { draft: true } in the REST body (separate key)
- *   harness   → CLI passes { harness_id: ... } (different key)
- *   forkFrom  → CLI resolves to base_branch before calling the API
- */
-const CREATE_TASK_CLI_ONLY: ReadonlySet<string> = new Set(['draft', 'harness', 'forkFrom']);
-
-/**
- * Explicit CLI camelCase → schema snake_case renames for fields where the
- * standard camelCase-to-snake_case conversion gives the wrong result:
- *   mode → run_mode  (CLI uses --mode; schema field is run_mode)
- */
-const CREATE_TASK_CLI_TO_SCHEMA: ReadonlyMap<string, string> = new Map([['mode', 'run_mode']]);
-
-describe('CLI drift test — createTaskInputSchema', () => {
-  it(
-    'schema fields cover all CLI create-task flags (minus CLI-only) ' +
-      'and vice-versa (minus schema-only) — FAILS if either side adds/removes a flag',
-    () => {
-      const program = buildProgram(registerCreateTask);
-      const createTaskCmd = program.commands.find((c) => c.name() === 'create-task');
-      expect(createTaskCmd, 'create-task subcommand must be registered').toBeDefined();
-
-      // CLI camelCase keys → schema snake_case keys
-      const cliSchemaKeys = new Set<string>();
-      for (const cliKey of collectCommanderKeys(createTaskCmd!)) {
-        if (CREATE_TASK_CLI_ONLY.has(cliKey)) continue;
-        const schemaKey = CREATE_TASK_CLI_TO_SCHEMA.get(cliKey) ?? toSnakeCase(cliKey);
-        cliSchemaKeys.add(schemaKey);
-      }
-
-      // Schema keys present on the CLI (exclude orchestrator-only extensions)
-      const schemaKeys = new Set(
-        Object.keys(createTaskInputSchema.shape).filter((k) => !CREATE_TASK_SCHEMA_ONLY.has(k)),
-      );
-
-      const cliMissingFromSchema = [...cliSchemaKeys].filter((k) => !schemaKeys.has(k));
-      const schemaMissingFromCli = [...schemaKeys].filter((k) => !cliSchemaKeys.has(k));
-
-      expect(
-        cliMissingFromSchema,
-        `CLI flags mapped to these schema keys but the keys are missing from createTaskInputSchema.` +
-          ` Add them to the schema or to CREATE_TASK_CLI_ONLY: ${cliMissingFromSchema.join(', ')}`,
-      ).toEqual([]);
-
-      expect(
-        schemaMissingFromCli,
-        `Schema has these fields but they have no matching CLI flag.` +
-          ` Add --${schemaMissingFromCli.map((k) => k.replace(/_/g, '-')).join(' / --')} to the CLI` +
-          ` or add the fields to CREATE_TASK_SCHEMA_ONLY: ${schemaMissingFromCli.join(', ')}`,
-      ).toEqual([]);
-    },
-  );
-
-  it('schema parses valid create-task input', () => {
-    const r = createTaskInputSchema.safeParse({
-      title: 'Fix bug',
-      description: 'Description',
-      repo_path: '/tmp/repo',
-      run_mode: 'new',
-    });
-    expect(r.success).toBe(true);
-  });
-
-  it('schema rejects invalid run_mode', () => {
-    const r = createTaskInputSchema.safeParse({
-      title: 'T',
-      description: 'd',
-      run_mode: 'invalid-mode',
-    });
-    expect(r.success).toBe(false);
-  });
-
-  it('schema rejects invalid kind', () => {
-    const r = createTaskInputSchema.safeParse({ title: 'T', description: 'd', kind: 'bogus' });
-    expect(r.success).toBe(false);
-  });
-});
 
 // ─── send_message ─────────────────────────────────────────────────────────────
 
@@ -248,36 +150,5 @@ describe('CLI drift test — deleteTaskInputSchema', () => {
   it('requires task_id', () => {
     expect(deleteTaskInputSchema.safeParse({ task_id: 't1' }).success).toBe(true);
     expect(deleteTaskInputSchema.safeParse({}).success).toBe(false);
-  });
-});
-
-// ─── Schema surface area guard ────────────────────────────────────────────────
-
-describe('createTaskInputSchema field surface area guard', () => {
-  it('has exactly the expected top-level fields (update this test when the schema changes)', () => {
-    const fields = new Set(Object.keys(createTaskInputSchema.shape));
-
-    // CLI-mapped fields
-    const CLI_MAPPED = [
-      'title',
-      'description',
-      'repo_path',
-      'initial_prompt',
-      'branch',
-      'base_branch',
-      'run_mode',
-      'worktree_path',
-      'model',
-      'notify_task',
-    ] as const;
-    for (const f of CLI_MAPPED) expect(fields.has(f), `schema must have field ${f}`).toBe(true);
-
-    // Orchestrator-only extensions
-    const ORCHESTRATOR_ONLY = ['kind', 'effort', 'conversation_id'] as const;
-    for (const f of ORCHESTRATOR_ONLY)
-      expect(fields.has(f), `schema must have field ${f}`).toBe(true);
-
-    // Exact count — prevents silent accidental additions
-    expect(fields.size).toBe(CLI_MAPPED.length + ORCHESTRATOR_ONLY.length);
   });
 });

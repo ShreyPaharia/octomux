@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestDb } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockCreateChat = vi.fn();
 
@@ -8,10 +6,13 @@ vi.mock('../../chats.js', () => ({
   createChat: (...args: unknown[]) => mockCreateChat(...args),
 }));
 
+const { createTestDb } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const { runDailyPlanFromSchedule, finishDailyPlanRunForChat } = await import('./run.js');
+const { insertRun, getRun } = await import('../../repositories/runs.js');
+
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { runDailyPlanFromSchedule, finishDailyPlanRunForChat } from './run.js';
-import { insertRun, getRun } from '../../repositories/runs.js';
 import type { RunResult } from '../../types.js';
 
 /** Insert a schedule row with a prompt — schedule.prompt is the self-contained

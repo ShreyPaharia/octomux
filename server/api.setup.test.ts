@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import { createTestDb } from './test-helpers.js';
-import { createApp } from './app.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 
 vi.mock('./setup-status.js', () => ({
   getSetupStatus: vi.fn(async () => ({
@@ -39,8 +36,12 @@ vi.mock('./task-engine/index.js', () => ({
   hopAgent: vi.fn(),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 describe('GET /api/setup/status', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -60,7 +61,7 @@ describe('GET /api/setup/status', () => {
 });
 
 describe('POST /api/setup/install', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -84,7 +85,7 @@ describe('POST /api/setup/install', () => {
 });
 
 describe('POST /api/hooks/install', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -107,7 +108,7 @@ describe('POST /api/hooks/install', () => {
 });
 
 describe('GET /api/hooks/templates', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

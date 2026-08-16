@@ -52,10 +52,26 @@ export const tmuxWindowSubstrate: TmuxWindowSubstrate = {
       'launching tmux window',
     );
 
+    // Fresh sessions chain all three tmux commands into one invocation (`;` is
+    // tmux's command separator) — one process spawn instead of three. Each
+    // spawn is ~140ms, which was ~25% of task-creation wall clock.
     if (fresh) {
-      await execTmux(appendStartupCmd(['new-session', '-d', '-s', session, '-c', cwd], startupCmd));
-      await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
-      return getActiveWindowIndex(session);
+      const { stdout } = await execTmux([
+        ...appendStartupCmd(['new-session', '-d', '-s', session, '-c', cwd], startupCmd),
+        ';',
+        'set-option',
+        '-t',
+        session,
+        'aggressive-resize',
+        'on',
+        ';',
+        'display-message',
+        '-t',
+        session,
+        '-p',
+        '#{window_index}',
+      ]);
+      return parseInt(stdout.trim(), 10);
     }
 
     await execTmux(appendStartupCmd(['new-window', '-t', session, '-c', cwd], startupCmd));
@@ -65,7 +81,19 @@ export const tmuxWindowSubstrate: TmuxWindowSubstrate = {
   async createEmptySession(opts: { session: string; cwd: string }): Promise<void> {
     const { session, cwd } = opts;
     logger.debug({ session, cwd }, 'creating empty tmux session');
-    await execTmux(['new-session', '-d', '-s', session, '-c', cwd]);
-    await execTmux(['set-option', '-t', session, 'aggressive-resize', 'on']);
+    await execTmux([
+      'new-session',
+      '-d',
+      '-s',
+      session,
+      '-c',
+      cwd,
+      ';',
+      'set-option',
+      '-t',
+      session,
+      'aggressive-resize',
+      'on',
+    ]);
   },
 };

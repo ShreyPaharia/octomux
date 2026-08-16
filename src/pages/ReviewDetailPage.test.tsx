@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import ReviewDetailPage from './ReviewDetailPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { ReviewDetail, InlineCommentDTO } from '@/lib/api/reviewApi';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -19,13 +15,13 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock('react-router-dom', (importOriginal) => {
+  const actual = importOriginal() as Record<string, unknown>;
   return { ...actual, useParams: () => ({ id: 't1' }) };
 });
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-vi.mock('@/components/DiffViewer', async () => {
-  const { useEffect } = await import('react');
+vi.mock('@/components/DiffViewer', () => {
+  const { useEffect } = vi.importActual<typeof import('react')>('react');
   return {
     DiffViewer: ({
       listRef,
@@ -52,6 +48,11 @@ vi.mock('@/components/DiffViewer', async () => {
     },
   };
 });
+
+const { screen, fireEvent, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: ReviewDetailPage } = await import('./ReviewDetailPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 function comment(overrides: Partial<InlineCommentDTO> = {}): InlineCommentDTO {
   return {

@@ -1,9 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import TasksPage from './TasksPage';
-import { renderWithRouter, makeTask } from '../test-helpers';
-import { TasksProvider } from '../lib/tasks-context';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -22,6 +17,12 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: TasksPage } = await import('./TasksPage');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
+const { TasksProvider } = await import('../lib/tasks-context');
 
 function renderDashboard() {
   return renderWithRouter(

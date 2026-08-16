@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from './bun-test.js';
 import { postPullRequestReview } from './github-client.js';
 
 const SAMPLE_INPUT = {

@@ -1,82 +1,40 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import pino from 'pino';
-import { childLogger, getLogger, setLogger } from './logger.js';
+/**
+ * Guards the in-process pino-roll destination. pino's `transport:` option spawns
+ * a worker that resolves targets by module path, which fails inside a compiled
+ * binary — this asserts the replacement actually writes the rotated file.
+ *
+ * Runs under `bun test` (see `test:bun`), with NODE_ENV=production so the logger
+ * isn't silenced and writes under a throwaway OCTOMUX_DATA_DIR.
+ *
+ *   bun test ./server/logger.bun-test.ts
+ */
 
-/** Collect pino JSON log lines into memory for assertions. */
-function bufferStream() {
-  const chunks: string[] = [];
-  return {
-    stream: {
-      write(chunk: string) {
-        chunks.push(chunk);
-      },
-    },
-    lines(): Array<Record<string, unknown>> {
-      return chunks
-        .join('')
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as Record<string, unknown>);
-    },
-  };
-}
+import { test, expect } from 'bun:test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
-describe('logger', () => {
-  let original: ReturnType<typeof getLogger>;
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-logger-'));
+process.env.OCTOMUX_DATA_DIR = root;
+process.env.NODE_ENV = 'production';
 
-  beforeEach(() => {
-    original = getLogger();
-  });
-  afterEach(() => {
-    setLogger(original);
-  });
+const { childLogger } = await import('./logger.js');
 
-  it('childLogger tags log lines with the module name', () => {
-    const buf = bufferStream();
-    setLogger(pino({ level: 'trace' }, buf.stream));
+test('writes structured lines to the rotated log file, no transport worker', async () => {
+  childLogger('logcheck').info({ task_id: 'task-abc' }, 'hello from the compiled logger');
 
-    childLogger('db').info({ task_id: 't1' }, 'hello');
+  const logDir = path.join(root, 'logs');
+  let lines = '';
+  // The roll stream resolves asynchronously; poll briefly for the first flush.
+  for (let i = 0; i < 40 && !lines; i++) {
+    await Bun.sleep(50);
+    if (!fs.existsSync(logDir)) continue;
+    lines = fs
+      .readdirSync(logDir)
+      .map((f) => fs.readFileSync(path.join(logDir, f), 'utf8'))
+      .join('');
+  }
 
-    const lines = buf.lines();
-    expect(lines).toHaveLength(1);
-    expect(lines[0].module).toBe('db');
-    expect(lines[0].task_id).toBe('t1');
-    expect(lines[0].msg).toBe('hello');
-  });
-
-  it('respects the root logger level', () => {
-    const buf = bufferStream();
-    setLogger(pino({ level: 'warn' }, buf.stream));
-
-    const log = childLogger('startup');
-    log.info('quiet');
-    log.warn('loud');
-    log.error('louder');
-
-    const msgs = buf.lines().map((l) => l.msg);
-    expect(msgs).toEqual(['loud', 'louder']);
-  });
-
-  it('preserves structured fields like task_id and agent_id', () => {
-    const buf = bufferStream();
-    setLogger(pino({ level: 'trace' }, buf.stream));
-
-    childLogger('task-runner').info(
-      { task_id: 'abc', agent_id: 'xyz', operation: 'create' },
-      'Task created',
-    );
-
-    const [line] = buf.lines();
-    expect(line.task_id).toBe('abc');
-    expect(line.agent_id).toBe('xyz');
-    expect(line.operation).toBe('create');
-    expect(line.module).toBe('task-runner');
-  });
-
-  it('defaults to silent in the test environment', () => {
-    // Root logger default (built at import time with NODE_ENV=test) should be silent —
-    // verify by calling info on a freshly built child and ensuring nothing throws.
-    // This exercises the live config; no buffer is required.
-    expect(() => childLogger('test').info('should be silent')).not.toThrow();
-  });
+  expect(lines).toContain('hello from the compiled logger');
+  expect(lines).toContain('"task_id":"task-abc"');
 });

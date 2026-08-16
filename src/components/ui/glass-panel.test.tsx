@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { render } from '@testing-library/react';
 import { GlassPanel } from './glass-panel';
 

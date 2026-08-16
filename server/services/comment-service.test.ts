@@ -1,3 +1,4 @@
+import type { CreateInlineCommentInput } from './comment-service.js';
 /**
  * Unit tests for the inline-comment service (SHR-176).
  *
@@ -5,8 +6,7 @@
  * ServiceError with the right status, plus the happy path that inserts a row.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb, insertTestTask } from '../test-helpers.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mock git execFile + the diff module ────────────────────────────────────
 
@@ -20,9 +20,11 @@ vi.mock('@octomux/diff-engine', () => ({
   getFileDiff: (...args: unknown[]) => mockGetFileDiff(...args),
 }));
 
+const { createTestDb, insertTestTask } = await import('../test-helpers.js');
+
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { createInlineComment, type CreateInlineCommentInput } from './comment-service.js';
+const { createInlineComment } = await import('./comment-service.js');
 
 /** Drive the promisified execFile callback with success. */
 function execOk(stdout: string) {

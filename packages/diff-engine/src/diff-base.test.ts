@@ -1,16 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
-import { execFile } from 'child_process';
-import {
-  BaseBranchMissingError,
-  BaseUnavailableError,
-  clearDiffBaseCache,
-  resolveDiffBase,
-} from './diff-base.js';
+const { execFile } = await import('child_process');
+const { BaseBranchMissingError, BaseUnavailableError, clearDiffBaseCache, resolveDiffBase } =
+  await import('./diff-base.js');
 import type { DiffTarget } from './types.js';
 
 const baseTarget: DiffTarget = {

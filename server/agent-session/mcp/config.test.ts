@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';

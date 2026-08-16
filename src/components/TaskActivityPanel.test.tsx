@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import { renderWithRouter } from '../test-helpers';
-import { TaskActivityPanel } from './TaskActivityPanel';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { TaskUpdate } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -14,6 +11,10 @@ vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { renderWithRouter } = await import('../test-helpers');
+const { TaskActivityPanel } = await import('./TaskActivityPanel');
 
 function makeUpdate(overrides: Partial<TaskUpdate> = {}): TaskUpdate {
   return {

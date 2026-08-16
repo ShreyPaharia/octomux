@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import path from 'path';
-import os from 'os';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 import type { HookEnvelope } from './hook-types.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -35,6 +33,9 @@ vi.mock('fs', () => ({
 // hardcoded 30000ms default, matching pre-existing behavior.
 const mockGetSettings = vi.fn(async () => ({}) as { hookTimeoutMs?: number });
 vi.mock('./settings.js', () => ({ getSettings: () => mockGetSettings() }));
+
+const { default: path } = await import('path');
+const { default: os } = await import('os');
 
 // ─── Fake Process ─────────────────────────────────────────────────────────────
 

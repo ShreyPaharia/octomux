@@ -5,11 +5,7 @@
  * 1. addOptimistic is called with each created task immediately after POST returns.
  * 2. addOptimistic is NOT called when createTask fails (no partial optimistic injection).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { BulkCreateDialog } from './BulkCreateDialog';
-import { renderWithRouter, makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { TasksState } from '../lib/tasks-context';
 
 // ── Hoist API mocks ──────────────────────────────────────────────────────────
@@ -44,6 +40,11 @@ vi.mock('../lib/tasks-context', () => ({
   useTasksContextOptional: () => null,
   TasksProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { BulkCreateDialog } = await import('./BulkCreateDialog');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
 
 const REPO_PLACEHOLDER = '/Users/you/projects/my-repo';
 

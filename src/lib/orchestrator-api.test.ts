@@ -9,7 +9,7 @@
  *  - close() stops reconnection
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 import {
   openOrchestratorWs,
   WS_RECONNECT_DELAYS_MS,

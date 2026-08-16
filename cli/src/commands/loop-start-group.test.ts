@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import { registerLoopStartGroup } from './loop-start-group.js';
-import type { OctomuxClient, LoopGroupResult } from '../client.js';
+import type { OctomuxClient, RunResult, LoopGroupResult } from '../client.js';
 
 function makeClient(startLoopGroup: OctomuxClient['startLoopGroup']): OctomuxClient {
   return { startLoopGroup } as OctomuxClient;
@@ -19,8 +19,8 @@ function buildProgram(client: OctomuxClient): Command {
   return program;
 }
 
-function makeGroup(overrides: Partial<LoopGroupResult> = {}): LoopGroupResult {
-  return {
+function makeGroup(overrides: Partial<LoopGroupResult> = {}): RunResult {
+  const group: LoopGroupResult = {
     id: 'group-1',
     n: 3,
     repo_path: '/repo',
@@ -30,8 +30,24 @@ function makeGroup(overrides: Partial<LoopGroupResult> = {}): LoopGroupResult {
     judge_rationale: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
-    loopRuns: [],
     ...overrides,
+  };
+  return {
+    id: 'run-group-1',
+    workflow_kind: 'loop-group',
+    trigger: 'manual',
+    schedule_id: null,
+    task_id: null,
+    chat_id: null,
+    loop_run_id: null,
+    status: 'running',
+    effective_status: 'running',
+    result_json: null,
+    error: null,
+    started_at: '2026-01-01T00:00:00Z',
+    ended_at: null,
+    loop: null,
+    loopGroup: { ...group, candidates: [] },
   };
 }
 

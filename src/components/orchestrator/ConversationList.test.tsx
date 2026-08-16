@@ -11,7 +11,7 @@
  *  - Empty state renders a placeholder.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../../bun-test.js';
 import { screen, fireEvent } from '@testing-library/react';
 import { ConversationList } from './ConversationList';
 import { renderWithRouter } from '../../test-helpers';

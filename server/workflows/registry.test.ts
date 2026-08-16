@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { registerWorkflow, getWorkflow, listWorkflows } from './registry.js';
 
 describe('workflow registry', () => {

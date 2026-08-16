@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import { registerPrExtractEmit } from './pr-extract-emit.js';
 

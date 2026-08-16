@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb } from '../../test-helpers.js';
-import { listRunsForWorkflow } from '../../repositories/runs.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../../bun-test.js';
 
 const mockStartTask = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../task-engine/index.js', () => ({
@@ -12,9 +10,11 @@ vi.mock('../../events.js', () => ({
   broadcast: vi.fn((...args: unknown[]) => mockBroadcast(...args)),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { createTestDb } = await import('../../test-helpers.js');
+const { listRunsForWorkflow } = await import('../../repositories/runs.js');
+const { createExtractTaskFromMergedPr } = await import('./run.js');
 
-import { createExtractTaskFromMergedPr } from './run.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 describe('createExtractTaskFromMergedPr', () => {
   beforeEach(() => {

@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb, insertTestTask, execFileOk } from './test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
-import { execFile } from 'child_process';
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb, insertTestTask, execFileOk } = await import('./test-helpers.js');
+const { execFile } = await import('child_process');
 
 describe('POST/DELETE /api/tasks/:id/files/*path/reviewed', () => {
   let app: ReturnType<typeof createApp>;

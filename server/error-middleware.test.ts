@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './bun-test.js';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { ServiceError } from './services/errors.js';

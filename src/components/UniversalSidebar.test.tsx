@@ -1,10 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { UniversalSidebar } from './sidebar/universal-sidebar';
-import { forkDisabledReason } from './sidebar/nav-items';
-import { renderWithRouter, makeTask } from '../test-helpers';
-import { TasksProvider } from '../lib/tasks-context';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 import type { RunMode } from '@octomux/types';
 import type { SidebarItem } from '@/lib/sidebar-utils';
 
@@ -23,6 +17,13 @@ const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor, within, act } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { UniversalSidebar } = await import('./sidebar/universal-sidebar');
+const { forkDisabledReason } = await import('./sidebar/nav-items');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
+const { TasksProvider } = await import('../lib/tasks-context');
 
 function renderSidebar(route: string = '/') {
   return renderWithRouter(

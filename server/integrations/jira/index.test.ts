@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../bun-test.js';
 import type { HookEnvelope } from '../../hook-types.js';
 
 // ─── Mock fetch globally ──────────────────────────────────────────────────────

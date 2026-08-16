@@ -1,20 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertUserTerminal,
-  getTask,
-  getAgents,
-  getUserTerminals,
-  findCallback,
-  deadSessionMock,
-  execFileOk,
-  execFileFail,
-  DEFAULTS,
-} from './test-helpers.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -32,7 +17,9 @@ vi.mock('child_process', () => ({
 vi.mock('./task-engine/index.js', () => ({
   closeTask: vi.fn(),
   deleteTask: vi.fn(async () => undefined),
+  softDeleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
+  resumeTask: vi.fn(async () => undefined),
   addAgent: vi.fn().mockResolvedValue({ id: 'a2', label: 'Agent 2', window_index: 1 }),
 }));
 
@@ -57,6 +44,22 @@ vi.mock('./github-login.js', () => ({
 }));
 
 const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertUserTerminal,
+  getTask,
+  getAgents,
+  getUserTerminals,
+  findCallback,
+  deadSessionMock,
+  execFileOk,
+  execFileFail,
+  DEFAULTS,
+} = await import('./test-helpers.js');
+const { getDb } = await import('./db.js');
+
+const {
   checkTaskStatus,
   pollStatuses,
   pollTerminalActivity,
@@ -72,7 +75,8 @@ const {
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
 const { sendMessageToAgent } = await import('./tmux-input.js');
-const { closeTask, deleteTask, startTask, addAgent } = await import('./task-engine/index.js');
+const { closeTask, deleteTask, softDeleteTask, startTask, resumeTask, addAgent } =
+  await import('./task-engine/index.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
@@ -81,7 +85,7 @@ await import('./workflows/index.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();
@@ -140,7 +144,7 @@ describe('pollStatuses', () => {
     },
   ];
 
-  describe.each(sessionDeathCases)(
+  describe.each([...sessionDeathCases])(
     'when $taskState task session dies',
     ({ taskState, expectedState, expectedError }) => {
       beforeEach(() => {
@@ -258,7 +262,7 @@ describe('pollStatuses', () => {
 
   const ignoredStates = ['idle', 'error'] as const;
 
-  it.each(ignoredStates)('ignores tasks with runtime_state "%s"', async (state) => {
+  it.each([...ignoredStates])('ignores tasks with runtime_state "%s"', async (state) => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
 
     vi.mocked(execFile).mockImplementation(deadSessionMock as any);
@@ -389,7 +393,7 @@ describe('ensureHooksInstalled', () => {
     { name: 'tasks without worktree', overrides: { worktree: null } },
   ];
 
-  it.each(skipCases)('skips $name', async ({ overrides }) => {
+  it.each([...skipCases])('skips $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
     await ensureHooksInstalled();
@@ -413,7 +417,7 @@ describe('ensureHooksInstalled', () => {
       throw new Error('permission denied');
     });
 
-    await expect(ensureHooksInstalled()).resolves.not.toThrow();
+    await expect(ensureHooksInstalled()).resolves.toBeUndefined();
   });
 });
 
@@ -443,7 +447,7 @@ describe('detectPR', () => {
     { name: 'repo_path is empty', setup: () => {}, overrides: { repo_path: '' } },
   ];
 
-  it.each(nullReturnCases)('returns null when $name', async ({ setup, overrides }) => {
+  it.each([...nullReturnCases])('returns null when $name', async ({ setup, overrides }) => {
     setup?.();
     const result = await detectPR({ ...DEFAULTS.runningTask, ...overrides } as Task);
     expect(result).toBeNull();
@@ -504,7 +508,7 @@ describe('pollPRs', () => {
   // pr-detection.test.ts). Only a missing branch skips detection.
   const pollPRSkipCases = [{ name: 'has no branch', overrides: { branch: null } }];
 
-  it.each(pollPRSkipCases)('skips tasks that $name', async ({ overrides }) => {
+  it.each([...pollPRSkipCases])('skips tasks that $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
 
     await pollPRs();
@@ -521,7 +525,7 @@ describe('pollPRs', () => {
     { state: 'error', shouldPoll: false },
   ] as const;
 
-  it.each(prPollStates)(
+  it.each([...prPollStates])(
     'runtime_state "$state" → shouldPoll=$shouldPoll',
     async ({ state, shouldPoll }) => {
       insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
@@ -627,7 +631,7 @@ describe('checkMergedPRs', () => {
       return undefined as any;
     });
 
-    await expect(checkMergedPRs()).resolves.not.toThrow();
+    await expect(checkMergedPRs()).resolves.toBeUndefined();
     expect(closeTask).not.toHaveBeenCalled();
   });
 
@@ -656,7 +660,7 @@ describe('checkMergedPRs', () => {
 
   const nonRunningStates = ['idle', 'error', 'setting_up'] as const;
 
-  it.each(nonRunningStates)('skips tasks with runtime_state "%s"', async (state) => {
+  it.each([...nonRunningStates])('skips tasks with runtime_state "%s"', async (state) => {
     insertTask(db, {
       ...DEFAULTS.runningTask,
       runtime_state: state,
@@ -903,13 +907,11 @@ describe('pollReviewerRequests', () => {
     expect((created!.branch as string).startsWith('review/')).toBe(true);
     expect(created!.branch).toContain('pr-42');
     expect(created!.title).toContain('#42');
-    expect((created!.initial_prompt as string).startsWith('/octomux:review-walkthrough')).toBe(
-      true,
-    );
+    expect(created!.initial_prompt).toContain('/review-artifact');
     expect(created!.initial_prompt).toContain('https://github.com');
-    // Prompt pins the new review task's own id for the review CLI.
+    // Prompt pins the new review task's own id so the agent closes the right task.
     expect(created!.initial_prompt).toContain(`Review task id: ${created!.id}`);
-    expect(created!.initial_prompt).toContain(`--task ${created!.id}`);
+    expect(created!.initial_prompt).toContain(`octomux close-task ${created!.id}`);
     expect(broadcast).toHaveBeenCalledWith({
       type: 'task:created',
       payload: { taskId: created!.id },
@@ -1103,64 +1105,64 @@ describe('pollReviewerRequests', () => {
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
   });
 
-  it('falls back to full re-review when prev head is unreachable from new head', async () => {
+  it('resumes a closed review session with a re-review prompt when head advances', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     insertTask(db, {
-      id: 'running-review',
+      id: 'closed-review',
       repo_path: REPO,
-      worktree: '/wt',
-      runtime_state: 'running',
-      tmux_session: 'octomux-agent-running-review',
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
       pr_number: 42,
       pr_head_sha: 'sha-old',
       source: 'auto_review',
     });
+    // The task ran before: it has a (stopped) worker → not a draft.
     insertAgent(db, {
       id: 'agent-a',
-      task_id: 'running-review',
+      task_id: 'closed-review',
       window_index: 0,
-      status: 'running',
+      status: 'stopped',
     });
-
-    // PR list mock + override merge-base --is-ancestor to fail.
-    const searchNodes = [
-      {
-        number: 42,
-        title: 'Add thing',
-        url: 'https://github.com/org/repo/pull/42',
-        author: { login: 'teammate' },
-        headRefOid: 'sha-new',
-        headRefName: 'feat/thing',
-        baseRefName: 'main',
-        repository: { nameWithOwner: 'org/repo' },
-        reviewRequests: {
-          nodes: [{ requestedReviewer: { __typename: 'User', login: OWNER } }],
-        },
-      },
-    ];
-    const graphqlBody = JSON.stringify({ data: { search: { nodes: searchNodes } } });
-
-    vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-      const cb = findCallback(...args)!;
-      const cmd = args[0] as string;
-      const cmdArgs = args[1] as string[];
-      if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
-        cb(null, { stdout: graphqlBody, stderr: '' });
-      } else if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
-        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
-      } else if (cmd === 'git' && cmdArgs?.includes('merge-base')) {
-        cb(new Error('not an ancestor'));
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as unknown as ReturnType<typeof execFile>;
-    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
 
     await pollReviewerRequests();
 
-    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
-    const nudgeMessage = vi.mocked(sendMessageToAgent).mock.calls[0][2];
-    expect(nudgeMessage).toMatch(/previous_head_unreachable=true/);
+    expect(vi.mocked(resumeTask)).toHaveBeenCalledOnce();
+    const [task, opts] = vi.mocked(resumeTask).mock.calls[0] as [Task, { prompt?: string }];
+    expect(task.id).toBe('closed-review');
+    expect(opts.prompt).toContain('/review-artifact');
+    expect(opts.prompt).toContain('sha-new');
+    expect(opts.prompt).toContain('octomux close-task closed-review');
+    // Prompt refresh must not happen — the resumed conversation gets the nudge.
+    expect(getTask(db, 'closed-review')!.pr_head_sha).toBe('sha-new');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:updated',
+      payload: { taskId: 'closed-review' },
+    });
+  });
+
+  it('does not resume a closed review session when head SHA is unchanged', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-aaa' })]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(resumeTask)).not.toHaveBeenCalled();
   });
 
   it('does not re-nudge a running review when head SHA is unchanged', async () => {
@@ -1270,6 +1272,86 @@ describe('pollReviewerRequests', () => {
     expect(getTask(db, 'running-review')).toBeDefined();
   });
 
+  /**
+   * Like mockPrList([]), but also answers the aliased pullRequest-state GraphQL
+   * query (issued by cleanupResolvedReviews) with the given per-number states.
+   */
+  function mockPrListWithStates(states: Record<number, string>) {
+    const searchBody = JSON.stringify({ data: { search: { nodes: [] } } });
+    const repoFields = Object.fromEntries(
+      Object.entries(states).map(([n, state]) => [`p${n}`, { state }]),
+    );
+    const statesBody = JSON.stringify({ data: { repository: repoFields } });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args)!;
+      const cmd = args[0] as string;
+      const cmdArgs = args[1] as string[];
+      if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
+        const q = cmdArgs.find((a) => a.startsWith('query=')) ?? '';
+        cb(null, { stdout: q.includes('review-requested') ? searchBody : statesBody, stderr: '' });
+      } else if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
+        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+  }
+
+  it('keeps a closed review session while its PR is still open', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      pr_number: 99,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrListWithStates({ 99: 'OPEN' });
+
+    await pollReviewerRequests();
+
+    expect(getTask(db, 'closed-review')).toBeDefined();
+    expect(vi.mocked(softDeleteTask)).not.toHaveBeenCalled();
+  });
+
+  it('trashes a closed review session once its PR is merged', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      pr_number: 99,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrListWithStates({ 99: 'MERGED' });
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(softDeleteTask)).toHaveBeenCalledOnce();
+    const trashed = vi.mocked(softDeleteTask).mock.calls[0][0] as Task;
+    expect(trashed.id).toBe('closed-review');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:deleted',
+      payload: { taskId: 'closed-review' },
+    });
+  });
+
   it('does nothing when there are no tracked repos', async () => {
     mockPrList([]);
 
@@ -1286,7 +1368,7 @@ describe('pollReviewerRequests', () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     vi.mocked(execFile).mockImplementation(execFileFail('gh not found') as any);
 
-    await expect(pollReviewerRequests()).resolves.not.toThrow();
+    await expect(pollReviewerRequests()).resolves.toBeUndefined();
     const autos = db.prepare(`SELECT id FROM tasks WHERE source = 'auto_review'`).all();
     expect(autos).toHaveLength(0);
   });

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
+import Database from './sqlite.js';
 import request from 'supertest';
 import fs from 'fs';
 import path from 'path';
@@ -18,17 +18,26 @@ import {
   upsertManagedTask,
   eventsSince,
   createConversation,
+  getCard,
+  listAllPendingCards,
+  setGlobalMonitor,
 } from './repositories/orchestrator.js';
-import { advancePhaseForLabel } from './hooks.js';
+import { advancePhaseForLabel, resolveGateCardConversationId } from './hooks.js';
+import { getArtifactSummary } from './artifact.js';
 
 describe('Hook endpoints', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
+  // Real worktree dir: current_summary now lives in .octomux/artifact.md
+  // (spec §5.5), so post-tool-use / Stop hooks need an actual directory to
+  // write into, not just a DB row.
+  let worktreeDir: string;
 
   beforeEach(() => {
     db = createTestDb();
     app = createApp();
-    insertTask(db, { id: 't1', runtime_state: 'running' });
+    worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-hooks-test-'));
+    insertTask(db, { id: 't1', runtime_state: 'running', worktree: worktreeDir });
     insertAgent(db, {
       id: 'a1',
       task_id: 't1',
@@ -37,13 +46,17 @@ describe('Hook endpoints', () => {
     } as any);
   });
 
+  afterEach(() => {
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
+  });
+
   describe('POST /api/hooks/user-prompt-submit', () => {
     const activatableCases = [
       { from: 'idle', description: 'idle agent' },
       { from: 'waiting', description: 'waiting agent' },
     ];
 
-    it.each(activatableCases)(
+    it.each([...activatableCases])(
       'sets $description to active when user submits a prompt',
       async ({ from }) => {
         db.prepare(`UPDATE workers SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
@@ -217,17 +230,15 @@ describe('Hook endpoints', () => {
       },
     ];
 
-    it.each(summaryCases)('populates current_summary: $name', async ({ body, expected }) => {
+    it.each([...summaryCases])('populates current_summary: $name', async ({ body, expected }) => {
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', ...body })
         .expect(200);
 
-      const row = db
-        .prepare(`SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?`)
-        .get('t1') as { current_summary: string | null; current_summary_updated_at: string | null };
-      expect(row.current_summary).toBe(expected);
-      expect(row.current_summary_updated_at).not.toBeNull();
+      const result = getArtifactSummary(worktreeDir);
+      expect(result.current_summary).toBe(expected);
+      expect(result.current_summary_updated_at).not.toBeNull();
     });
 
     it('truncates very long tool details to ≤ 100 chars with ellipsis', async () => {
@@ -237,12 +248,11 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: long } })
         .expect(200);
 
-      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
-        current_summary: string;
-      };
-      expect(row.current_summary.length).toBeLessThanOrEqual(100);
-      expect(row.current_summary.startsWith('Bash: ')).toBe(true);
-      expect(row.current_summary.endsWith('…')).toBe(true);
+      const { current_summary } = getArtifactSummary(worktreeDir);
+      expect(current_summary).not.toBeNull();
+      expect(current_summary!.length).toBeLessThanOrEqual(100);
+      expect(current_summary!.startsWith('Bash: ')).toBe(true);
+      expect(current_summary!.endsWith('…')).toBe(true);
     });
 
     it('leaves current_summary unchanged when tool_name is missing', async () => {
@@ -251,85 +261,7 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_input: { command: 'noop' } })
         .expect(200);
 
-      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
-        current_summary: string | null;
-      };
-      expect(row.current_summary).toBeNull();
-    });
-  });
-
-  describe('POST /api/hooks/post-tool-use — PR tracking', () => {
-    it('upserts a pull_requests row when gh pr create output includes a URL', async () => {
-      await request(app)
-        .post('/api/hooks/post-tool-use?token=tok-test')
-        .send({
-          session_id: 'sess-123',
-          tool_name: 'Bash',
-          tool_input: { command: 'gh pr create --title "fix: thing" --body ""' },
-          tool_response: 'https://github.com/org/repo/pull/55\n',
-        })
-        .expect(200);
-
-      const rows = db
-        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
-        .all() as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(1);
-      expect(rows[0].url).toBe('https://github.com/org/repo/pull/55');
-      expect(rows[0].number).toBe(55);
-    });
-
-    it('upserts a branch-only row on git push (no url/number yet)', async () => {
-      await request(app)
-        .post('/api/hooks/post-tool-use?token=tok-test')
-        .send({
-          session_id: 'sess-123',
-          tool_name: 'Bash',
-          tool_input: { command: 'git push -u origin agents/my-branch' },
-          tool_response: 'Branch pushed.',
-        })
-        .expect(200);
-
-      const rows = db
-        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
-        .all() as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(1);
-      expect(rows[0].branch).toBe('agents/my-branch');
-      expect(rows[0].url).toBeNull();
-      expect(rows[0].number).toBeNull();
-    });
-
-    it('no-ops when tool_response is missing', async () => {
-      await request(app)
-        .post('/api/hooks/post-tool-use?token=tok-test')
-        .send({
-          session_id: 'sess-123',
-          tool_name: 'Bash',
-          tool_input: { command: 'gh pr create --title "x"' },
-          // no tool_response
-        })
-        .expect(200);
-
-      const rows = db
-        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
-        .all() as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(0);
-    });
-
-    it('no-ops for unrelated commands (npm test)', async () => {
-      await request(app)
-        .post('/api/hooks/post-tool-use?token=tok-test')
-        .send({
-          session_id: 'sess-123',
-          tool_name: 'Bash',
-          tool_input: { command: 'npm test' },
-          tool_response: 'Tests passed',
-        })
-        .expect(200);
-
-      const rows = db
-        .prepare(`SELECT * FROM pull_requests WHERE task_id = 't1'`)
-        .all() as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(0);
+      expect(getArtifactSummary(worktreeDir).current_summary).toBeNull();
     });
   });
 
@@ -461,7 +393,7 @@ describe('Hook endpoints', () => {
 });
 
 describe('findAgentByTokenAndSession', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -522,7 +454,7 @@ describe('findAgentByTokenAndSession', () => {
 });
 
 describe('POST /api/hooks/session-start', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -584,7 +516,7 @@ describe('POST /api/hooks/session-start', () => {
 // ─── Task 2.1: phase-complete hook + Stop reconciliation ───────────────────────
 
 describe('POST /api/hooks/phase-complete', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -668,7 +600,7 @@ describe('POST /api/hooks/phase-complete', () => {
 });
 
 describe('Stop hook suppression for orchestrator-managed tasks', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -721,7 +653,7 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
 });
 
 describe('phase-complete + Stop ordering contract (§6.5, R3-I1)', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -797,7 +729,7 @@ describe('phase-complete + Stop ordering contract (§6.5, R3-I1)', () => {
 // ─── maybeSignalPhaseComplete — multi-phase dispatch (SHR-143) ─────────────────
 
 describe('maybeSignalPhaseComplete — Stop hook phase dispatch', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
   let worktreeDir: string;
 
@@ -1002,7 +934,7 @@ describe('maybeSignalPhaseComplete — Stop hook phase dispatch', () => {
 // ─── advancePhaseForLabel — label→column mapping + idempotency (SHR-160) ──────
 
 describe('advancePhaseForLabel', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -1148,7 +1080,7 @@ describe('advancePhaseForLabel', () => {
 // ─── phase-complete endpoint uses advancePhaseForLabel label→column map (SHR-160) ──
 
 describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -1189,4 +1121,206 @@ describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
       expect(payload.phase).toBe(label);
     },
   );
+});
+
+// ─── POST /api/hooks/gate-card ────────────────────────────────────────────
+//
+// Part B of the worker-ask-owner change: a worker's MCP subprocess never has
+// OCTOMUX_CONVERSATION_ID (only the conductor does — see
+// orchestrator/mcp/write.ts's module doc), so it sends task_id instead and
+// this route must resolve the OWNING conversation via `managed_tasks`
+// (findConversationForTask) rather than requiring the caller to know its own
+// conversation. This is routing (a worker's question goes to the conductor
+// supervising it), not a lookup for which human to interrupt — see the
+// route's own doc comment in hooks.ts. The conductor's existing
+// conversation_id-direct path must keep working unchanged.
+//
+// The routing table (resolveGateCardConversationId's three-branch order) is
+// the deliverable below: owner wins when one exists; the global-monitor
+// conversation is the fallback ONLY when there is no owner; and with neither,
+// the request fails closed instead of hanging or creating an orphaned card.
+describe('POST /api/hooks/gate-card', () => {
+  let db: Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 'task-gc', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-gc',
+      task_id: 'task-gc',
+      harness_session_id: 'sess-gc',
+      hook_token: 'tok-gc',
+    } as any);
+  });
+
+  it('conductor path: conversation_id given directly still creates a card', async () => {
+    const convId = createConversation({ title: 'conductor-conv' });
+
+    const res = await request(app)
+      .post(`/api/hooks/gate-card?token=tok-gc&conversation_id=${convId}`)
+      .send({
+        capability_id: 'task.close',
+        tier: 'always-ask',
+        kind: 'action',
+        command: 'close_task',
+        args: { task_id: 'task-gc' },
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+  });
+
+  // ── Routing branch 1: OWNER wins ──────────────────────────────────────────
+
+  it('worker with a conductor: task_id resolves the OWNING conversation via managed_tasks (not the global monitor)', async () => {
+    const convId = createConversation({ title: 'worker-owning-conv' });
+    upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+    // A global monitor is ALSO configured, to prove owner takes precedence —
+    // if resolution ever preferred the monitor, or the owner lookup broke and
+    // fell through, this card would land there instead.
+    const monitorConvId = createConversation({ title: 'global-monitor-conv' });
+    setGlobalMonitor(monitorConvId);
+
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    // The resolved conversation is the one managed_tasks points at, not one
+    // the worker had to know or supply, and NOT the global monitor.
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+    expect(getCard(res.body.result.card_id)!.conversation_id).not.toBe(monitorConvId);
+  });
+
+  // ── Routing branch 2: no owner → the global monitor ───────────────────────
+
+  it('no owner + global monitor configured: card lands in the GLOBAL MONITOR conversation', async () => {
+    // task-gc exists but has no managed_tasks row — not orchestrator-managed,
+    // i.e. no owner.
+    const monitorConvId = createConversation({ title: 'global-monitor-conv' });
+    setGlobalMonitor(monitorConvId);
+
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(monitorConvId);
+  });
+
+  // ── Routing branch 3: no owner, no monitor → fail closed ──────────────────
+
+  it('plain standalone task (no managed_tasks row) and no global monitor: fails CLOSED with a distinct error — never a hang, never an orphaned card', async () => {
+    // task-gc exists but has no managed_tasks row (no owner), and this test
+    // never calls setGlobalMonitor (no fallback human either).
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200); // hook endpoints report failure IN the body, not via HTTP status
+
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toMatch(/no owner for this session/);
+    expect(res.body.error).toMatch(/no.*global-monitor/);
+    expect(res.body.result).toBeUndefined();
+    // Never an orphaned card: nothing was written to action_cards.
+    expect(listAllPendingCards()).toEqual([]);
+  });
+
+  it('neither conversation_id nor task_id, no global monitor: fails CLOSED with a distinct error', async () => {
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toBeTruthy();
+    expect(res.body.result).toBeUndefined();
+    expect(listAllPendingCards()).toEqual([]);
+  });
+
+  // ── resolveGateCardConversationId directly (unit-level, no HTTP) ──────────
+
+  describe('resolveGateCardConversationId', () => {
+    it('owner beats a configured global monitor', () => {
+      // task-gc is inserted by this describe block's beforeEach — managed_tasks
+      // has a FK on task_id, so the owner lookup needs a real task row.
+      const convId = createConversation({ title: 'owner-conv' });
+      upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+      setGlobalMonitor(createConversation({ title: 'monitor-conv' }));
+
+      const result = resolveGateCardConversationId(undefined, 'task-gc');
+
+      expect(result).toEqual({ conversationId: convId });
+    });
+
+    it('falls back to the global monitor when there is no owner', () => {
+      const monitorConvId = createConversation({ title: 'monitor-conv' });
+      setGlobalMonitor(monitorConvId);
+
+      const result = resolveGateCardConversationId(undefined, 'task-unowned');
+
+      expect(result).toEqual({ conversationId: monitorConvId });
+    });
+
+    it('fails closed with a distinct error when there is neither an owner nor a global monitor', () => {
+      const result = resolveGateCardConversationId(undefined, 'task-unowned');
+
+      expect('error' in result).toBe(true);
+      expect((result as { error: string }).error).toMatch(/no owner for this session/);
+    });
+  });
+
+  it('returns 401 when hook_token is missing or unrecognized', async () => {
+    await request(app)
+      .post('/api/hooks/gate-card?task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+      })
+      .expect(401);
+
+    await request(app)
+      .post('/api/hooks/gate-card?token=bad-token&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+      })
+      .expect(401);
+  });
 });

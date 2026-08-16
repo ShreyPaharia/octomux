@@ -1,11 +1,7 @@
 /**
  * Tests for the show-trash toggle and delete-all button in TaskBoard.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderWithRouter, makeTask } from '../test-helpers';
-import { TaskBoard } from './TaskBoard';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { Task } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -23,6 +19,11 @@ const { mockNavigate: _mockNavigate, routerMockFactory } = await vi.hoisted(asyn
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
+const { TaskBoard } = await import('./TaskBoard');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

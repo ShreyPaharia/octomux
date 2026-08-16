@@ -1,22 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import os from 'os';
-import path from 'path';
-import { initDb } from './db.js';
-import {
-  createTestDb,
-  insertTask,
-  getTask,
-  findExecCall,
-  countExecCalls,
-  DEFAULTS,
-} from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 import type { Task } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -34,8 +23,8 @@ vi.mock('./hook-settings.js', () => ({
   installHookSettings: vi.fn(),
 }));
 
-vi.mock('./settings.js', async () => {
-  const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
+vi.mock('./settings.js', () => {
+  const actual = vi.importActual<typeof import('./settings.js')>('./settings.js');
   return {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
@@ -103,6 +92,12 @@ vi.mock('child_process', () => ({
   ),
 }));
 
+const { default: os } = await import('os');
+const { default: path } = await import('path');
+const { initDb } = await import('./db.js');
+const { createTestDb, insertTask, getTask, findExecCall, countExecCalls, DEFAULTS } =
+  await import('./test-helpers.js');
+
 const {
   startTask,
   deleteTask,
@@ -116,7 +111,7 @@ const fsMod = await import('fs');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();
@@ -136,7 +131,7 @@ afterEach(() => {
 describe('migration: no_worktree → run_mode', () => {
   // Build a legacy-shaped DB manually by creating the schema with no_worktree
   // column, inserting mixed-shape rows, then running initDb on it.
-  function legacyDb(): Database.Database {
+  function legacyDb(): Database {
     const db = new Database(':memory:');
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
@@ -195,7 +190,7 @@ describe('migration: no_worktree → run_mode', () => {
     { id: 't-scratch', no_worktree: 1, repo_path: '', expected: 'scratch' },
   ];
 
-  it.each(cases)(
+  it.each([...cases])(
     'backfills $id with no_worktree=$no_worktree,repo=$repo_path → $expected',
     ({ id, no_worktree, repo_path, expected }) => {
       const legacy = legacyDb();
@@ -288,7 +283,7 @@ describe('startTask per-mode setup', () => {
     { mode: 'scratch' as const, callsWorktreeAdd: 0 },
   ];
 
-  it.each(modes)(
+  it.each([...modes])(
     '$mode mode calls worktree add $callsWorktreeAdd times',
     async ({ mode, callsWorktreeAdd }) => {
       const task: Task = { ...DEFAULTS.task, run_mode: mode } as Task;

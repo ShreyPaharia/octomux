@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import ChatPage from './ChatPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -15,6 +12,10 @@ vi.mock('@/components/TerminalView', () => ({
     <div data-testid="terminal-view" data-ws-url={wsUrl} />
   ),
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: ChatPage } = await import('./ChatPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 describe('ChatPage', () => {
   beforeEach(() => {

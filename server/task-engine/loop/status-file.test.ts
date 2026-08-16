@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import fs from 'fs';
-import path from 'path';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 vi.mock('fs');
+
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
 
 describe('writeLoopStatusFile', () => {
   beforeEach(() => {

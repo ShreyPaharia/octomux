@@ -1,14 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb } from '../../server/test-helpers.js';
-import { runComplete } from './complete.js';
-import { getDb } from '../../server/db.js';
-import { broadcast } from '../../server/events.js';
+import { describe, it, expect, beforeEach, vi } from '../../server/bun-test.js';
 
 vi.mock('../../server/events.js', () => ({ broadcast: vi.fn() }));
 vi.mock('../../server/review-staleness.js', () => ({
   autoResolvePublished: vi.fn(async () => undefined),
   markStaleDrafts: vi.fn(async () => undefined),
 }));
+
+const { createTestDb } = await import('../../server/test-helpers.js');
+const { runComplete } = await import('./complete.js');
+const { getDb } = await import('../../server/db.js');
+const { broadcast } = await import('../../server/events.js');
 
 let stdoutBuf = '';
 let stderrBuf = '';

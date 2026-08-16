@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentTabs } from './AgentTabs';
@@ -104,7 +104,7 @@ describe('AgentTabs', () => {
 
   const visibleStatusCases = [{ status: 'running' as const }, { status: 'idle' as const }];
 
-  it.each(visibleStatusCases)('agent with status "$status" is visible', ({ status }) => {
+  it.each([...visibleStatusCases])('agent with status "$status" is visible', ({ status }) => {
     const agents = [makeAgent({ status })];
     renderWithRouter(<AgentTabs {...defaultProps} agents={agents} />);
     expect(screen.getByText('Agent 1')).toBeInTheDocument();

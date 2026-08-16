@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
@@ -24,7 +24,6 @@ import {
   deletePermissionRule,
   findConversationForTask,
   listManagedTasksForConversation,
-  listManagedTasksWithDependsOn,
   incrementConversationUsage,
   getConversationUsage,
 } from './orchestrator.js';
@@ -407,32 +406,6 @@ describe('orchestrator store', () => {
     it('returns empty array for conversation with no managed tasks', () => {
       const convId = createConversation({ title: 'Empty Conv' });
       expect(listManagedTasksForConversation(convId)).toEqual([]);
-    });
-  });
-
-  describe('listManagedTasksWithDependsOn (verify.ts:scheduleDagStep)', () => {
-    it('returns only rows with non-null depends_on', () => {
-      const db = getDb();
-      const task1 = insertTask(db, { id: 'task-dep-01', worktree: null });
-      const task2 = insertTask(db, { id: 'task-dep-02', worktree: null });
-      const task3 = insertTask(db, { id: 'task-dep-03', worktree: null });
-      const convId = createConversation({ title: 'Dep Test' });
-      upsertManagedTask({
-        conversation_id: convId,
-        task_id: task1.id,
-        depends_on: JSON.stringify(['task-dep-02']),
-      });
-      upsertManagedTask({ conversation_id: convId, task_id: task2.id }); // no depends_on
-      upsertManagedTask({
-        conversation_id: convId,
-        task_id: task3.id,
-        depends_on: JSON.stringify(['task-dep-01', 'task-dep-02']),
-      });
-      const rows = listManagedTasksWithDependsOn(convId);
-      expect(rows).toHaveLength(2);
-      expect(rows.map((r) => r.task_id)).toContain(task1.id);
-      expect(rows.map((r) => r.task_id)).toContain(task3.id);
-      expect(rows.map((r) => r.task_id)).not.toContain(task2.id);
     });
   });
 

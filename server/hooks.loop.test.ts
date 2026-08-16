@@ -7,11 +7,8 @@
  * idle and defers the in_progress → human_review transition to the quiescence
  * poller (no longer happens synchronously in the Stop handler).
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import request from 'supertest';
-import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
-import { createApp } from './app.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('./hook-dispatcher.js', () => ({
   fireHook: vi.fn(),
@@ -26,8 +23,12 @@ vi.mock('./summarize.js', () => ({
   summarizeAgentProgress: vi.fn(async () => undefined),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, insertAgent } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 describe('Stop hook: loop guard', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

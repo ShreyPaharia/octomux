@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from './bun-test.js';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { sessionCookieValue, COOKIE_NAME } from './remote-auth.js';

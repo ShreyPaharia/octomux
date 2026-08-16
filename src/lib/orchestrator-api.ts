@@ -60,7 +60,18 @@ export interface DisplayMessage {
 /** All server→client ws event shapes (§ stream.ts). */
 export type WsIncomingEvent =
   | { type: 'message'; role: 'user' | 'assistant'; text: string; id?: string }
-  | { type: 'card'; id: string; command: string; args: Record<string, unknown> }
+  | {
+      type: 'card';
+      id: string;
+      command: string;
+      args: Record<string, unknown>;
+      /** Gate tier — drives the alwaysAsk badge / hides "always allow". */
+      tier?: 'ask' | 'always-ask';
+      /** 'action' (default) → approve/reject. 'question' → free-text answer (ask_owner). */
+      kind?: 'action' | 'question';
+      /** The question text, present only when kind === 'question'. */
+      question?: string;
+    }
   | { type: 'tool'; id: string; tool_name: string; input: unknown }
   | { type: 'status'; status: string }
   | { type: 'error'; error: string };
@@ -74,9 +85,12 @@ export type WsOutgoingEvent =
       decision: 'approve' | 'edit' | 'reject' | 'respond';
       /** Edited command args (present when decision='edit'). */
       args?: Record<string, unknown>;
-      /** Follow-up message text (present when decision='respond'). */
-      text?: string;
-      /** Whether to persist an always-allow rule for this command. */
+      /**
+       * Free-text (present for 'reject'/'respond', and for a question card's
+       * answer, sent as decision:'approve' + respond_text: <answer>).
+       */
+      respond_text?: string;
+      /** Whether to persist an always-allow rule for this command. 'ask' tier only. */
       always_allow?: boolean;
     };
 

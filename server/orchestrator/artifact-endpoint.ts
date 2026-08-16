@@ -131,39 +131,6 @@ function resolveArtifactPath(
   return { resolved };
 }
 
-/**
- * Read a task artifact's contents server-side, reusing the same symlink-safe
- * resolution as the GET endpoint. Returns null (never throws) on missing
- * task/worktree, a rejected/traversing path, or a missing file — so callers
- * (e.g. the supervisor summary path) can fall back gracefully.
- *
- * This is the single server-side artifact reader: the browser goes through the
- * GET endpoint, the supervisor goes through here, both via `resolveArtifactPath`.
- */
-export function readTaskArtifact(taskId: string, relPath: string): string | null {
-  const found = getWorktreePath(taskId);
-  if (!found) return null;
-
-  const resolution = resolveArtifactPath(found.worktreePath, relPath);
-  if ('rejected' in resolution) {
-    logger.debug(
-      { task_id: taskId, path: relPath, reason: resolution.rejected },
-      'readTaskArtifact rejected',
-    );
-    return null;
-  }
-
-  try {
-    return fs.readFileSync(resolution.resolved, 'utf8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      logger.warn({ task_id: taskId, path: relPath, err }, 'readTaskArtifact read error');
-    }
-    return null;
-  }
-}
-
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
 function handleGet(req: Request, res: Response): void {

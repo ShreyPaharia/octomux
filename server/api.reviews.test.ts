@@ -1,8 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb, insertTestTask } from './test-helpers.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 // Minimal mocks so createApp doesn't fail on missing native deps
 vi.mock('./task-engine/index.js', () => ({
@@ -25,6 +21,11 @@ vi.mock('./tmux-input.js', () => ({
 vi.mock('./workflows/reviewer/publish-review.js', () => ({
   publishReview: vi.fn().mockResolvedValue({ github_review_url: 'https://github.com/test' }),
 }));
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb, insertTestTask } = await import('./test-helpers.js');
+const { getDb } = await import('./db.js');
 
 const { startTask } = await import('./task-engine/index.js');
 const { sendMessageToAgent } = await import('./tmux-input.js');
@@ -118,52 +119,6 @@ describe('GET /api/reviews/:id', () => {
     insertTestTask({ id: 'regular-t', source: null });
     const res = await request(app).get('/api/reviews/regular-t');
     expect(res.status).toBe(404);
-  });
-});
-
-describe('PATCH /api/tasks/:id/review-runs/:rid/walkthrough', () => {
-  let app: ReturnType<typeof createApp>;
-
-  beforeEach(() => {
-    createTestDb();
-    seedReviewTask();
-    app = createApp();
-  });
-
-  it('deep-merges walkthrough JSON', async () => {
-    const res = await request(app)
-      .patch('/api/tasks/task-rev1/review-runs/run-r1/walkthrough')
-      .send({ global: { risk: 'high' }, newKey: 'newVal' });
-    expect(res.status).toBe(200);
-    const wt = JSON.parse(res.body.walkthrough);
-    expect(wt.global.risk).toBe('high');
-    expect(wt.newKey).toBe('newVal');
-  });
-
-  it('returns 404 for unknown run', async () => {
-    const res = await request(app)
-      .patch('/api/tasks/task-rev1/review-runs/no-such-run/walkthrough')
-      .send({ global: {} });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 404 for unknown task', async () => {
-    const res = await request(app)
-      .patch('/api/tasks/no-task/review-runs/run-r1/walkthrough')
-      .send({ global: {} });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 409 if review already published for this head SHA', async () => {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO published_reviews (id, task_id, github_review_id, github_review_url, head_sha, verdict, comment_count)
-       VALUES ('pub1', 'task-rev1', 12345, 'https://gh/r', 'sha-head', 'COMMENT', 1)`,
-    ).run();
-    const res = await request(app)
-      .patch('/api/tasks/task-rev1/review-runs/run-r1/walkthrough')
-      .send({ global: {} });
-    expect(res.status).toBe(409);
   });
 });
 

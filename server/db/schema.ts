@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type Database from '../sqlite.js';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS worktrees (
@@ -33,8 +33,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     source                       TEXT,
     schedule_id                  TEXT,
     error                        TEXT,
-    current_summary              TEXT,
-    current_summary_updated_at   TEXT,
     harness_id                   TEXT NOT NULL DEFAULT 'claude-code',
     deleted_at                   TEXT,
     created_at                   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -59,7 +57,7 @@ CREATE TABLE IF NOT EXISTS task_external_refs (
   ref         TEXT NOT NULL,
   url         TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (task_id, integration, ref)
+  PRIMARY KEY (task_id, integration)
 );
 
 CREATE TABLE IF NOT EXISTS integrations (
@@ -223,7 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_pull_requests_state ON pull_requests(state);
 `;
 
 /** Apply SQLite pragmas required for octomux (WAL + foreign keys). */
-export function applyPragmas(instance: Database.Database): void {
+export function applyPragmas(instance: Database): void {
   instance.pragma('journal_mode = WAL');
   instance.pragma('foreign_keys = ON');
 }

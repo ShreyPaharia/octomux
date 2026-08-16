@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Post-build verification: ensures all imports in bin/octomux.js
+ * Post-build verification: ensures all imports in bin/main.js
  * resolve to files that actually exist in the build output.
  */
 
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const binFile = path.join(root, 'bin', 'octomux.js');
+const binFile = path.join(root, 'bin', 'main.js');
 
 const source = readFileSync(binFile, 'utf8');
 const importRegex = /import\(['"](\.\.[^'"]+)['"]\)/g;
@@ -29,5 +29,5 @@ for (const match of source.matchAll(importRegex)) {
 if (failed) {
   process.exit(1);
 } else {
-  console.log('\u2705 All bin/octomux.js imports resolve to existing files');
+  console.log('\u2705 All bin/main.js imports resolve to existing files');
 }

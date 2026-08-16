@@ -9,6 +9,7 @@ import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
 import { SQL_EXCLUDE_AUTO_REVIEW } from '../task-query.js';
 import type { Task, TaskUpdate, TaskExternalRef } from '../types.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 
 const logger = childLogger('repositories/tasks');
 
@@ -29,8 +30,6 @@ const TASK_WRITABLE_COLUMNS = new Set([
   'last_viewed_at',
   'deleted_at',
   'error',
-  'current_summary',
-  'current_summary_updated_at',
   'worktree_id',
   'agent',
   'model',
@@ -214,7 +213,9 @@ export function listRecentRepoPaths(limit = 10): Array<{ repo_path: string; last
 
 /**
  * Find an existing live review task for a given repo_path + pr_number.
- * Returns only the id.
+ * Returns only the id. Repo-scoped: PR numbers are per-repo, so a repo_path
+ * filter is required to avoid matching a same-numbered PR in a different repo.
+ * Used by the manual-review-create route and by lookupExistingReviewId.
  */
 export function findExistingReviewTask(
   repoPath: string,
@@ -228,20 +229,6 @@ export function findExistingReviewTask(
           ORDER BY t.created_at DESC LIMIT 1`,
     )
     .get(repoPath, prNumber) as { id: string } | undefined;
-}
-/**
- * Find a live auto_review task by pr_number only (no repo_path filter).
- * Used by lookupExistingReviewId in the API layer.
- */
-export function findReviewTaskByPrNumber(prNumber: number): { id: string } | undefined {
-  return getDb()
-    .prepare(
-      `SELECT id FROM tasks
-        WHERE pr_number = ? AND source = 'auto_review'
-          AND runtime_state != 'error' AND deleted_at IS NULL
-        ORDER BY created_at DESC LIMIT 1`,
-    )
-    .get(prNumber) as { id: string } | undefined;
 }
 
 /**
@@ -331,6 +318,8 @@ export interface InsertTaskInput {
   review_of_task_id?: string | null;
   /** Set on scheduled runs — links back to the `schedules` row that fired them. */
   schedule_id?: string | null;
+  /** Another task's id this one depends on. Caller must have run validateDependsOn first. */
+  depends_on?: string | null;
 }
 
 /** Insert a new task row. Returns the generated id. */
@@ -339,8 +328,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -360,9 +349,83 @@ export function insertTask(input: InsertTaskInput): string {
       input.pr_head_sha ?? null,
       input.review_of_task_id ?? null,
       input.schedule_id ?? null,
+      input.depends_on ?? null,
     );
   logger.info({ task_id: id, operation: 'insertTask' }, 'task inserted');
   return id;
+}
+
+/** Set (or clear, with null) the depends_on link. Caller must have run validateDependsOn first. */
+export function setDependsOn(id: string, dependsOn: string | null): void {
+  getDb()
+    .prepare(`UPDATE tasks SET depends_on = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(dependsOn, id);
+  logger.info({ task_id: id, depends_on: dependsOn, operation: 'setDependsOn' }, 'depends_on set');
+}
+
+/**
+ * Validate that `dependsOn` is safe to store as `taskId`'s depends_on.
+ *
+ * Checks (in order): the target task exists; it isn't `taskId` itself
+ * (self-dependency); and it doesn't transitively depend back on `taskId`
+ * (a longer cycle). Since a task has at most ONE depends_on, the graph is a
+ * forest of chains, so cycle detection is a single forward walk from
+ * `dependsOn` — bounded by a visited set so pre-existing corrupt data can't
+ * spin the walk forever.
+ *
+ * Pure validation, no throwing (repositories don't shape HTTP errors) — returns
+ * an error message on failure, or null when the edge is safe to write.
+ *
+ * `taskId` is null when validating for a not-yet-inserted task (task.create):
+ * a brand-new id can never already appear in a depends_on chain, so only
+ * existence is checked.
+ */
+export function validateDependsOn(taskId: string | null, dependsOn: string): string | null {
+  const target = getTask(dependsOn);
+  if (!target) return `depends_on task not found: ${dependsOn}`;
+  if (taskId === null) return null;
+  if (taskId === dependsOn) return 'a task cannot depend on itself';
+
+  const visited = new Set<string>([taskId]);
+  let current: string | null = dependsOn;
+  while (current) {
+    if (visited.has(current)) return 'depends_on would create a dependency cycle';
+    visited.add(current);
+    const row = getDb().prepare(`SELECT depends_on FROM tasks WHERE id = ?`).get(current) as
+      | { depends_on: string | null }
+      | undefined;
+    current = row?.depends_on ?? null;
+  }
+  return null;
+}
+
+/**
+ * True when `dependsOn` points at a task that has not reached
+ * workflow_status 'done' (or points at a task that no longer exists — treated
+ * as still-blocked, the safe default). False for null (no dependency).
+ */
+export function isDependencyUnmet(dependsOn: string | null): boolean {
+  if (!dependsOn) return false;
+  const dep = getDb().prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get(dependsOn) as
+    | { workflow_status: string }
+    | undefined;
+  return !dep || dep.workflow_status !== 'done';
+}
+
+/**
+ * Tasks that named `dependencyTaskId` as their depends_on and are sitting
+ * idle at workflow_status='in_progress' — the shape a task is left in when
+ * its own start was skipped because this dependency wasn't done yet (see
+ * task-service.ts:createTask and task.move's autoStart gate). Used to
+ * auto-start/resume them once the dependency completes.
+ */
+export function listDependentsAwaitingStart(dependencyTaskId: string): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.depends_on = ? AND t.runtime_state = 'idle'
+                            AND t.workflow_status = 'in_progress' AND t.deleted_at IS NULL`,
+    )
+    .all(dependencyTaskId) as Task[];
 }
 
 /**
@@ -371,14 +434,14 @@ export function insertTask(input: InsertTaskInput): string {
  */
 export function updateTaskFields(id: string, patch: Partial<Record<string, unknown>>): void {
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLQueryBindings[] = [];
 
   for (const [key, value] of Object.entries(patch)) {
     if (!TASK_WRITABLE_COLUMNS.has(key)) {
       throw new Error(`updateTaskFields: column '${key}' is not in the writable allowlist`);
     }
     fields.push(`${key} = ?`);
-    values.push(value);
+    values.push(value as SQLQueryBindings);
   }
 
   if (fields.length === 0) return;
@@ -442,20 +505,6 @@ export function setPrHeadSha(id: string, prHeadSha: string): void {
   getDb()
     .prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(prHeadSha, id);
-}
-
-/** Set current_summary and bump updated_at. */
-export function setCurrentSummary(id: string, summary: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks
-          SET current_summary = ?,
-              current_summary_updated_at = datetime('now'),
-              updated_at = datetime('now')
-        WHERE id = ?`,
-    )
-    .run(summary, id);
-  logger.info({ task_id: id, operation: 'setCurrentSummary' }, 'current_summary updated');
 }
 
 /** Touch last_viewed_at for a single task. */
@@ -762,8 +811,9 @@ export function hasTrashedPrReviewTask(repoPath: string, prNumber: number): bool
 
 /**
  * List idle auto-review draft tasks for a given repo_path.
- * Used by cleanupResolvedReviewDrafts to find and purge drafts whose PR is no
- * longer awaiting review.
+ * Used by cleanupResolvedReviews to find and purge drafts whose PR is no
+ * longer awaiting review. "Draft" = never started: a task that has worker rows
+ * is a closed-but-resumable review session, kept until its PR merges/closes.
  */
 export function listAutoReviewDrafts(
   repoPath: string,
@@ -773,9 +823,28 @@ export function listAutoReviewDrafts(
       `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
          LEFT JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
-          AND t.deleted_at IS NULL`,
+          AND t.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM workers wk WHERE wk.task_id = t.id)`,
     )
     .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
+}
+
+/**
+ * List idle (closed or never-started) auto-review tasks that still point at a
+ * PR. Used by cleanupResolvedReviews to trash review sessions once their PR is
+ * merged or closed, so reviews never dangle past the PR's life.
+ */
+export function listIdleAutoReviewTasksWithPr(
+  repoPath: string,
+): Array<{ id: string; pr_number: number }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id AS id, t.pr_number AS pr_number FROM tasks t
+         LEFT JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
+          AND t.pr_number IS NOT NULL AND t.deleted_at IS NULL`,
+    )
+    .all(repoPath) as Array<{ id: string; pr_number: number }>;
 }
 
 /**
@@ -1039,28 +1108,14 @@ export function getTaskExternalRefs(taskId: string): TaskExternalRef[] {
   return rows.map(parseRefRow);
 }
 
-/** Get the first external ref for (task_id, integration) — back-compat. */
+/** Get a single external ref by task_id + integration. */
 export function getTaskExternalRef(
   taskId: string,
   integration: string,
 ): TaskExternalRef | undefined {
   const row = getDb()
-    .prepare(
-      'SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ? ORDER BY created_at ASC LIMIT 1',
-    )
+    .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ?')
     .get(taskId, integration) as ExternalRefRow | undefined;
-  return row ? parseRefRow(row) : undefined;
-}
-
-/** Get an external ref by exact (task_id, integration, ref) triple. */
-export function getTaskExternalRefByRef(
-  taskId: string,
-  integration: string,
-  ref: string,
-): TaskExternalRef | undefined {
-  const row = getDb()
-    .prepare('SELECT * FROM task_external_refs WHERE task_id = ? AND integration = ? AND ref = ?')
-    .get(taskId, integration, ref) as ExternalRefRow | undefined;
   return row ? parseRefRow(row) : undefined;
 }
 
@@ -1087,11 +1142,11 @@ export function upsertTaskExternalRef(input: UpsertTaskExternalRefInput): TaskEx
     .run(input.task_id, input.integration, input.ref, input.url ?? null, metadataJson);
 
   logger.info(
-    { task_id: input.task_id, integration: input.integration, ref: input.ref, operation: 'upsertTaskExternalRef' },
+    { task_id: input.task_id, integration: input.integration, operation: 'upsertTaskExternalRef' },
     'external ref upserted',
   );
 
-  return getTaskExternalRefByRef(input.task_id, input.integration, input.ref)!;
+  return getTaskExternalRef(input.task_id, input.integration)!;
 }
 
 /**
@@ -1112,23 +1167,13 @@ export function insertTaskExternalRefIfAbsent(input: {
     .run(input.task_id, input.integration, input.ref, input.url ?? null);
 }
 
-/**
- * Delete an external ref.
- * - With `ref`: deletes only that specific (task_id, integration, ref) row.
- * - Without `ref`: deletes ALL rows for (task_id, integration) — back-compat.
- */
-export function deleteTaskExternalRef(taskId: string, integration: string, ref?: string): void {
-  if (ref !== undefined) {
-    getDb()
-      .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ? AND ref = ?')
-      .run(taskId, integration, ref);
-  } else {
-    getDb()
-      .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?')
-      .run(taskId, integration);
-  }
+/** Delete an external ref. */
+export function deleteTaskExternalRef(taskId: string, integration: string): void {
+  getDb()
+    .prepare('DELETE FROM task_external_refs WHERE task_id = ? AND integration = ?')
+    .run(taskId, integration);
   logger.info(
-    { task_id: taskId, integration, ref, operation: 'deleteTaskExternalRef' },
+    { task_id: taskId, integration, operation: 'deleteTaskExternalRef' },
     'external ref deleted',
   );
 }

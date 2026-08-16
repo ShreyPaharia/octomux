@@ -1,14 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 import type { ReactNode } from 'react';
-import { useNotifications } from './use-notifications';
-import { makeTask, makeAgent } from '../test-helpers';
 
 vi.mock('../components/CustomToast', () => ({
   showToast: vi.fn(),
   CustomToast: vi.fn(),
 }));
+
+const { renderHook } = await import('@testing-library/react');
+const { MemoryRouter } = await import('react-router-dom');
+const { useNotifications } = await import('./use-notifications');
+const { makeTask, makeAgent } = await import('../test-helpers');
 
 const { showToast } = await import('../components/CustomToast');
 

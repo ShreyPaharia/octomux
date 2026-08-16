@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid';
 import { createTask } from './task-service.js';
 import { getTask } from '../repositories/tasks.js';
 import { startLoop } from '../task-engine/loop/engine.js';
@@ -7,6 +8,7 @@ import {
   listLoopRunsForGroup,
   setJudgeRunning,
 } from '../repositories/loop-groups.js';
+import { insertRun } from '../repositories/runs.js';
 import { badRequest, notFound, conflict } from './errors.js';
 import { childLogger } from '../logger.js';
 import type { LoopSpec, LoopRun, LoopGroup } from '../types.js';
@@ -65,18 +67,35 @@ export interface CreateLoopGroupServiceInput {
   baseBranch: string;
   spec: LoopSpec;
   n: number;
+  /** Set when this group was fired by a schedule; defaults to 'manual' (dashboard/CLI). */
+  trigger?: 'cron' | 'manual';
 }
 
-/** Fans out N fresh tasks/worktrees off the same base branch and starts an identical LoopSpec
- * loop on each, tagging every resulting loop_run with the new group's id. */
+/**
+ * Fans out N fresh tasks/worktrees off the same base branch and starts an identical LoopSpec
+ * loop on each, tagging every resulting loop_run with the new group's id.
+ *
+ * Adoption fix (see spec/workflow-consolidation.md discussion in routes/runs.ts's module doc):
+ * this used to never call `insertRun`, so a best-of-N group and its candidates were invisible to
+ * GET /api/runs. Now it creates ONE `runs` row for the group itself (workflow_kind:'loop-group',
+ * linked back via `loop_groups.run_id` — the group has no single `task_id` to key a forward link
+ * off, unlike a plain loop) plus one `runs` row per candidate (workflow_kind:'loop', linked via
+ * `runs.loop_run_id` and threaded into `spec.runId`, exactly like a standalone loop / doc-drift /
+ * prod-log-triage). Every candidate's own `octomux emit --run <id>` targets ITS OWN runs.id, not
+ * the group's — the group's runs.id is only ever addressed by `octomux judge-emit`.
+ */
 export async function createLoopGroupWithCandidates(
   input: CreateLoopGroupServiceInput,
 ): Promise<{ group: LoopGroup; loopRuns: LoopRun[] }> {
+  const trigger = input.trigger ?? 'manual';
+  const groupRunsRow = insertRun({ workflowKind: 'loop-group', trigger });
+
   const group = createLoopGroup({
     spec_json: JSON.stringify(input.spec),
     n: input.n,
     repo_path: input.repoPath,
     base_branch: input.baseBranch,
+    run_id: groupRunsRow.id,
   });
 
   const loopRuns = await Promise.all(
@@ -85,16 +104,31 @@ export async function createLoopGroupWithCandidates(
         candidateTaskInput(input.repoPath, input.baseBranch, input.spec, i, input.n),
       );
       await waitForTaskRunning(task.id);
-      return startLoop(task.id, input.spec, group.id);
+
+      const loopRunId = nanoid(12);
+      const candidateRunsRow = insertRun({
+        workflowKind: 'loop',
+        trigger,
+        taskId: task.id,
+        loopRunId,
+      });
+      return startLoop(task.id, { ...input.spec, runId: candidateRunsRow.id }, group.id, loopRunId);
     }),
   );
 
-  logger.info({ loop_group_id: group.id, n: input.n }, 'loop_group: candidates launched');
+  logger.info(
+    { loop_group_id: group.id, run_id: groupRunsRow.id, n: input.n },
+    'loop_group: candidates launched',
+  );
   return { group, loopRuns };
 }
 
 export function buildJudgePrompt(group: LoopGroup, loopRuns: LoopRun[]): string {
   const spec = JSON.parse(group.spec_json) as LoopSpec;
+  // The id namespace for `--group` moved from loop_groups.id to runs.id (see routes/runs.ts's
+  // module doc) — `group.run_id` ?? `group.id` fallback only matters for a pre-migration row
+  // that predates the reverse link (breaking those in-flight groups is accepted).
+  const groupRunId = group.run_id ?? group.id;
   const candidateLines = loopRuns.map(
     (r, i) =>
       `- Candidate ${i + 1}: loop run id ${r.id}, task id ${r.task_id}, branch agents/${r.task_id}, ` +
@@ -114,7 +148,7 @@ export function buildJudgePrompt(group: LoopGroup, loopRuns: LoopRun[]): string 
     'quality. This is advisory only: a human makes the final call.',
     '',
     'When you have decided, report your pick:',
-    `octomux judge-emit --group ${group.id} --winner <winning loop run id> --rationale "<why, 2-4 sentences>"`,
+    `octomux judge-emit --group ${groupRunId} --winner <winning loop run id> --rationale "<why, 2-4 sentences>"`,
   ].join('\n');
 }
 

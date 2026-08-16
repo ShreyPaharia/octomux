@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { renderHook } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { _resetPerTaskUiState, setPerTaskUiState } from './perTaskUiState';

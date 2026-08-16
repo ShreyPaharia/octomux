@@ -3,11 +3,7 @@
  *
  * Verifies: three groups render, toggle calls API, warning visible when env unset.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import SettingsPage from './SettingsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { HookRegistryEntry } from '@/lib/api/configApi';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -99,8 +95,8 @@ vi.mock('@/lib/api/kindsApi', () => ({
   },
 }));
 
-vi.mock('../lib/hooks', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock('../lib/hooks', (importOriginal) => {
+  const actual = importOriginal() as Record<string, unknown>;
   return {
     ...actual,
     useRepoConfigs: () => ({ configs: [], loading: false, error: null, refresh: vi.fn() }),
@@ -110,6 +106,11 @@ vi.mock('../lib/hooks', async (importOriginal) => {
 vi.mock('@/lib/tasks-context', () => ({
   useTasksContextOptional: () => null,
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: SettingsPage } = await import('./SettingsPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

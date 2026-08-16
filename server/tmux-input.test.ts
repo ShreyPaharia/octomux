@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { execFile } from 'child_process';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
 
+const { execFile } = await import('child_process');
+
 const mockedExecFile = vi.mocked(execFile);
 
-import { sendMessageToAgent, normalizePromptForPaste } from './tmux-input.js';
+const { sendMessageToAgent, normalizePromptForPaste } = await import('./tmux-input.js');
 
 describe('normalizePromptForPaste', () => {
   it('leaves a plain prose prompt untouched (newlines preserved)', () => {

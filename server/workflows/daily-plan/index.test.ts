@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkflow, listWorkflows, listCronWorkflowKinds } from '../registry.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockRunDailyPlanFromSchedule = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('./run.js', () => ({
   runDailyPlanFromSchedule: (...args: unknown[]) => mockRunDailyPlanFromSchedule(...args),
 }));
+
+const { getWorkflow, listWorkflows, listCronWorkflowKinds } = await import('../registry.js');
 
 import './index.js';
 

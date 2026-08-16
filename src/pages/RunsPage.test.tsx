@@ -1,18 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import RunsPage from './RunsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { WorkflowRunRow } from '@/lib/api/workflowsApi';
-import { registerWorkflowUI } from '@/workflows/registry';
 
-const { taskApiProxy, reviewApiProxy, configApiProxy, loopApiProxy, workflowsApiProxy, apiMock } =
+const { taskApiProxy, reviewApiProxy, configApiProxy, runApiProxy, workflowsApiProxy, apiMock } =
   await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
 
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
-vi.mock('@/lib/api/loopApi', () => ({ loopApi: loopApiProxy }));
+vi.mock('@/lib/api/runApi', () => ({ runApi: runApiProxy }));
 vi.mock('@/lib/api/workflowsApi', () => ({ workflowsApi: workflowsApiProxy }));
 vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
@@ -23,6 +18,12 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: RunsPage } = await import('./RunsPage');
+const { renderWithRouter } = await import('../test-helpers');
+const { registerWorkflowUI } = await import('@/workflows/registry');
 
 function makeRun(overrides: Partial<WorkflowRunRow> = {}): WorkflowRunRow {
   return {

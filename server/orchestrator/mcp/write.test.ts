@@ -6,7 +6,7 @@
  * retried RPC produces the same key and the server replays instead of re-running.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { actionIdempotencyKey } from './write.js';
 
 describe('actionIdempotencyKey (SHR-163)', () => {

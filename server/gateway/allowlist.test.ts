@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { createIntegration, setEnabled } from '../integrations/store.js';
 import { isAllowed } from './allowlist.js';

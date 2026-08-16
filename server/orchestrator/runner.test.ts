@@ -7,9 +7,7 @@
  * verify the right tmux + claude commands are issued without touching real tmux
  * or the filesystem. Pattern mirrors server/task-runner.test.ts.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { execFile } from 'child_process';
-import { createTestDb } from '../test-helpers.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 // ─── Mock child_process ───────────────────────────────────────────────────────
 
@@ -60,8 +58,8 @@ vi.mock('child_process', () => ({
 
 // ─── Mock fs ─────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -73,23 +71,23 @@ vi.mock('fs', async (importOriginal) => {
   return { ...mocked, default: mocked };
 });
 
-const mockedExecFile = vi.mocked(execFile);
-
-// Import runner under test AFTER mocks are set up
-import {
+const { execFile } = await import('child_process');
+const { createTestDb } = await import('../test-helpers.js');
+const {
   startConversation,
   sendTurn,
   interruptTurn,
   stopConversation,
   resumeConversation,
   conversationTmuxTarget,
-} from './runner.js';
-import {
-  createConversation,
-  getConversation,
-  updateConversation,
-} from '../repositories/orchestrator.js';
-import { ORCHESTRATOR_SYSTEM_PROMPT } from './conductor-flags.js';
+} = await import('./runner.js');
+const { createConversation, getConversation, updateConversation } =
+  await import('../repositories/orchestrator.js');
+const { ORCHESTRATOR_SYSTEM_PROMPT } = await import('./conductor-flags.js');
+
+const mockedExecFile = vi.mocked(execFile);
+
+// Import runner under test AFTER mocks are set up
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

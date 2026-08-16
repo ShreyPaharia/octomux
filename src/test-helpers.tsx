@@ -1,3 +1,4 @@
+import { vi } from './bun-test.js';
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
@@ -57,8 +58,11 @@ export function renderWithRouter(
  */
 export function setupRouterNavigateMock() {
   const mockNavigate = vi.fn();
-  const routerMockFactory = async (importOriginal: () => Promise<unknown>) => {
-    const actual = (await importOriginal()) as Record<string, unknown>;
+  // Synchronous on purpose: an async mock.module factory deadlocks when the
+  // mocked module is imported synchronously (which components do). The shim's
+  // importOriginal returns the module directly for exactly this reason.
+  const routerMockFactory = (importOriginal: () => unknown) => {
+    const actual = importOriginal() as Record<string, unknown>;
     return { ...actual, useNavigate: () => mockNavigate };
   };
   return { mockNavigate, routerMockFactory };
@@ -79,9 +83,8 @@ export function setupRouterNavigateMock() {
 type ApiMock = ReturnType<typeof mockTaskApi> &
   ReturnType<typeof mockReviewApi> &
   ReturnType<typeof mockConfigApi> &
-  ReturnType<typeof mockLoopApi> &
+  ReturnType<typeof mockRunApi> &
   ReturnType<typeof mockExtractApi> &
-  ReturnType<typeof mockLoopGroupApi> &
   ReturnType<typeof mockSchedulesApi> &
   ReturnType<typeof mockKindsApi> &
   ReturnType<typeof mockWorkflowsApi> &
@@ -92,9 +95,8 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
   const taskApiMock = mockTaskApi(overrides);
   const reviewApiMock = mockReviewApi(overrides);
   const configApiMock = mockConfigApi(overrides);
-  const loopApiMock = mockLoopApi(overrides);
+  const runApiMock = mockRunApi(overrides);
   const extractApiMock = mockExtractApi(overrides);
-  const loopGroupApiMock = mockLoopGroupApi(overrides);
   const schedulesApiMock = mockSchedulesApi(overrides);
   const kindsApiMock = mockKindsApi(overrides);
   const workflowsApiMock = mockWorkflowsApi(overrides);
@@ -111,17 +113,13 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     {},
     { get: (_target, prop: string) => configApiMock[prop as keyof typeof configApiMock] },
   );
-  const loopApiProxy = new Proxy(
+  const runApiProxy = new Proxy(
     {},
-    { get: (_target, prop: string) => loopApiMock[prop as keyof typeof loopApiMock] },
+    { get: (_target, prop: string) => runApiMock[prop as keyof typeof runApiMock] },
   );
   const extractApiProxy = new Proxy(
     {},
     { get: (_target, prop: string) => extractApiMock[prop as keyof typeof extractApiMock] },
-  );
-  const loopGroupApiProxy = new Proxy(
-    {},
-    { get: (_target, prop: string) => loopGroupApiMock[prop as keyof typeof loopGroupApiMock] },
   );
   const schedulesApiProxy = new Proxy(
     {},
@@ -146,10 +144,8 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
         if (prop in taskApiMock) return taskApiMock[prop as keyof typeof taskApiMock];
         if (prop in reviewApiMock) return reviewApiMock[prop as keyof typeof reviewApiMock];
         if (prop in configApiMock) return configApiMock[prop as keyof typeof configApiMock];
-        if (prop in loopApiMock) return loopApiMock[prop as keyof typeof loopApiMock];
+        if (prop in runApiMock) return runApiMock[prop as keyof typeof runApiMock];
         if (prop in extractApiMock) return extractApiMock[prop as keyof typeof extractApiMock];
-        if (prop in loopGroupApiMock)
-          return loopGroupApiMock[prop as keyof typeof loopGroupApiMock];
         if (prop in schedulesApiMock)
           return schedulesApiMock[prop as keyof typeof schedulesApiMock];
         if (prop in kindsApiMock) return kindsApiMock[prop as keyof typeof kindsApiMock];
@@ -171,16 +167,12 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           (configApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
-        if (prop in loopApiMock) {
-          (loopApiMock as Record<string, unknown>)[prop] = value;
+        if (prop in runApiMock) {
+          (runApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
         if (prop in extractApiMock) {
           (extractApiMock as Record<string, unknown>)[prop] = value;
-          return true;
-        }
-        if (prop in loopGroupApiMock) {
-          (loopGroupApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
         if (prop in schedulesApiMock) {
@@ -212,9 +204,8 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     taskApiMock,
     reviewApiMock,
     configApiMock,
-    loopApiMock,
+    runApiMock,
     extractApiMock,
-    loopGroupApiMock,
     schedulesApiMock,
     kindsApiMock,
     workflowsApiMock,
@@ -222,9 +213,8 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     taskApiProxy,
     reviewApiProxy,
     configApiProxy,
-    loopApiProxy,
+    runApiProxy,
     extractApiProxy,
-    loopGroupApiProxy,
     schedulesApiProxy,
     kindsApiProxy,
     workflowsApiProxy,
@@ -324,17 +314,6 @@ export function mockTaskApi(overrides: Record<string, unknown> = {}) {
     deleteDone: vi.fn().mockResolvedValue({ deleted: 0 }),
     restoreTask: vi.fn().mockResolvedValue(undefined),
     moveTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    postTaskSummary: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    postTaskNote: vi.fn().mockResolvedValue({
-      id: 'u1',
-      task_id: 'test-task-01',
-      agent_id: null,
-      kind: 'note' as const,
-      from_status: null,
-      to_status: null,
-      body: 'test note',
-      created_at: '2026-01-01 00:00:00',
-    }),
     addTaskRef: vi.fn().mockResolvedValue({
       task_id: 'test-task-01',
       integration: 'jira',
@@ -359,7 +338,6 @@ export function mockReviewApi(overrides: Record<string, unknown> = {}) {
     listReviewsInbox: vi.fn().mockResolvedValue([]),
     getReviewDetail: vi.fn().mockResolvedValue(null),
     patchComment: vi.fn().mockResolvedValue({ id: 'c1', status: 'accepted' }),
-    patchWalkthrough: vi.fn().mockResolvedValue({ walkthrough: '{}' }),
     publishReview: vi.fn().mockResolvedValue({ publishedReviewId: 'pr1', commentCount: 0 }),
     requestReReview: vi.fn().mockResolvedValue({ ok: true }),
     triggerManualReview: vi.fn().mockResolvedValue({ id: 'rev1', action: 'created' as const }),
@@ -415,7 +393,6 @@ export function mockConfigApi(overrides: Record<string, unknown> = {}) {
       content: '# Test',
     }),
     listRepoConfigs: vi.fn().mockResolvedValue([]),
-    getRepoConfig: vi.fn().mockResolvedValue(null),
     updateRepoConfig: vi.fn().mockResolvedValue(null),
     listProviders: vi.fn().mockResolvedValue([]),
     listIntegrations: vi.fn().mockResolvedValue([]),
@@ -452,23 +429,106 @@ export function mockConfigApi(overrides: Record<string, unknown> = {}) {
   return { ...defaults, ...overrides };
 }
 
-export function mockLoopApi(overrides: Record<string, unknown> = {}) {
+/** Base fields shared by every mocked `runs` row / detail envelope below. */
+function baseRunFields(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'run-1',
+    workflow_kind: 'loop',
+    trigger: 'manual',
+    schedule_id: null,
+    task_id: 'test-task-01',
+    chat_id: null,
+    loop_run_id: 'loop-1',
+    status: 'running',
+    effective_status: 'running',
+    result_json: null,
+    error: null,
+    started_at: '2026-01-01 00:00:00',
+    ended_at: null,
+    ...overrides,
+  };
+}
+
+export function mockRunApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
-    listLoops: vi.fn().mockResolvedValue([]),
-    getLoop: vi.fn().mockResolvedValue(null),
-    createLoop: vi.fn().mockResolvedValue({
-      id: 'loop-1',
-      task_id: 'test-task-01',
-      spec_json: '{}',
-      status: 'running',
-      iteration: 0,
-      max_iterations: 10,
-      budget_json: null,
-      termination_reason: null,
-      created_at: '2026-01-01 00:00:00',
-      updated_at: '2026-01-01 00:00:00',
+    listRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    getRun: vi.fn().mockResolvedValue(null),
+    startLoop: vi.fn().mockResolvedValue({
+      ...baseRunFields(),
+      loop: {
+        id: 'loop-1',
+        task_id: 'test-task-01',
+        status: 'running',
+        iteration: 0,
+        max_iterations: 10,
+        termination_reason: null,
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        iterations: [],
+      },
+      loopGroup: null,
     }),
-    stopLoop: vi.fn().mockResolvedValue({ id: 'loop-1', status: 'needs_human' }),
+    startLoopGroup: vi.fn().mockResolvedValue({
+      ...baseRunFields({
+        id: 'run-group-1',
+        workflow_kind: 'loop-group',
+        task_id: null,
+        loop_run_id: null,
+      }),
+      loop: null,
+      loopGroup: {
+        id: 'group-1',
+        spec_json: '{}',
+        n: 3,
+        repo_path: '/repo',
+        base_branch: 'main',
+        judge_status: 'not_run',
+        winner_loop_run_id: null,
+        judge_rationale: null,
+        run_id: 'run-group-1',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        candidates: [],
+      },
+    }),
+    stopRun: vi.fn().mockResolvedValue({
+      ...baseRunFields({ status: 'blocked', effective_status: 'blocked' }),
+      loop: {
+        id: 'loop-1',
+        task_id: 'test-task-01',
+        status: 'needs_human',
+        iteration: 0,
+        max_iterations: 10,
+        termination_reason: 'stopped',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        iterations: [],
+      },
+      loopGroup: null,
+    }),
+    judgeLoopGroup: vi.fn().mockResolvedValue({
+      ...baseRunFields({
+        id: 'run-group-1',
+        workflow_kind: 'loop-group',
+        task_id: null,
+        loop_run_id: null,
+      }),
+      loop: null,
+      loopGroup: {
+        id: 'group-1',
+        spec_json: '{}',
+        n: 3,
+        repo_path: '/repo',
+        base_branch: 'main',
+        judge_status: 'running',
+        winner_loop_run_id: null,
+        judge_rationale: null,
+        run_id: 'run-group-1',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        candidates: [],
+      },
+    }),
   };
   return { ...defaults, ...overrides };
 }
@@ -477,28 +537,6 @@ export function mockExtractApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listExtracts: vi.fn().mockResolvedValue([]),
     getExtract: vi.fn().mockResolvedValue(null),
-  };
-  return { ...defaults, ...overrides };
-}
-
-export function mockLoopGroupApi(overrides: Record<string, unknown> = {}) {
-  const defaults = {
-    listLoopGroups: vi.fn().mockResolvedValue([]),
-    getLoopGroup: vi.fn().mockResolvedValue(null),
-    createLoopGroup: vi.fn().mockResolvedValue({
-      id: 'group-1',
-      spec_json: '{}',
-      n: 3,
-      repo_path: '/repo',
-      base_branch: 'main',
-      judge_status: 'not_run',
-      winner_loop_run_id: null,
-      judge_rationale: null,
-      created_at: '2026-01-01 00:00:00',
-      updated_at: '2026-01-01 00:00:00',
-      loopRuns: [],
-    }),
-    judgeLoopGroup: vi.fn().mockResolvedValue({ id: 'group-1', judge_status: 'running' }),
   };
   return { ...defaults, ...overrides };
 }
@@ -590,7 +628,6 @@ export function mockKindsApi(overrides: Record<string, unknown> = {}) {
 export function mockWorkflowsApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
     listWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
-    getWorkflowRuns: vi.fn().mockResolvedValue({ runs: [] }),
     listAllRuns: vi.fn().mockResolvedValue({ runs: [] }),
   };
   return { ...defaults, ...overrides };
@@ -654,9 +691,8 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     ...mockTaskApi(),
     ...mockReviewApi(),
     ...mockConfigApi(),
-    ...mockLoopApi(),
+    ...mockRunApi(),
     ...mockExtractApi(),
-    ...mockLoopGroupApi(),
     ...mockSchedulesApi(),
     ...mockKindsApi(),
     ...mockWorkflowsApi(),

@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
+import Database from './sqlite.js';
 import { createTestDb, insertTask, insertPermissionPrompt, DEFAULTS } from './test-helpers.js';
 import { getNeedsYou, getActivity } from './inbox.js';
 
 describe('inbox queries', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

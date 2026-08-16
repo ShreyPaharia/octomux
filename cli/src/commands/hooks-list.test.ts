@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import os from 'os';
 import path from 'path';

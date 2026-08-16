@@ -8,25 +8,36 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
 ## Tech Stack
 
 - **Frontend:** Vite + React 19 + Tailwind CSS 4 + shadcn/ui + React Router 7
-- **Backend:** Express 5 + better-sqlite3 (WAL mode) + node-pty + ws
-- **Terminal:** xterm.js (bidirectional) → node-pty → `tmux attach`
+- **Backend:** Express 5 + `bun:sqlite` (WAL mode) + `Bun.Terminal` + ws
+- **Terminal:** xterm.js (bidirectional) → `Bun.Terminal` (`server/pty.ts`) → `tmux attach`
 - **Isolation:** git worktrees per task, tmux sessions per task, tmux windows per agent
 - **IDs:** nanoid(12)
-- **Runtime:** bun (package manager + script runner), tsx (dev server)
-- **Binary:** single `octomux` command (`bin/octomux.js`) — `start` launches dashboard, all other subcommands are CLI operations
+- **Runtime:** bun everywhere — package manager, script runner, dev server, test runner,
+  and the compiler for the shipped binary. No Node in the build or at runtime.
+  There is no better-sqlite3, node-pty, vitest, or tsup; do not reintroduce them.
+- **Binary:** `bun build --compile bin/main.js` → one self-contained executable per
+  platform. `start` launches the dashboard, all other subcommands are CLI operations.
 
 ## Commands
 
 - `bun run dev` — starts Express (7777) + Vite concurrently
-- `bun run test` — vitest run (unit + component tests)
-- `bun run test:watch` — vitest in watch mode
+- `bun run test` — all three suites below
+- `bun run test:server` — `server/` + `cli/review` (bun test)
+- `bun run test:client` — `src/` (bun test + happy-dom preload)
+- `bun run test:units` — `cli/src`, `packages`, `bin` (bun test)
+- `bun run test:watch` — bun test in watch mode (server suite)
 - `bun run test:e2e` — Playwright E2E tests (auto-starts servers)
 - `bun run test:e2e:ui` — Playwright interactive UI mode
+- `bun run bench:task-create [-- --repo <path> --runs N]` — times real `startTask`
+  runs and prints a per-stage breakdown (reads the `stage_timing` log lines)
 - `bun run lint` / `bun run lint:fix` — ESLint 9 flat config
 - `bun run format` / `bun run format:check` — Prettier
 - `bun run typecheck` — `tsc -b` (project references across `packages/*`)
-- `bun run build` — builds `packages/*` (diff-engine, types, test-fixtures, api-client),
-  then Vite build + tsup server bundle + `cli:build`, then `scripts/verify-build.js`
+- `bun run build` — builds `packages/*` (diff-engine, types, test-fixtures, api-client,
+  capabilities), then the compiled binary
+- `bun run build:binary` — this host only → `dist-bin/octomux`
+- `bun run build:binary:all` — all six targets
+- `bun run build:npm` — build all + sign + stage `dist-npm/` for publishing
 
 ## Architecture
 
@@ -42,7 +53,8 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
     plus `lifecycle/`, `setup/`, `loop/` subdirs.
   - `db.ts` — SQLite singleton with `getDb()` / `setDb()` / `initDb()`
   - `logger.ts` — pino root + `childLogger('<module>')` helper
-  - `types.ts` — shared types (Task, Agent, TaskStatus, AgentStatus)
+  - `types.ts` — re-exports `@octomux/types` (Task, Worker, RuntimeState, WorkflowStatus,
+    WorkerStatus) plus the server-only review/orchestrator types
   - `harnesses/` — pluggable harness implementations (`claude-code.ts`, `cursor.ts`;
     `claude-code` is the default via `DEFAULT_HARNESS_ID`).
     Each `Harness` exports `id`, `displayName`, `sessionIdMode`, command builders,
@@ -100,8 +112,13 @@ DB migrations are forward-only. Back up `~/.octomux/data/tasks.db` (prod) or
 
 ## Task Lifecycle
 
-draft → setting_up → running → closed/error
-Error at any point → error state with message in `task.error`
+A task carries two orthogonal statuses (`packages/types/src/index.ts`):
+
+- `runtime_state: RuntimeState` — `idle | setting_up | running | error | looping`
+- `workflow_status: WorkflowStatus` — the board column, `backlog | planned | in_progress | human_review | pr | done`
+
+`setting_up → running → idle` is the usual runtime path (close sets `idle`). Error at any
+point → `error` with the message in `task.error`.
 
 Per task: git worktree at `<repo>/.worktrees/<id>`, tmux session `octomux-agent-<id>`,
 branch `agents/<id>`. Each **worker** = tmux window within the session.
@@ -116,6 +133,9 @@ branch `agents/<id>`. Each **worker** = tmux window within the session.
 
 - **close** = stop workers + kill tmux session. Preserves worktree and branch (for resume).
 - **delete** = kill tmux session + remove worktree + delete branch + delete DB rows. Full cleanup.
+
+`startTask` logs a `duration_ms` per stage (`stage_timing: true`); `bun run
+bench:task-create` reports the breakdown. `git worktree add` dominates.
 
 ## Per-task model override
 
@@ -176,8 +196,9 @@ no resolution chain, no per-kind DB table, and editing a preset never touches ex
 `poller/execute-schedule-run.ts`, which threads model/timeout into the workflow's `RunContext`.
 Session-vertical prompts interpolate `{{configKey}}` placeholders generically
 (`server/prompt-interpolate.ts`, single-pass). Managed from `/schedules` and Settings → Kinds
-in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH /api/schedules/:id`,
-`POST /api/schedules/:id/run`, `GET /api/schedules/:id/export`, `POST /api/schedules/import`)
+in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH`/`DELETE /api/schedules/:id`,
+`POST /api/schedules/:id/run`, `GET /api/schedules/:id/runs`,
+`GET /api/schedules/:id/export`, `POST /api/schedules/import`, `GET /api/schedules/kinds`)
 and `server/routes/kinds.ts` (`GET /api/kinds`, `PUT`/`DELETE /api/kinds/:kind`, home tier only).
 
 ## Skills and agent roles
@@ -210,7 +231,21 @@ task-backed schedule prompts.
 
 ## Testing Patterns
 
-- vitest with `NODE_ENV=test` (set in vitest.config.ts)
+- `bun test`, not vitest. Tests keep the vitest shape (`describe/it/expect/vi`) via
+  the shim at `server/bun-test.ts` — import from it, never from `vitest`.
+  `src/` tests import `src/bun-test.ts`, which re-exports the same surface.
+- **`vi.mock()` does not hoist**, and a static `import` is hoisted no matter where it
+  sits. Load the module under test with `await import()` _after_ the mocks.
+- **Mock factories must be synchronous** — an `async` factory deadlocks a synchronous
+  import of the mocked module. `importOriginal()` / `vi.importActual()` return the
+  module directly, so don't `await` them.
+- **Mock order matters** when a factory loads real modules: mock `child_process`
+  before anything whose module scope captures `execFile` (e.g. `tmux-bin`,
+  `git-commits`).
+- Suites run `--parallel` (implies `--isolate`); without it `mock.module()`
+  registrations leak across files in the shared process.
+- `NODE_ENV=test` comes from the test scripts — bun does not set it. Without it the
+  suite runs in production mode against the real `~/.octomux`.
 - Table-driven tests using `it.each()` — prefer over individual test cases
 - Shared test harness: `server/test-helpers.ts` (DEFAULTS fixtures, insert/get helpers,
   shell mock assertion helpers via `findExecCall`/`countExecCalls`)
@@ -239,11 +274,21 @@ task-backed schedule prompts.
 - SQLite `datetime('now')` needs single-quoted `'now'` — use template literals, not regular strings
 - `fs` mock for task-engine needs `default: mocked` in vi.mock return (default import)
 - Express 5 uses `req.params` differently — use `as Record<string, string>` if needed
-- better-sqlite3 is synchronous — no await needed for DB calls
-- node-pty `spawn-helper` may lack +x after install — postinstall script fixes this
+- `bun:sqlite` is synchronous — no await needed for DB calls
+- `bun:sqlite` `.get()` returns `null` on a miss where better-sqlite3 returned
+  `undefined`; `server/sqlite.ts` normalises it back to `undefined`. Go through that
+  module, never `bun:sqlite` directly.
+- `Bun.Terminal.resize()` updates the tty winsize but does not signal the child —
+  `server/pty.ts` sends SIGWINCH itself, or `tmux attach` never reflows
 - tmux `base-index` varies per user — always query actual window index via `display-message`/`list-windows`, never hardcode 0
 - shadcn/ui uses `@base-ui/react` — use `render={<Button />}` prop, not `asChild`
-- vitest projects: put `globals: true` in each project config individually, not just top-level
+- assets (`skills/`, `agents/`, `templates/`, `workflows/`, `dist/`) live in a read-only
+  `/$bunfs` inside the binary — reach them via `assetRoot()` from `server/assets.ts`,
+  which unpacks to `~/.octomux/runtime/<version>/`. `__dirname` does not work.
+- pino's `transport:` option resolves targets by module path in a worker thread, which
+  a compiled binary can't do — `server/logger.ts` uses pino-roll as an in-process stream
+- happy-dom ships `IntersectionObserver`/`ResizeObserver` that never fire; the stubs in
+  `src/bun-test-setup.ts` are installed unconditionally and re-applied per isolate
 - Frontend test helpers in `src/test-helpers.tsx`: `makeTask()`, `renderWithRouter()`, `mockApi()`
 - poller tests: use `findCallback(...args)` to find callback in promisified execFile mocks
 - logger path resolution is lazy — tests that stub `os`/`fs` must not expect the log

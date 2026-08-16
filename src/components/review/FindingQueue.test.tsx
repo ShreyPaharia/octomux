@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { FindingQueue } from './FindingQueue';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { InlineCommentDTO } from '@/lib/api/reviewApi';
 
 const { mockPatchComment } = await vi.hoisted(async () => ({
@@ -11,6 +8,10 @@ vi.mock('@/lib/api/reviewApi', () => ({
   reviewApi: { patchComment: mockPatchComment },
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+const { render, screen } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { FindingQueue } = await import('./FindingQueue');
 
 function makeComment(overrides: Partial<InlineCommentDTO> = {}): InlineCommentDTO {
   return {

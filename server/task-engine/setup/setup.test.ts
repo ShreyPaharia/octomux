@@ -1,18 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  DEFAULTS,
-  findExecCall,
-  countExecCalls,
-} from '../../test-helpers.js';
+import Database from '../../sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 import type { Task } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -77,8 +70,8 @@ vi.mock('../../git-commits.js', () => ({
 }));
 
 // Silence logger in tests
-vi.mock('../../logger.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../logger.js')>();
+vi.mock('../../logger.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../../logger.js')>();
   return {
     ...actual,
     childLogger: vi.fn(() => ({
@@ -89,6 +82,9 @@ vi.mock('../../logger.js', async (importOriginal) => {
     })),
   };
 });
+
+const { createTestDb, insertTask, DEFAULTS, findExecCall, countExecCalls } =
+  await import('../../test-helpers.js');
 
 const { setupNew } = await import('./new.js');
 const { setupExisting } = await import('./existing.js');
@@ -101,7 +97,7 @@ const { preflightNoneMode } = await import('../../preflight.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

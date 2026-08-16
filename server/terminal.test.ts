@@ -1,8 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createServer, type Server } from 'http';
+import type { Server } from 'http';
 import { WebSocket } from 'ws';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -14,7 +13,7 @@ const mockPty = {
   kill: vi.fn(),
 };
 
-vi.mock('node-pty', () => ({
+vi.mock('./pty.js', () => ({
   spawn: vi.fn(() => mockPty),
 }));
 
@@ -31,7 +30,11 @@ const mockExecFile = vi.fn(
       if (execFileShouldFail) {
         process.nextTick(() => callback(new Error('tmux failed'), '', ''));
       } else {
-        const stdout = _args?.includes('list-clients') ? '/dev/ttys001\n' : '';
+        const stdout = _args?.includes('list-clients')
+          ? '/dev/ttys001\n'
+          : _args?.includes('capture-pane')
+            ? 'line one\nline two\n'
+            : '';
         process.nextTick(() => callback(null, stdout, ''));
       }
     }
@@ -66,13 +69,16 @@ vi.mock('child_process', () => {
   return { execFile };
 });
 
+const { createServer } = await import('http');
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('./test-helpers.js');
+
 const { setupTerminalWebSocket, handleTerminalUpgrade, getActiveConnections } =
   await import('./terminal.js');
-const nodePty = await import('node-pty');
+const nodePty = await import('./pty.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 let server: Server;
 let port: number;
 
@@ -121,6 +127,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   db.close();
+  // server.close() waits for open sockets to drain, and the terminal WebSockets
+  // stay open — under bun that never resolves and hangs the file. Drop them.
+  server.closeAllConnections?.();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -185,7 +194,7 @@ describe('terminal WebSocket', () => {
     ws.close();
   });
 
-  it('spawns node-pty attaching to the grouped session (not the main session)', async () => {
+  it('spawns a pty attaching to the grouped session (not the main session)', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
@@ -224,6 +233,29 @@ describe('terminal WebSocket', () => {
     const selIdx = selArgs.indexOf('select-window');
     const selectTarget = selArgs[selIdx + 2] as string; // -t <target>
     expect(selectTarget).toMatch(/:1$/);
+
+    ws.close();
+  });
+
+  it('sends a capture-pane snapshot as the first frame, before any PTY data', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    const frames: string[] = [];
+    ws.on('message', (d) => frames.push(d.toString()));
+    await waitForSetup();
+
+    // Snapshot targets the shared session's window, not the viewer session.
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'tmux',
+      expect.arrayContaining(['capture-pane', '-t', `${DEFAULTS.runningTask.tmux_session}:0`]),
+      expect.any(Function),
+    );
+
+    // First frame paints the pane into the alternate screen with CRLF line ends,
+    // so tmux's own `\e[?1049h\e[H\e[J` + repaint overwrites identical content.
+    expect(frames[0]).toBe('\x1b[?1049h\x1b[H\x1b[J' + 'line one\r\nline two\r\n');
 
     ws.close();
   });
@@ -407,7 +439,7 @@ describe('terminal WebSocket', () => {
 
   // ─── PTY spawn failure ─────────────────────────────────────────────────────
 
-  it('closes with 4005 when node-pty spawn fails', async () => {
+  it('closes with 4005 when pty spawn fails', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 

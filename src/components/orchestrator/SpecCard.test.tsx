@@ -8,7 +8,7 @@
  *  - "Done reviewing" button calls onDismiss (no PUT, no ws event).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import { screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { SpecCard, type SpecCardProps } from './SpecCard';
 import { renderWithRouter } from '../../test-helpers';

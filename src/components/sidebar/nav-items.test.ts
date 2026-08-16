@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { MORE_ITEMS, NAV_ITEMS, deriveActiveNav } from './nav-items';
 
 describe('MORE_ITEMS', () => {

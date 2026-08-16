@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { setReviewed, clearReviewed, listReviewState } from './file-review-state.js';
-import { createTestDb, insertTask } from '../test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
-import { execFile } from 'child_process';
+
+const { setReviewed, clearReviewed, listReviewState } = await import('./file-review-state.js');
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { execFile } = await import('child_process');
 
 describe('file_review_state DAO', () => {
   beforeEach(() => {

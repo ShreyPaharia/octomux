@@ -1,0 +1,18 @@
+#!/bin/sh
+# Placeholder for the npm `bin` entry.
+#
+# `scripts/install-binary.cjs` (postinstall) overwrites this file with the real
+# compiled binary for the host platform, so `octomux` execs native code with no
+# Node process in between. If you are seeing this message, that never happened.
+echo "Error: octomux native binary not installed." >&2
+echo "" >&2
+echo "Either postinstall did not run (--ignore-scripts, some pnpm configs)" >&2
+echo "or the platform-native optional dependency was not downloaded" >&2
+echo "(--omit=optional / --no-optional)." >&2
+echo "" >&2
+echo "Fixes:" >&2
+echo "  npm rebuild octomux          # re-run the install step" >&2
+echo "  node node_modules/octomux/bin/cli-wrapper.cjs --help   # run via the fallback" >&2
+echo "" >&2
+echo "Supported platforms: macOS (arm64, x64), Linux (arm64, x64; glibc or musl)." >&2
+exit 1

@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import { SetupBanner } from './SetupBanner';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const apiMock = vi.hoisted(() => ({
   getSettings: vi.fn(),
@@ -11,6 +8,10 @@ const apiMock = vi.hoisted(() => ({
 vi.mock('@/lib/api/configApi', () => ({ configApi: apiMock }));
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: {} }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: {} }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { SetupBanner } = await import('./SetupBanner');
+const { renderWithRouter } = await import('../test-helpers');
 
 function setupStatus(blockerCount: number, attentionCount: number) {
   return {

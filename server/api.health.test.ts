@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 import request from 'supertest';
-import type Database from 'better-sqlite3';
+import type Database from './sqlite.js';
 import { createTestDb, insertTask } from './test-helpers.js';
 import { setDb } from './db.js';
 import { createApp } from './app.js';
 
 describe('GET /api/health', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -48,7 +48,7 @@ describe('GET /api/health', () => {
         prepare: vi.fn(() => {
           throw new Error('database is locked');
         }),
-      } as unknown as Database.Database;
+      } as unknown as Database;
       setDb(failing);
 
       const res = await request(createApp()).get('/api/health');

@@ -1,11 +1,8 @@
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TaskPickerField } from './TaskPickerField';
-import { renderWithRouter } from '../../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
-vi.mock('@/lib/api/taskApi', async () => {
-  const { makeTask: mt } = await import('../../test-helpers');
+vi.mock('@/lib/api/taskApi', () => {
+  const { makeTask: mt } =
+    vi.importActual<typeof import('../../test-helpers')>('../../test-helpers');
   const tasks = [
     mt({ id: 'abc123456789', title: 'Fix login bug', runtime_state: 'running' }),
     mt({ id: 'def987654321', title: 'Add auth middleware', runtime_state: 'idle' }),
@@ -17,6 +14,11 @@ vi.mock('@/lib/api/taskApi', async () => {
     },
   };
 });
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { TaskPickerField } = await import('./TaskPickerField');
+const { renderWithRouter } = await import('../../test-helpers');
 
 describe('TaskPickerField', () => {
   let onChange: ReturnType<typeof vi.fn>;

@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
 
 vi.mock('../../github-client.js', () => ({
   postPullRequestReview: vi.fn().mockResolvedValue({
@@ -14,6 +12,9 @@ vi.mock('../../inline-comments-outdated.js', () => ({
   computeOutdated: vi.fn().mockResolvedValue(new Map()),
   splitLines: (s: string) => s.split('\n'),
 }));
+
+const { createTestDb } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
 
 const { postPullRequestReview } = await import('../../github-client.js');
 const { isAnchorOutdated } = await import('../../inline-comments-outdated.js');

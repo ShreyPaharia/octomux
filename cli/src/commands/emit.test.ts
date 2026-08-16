@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import { registerEmit } from './emit.js';
 
@@ -48,7 +48,7 @@ describe('emit command', () => {
     );
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:7777/api/loops/run-1/emit',
+      'http://127.0.0.1:7777/api/runs/run-1/emit',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({

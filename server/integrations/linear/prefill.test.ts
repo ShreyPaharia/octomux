@@ -1,16 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockInvokeLinear = vi.fn();
 
-vi.mock('./graphql.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./graphql.js')>();
+vi.mock('./graphql.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./graphql.js')>();
   return {
     ...actual,
     invokeLinear: (...args: unknown[]) => mockInvokeLinear(...args),
   };
 });
 
-import { prefillFromLinear } from './prefill.js';
+const { prefillFromLinear } = await import('./prefill.js');
 
 const TEAMS_RESPONSE = {
   teams: {

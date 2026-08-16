@@ -51,11 +51,20 @@ export function actionIdempotencyKey(action: string, input: Record<string, unkno
     .digest('hex');
 }
 
-function actionConfig(): { baseUrl?: string; token?: string; conversationId?: string } {
+function actionConfig(): {
+  baseUrl?: string;
+  token?: string;
+  conversationId?: string;
+  taskId?: string;
+} {
   return {
     baseUrl: process.env.OCTOMUX_ACTION_BASE_URL,
     token: process.env.OCTOMUX_ACTION_TOKEN,
     conversationId: process.env.OCTOMUX_CONVERSATION_ID,
+    // Set for a worker session (OCTOMUX_TASK_ID), never for the conductor.
+    // callGateCard sends it so the server can resolve conversation_id via
+    // managed_tasks when OCTOMUX_CONVERSATION_ID isn't set — see its doc.
+    taskId: process.env.OCTOMUX_TASK_ID,
   };
 }
 
@@ -118,6 +127,97 @@ export async function callOrchestratorAction(
     throw new Error(body.error ?? `orchestrator action '${action}' failed (HTTP ${res.status})`);
   }
   return body.result;
+}
+
+// ─── Gate card RPC (capability registry ask/always-ask gate) ────────────────
+
+export interface CreateGateCardInput {
+  /** Capability id, e.g. 'task.close' or 'owner.ask'. */
+  capabilityId: string;
+  tier: 'ask' | 'always-ask';
+  /** 'action' → approve/reject an implied write. 'question' → free-text answer. */
+  kind: 'action' | 'question';
+  /** Display name for the card header (defaults to the capability's MCP tool name). */
+  command: string;
+  /** Displayed as editable-looking fields on an 'action' card. Omitted for 'question'. */
+  args?: Record<string, unknown>;
+  /** The question text for a 'question' card. Omitted for 'action'. */
+  question?: string;
+}
+
+/**
+ * RPC to the main server's POST /api/hooks/gate-card, creating a pending
+ * action_cards row and pushing it to the conductor's conversation. Used by
+ * `onGatedInvoke` (./gate.js) — CREATION must happen in the main process
+ * because pushing the card to the browser needs the main process's live
+ * WebSocket client registry (server/orchestrator/stream.ts's `convClients`),
+ * which this stdio subprocess does not share. Once created, `onGatedInvoke`
+ * polls the card's resolution straight off its OWN `getDb()` connection (WAL
+ * mode makes that safe and cheap) rather than RPCing again.
+ *
+ * Throws on any failure (missing config, network error, non-ok response) —
+ * the caller (`onGatedInvoke`) must treat that as a DISTINCT denial from the
+ * owner rejecting or a timeout: the owner was never even asked.
+ *
+ * conversation_id resolution: the conductor always has OCTOMUX_CONVERSATION_ID
+ * set and that wins when present. A worker session never has it (write.ts's
+ * module doc) but does have OCTOMUX_TASK_ID, so this sends task_id instead and
+ * lets the server resolve the OWNING conversation via `managed_tasks`
+ * (server/hooks.ts's `/gate-card` — `findConversationForTask`). This is not a
+ * fallback for locating a person — `managed_tasks` (task → conversation) IS
+ * the routing table: a worker's question is addressed to the conductor
+ * supervising it, and a human is however far up that chain the conductor
+ * escalates to. That only resolves for an ORCHESTRATOR-MANAGED worker (it has
+ * a `managed_tasks` row by definition — see the module doc on
+ * `applyOrchestratorMcpConfig`, which is also why a worker with no
+ * `managed_tasks` row never gets this MCP server wired up in the first place:
+ * there is no case today where a worker reaches this call with neither id
+ * resolvable). If somehow neither is available this throws locally rather
+ * than round-tripping for a guaranteed failure.
+ */
+export async function callGateCard(input: CreateGateCardInput): Promise<{ card_id: string }> {
+  const { baseUrl, token, conversationId, taskId } = actionConfig();
+  if (!baseUrl || !token) {
+    throw new Error('orchestrator write tools are not configured (missing base url / token)');
+  }
+  if (!conversationId && !taskId) {
+    throw new Error('no conversation or task configured — no owner to route this question to');
+  }
+
+  const url =
+    `${baseUrl}/api/hooks/gate-card` +
+    `?token=${encodeURIComponent(token)}` +
+    (conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : '') +
+    (taskId ? `&task_id=${encodeURIComponent(taskId)}` : '');
+
+  logger.debug(
+    { capability_id: input.capabilityId, tier: input.tier, kind: input.kind },
+    'mcp write: RPC gate-card',
+  );
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      capability_id: input.capabilityId,
+      tier: input.tier,
+      kind: input.kind,
+      command: input.command,
+      args: input.args,
+      question: input.question,
+    }),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    result?: { card_id?: string };
+    error?: string;
+  };
+
+  if (!res.ok || body.ok === false || !body.result?.card_id) {
+    throw new Error(body.error ?? `gate-card RPC failed (HTTP ${res.status})`);
+  }
+  return { card_id: body.result.card_id };
 }
 
 /**

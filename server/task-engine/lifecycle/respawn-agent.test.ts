@@ -1,12 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from '../../test-helpers.js';
+import Database from '../../sqlite.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
 import type { Task, Worker } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -36,8 +35,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../../repositories/orchestrator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../repositories/orchestrator.js')>();
+vi.mock('../../repositories/orchestrator.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../../repositories/orchestrator.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 
@@ -75,13 +74,15 @@ vi.mock('../../harnesses/index.js', () => ({
   })),
 }));
 
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('../../test-helpers.js');
+
 const { respawnAgentFresh } = await import('./respawn-agent.js');
 const { execFile } = await import('child_process');
 const { broadcast } = await import('../../events.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();
@@ -180,7 +181,7 @@ describe('respawnAgentFresh', () => {
     const fs = await import('fs');
     expect(fs.writeFileSync).toHaveBeenCalledWith(
       expect.stringContaining(`.claude-prompt-${agent.id}`),
-      'do the loop thing',
+      expect.stringContaining('do the loop thing'),
       expect.anything(),
     );
   });

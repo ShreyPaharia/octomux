@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { HeadAdvancedBanner } from './HeadAdvancedBanner';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const { mockRequestReReview } = await vi.hoisted(async () => ({
   mockRequestReReview: vi.fn(),
@@ -26,6 +23,10 @@ vi.mock('../../lib/event-source', () => ({
     };
   }),
 }));
+
+const { render, screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { HeadAdvancedBanner } = await import('./HeadAdvancedBanner');
 
 describe('HeadAdvancedBanner', () => {
   beforeEach(() => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from './bun-test.js';
 import { inferRefs, parseRefInferenceRules } from './ref-inference.js';
 import type { RepoConfigWithInference } from './ref-inference.js';
 

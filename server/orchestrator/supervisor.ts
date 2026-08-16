@@ -48,7 +48,6 @@ import {
 import { pushToConversation } from './stream.js';
 import { runSendMessage } from './exec.js';
 import { getTask } from '../repositories/index.js';
-import { summarizeArtifact } from './artifact-summary.js';
 
 const logger = childLogger('orchestrator/supervisor');
 
@@ -241,10 +240,6 @@ export function createSupervisor(): Supervisor {
         const specPath = (artifacts[0] as string | undefined) ?? 'spec.md';
         const artifactUrl = `/api/orchestrator/artifact?task=${encodeURIComponent(event.task_id)}&path=${encodeURIComponent(specPath)}`;
 
-        // Self-contained gist of the spec so a channel reader (mobile/SSH) can
-        // review without opening the link. Falls back to null → plain note.
-        const specSummary = summarizeArtifact(event.task_id, specPath);
-
         // Push a read-only spec card event (no action_cards row — it's informational only).
         const specCardId = nanoid(12);
         const specCardEvent = {
@@ -255,21 +250,17 @@ export function createSupervisor(): Supervisor {
             task_id: event.task_id,
             spec_path: specPath,
             artifact_url: artifactUrl,
-            ...(specSummary ? { summary: specSummary } : {}),
           },
         };
         pushToConversation(convId, JSON.stringify(specCardEvent));
 
-        // Assistant note carrying the spec gist as its payload (link secondary).
-        const specNote = specSummary
-          ? `📋 spec ready — planning is underway. Review:\n\n${specSummary}\n\n(ref: ${artifactUrl})`
-          : `📋 spec ready — open to review; planning is underway.`;
+        // Concise assistant note so the ws history shows what happened.
         pushToConversation(
           convId,
           JSON.stringify({
             type: 'message',
             role: 'assistant',
-            text: specNote,
+            text: `📋 spec ready — open to review; planning is underway.`,
           }),
         );
 
@@ -342,11 +333,6 @@ export function createSupervisor(): Supervisor {
         // path can resolve it on approval (without a row, approve is a silent
         // no-op). tool_name 'approve-plan' routes executeCard to the relay branch.
         const artifactUrl = `/api/orchestrator/artifact?task=${encodeURIComponent(event.task_id)}&path=${encodeURIComponent(planPath)}`;
-
-        // Self-contained gist of the plan so the user can approve from chat
-        // (mobile/SSH) without opening the artifact link.
-        const planSummary = summarizeArtifact(event.task_id, planPath);
-
         const cardId = createCard({
           conversation_id: convId,
           tool_use_id: `relay-${nanoid(8)}`,
@@ -362,21 +348,17 @@ export function createSupervisor(): Supervisor {
             plan_path: planPath,
             // artifact_url is the REST endpoint the UI calls to render the plan
             artifact_url: artifactUrl,
-            ...(planSummary ? { summary: planSummary } : {}),
           },
         };
         pushToConversation(convId, JSON.stringify(cardEvent));
 
-        // Text note carrying the plan gist as its payload (link secondary).
-        const planNote = planSummary
-          ? `📋 task \`${event.task_id}\` plan ready to approve:\n\n${planSummary}\n\nReply approve to begin implementation.\n\n(ref: ${artifactUrl})`
-          : `[supervisor] task \`${event.task_id}\` plan ready — review at \`${planPath}\` and approve to begin implementation.`;
+        // Also push a concise text note so the ws history shows what happened
         pushToConversation(
           convId,
           JSON.stringify({
             type: 'message',
             role: 'assistant',
-            text: planNote,
+            text: `[supervisor] task \`${event.task_id}\` plan ready — review at \`${planPath}\` and approve to begin implementation.`,
           }),
         );
 
@@ -405,18 +387,12 @@ export function createSupervisor(): Supervisor {
 
         // Diff-view URL is a pointer to the diff viewer for this task — not code contents
         const diffUrl = `/tasks/${event.task_id}?view=diff`;
-        // Lead with the agent's own last-reported summary so the message stands
-        // on its own; the diff link is a trailing secondary reference.
-        const doneSummary = getTask(event.task_id)?.current_summary?.trim();
-        const doneNote = doneSummary
-          ? `✅ task \`${event.task_id}\` implementation complete:\n\n${doneSummary}\n\n(diff: ${diffUrl})`
-          : `✅ task \`${event.task_id}\` implementation complete. (diff: ${diffUrl})`;
         pushToConversation(
           convId,
           JSON.stringify({
             type: 'message',
             role: 'assistant',
-            text: doneNote,
+            text: `[supervisor] task \`${event.task_id}\` implementation complete — diff view: ${diffUrl}`,
           }),
         );
 

@@ -12,10 +12,9 @@ import {
   getTask as getTaskRepo,
 } from '../../repositories/index.js';
 import { createReviewTaskFromPr, createManualReview, triggerReviewRun } from './run.js';
-import { lookupExistingReviewId, loadTaskOrFail, deepMerge } from '../../routes/_shared.js';
+import { lookupExistingReviewId, loadTaskOrFail } from '../../routes/_shared.js';
 import { badRequest, notFound, ServiceError, conflict } from '../../services/errors.js';
-import { getReviewRun, getCurrentRun, setWalkthrough } from '../../repositories/review-runs.js';
-import { listPublishedReviews } from '../../repositories/published-reviews.js';
+import { getCurrentRun } from '../../repositories/review-runs.js';
 
 const execFile = promisify(execFileCb);
 const logger = childLogger('workflows/reviewer');
@@ -35,7 +34,55 @@ router.get('/api/reviews/:id', (req: Request, res: Response) => {
 });
 
 router.post('/api/reviews', async (req: Request, res: Response) => {
-  const body = req.body as { pr_url?: unknown; repo_path?: unknown };
+  const body = req.body as { pr_url?: unknown; repo_path?: unknown; source_task_id?: unknown };
+
+  // Discriminated body: {source_task_id} triggers a manual review of a source
+  // task's current branch/PR (formerly POST /api/tasks/:taskId/review).
+  // Everything else falls through to the {pr_url, repo_path?} PR-import path.
+  if (typeof body.source_task_id === 'string' && body.source_task_id) {
+    const taskId = body.source_task_id;
+    const task = getTaskRepo(taskId);
+    if (!task) {
+      throw notFound('Task not found');
+    }
+
+    if (!task.branch || !task.worktree) {
+      throw badRequest('Start the task first');
+    }
+
+    const existingId = lookupExistingReviewId(task);
+    if (existingId) {
+      res.status(200).json({ id: existingId, action: 'existing' });
+      return;
+    }
+
+    let prHeadSha = task.pr_head_sha;
+    if (!prHeadSha) {
+      const cwd = taskWorkingDir(task);
+      try {
+        prHeadSha = await revParseHead(cwd!);
+      } catch (err) {
+        throw new ServiceError(`failed to resolve HEAD: ${(err as Error).message}`, 500);
+      }
+    }
+
+    const { id: newId } = await createManualReview({
+      source_task_id: task.id,
+      source_title: task.title,
+      repo_path: task.repo_path,
+      branch: task.branch,
+      base_branch: task.base_branch,
+      base_sha: task.base_sha ?? null,
+      pr_head_sha: prHeadSha,
+      pr_url: task.pr_url ?? null,
+      pr_number: task.pr_number ?? null,
+      requested_at: new Date().toISOString(),
+    });
+
+    res.status(201).json({ id: newId, action: 'created' });
+    return;
+  }
+
   const prUrl = typeof body.pr_url === 'string' ? body.pr_url.trim() : '';
   const bodyRepoPath = typeof body.repo_path === 'string' ? body.repo_path.trim() : '';
 
@@ -128,75 +175,6 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
   );
 
   res.status(201).json({ id, reused: false });
-});
-
-router.post('/api/tasks/:taskId/review', async (req: Request, res: Response) => {
-  const taskId = (req.params as Record<string, string>).taskId;
-  const task = getTaskRepo(taskId);
-  if (!task) {
-    throw notFound('Task not found');
-  }
-
-  if (!task.branch || !task.worktree) {
-    throw badRequest('Start the task first');
-  }
-
-  const existingId = lookupExistingReviewId(task);
-  if (existingId) {
-    res.status(200).json({ id: existingId, action: 'existing' });
-    return;
-  }
-
-  let prHeadSha = task.pr_head_sha;
-  if (!prHeadSha) {
-    const cwd = taskWorkingDir(task);
-    try {
-      prHeadSha = await revParseHead(cwd!);
-    } catch (err) {
-      throw new ServiceError(`failed to resolve HEAD: ${(err as Error).message}`, 500);
-    }
-  }
-
-  const { id: newId } = await createManualReview({
-    source_task_id: task.id,
-    source_title: task.title,
-    repo_path: task.repo_path,
-    branch: task.branch,
-    base_branch: task.base_branch,
-    base_sha: task.base_sha ?? null,
-    pr_head_sha: prHeadSha,
-    pr_url: task.pr_url ?? null,
-    pr_number: task.pr_number ?? null,
-    requested_at: new Date().toISOString(),
-  });
-
-  res.status(201).json({ id: newId, action: 'created' });
-});
-
-router.patch('/api/tasks/:id/review-runs/:rid/walkthrough', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req);
-
-  const params = req.params as Record<string, string>;
-  const rid = params.rid;
-
-  const run = getReviewRun(rid);
-  if (!run || run.task_id !== task.id) {
-    throw notFound('Review run not found');
-  }
-
-  const published = listPublishedReviews(task.id);
-  const alreadyPublished = published.some((p) => p.head_sha === run.pr_head_sha);
-  if (alreadyPublished) {
-    throw conflict('Review already published for this head SHA');
-  }
-
-  const existing = run.walkthrough ? JSON.parse(run.walkthrough) : {};
-  const incoming = req.body as Record<string, unknown>;
-  const merged = deepMerge(existing, incoming);
-  setWalkthrough(rid, JSON.stringify(merged));
-
-  const updated = getReviewRun(rid);
-  res.json(updated);
 });
 
 router.post('/api/tasks/:id/review-runs', async (req: Request, res: Response) => {

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import type Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach } from './bun-test.js';
+import type Database from './sqlite.js';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
@@ -8,7 +8,7 @@ import type { RunResult } from './types.js';
 
 describe('POST /api/pr-extracts/:taskId/emit', () => {
   let app: ReturnType<typeof createApp>;
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

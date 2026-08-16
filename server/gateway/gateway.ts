@@ -17,6 +17,7 @@
 import { childLogger } from '../logger.js';
 import { isAllowed, type Channel } from './allowlist.js';
 import { redactSecrets } from './redact.js';
+import { condenseForChat } from './condense.js';
 import { OutboundQueue } from './outbound.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
 import { getThreadConv, setThreadConv, seenInbound, markInbound } from '../repositories/gateway.js';
@@ -89,7 +90,12 @@ export function createGateway(
   adapter: ChannelAdapter,
   conductor: GatewayConductor = realConductor,
 ): Gateway {
-  const outbound = new OutboundQueue((threadKey, text) => adapter.send(threadKey, text));
+  // Single choke point for every outbound chat message (turn replies AND
+  // supervisor pushes): condense raw artifact payloads and cap length here so
+  // no adapter ever receives a raw plan.json dump or an over-limit message.
+  const outbound = new OutboundQueue((threadKey, text) =>
+    adapter.send(threadKey, condenseForChat(text)),
+  );
   const threads = new Map<string, ThreadState>();
 
   const key = (channel: Channel, threadKey: string) => `${channel}:${threadKey}`;
@@ -117,7 +123,6 @@ export function createGateway(
     const args = event.args;
     const taskId = typeof args.task_id === 'string' ? args.task_id : undefined;
     const artifactUrl = typeof args.artifact_url === 'string' ? args.artifact_url : undefined;
-    const summary = typeof args.summary === 'string' ? args.summary.trim() : '';
     const label =
       event.command === 'approve-plan'
         ? 'plan ready for review'
@@ -125,13 +130,6 @@ export function createGateway(
           ? 'spec ready for review'
           : event.command;
     const prefix = taskId ? `[${taskId}] ` : '';
-    // Summary is the payload; the link (when present) is a trailing secondary
-    // reference only — a user on mobile/SSH can't open it, so it must never be
-    // the whole message.
-    if (summary) {
-      const ref = artifactUrl ? `\n\n(ref: ${artifactUrl})` : '';
-      return `${prefix}${label}\n\n${summary}${ref}`;
-    }
     return artifactUrl ? `${prefix}${label}: ${artifactUrl}` : `${prefix}${label}`;
   }
 

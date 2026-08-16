@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { groupTasksForSidebar, type SidebarItem, type SidebarGroup } from './sidebar-utils';
 import { makeTask } from '@/test-helpers';
 
@@ -19,7 +19,7 @@ describe('groupTasksForSidebar', () => {
       makeTask({ id: '3', runtime_state: 'idle', title: 'C' }),
       makeTask({ id: '4', runtime_state: 'error', title: 'D' }),
     ];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));
     expect(ids).toEqual(['1', '4']);
   });
@@ -30,7 +30,7 @@ describe('groupTasksForSidebar', () => {
       makeTask({ id: '2', runtime_state: 'running', repo_path: '/home/dev/repo-b' }),
       makeTask({ id: '3', runtime_state: 'error', repo_path: '/home/dev/repo-a' }),
     ];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     expect(groups.map((g) => g.repo)).toEqual(['repo-a', 'repo-b']);
     expect(groups[0].items).toHaveLength(2);
     expect(groups[1].items).toHaveLength(1);
@@ -70,7 +70,7 @@ describe('groupTasksForSidebar', () => {
       expectedOrder: ['2', '1'],
     },
   ])('sorts $name', ({ tasks, expectedOrder }) => {
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));
     expect(ids).toEqual(expectedOrder);
   });
@@ -80,7 +80,7 @@ describe('groupTasksForSidebar', () => {
       makeTask({ id: '1', runtime_state: 'running', created_at: '2026-01-01 00:00:00' }),
       makeTask({ id: '2', runtime_state: 'running', created_at: '2026-01-02 00:00:00' }),
     ];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     const ids = groups.flatMap((g) => g.items.map((i) => i.id));
     expect(ids).toEqual(['2', '1']); // newer first
   });
@@ -104,7 +104,7 @@ describe('groupTasksForSidebar', () => {
         derived_status: 'needs_attention',
       }),
     ];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     const item = groups[0].items[0];
     expect(item).toEqual({
       id: '1',
@@ -122,7 +122,7 @@ describe('groupTasksForSidebar', () => {
       makeTask({ id: '2', runtime_state: 'running', repo_path: '/home/dev/alpha' }),
       makeTask({ id: '3', runtime_state: 'running', repo_path: '/home/dev/middle' }),
     ];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     expect(groups.map((g) => g.repo)).toEqual(['alpha', 'middle', 'zebra']);
   });
 
@@ -151,7 +151,7 @@ describe('groupTasksForSidebar', () => {
         title: 'Scratch work',
       }),
     ];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     expect(groups.map((g) => g.repo)).toEqual(['alpha', 'Other']);
     expect(groups[1].key).toBe('__other__');
     expect(groups[1].items).toHaveLength(1);
@@ -160,7 +160,7 @@ describe('groupTasksForSidebar', () => {
 
   it('places repo-less non-scratch tasks in the Other group', () => {
     const tasks = [makeTask({ id: '1', runtime_state: 'running', repo_path: '', run_mode: 'new' })];
-    const groups = groupTasksForSidebar(tasks);
+    const groups = groupTasksForSidebar([...tasks]);
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe('__other__');
   });

@@ -1,25 +1,8 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import fs from 'fs';
-import {
-  getBindHost,
-  isRemoteMode,
-  isLoopbackAddress,
-  ensureToken,
-  tokenFilePath,
-  sessionCookieValue,
-  sessionCookieValue as sig,
-  parseCookies,
-  validSessionCookie,
-  validToken,
-  COOKIE_NAME,
-  authorizeRequest,
-  authorizeUpgrade,
-  isUpgradeAuthorized,
-} from './remote-auth.js';
+import { describe, it, expect, afterEach, vi } from './bun-test.js';
 import type { IncomingMessage } from 'http';
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => false),
@@ -29,6 +12,24 @@ vi.mock('fs', async (importOriginal) => {
   };
   return { ...mocked, default: mocked };
 });
+
+const { default: fs } = await import('fs');
+const {
+  getBindHost,
+  isRemoteMode,
+  isLoopbackAddress,
+  ensureToken,
+  tokenFilePath,
+  sessionCookieValue,
+  sessionCookieValue: sig,
+  parseCookies,
+  validSessionCookie,
+  validToken,
+  COOKIE_NAME,
+  authorizeRequest,
+  authorizeUpgrade,
+  isUpgradeAuthorized,
+} = await import('./remote-auth.js');
 
 describe('remote-auth config', () => {
   afterEach(() => {

@@ -1,27 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import pino from 'pino';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertPermissionPrompt,
-  insertUserTerminal,
-  getUserTerminals,
-  getTask,
-  getAgents,
-  getPermissionPrompts,
-  findExecCall,
-  countExecCalls,
-  DEFAULTS,
-} from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 import type { Task, Worker } from './types.js';
-import { getSettings } from './settings.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -42,8 +26,8 @@ vi.mock('./hook-settings.js', () => ({
   DENIED_TOOLS: [],
 }));
 
-vi.mock('./settings.js', async () => {
-  const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
+vi.mock('./settings.js', () => {
+  const actual = vi.importActual<typeof import('./settings.js')>('./settings.js');
   return {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
@@ -102,6 +86,23 @@ vi.mock('child_process', () => ({
   ),
 }));
 
+const { default: pino } = await import('pino');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getUserTerminals,
+  getTask,
+  getAgents,
+  getPermissionPrompts,
+  findExecCall,
+  countExecCalls,
+  DEFAULTS,
+} = await import('./test-helpers.js');
+const { getSettings } = await import('./settings.js');
+
 const {
   startTask,
   closeTask,
@@ -124,7 +125,7 @@ const { setLogger, getLogger } = await import('./logger.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();
@@ -189,7 +190,7 @@ describe('buildAgentStartupCommand', () => {
     expect(cmd).toContain('-- "$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
-      'Do the thing',
+      expect.stringContaining('Do the thing'),
       { mode: 0o600 },
     );
   });
@@ -271,7 +272,7 @@ describe('startTask', () => {
     expect(findLaunchCmd()).toContain('$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
-      'Do the thing',
+      expect.stringContaining('Do the thing'),
       { mode: 0o600 },
     );
   });
@@ -297,6 +298,15 @@ describe('startTask', () => {
     // the launch cmd is itself single-quoted into `zsh -ic '...'`, so the quoted
     // model value appears in its shell-escaped '\\'' form
     expect(findLaunchCmd()).toContain("--model '\\''claude-sonnet-4-6'\\''");
+  });
+
+  // ─── No format/lint preflight (it was ~87% of task-creation wall clock) ──
+
+  it('runs no format/lint preflight before launching the agent', async () => {
+    insertTask(db);
+    await startTask({ ...DEFAULTS.task } as Task);
+
+    expect(findExecCall(vi.mocked(execFile), { cmd: 'sh' })).toBeUndefined();
   });
 
   // ─── Worker MCP config for orchestrator-managed tasks (SHR-160) ────────
@@ -1160,7 +1170,7 @@ describe('addAgent', () => {
     expect(findAddAgentLaunchCmd()).toContain('$(cat ');
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-'),
-      'Write tests',
+      expect.stringContaining('Write tests'),
       { mode: 0o600 },
     );
   });
@@ -1338,7 +1348,7 @@ describe('closeTask', () => {
 
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.not.toThrow();
+    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.toBeUndefined();
   });
 
   it('logs tmux "session not found" at debug, not warn', async () => {
@@ -2286,7 +2296,7 @@ describe('cleanupLinkedSessions', () => {
       cb(new Error('no server running'), null);
     }) as any);
 
-    await expect(cleanupLinkedSessions('any-session')).resolves.not.toThrow();
+    await expect(cleanupLinkedSessions('any-session')).resolves.toBeUndefined();
   });
 });
 

@@ -13,12 +13,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RepoPickerField } from '@/components/fields/RepoPickerField';
 import { BranchPickerField } from '@/components/fields/BranchPickerField';
-import { loopGroupApi, type LoopGroupDetail } from '@/lib/api/loopGroupApi';
+import { runApi, type RunDetail } from '@/lib/api/runApi';
 
 interface NewLoopGroupDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: (group: LoopGroupDetail) => void;
+  onCreated: (group: RunDetail) => void;
 }
 
 const DEFAULT_N = '3';
@@ -71,7 +71,7 @@ export function NewLoopGroupDialog({ open, onOpenChange, onCreated }: NewLoopGro
     setSubmitting(true);
     setError(null);
     try {
-      const group = await loopGroupApi.createLoopGroup({
+      const group = await runApi.startLoopGroup({
         repoPath: repoPath.trim(),
         baseBranch: baseBranch.trim(),
         spec: { prompt: prompt.trim(), verify: verify.trim(), maxIterations: maxIterationsN },

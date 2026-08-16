@@ -42,6 +42,7 @@ import { tailTranscript } from './transcript.js';
 import type { ChatEvent } from './transcript.js';
 import type { StopFn } from './transcript.js';
 import { executeCard } from './gate.js';
+import { installHeartbeat } from '../ws-heartbeat.js';
 
 const logger = childLogger('orchestrator/stream');
 
@@ -61,6 +62,17 @@ export interface WsCardEvent {
   id: string;
   command: string;
   args: Record<string, unknown>;
+  /**
+   * Gate tier — present on capability-registry gate cards (gate.ts's
+   * onGatedInvoke, via /api/hooks/gate-card) and on the legacy Bash-gate cards
+   * (gate.ts's handlePreToolUse). Drives the UI's alwaysAsk badge and hides
+   * the "always allow" toggle for `always-ask` cards.
+   */
+  tier?: 'ask' | 'always-ask';
+  /** 'action' (default) → approve/reject an implied write. 'question' → free-text answer (ask_owner). */
+  kind?: 'action' | 'question';
+  /** The question text, present only when kind === 'question' (ask_owner). */
+  question?: string;
 }
 
 /** A status update pushed to the ws client. */
@@ -108,8 +120,20 @@ export interface WsClientCardDecision {
   decision: 'approve' | 'edit' | 'reject' | 'respond';
   /** For 'edit': the user-adjusted command/args to run instead. */
   edited_input?: Record<string, unknown>;
-  /** For 'reject'/'respond': optional free-text to inject. */
+  /**
+   * For 'reject'/'respond': optional free-text to inject. Also used by a
+   * question card's "submit answer" (decision: 'approve' + respond_text: the
+   * answer) — see gate.ts's executeCard / mcp/gate.ts's onGatedInvoke.
+   */
   respond_text?: string;
+  /**
+   * Persist a permission_rules allow-rule for this card's command/capability
+   * (policy.ts's addRule) so future calls skip the card entirely. `ask` tier
+   * ONLY — gate.ts's executeCard refuses to promote an `always-ask` card
+   * regardless of this flag (see policy.ts's addRule doc: always-ask is never
+   * promotable).
+   */
+  always_allow?: boolean;
 }
 
 export type WsClientMessage = WsClientTurn | WsClientCardDecision;
@@ -530,6 +554,7 @@ let wss: WebSocketServer;
 /** Initialise the orchestrator WebSocket server (noServer mode). Call once at startup. */
 export function setupOrchestratorWebSocket(): void {
   wss = new WebSocketServer({ noServer: true });
+  installHeartbeat(wss);
   logger.debug({}, 'stream: orchestrator WebSocket server initialised');
 }
 
@@ -612,6 +637,7 @@ export function handleOrchestratorUpgrade(
           decision: msg.decision,
           edited_input: msg.edited_input,
           respond_text: msg.respond_text,
+          always_allow: msg.always_allow,
         }).catch((err) => {
           const errMsg = (err as Error).message ?? 'unknown error';
           logger.warn(

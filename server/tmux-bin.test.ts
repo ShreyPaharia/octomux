@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import path from 'path';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +22,8 @@ vi.mock('child_process', () => ({
     return undefined as any;
   }),
 }));
+
+const { default: path } = await import('path');
 
 const { probeBinary } = await import('./binary-check.js');
 

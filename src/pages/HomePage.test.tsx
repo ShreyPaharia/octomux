@@ -1,10 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, render } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
-import { TasksProvider } from '@/lib/tasks-context';
-import HomePage from './HomePage';
-import { makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { Task } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -43,6 +37,13 @@ const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor, render } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { MemoryRouter } = await import('react-router-dom');
+const { TasksProvider } = await import('@/lib/tasks-context');
+const { default: HomePage } = await import('./HomePage');
+const { makeTask } = await import('../test-helpers');
 
 function renderHome(route = '/', opts: { tasks?: Task[] } = {}) {
   mockTasksRef.current = opts.tasks ?? [];

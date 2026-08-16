@@ -13,7 +13,7 @@ import {
 import { listPullRequestsByTask } from '../repositories/pull-requests.js';
 import type { PullRequest } from '../repositories/pull-requests.js';
 import type { PermissionPromptRow } from '../repositories/permission-prompts.js';
-import { findReviewTaskByPrNumber, findReviewTaskBySource } from '../repositories/index.js';
+import { findExistingReviewTask, findReviewTaskBySource } from '../repositories/index.js';
 import { nanoid } from 'nanoid';
 import fs from 'fs';
 import type {
@@ -58,45 +58,23 @@ export function throwIfValidationError(
 
 /**
  * Return the id of a live auto_review task pointing at this source — either
- * keyed on `pr_number` (poller-created) or on `review_of_task_id` (manual).
- * Used by both GET /api/tasks/:id and the manual-trigger endpoint.
+ * keyed on `repo_path` + `pr_number` (poller-created) or on `review_of_task_id`
+ * (manual). Used by both GET /api/tasks/:id and the manual-trigger endpoint.
+ *
+ * Repo-scoped on purpose: PR numbers are per-repo, so matching on pr_number
+ * alone can return a review task that belongs to an entirely different repo.
  */
 export function lookupExistingReviewId(task: {
   id: string;
+  repo_path: string;
   pr_number: number | null;
 }): string | null {
   if (task.pr_number != null) {
-    const byPr = findReviewTaskByPrNumber(task.pr_number);
+    const byPr = findExistingReviewTask(task.repo_path, task.pr_number);
     if (byPr) return byPr.id;
   }
   const byLink = findReviewTaskBySource(task.id);
   return byLink?.id ?? null;
-}
-
-/** Recursively merge `incoming` into `base` (objects merged, primitives overwritten). */
-export function deepMerge(
-  base: Record<string, unknown>,
-  incoming: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...base };
-  for (const [key, val] of Object.entries(incoming)) {
-    if (
-      val !== null &&
-      typeof val === 'object' &&
-      !Array.isArray(val) &&
-      typeof result[key] === 'object' &&
-      result[key] !== null &&
-      !Array.isArray(result[key])
-    ) {
-      result[key] = deepMerge(
-        result[key] as Record<string, unknown>,
-        val as Record<string, unknown>,
-      );
-    } else {
-      result[key] = val;
-    }
-  }
-  return result;
 }
 
 export interface TaskRelations {
@@ -139,6 +117,11 @@ export function formatTaskResponse(
       runtime_state: task.runtime_state,
       workers: relations.workers,
     }),
+    needs_you: needsYou({
+      runtime_state: task.runtime_state,
+      workers: relations.workers,
+      pending_prompts: relations.pending_prompts,
+    }),
     user_terminals: relations.user_terminals,
     pull_requests: relations.pull_requests,
     ...(extras?.worktree_row !== undefined ? { worktree_row: extras.worktree_row } : {}),
@@ -166,6 +149,22 @@ export function derivedStatus(task: {
   if (activities.includes('active')) return 'working';
   if (activities.includes('waiting')) return 'needs_attention';
   return 'done';
+}
+
+/**
+ * Does this task want the user right now? The single definition of the rule —
+ * every surface (dashboard tab, CLI, anything later) reads `needs_you` off the
+ * task envelope rather than re-deriving it. Distinct from the inbox's
+ * `listNeedsYouTasks()`, which asks the narrower "…and hasn't been seen yet".
+ */
+export function needsYou(task: {
+  runtime_state: string;
+  workers: Array<{ status: string; hook_activity: string }>;
+  pending_prompts: unknown[];
+}): boolean {
+  if (task.runtime_state === 'error') return true;
+  if (task.pending_prompts.length > 0) return true;
+  return derivedStatus(task) === 'needs_attention';
 }
 
 /** Flat Claude launch aliases for `/api/settings` responses (dashboard reads these keys). */

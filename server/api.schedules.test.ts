@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from './bun-test.js';
 import request from 'supertest';
 import { createApp } from './app.js';
 import { createTestDb } from './test-helpers.js';

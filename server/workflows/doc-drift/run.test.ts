@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../../bun-test.js';
 
 const mockStartTask = vi.fn();
 vi.mock('../../task-engine/index.js', () => ({
@@ -17,11 +15,14 @@ vi.mock('../../events.js', () => ({
   broadcast: vi.fn((...args: unknown[]) => mockBroadcast(...args)),
 }));
 
+const { createTestDb } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const { createDocDriftTaskFromSchedule } = await import('./run.js');
+const { setRuntimeState } = await import('../../repositories/tasks.js');
+const { listRunsForWorkflow } = await import('../../repositories/runs.js');
+
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { createDocDriftTaskFromSchedule } from './run.js';
-import { setRuntimeState } from '../../repositories/tasks.js';
-import { listRunsForWorkflow } from '../../repositories/runs.js';
 import type { RunResult } from '../../types.js';
 
 function insertActiveAgent(taskId: string): void {

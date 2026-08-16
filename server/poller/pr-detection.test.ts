@@ -1,7 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, findCallback } from '../test-helpers.js';
-import { listPullRequestsByTask } from '../repositories/pull-requests.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
+import type Database from '../sqlite.js';
 
 // ─── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -16,6 +14,9 @@ vi.mock('../events.js', () => ({
 vi.mock('../hook-dispatcher.js', () => ({
   fireHook: vi.fn(),
 }));
+
+const { createTestDb, insertTask, insertAgent, findCallback } = await import('../test-helpers.js');
+const { listPullRequestsByTask } = await import('../repositories/pull-requests.js');
 
 const { execFile } = await import('child_process');
 const { broadcast } = await import('../events.js');
@@ -60,7 +61,7 @@ function mockExecFile(options: {
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('pollPRs (pr-detection)', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

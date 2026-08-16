@@ -145,6 +145,8 @@ export interface Task {
   notify_task_id: string | null;
   /** Set when this task was created by a cron schedule run. */
   schedule_id?: string | null;
+  /** Another task's id this one depends on — must reach 'done' before this task auto-starts. Null = no dependency. */
+  depends_on: string | null;
   harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */
@@ -156,9 +158,10 @@ export interface Task {
   user_terminals?: UserTerminal[];
   pending_prompts?: PermissionPrompt[];
   derived_status?: DerivedTaskStatus | null;
+  /** Server-computed "wants the user right now". Never re-derive this client-side. */
+  needs_you?: boolean;
   external_refs?: TaskExternalRef[];
   recent_updates?: TaskUpdate[];
-  pull_requests?: TaskPullRequest[];
   /** Live review task pointing at this source (or this PR). Set by GET /api/tasks/:id. */
   existing_review_id?: string | null;
 }
@@ -228,22 +231,6 @@ export interface TaskUpdate {
   created_at: string;
 }
 
-export type PullRequestState = 'open' | 'merged' | 'closed';
-
-export interface TaskPullRequest {
-  id: string;
-  task_id: string;
-  branch: string;
-  base_branch: string | null;
-  number: number | null;
-  url: string | null;
-  head_sha: string | null;
-  title: string | null;
-  state: PullRequestState;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Integration {
   id: string;
   kind: string;
@@ -298,14 +285,6 @@ export interface MoveTaskRequest {
   note?: string;
 }
 
-export interface SummaryRequest {
-  summary: string;
-}
-
-export interface NoteRequest {
-  body: string;
-}
-
 export interface AddRefRequest {
   integration: string;
   ref: string;
@@ -338,4 +317,75 @@ export interface ListTaskBranchesResponse {
   branches: string[];
   current: string | null;
   default: string | null;
+}
+
+/**
+ * Every event broadcast over `/ws/events`. Producers (the server) use this
+ * discriminated union so `broadcast()` rejects a payload that doesn't match its
+ * type. Consumers use `ReceivedServerEvent` below.
+ */
+export type ServerEvent =
+  | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
+  | { type: 'chat:updated' | 'chat:deleted'; payload: { chatId: string } }
+  | {
+      type: 'review:drafts-ready' | 'review:run-failed';
+      payload: { taskId: string; reviewRunId: string };
+    }
+  | {
+      type: 'review:published';
+      payload: { taskId: string; github_review_url: string | null };
+    }
+  | {
+      type: 'review:head-advanced';
+      payload: { taskId: string; newHeadSha: string };
+    }
+  | {
+      type: 'task:phase_complete';
+      payload: { taskId: string; phase: string; [key: string]: unknown };
+    }
+  | {
+      type: 'task:stuck';
+      payload: { taskId: string; reason?: string; [key: string]: unknown };
+    }
+  | {
+      type: 'loop:emit';
+      // runId is the `runs.id` this loop's run row lives under (see
+      // server/routes/runs.ts's module doc) — loopRunId is the underlying
+      // loop_runs.id, kept for callers that still key off it.
+      payload: { taskId: string; runId: string; loopRunId: string; status: string; reason: string };
+    }
+  | {
+      type: 'pr_extract:created';
+      payload: { taskId: string; extractId: string };
+    }
+  | {
+      type: 'loop_group:judging' | 'loop_group:judged';
+      payload: { groupId: string; runId: string };
+    };
+
+export type ServerEventType = ServerEvent['type'];
+
+/**
+ * Consumer-side view of a `/ws/events` message: payload fields flattened and
+ * optional, so a subscriber can filter on `payload.taskId` without narrowing on
+ * `type` first. Kept next to `ServerEvent` deliberately — the two must be edited
+ * together, and one file makes that obvious.
+ */
+export interface ReceivedServerEvent {
+  type: ServerEventType;
+  payload: {
+    taskId?: string;
+    chatId?: string;
+    reviewRunId?: string;
+    newHeadSha?: string;
+    github_review_url?: string | null;
+    phase?: string;
+    reason?: string;
+    runId?: string;
+    loopRunId?: string;
+    groupId?: string;
+    status?: string;
+    extractId?: string;
+    [key: string]: unknown;
+  };
 }

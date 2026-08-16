@@ -1,11 +1,8 @@
 /**
  * Tests: GET /api/tasks/:id returns pull_requests array and legacy pr_url field.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import type Database from 'better-sqlite3';
-import { createTestDb, insertTask } from './test-helpers.js';
-import { upsertPullRequest } from './repositories/pull-requests.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
+import type Database from './sqlite.js';
 
 // ─── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +33,10 @@ vi.mock('./hook-token.js', () => ({
   ensureHookToken: vi.fn(async () => 'tok'),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask } = await import('./test-helpers.js');
+const { upsertPullRequest } = await import('./repositories/pull-requests.js');
+
 // Note: do NOT mock 'fs' globally — migrations.ts uses fs.readFileSync to read kind presets
 // (catches ENOENT gracefully), and mocking it without that function causes 500s.
 
@@ -44,7 +45,7 @@ const { createApp } = await import('./app.js');
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/tasks/:id — pull_requests field', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -56,7 +57,7 @@ describe('GET /api/tasks/:id — pull_requests field', () => {
   it('returns empty pull_requests array when the task has no PRs', async () => {
     insertTask(db, { id: 't1', branch: 'agents/t1', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/tasks/t1').expect(200);
+    const res = await request(app).get('/api/tasks/t1?include=pull_requests').expect(200);
     expect(res.body.pull_requests).toEqual([]);
   });
 
@@ -78,7 +79,7 @@ describe('GET /api/tasks/:id — pull_requests field', () => {
       state: 'merged',
     });
 
-    const res = await request(app).get('/api/tasks/t2').expect(200);
+    const res = await request(app).get('/api/tasks/t2?include=pull_requests').expect(200);
     expect(res.body.pull_requests).toHaveLength(2);
     const urls = res.body.pull_requests.map((p: { url: string }) => p.url);
     expect(urls).toContain('https://github.com/o/r/pull/7');
@@ -94,7 +95,7 @@ describe('GET /api/tasks/:id — pull_requests field', () => {
       pr_number: 5,
     });
 
-    const res = await request(app).get('/api/tasks/t3').expect(200);
+    const res = await request(app).get('/api/tasks/t3?include=pull_requests').expect(200);
     expect(res.body.pr_url).toBe('https://github.com/o/r/pull/5');
     expect(res.body.pr_number).toBe(5);
     // pull_requests array is populated by the backfill migration

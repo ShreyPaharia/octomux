@@ -4,19 +4,20 @@
  * Mirrors B4 (Stop → human_review). When the user submits a prompt to an agent
  * whose task is in human_review, the task auto-transitions back to in_progress.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import request from 'supertest';
-import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
-import { createApp } from './app.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('./hook-dispatcher.js', () => ({
   fireHook: vi.fn(),
   getTaskHookExecutions: vi.fn(async () => []),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, insertAgent } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 describe('POST /api/hooks/user-prompt-submit → in_progress transition', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

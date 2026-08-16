@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import { taskApi } from '../lib/api/taskApi';
 
 // ─── Fetch Mock ──────────────────────────────────────────────────────────────
 
 const fetchMock = vi.fn();
-globalThis.fetch = fetchMock;
+globalThis.fetch = fetchMock as unknown as typeof fetch;
 
 function mockResponse(body: unknown, status = 200) {
   return {
@@ -25,7 +25,9 @@ const apiCases = [
   {
     name: 'listTasks',
     call: () => taskApi.listTasks(),
-    expectedUrl: '/api/tasks',
+    // task.list is lean by default; the dashboard asks for the relations it
+    // renders. See LIST_INCLUDE in src/lib/api/taskApi.ts.
+    expectedUrl: '/api/tasks?include=workers%2Cpending_prompts%2Cuser_terminals',
     expectedMethod: undefined,
     expectedBody: undefined,
     response: [{ id: 't1', title: 'Test' }],
@@ -33,7 +35,8 @@ const apiCases = [
   {
     name: 'getTask',
     call: () => taskApi.getTask('t1'),
-    expectedUrl: '/api/tasks/t1',
+    expectedUrl:
+      '/api/tasks/t1?include=workers,pending_prompts,user_terminals,worktree,existing_review_id',
     expectedMethod: undefined,
     expectedBody: undefined,
     response: { id: 't1' },
@@ -275,7 +278,7 @@ const apiCases = [
 ] as const;
 
 describe('api methods (table-driven)', () => {
-  it.each(apiCases)('$name → $expectedMethod $expectedUrl', async (testCase) => {
+  it.each([...apiCases])('$name → $expectedMethod $expectedUrl', async (testCase) => {
     const status = 'status' in testCase ? (testCase.status as number) : 200;
     fetchMock.mockResolvedValue(mockResponse(testCase.response, status));
 
@@ -333,7 +336,7 @@ describe('request error handling', () => {
     },
   ];
 
-  it.each(errorCases)('$name', async ({ response, expectedError }) => {
+  it.each([...errorCases])('$name', async ({ response, expectedError }) => {
     fetchMock.mockResolvedValue(response);
     await expect(taskApi.listTasks()).rejects.toThrow(expectedError);
   });

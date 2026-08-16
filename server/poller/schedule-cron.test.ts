@@ -1,11 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb } from '../test-helpers.js';
-import { createSchedule, listEnabledSchedules } from '../repositories/schedules.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 const mockRun = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('../workflows/registry.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../workflows/registry.js')>();
+vi.mock('../workflows/registry.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../workflows/registry.js')>();
   return {
     ...actual,
     getWorkflow: (kind: string) =>
@@ -15,7 +13,9 @@ vi.mock('../workflows/registry.js', async (importOriginal) => {
   };
 });
 
-import { pollSchedules } from './schedule-cron.js';
+const { createTestDb } = await import('../test-helpers.js');
+const { createSchedule, listEnabledSchedules } = await import('../repositories/schedules.js');
+const { pollSchedules } = await import('./schedule-cron.js');
 
 describe('pollSchedules', () => {
   beforeEach(() => {

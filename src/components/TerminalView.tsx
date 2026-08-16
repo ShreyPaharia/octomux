@@ -111,7 +111,10 @@ export function TerminalView({
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
         setDisconnected(false);
-        setConnecting(false);
+        // Deliberately NOT clearing `connecting` here: the socket opens in ~5ms
+        // but the server's first frame lands later, so clearing on open left the
+        // user staring at a blank black rectangle with no feedback for the rest
+        // of the wait. `onmessage` clears it when there is actually something to see.
         if (countdownTimer.current) {
           clearInterval(countdownTimer.current);
           countdownTimer.current = null;
@@ -348,6 +351,22 @@ export function TerminalView({
       connectWs(termRef.current);
     }
   }, [connectWs]);
+
+  // A reconnect scheduled while the tab is hidden gets throttled by the browser
+  // (background timers fire at most ~once a minute), so a dropped connection can
+  // stay down long after the user returns. Retry immediately on tab return if
+  // the socket is dead. CONNECTING/OPEN sockets are left alone — retrying then
+  // would leak a duplicate connection.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ws = wsRef.current;
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) return;
+      handleRetryNow();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [handleRetryNow]);
 
   // Connect on mount and reconnect when taskId/windowIndex changes
   useEffect(() => {

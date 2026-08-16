@@ -1,7 +1,7 @@
 // NOTE: opts.env only applies to the attach pty process; the tmux session itself
 // inherits the server's environment. Per-session env injection is out of scope (YAGNI).
 
-import { spawn as ptySpawn, type IPty } from 'node-pty';
+import { spawn as ptySpawn, type Pty } from '../pty.js';
 import { nanoid } from 'nanoid';
 import { execTmux, tmuxSpawnSpec } from '../tmux-bin.js';
 import { childLogger } from '../logger.js';
@@ -9,7 +9,7 @@ import type { ProcessHandle, ProcessSubstrate, SpawnOptions } from './substrate.
 
 const logger = childLogger('agent-session/substrate-tmux');
 
-function makeHandle(pty: IPty, session: string): ProcessHandle {
+function makeHandle(pty: Pty, session: string): ProcessHandle {
   let disposed = false;
   let exited = false;
 

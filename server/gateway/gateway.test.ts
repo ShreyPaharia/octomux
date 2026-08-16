@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { createGateway, type GatewayConductor } from './gateway.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
@@ -123,6 +123,68 @@ describe('gateway glue', () => {
     expect(sent[0]!.text).toContain('Two tasks running.');
     // Secret scrubbed by redactSecrets before it leaves the process.
     expect(sent[0]!.text).not.toContain('ghp_ABCDEFGH12345678');
+  });
+
+  it('delivers a raw plan.json reply as a readable summary, never the raw JSON', async () => {
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn, emit } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound());
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    // The conductor pastes the raw plan artifact into its reply (the observed
+    // live failure mode) — the gateway must condense it before send.
+    const planJson = JSON.stringify(
+      {
+        schema_version: '1.0.0',
+        summary: 'Wire the condense guard into the outbound path.',
+        files: [{ path: 'server/gateway/gateway.ts', action: 'modify', steps: ['wire'] }],
+        open_questions: ['ship behind a flag?'],
+        detail: 'long body '.repeat(100),
+      },
+      null,
+      2,
+    );
+    emit(convId, {
+      type: 'assistant',
+      text: `plan ready for task abc123 — approve?\n\`\`\`json\n${planJson}\n\`\`\``,
+      uuid: 'a1',
+      timestamp: 't',
+    });
+    emit(convId, { type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sent).toHaveLength(1);
+    const text = sent[0]!.text;
+    expect(text).toContain('plan ready for task abc123 — approve?');
+    expect(text).toContain('📋 Plan: Wire the condense guard into the outbound path.');
+    expect(text).toContain('• server/gateway/gateway.ts (modify)');
+    expect(text).toContain('• ship behind a flag?');
+    expect(text).not.toContain('schema_version');
+    expect(text).not.toContain('long body');
+  });
+
+  it('truncates an over-long reply with a clear marker instead of dumping it', async () => {
+    const { adapter, sent } = fakeAdapter();
+    const { conductor, sendTurn, emit } = fakeConductor();
+    const gw = createGateway(adapter, conductor);
+
+    await gw.handleInbound(inbound());
+    const convId = sendTurn.mock.calls[0]![0] as string;
+
+    emit(convId, {
+      type: 'assistant',
+      text: `# Spec\n${'spec prose '.repeat(2000)}`, // ~22KB, like the observed spec dump
+      uuid: 'a1',
+      timestamp: 't',
+    });
+    emit(convId, { type: 'system', subtype: 'stop_hook_summary', uuid: 's1', timestamp: 't' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text.length).toBeLessThan(4096); // Telegram hard limit
+    expect(sent[0]!.text).toContain('… [truncated,');
   });
 
   it('reuses the same conversation for a second message on the same thread', async () => {
@@ -272,47 +334,6 @@ describe('gateway glue', () => {
       '[supervisor] task `t1` plan ready — review and approve to begin implementation.',
       '[t1] plan ready for review: /api/orchestrator/artifact?task=t1&path=plan.json',
     ]);
-  });
-
-  it('a card with args.summary sends the summary as payload — link only a trailing ref', async () => {
-    createAgent({
-      name: 'Ops Agent',
-      system_prompt: 'You watch prod.',
-      channel: 'telegram',
-      channel_config: JSON.stringify({ threadKey: 'chat-1' }),
-    });
-
-    const { adapter, sent } = fakeAdapter();
-    const { conductor, sendTurn } = fakeConductor();
-    const gw = createGateway(adapter, conductor);
-    await gw.handleInbound(inbound());
-    const convId = sendTurn.mock.calls[0]![0] as string;
-
-    pushToConversation(
-      convId,
-      JSON.stringify({
-        type: 'card',
-        id: 'card-1',
-        command: 'approve-plan',
-        args: {
-          task_id: 't1',
-          plan_path: 'plan.json',
-          artifact_url: '/api/orchestrator/artifact?task=t1&path=plan.json',
-          summary: 'Add a widget.\n\nFiles:\n• src/widget.ts — create',
-        },
-      }),
-    );
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(sent).toHaveLength(1);
-    const text = sent[0]!.text;
-    // Summary is the payload; the URL is a trailing secondary ref, never alone.
-    expect(text).toContain('Add a widget.');
-    expect(text).toContain('src/widget.ts — create');
-    expect(text).toContain('(ref: /api/orchestrator/artifact?task=t1&path=plan.json)');
-    expect(text).not.toBe(
-      '[t1] plan ready for review: /api/orchestrator/artifact?task=t1&path=plan.json',
-    );
   });
 
   it('start() pre-registers the proactive relay for a bound agent — a supervisor push reaches the channel with NO prior inbound (survives restart)', async () => {

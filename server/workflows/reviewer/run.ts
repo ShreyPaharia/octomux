@@ -25,6 +25,38 @@ import type { Task } from '../../types.js';
 
 const logger = childLogger('workflows/reviewer');
 
+// ─── shared PR-backed branch + prompt ───────────────────────────────────────
+
+/**
+ * Branch name and initial prompt for a PR-backed review task. Shared by
+ * createReviewTaskFromPr and the pr_url branch of createManualReview — both
+ * build a `review/${short}-pr-${number}` branch and call buildPrReviewPrompt
+ * with the same shape, differing only in title source and author.
+ */
+function buildPrReviewTail(params: {
+  id: string;
+  short: string;
+  prNumber: number;
+  prUrl: string;
+  prHeadSha: string;
+  title: string;
+  author: string | null;
+  requestedAt: string;
+}): { branch: string; prompt: string } {
+  return {
+    branch: `review/${params.short}-pr-${params.prNumber}`,
+    prompt: buildPrReviewPrompt({
+      reviewTaskId: params.id,
+      title: params.title,
+      number: params.prNumber,
+      url: params.prUrl,
+      author: params.author,
+      headRefOid: params.prHeadSha,
+      requestedAt: params.requestedAt,
+    }),
+  };
+}
+
 // ─── createReviewTaskFromPr ─────────────────────────────────────────────────
 
 export interface CreateReviewFromPrInput {
@@ -63,15 +95,14 @@ export async function createReviewTaskFromPr(
 ): Promise<CreateReviewResult> {
   const id = nanoid(12);
   const short = repoShortName(input.repo_path);
-  const branch = `review/${short}-pr-${input.pr_number}`;
-
-  const initialPrompt = buildPrReviewPrompt({
-    reviewTaskId: id,
+  const { branch, prompt: initialPrompt } = buildPrReviewTail({
+    id,
+    short,
+    prNumber: input.pr_number,
+    prUrl: input.pr_url,
+    prHeadSha: input.pr_head_sha,
     title: input.title,
-    number: input.pr_number,
-    url: input.pr_url,
     author: input.author,
-    headRefOid: input.pr_head_sha,
     requestedAt: input.requested_at,
   });
 
@@ -131,18 +162,18 @@ export async function createManualReview(
   let description: string;
   let prompt: string;
   if (input.pr_url && input.pr_number != null) {
-    branch = `review/${short}-pr-${input.pr_number}`;
     title = `Review: ${input.source_title} (#${input.pr_number})`;
     description = `Manual review for PR #${input.pr_number} in ${short}`;
-    prompt = buildPrReviewPrompt({
-      reviewTaskId: id,
+    ({ branch, prompt } = buildPrReviewTail({
+      id,
+      short,
+      prNumber: input.pr_number,
+      prUrl: input.pr_url,
+      prHeadSha: input.pr_head_sha,
       title: input.source_title,
-      number: input.pr_number,
-      url: input.pr_url,
       author: null,
-      headRefOid: input.pr_head_sha,
       requestedAt: input.requested_at,
-    });
+    }));
   } else {
     branch = `review/${short}-task-${input.source_task_id}`;
     title = `Review: ${input.source_title}`;

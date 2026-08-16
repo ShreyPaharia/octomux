@@ -45,6 +45,32 @@ function loopRunIdLines(loopRunId: string): string[] {
   ];
 }
 
+/**
+ * The id the agent's `octomux emit` callback must target.
+ *
+ * Post-collapse this is `runs.id` (`spec.runId`), threaded through spec_json by
+ * every caller of `startLoop`. A spec without one can only be a loop persisted
+ * BEFORE that migration and now resuming: its prompt gets the old
+ * `loop_runs.id`, which the emit route no longer resolves, so the agent's
+ * callback 404s and the loop grinds on to max_iterations instead of
+ * terminating cleanly.
+ *
+ * That breakage is accepted (the id namespace moved deliberately, with no
+ * compat alias), but it must not be SILENT — a loop that just "hangs" is
+ * near-impossible to diagnose from the outside. Hence the warning: it names
+ * the cause at the moment the doomed prompt is built.
+ */
+function emitTargetId(spec: LoopSpec, loopRunId: string): string {
+  if (spec.runId) return spec.runId;
+  logger.warn(
+    { operation: 'emitTargetId', loop_run_id: loopRunId },
+    'loop spec carries no runId — prompting with the legacy loop_runs.id, whose emit callback ' +
+      'will 404. Expected only for a loop that started before the runs collapse; stop and ' +
+      'restart it to recover.',
+  );
+  return loopRunId;
+}
+
 /** Build the prompt for a loop iteration, pinning the loop run id (mirrors reviewTaskIdLines in review-tasks.ts). */
 export function buildLoopPrompt(
   spec: LoopSpec,
@@ -196,7 +222,7 @@ export async function startLoop(
 
   const seeded = seedLearnings(task);
   await respawnAgentFresh(task, agent, {
-    prompt: buildLoopPrompt(spec, run.id, null, seeded),
+    prompt: buildLoopPrompt(spec, emitTargetId(spec, run.id), null, seeded),
     env: loopAgentEnv(taskId, agent.hook_token),
   });
 
@@ -314,7 +340,12 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
     updatedAt: new Date().toISOString(),
   });
   await respawnAgentFresh(task, agent, {
-    prompt: buildLoopPrompt(spec, run.id, verify.passed ? null : verify.output, seeded),
+    prompt: buildLoopPrompt(
+      spec,
+      emitTargetId(spec, run.id),
+      verify.passed ? null : verify.output,
+      seeded,
+    ),
     env: loopAgentEnv(taskId, agent.hook_token),
   });
 }
@@ -361,7 +392,7 @@ export async function resumeLoopOnStartup(task: Task): Promise<void> {
   const seeded = seedLearnings(task);
 
   await respawnAgentFresh(task, agent, {
-    prompt: buildLoopPrompt(spec, run.id, null, seeded),
+    prompt: buildLoopPrompt(spec, emitTargetId(spec, run.id), null, seeded),
     env: loopAgentEnv(task.id, agent.hook_token),
     fresh: true,
   });

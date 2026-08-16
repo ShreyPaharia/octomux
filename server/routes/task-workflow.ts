@@ -1,134 +1,26 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import { startTask, closeTask, resumeTask } from '../task-engine/index.js';
-import { broadcast } from '../events.js';
-import type { MoveTaskRequest, SummaryRequest, NoteRequest, AddRefRequest } from '../types.js';
-import { WORKFLOW_STATUSES } from '../types.js';
+import type { AddRefRequest } from '../types.js';
 import { fireHook, getTaskHookExecutions } from '../hook-dispatcher.js';
 import {
-  setRuntimeState,
-  setWorkflowStatus,
-  setCurrentSummary,
-  addTaskUpdate,
   listTaskUpdates,
   getTaskExternalRefs,
   getTaskExternalRef,
-  getTaskExternalRefByRef,
   upsertTaskExternalRef,
   deleteTaskExternalRef,
 } from '../repositories/index.js';
-import { loadTaskOrFail, fetchTaskBundle } from './_shared.js';
+import { loadTaskOrFail } from './_shared.js';
 import { badRequest, notFound } from '../services/errors.js';
 
 export const router = express.Router();
 
-// Move task to a new workflow_status
-router.post('/api/tasks/:id/move', async (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req);
-  const body = req.body as MoveTaskRequest;
-
-  if (!body.workflow_status || !WORKFLOW_STATUSES.includes(body.workflow_status)) {
-    throw badRequest(`invalid workflow_status: ${body.workflow_status}`);
-  }
-  if (
-    (body.workflow_status === 'human_review' || body.workflow_status === 'planned') &&
-    !body.note?.trim()
-  ) {
-    throw badRequest(`note is required when moving to ${body.workflow_status}`);
-  }
-
-  // Close eagerly on every move to done — idle agents still hold a live claude
-  // process (+MCP sidecars); reopening resumes via harness_session_id.
-  if (body.workflow_status === 'done' && task.workflow_status !== 'done') {
-    await closeTask(task);
-  }
-
-  const prevStatus = task.workflow_status;
-  setWorkflowStatus(task.id, body.workflow_status);
-
-  addTaskUpdate({
-    task_id: task.id,
-    kind: 'transition',
-    from_status: prevStatus,
-    to_status: body.workflow_status,
-    body: body.note ?? null,
-  });
-
-  let autoStart: 'start' | 'resume' | null = null;
-  if (
-    body.workflow_status === 'in_progress' &&
-    (task.runtime_state === 'idle' || task.runtime_state === 'error')
-  ) {
-    autoStart = task.worktree ? 'resume' : 'start';
-  }
-  if (autoStart) {
-    setRuntimeState(task.id, 'setting_up', null);
-  }
-
-  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-  fireHook('workflow_status_changed', {
-    event: 'workflow_status_changed',
-    task: {
-      ...task,
-      workflow_status: body.workflow_status as import('../types.js').WorkflowStatus,
-    },
-    data: { from: prevStatus, to: body.workflow_status, note: body.note },
-  });
-
-  const updated = fetchTaskBundle(task.id);
-  res.json(updated);
-
-  if (autoStart === 'start') {
-    startTask(task)
-      .then(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }))
-      .catch(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }));
-  } else if (autoStart === 'resume') {
-    resumeTask(task)
-      .then(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }))
-      .catch(() => broadcast({ type: 'task:updated', payload: { taskId: task.id } }));
-  }
-});
-
-router.post('/api/tasks/:id/summary', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req);
-  const body = req.body as SummaryRequest;
-
-  if (!body.summary?.trim()) {
-    throw badRequest('summary is required');
-  }
-
-  setCurrentSummary(task.id, body.summary);
-  addTaskUpdate({ task_id: task.id, kind: 'summary', body: body.summary });
-
-  broadcast({ type: 'task:updated', payload: { taskId: task.id } });
-  fireHook('summary_updated', {
-    event: 'summary_updated',
-    task: { ...task, current_summary: body.summary },
-    data: { summary: body.summary },
-  });
-
-  const updated = fetchTaskBundle(task.id);
-  res.json(updated);
-});
-
-router.post('/api/tasks/:id/note', (req: Request, res: Response) => {
-  const task = loadTaskOrFail(req);
-  const body = req.body as NoteRequest;
-
-  if (!body.body?.trim()) {
-    throw badRequest('body is required');
-  }
-
-  const updateId = addTaskUpdate({ task_id: task.id, kind: 'note', body: body.body });
-
-  fireHook('note_added', {
-    event: 'note_added',
-    task,
-    data: { body: body.body },
-  });
-
-  res.status(201).json({ id: updateId, task_id: task.id, kind: 'note', body: body.body });
-});
+// POST /api/tasks/:id/summary and POST /api/tasks/:id/note retired (spec
+// §5.5): the narrative they wrote now lives in the task's
+// `.octomux/artifact.md` (see server/artifact.ts). The one remaining
+// summary writer (server/summarize.ts, server/hooks.ts post-tool-use) calls
+// setTaskSummary() directly — there is no HTTP surface left for it. Note-
+// adding has no replacement in this pass (see report); 'note_added' is
+// deprecated in server/routes/hooks-registry.ts accordingly.
 
 router.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
@@ -174,23 +66,18 @@ router.post('/api/tasks/:id/refs', (req: Request, res: Response) => {
 router.delete('/api/tasks/:id/refs/:integration', (req: Request, res: Response) => {
   const task = loadTaskOrFail(req);
   const integration = (req.params as Record<string, string>).integration;
-  // Optional ?ref= query param: when supplied, delete only that specific ref row.
-  // Without it, delete ALL refs for this integration (back-compat).
-  const ref = typeof req.query.ref === 'string' ? req.query.ref : undefined;
 
-  const existing = ref
-    ? getTaskExternalRefByRef(task.id, integration, ref)
-    : getTaskExternalRef(task.id, integration);
+  const existing = getTaskExternalRef(task.id, integration);
   if (!existing) {
     throw notFound('Ref not found');
   }
 
-  deleteTaskExternalRef(task.id, integration, ref);
+  deleteTaskExternalRef(task.id, integration);
 
   fireHook('ref_removed', {
     event: 'ref_removed',
     task,
-    data: { integration, ref },
+    data: { integration },
   });
 
   res.status(204).send();

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { insertAgent } from './workers.js';
 import {
@@ -11,10 +11,10 @@ import {
   resolveAgentPermissionPrompts,
   resolveOldestPendingByAgent,
 } from './permission-prompts.js';
-import type Database from 'better-sqlite3';
+import type Database from '../sqlite.js';
 
 describe('repositories/permission-prompts', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

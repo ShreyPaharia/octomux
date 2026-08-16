@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 import { createPoller } from './base.js';
 
 describe('createPoller', () => {

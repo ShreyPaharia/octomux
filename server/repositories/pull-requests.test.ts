@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import type Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
+import type Database from '../sqlite.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import {
   upsertPullRequest,
@@ -8,7 +8,7 @@ import {
 } from './pull-requests.js';
 
 describe('pull-requests repository', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

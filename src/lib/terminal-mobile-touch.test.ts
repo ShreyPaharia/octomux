@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from '../bun-test.js';
 import { installTerminalMobileTouch, scrollTerminalByWheel } from './terminal-mobile-touch';
 
 describe('terminal-mobile-touch', () => {

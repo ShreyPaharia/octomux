@@ -16,7 +16,7 @@
  * No approval gate: actions execute immediately. Structured args mean there is
  * no Bash string to re-parse (the source of the create-task flag bugs).
  *
- * Validation is done via the canonical schemas in command-schemas.ts — the same
+ * Validation is done via the canonical schemas in @octomux/capabilities/schemas.ts — the same
  * schemas that power the MCP tool inputSchemas and are tested by the CLI drift
  * test. Any field mismatch is caught at parse time, not at runtime worker launch.
  *
@@ -66,7 +66,7 @@ function pushActivity(conversationId: string, text: string): void {
  * supervisor relays its phase/error events (when absent, the action still runs
  * but isn't tracked — e.g. a non-conductor caller).
  *
- * Validation uses the canonical schemas from command-schemas.ts (via the
+ * Validation uses the canonical schemas from @octomux/capabilities/schemas.ts (via the
  * command-registry). Unknown extra fields are stripped (zod .strip() default).
  * Missing required fields throw.
  *

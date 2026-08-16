@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from '../bun-test.js';
 import { installTerminalWheelCoalesce } from './terminal-wheel-coalesce';
 import { scrollTerminalByWheel } from './terminal-mobile-touch';
 

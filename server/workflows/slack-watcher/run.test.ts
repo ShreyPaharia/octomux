@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestDb } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
-import { insertRun, finishRun } from '../../repositories/runs.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockRunSessionVertical = vi.fn();
 
@@ -9,10 +6,13 @@ vi.mock('../../services/session-vertical-service.js', () => ({
   runSessionVertical: (...args: unknown[]) => mockRunSessionVertical(...args),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { createTestDb } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const { insertRun, finishRun } = await import('../../repositories/runs.js');
+const { runSlackWatcher, previousItemsJson } = await import('./run.js');
+const { SLACK_WATCHER_SCHEMA } = await import('./schema.js');
 
-import { runSlackWatcher, previousItemsJson } from './run.js';
-import { SLACK_WATCHER_SCHEMA } from './schema.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 const SKILL_BODY =
   'Watch {{slackUserId}} back {{lookbackMinutes}}m, via {{digestTarget}} tg:{{telegramChatId}} DM {{digestUserId}} at "{{digestChannel}}", skip {{previousItems}}.';

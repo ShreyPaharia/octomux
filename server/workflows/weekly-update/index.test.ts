@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkflow, listWorkflows, listCronWorkflowKinds } from '../registry.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { ScheduleRow } from '../../repositories/schedules.js';
 
 const mockRunSession = vi.fn().mockResolvedValue(undefined);
@@ -7,6 +6,8 @@ const mockRunSession = vi.fn().mockResolvedValue(undefined);
 vi.mock('../session-runner.js', () => ({
   runSession: (...args: unknown[]) => mockRunSession(...args),
 }));
+
+const { getWorkflow, listWorkflows, listCronWorkflowKinds } = await import('../registry.js');
 
 import './index.js';
 

@@ -1,10 +1,10 @@
-import { spawn as ptySpawn, type IPty } from 'node-pty';
+import { spawn as ptySpawn, type Pty } from '../pty.js';
 import { childLogger } from '../logger.js';
 import type { ProcessHandle, ProcessSubstrate, SpawnOptions } from './substrate.js';
 
 const logger = childLogger('agent-session/substrate-pty');
 
-function makeHandle(pty: IPty): ProcessHandle {
+function makeHandle(pty: Pty): ProcessHandle {
   let disposed = false;
   let exited = false;
 

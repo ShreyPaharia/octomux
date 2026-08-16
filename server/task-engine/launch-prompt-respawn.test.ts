@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from '../bun-test.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -36,6 +36,6 @@ describe('buildAgentStartupCommand prompt file (real fs)', () => {
     ).not.toThrow();
 
     const promptFile = path.join(tmpDir, `.claude-prompt-${agentId}`);
-    expect(fs.readFileSync(promptFile, 'utf8')).toBe('respawn prompt');
+    expect(fs.readFileSync(promptFile, 'utf8')).toContain('respawn prompt');
   });
 });

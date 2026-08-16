@@ -3,10 +3,8 @@
 //   2. computeOutdated git deduplication — only one git show per (sha, path) pair
 //   3. Hook-token backfill off the hot read path — zero token generation when tokens already exist
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -51,9 +49,8 @@ vi.mock('./diff-review-state.js', () => ({
   })),
 }));
 
-vi.mock('@octomux/diff-engine', async () => {
-  const actual =
-    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+vi.mock('@octomux/diff-engine', () => {
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
@@ -99,6 +96,9 @@ vi.mock('./settings.js', () => ({
   })),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('./test-helpers.js');
+
 const diffModule = await import('@octomux/diff-engine');
 const { ensureHookToken } = await import('./hook-token.js');
 const { clearDiffSummaryCache } = await import('./routes/diffs.js');
@@ -107,7 +107,7 @@ const { createApp } = await import('./app.js');
 
 // ─── Setup / Teardown ─────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {
@@ -200,7 +200,7 @@ describe('GET /api/tasks/:id — hook token backfill', () => {
     insertAgent(db, { id: 'w1', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-aaa' });
     insertAgent(db, { id: 'w2', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-bbb' });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}?include=workers`);
     expect(res.status).toBe(200);
 
     // ensureHookToken must not have been called at all.
@@ -212,7 +212,7 @@ describe('GET /api/tasks/:id — hook token backfill', () => {
     insertAgent(db, { id: 'w3', task_id: DEFAULTS.runningTask.id, hook_token: 'tok-existing' });
     insertAgent(db, { id: 'w4', task_id: DEFAULTS.runningTask.id, hook_token: '' });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}?include=workers`);
     expect(res.status).toBe(200);
 
     // Only the agent with an empty token should trigger ensureHookToken.
@@ -226,7 +226,7 @@ describe('GET /api/tasks/:id — hook token backfill', () => {
   it('returns task successfully even with no agents', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}`);
+    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}?include=workers`);
     expect(res.status).toBe(200);
     expect(ensureHookToken).not.toHaveBeenCalled();
   });

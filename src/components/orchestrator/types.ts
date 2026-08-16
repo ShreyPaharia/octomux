@@ -52,12 +52,27 @@ export interface ToolCallItem {
   input: unknown;
 }
 
+/**
+ * A question card for the `ask_owner` capability — the agent is blocked
+ * waiting for a free-text answer, not a write to approve/reject. Rendered by
+ * QuestionCard; sibling to ActionCard rather than a variant of it (no arg
+ * fields, no always-allow toggle — always-ask is never promotable).
+ */
+export interface QuestionCardItem {
+  kind: 'question-card';
+  id: string;
+  question: string;
+  /** resolved once the user answers or rejects; removes the card from the thread */
+  resolved: boolean;
+}
+
 /** A union of everything that can appear in the thread. */
 export type ThreadItem =
   | ThreadMessage
   | PlanCardItem
   | SpecCardItem
   | ActionCardItem
+  | QuestionCardItem
   | ToolCallItem;
 
 export const ORCHESTRATOR_FOCUS_RING =

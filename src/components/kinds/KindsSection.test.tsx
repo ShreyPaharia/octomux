@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { KindsSection } from './KindsSection';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const { kindsApiProxy, kindsApiMock } = await vi.hoisted(async () => {
   const { vi } = await import('vitest');
@@ -36,6 +33,10 @@ const { kindsApiProxy, kindsApiMock } = await vi.hoisted(async () => {
 });
 
 vi.mock('@/lib/api/kindsApi', () => ({ kindsApi: kindsApiProxy }));
+
+const { render, screen, waitFor, within } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { KindsSection } = await import('./KindsSection');
 
 function renderSection() {
   return render(<KindsSection scrollRef={() => {}} />);

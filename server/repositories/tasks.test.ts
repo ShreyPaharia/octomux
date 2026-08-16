@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
@@ -15,7 +15,6 @@ import {
   listTaskUpdates,
   getTaskExternalRefs,
   getTaskExternalRef,
-  getTaskExternalRefByRef,
   upsertTaskExternalRef,
   deleteTaskExternalRef,
   insertTaskExternalRefIfAbsent,
@@ -23,10 +22,13 @@ import {
   touchAllLastViewed,
   touchUpdatedAt,
   setPrHeadSha,
-  setCurrentSummary,
   unlinkWorktree,
   markTaskRunning,
   countTasks,
+  setDependsOn,
+  validateDependsOn,
+  isDependencyUnmet,
+  listDependentsAwaitingStart,
 } from './tasks.js';
 import { inTransaction } from './tx.js';
 
@@ -385,7 +387,9 @@ describe('repositories/tasks', () => {
     });
   });
 
-  // ─── setPrHeadSha / setCurrentSummary / unlinkWorktree ──────────────────────
+  // ─── setPrHeadSha / unlinkWorktree ──────────────────────────────────────────
+  // current_summary retired (spec §5.5) — see server/artifact.test.ts for its
+  // replacement (setTaskSummary / getArtifactSummary against .octomux/artifact.md).
 
   describe('misc setters', () => {
     it('setPrHeadSha updates the column', () => {
@@ -395,16 +399,6 @@ describe('repositories/tasks', () => {
         pr_head_sha: string | null;
       };
       expect(row.pr_head_sha).toBe('deadbeef');
-    });
-
-    it('setCurrentSummary updates the summary', () => {
-      const id = insertTask({ title: 'T', description: 'D' });
-      setCurrentSummary(id, 'Agent fixed the thing');
-      const row = db
-        .prepare('SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?')
-        .get(id) as { current_summary: string | null; current_summary_updated_at: string | null };
-      expect(row.current_summary).toBe('Agent fixed the thing');
-      expect(row.current_summary_updated_at).not.toBeNull();
     });
 
     it('unlinkWorktree sets worktree_id to NULL', () => {
@@ -496,53 +490,11 @@ describe('repositories/tasks', () => {
       expect(refs[0]!.metadata).toBeNull();
     });
 
-    it('upsert with same ref updates the row (same PK)', () => {
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-5', url: 'old' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-5', url: 'new' });
-      const refs = getTaskExternalRefs(taskId);
-      expect(refs).toHaveLength(1);
-      expect(refs[0]!.url).toBe('new');
-    });
-
-    it('upsert with different ref adds a new row (multi-ticket)', () => {
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-2' });
-      const refs = getTaskExternalRefs(taskId);
-      expect(refs).toHaveLength(2);
-      expect(refs.map((r) => r.ref).sort()).toEqual(['SHR-1', 'SHR-2']);
-    });
-
-    it('upsert replaces on conflict (legacy: same ref = update, not duplicate)', () => {
+    it('upsert replaces on conflict', () => {
       upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'OLD' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'OLD' });
-      const refs = getTaskExternalRefs(taskId);
-      expect(refs).toHaveLength(1);
-      expect(refs[0]!.ref).toBe('OLD');
-    });
-
-    it('getTaskExternalRefByRef looks up by exact (task_id, integration, ref)', () => {
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-10' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-11' });
-      const found = getTaskExternalRefByRef(taskId, 'linear', 'SHR-11');
-      expect(found).toBeDefined();
-      expect(found!.ref).toBe('SHR-11');
-      expect(getTaskExternalRefByRef(taskId, 'linear', 'SHR-99')).toBeUndefined();
-    });
-
-    it('deleteTaskExternalRef with ref deletes only that row', () => {
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-2' });
-      deleteTaskExternalRef(taskId, 'linear', 'SHR-1');
-      const refs = getTaskExternalRefs(taskId);
-      expect(refs).toHaveLength(1);
-      expect(refs[0]!.ref).toBe('SHR-2');
-    });
-
-    it('deleteTaskExternalRef without ref deletes all rows for that integration', () => {
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
-      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-2' });
-      deleteTaskExternalRef(taskId, 'linear');
-      expect(getTaskExternalRefs(taskId)).toHaveLength(0);
+      upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'NEW' });
+      const ref = getTaskExternalRef(taskId, 'linear');
+      expect(ref!.ref).toBe('NEW');
     });
 
     it('deleteTaskExternalRef removes the row', () => {
@@ -554,12 +506,8 @@ describe('repositories/tasks', () => {
     it('insertTaskExternalRefIfAbsent does not overwrite existing', () => {
       upsertTaskExternalRef({ task_id: taskId, integration: 'linear', ref: 'SHR-1' });
       insertTaskExternalRefIfAbsent({ task_id: taskId, integration: 'linear', ref: 'SHR-99' });
-      // SHR-1 still exists; SHR-99 was not inserted because SHR-1 already occupied the key
-      // Note: with the new PK (task_id, integration, ref), INSERT OR IGNORE skips only
-      // exact (task_id, integration, ref) conflicts. SHR-99 IS a different ref so it WILL
-      // be inserted — this existing test's behaviour changes.
-      const refs = getTaskExternalRefs(taskId);
-      expect(refs.map((r) => r.ref).sort()).toContain('SHR-1');
+      const ref = getTaskExternalRef(taskId, 'linear');
+      expect(ref!.ref).toBe('SHR-1'); // original not overwritten
     });
 
     it('created_at is non-null', () => {
@@ -623,6 +571,113 @@ describe('inTransaction', () => {
       const before = countTasks();
       insertTask({ title: 'New', description: 'D' });
       expect(countTasks()).toBe(before + 1);
+    });
+  });
+
+  // ─── depends_on primitive (agents/task-depends-on) ─────────────────────────
+
+  describe('depends_on', () => {
+    it('insertTask stores and getTask reads back depends_on', () => {
+      const a = insertTask({ title: 'A', description: 'D' });
+      const b = insertTask({ title: 'B', description: 'D', depends_on: a });
+      expect(getTask(b)?.depends_on).toBe(a);
+    });
+
+    it('setDependsOn writes and clears the link', () => {
+      const a = insertTask({ title: 'A', description: 'D' });
+      const b = insertTask({ title: 'B', description: 'D' });
+      setDependsOn(b, a);
+      expect(getTask(b)?.depends_on).toBe(a);
+      setDependsOn(b, null);
+      expect(getTask(b)?.depends_on).toBeNull();
+    });
+
+    describe('validateDependsOn — cycle safety', () => {
+      it('rejects a nonexistent target task', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(a, 'does-not-exist')).toMatch(/not found/);
+      });
+
+      it('rejects self-dependency', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(a, a)).toMatch(/cannot depend on itself/);
+      });
+
+      it('rejects a 2-cycle: A already depends on B, so B -> A is refused', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        expect(validateDependsOn(a, b)).toBeNull();
+        setDependsOn(a, b); // A -> B
+        expect(validateDependsOn(b, a)).toMatch(/cycle/); // B -> A would close the loop
+      });
+
+      it('rejects a 3-cycle: A -> B -> C exists, so C -> A is refused', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        const c = insertTask({ title: 'C', description: 'D' });
+        setDependsOn(a, b); // A -> B
+        setDependsOn(b, c); // B -> C
+        expect(validateDependsOn(c, a)).toMatch(/cycle/); // C -> A would close the loop
+      });
+
+      it('allows a valid non-cyclic chain', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        expect(validateDependsOn(a, b)).toBeNull();
+      });
+
+      it('taskId=null (create-time) only checks existence, never a cycle', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(null, a)).toBeNull();
+        expect(validateDependsOn(null, 'nope')).toMatch(/not found/);
+      });
+    });
+
+    describe('isDependencyUnmet', () => {
+      it('is false when depends_on is null', () => {
+        expect(isDependencyUnmet(null)).toBe(false);
+      });
+
+      it('is true while the dependency has not reached done', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        setWorkflowStatus(a, 'in_progress');
+        expect(isDependencyUnmet(a)).toBe(true);
+      });
+
+      it('is false once the dependency reaches done', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        setWorkflowStatus(a, 'done');
+        expect(isDependencyUnmet(a)).toBe(false);
+      });
+
+      it('treats a dependency task that no longer exists as still unmet (safe default)', () => {
+        expect(isDependencyUnmet('ghost-task')).toBe(true);
+      });
+    });
+
+    describe('listDependentsAwaitingStart', () => {
+      it('finds idle+in_progress tasks blocked on the given dependency', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: dep });
+        setWorkflowStatus(blocked, 'in_progress'); // runtime_state stays 'idle' (default)
+        expect(listDependentsAwaitingStart(dep).map((t) => t.id)).toEqual([blocked]);
+      });
+
+      it('excludes a dependent that is already running', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const running = insertTask({ title: 'Running', description: 'D', depends_on: dep });
+        setWorkflowStatus(running, 'in_progress');
+        setRuntimeState(running, 'running');
+        expect(listDependentsAwaitingStart(dep)).toEqual([]);
+      });
+
+      it('excludes tasks that depend on a different task', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const otherDep = insertTask({ title: 'OtherDep', description: 'D' });
+        const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: otherDep });
+        setWorkflowStatus(blocked, 'in_progress');
+        expect(listDependentsAwaitingStart(dep)).toEqual([]);
+      });
     });
   });
 });

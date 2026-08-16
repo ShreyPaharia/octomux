@@ -6,17 +6,14 @@ import { hookRoutes } from './hooks.js';
 import './workflows/index.js';
 
 import { router as miscRouter } from './routes/misc.js';
-import { router as learningsRouter } from './routes/learnings.js';
-import { router as skillsRouter } from './routes/skills.js';
+import { skillsRouter, agentDefsRouter } from './routes/registry-docs.js';
 import { router as savedFilesRouter } from './routes/saved-files.js';
 import { router as setupRouter } from './routes/setup.js';
 import { router as settingsRouter } from './routes/settings.js';
 import { router as hooksRegistryRouter } from './routes/hooks-registry.js';
 import { router as chatsRouter } from './routes/chats.js';
-import { router as agentDefsRouter } from './routes/agent-defs.js';
 import { router as orchestratorRouter } from './routes/orchestrator.js';
 import { router as integrationsRouter } from './routes/integrations.js';
-import { router as loopGroupsRouter } from './routes/loop-groups.js';
 import { router as commentsRouter } from './routes/comments.js';
 import { router as diffsRouter } from './routes/diffs.js';
 import { router as tasksRouter } from './routes/tasks.js';
@@ -25,9 +22,10 @@ import { router as taskAgentsRouter } from './routes/task-agents.js';
 import { router as worktreesRouter } from './routes/worktrees.js';
 import { router as schedulesRouter } from './routes/schedules.js';
 import { router as kindsRouter } from './routes/kinds.js';
-import { router as workflowRunsRouter } from './routes/workflow-runs.js';
+import { router as runsRouter } from './routes/runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { listWorkflows } from './workflows/registry.js';
+import { mountCapabilityRoutes } from './registry/mount.js';
 
 import { insertWorktreeIfAbsent, insertTaskIfAbsent, inTransaction } from './repositories/index.js';
 
@@ -37,7 +35,6 @@ export function setupRoutes(app: Express): void {
 
   // Mount extracted routers (bare app.use — each router keeps full /api/... paths)
   app.use(miscRouter);
-  app.use(learningsRouter);
   app.use(skillsRouter);
   app.use(savedFilesRouter);
   app.use(setupRouter);
@@ -50,7 +47,6 @@ export function setupRoutes(app: Express): void {
   for (const wf of listWorkflows()) {
     if (wf.apiRouter) app.use(wf.apiRouter);
   }
-  app.use(loopGroupsRouter);
   app.use(commentsRouter);
   app.use(diffsRouter);
   app.use(tasksRouter);
@@ -59,8 +55,18 @@ export function setupRoutes(app: Express): void {
   app.use(worktreesRouter);
   app.use(schedulesRouter);
   app.use(kindsRouter);
-  app.use(workflowRunsRouter);
+  app.use(runsRouter);
   app.use(agentsCrudRouter);
+
+  // Capability registry LAST. A migrated capability and the hand-written route
+  // it replaces can never both be mounted — Express takes the first match — so
+  // migrating a route means deleting its handler above.
+  //
+  // Mounting last matters: `/api/tasks/:id` would otherwise swallow sibling
+  // literal routes declared later, such as `/api/tasks/inbox`, which is exactly
+  // why the hand-written routers declare their literal paths before their
+  // parameterised ones.
+  mountCapabilityRoutes(app);
 
   // ─── Test-only seed endpoint ─────────────────────────────────────────────────
   // Gated strictly on NODE_ENV=test. Never exposed in production.

@@ -1,15 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import SchedulesPage from './SchedulesPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { ScheduleRow } from '@/lib/api/schedulesApi';
 
 const {
   taskApiProxy,
   reviewApiProxy,
   configApiProxy,
-  loopApiProxy,
+  runApiProxy,
   schedulesApiProxy,
   kindsApiProxy,
   apiMock,
@@ -18,7 +14,7 @@ const {
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
-vi.mock('@/lib/api/loopApi', () => ({ loopApi: loopApiProxy }));
+vi.mock('@/lib/api/runApi', () => ({ runApi: runApiProxy }));
 vi.mock('@/lib/api/schedulesApi', () => ({ schedulesApi: schedulesApiProxy }));
 vi.mock('@/lib/api/kindsApi', () => ({ kindsApi: kindsApiProxy }));
 vi.mock('@/components/fields/RepoPickerField', () => ({
@@ -61,6 +57,11 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor, within } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: SchedulesPage } = await import('./SchedulesPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
   return {
@@ -115,7 +116,6 @@ describe('SchedulesPage', () => {
         },
       ],
     });
-    apiMock.listLoops.mockResolvedValue([]);
     apiMock.listKinds.mockResolvedValue({
       kinds: [
         {

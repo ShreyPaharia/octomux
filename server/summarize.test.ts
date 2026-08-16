@@ -3,11 +3,8 @@
  *
  * Covers: builtin-disabled fallback, success path, error swallowed, CLI args.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
-import request from 'supertest';
-import { createTestDb, insertTask, insertAgent, findCallback } from './test-helpers.js';
-import { createApp } from './app.js';
+import Database from './sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
 // ─── child_process mock ──────────────────────────────────────────────────────
 
@@ -26,13 +23,21 @@ vi.mock('./hook-dispatcher.js', () => ({
   invalidateHookEnabledCache: vi.fn(),
 }));
 
-import { summarizeAgentProgress } from './summarize.js';
-import { execFile } from 'child_process';
+const { default: request } = await import('supertest');
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createTestDb, insertTask, insertAgent, findCallback } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+const { getArtifactSummary } = await import('./artifact.js');
+const { summarizeAgentProgress } = await import('./summarize.js');
+const { execFile } = await import('child_process');
+
 const mockedExecFile = vi.mocked(execFile);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function enableBuiltin(db: Database.Database, enabled: boolean) {
+function enableBuiltin(db: Database, enabled: boolean) {
   db.prepare(
     `INSERT INTO hook_settings (scope, key, enabled, updated_at)
      VALUES ('builtin', 'summarize-progress', ?, datetime('now'))
@@ -40,11 +45,11 @@ function enableBuiltin(db: Database.Database, enabled: boolean) {
   ).run(enabled ? 1 : 0);
 }
 
-function getTaskSummary(db: Database.Database, taskId: string): string | null {
-  const row = db.prepare('SELECT current_summary FROM tasks WHERE id = ?').get(taskId) as
-    | { current_summary: string | null }
-    | undefined;
-  return row?.current_summary ?? null;
+// current_summary now lives in the task's .octomux/artifact.md (spec §5.5),
+// not a DB column — read it straight from the worktree directory the test
+// pointed the task at.
+function getTaskSummary(worktreeDir: string): string | null {
+  return getArtifactSummary(worktreeDir).current_summary;
 }
 
 function mockClaudeOk(stdout: string) {
@@ -66,15 +71,18 @@ function mockClaudeFail(err: Error) {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('C3: summarizeAgentProgress', () => {
-  let db: Database.Database;
+  let db: Database;
+  let worktreeDir: string;
 
   beforeEach(() => {
     db = createTestDb();
     vi.clearAllMocks();
+    worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-summarize-test-'));
   });
 
   afterEach(() => {
     db.close();
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
 
   it('does nothing when builtin hook is disabled (missing row = disabled)', async () => {
@@ -84,10 +92,15 @@ describe('C3: summarizeAgentProgress', () => {
     expect(claudeCalls).toHaveLength(0);
   });
 
-  it('writes summary to DB on success', async () => {
+  it('writes summary to the artifact on success', async () => {
     enableBuiltin(db, true);
 
-    insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertTask(db, {
+      id: 'task1',
+      runtime_state: 'running',
+      workflow_status: 'in_progress',
+      worktree: worktreeDir,
+    });
     insertAgent(db, { id: 'agent1', task_id: 'task1', status: 'running' });
 
     db.prepare(
@@ -98,7 +111,7 @@ describe('C3: summarizeAgentProgress', () => {
 
     await summarizeAgentProgress('task1', 'agent1');
 
-    const summary = getTaskSummary(db, 'task1');
+    const summary = getTaskSummary(worktreeDir);
     expect(summary).toBe('Implemented hook registry endpoints.');
     const claudeCalls = mockedExecFile.mock.calls.filter((c) => c[0] === 'claude');
     expect(claudeCalls).toHaveLength(1);
@@ -107,7 +120,12 @@ describe('C3: summarizeAgentProgress', () => {
   it('swallows CLI errors — never throws', async () => {
     enableBuiltin(db, true);
 
-    insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertTask(db, {
+      id: 'task1',
+      runtime_state: 'running',
+      workflow_status: 'in_progress',
+      worktree: worktreeDir,
+    });
     db.prepare(
       `INSERT INTO task_updates (id, task_id, kind, body) VALUES ('u1', 'task1', 'summary', 'Did something')`,
     ).run();
@@ -115,13 +133,18 @@ describe('C3: summarizeAgentProgress', () => {
     mockClaudeFail(new Error('claude not found'));
 
     await expect(summarizeAgentProgress('task1', 'agent1')).resolves.toBeUndefined();
-    expect(getTaskSummary(db, 'task1')).toBeNull();
+    expect(getTaskSummary(worktreeDir)).toBeNull();
   });
 
   it('truncates summary to 120 chars', async () => {
     enableBuiltin(db, true);
 
-    insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertTask(db, {
+      id: 'task1',
+      runtime_state: 'running',
+      workflow_status: 'in_progress',
+      worktree: worktreeDir,
+    });
     db.prepare(
       `INSERT INTO task_updates (id, task_id, kind, body) VALUES ('u1', 'task1', 'summary', 'content')`,
     ).run();
@@ -130,7 +153,7 @@ describe('C3: summarizeAgentProgress', () => {
 
     await summarizeAgentProgress('task1', 'agent1');
 
-    const summary = getTaskSummary(db, 'task1');
+    const summary = getTaskSummary(worktreeDir);
     expect(summary).not.toBeNull();
     expect(summary!.length).toBeLessThanOrEqual(120);
   });
@@ -138,7 +161,12 @@ describe('C3: summarizeAgentProgress', () => {
   it('passes transcript and haiku flags to claude -p', async () => {
     enableBuiltin(db, true);
 
-    insertTask(db, { id: 'task1', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertTask(db, {
+      id: 'task1',
+      runtime_state: 'running',
+      workflow_status: 'in_progress',
+      worktree: worktreeDir,
+    });
     insertAgent(db, { id: 'agent1', task_id: 'task1', status: 'running' });
 
     db.prepare(
@@ -168,7 +196,7 @@ describe('C3: summarizeAgentProgress', () => {
 });
 
 describe('C3: Stop hook calls summarizeAgentProgress when enabled', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

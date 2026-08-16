@@ -10,17 +10,7 @@
  *  - A card without a task_id still auto-rejects (no lock to release, no throw).
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTask } from '../test-helpers.js';
-import { getDb } from '../db.js';
-import {
-  createConversation,
-  createCard,
-  getCard,
-  resolveCard,
-  upsertManagedTask,
-  getManagedTask,
-} from '../repositories/orchestrator.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 // Capture conversation pushes without a ws.
 const mockPush = vi.fn();
@@ -35,11 +25,12 @@ vi.mock('../settings.js', () => ({
   getStoredApprovalTimeoutMs: () => mockGetStoredApprovalTimeoutMs(),
 }));
 
-import {
-  sweepExpiredApprovalCards,
-  approvalTimeoutMs,
-  DEFAULT_APPROVAL_TIMEOUT_MS,
-} from './approval-timeout.js';
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const { createConversation, createCard, getCard, resolveCard, upsertManagedTask, getManagedTask } =
+  await import('../repositories/orchestrator.js');
+const { sweepExpiredApprovalCards, approvalTimeoutMs, DEFAULT_APPROVAL_TIMEOUT_MS } =
+  await import('./approval-timeout.js');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

@@ -2,42 +2,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { appendEvent, eventsSince } from './repositories/orchestrator.js';
+import { installHeartbeat } from './ws-heartbeat.js';
+import type { ServerEvent } from '@octomux/types';
 
-export type ServerEvent =
-  | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
-  | { type: 'chat:updated' | 'chat:deleted'; payload: { chatId: string } }
-  | {
-      type: 'review:drafts-ready' | 'review:run-failed';
-      payload: { taskId: string; reviewRunId: string };
-    }
-  | {
-      type: 'review:published';
-      payload: { taskId: string; github_review_url: string | null };
-    }
-  | {
-      type: 'review:head-advanced';
-      payload: { taskId: string; newHeadSha: string };
-    }
-  | {
-      type: 'task:phase_complete';
-      payload: { taskId: string; phase: string; [key: string]: unknown };
-    }
-  | {
-      type: 'task:stuck';
-      payload: { taskId: string; reason?: string; [key: string]: unknown };
-    }
-  | {
-      type: 'loop:emit';
-      payload: { taskId: string; loopRunId: string; status: string; reason: string };
-    }
-  | {
-      type: 'pr_extract:created';
-      payload: { taskId: string; extractId: string };
-    }
-  | {
-      type: 'loop_group:judging' | 'loop_group:judged';
-      payload: { groupId: string };
-    };
+export type { ServerEvent };
 
 /** Event types that carry a taskId and should be persisted to the durable events log. */
 const TASK_EVENT_TYPES = new Set([
@@ -68,6 +36,7 @@ export function subscribeServerEvents(listener: InProcessListener): () => void {
 
 export function setupEventWebSocket(): void {
   wss = new WebSocketServer({ noServer: true });
+  installHeartbeat(wss);
 }
 
 export function handleEventUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {

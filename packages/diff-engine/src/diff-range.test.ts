@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from '../../../server/bun-test.js';
 import {
   parseDiffRange,
   rangeIncludesWorkingTree,

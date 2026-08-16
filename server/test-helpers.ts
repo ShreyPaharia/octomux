@@ -1,5 +1,5 @@
-import Database from 'better-sqlite3';
-import { vi } from 'vitest';
+import Database from './sqlite.js';
+import { vi } from './bun-test.js';
 import {
   IDLE_TASK_FIXTURE,
   RUNNING_TASK_FIXTURE,
@@ -28,14 +28,14 @@ export { SESSION_PREFIX, BRANCH_PREFIX, WORKTREE_DIR };
 
 // ─── Database Helpers ────────────────────────────────────────────────────────
 
-export function createTestDb(): Database.Database {
+export function createTestDb(): Database {
   const db = new Database(':memory:');
   initDb(db);
   setDb(db);
   return db;
 }
 
-export function insertTask(db: Database.Database, overrides: Partial<Task> = {}): Task {
+export function insertTask(db: Database, overrides: Partial<Task> = {}): Task {
   const task: Task = {
     ...DEFAULTS.task,
     workers: undefined,
@@ -73,8 +73,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   const workflowStatus = (task as any).workflow_status ?? 'backlog';
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, current_summary, current_summary_updated_at, notify_task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, notify_task_id, depends_on, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -91,9 +91,8 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
     task.source ?? null,
     wtId,
     task.error,
-    (task as any).current_summary ?? null,
-    (task as any).current_summary_updated_at ?? null,
     (task as any).notify_task_id ?? null,
+    (task as any).depends_on ?? null,
     task.created_at,
     task.updated_at,
   );
@@ -103,7 +102,7 @@ export function insertTask(db: Database.Database, overrides: Partial<Task> = {})
   return task;
 }
 
-export function insertAgent(db: Database.Database, overrides: Partial<Worker> = {}): Worker {
+export function insertAgent(db: Database, overrides: Partial<Worker> = {}): Worker {
   const agent: Worker = {
     ...DEFAULTS.agent,
     ...overrides,
@@ -134,16 +133,16 @@ export function insertTestTask(overrides: Partial<Task> = {}): Task {
   return insertTask(getDb(), { ...DEFAULTS.runningTask, ...overrides });
 }
 
-export function getTask(db: Database.Database, id: string): Task | undefined {
+export function getTask(db: Database, id: string): Task | undefined {
   return db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-export function getAgents(db: Database.Database, taskId: string): Worker[] {
+export function getAgents(db: Database, taskId: string): Worker[] {
   return db.prepare('SELECT * FROM workers WHERE task_id = ?').all(taskId) as Worker[];
 }
 
 export function insertPermissionPrompt(
-  db: Database.Database,
+  db: Database,
   overrides: Partial<Omit<typeof DEFAULTS.permissionPrompt, 'agent_id'>> & {
     agent_id?: string | null;
   } = {},
@@ -166,14 +165,14 @@ export function insertPermissionPrompt(
   return pp;
 }
 
-export function getPermissionPrompts(db: Database.Database, taskId: string) {
+export function getPermissionPrompts(db: Database, taskId: string) {
   return db
     .prepare('SELECT * FROM permission_prompts WHERE task_id = ? ORDER BY created_at ASC')
     .all(taskId) as Array<Record<string, unknown>>;
 }
 
 export function insertUserTerminal(
-  db: Database.Database,
+  db: Database,
   overrides: Partial<UserTerminal> = {},
 ): UserTerminal {
   const ut: UserTerminal = { ...DEFAULTS.userTerminal, ...overrides } as UserTerminal;
@@ -183,7 +182,7 @@ export function insertUserTerminal(
   return ut;
 }
 
-export function getUserTerminals(db: Database.Database, taskId: string): UserTerminal[] {
+export function getUserTerminals(db: Database, taskId: string): UserTerminal[] {
   return db
     .prepare('SELECT * FROM user_terminals WHERE task_id = ? ORDER BY window_index')
     .all(taskId) as UserTerminal[];
@@ -257,10 +256,7 @@ export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallM
 
 // ─── Agent Activity Helper ───────────────────────────────────────────────────
 
-export function getAgentActivity(
-  db: Database.Database,
-  agentId: string,
-): { hook_activity: string } {
+export function getAgentActivity(db: Database, agentId: string): { hook_activity: string } {
   return db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get(agentId) as {
     hook_activity: string;
   };
@@ -316,8 +312,6 @@ export const TASKS_TABLE_COLUMNS = [
   'last_viewed_at',
   'source',
   'error',
-  'current_summary',
-  'current_summary_updated_at',
   'created_at',
   'updated_at',
   'agent',

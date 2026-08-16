@@ -1,5 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, afterEach } from '../bun-test.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { getArtifactSummary } from '../artifact.js';
+import Database from '../sqlite.js';
 import { SCHEMA, applyPragmas } from './schema.js';
 import { runMigrations } from './migrations.js';
 import {
@@ -10,7 +14,7 @@ import {
 } from '../test-helpers.js';
 
 describe('runMigrations (isolated)', () => {
-  let db: Database.Database;
+  let db: Database;
 
   afterEach(() => {
     db?.close();
@@ -30,6 +34,8 @@ describe('runMigrations (isolated)', () => {
       expect(taskCols).toContain(col);
     }
     expect(taskCols).not.toContain('status');
+    expect(taskCols).not.toContain('current_summary');
+    expect(taskCols).not.toContain('current_summary_updated_at');
 
     const agentCols = (db.pragma('table_info(workers)') as Array<{ name: string }>).map(
       (c) => c.name,
@@ -83,13 +89,87 @@ describe('runMigrations (isolated)', () => {
     expect(() => runMigrations(db)).not.toThrow();
   });
 
+  describe('retired current_summary columns', () => {
+    /**
+     * Simulate a pre-retirement DB: SCHEMA no longer creates these columns, so
+     * an upgrade install needs them added back by hand before runMigrations can
+     * exercise the back-fill path.
+     */
+    function oldInstall(worktree: string | null): Database {
+      const instance = new Database(':memory:');
+      applyPragmas(instance);
+      instance.exec(SCHEMA);
+      instance.exec(`ALTER TABLE tasks ADD COLUMN current_summary TEXT`);
+      instance.exec(`ALTER TABLE tasks ADD COLUMN current_summary_updated_at TEXT`);
+      if (worktree) {
+        instance
+          .prepare(
+            `INSERT INTO worktrees (id, path, repo_path, mode)
+             VALUES ('w1', ?, '/tmp/repo', 'worktree')`,
+          )
+          .run(worktree);
+      }
+      instance
+        .prepare(
+          `INSERT INTO tasks (id, title, description, worktree_id,
+                              current_summary, current_summary_updated_at)
+           VALUES ('t1', 'T', 'D', ?, 'old summary', '2026-01-01 00:00:00')`,
+        )
+        .run(worktree ? 'w1' : null);
+      return instance;
+    }
+
+    it('copies an existing summary into the task artifact, keeping its timestamp', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-mig-'));
+      try {
+        db = oldInstall(dir);
+        runMigrations(db);
+
+        const got = getArtifactSummary(dir);
+        expect(got.current_summary).toBe('old summary');
+        // Not restamped to now — a migrated summary that looks freshly written
+        // would defeat the staleness indicator on every upgraded board card.
+        expect(got.current_summary_updated_at).toBe('2026-01-01 00:00:00');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('KEEPS the columns rather than dropping them', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-mig-'));
+      try {
+        db = oldInstall(dir);
+        runMigrations(db);
+
+        // Deliberately not dropped: a task whose worktree is gone has nowhere
+        // to put an artifact, so dropping would destroy that prose forever for
+        // no functional gain — nothing reads the column either way.
+        const taskCols = (db.pragma('table_info(tasks)') as Array<{ name: string }>).map(
+          (c) => c.name,
+        );
+        expect(taskCols).toContain('current_summary');
+        expect(taskCols).toContain('current_summary_updated_at');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not throw for a task with no worktree to write an artifact into', () => {
+      db = oldInstall(null);
+      expect(() => runMigrations(db)).not.toThrow();
+      const row = db.prepare(`SELECT id, current_summary FROM tasks WHERE id = 't1'`).get();
+      // Unmigratable, but preserved in the retired column rather than lost.
+      expect(row).toMatchObject({ id: 't1', current_summary: 'old summary' });
+    });
+  });
+
   // ── Schedule kinds as presets (spec/schedule-kinds-as-presets.md §8) ────────
 
   describe('schedule_skills → schedules.prompt/config_json migration', () => {
     /** Simulate a pre-migration DB: SCHEMA no longer creates `schedule_skills`,
      * so an upgrade install needs it added back by hand before `runMigrations`
      * can exercise the backfill-then-drop path. */
-    function addLegacyScheduleSkillsTable(instance: Database.Database): void {
+    function addLegacyScheduleSkillsTable(instance: Database): void {
       instance.exec(`
         CREATE TABLE schedule_skills (
           kind        TEXT PRIMARY KEY,
@@ -100,7 +180,7 @@ describe('runMigrations (isolated)', () => {
       `);
     }
 
-    function tableNames(instance: Database.Database): string[] {
+    function tableNames(instance: Database): string[] {
       return (
         instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
           name: string;
@@ -202,106 +282,6 @@ describe('runMigrations (isolated)', () => {
         db.prepare(`SELECT prompt FROM schedules WHERE id = 'sched-1'`).get() as { prompt: string }
       ).prompt;
       expect(secondPrompt).toBe('Legacy body');
-    });
-  });
-
-  // ── Multi-ticket external refs: PK (task_id, integration, ref) ───────────────
-
-  describe('task_external_refs PK migration', () => {
-    it('migrates old (task_id, integration) PK to (task_id, integration, ref) preserving rows', () => {
-      db = new Database(':memory:');
-      applyPragmas(db);
-
-      // Simulate an old-style DB: create the table with the legacy PK
-      db.exec(`
-        CREATE TABLE tasks (
-          id          TEXT PRIMARY KEY,
-          title       TEXT NOT NULL DEFAULT '',
-          description TEXT,
-          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO tasks (id) VALUES ('t1');
-        CREATE TABLE task_external_refs (
-          task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-          integration TEXT NOT NULL,
-          ref         TEXT NOT NULL,
-          url         TEXT,
-          metadata    TEXT,
-          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-          PRIMARY KEY (task_id, integration)
-        );
-        INSERT INTO task_external_refs (task_id, integration, ref) VALUES ('t1', 'linear', 'SHR-1');
-      `);
-
-      // Verify old PK columns
-      const beforePk = (
-        db.pragma('table_info(task_external_refs)') as Array<{ name: string; pk: number }>
-      )
-        .filter((c) => c.pk > 0)
-        .map((c) => c.name);
-      expect(beforePk).toEqual(['task_id', 'integration']);
-
-      // runMigrations won't work on this bare DB (tasks table is missing many cols),
-      // but we can run just the migration block directly by simulating the guard.
-      // Instead, just run the rebuild SQL directly:
-      db.transaction(() => {
-        db.exec(`
-          CREATE TABLE task_external_refs_new (
-            task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-            integration TEXT NOT NULL,
-            ref         TEXT NOT NULL,
-            url         TEXT,
-            metadata    TEXT,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-            PRIMARY KEY (task_id, integration, ref)
-          )
-        `);
-        db.exec(`
-          INSERT INTO task_external_refs_new (task_id, integration, ref, url, metadata, created_at)
-          SELECT task_id, integration, ref, url, metadata, created_at
-          FROM task_external_refs
-        `);
-        db.exec(`DROP TABLE task_external_refs`);
-        db.exec(`ALTER TABLE task_external_refs_new RENAME TO task_external_refs`);
-      })();
-
-      // Row is preserved
-      const rows = db
-        .prepare(`SELECT * FROM task_external_refs WHERE task_id = 't1'`)
-        .all() as Array<{ ref: string }>;
-      expect(rows).toHaveLength(1);
-      expect(rows[0].ref).toBe('SHR-1');
-
-      // New PK covers 3 columns
-      const afterPk = (
-        db.pragma('table_info(task_external_refs)') as Array<{ name: string; pk: number }>
-      )
-        .filter((c) => c.pk > 0)
-        .map((c) => c.name);
-      expect(afterPk).toHaveLength(3);
-      expect(afterPk).toContain('ref');
-    });
-
-    it('fresh DB (SCHEMA with new PK) allows 2 refs same integration', () => {
-      db = new Database(':memory:');
-      applyPragmas(db);
-      db.exec(SCHEMA);
-      runMigrations(db);
-
-      db.exec(`INSERT INTO tasks (id, title, description) VALUES ('t1', 'T', '')`);
-      db.exec(
-        `INSERT INTO task_external_refs (task_id, integration, ref) VALUES ('t1', 'linear', 'SHR-1')`,
-      );
-      db.exec(
-        `INSERT INTO task_external_refs (task_id, integration, ref) VALUES ('t1', 'linear', 'SHR-2')`,
-      );
-
-      const rows = db
-        .prepare(`SELECT ref FROM task_external_refs WHERE task_id = 't1' ORDER BY ref`)
-        .all() as Array<{ ref: string }>;
-      expect(rows).toHaveLength(2);
-      expect(rows.map((r) => r.ref)).toEqual(['SHR-1', 'SHR-2']);
     });
   });
 });

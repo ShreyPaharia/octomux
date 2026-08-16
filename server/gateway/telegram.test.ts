@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../bun-test.js';
 import type { Transformer } from 'grammy';
 import type { UserFromGetMe } from 'grammy/types';
 import { buildTelegram, createTelegramAdapter } from './telegram.js';

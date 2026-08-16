@@ -1,11 +1,11 @@
 ---
 name: update-task-status
-description: Use when you want to update the workflow status of an octomux task, add a note, post a progress summary, or link external references (e.g. Jira tickets)
+description: Use when you want to update the workflow status of an octomux task, add a note, rename it, or link external references (e.g. Jira tickets)
 ---
 
 # Update octomux task status
 
-Move a task through the workflow board, add notes, post progress summaries, or link external references.
+Move a task through the workflow board, add notes, rename the task, or link external references.
 
 ## Workflow columns
 
@@ -65,38 +65,31 @@ octomux task-move abc123 done
 
 **Notes:**
 
-- Moving to `human_review` or `planned` requires a note explaining why — use `--note` with the CLI, or follow up with `octomux task-note` (or a note in your message) when using the MCP tool
+- Moving to `human_review` or `planned` requires a note explaining why — use `--note` with the CLI, or mention it in your message when using the MCP tool
 - The move is recorded in the task activity log automatically
 
-## Posting a progress summary
+## Renaming a task
 
-A summary is a short, human-readable status snapshot stored on the task. Agents should post summaries when they reach key milestones.
+A task's title defaults to the first 80 characters of its initial prompt, which is usually unreadable on the board. Rename it once you understand what the task is actually about.
 
 ```bash
-octomux task-summary <task-id> "<summary text>"
+# From inside the task — id comes from the OCTOMUX_TASK_ID env var
+octomux task rename --title "New title"
+
+# From outside a task — pass the task id explicitly
+octomux task rename --id <task-id> --title "New title"
+
+# Optionally update the description too
+octomux task rename --title "New title" --description "One-line summary"
 ```
 
 **Example:**
 
 ```bash
-octomux task-summary abc123 "Completed auth middleware refactor. Tests pass. Writing migration docs next."
+octomux task rename --title "Fix auth middleware token refresh bug"
 ```
 
-The summary appears in the dashboard task card and is visible to humans monitoring work.
-
-## Adding a note to the activity log
-
-Notes are append-only timeline entries — useful for capturing decisions, blockers, or context without overwriting the summary.
-
-```bash
-octomux task-note <task-id> "<note text>"
-```
-
-**Example:**
-
-```bash
-octomux task-note abc123 "Decided to defer DB migration to a follow-up task (see PROJ-999)"
-```
+**When to use it:** right after you understand what the task actually is — do this once, early, so the board shows a readable title instead of a truncated prompt.
 
 ## Linking external references
 
@@ -149,15 +142,12 @@ If you need to look up a task ID by name, prefer the MCP tool when available (yo
 
 ## When to use this skill
 
-- **Agent completing a milestone:** post a summary via `octomux task-summary`
+- **Agent understands what the task is about:** rename it via `octomux task rename` so the board shows a readable title
 - **Agent blocked on human input:** move to `human_review` with a note explaining what's needed — use `mcp__octomux__set_task_status` (MCP) or `octomux task-move` (CLI)
 - **Human reviewing work:** add notes, move to `done` after merge
 - **Linking a Jira ticket to a new task:** use `task-ref-add` immediately after creating the task
-- **Tracking decisions or context:** use `task-note` to capture anything that affects how the work is understood later
 
 ## Tips
 
-- Keep summaries under 2-3 sentences — they appear in dashboard cards
-- Use notes for longer context or multi-line decisions
 - Always include a note when moving to `human_review` so the reviewer knows what to look at
-- The `--author` flag on `task-summary` and `task-note` defaults to `cli` but can be set to the agent ID or your name for attribution
+- Rename the task once, early — don't rename repeatedly as understanding evolves

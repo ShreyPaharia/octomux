@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { makeTask } from '../test-helpers';
 import { useAttentionIndicator } from './use-attention-indicator';
 
@@ -40,7 +40,7 @@ describe('useAttentionIndicator', () => {
       expected: 'octomux',
     },
   ])('$name', ({ tasks, expected }) => {
-    renderHook(() => useAttentionIndicator(tasks));
+    renderHook(() => useAttentionIndicator([...tasks]));
     expect(document.title).toBe(expected);
   });
 

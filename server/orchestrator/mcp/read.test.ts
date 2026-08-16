@@ -8,9 +8,7 @@
  *
  * Tests call the handler functions directly; no MCP transport is exercised here.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTask, insertAgent } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
 
 // Controllable tmux mock for get_agent_output (hoisted so the factory can close over it).
 const tmuxState = vi.hoisted(() => ({ hasSession: true, capture: '' }));
@@ -25,163 +23,30 @@ vi.mock('../../tmux-bin.js', () => ({
   }),
 }));
 
-import {
-  handleListTasks,
-  handleGetTask,
+const { createTestDb, insertTask, insertAgent } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const {
   handleMonitorStatus,
   handleGetTaskOutput,
   handleGetAgentOutput,
   handleRecentRepos,
   handleDefaultBranch,
   handleSearchLearnings,
-} from './read.js';
-import { upsertManagedTask } from '../../repositories/orchestrator.js';
-import { setCurrentSummary } from '../../repositories/index.js';
-import { addLearning, SHARED_LANE } from '../../repositories/agent-learnings.js';
-import { POLICY_ONLY_COMMANDS } from '../command-registry.js';
+} = await import('./read.js');
+const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
+const { addLearning, SHARED_LANE } = await import('../../repositories/agent-learnings.js');
+const { POLICY_ONLY_COMMANDS } = await import('../command-registry.js');
 
 describe('orchestrator mcp read tools', () => {
   beforeEach(() => {
     createTestDb();
   });
 
-  // ─── list_tasks ────────────────────────────────────────────────────────────
-
-  describe('handleListTasks', () => {
-    it('returns lean summary fields — only id, title, status, workflow_status', () => {
-      const db = getDb();
-      insertTask(db, {
-        id: 'task-lt-01',
-        title: 'Build feature A',
-        workflow_status: 'in_progress',
-        runtime_state: 'running',
-      });
-      insertTask(db, {
-        id: 'task-lt-02',
-        title: 'Fix bug B',
-        workflow_status: 'backlog',
-        runtime_state: 'idle',
-      });
-
-      const result = handleListTasks({});
-      expect(Array.isArray(result)).toBe(true);
-      const task = result.find((t) => t.id === 'task-lt-01');
-      expect(task).toBeDefined();
-      // Lean summary: only these fields
-      expect(task).toHaveProperty('id');
-      expect(task).toHaveProperty('title');
-      expect(task).toHaveProperty('runtime_state');
-      expect(task).toHaveProperty('workflow_status');
-      // Must NOT include full rows
-      expect(task).not.toHaveProperty('description');
-      expect(task).not.toHaveProperty('initial_prompt');
-      expect(task).not.toHaveProperty('error');
-    });
-
-    it('filters by workflow_status when provided', () => {
-      const db = getDb();
-      insertTask(db, {
-        id: 'task-lt-03',
-        title: 'Running task',
-        workflow_status: 'in_progress',
-        runtime_state: 'running',
-      });
-      insertTask(db, {
-        id: 'task-lt-04',
-        title: 'Done task',
-        workflow_status: 'done',
-        runtime_state: 'idle',
-      });
-
-      const result = handleListTasks({ workflow_status: 'in_progress' });
-      expect(result.every((t) => t.workflow_status === 'in_progress')).toBe(true);
-      expect(result.find((t) => t.id === 'task-lt-03')).toBeDefined();
-      expect(result.find((t) => t.id === 'task-lt-04')).toBeUndefined();
-    });
-
-    it('returns empty array when no tasks match', () => {
-      const result = handleListTasks({ workflow_status: 'pr' });
-      expect(result).toEqual([]);
-    });
-
-    it('excludes soft-deleted tasks', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-lt-05', title: 'Active task', workflow_status: 'backlog' });
-      // Mark as deleted
-      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 'task-lt-05'`).run();
-      const result = handleListTasks({});
-      expect(result.find((t) => t.id === 'task-lt-05')).toBeUndefined();
-    });
-  });
-
-  // ─── get_task ──────────────────────────────────────────────────────────────
-
-  describe('handleGetTask', () => {
-    it('returns lean task summary for an existing task', () => {
-      const db = getDb();
-      insertTask(db, {
-        id: 'task-gt-01',
-        title: 'Implement auth',
-        workflow_status: 'in_progress',
-        runtime_state: 'running',
-      });
-
-      const result = handleGetTask({ task_id: 'task-gt-01' });
-      expect(result).not.toBeNull();
-      expect(result!.id).toBe('task-gt-01');
-      expect(result!.title).toBe('Implement auth');
-      expect(result!.workflow_status).toBe('in_progress');
-      expect(result!.runtime_state).toBe('running');
-      // Lean: no description/initial_prompt/error in the summary
-      expect(result).not.toHaveProperty('initial_prompt');
-    });
-
-    it('returns null for an unknown task_id', () => {
-      const result = handleGetTask({ task_id: 'nonexistent-task' });
-      expect(result).toBeNull();
-    });
-
-    it('includes agent count (pointer, not agent rows)', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-gt-02', title: 'Task with agents', worktree: null });
-      insertAgent(db, { id: 'agent-gt-01', task_id: 'task-gt-02' });
-      insertAgent(db, { id: 'agent-gt-02', task_id: 'task-gt-02', window_index: 1 });
-
-      const result = handleGetTask({ task_id: 'task-gt-02' });
-      expect(result!.agent_count).toBe(2);
-      // Must not include full agent rows
-      expect(result).not.toHaveProperty('agents');
-    });
-
-    it('surfaces the managed phase (distinguishes paused-at-gate from working)', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-gt-03', title: 'Gated task', runtime_state: 'running' });
-      db.prepare(
-        `INSERT INTO orchestrator_conversations (id, title) VALUES ('conv-gt', 'c')`,
-      ).run();
-      upsertManagedTask({
-        conversation_id: 'conv-gt',
-        task_id: 'task-gt-03',
-        phase: 'awaiting_approval',
-      });
-
-      const result = handleGetTask({ task_id: 'task-gt-03' });
-      // runtime_state says 'running', but phase reveals it's paused for approval.
-      expect(result!.runtime_state).toBe('running');
-      expect(result!.phase).toBe('awaiting_approval');
-    });
-
-    it('phase is null for a non-managed task and includes current_summary', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-gt-04', title: 'Plain task' });
-      setCurrentSummary('task-gt-04', 'Editing auth.ts');
-
-      const result = handleGetTask({ task_id: 'task-gt-04' });
-      expect(result!.phase).toBeNull();
-      expect(result!.current_summary).toBe('Editing auth.ts');
-      expect(result!.current_summary_updated_at).not.toBeNull();
-    });
-  });
+  // list_tasks / get_task now live in server/registry/capabilities/task.test.ts
+  // (task.list / task.get) — see that file's 'returns the lean summary by
+  // default' / 'expands to the full task row + ... via include' tests, which
+  // cover the same lean-shape + agent_count/phase/current_summary contract
+  // these handlers used to test directly.
 
   // ─── get_agent_output ──────────────────────────────────────────────────────
   describe('handleGetAgentOutput', () => {
@@ -224,41 +89,6 @@ describe('orchestrator mcp read tools', () => {
       const result = await handleGetAgentOutput({ task_id: 'nope' });
       expect(result.live).toBe(false);
       expect(result.note).toMatch(/not found/i);
-    });
-  });
-
-  // ─── regression: post-rename schema (no `no such column: task_id`) ───────────
-  //
-  // get_task and get_agent_output both count agents via `countAgentsForTask`.
-  // A stale build queried `FROM agents WHERE task_id` — after the agents→workers
-  // rename `agents` is the conductor table (no task_id), so the live conductor
-  // saw `no such column: task_id` on exactly these two tools while list_tasks etc.
-  // (which never count agents) kept working. This pins the count to `workers`
-  // against the real migrated schema so that regression can't silently return.
-  describe('post-rename agent-count regression (SHR: no such column task_id)', () => {
-    it('get_task counts workers rows without throwing on the post-rename schema', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-reg-01', title: 'Regression task' });
-      insertAgent(db, { id: 'w-reg-01', task_id: 'task-reg-01' });
-      insertAgent(db, { id: 'w-reg-02', task_id: 'task-reg-01', window_index: 1 });
-
-      expect(() => handleGetTask({ task_id: 'task-reg-01' })).not.toThrow();
-      expect(handleGetTask({ task_id: 'task-reg-01' })!.agent_count).toBe(2);
-    });
-
-    it('get_agent_output counts workers rows without throwing on the post-rename schema', async () => {
-      const db = getDb();
-      insertTask(db, {
-        id: 'task-reg-02',
-        title: 'Regression task 2',
-        tmux_session: 'octomux-agent-task-reg-02',
-      });
-      insertAgent(db, { id: 'w-reg-03', task_id: 'task-reg-02' });
-      tmuxState.hasSession = true;
-      tmuxState.capture = 'working\n';
-
-      const result = await handleGetAgentOutput({ task_id: 'task-reg-02' });
-      expect(result.agent_count).toBe(1);
     });
   });
 

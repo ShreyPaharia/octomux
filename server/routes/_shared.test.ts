@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 // resolveAiTaskNamingEnabled reads settings.js's getSettings() when
 // OCTOMUX_AI_TASK_NAMING is unset — stub it so tests control the resolution
@@ -11,7 +11,9 @@ vi.mock('../settings.js', () => ({ getSettings: () => mockGetSettings() }));
 // but must not blow up module resolution.
 vi.mock('../title-gen.js', () => ({ generateTitleAndDescription: vi.fn() }));
 
-import { resolveAiTaskNamingEnabled } from './_shared.js';
+const { resolveAiTaskNamingEnabled, lookupExistingReviewId } = await import('./_shared.js');
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
 
 describe('resolveAiTaskNamingEnabled', () => {
   beforeEach(() => {
@@ -61,5 +63,51 @@ describe('resolveAiTaskNamingEnabled', () => {
   it('falls back to false when settings.js throws', async () => {
     mockGetSettings.mockRejectedValue(new Error('settings unavailable'));
     await expect(resolveAiTaskNamingEnabled()).resolves.toBe(false);
+  });
+});
+
+describe('lookupExistingReviewId', () => {
+  beforeEach(() => {
+    createTestDb();
+  });
+
+  it('does not match a same-numbered PR review task in a different repo', () => {
+    // Regression test: PR numbers are per-repo, so a review task for PR #42 in
+    // repo A must never be reported as "existing" for PR #42 in repo B.
+    insertTask(getDb(), {
+      id: 'review-in-repo-a',
+      repo_path: '/repo/a',
+      pr_number: 42,
+      source: 'auto_review',
+      runtime_state: 'running',
+    });
+    const sourceTaskInRepoB = insertTask(getDb(), {
+      id: 'source-in-repo-b',
+      repo_path: '/repo/b',
+      pr_number: 42,
+    });
+
+    const result = lookupExistingReviewId(sourceTaskInRepoB);
+
+    expect(result).toBeNull();
+  });
+
+  it('matches a review task for the same repo + PR number', () => {
+    insertTask(getDb(), {
+      id: 'review-in-repo-a',
+      repo_path: '/repo/a',
+      pr_number: 42,
+      source: 'auto_review',
+      runtime_state: 'running',
+    });
+    const sourceTaskInRepoA = insertTask(getDb(), {
+      id: 'source-in-repo-a',
+      repo_path: '/repo/a',
+      pr_number: 42,
+    });
+
+    const result = lookupExistingReviewId(sourceTaskInRepoA);
+
+    expect(result).toBe('review-in-repo-a');
   });
 });

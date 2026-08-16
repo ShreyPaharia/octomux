@@ -45,3 +45,8 @@ packages/*/share/terminfo/*
 # Cursor harness hook install — written into worktrees at launch, not source
 .cursor/
 .octomux-hooks/
+
+# Compiled binaries, staged npm packages, and the generated asset blob
+dist-bin/
+dist-npm/
+server/assets.generated.json

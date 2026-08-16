@@ -1,14 +1,15 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { spawn, type IPty } from 'node-pty';
+import { spawn, type Pty } from './pty.js';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
 import { getTask, getChatAgentTmuxSession } from './repositories/index.js';
 import { execTmux, tmuxSpawnSpec } from './tmux-bin.js';
+import { installHeartbeat } from './ws-heartbeat.js';
 
 interface TerminalConnection {
   ws: WebSocket;
-  pty: IPty;
+  pty: Pty;
 }
 
 const connections = new Map<string, TerminalConnection[]>();
@@ -19,6 +20,7 @@ export function setupTerminalWebSocket(): void {
   // repetitive ANSI — compression cuts remote-viewing bandwidth ~10x. ws only
   // compresses frames above its 1KB threshold, so keystroke echo stays fast.
   wss = new WebSocketServer({ noServer: true, perMessageDeflate: true });
+  installHeartbeat(wss);
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
@@ -51,7 +53,7 @@ function attachToTmuxSession(
   linkedSession?: string,
   pendingMessages?: (Buffer | string)[],
 ): void {
-  let pty: IPty;
+  let pty: Pty;
   try {
     const spec = tmuxSpawnSpec(['attach-session', '-t', tmuxTarget]);
     pty = spawn(spec.file, spec.args, {
@@ -226,15 +228,57 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   // Create a grouped session so each viewer has independent window selection.
   // Without this, all clients attached to the same session share the active window,
   // meaning switching tabs in one browser would affect all other viewers.
+  //
+  // `;` separates commands within a single tmux argv, so session creation and
+  // window selection cost one process spawn instead of two sequential
+  // round-trips (~10ms each) on the path to first paint.
   const linkedSession = `${task.tmux_session}-v-${nanoid(6)}`;
+  // `tmux attach` takes 100-300ms to emit its first frame — a blank terminal for
+  // the whole switch. Snapshot the pane concurrently with the setup above and
+  // paint it into the alternate screen first; tmux's attach opens with
+  // `\e[?1049h\e[H\e[J` + a full repaint of the same content, so the handoff is
+  // a same-frame overwrite rather than a flash of empty screen.
+  const snapshot = execTmux([
+    'capture-pane',
+    '-p',
+    '-e',
+    '-t',
+    `${task.tmux_session}:${windowIndex}`,
+  ]).then(
+    ({ stdout }) => stdout,
+    () => null,
+  );
+
+  let pane: string | null;
   try {
-    await execTmux(['new-session', '-d', '-t', task.tmux_session, '-s', linkedSession]);
-    // Prevent grouped sessions from constraining window size to the smallest client
-    await execTmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
-    await execTmux(['select-window', '-t', `${linkedSession}:${windowIndex}`]);
+    [, pane] = await Promise.all([
+      execTmux([
+        'new-session',
+        '-d',
+        '-t',
+        task.tmux_session,
+        '-s',
+        linkedSession,
+        ';',
+        'select-window',
+        '-t',
+        `${linkedSession}:${windowIndex}`,
+      ]),
+      snapshot,
+    ]);
   } catch {
     ws.close(4005, 'Failed to create terminal view session');
     return;
+  }
+
+  // Best-effort and deliberately off the critical path: without it a grouped
+  // session clamps window size to the smallest client. Kept out of the chain
+  // above because `aggressive-resize` is a window option and a tmux build that
+  // rejects it on a session target would abort the commands that do matter.
+  execTmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
+
+  if (pane && ws.readyState === WebSocket.OPEN) {
+    ws.send(`\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`);
   }
 
   const connKey = `${taskId}:${windowIndex}`;

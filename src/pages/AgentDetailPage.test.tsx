@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import AgentDetailPage from './AgentDetailPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 import type { AgentWithStatus } from '@/lib/api/agentsApi';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, agentsApiProxy, apiMock } = await vi.hoisted(
@@ -21,10 +17,15 @@ vi.mock('@/lib/event-source', () => ({
 const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
-vi.mock('react-router-dom', async (importOriginal) => {
-  const withNav = await routerMockFactory(importOriginal);
+vi.mock('react-router-dom', (importOriginal) => {
+  const withNav = routerMockFactory(importOriginal);
   return { ...withNav, useParams: () => ({ id: 'agent-1' }) };
 });
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: AgentDetailPage } = await import('./AgentDetailPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 // ─── WS mock (AgentSessionChat opens its own socket in the Sessions tab) ─────
 

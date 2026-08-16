@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { LearningsPanel } from './LearningsPanel';
-import { renderWithRouter } from '../../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { ReviewLearning } from '@/lib/api/index';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -54,6 +50,11 @@ vi.mock('@/lib/api/reviewApi', () => ({
 vi.mock('@/lib/tasks-context', () => ({
   useTasksContextOptional: () => null,
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { LearningsPanel } = await import('./LearningsPanel');
+const { renderWithRouter } = await import('../../test-helpers');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

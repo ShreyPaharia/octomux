@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockRunSessionVertical = vi.fn();
 
@@ -6,10 +6,10 @@ vi.mock('../../services/session-vertical-service.js', () => ({
   runSessionVertical: (...args: unknown[]) => mockRunSessionVertical(...args),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { sendWatcherReply, SEND_REPLY_SCHEMA } = await import('./send-reply.js');
+const { getWorkflow, listCronWorkflowKinds } = await import('../registry.js');
 
-import { sendWatcherReply, SEND_REPLY_SCHEMA } from './send-reply.js';
-import { getWorkflow, listCronWorkflowKinds } from '../registry.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 describe('sendWatcherReply', () => {
   beforeEach(() => {

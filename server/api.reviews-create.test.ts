@@ -1,11 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb, execFileOk, execFileFail } from './test-helpers.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
-import { execFile } from 'child_process';
+const { execFile } = await import('child_process');
 
 vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn().mockResolvedValue(undefined),
@@ -20,6 +16,11 @@ vi.mock('./task-engine/index.js', () => ({
   closeShellTerminal: vi.fn(),
   hopAgent: vi.fn(),
 }));
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb, execFileOk, execFileFail } = await import('./test-helpers.js');
+const { getDb } = await import('./db.js');
 
 const { startTask } = await import('./task-engine/index.js');
 
@@ -96,9 +97,9 @@ describe('POST /api/reviews', () => {
     expect(review!.repo_path).toBe('/repos/myrepo');
     expect(review!.branch).toMatch(/^review\/.+-pr-42$/);
     expect(review!.base_branch).toBe('main');
-    expect(String(review!.initial_prompt)).toContain('/octomux:review-walkthrough');
+    expect(String(review!.initial_prompt)).toContain('/review-artifact');
     expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
-    expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);
+    expect(String(review!.initial_prompt)).toContain(`close-task ${res.body.id}`);
     expect(startTask).toHaveBeenCalled();
   });
 

@@ -7,6 +7,7 @@ import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
+import { setTaskSummary } from './artifact-task.js';
 import { handleLoopIterationBoundary } from './task-engine/loop/engine.js';
 import {
   upsertManagedTask,
@@ -14,6 +15,14 @@ import {
   conversationIdForHookToken,
 } from './repositories/orchestrator.js';
 import { handlePreToolUse } from './orchestrator/gate.js';
+import { pushToConversation } from './orchestrator/stream.js';
+import {
+  createCard,
+  findConversationForTask,
+  getGlobalMonitorConversation,
+  hasCardForTask,
+  hasPhaseCompleteEvent,
+} from './repositories/orchestrator.js';
 import {
   runOrchestratorAction,
   ORCHESTRATOR_ACTIONS,
@@ -35,68 +44,14 @@ import {
   getWorktreePathForTask,
   setWorkflowStatus,
   addTaskUpdate,
-  setCurrentSummary,
 } from './repositories/tasks.js';
 import {
   insertPermissionPrompt,
   resolveOldestPendingByAgent,
 } from './repositories/permission-prompts.js';
 import { inTransaction } from './repositories/tx.js';
-import { upsertPullRequest } from './repositories/pull-requests.js';
 
 const logger = childLogger('hooks');
-
-// ─── parsePrFromToolUse ───────────────────────────────────────────────────────
-// Pure helper: extract PR info from a PostToolUse payload. Exported for tests.
-
-export interface PrFromToolUse {
-  branch?: string;
-  number?: number;
-  url?: string;
-}
-
-/**
- * Attempt to extract PR tracking info from a shell-tool PostToolUse event.
- * Returns null when the command is unrecognised or not PR-related.
- * Never throws — callers rely on fail-open behaviour.
- */
-export function parsePrFromToolUse(
-  command: string,
-  toolResponse: string,
-): PrFromToolUse | null {
-  try {
-    // ── gh pr create ──
-    // Output typically ends with the PR URL on its own line.
-    if (/gh\s+pr\s+create/.test(command)) {
-      const urlMatch = /https:\/\/github\.com\/[^\s]+\/pull\/(\d+)/.exec(toolResponse);
-      if (!urlMatch) return null; // tool ran but didn't print a URL yet
-      const url = urlMatch[0];
-      const number = parseInt(urlMatch[1], 10);
-      // Try to extract --head flag from command for branch
-      const headMatch = /--head[=\s]+(\S+)/.exec(command);
-      return { url, number: isNaN(number) ? undefined : number, branch: headMatch?.[1] };
-    }
-
-    // ── git push ... <branch> ──
-    // Forms: `git push origin mybranch`, `git push -u origin mybranch`,
-    //        `git push --set-upstream origin mybranch`
-    if (/git\s+push\b/.test(command)) {
-      // Strip flags that consume no value, then find positional remote + branch
-      // Simplification: grab the last non-flag token as branch.
-      // ponytail: naive positional parse; handles common forms, not every git-push flag
-      const tokens = command.split(/\s+/).filter(Boolean);
-      const nonFlag = tokens.filter((t) => !t.startsWith('-'));
-      // nonFlag[0]='git', nonFlag[1]='push', nonFlag[2]=remote, nonFlag[3]=branch
-      const branch = nonFlag[3];
-      if (!branch) return null;
-      return { branch };
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 const router = Router();
 
@@ -321,13 +276,7 @@ router.post('/permission-request', requireHookToken, (req, res) => {
 
 // POST /api/hooks/post-tool-use
 router.post('/post-tool-use', requireHookToken, (req, res) => {
-  const { session_id, conversation_id, tool_name, tool_input, tool_response } = req.body as {
-    session_id?: string;
-    conversation_id?: string;
-    tool_name?: string;
-    tool_input?: Record<string, unknown>;
-    tool_response?: string;
-  };
+  const { session_id, conversation_id, tool_name, tool_input } = req.body;
   const sid = (session_id ?? conversation_id) as string | undefined;
   if (!sid) {
     res.status(200).send();
@@ -348,42 +297,12 @@ router.post('/post-tool-use', requireHookToken, (req, res) => {
 
     // Only set active if not already idle (Stop hook may have fired first)
     setAgentHookActivityIfNotIdle(agent.id);
-
-    if (summary) {
-      setCurrentSummary(agent.task_id, summary);
-    }
   });
 
-  // Fast-path PR tracking: parse gh pr create / git push output and upsert a row.
-  // Shell tools: Claude Code uses 'Bash', Cursor uses 'run_terminal_cmd'.
-  if (
-    agent.task_id &&
-    (tool_name === 'Bash' || tool_name === 'run_terminal_cmd') &&
-    typeof tool_input?.command === 'string' &&
-    typeof tool_response === 'string'
-  ) {
-    try {
-      const parsed = parsePrFromToolUse(tool_input.command, tool_response);
-      // Require at least a branch OR a url+number so we have a meaningful row.
-      // When gh pr create prints a URL but --head wasn't passed, use 'pr-<n>' as a
-      // synthetic branch key so the poller can fill in the real branch later.
-      const branch = parsed?.branch ?? (parsed?.url && parsed?.number ? `pr-${parsed.number}` : undefined);
-      if (parsed && branch) {
-        upsertPullRequest({
-          task_id: agent.task_id,
-          branch,
-          number: parsed.number ?? null,
-          url: parsed.url ?? null,
-        });
-        logger.info(
-          { task_id: agent.task_id, branch, pr_number: parsed.number, operation: 'post_tool_use_pr_upsert' },
-          'upserted pull_request from PostToolUse',
-        );
-      }
-    } catch (err) {
-      // Fail open — PR tracking is best-effort
-      logger.warn({ task_id: agent.task_id, err, operation: 'post_tool_use_pr_upsert' }, 'PR upsert failed (ignored)');
-    }
+  // Filesystem write (artifact file), not a DB row — kept outside the sqlite
+  // transaction above.
+  if (summary) {
+    setTaskSummary(agent.task_id, summary);
   }
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });
@@ -450,6 +369,48 @@ router.post(
 );
 
 /**
+ * Re-fire guard for the marker-file backstop, keyed on ARTIFACT / CARD / EVENT
+ * EXISTENCE rather than on `managed_tasks.phase`.
+ *
+ * Today `maybeSignalPhaseComplete` only reaches the marker check once
+ * `managed.phase` already matches the expected stage, so this guard is
+ * belt-and-braces — it changes no behaviour on its own. It exists so a LATER
+ * change can delete the `phase` column: `spec.md` and `plan.json` are never
+ * deleted, so once the phase gate is gone the backstop would otherwise
+ * re-detect them (and re-relay) on every subsequent Stop hook for the rest of
+ * the task's life. `implement` needs no such guard — `advancePhaseForLabel`
+ * deletes the `.octomux/implement-done` sentinel on the call that fires it,
+ * so `fs.existsSync` is self-guarding without any extra state.
+ *
+ *   'spec' → already relayed once a `task:phase_complete` event with
+ *            phase='spec' has already been durably recorded for this task.
+ *            NOTE: an earlier draft of this guard checked "does plan.json
+ *            exist" instead (the NEXT artifact), reasoning that the spec
+ *            relay's whole job is prompting the worker to write it. That has
+ *            a real false positive: a worker can write spec.md AND plan.json
+ *            in the very same turn, before the relay has ever run once — the
+ *            existing test 'speccing + BOTH spec.md and plan.json present →
+ *            only spec fires' covers exactly this. The events log has no
+ *            such gap: an event only exists once advancePhaseForLabel has
+ *            actually fired for this label, so it can't false-positive on a
+ *            worker being fast. See hasPhaseCompleteEvent's doc for cost.
+ *   'plan' → already relayed once an `approve-plan` card exists for this
+ *            task, in ANY status — a resolved (approved/rejected/executed)
+ *            card still proves the card was already minted once; only a
+ *            missing card means "never relayed". See hasCardForTask's doc
+ *            for how the lookup is scoped (action_cards has no task_id
+ *            column).
+ */
+export function hasAlreadyRelayed(taskId: string, label: 'spec' | 'plan'): boolean {
+  if (label === 'spec') {
+    return hasPhaseCompleteEvent(taskId, 'spec');
+  }
+  const convId = findConversationForTask(taskId);
+  if (!convId) return false;
+  return hasCardForTask(convId, taskId, 'approve-plan');
+}
+
+/**
  * Backstop: detect phase completion from marker files on the Stop hook.
  *
  * When the worker uses the explicit report_complete MCP tool, advancePhaseForLabel
@@ -464,6 +425,23 @@ router.post(
  * NOTE: managed_tasks.phase COLUMN values ('speccing'/'planning'/...) are
  * DISTINCT from the broadcast payload.phase LABEL ('spec'/'plan'/'implement').
  * The supervisor switches on the LABEL.
+ *
+ * NOT-YET-SAFE TO DELETE THE PHASE GATES. `hasAlreadyRelayed` (added below)
+ * removes one of the two jobs the `managed.phase === ...` checks do — it stops
+ * a relay firing TWICE. But those checks do a second job that nothing has
+ * replaced yet: they SELECT which branch applies. Every branch here ends in an
+ * unconditional `return`, so with the gates naively removed the spec branch
+ * matches first on every Stop hook (spec.md is never deleted), returns, and the
+ * plan branch is never reached — the plan relay would never fire at all.
+ *
+ * Verified by mutation: replacing both gates with `if (true)` makes the
+ * "third, later Stop hook" test in server/orchestrator/refire-guard.test.ts
+ * fail with ZERO approve-plan cards rather than two.
+ *
+ * So deleting the gates also requires restructuring this function so each
+ * label's artifact check and `hasAlreadyRelayed` guard are evaluated
+ * independently, instead of the first matching branch returning for all of
+ * them. That restructure is deliberately NOT in this change.
  */
 function maybeSignalPhaseComplete(taskId: string): void {
   const managed = getManagedTask(taskId);
@@ -477,6 +455,18 @@ function maybeSignalPhaseComplete(taskId: string): void {
     const specPath = path.join(worktree, 'spec.md');
     if (!fs.existsSync(specPath)) return;
 
+    // Redundant with the `phase === 'speccing'` gate today. It stops a REPEAT
+    // spec relay once that gate is gone, but see the NOT-YET-SAFE note on
+    // maybeSignalPhaseComplete: on its own it is not sufficient to delete the
+    // gates, because this branch still `return`s unconditionally.
+    if (hasAlreadyRelayed(taskId, 'spec')) {
+      logger.debug(
+        { task_id: taskId, operation: 'spec_complete_already_relayed' },
+        'Stop hook backstop: spec already relayed — skipping',
+      );
+      return;
+    }
+
     logger.info(
       { task_id: taskId, operation: 'spec_complete_detected' },
       'Stop hook backstop: spec.md present for managed speccing task — advancing via advancePhaseForLabel',
@@ -488,6 +478,17 @@ function maybeSignalPhaseComplete(taskId: string): void {
   if (managed.phase === 'planning') {
     const planPath = path.join(worktree, 'plan.json');
     if (!fs.existsSync(planPath)) return;
+
+    // Redundant with the `phase === 'planning'` gate today; stops a REPEAT
+    // plan relay once that gate is gone. Same caveat as the spec branch — the
+    // unconditional `return`s must go too. See maybeSignalPhaseComplete's doc.
+    if (hasAlreadyRelayed(taskId, 'plan')) {
+      logger.debug(
+        { task_id: taskId, operation: 'plan_complete_already_relayed' },
+        'Stop hook backstop: plan already relayed (approve-plan card exists) — skipping',
+      );
+      return;
+    }
 
     logger.info(
       { task_id: taskId, operation: 'plan_complete_detected' },
@@ -801,6 +802,137 @@ router.post('/orchestrator-action', requireHookToken, (req: Request, res: Respon
       logger.error({ err, action, conversation_id: conversationId }, 'orchestrator-action failed');
       res.status(200).json({ ok: false, error: message });
     });
+});
+
+/**
+ * Resolve which conversation a `/gate-card` request's question or approval
+ * lands in. The ONE place this decision is made — the route handler below is
+ * the only caller — so "where does this go" can never be answered
+ * differently in two places later.
+ *
+ * Resolution order:
+ *   1. OWNER. The conductor sends `conversation_id` directly (it always has
+ *      OCTOMUX_CONVERSATION_ID) — that IS its owner, no lookup needed. A
+ *      worker session never has that env var (write.ts's module doc) but
+ *      sends `task_id` instead, resolved via `managed_tasks`
+ *      (findConversationForTask): a worker's owner is the conductor
+ *      supervising it, and the card lands in that conductor's conversation by
+ *      design, exactly like a conductor-originated card would.
+ *   2. NO owner (a plain, non-orchestrator-managed task, or no identifying
+ *      param at all) → route to a human via the global-monitor conversation
+ *      (getGlobalMonitorConversation, §6/SHR-136 — the same conversation the
+ *      supervisor already falls back to for unowned task events, see
+ *      orchestrator/supervisor.ts's processEvent).
+ *   3. no owner AND no global-monitor configured → FAIL CLOSED with a
+ *      distinct, readable error rather than creating an orphaned card or
+ *      hanging. `action_cards.conversation_id` is `NOT NULL REFERENCES
+ *      orchestrator_conversations(id)`, so there is nowhere to put the row
+ *      even if we wanted to.
+ */
+export function resolveGateCardConversationId(
+  queryConversationId: string | undefined,
+  taskId: string | undefined,
+): { conversationId: string } | { error: string } {
+  const owner = queryConversationId ?? (taskId ? findConversationForTask(taskId) : null);
+  if (owner) return { conversationId: owner };
+
+  const monitor = getGlobalMonitorConversation();
+  if (monitor) return { conversationId: monitor };
+
+  if (taskId) {
+    return {
+      error:
+        `no owner for this session — task '${taskId}' is not orchestrator-managed, and no ` +
+        'global-monitor conversation is configured to route this question to a human',
+    };
+  }
+  return {
+    error:
+      'no owner for this session — no conversation_id or resolvable task_id was given, and no ' +
+      'global-monitor conversation is configured to route this question to a human',
+  };
+}
+
+// POST /api/hooks/gate-card
+// The conductor's (or a worker's) MCP subprocess RPCs here to create a pending
+// action_cards row for a gated (ask/always-ask) CAPABILITY call and push it to
+// the OWNING conversation's WS clients — server/orchestrator/mcp/gate.ts's
+// `onGatedInvoke`. Mirrors /orchestrator-action's RPC shape but creates a
+// card instead of running an action; the owner's later decision is handled
+// by the existing card_decision WS path → gate.ts's executeCard, same as
+// every other action_cards row. Card creation must happen here (not in the
+// subprocess) because pushToConversation needs the main process's live
+// WebSocket client registry — see write.ts's callGateCard doc.
+// Query: ?token=<hook_token>&conversation_id=<conv_id>&task_id=<task_id>
+// Body:  { capability_id, tier, kind, command, args?, question? }
+//
+// conversation_id resolution is `resolveGateCardConversationId` above — see
+// its doc for the full owner → global-monitor → fail-closed order. (In
+// practice this worker MCP server is only ever wired up for
+// orchestrator-managed tasks — see task-engine/launch.ts's
+// `applyOrchestratorMcpConfig` — so a resolvable task_id is expected on every
+// real worker call; the fail-closed branch is what turns a future wiring
+// change or a stray manual call into a clear error instead of a silent gap
+// or a hang.)
+router.post('/gate-card', requireHookToken, (req: Request, res: Response) => {
+  const queryConversationId = ((req.query.conversation_id ?? '') as string) || undefined;
+  const taskId = ((req.query.task_id ?? '') as string) || undefined;
+  const { capability_id, tier, kind, command, args, question } = req.body as {
+    capability_id?: string;
+    tier?: 'ask' | 'always-ask';
+    kind?: 'action' | 'question';
+    command?: string;
+    args?: Record<string, unknown>;
+    question?: string;
+  };
+
+  const resolved = resolveGateCardConversationId(queryConversationId, taskId);
+  if ('error' in resolved) {
+    res.status(200).json({ ok: false, error: resolved.error });
+    return;
+  }
+  const conversationId = resolved.conversationId;
+
+  if (!capability_id || !tier || !kind || !command) {
+    res
+      .status(200)
+      .json({ ok: false, error: 'capability_id, tier, kind and command are required' });
+    return;
+  }
+
+  try {
+    const cardId = createCard({
+      conversation_id: conversationId,
+      tool_use_id: `gate-${nanoid(8)}`,
+      tool_name: `capability:${capability_id}`,
+      input: JSON.stringify({
+        kind,
+        tier,
+        capability_id,
+        args: args ?? {},
+        question: question ?? null,
+      }),
+    });
+
+    pushToConversation(
+      conversationId,
+      JSON.stringify({
+        type: 'card',
+        id: cardId,
+        command,
+        args: args ?? {},
+        tier,
+        kind,
+        ...(question !== undefined ? { question } : {}),
+      }),
+    );
+
+    res.status(200).json({ ok: true, result: { card_id: cardId } });
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    logger.error({ err, capability_id }, 'gate-card: failed to create card');
+    res.status(200).json({ ok: false, error: message });
+  }
 });
 
 export { router as hookRoutes };

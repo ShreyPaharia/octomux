@@ -1,6 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { MixedThread } from './MixedThread';
+import { describe, it, expect, vi } from '../../bun-test.js';
 import type { ThreadItem } from './types';
 
 vi.mock('./MessageThread', () => ({
@@ -14,6 +12,9 @@ vi.mock('./ToolCallCard', () => ({
     <div data-testid="tool-call">{toolName}</div>
   ),
 }));
+
+const { render, screen } = await import('@testing-library/react');
+const { MixedThread } = await import('./MixedThread');
 
 describe('MixedThread', () => {
   const noop = vi.fn();
