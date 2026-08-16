@@ -102,12 +102,22 @@ for (const { platform, arch } of TARGETS) {
     pinned++;
   }
 }
-if (pinned > 0) {
-  rootManifest.optionalDependencies = optional;
-  writeFileSync(rootPkgPath, JSON.stringify(rootManifest, null, 2) + '\n');
-  console.log(`\n  pinned ${pinned} platform package(s) at ${rootPkg.version} in package.json`);
-  console.log('  (expected to show as a local edit — it is a release-time change)');
-}
+rootManifest.optionalDependencies = optional;
+
+// Drop `dependencies` from the published manifest.
+//
+// Nothing in `files` needs node_modules: the CLI is a compiled binary that
+// bundles its imports, and bin/*.cjs + scripts/*.cjs only require the platform
+// package (an optionalDependency, pinned above). Shipping them is not merely
+// dead weight — the workspace packages are declared `workspace:*`, a protocol
+// npm cannot resolve from the registry, so `npm i octomux` died with
+// EUNSUPPORTEDPROTOCOL on every published version through 1.4.0.
+delete rootManifest.dependencies;
+
+writeFileSync(rootPkgPath, JSON.stringify(rootManifest, null, 2) + '\n');
+console.log(`\n  pinned ${pinned} platform package(s) at ${rootPkg.version} in package.json`);
+console.log('  dropped `dependencies` — the binary bundles them');
+console.log('  (expected to show as a local edit — it is a release-time change)');
 
 if (staged === 0) {
   console.error('\n❌ nothing staged — build the binaries first: bun run build:binary:all');
