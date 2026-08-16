@@ -458,7 +458,14 @@ describe('DiffViewer', () => {
     render(<DiffViewer taskId="t1" isRunning={false} />);
 
     await screen.findByRole('button', { name: /Collapse all in src\/a\.ts/i });
-    const opts = JSON.parse(screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}');
-    expect(opts.hideUnchangedRegions.enabled).toBe(false);
+    // The toolbar button renders before the editor does — under a loaded
+    // machine the host is still "Loading editor…" here, so poll for the mount
+    // rather than reading it synchronously (same shape as the test above).
+    await waitFor(() => {
+      const opts = JSON.parse(
+        screen.getByTestId('monaco-diff').getAttribute('data-options') ?? '{}',
+      );
+      expect(opts.hideUnchangedRegions.enabled).toBe(false);
+    });
   });
 });
