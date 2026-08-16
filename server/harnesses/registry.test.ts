@@ -52,7 +52,6 @@ function fakeHarness(id: string): Harness {
     buildContinueCommand: () => null,
     installHooks: async () => {},
     uninstallHooks: async () => {},
-    syncAgents: async () => {},
     resolveFlags: () => '',
     validateSettings: () => ({}),
     validateAgentName: (name: string) => name,
