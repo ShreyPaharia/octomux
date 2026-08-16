@@ -5,6 +5,7 @@ import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
 import { getTask, getChatAgentTmuxSession } from './repositories/index.js';
 import { execTmux, tmuxSpawnSpec } from './tmux-bin.js';
+import { installHeartbeat } from './ws-heartbeat.js';
 
 interface TerminalConnection {
   ws: WebSocket;
@@ -15,7 +16,11 @@ const connections = new Map<string, TerminalConnection[]>();
 let wss: WebSocketServer;
 
 export function setupTerminalWebSocket(): void {
-  wss = new WebSocketServer({ noServer: true });
+  // permessage-deflate: TUI redraws (alt-screen full-frame repaints) are highly
+  // repetitive ANSI — compression cuts remote-viewing bandwidth ~10x. ws only
+  // compresses frames above its 1KB threshold, so keystroke echo stays fast.
+  wss = new WebSocketServer({ noServer: true, perMessageDeflate: true });
+  installHeartbeat(wss);
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
@@ -69,23 +74,57 @@ function attachToTmuxSession(
   }
   connections.get(connKey)!.push({ ws, pty });
 
-  // PTY → WebSocket (microtask batching)
+  // PTY → WebSocket (microtask batching + backpressure coalescing)
   // Collect chunks arriving in the same event loop tick and send as one frame.
+  // While the socket is congested (slow remote link), keep merging chunks
+  // instead of queueing frames: consecutive TUI repaints are near-identical,
+  // so the merged frame deflates to almost nothing and the client jumps to
+  // the latest state instead of replaying stale repaints one by one.
+  // ponytail: pendingOutput is unbounded during a long stall; add a cap +
+  // capture-pane resync if it ever matters.
+  const BACKPRESSURE_LIMIT = 64 * 1024;
+  const BACKPRESSURE_RETRY_MS = 16;
   let pendingOutput = '';
   let outputScheduled = false;
+  let retryTimer: NodeJS.Timeout | null = null;
+  // Hidden viewers (inactive tabs in the terminal LRU) send {type:'pause'} —
+  // output is discarded rather than streamed to a terminal nobody can see.
+  // On resume, refresh-client forces a full repaint so the screen is current.
+  // Discarding (vs pty.pause()) means a stalled viewer can never backpressure
+  // tmux and stall the agent's pane.
+  let paused = false;
+
+  const forceRepaint = () => {
+    execTmux(['list-clients', '-t', tmuxTarget, '-F', '#{client_name}'])
+      .then(({ stdout }) => {
+        const client = stdout.trim().split('\n')[0];
+        if (client) return execTmux(['refresh-client', '-t', client]);
+      })
+      .catch(() => {});
+  };
+
+  const flushOutput = () => {
+    retryTimer = null;
+    if (ws.readyState !== WebSocket.OPEN || !pendingOutput) {
+      pendingOutput = '';
+      outputScheduled = false;
+      return;
+    }
+    if (ws.bufferedAmount > BACKPRESSURE_LIMIT) {
+      retryTimer = setTimeout(flushOutput, BACKPRESSURE_RETRY_MS);
+      return;
+    }
+    ws.send(pendingOutput);
+    pendingOutput = '';
+    outputScheduled = false;
+  };
 
   pty.onData((data: string) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+    if (paused || ws.readyState !== WebSocket.OPEN) return;
     pendingOutput += data;
     if (!outputScheduled) {
       outputScheduled = true;
-      queueMicrotask(() => {
-        if (ws.readyState === WebSocket.OPEN && pendingOutput) {
-          ws.send(pendingOutput);
-        }
-        pendingOutput = '';
-        outputScheduled = false;
-      });
+      queueMicrotask(flushOutput);
     }
   });
 
@@ -101,6 +140,18 @@ function attachToTmuxSession(
         const parsed = JSON.parse(msg);
         if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
           pty.resize(parsed.cols, parsed.rows);
+          return;
+        }
+        if (parsed.type === 'pause') {
+          paused = true;
+          pendingOutput = '';
+          return;
+        }
+        if (parsed.type === 'resume') {
+          if (paused) {
+            paused = false;
+            forceRepaint();
+          }
           return;
         }
       } catch {
@@ -134,6 +185,7 @@ function attachToTmuxSession(
 
   // Cleanup on WebSocket close
   ws.on('close', () => {
+    if (retryTimer) clearTimeout(retryTimer);
     if (!ptyExited) {
       pty.kill();
     }
@@ -176,15 +228,57 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   // Create a grouped session so each viewer has independent window selection.
   // Without this, all clients attached to the same session share the active window,
   // meaning switching tabs in one browser would affect all other viewers.
+  //
+  // `;` separates commands within a single tmux argv, so session creation and
+  // window selection cost one process spawn instead of two sequential
+  // round-trips (~10ms each) on the path to first paint.
   const linkedSession = `${task.tmux_session}-v-${nanoid(6)}`;
+  // `tmux attach` takes 100-300ms to emit its first frame — a blank terminal for
+  // the whole switch. Snapshot the pane concurrently with the setup above and
+  // paint it into the alternate screen first; tmux's attach opens with
+  // `\e[?1049h\e[H\e[J` + a full repaint of the same content, so the handoff is
+  // a same-frame overwrite rather than a flash of empty screen.
+  const snapshot = execTmux([
+    'capture-pane',
+    '-p',
+    '-e',
+    '-t',
+    `${task.tmux_session}:${windowIndex}`,
+  ]).then(
+    ({ stdout }) => stdout,
+    () => null,
+  );
+
+  let pane: string | null;
   try {
-    await execTmux(['new-session', '-d', '-t', task.tmux_session, '-s', linkedSession]);
-    // Prevent grouped sessions from constraining window size to the smallest client
-    await execTmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
-    await execTmux(['select-window', '-t', `${linkedSession}:${windowIndex}`]);
+    [, pane] = await Promise.all([
+      execTmux([
+        'new-session',
+        '-d',
+        '-t',
+        task.tmux_session,
+        '-s',
+        linkedSession,
+        ';',
+        'select-window',
+        '-t',
+        `${linkedSession}:${windowIndex}`,
+      ]),
+      snapshot,
+    ]);
   } catch {
     ws.close(4005, 'Failed to create terminal view session');
     return;
+  }
+
+  // Best-effort and deliberately off the critical path: without it a grouped
+  // session clamps window size to the smallest client. Kept out of the chain
+  // above because `aggressive-resize` is a window option and a tmux build that
+  // rejects it on a session target would abort the commands that do matter.
+  execTmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
+
+  if (pane && ws.readyState === WebSocket.OPEN) {
+    ws.send(`\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`);
   }
 
   const connKey = `${taskId}:${windowIndex}`;

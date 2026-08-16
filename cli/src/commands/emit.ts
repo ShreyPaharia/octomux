@@ -9,12 +9,17 @@ type EmitStatus = (typeof EMIT_STATUSES)[number];
  * bearer token from the same OCTOMUX_ACTION_* env vars the orchestrator's
  * other hook-calling code (server/orchestrator/mcp/write.ts) reads, since
  * they're set into the loop agent's shell the same way.
+ *
+ * Posts to POST /api/runs/:id/emit (the `run.emit` capability,
+ * server/registry/capabilities/run.ts) — `--run` takes a `runs.id`, not a
+ * loop_runs.id, since the loop/loop-group route collapse (see
+ * server/routes/runs.ts's module doc).
  */
 export function registerEmit(program: Command): void {
   program
     .command('emit')
     .description('Report loop-run completion status back to octomux')
-    .requiredOption('-r, --run <run-id>', 'loop run ID')
+    .requiredOption('-r, --run <run-id>', 'run ID (a `runs.id`)')
     .addOption(
       new Option('-s, --status <status>', 'completion status')
         .choices(EMIT_STATUSES)
@@ -32,7 +37,7 @@ export function registerEmit(program: Command): void {
         return;
       }
 
-      const res = await fetch(`${baseUrl}/api/loops/${encodeURIComponent(opts.run)}/emit`, {
+      const res = await fetch(`${baseUrl}/api/runs/${encodeURIComponent(opts.run)}/emit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

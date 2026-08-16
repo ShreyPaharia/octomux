@@ -64,7 +64,7 @@ describe('claudeCodeHarness', () => {
 describe('buildLaunchCommand model override', () => {
   it('appends --model when model is set and flags has no --model', () => {
     expect(claudeCodeHarness.buildLaunchCommand({ sessionId: 's1', model: 'sonnet' })).toBe(
-      'claude --session-id s1 --model sonnet',
+      "claude --session-id s1 --model 'sonnet'",
     );
   });
 
@@ -75,7 +75,7 @@ describe('buildLaunchCommand model override', () => {
         flags: ' --model opus',
         model: 'sonnet',
       }),
-    ).toBe('claude --session-id s1 --model sonnet');
+    ).toBe("claude --session-id s1 --model 'sonnet'");
   });
 
   it('preserves non-model flags alongside per-task model', () => {
@@ -85,7 +85,7 @@ describe('buildLaunchCommand model override', () => {
         flags: ' --dangerously-skip-permissions --model opus',
         model: 'sonnet',
       }),
-    ).toBe('claude --session-id s1 --dangerously-skip-permissions --model sonnet');
+    ).toBe("claude --session-id s1 --dangerously-skip-permissions --model 'sonnet'");
   });
 
   it('leaves flags unchanged when no per-task model', () => {
@@ -103,7 +103,7 @@ describe('buildResumeCommand model override', () => {
         flags: ' --model opus',
         model: 'sonnet',
       }),
-    ).toBe('claude --resume s1 --model sonnet');
+    ).toBe("claude --resume s1 --model 'sonnet'");
   });
 });
 
@@ -115,7 +115,7 @@ describe('buildContinueCommand model override', () => {
         flags: ' --model opus',
         model: 'sonnet',
       }),
-    ).toBe('claude --continue --session-id s1 --model sonnet');
+    ).toBe("claude --continue --session-id s1 --model 'sonnet'");
   });
 });
 
@@ -132,6 +132,44 @@ describe('claudeCodeHarness.installHooks', () => {
     expect(written.permissions.allow).toContain('Bash(git diff:*)');
   });
 
+  it("uninstallHooks strips our hooks but keeps the user's hooks and permissions", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok-abc');
+
+    const settingsPath = path.join(tmp, '.claude', 'settings.local.json');
+    const withUserHook = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    withUserHook.hooks.Stop.push({ hooks: [{ type: 'command', command: 'say done' }] });
+    withUserHook.hooks.PreToolUse = [{ hooks: [{ type: 'command', command: 'lint' }] }];
+    fs.writeFileSync(settingsPath, JSON.stringify(withUserHook), 'utf-8');
+
+    await claudeCodeHarness.uninstallHooks(tmp);
+
+    const after = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    expect(JSON.stringify(after)).not.toContain('/api/hooks/');
+    expect(after.hooks.Stop).toEqual([{ hooks: [{ type: 'command', command: 'say done' }] }]);
+    expect(after.hooks.PreToolUse).toHaveLength(1);
+    expect(after.hooks.UserPromptSubmit).toBeUndefined();
+    expect(after.permissions.allow).toContain('Bash(git diff:*)');
+  });
+
+  it('uninstallHooks drops the hooks key entirely when only ours were there', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok-abc');
+    await claudeCodeHarness.uninstallHooks(tmp);
+
+    const after = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(after.hooks).toBeUndefined();
+    expect(after.permissions.deny).toContain('Bash(rm -rf:*)');
+  });
+
+  it('uninstallHooks is a no-op when there is no settings file', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await expect(claudeCodeHarness.uninstallHooks(tmp)).resolves.toBeUndefined();
+    expect(fs.existsSync(path.join(tmp, '.claude', 'settings.local.json'))).toBe(false);
+  });
+
   it('uri-encodes the token', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
     await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok&special=value');
@@ -141,5 +179,28 @@ describe('claudeCodeHarness.installHooks', () => {
     expect(written.hooks.Stop[0].hooks[0].url).toBe(
       'http://127.0.0.1:7777/api/hooks/stop?token=tok%26special%3Dvalue',
     );
+  });
+
+  it('forces editorMode: emacs so send-keys Enter submits (defeats global vim mode)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok');
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(written.editorMode).toBe('emacs');
+  });
+
+  it('preserves an explicit worktree editorMode', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-harness-'));
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, '.claude', 'settings.local.json'),
+      JSON.stringify({ editorMode: 'vim' }),
+    );
+    await claudeCodeHarness.installHooks(tmp, 'http://127.0.0.1:7777', 'tok');
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, '.claude', 'settings.local.json'), 'utf-8'),
+    );
+    expect(written.editorMode).toBe('vim');
   });
 });

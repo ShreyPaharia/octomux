@@ -8,20 +8,40 @@ import {
 import { createTestDb } from './test-helpers.js';
 
 describe('buildPrReviewPrompt', () => {
-  it('embeds the review task id and instructs using it for --task', () => {
-    const prompt = buildPrReviewPrompt({
-      reviewTaskId: 'REVIEW123abc',
-      title: 'Fix the thing',
-      number: 42,
-      url: 'https://github.com/o/r/pull/42',
-      author: 'octocat',
-      headRefOid: 'deadbeef',
-      requestedAt: '2026-01-01T00:00:00Z',
-    });
-    expect(prompt.startsWith('/review-walkthrough')).toBe(true);
+  const input = {
+    reviewTaskId: 'REVIEW123abc',
+    title: 'Fix the thing',
+    number: 42,
+    url: 'https://github.com/o/r/pull/42',
+    author: 'octocat',
+    headRefOid: 'deadbeef',
+    requestedAt: '2026-01-01T00:00:00Z',
+  };
+
+  it('instructs the review-artifact flow and closing the task by its own id', () => {
+    const prompt = buildPrReviewPrompt(input);
     expect(prompt).toContain('Review task id: REVIEW123abc');
-    expect(prompt).toMatch(/--task REVIEW123abc/);
+    expect(prompt).toContain('/review-artifact');
+    expect(prompt).toContain('octomux close-task REVIEW123abc');
     expect(prompt).toContain('PR: Fix the thing (#42)');
+    expect(prompt).not.toContain('review-walkthrough');
+  });
+
+  it('includes the Slack ping instruction only when the channel env is set', () => {
+    const prev = process.env.OCTOMUX_REVIEW_SLACK_CHANNEL;
+    try {
+      delete process.env.OCTOMUX_REVIEW_SLACK_CHANNEL;
+      expect(buildPrReviewPrompt(input)).not.toContain('chat.postMessage');
+
+      process.env.OCTOMUX_REVIEW_SLACK_CHANNEL = 'C0TEST';
+      const prompt = buildPrReviewPrompt(input);
+      expect(prompt).toContain('chat.postMessage');
+      expect(prompt).toContain('channel=C0TEST');
+      expect(prompt).toContain('OCTOMUX_GATEWAY_SLACK_BOT_TOKEN');
+    } finally {
+      if (prev === undefined) delete process.env.OCTOMUX_REVIEW_SLACK_CHANNEL;
+      else process.env.OCTOMUX_REVIEW_SLACK_CHANNEL = prev;
+    }
   });
 });
 
@@ -38,7 +58,7 @@ describe('buildManualReviewPrompt', () => {
       prHeadSha: 'headsha',
       requestedAt: '2026-01-01T00:00:00Z',
     });
-    expect(prompt.startsWith('/review-walkthrough')).toBe(true);
+    expect(prompt.startsWith('/octomux:review-walkthrough')).toBe(true);
     // The review task's own id is what the CLI must be invoked with.
     expect(prompt).toContain('Review task id: REVIEW123abc');
     expect(prompt).toMatch(/--task REVIEW123abc/);
@@ -49,23 +69,25 @@ describe('buildManualReviewPrompt', () => {
   });
 });
 
-it('pr + manual prompts invoke the walkthrough skill', () => {
-  const pr = buildPrReviewPrompt({
+it('manual prompt still invokes the walkthrough skill', () => {
+  const manual = buildManualReviewPrompt({
     reviewTaskId: 'rt1',
-    title: 'T',
-    number: 1,
-    url: 'u',
-    author: 'a',
-    headRefOid: 'h',
+    sourceId: 's1',
+    sourceTitle: 'T',
+    repoShort: 'r',
+    branch: 'b',
+    baseBranch: 'main',
+    baseSha: 'bs',
+    prHeadSha: 'h',
     requestedAt: 'now',
   });
-  expect(pr).toContain('/review-walkthrough');
-  expect(pr).not.toContain('/review-orchestrator');
+  expect(manual).toContain('/octomux:review-walkthrough');
+  expect(manual).not.toContain('/review-orchestrator');
 });
 
 it('buildDeepReviewPrompt invokes the deep skill and pins the task id', () => {
   const p = buildDeepReviewPrompt({ reviewTaskId: 'rt1' });
-  expect(p).toContain('/review-deep');
+  expect(p).toContain('/octomux:review-deep');
   expect(p).toContain('Review task id: rt1');
   expect(p).toContain('--task rt1');
 });

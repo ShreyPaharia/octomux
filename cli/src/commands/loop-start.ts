@@ -33,7 +33,7 @@ export function registerLoopStart(program: Command): void {
     .action(async (opts, cmd) => {
       const { client, json } = getContext(cmd);
 
-      const run = await client.startLoop({
+      const result = await client.startLoop({
         taskId: opts.task,
         spec: {
           prompt: resolvePrompt(opts.prompt),
@@ -45,12 +45,14 @@ export function registerLoopStart(program: Command): void {
       });
 
       if (json) {
-        outputJson(run);
+        outputJson(result);
         return;
       }
 
-      success(`Started loop run ${run.id}`);
-      console.log(label('Task', run.task_id));
-      console.log(label('Status', run.status));
+      // result.id is a `runs.id` — the id `octomux emit --run <id>` will report
+      // back against, not the nested loop_run's own id.
+      success(`Started loop run ${result.id}`);
+      console.log(label('Task', result.loop?.task_id ?? opts.task));
+      console.log(label('Status', result.loop?.status ?? result.status));
     });
 }

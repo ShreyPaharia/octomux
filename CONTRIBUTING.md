@@ -22,25 +22,48 @@ bun run dev      # starts Express (port 7777) + Vite dev server concurrently
 
 ```
 server/           Express backend (API, terminal streaming, task lifecycle, DB)
-  api.ts          REST routes mounted on Express app
+  api.ts          mounts the routers in server/routes/ onto the Express app
   app.ts          extracted createApp() for testability
-  task-runner.ts  worktree + tmux + claude lifecycle (closeTask, deleteTask)
+  routes/         one module per REST surface (tasks, diffs, reviews, loops, …)
+  task-engine/    worktree + tmux + harness lifecycle (cleanup.ts: closeTask, deleteTask)
+  harnesses/      pluggable agent backends (claude-code.ts, cursor.ts)
+  workflows/      workflow kinds (loops, reviewer, doc-drift, …) + kind presets
+  schedules/      cron.ts — isCronDue(), the 5-field cron evaluator behind schedules
+  poller/         background pollers (PR detection, merged-PR close, hooks, schedules)
+  orchestrator/   the conductor — command gate/schemas, MCP server, approvals
+  gateway/        Telegram + Slack chat front end onto the conductor (see its README.md)
+  integrations/   provider registry + credential store (jira, linear, *-gateway)
   db.ts           SQLite singleton with getDb() / setDb() / initDb()
-  types.ts        shared types (Task, Agent, TaskStatus, AgentStatus)
+  db/             schema.ts + forward-only migrations.ts
+  types.ts        re-exports @octomux/types + review-orchestrator types
 src/              React SPA (pages, components, lib/api.ts)
+  workflows/      front-end workflow-UI registry behind the /w/:kind/:id route
 cli/              CLI tool for task management
+packages/         bun workspaces: types, diff-engine, api-client, test-fixtures,
+                  plus the prebuilt tmux-{darwin,linux}-{arm64,x64} binaries
+plugin/           bundled Claude Code plugin (skills/, agents/) — the only tier agents see
+kinds/            built-in schedule-kind presets (*.json), read by server/workflows/presets.ts
+workflows/        Claude Code workflow scripts (review-deep.js) — `octomux init` copies these
+                  to ~/.claude/workflows/, since plugins cannot ship them
+electron/         macOS desktop shell
 e2e/              Playwright E2E tests
 ```
 
 ## Task Lifecycle
 
+A task carries two orthogonal statuses (`packages/types/src/index.ts`):
+
 ```
-draft → setting_up → running → closed / error
+runtime_state:    idle | setting_up | running | error | looping
+workflow_status:  backlog | planned | in_progress | human_review | pr | done
 ```
 
-Each task gets a git worktree at `<repo>/.worktrees/<id>`, a tmux session `octomux-agent-<id>`, and a branch `agents/<id>`. Each agent runs in a tmux window within the session.
+`setting_up → running → idle` is the usual runtime path; errors land in `error` with the
+message in `task.error`.
 
-- **Close** — stops agents and kills the tmux session. Worktree and branch are preserved for resume.
+Each task gets a git worktree at `<repo>/.worktrees/<id>`, a tmux session `octomux-agent-<id>`, and a branch `agents/<id>`. Each worker runs in a tmux window within the session.
+
+- **Close** — stops workers and kills the tmux session. Worktree and branch are preserved for resume.
 - **Delete** — kills tmux session, removes worktree, deletes branch, removes DB rows. Full cleanup.
 
 ## Testing
@@ -89,7 +112,7 @@ bun run test:e2e:ui    # Playwright interactive UI mode
 - Table-driven tests using `it.each()` — prefer over individual test cases
 - Shared test harness: `server/test-helpers.ts` (DEFAULTS fixtures, insert/get helpers, shell mock assertion helpers via `findExecCall`/`countExecCalls`)
 - DB tests use in-memory SQLite via `createTestDb()` → calls `setDb()` for isolation
-- task-runner tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
+- task-engine tests mock `child_process` (execFile, spawn) and `fs` (existsSync, mkdirSync, copyFileSync)
 - API tests use supertest against `createApp()`
 - Frontend test helpers in `src/test-helpers.tsx`: `makeTask()`, `renderWithRouter()`, `mockApi()`
 - The DOM is happy-dom, registered in `src/bun-test-setup.ts` (passed via
@@ -112,7 +135,7 @@ bun run lint           # ESLint 9 flat config
 bun run lint:fix       # auto-fix lint issues
 bun run format         # Prettier
 bun run format:check   # check formatting
-bun run typecheck      # tsc --noEmit
+bun run typecheck      # tsc -b across all tsconfig projects
 bun run build          # workspace packages + the compiled binary
 ```
 

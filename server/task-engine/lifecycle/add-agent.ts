@@ -2,10 +2,10 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
-import { syncSkills } from '../../skills.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { childLogger } from '../../logger.js';
 import {
   listActiveAgents,
@@ -13,7 +13,7 @@ import {
   insertAgentWithNotify,
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, computeFreshSessionIds } from '../launch.js';
-import type { Agent, Task } from '../../types.js';
+import type { Worker, Task } from '../../types.js';
 import type { AddAgentOpts } from './types.js';
 
 const logger = childLogger('task-engine/lifecycle');
@@ -72,11 +72,13 @@ export async function prepareAddAgentLaunch(
   const agentId = nanoid(12);
   const existingTokenRow = getTaskHookToken(task.id);
   const hookToken = existingTokenRow?.hook_token ?? crypto.randomBytes(32).toString('hex');
-  const flags = harness.resolveFlags(await getSettings());
+  const flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.syncAgents(task.worktree!);
-  await syncSkills(task.worktree!);
   await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
 
   const baseCmd = harness.buildLaunchCommand({
@@ -112,7 +114,7 @@ export function persistAddAgentRow(
   resolved: ResolvedAddAgentOpts,
   prepared: PreparedAddAgentLaunch,
   windowIndex: number,
-): Agent {
+): Worker {
   const addTarget = `${task.tmux_session}:${windowIndex}`;
 
   insertAgentWithNotify({
@@ -147,7 +149,7 @@ export function persistAddAgentRow(
   };
 }
 
-export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Agent> {
+export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Worker> {
   logger.info(
     { task_id: task.id, operation: 'addAgent', agent: opts.agent ?? null },
     'addAgent: start',

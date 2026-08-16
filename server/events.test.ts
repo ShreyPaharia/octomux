@@ -10,7 +10,7 @@ import {
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { createTestDb } from './test-helpers.js';
-import { eventsSince } from './orchestrator/store.js';
+import { eventsSince } from './repositories/orchestrator.js';
 
 describe('events', () => {
   beforeEach(() => {

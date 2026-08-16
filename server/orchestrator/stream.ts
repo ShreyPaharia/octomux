@@ -30,13 +30,19 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { childLogger } from '../logger.js';
-import { getConversation, appendMessage, listMessages, listPendingCards } from './store.js';
-import type { ActionCard } from './store.js';
+import {
+  getConversation,
+  appendMessage,
+  listMessages,
+  listPendingCards,
+} from '../repositories/orchestrator.js';
+import type { ActionCard } from '../repositories/orchestrator.js';
 import { sendTurn } from './runner.js';
 import { tailTranscript } from './transcript.js';
 import type { ChatEvent } from './transcript.js';
 import type { StopFn } from './transcript.js';
 import { executeCard } from './gate.js';
+import { installHeartbeat } from '../ws-heartbeat.js';
 
 const logger = childLogger('orchestrator/stream');
 
@@ -56,6 +62,17 @@ export interface WsCardEvent {
   id: string;
   command: string;
   args: Record<string, unknown>;
+  /**
+   * Gate tier — present on capability-registry gate cards (gate.ts's
+   * onGatedInvoke, via /api/hooks/gate-card) and on the legacy Bash-gate cards
+   * (gate.ts's handlePreToolUse). Drives the UI's alwaysAsk badge and hides
+   * the "always allow" toggle for `always-ask` cards.
+   */
+  tier?: 'ask' | 'always-ask';
+  /** 'action' (default) → approve/reject an implied write. 'question' → free-text answer (ask_owner). */
+  kind?: 'action' | 'question';
+  /** The question text, present only when kind === 'question' (ask_owner). */
+  question?: string;
 }
 
 /** A status update pushed to the ws client. */
@@ -103,8 +120,20 @@ export interface WsClientCardDecision {
   decision: 'approve' | 'edit' | 'reject' | 'respond';
   /** For 'edit': the user-adjusted command/args to run instead. */
   edited_input?: Record<string, unknown>;
-  /** For 'reject'/'respond': optional free-text to inject. */
+  /**
+   * For 'reject'/'respond': optional free-text to inject. Also used by a
+   * question card's "submit answer" (decision: 'approve' + respond_text: the
+   * answer) — see gate.ts's executeCard / mcp/gate.ts's onGatedInvoke.
+   */
   respond_text?: string;
+  /**
+   * Persist a permission_rules allow-rule for this card's command/capability
+   * (policy.ts's addRule) so future calls skip the card entirely. `ask` tier
+   * ONLY — gate.ts's executeCard refuses to promote an `always-ask` card
+   * regardless of this flag (see policy.ts's addRule doc: always-ask is never
+   * promotable).
+   */
+  always_allow?: boolean;
 }
 
 export type WsClientMessage = WsClientTurn | WsClientCardDecision;
@@ -112,7 +141,10 @@ export type WsClientMessage = WsClientTurn | WsClientCardDecision;
 /** Callback type for pushing a serialized ws message to a client. */
 export type PushFn = (message: string) => void;
 
-// ─── Per-conversation client registry ────────────────────────────────────────
+// ─── Per-conversation client + consumer registry ─────────────────────────────
+
+/** A raw-ChatEvent consumer of a conversation's transcript (WS bridge or gateway). */
+export type ChatConsumer = (event: ChatEvent) => void;
 
 /**
  * Map of conversation_id → Set of active push functions.
@@ -120,16 +152,82 @@ export type PushFn = (message: string) => void;
  */
 const convClients = new Map<string, Set<PushFn>>();
 
+/**
+ * conversation_id → raw-ChatEvent consumers. Both the WS bridge and the gateway
+ * register here; the transcript tail is refcounted by this set (starts on the
+ * first consumer, stops on the last) so a phone DM with no dashboard open is
+ * still read by the gateway's consumer.
+ */
+const convConsumers = new Map<string, Set<ChatConsumer>>();
+
 /** Active transcript tail stop functions, keyed by conversation_id. */
 const convTails = new Map<string, StopFn>();
 
-function addClient(convId: string, push: PushFn): void {
+/** In-flight tail-start promises — dedupe concurrent registrations for one conv. */
+const convTailStarting = new Map<string, Promise<void>>();
+
+/** conversation_id → unregister fn for the shared WS-bridge consumer. */
+const convWsUnregister = new Map<string, () => void>();
+
+/**
+ * conversation_id → listeners notified whenever `pushToConversation` fires a
+ * `message` or `card` event (SHR agents-feature Task 6). This is a SEPARATE
+ * registry from `convConsumers`: those carry raw ChatEvents off the live
+ * transcript tail (the conductor's own turn); this one carries supervisor-
+ * injected notes/cards, which are synthesized at the app layer and never
+ * written into the transcript JSONL, so the two never double-deliver the same
+ * event. The gateway is the intended consumer — it lets a worker's
+ * `task:phase_complete` report (relayed via `pushToConversation`) reach a
+ * bound channel, not just connected WS clients.
+ */
+const convMessageListeners = new Map<string, Set<(event: OrchestratorWsEvent) => void>>();
+
+/**
+ * Register a listener notified of every `message`/`card` event pushed to a
+ * conversation via `pushToConversation` (additive to, and independent of, the
+ * WS client fan-out below). Returns an unregister fn.
+ */
+export function registerConversationMessageListener(
+  convId: string,
+  listener: (event: OrchestratorWsEvent) => void,
+): () => void {
+  let set = convMessageListeners.get(convId);
+  if (!set) {
+    set = new Set();
+    convMessageListeners.set(convId, set);
+  }
+  set.add(listener);
+
+  return () => {
+    const s = convMessageListeners.get(convId);
+    if (!s) return;
+    s.delete(listener);
+    if (s.size === 0) convMessageListeners.delete(convId);
+  };
+}
+
+function addClient(convId: string, push: PushFn, transcriptPath: string | null): void {
   let set = convClients.get(convId);
   if (!set) {
     set = new Set();
     convClients.set(convId, set);
   }
   set.add(push);
+
+  // Register a single shared WS-bridge consumer for this conversation on the
+  // first client — it maps raw ChatEvents to ws events and fans them out to all
+  // connected clients. (One consumer per conv, not per client.)
+  if (transcriptPath && !convWsUnregister.has(convId)) {
+    const bridge: ChatConsumer = (chatEvent) => {
+      const wsEvent = chatEventToWsEvent(chatEvent);
+      if (!wsEvent) return;
+      const clients = convClients.get(convId);
+      if (!clients || clients.size === 0) return;
+      const msg = JSON.stringify(wsEvent);
+      for (const p of clients) p(msg);
+    };
+    convWsUnregister.set(convId, registerTranscriptConsumer(convId, transcriptPath, bridge));
+  }
 }
 
 function removeClient(convId: string, push: PushFn): void {
@@ -138,12 +236,11 @@ function removeClient(convId: string, push: PushFn): void {
   set.delete(push);
   if (set.size === 0) {
     convClients.delete(convId);
-    // Stop the transcript tail when no clients are connected
-    const stop = convTails.get(convId);
-    if (stop) {
-      stop();
-      convTails.delete(convId);
-      logger.debug({ conversation_id: convId }, 'stream: transcript tail stopped (no clients)');
+    // Drop the WS bridge; the tail keeps running iff the gateway still consumes.
+    const unreg = convWsUnregister.get(convId);
+    if (unreg) {
+      unreg();
+      convWsUnregister.delete(convId);
     }
   }
 }
@@ -309,56 +406,114 @@ export function replayConnectionState(convId: string, push: PushFn): void {
   }
 }
 
-// ─── startTranscriptTail ──────────────────────────────────────────────────────
+// ─── Transcript tail (consumer-refcounted) ───────────────────────────────────
 
 /**
- * Start tailing the transcript for a conversation (idempotent — if already
- * tailing, does nothing). Each ChatEvent is normalized and broadcast to all
- * connected ws clients, and message events are persisted to the DB.
+ * Persist a user/assistant text ChatEvent to `orchestrator_messages` — ONCE per
+ * conversation, at the tail level. Consumers (WS bridge, gateway) are
+ * delivery-only, so two of them watching the same conversation never
+ * double-persist. Empty-text lines (pure tool_use / tool_result carriers) are
+ * skipped, matching `chatEventToWsEvent`.
  */
-async function startTranscriptTail(convId: string, transcriptPath: string): Promise<void> {
-  if (convTails.has(convId)) return; // Already tailing
+function persistChatEvent(convId: string, event: ChatEvent): void {
+  if (event.type !== 'user' && event.type !== 'assistant') return;
+  if (!event.text.trim()) return;
+  try {
+    const contentBlocks = [{ type: 'text', text: event.text }];
+    appendMessage({
+      conversation_id: convId,
+      role: event.type,
+      content: JSON.stringify(contentBlocks),
+    });
+  } catch (err) {
+    logger.warn({ conversation_id: convId, err }, 'stream: failed to persist message');
+  }
+}
 
-  logger.info(
-    { conversation_id: convId, transcript_path: transcriptPath },
-    'stream: starting transcript tail',
-  );
+/**
+ * Ensure a transcript tail is running for a conversation (idempotent, and
+ * deduped across concurrent callers). The tail persists message events once and
+ * broadcasts every raw ChatEvent to all registered consumers.
+ */
+async function ensureTail(convId: string, transcriptPath: string): Promise<void> {
+  if (convTails.has(convId)) return;
+  const inflight = convTailStarting.get(convId);
+  if (inflight) return inflight;
 
-  const stop = await tailTranscript(
-    transcriptPath,
-    (chatEvent) => {
-      const wsEvent = chatEventToWsEvent(chatEvent);
-      if (!wsEvent) return;
-
-      // Broadcast to all connected clients
-      const set = convClients.get(convId);
-      if (!set || set.size === 0) return;
-
-      const msg = JSON.stringify(wsEvent);
-
-      // Persist message events
-      if (wsEvent.type === 'message') {
-        try {
-          const contentBlocks = [{ type: 'text', text: wsEvent.text }];
-          appendMessage({
-            conversation_id: convId,
-            role: wsEvent.role,
-            content: JSON.stringify(contentBlocks),
-          });
-        } catch (err) {
-          logger.warn({ conversation_id: convId, err }, 'stream: failed to persist message');
+  const start = (async () => {
+    logger.info(
+      { conversation_id: convId, transcript_path: transcriptPath },
+      'stream: starting transcript tail',
+    );
+    const stop = await tailTranscript(
+      transcriptPath,
+      (chatEvent) => {
+        persistChatEvent(convId, chatEvent);
+        const set = convConsumers.get(convId);
+        if (!set) return;
+        for (const consumer of set) {
+          try {
+            consumer(chatEvent);
+          } catch (err) {
+            logger.warn({ conversation_id: convId, err }, 'stream: transcript consumer threw');
+          }
         }
-      }
+      },
+      { startAtEnd: true },
+    );
+    // All consumers may have unregistered while we awaited — honor teardown.
+    if (convConsumers.get(convId)?.size) {
+      convTails.set(convId, stop);
+      logger.debug({ conversation_id: convId }, 'stream: transcript tail started');
+    } else {
+      stop();
+    }
+  })();
 
-      for (const push of set) {
-        push(msg);
-      }
-    },
-    { startAtEnd: true },
+  convTailStarting.set(convId, start);
+  try {
+    await start;
+  } finally {
+    convTailStarting.delete(convId);
+  }
+}
+
+/**
+ * Register a raw-ChatEvent consumer for a conversation, starting the transcript
+ * tail if it isn't running. Returns an unregister fn; the tail stops when the
+ * last consumer unregisters. This is the gateway's entry point — it lets a
+ * non-WS owner receive assistant lines and turn-done boundaries with no browser
+ * client connected.
+ */
+export function registerTranscriptConsumer(
+  convId: string,
+  transcriptPath: string,
+  consumer: ChatConsumer,
+): () => void {
+  let set = convConsumers.get(convId);
+  if (!set) {
+    set = new Set();
+    convConsumers.set(convId, set);
+  }
+  set.add(consumer);
+  void ensureTail(convId, transcriptPath).catch((err) =>
+    logger.warn({ conversation_id: convId, err }, 'stream: failed to start transcript tail'),
   );
 
-  convTails.set(convId, stop);
-  logger.debug({ conversation_id: convId }, 'stream: transcript tail started');
+  return () => {
+    const s = convConsumers.get(convId);
+    if (!s) return;
+    s.delete(consumer);
+    if (s.size === 0) {
+      convConsumers.delete(convId);
+      const stop = convTails.get(convId);
+      if (stop) {
+        stop();
+        convTails.delete(convId);
+        logger.debug({ conversation_id: convId }, 'stream: transcript tail stopped (no consumers)');
+      }
+    }
+  };
 }
 
 // ─── dispatchUserTurn ─────────────────────────────────────────────────────────
@@ -399,6 +554,7 @@ let wss: WebSocketServer;
 /** Initialise the orchestrator WebSocket server (noServer mode). Call once at startup. */
 export function setupOrchestratorWebSocket(): void {
   wss = new WebSocketServer({ noServer: true });
+  installHeartbeat(wss);
   logger.debug({}, 'stream: orchestrator WebSocket server initialised');
 }
 
@@ -437,8 +593,6 @@ export function handleOrchestratorUpgrade(
       }
     };
 
-    addClient(convId, push);
-
     // Send conversation history on connect
     const conv = getConversation(convId);
     if (!conv) {
@@ -447,15 +601,11 @@ export function handleOrchestratorUpgrade(
       return;
     }
 
+    // Register the client (and, on the first client, the shared WS bridge + tail).
+    addClient(convId, push, conv.transcript_path);
+
     // Replay persisted messages AND pending cards to the (re)connecting client.
     replayConnectionState(convId, push);
-
-    // Start tailing the transcript if we have a path
-    if (conv.transcript_path) {
-      startTranscriptTail(convId, conv.transcript_path).catch((err) => {
-        logger.warn({ conversation_id: convId, err }, 'stream: failed to start transcript tail');
-      });
-    }
 
     ws.on('message', (data) => {
       let msg: WsClientMessage;
@@ -487,6 +637,7 @@ export function handleOrchestratorUpgrade(
           decision: msg.decision,
           edited_input: msg.edited_input,
           respond_text: msg.respond_text,
+          always_allow: msg.always_allow,
         }).catch((err) => {
           const errMsg = (err as Error).message ?? 'unknown error';
           logger.warn(
@@ -527,30 +678,55 @@ export function getOrchestratorClientCount(convId: string): number {
 /**
  * Push a serialized ws message to all connected clients for a conversation.
  * Used by the supervisor to inject concise notes without going through the
- * transcript tail. Also persists message-type events to orchestrator_messages.
+ * transcript tail. Also persists message-type events to orchestrator_messages,
+ * and notifies any registered conversation-message listeners (the gateway) —
+ * this is what lets a worker's report reach a bound channel, not just the web
+ * dashboard's WS clients.
  *
  * The `message` parameter must be a serialized JSON string (OrchestratorWsEvent).
  */
 export function pushToConversation(convId: string, message: string): void {
-  // Persist if it's a message-type event
+  let event: OrchestratorWsEvent | undefined;
   try {
-    const event = JSON.parse(message) as OrchestratorWsEvent;
-    if (event.type === 'message') {
-      const contentBlocks = [{ type: 'text', text: event.text }];
-      appendMessage({
-        conversation_id: convId,
-        role: event.role,
-        content: JSON.stringify(contentBlocks),
-      });
-    }
+    event = JSON.parse(message) as OrchestratorWsEvent;
   } catch {
-    // ignore parse errors — still push to clients
+    // ignore parse errors — still push to WS clients below
   }
 
-  const set = convClients.get(convId);
-  if (!set || set.size === 0) return;
-  for (const push of set) {
-    push(message);
+  // Persist if it's a message-type event
+  if (event?.type === 'message') {
+    const contentBlocks = [{ type: 'text', text: event.text }];
+    appendMessage({
+      conversation_id: convId,
+      role: event.role,
+      content: JSON.stringify(contentBlocks),
+    });
+  }
+
+  const clients = convClients.get(convId);
+  if (clients && clients.size > 0) {
+    for (const push of clients) {
+      push(message);
+    }
+  }
+
+  // Additive: notify any registered conversation-message listeners (e.g. the
+  // gateway) so a bound channel also sees message/card events, independent of
+  // whether any WS client is connected.
+  if (event && (event.type === 'message' || event.type === 'card')) {
+    const listeners = convMessageListeners.get(convId);
+    if (listeners) {
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          logger.warn(
+            { conversation_id: convId, err },
+            'stream: conversation message listener threw',
+          );
+        }
+      }
+    }
   }
 }
 
@@ -565,5 +741,9 @@ export function cleanupOrchestratorClients(): void {
     logger.debug({ conversation_id: convId }, 'stream: transcript tail stopped (cleanup)');
   }
   convTails.clear();
+  convTailStarting.clear();
   convClients.clear();
+  convConsumers.clear();
+  convWsUnregister.clear();
+  convMessageListeners.clear();
 }

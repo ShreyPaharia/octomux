@@ -1,8 +1,12 @@
 /**
- * B4: Stop hook → human_review auto-transition tests.
+ * Quiescence-guarded in_progress → human_review transition tests.
  *
- * Verifies that POST /api/hooks/stop transitions in_progress → human_review
- * when the stopping agent is the last running one and no pending prompts remain.
+ * The B4 synchronous transition was removed from the Stop hook and replaced by
+ * the quiescence poller (pollQuiescence). These tests verify that Stop no longer
+ * transitions the task, and that the quiescence poller does so when the agent
+ * has been genuinely idle past the debounce window.
+ *
+ * Poller-level tests live in server/poller/quiescence.test.ts.
  */
 import Database from './sqlite.js';
 import { describe, it, expect, beforeEach, vi } from './bun-test.js';
@@ -13,11 +17,10 @@ vi.mock('./hook-dispatcher.js', () => ({
 }));
 
 const { default: request } = await import('supertest');
-const { createTestDb, insertTask, insertAgent, insertPermissionPrompt } =
-  await import('./test-helpers.js');
+const { createTestDb, insertTask, insertAgent, insertPermissionPrompt } = await import('./test-helpers.js');
 const { createApp } = await import('./app.js');
 
-describe('B4: POST /api/hooks/stop → human_review transition', () => {
+describe('B4 (removed): POST /api/hooks/stop no longer synchronously transitions to human_review', () => {
   let db: Database;
   let app: ReturnType<typeof createApp>;
 
@@ -35,7 +38,7 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
     } as any);
   });
 
-  it('transitions in_progress → human_review when last agent stops', async () => {
+  it('Stop does NOT transition in_progress → human_review (debounced via quiescence poller)', async () => {
     await request(app)
       .post('/api/hooks/stop?token=tok-b4')
       .send({ session_id: 'sess-123' })
@@ -44,18 +47,16 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
     const task = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get('t1') as {
       workflow_status: string;
     };
-    expect(task.workflow_status).toBe('human_review');
+    // Must remain in_progress — quiescence poller handles the transition after debounce
+    expect(task.workflow_status).toBe('in_progress');
 
     const update = db
       .prepare(`SELECT * FROM task_updates WHERE task_id = 't1' AND kind = 'transition'`)
-      .get() as any;
-    expect(update).not.toBeNull();
-    expect(update.from_status).toBe('in_progress');
-    expect(update.to_status).toBe('human_review');
-    expect(update.body).toBe('auto: agent stopped');
+      .get();
+    expect(update).toBeUndefined();
   });
 
-  it('fires workflow_status_changed hook on transition', async () => {
+  it('Stop does NOT fire workflow_status_changed (that belongs to the quiescence poller)', async () => {
     const { fireHook } = await import('./hook-dispatcher.js');
 
     await request(app)
@@ -63,43 +64,32 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
       .send({ session_id: 'sess-123' })
       .expect(200);
 
-    expect(fireHook).toHaveBeenCalledWith(
-      'workflow_status_changed',
-      expect.objectContaining({
-        event: 'workflow_status_changed',
-        data: expect.objectContaining({ from: 'in_progress', to: 'human_review' }),
-      }),
-    );
+    expect(fireHook).not.toHaveBeenCalledWith('workflow_status_changed', expect.anything());
   });
 
-  it('skips transition when other agents are still running', async () => {
-    // Add a second running agent
-    insertAgent(db, {
-      id: 'a2',
-      task_id: 't1',
-      harness_session_id: 'sess-456',
-      hook_token: 'tok-b4-2',
-      status: 'running',
-      window_index: 1,
-    } as any);
+  it('Stop sets agent to idle regardless', async () => {
+    const row = db.prepare(`SELECT hook_activity FROM workers WHERE id = 'a1'`).get() as {
+      hook_activity: string;
+    };
+    // starts active
+    expect(row.hook_activity).toBe('active');
 
     await request(app)
       .post('/api/hooks/stop?token=tok-b4')
       .send({ session_id: 'sess-123' })
       .expect(200);
 
-    const task = db.prepare('SELECT workflow_status FROM tasks WHERE id = ?').get('t1') as {
-      workflow_status: string;
+    const after = db.prepare(`SELECT hook_activity FROM workers WHERE id = 'a1'`).get() as {
+      hook_activity: string;
     };
-    // Should remain in_progress because a2 is still running
-    expect(task.workflow_status).toBe('in_progress');
+    expect(after.hook_activity).toBe('idle');
   });
 
-  it('skips transition when pending permission prompts remain', async () => {
+  it('workflow_status remains in_progress even when pending prompts exist', async () => {
     insertPermissionPrompt(db, {
       id: 'pp1',
       task_id: 't1',
-      agent_id: null, // no agent (or same agent — just needs to be pending)
+      agent_id: null,
       session_id: 'sess-other',
       status: 'pending',
     });
@@ -120,7 +110,7 @@ describe('B4: POST /api/hooks/stop → human_review transition', () => {
     { workflow_status: 'planned' as const },
     { workflow_status: 'pr' as const },
     { workflow_status: 'done' as const },
-  ])('skips transition when task is in $workflow_status', async ({ workflow_status }) => {
+  ])('tasks in $workflow_status are not modified by Stop', async ({ workflow_status }) => {
     db.prepare('UPDATE tasks SET workflow_status = ? WHERE id = ?').run(workflow_status, 't1');
 
     await request(app)

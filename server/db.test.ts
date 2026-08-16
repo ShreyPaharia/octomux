@@ -32,22 +32,22 @@ describe('Database', () => {
   // ─── Schema Tests (table-driven) ────────────────────────────────────────
 
   describe('schema', () => {
-    it.each([...TASKS_TABLE_COLUMNS])('tasks table has column: %s', (col) => {
+    it.each(TASKS_TABLE_COLUMNS)('tasks table has column: %s', (col) => {
       const columns = db.pragma('table_info(tasks)') as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(col);
     });
 
-    it.each([...AGENTS_TABLE_COLUMNS])('agents table has column: %s', (col) => {
-      const columns = db.pragma('table_info(agents)') as { name: string }[];
+    it.each(AGENTS_TABLE_COLUMNS)('workers table has column: %s', (col) => {
+      const columns = db.pragma('table_info(workers)') as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(col);
     });
 
     const indexCases = [
       { table: 'tasks', index: 'idx_tasks_active_worktree' },
-      { table: 'agents', index: 'idx_agents_task' },
+      { table: 'workers', index: 'idx_workers_task' },
     ];
 
-    it.each([...indexCases])('creates $index on $table', ({ table, index }) => {
+    it.each(indexCases)('creates $index on $table', ({ table, index }) => {
       const indexes = db
         .prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='${table}'`)
         .all() as { name: string }[];
@@ -58,7 +58,7 @@ describe('Database', () => {
   // ─── Constraint Tests ───────────────────────────────────────────────────
 
   describe('constraints', () => {
-    it('enforces foreign key on agents.task_id', () => {
+    it('enforces foreign key on workers.task_id', () => {
       expect(() => insertAgent(db, { task_id: 'nonexistent' })).toThrow();
     });
 
@@ -84,17 +84,14 @@ describe('Database', () => {
       { table: 'agent', field: 'status', expected: 'running' },
     ] as const;
 
-    it.each([...defaultCases])(
-      '$table.$field defaults to $expected',
-      ({ table, field, expected }) => {
-        insertTask(db);
-        if (table === 'agent') insertAgent(db);
+    it.each(defaultCases)('$table.$field defaults to $expected', ({ table, field, expected }) => {
+      insertTask(db);
+      if (table === 'agent') insertAgent(db);
 
-        const row =
-          table === 'task' ? getTask(db, DEFAULTS.task.id) : getAgents(db, DEFAULTS.task.id)[0];
-        expect((row as any)[field]).toBe(expected);
-      },
-    );
+      const row =
+        table === 'task' ? getTask(db, DEFAULTS.task.id) : getAgents(db, DEFAULTS.task.id)[0];
+      expect((row as any)[field]).toBe(expected);
+    });
 
     it('auto-populates created_at and updated_at on tasks', () => {
       db.prepare('INSERT INTO tasks (id, title, description) VALUES (?, ?, ?)').run(
@@ -109,7 +106,7 @@ describe('Database', () => {
 
     it('auto-populates created_at on agents', () => {
       insertTask(db);
-      db.prepare('INSERT INTO agents (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
+      db.prepare('INSERT INTO workers (id, task_id, window_index, label) VALUES (?, ?, ?, ?)').run(
         'auto-agent',
         DEFAULTS.task.id,
         0,
@@ -176,10 +173,10 @@ describe('Database', () => {
     const migrationColumns = [
       { table: 'tasks', column: 'initial_prompt' },
       { table: 'tasks', column: 'worktree_id' },
-      { table: 'agents', column: 'harness_session_id' },
+      { table: 'workers', column: 'harness_session_id' },
     ];
 
-    it.each([...migrationColumns])('$table has $column column (migration)', ({ table, column }) => {
+    it.each(migrationColumns)('$table has $column column (migration)', ({ table, column }) => {
       const columns = db.pragma(`table_info(${table})`) as { name: string }[];
       expect(columns.map((c) => c.name)).toContain(column);
     });
@@ -195,8 +192,8 @@ describe('Database', () => {
       expect(cols).toEqual(PERMISSION_PROMPTS_TABLE_COLUMNS);
     });
 
-    it('adds hook_activity column to agents table', () => {
-      const cols = (db.pragma('table_info(agents)') as { name: string }[]).map((c) => c.name);
+    it('adds hook_activity column to workers table', () => {
+      const cols = (db.pragma('table_info(workers)') as { name: string }[]).map((c) => c.name);
       expect(cols).toContain('hook_activity');
       expect(cols).toContain('hook_activity_updated_at');
     });
@@ -229,13 +226,13 @@ describe('Database', () => {
       },
     ];
 
-    it.each([...startupActivityCases])('$desc on startup', ({ initial, status, expected }) => {
+    it.each(startupActivityCases)('$desc on startup', ({ initial, status, expected }) => {
       insertTask(db, { id: 't1', runtime_state: 'running' });
       insertAgent(db, { id: 'a1', task_id: 't1', hook_activity: initial, status });
 
       initDb(db);
 
-      const agent = db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get('a1') as {
+      const agent = db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get('a1') as {
         hook_activity: string;
       };
       expect(agent.hook_activity).toBe(expected);
@@ -257,8 +254,8 @@ describe('Database', () => {
       expect(cols).toContain('worktree_id');
     });
 
-    it('makes agents.task_id nullable', () => {
-      const rows = db.pragma('table_info(agents)') as Array<{
+    it('makes workers.task_id nullable', () => {
+      const rows = db.pragma('table_info(workers)') as Array<{
         name: string;
         notnull: number;
       }>;
@@ -266,8 +263,8 @@ describe('Database', () => {
       expect(col.notnull).toBe(0);
     });
 
-    it('adds agents.tmux_session and agents.agent columns; drops legacy pinned', () => {
-      const cols = (db.pragma('table_info(agents)') as Array<{ name: string }>).map((c) => c.name);
+    it('adds workers.tmux_session and workers.agent columns; drops legacy pinned', () => {
+      const cols = (db.pragma('table_info(workers)') as Array<{ name: string }>).map((c) => c.name);
       expect(cols).toContain('tmux_session');
       expect(cols).toContain('agent');
       expect(cols).not.toContain('pinned');
@@ -280,14 +277,14 @@ describe('Database', () => {
 
     it('removes legacy seeded orchestrator agent row', () => {
       const row = db
-        .prepare(`SELECT id FROM agents WHERE id = 'orchestrator' AND task_id IS NULL`)
+        .prepare(`SELECT id FROM workers WHERE id = 'orchestrator' AND task_id IS NULL`)
         .get();
       expect(row).toBeUndefined();
     });
 
     it('allows inserting a standalone agent with NULL task_id', () => {
       const stmt = db.prepare(
-        `INSERT INTO agents (id, task_id, window_index, label, tmux_session)
+        `INSERT INTO workers (id, task_id, window_index, label, tmux_session)
          VALUES (?, NULL, 0, 'chat', 'octomux-agent-chat-1')`,
       );
       expect(() => stmt.run('chat-1')).not.toThrow();
@@ -402,14 +399,14 @@ describe('Database', () => {
       expect(row.harness_id).toBe('claude-code');
     });
 
-    it('adds harness_id and hook_token to agents with defaults', () => {
+    it('adds harness_id and hook_token to workers with defaults', () => {
       const db = createTestDb();
       db.prepare(
-        `INSERT INTO agents (id, task_id, window_index, label, harness_session_id, agent)
+        `INSERT INTO workers (id, task_id, window_index, label, harness_session_id, agent)
          VALUES ('a1', NULL, 0, 'Agent 1', 'old-session-uuid', NULL)`,
       ).run();
       const row = db
-        .prepare(`SELECT harness_id, hook_token FROM agents WHERE id = ?`)
+        .prepare(`SELECT harness_id, hook_token FROM workers WHERE id = ?`)
         .get('a1') as {
         harness_id: string;
         hook_token: string;
@@ -422,7 +419,7 @@ describe('Database', () => {
       const db = createTestDb();
       initDb(db);
       initDb(db);
-      const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+      const cols = db.pragma('table_info(workers)') as Array<{ name: string }>;
       const names = cols.map((c) => c.name);
       expect(names.filter((n) => n === 'harness_id')).toHaveLength(1);
       expect(names.filter((n) => n === 'hook_token')).toHaveLength(1);
@@ -504,7 +501,7 @@ describe('permission_prompts.session_id nullability', () => {
 });
 
 describe('review orchestrator migration', () => {
-  it('creates review_runs, published_reviews, review_learnings tables', () => {
+  it('creates review_runs, published_reviews tables (review_learnings folded into agent_learnings)', () => {
     const db = createTestDb();
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
       name: string;
@@ -512,7 +509,8 @@ describe('review orchestrator migration', () => {
     const names = tables.map((t) => t.name);
     expect(names).toContain('review_runs');
     expect(names).toContain('published_reviews');
-    expect(names).toContain('review_learnings');
+    expect(names).toContain('agent_learnings');
+    expect(names).not.toContain('review_learnings');
   });
 
   it('adds 14 new columns to inline_comments', () => {
@@ -651,18 +649,141 @@ describe('claude_session_id rename', () => {
 
     initDb(db);
 
-    const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+    // Pre-rename simulation: `agents` had no `agent_configs` sibling, so the
+    // 2026-07-25 agents/workers rename renames `agents` -> `workers` (step 2,
+    // agent_configs -> agents, no-ops since there's nothing to rename).
+    const cols = db.pragma('table_info(workers)') as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
     expect(names).toContain('harness_session_id');
     expect(names).not.toContain('claude_session_id');
 
-    const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+    const row = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a1') as {
       harness_session_id: string;
     };
     expect(row.harness_session_id).toBe('old-uuid');
 
-    const indexes = db.pragma('index_list(agents)') as Array<{ name: string }>;
-    expect(indexes.map((i) => i.name)).toContain('idx_agents_harness_session_id');
+    const indexes = db.pragma('index_list(workers)') as Array<{ name: string }>;
+    expect(indexes.map((i) => i.name)).toContain('idx_workers_harness_session_id');
     expect(indexes.map((i) => i.name)).not.toContain('idx_agents_claude_session_id');
+  });
+});
+
+describe('agents feature: agents table (conductor) + orchestrator_conversations.agent_id', () => {
+  it('creates the agents table on a fresh DB', () => {
+    const db = createTestDb();
+    const tables = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name)).toContain('agents');
+
+    const cols = db.pragma('table_info(agents)') as Array<{ name: string }>;
+    const names = cols.map((c) => c.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'id',
+        'name',
+        'system_prompt',
+        'channel',
+        'channel_config',
+        'created_at',
+        'updated_at',
+      ]),
+    );
+  });
+
+  it('adds a nullable agent_id column to orchestrator_conversations', () => {
+    const db = createTestDb();
+    const cols = db.pragma('table_info(orchestrator_conversations)') as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    const agentIdCol = cols.find((c) => c.name === 'agent_id');
+    expect(agentIdCol).toBeDefined();
+    expect(agentIdCol!.notnull).toBe(0);
+  });
+});
+
+describe('schedules configurability migration (2026-07-24)', () => {
+  it('fresh DB has schedules table with new columns and no UNIQUE(kind, repo_path)', () => {
+    const db = createTestDb();
+    const cols = (db.pragma('table_info(schedules)') as Array<{ name: string }>).map((c) => c.name);
+
+    for (const col of [
+      'id',
+      'kind',
+      'repo_path',
+      'name',
+      'cron',
+      'timezone',
+      'enabled',
+      'model',
+      'timeout_ms',
+      'last_run_at',
+      'config_json',
+      'prompt',
+      'created_at',
+      'updated_at',
+    ]) {
+      expect(cols).toContain(col);
+    }
+
+    // No UNIQUE(kind, repo_path) — two rows with same kind+repo_path must succeed
+    db.prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron) VALUES ('s1', 'watcher', '/repo', '0 7 * * *')`,
+    ).run();
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO schedules (id, kind, repo_path, cron) VALUES ('s2', 'watcher', '/repo', '0 8 * * *')`,
+        )
+        .run(),
+    ).not.toThrow();
+  });
+
+  it('migration idempotent: calling initDb twice leaves schedules table intact', () => {
+    const db = createTestDb();
+    db.prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron) VALUES ('s1', 'watcher', '/repo', '0 7 * * *')`,
+    ).run();
+
+    // Second initDb (re-run migrations) — uses already-imported initDb
+    initDb(db);
+
+    const rows = db.prepare('SELECT id FROM schedules').all() as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toContain('s1');
+    const cols = (db.pragma('table_info(schedules)') as Array<{ name: string }>).map((c) => c.name);
+    expect(cols).toContain('timezone');
+  });
+
+  it('pre-migration rows preserve id and last_run_at after rebuild', () => {
+    // Use an already-initialized DB (all migrations have run), then directly
+    // write a row as if it existed before the timezone migration (no name/timezone/
+    // model/timeout_ms set). Calling initDb again must preserve id + last_run_at.
+    const db = createTestDb();
+
+    // Insert a row with only the pre-migration columns populated
+    db.prepare(
+      `INSERT INTO schedules (id, kind, repo_path, cron, last_run_at)
+       VALUES ('existing-id', 'prod-log-triage', '/live-repo', '0 7 * * *', '2026-07-23 07:00:00')`,
+    ).run();
+
+    // Re-run migrations (idempotent — timezone column already present, rebuild skipped)
+    initDb(db);
+
+    const row = db.prepare('SELECT * FROM schedules WHERE id = ?').get('existing-id') as Record<
+      string,
+      unknown
+    >;
+
+    expect(row).toBeDefined();
+    expect(row.id).toBe('existing-id');
+    expect(row.last_run_at).toBe('2026-07-23 07:00:00');
+    expect(row.kind).toBe('prod-log-triage');
+    expect(row.repo_path).toBe('/live-repo');
+    // New columns were not set — they should be NULL
+    expect(row.name).toBeNull();
+    expect(row.timezone).toBeNull();
+    expect(row.model).toBeNull();
+    expect(row.timeout_ms).toBeNull();
   });
 });

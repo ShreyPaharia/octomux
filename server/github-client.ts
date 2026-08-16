@@ -1,7 +1,9 @@
-import { spawn } from 'child_process';
+import { spawn, execFile as execFileCb } from 'child_process';
+import { promisify } from 'util';
 import { childLogger } from './logger.js';
 
 const logger = childLogger('github-client');
+const execFile = promisify(execFileCb);
 
 export interface PullRequestReviewComment {
   path: string;
@@ -79,4 +81,45 @@ export async function postPullRequestReview(
   logger.info({ owner, repo, pull_number, review_id: result.id }, 'pull request review posted');
 
   return { id: result.id, html_url: result.html_url };
+}
+
+export interface InboundReviewComment {
+  id: string;
+  body: string;
+  path?: string;
+}
+
+/**
+ * Fetches inbound (human reviewer) review comments for a PR via `gh api`.
+ * Uses `gh`'s `{owner}/{repo}` template placeholders, resolved from the repo
+ * checked out at `repoPath` (`cwd`) — no manual remote parsing needed.
+ *
+ * ponytail: single page (up to 100 comments), no --paginate — PR review
+ * threads rarely exceed that; add pagination if a PR does.
+ */
+export async function fetchPrReviewComments(
+  repoPath: string,
+  prNumber: number,
+): Promise<InboundReviewComment[]> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFile(
+      'gh',
+      ['api', `repos/{owner}/{repo}/pulls/${prNumber}/comments?per_page=100`],
+      { cwd: repoPath },
+    ));
+  } catch (err) {
+    logger.debug(
+      { repoPath, prNumber, err: (err as Error).message },
+      'gh api pulls/comments failed',
+    );
+    return [];
+  }
+
+  const raw = JSON.parse(stdout.trim() || '[]') as Array<{
+    id: number;
+    body: string;
+    path?: string;
+  }>;
+  return raw.map((c) => ({ id: String(c.id), body: c.body, path: c.path }));
 }

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 import Database from '../../sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 import type { Task } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ vi.mock('../../logger.js', (importOriginal) => {
   };
 });
 
-const { createTestDb, insertTask, DEFAULTS, findExecCall } = await import('../../test-helpers.js');
+const { createTestDb, insertTask, DEFAULTS, findExecCall, countExecCalls } = await import('../../test-helpers.js');
 
 const { setupNew } = await import('./new.js');
 const { setupExisting } = await import('./existing.js');
@@ -144,9 +144,21 @@ describe('setupNew', () => {
     expect(result.baseSha).toBe('abcdef0000000000000000000000000000000000');
   });
 
-  it('sets runPreflight=true', async () => {
-    const result = await setupNew(baseTask);
-    expect(result.runPreflight).toBe(true);
+  it('does not spawn format or lint commands', async () => {
+    await setupNew(baseTask);
+    // format_command and lint_command from repo_configs are no longer read during setup;
+    // the format/lint preflight was removed to unblock agent launch immediately.
+    const shCalls = countExecCalls(vi.mocked(execFile), { cmd: 'sh' });
+    expect(shCalls).toBe(0);
+  });
+
+  it('does not make a preflight formatting commit', async () => {
+    await setupNew(baseTask);
+    const commitCall = findExecCall(vi.mocked(execFile), {
+      cmd: 'git',
+      argsInclude: ['commit', '-m', 'chore: fix pre-existing formatting'],
+    });
+    expect(commitCall).toBeUndefined();
   });
 
   it('sets installHooksAt to worktreePath', async () => {
@@ -238,12 +250,7 @@ describe('setupExisting', () => {
 
   it('returns worktreePath = task.worktree', async () => {
     const result = await setupExisting(baseTask);
-    expect(result.worktreePath).toBe(baseTask.worktree as string);
-  });
-
-  it('sets runPreflight=false', async () => {
-    const result = await setupExisting(baseTask);
-    expect(result.runPreflight).toBe(false);
+    expect(result.worktreePath).toBe(baseTask.worktree);
   });
 
   it('returns a baseSha from rev-parse', async () => {
@@ -293,11 +300,6 @@ describe('setupNone', () => {
   it('returns worktreePath = task.repo_path', async () => {
     const result = await setupNone(baseTask);
     expect(result.worktreePath).toBe(baseTask.repo_path);
-  });
-
-  it('sets runPreflight=false', async () => {
-    const result = await setupNone(baseTask);
-    expect(result.runPreflight).toBe(false);
   });
 
   it('returns a baseSha from rev-parse', async () => {
@@ -417,11 +419,6 @@ describe('setupScratch', () => {
     expect(result.baseSha).toBeNull();
   });
 
-  it('sets runPreflight=false', async () => {
-    const result = await setupScratch(baseTask);
-    expect(result.runPreflight).toBe(false);
-  });
-
   it('sets installHooksAt to the scratch dir', async () => {
     const result = await setupScratch(baseTask);
     expect(result.installHooksAt).toBe(result.worktreePath);
@@ -435,8 +432,7 @@ describe('runSetup', () => {
     const task: Task = { ...DEFAULTS.task, run_mode: 'new' } as Task;
     insertTask(db, task);
     const result = await runSetup(task);
-    // setupNew always sets runPreflight=true
-    expect(result.runPreflight).toBe(true);
+    expect(result.worktreePath).toContain('.worktrees');
   });
 
   it('dispatches to setupExisting for run_mode=existing', async () => {
@@ -447,7 +443,6 @@ describe('runSetup', () => {
     } as Task;
     insertTask(db, task);
     const result = await runSetup(task);
-    expect(result.runPreflight).toBe(false);
     expect(result.worktreePath).toBe('/tmp/existing-worktree');
   });
 
@@ -474,7 +469,6 @@ describe('runSetup', () => {
     const task: Task = { ...DEFAULTS.task, run_mode: 'none', base_branch: null } as Task;
     insertTask(db, task);
     const result = await runSetup(task);
-    expect(result.runPreflight).toBe(false);
     expect(result.worktreePath).toBe(DEFAULTS.task.repo_path);
   });
 

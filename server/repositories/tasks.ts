@@ -30,8 +30,6 @@ const TASK_WRITABLE_COLUMNS = new Set([
   'last_viewed_at',
   'deleted_at',
   'error',
-  'current_summary',
-  'current_summary_updated_at',
   'worktree_id',
   'agent',
   'model',
@@ -47,19 +45,19 @@ export function getTask(id: string): Task | undefined {
   return getDb().prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-/** Fetch a task by its worktree_id (returns undefined if not found). */
-export function getTaskByWorktreeId(worktreeId: string): Task | undefined {
-  return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.worktree_id = ? AND t.deleted_at IS NULL`)
-    .get(worktreeId) as Task | undefined;
-}
-
 export interface ListTasksOpts {
   /**
    * When false (default) auto_review tasks are excluded — reviews use the
    * /api/reviews endpoint.  Pass true to include them.
    */
   includeAutoReview?: boolean;
+  /**
+   * When false (default) tasks created by an automated workflow (any non-null
+   * `source` other than 'auto_review', which has its own `includeAutoReview`
+   * flag) are excluded — the Tasks board shows manual work only, automated
+   * runs live on /runs. Pass true to include them (CLI, orchestrator, pollers).
+   */
+  includeAutomated?: boolean;
   /** When true, include soft-deleted tasks only (trash view). */
   trash?: boolean;
   /** Filter by exact repo_path. */
@@ -69,23 +67,27 @@ export interface ListTasksOpts {
 /** List tasks with optional filtering. Results ordered newest-first by created_at (or deleted_at for trash). */
 export function listTasks(opts: ListTasksOpts = {}): Task[] {
   const db = getDb();
-  const { includeAutoReview = false, trash = false, repoPath } = opts;
+  const { includeAutoReview = false, includeAutomated = false, trash = false, repoPath } = opts;
 
   const trashPredicate = trash ? 't.deleted_at IS NOT NULL' : 't.deleted_at IS NULL';
   const orderBy = trash ? 'ORDER BY t.deleted_at DESC' : 'ORDER BY t.created_at DESC';
   const autoReviewClause = includeAutoReview ? '' : `AND ${SQL_EXCLUDE_AUTO_REVIEW}`;
+  const automatedFlag = includeAutomated ? 1 : 0;
 
   if (repoPath) {
     return db
       .prepare(
-        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND w.repo_path = ? ${orderBy}`,
+        `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause}
+                              AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') AND w.repo_path = ? ${orderBy}`,
       )
-      .all(repoPath) as Task[];
+      .all(automatedFlag, repoPath) as Task[];
   }
 
   return db
-    .prepare(`${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} ${orderBy}`)
-    .all() as Task[];
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE ${trashPredicate} ${autoReviewClause} AND (? = 1 OR t.source IS NULL OR t.source = 'auto_review') ${orderBy}`,
+    )
+    .all(automatedFlag) as Task[];
 }
 
 /** List soft-deleted tasks that have passed their grace window. */
@@ -211,7 +213,9 @@ export function listRecentRepoPaths(limit = 10): Array<{ repo_path: string; last
 
 /**
  * Find an existing live review task for a given repo_path + pr_number.
- * Returns only the id.
+ * Returns only the id. Repo-scoped: PR numbers are per-repo, so a repo_path
+ * filter is required to avoid matching a same-numbered PR in a different repo.
+ * Used by the manual-review-create route and by lookupExistingReviewId.
  */
 export function findExistingReviewTask(
   repoPath: string,
@@ -225,20 +229,6 @@ export function findExistingReviewTask(
           ORDER BY t.created_at DESC LIMIT 1`,
     )
     .get(repoPath, prNumber) as { id: string } | undefined;
-}
-/**
- * Find a live auto_review task by pr_number only (no repo_path filter).
- * Used by lookupExistingReviewId in the API layer.
- */
-export function findReviewTaskByPrNumber(prNumber: number): { id: string } | undefined {
-  return getDb()
-    .prepare(
-      `SELECT id FROM tasks
-        WHERE pr_number = ? AND source = 'auto_review'
-          AND runtime_state != 'error' AND deleted_at IS NULL
-        ORDER BY created_at DESC LIMIT 1`,
-    )
-    .get(prNumber) as { id: string } | undefined;
 }
 
 /**
@@ -291,13 +281,6 @@ export function getTaskRuntimeState(id: string): { runtime_state: string } | und
     | undefined;
 }
 
-/** Fetch just the model column from a task (for hop inheritance). */
-export function getTaskModel(id: string): { model: string | null } | undefined {
-  return getDb().prepare(`SELECT model FROM tasks WHERE id = ?`).get(id) as
-    | { model: string | null }
-    | undefined;
-}
-
 /**
  * List tasks for scratch GC: idle/setting_up/running scratch tasks (not deleted)
  * so the GC knows which scratch dirs are still alive.
@@ -333,6 +316,10 @@ export interface InsertTaskInput {
   pr_head_sha?: string | null;
   /** Used by review tasks. */
   review_of_task_id?: string | null;
+  /** Set on scheduled runs — links back to the `schedules` row that fired them. */
+  schedule_id?: string | null;
+  /** Another task's id this one depends on. Caller must have run validateDependsOn first. */
+  depends_on?: string | null;
 }
 
 /** Insert a new task row. Returns the generated id. */
@@ -341,8 +328,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -361,9 +348,84 @@ export function insertTask(input: InsertTaskInput): string {
       input.pr_number ?? null,
       input.pr_head_sha ?? null,
       input.review_of_task_id ?? null,
+      input.schedule_id ?? null,
+      input.depends_on ?? null,
     );
   logger.info({ task_id: id, operation: 'insertTask' }, 'task inserted');
   return id;
+}
+
+/** Set (or clear, with null) the depends_on link. Caller must have run validateDependsOn first. */
+export function setDependsOn(id: string, dependsOn: string | null): void {
+  getDb()
+    .prepare(`UPDATE tasks SET depends_on = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(dependsOn, id);
+  logger.info({ task_id: id, depends_on: dependsOn, operation: 'setDependsOn' }, 'depends_on set');
+}
+
+/**
+ * Validate that `dependsOn` is safe to store as `taskId`'s depends_on.
+ *
+ * Checks (in order): the target task exists; it isn't `taskId` itself
+ * (self-dependency); and it doesn't transitively depend back on `taskId`
+ * (a longer cycle). Since a task has at most ONE depends_on, the graph is a
+ * forest of chains, so cycle detection is a single forward walk from
+ * `dependsOn` — bounded by a visited set so pre-existing corrupt data can't
+ * spin the walk forever.
+ *
+ * Pure validation, no throwing (repositories don't shape HTTP errors) — returns
+ * an error message on failure, or null when the edge is safe to write.
+ *
+ * `taskId` is null when validating for a not-yet-inserted task (task.create):
+ * a brand-new id can never already appear in a depends_on chain, so only
+ * existence is checked.
+ */
+export function validateDependsOn(taskId: string | null, dependsOn: string): string | null {
+  const target = getTask(dependsOn);
+  if (!target) return `depends_on task not found: ${dependsOn}`;
+  if (taskId === null) return null;
+  if (taskId === dependsOn) return 'a task cannot depend on itself';
+
+  const visited = new Set<string>([taskId]);
+  let current: string | null = dependsOn;
+  while (current) {
+    if (visited.has(current)) return 'depends_on would create a dependency cycle';
+    visited.add(current);
+    const row = getDb().prepare(`SELECT depends_on FROM tasks WHERE id = ?`).get(current) as
+      | { depends_on: string | null }
+      | undefined;
+    current = row?.depends_on ?? null;
+  }
+  return null;
+}
+
+/**
+ * True when `dependsOn` points at a task that has not reached
+ * workflow_status 'done' (or points at a task that no longer exists — treated
+ * as still-blocked, the safe default). False for null (no dependency).
+ */
+export function isDependencyUnmet(dependsOn: string | null): boolean {
+  if (!dependsOn) return false;
+  const dep = getDb().prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get(dependsOn) as
+    | { workflow_status: string }
+    | undefined;
+  return !dep || dep.workflow_status !== 'done';
+}
+
+/**
+ * Tasks that named `dependencyTaskId` as their depends_on and are sitting
+ * idle at workflow_status='in_progress' — the shape a task is left in when
+ * its own start was skipped because this dependency wasn't done yet (see
+ * task-service.ts:createTask and task.move's autoStart gate). Used to
+ * auto-start/resume them once the dependency completes.
+ */
+export function listDependentsAwaitingStart(dependencyTaskId: string): Task[] {
+  return getDb()
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.depends_on = ? AND t.runtime_state = 'idle'
+                            AND t.workflow_status = 'in_progress' AND t.deleted_at IS NULL`,
+    )
+    .all(dependencyTaskId) as Task[];
 }
 
 /**
@@ -438,35 +500,11 @@ export function setWorktreeId(id: string, worktreeId: string | null): void {
   getDb().prepare(`UPDATE tasks SET worktree_id = ? WHERE id = ?`).run(worktreeId, id);
 }
 
-/** Set pr_url, pr_number, pr_head_sha (called when a PR is opened). */
-export function setPr(id: string, prUrl: string, prNumber: number, prHeadSha: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks SET pr_url = ?, pr_number = ?, pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .run(prUrl, prNumber, prHeadSha, id);
-  logger.info({ task_id: id, pr_number: prNumber, operation: 'setPr' }, 'PR fields set');
-}
-
 /** Update pr_head_sha (called when a PR gets a new commit). */
 export function setPrHeadSha(id: string, prHeadSha: string): void {
   getDb()
     .prepare(`UPDATE tasks SET pr_head_sha = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(prHeadSha, id);
-}
-
-/** Set current_summary and bump updated_at. */
-export function setCurrentSummary(id: string, summary: string): void {
-  getDb()
-    .prepare(
-      `UPDATE tasks
-          SET current_summary = ?,
-              current_summary_updated_at = datetime('now'),
-              updated_at = datetime('now')
-        WHERE id = ?`,
-    )
-    .run(summary, id);
-  logger.info({ task_id: id, operation: 'setCurrentSummary' }, 'current_summary updated');
 }
 
 /** Touch last_viewed_at for a single task. */
@@ -753,9 +791,29 @@ export function findExistingPrTask(
 }
 
 /**
+ * True when a soft-deleted (trashed) auto-review task still exists for the
+ * repo+PR. Used by the reviewer poller to avoid resurrecting a review the user
+ * just deleted — the trashed task's worktree is only removed when the trash
+ * purges, so recreating early would also collide with the leftover worktree.
+ */
+export function hasTrashedPrReviewTask(repoPath: string, prNumber: number): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM tasks t
+         INNER JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.pr_number = ?
+          AND t.source = 'auto_review' AND t.deleted_at IS NOT NULL
+        LIMIT 1`,
+    )
+    .get(repoPath, prNumber);
+  return row !== undefined;
+}
+
+/**
  * List idle auto-review draft tasks for a given repo_path.
- * Used by cleanupResolvedReviewDrafts to find and purge drafts whose PR is no
- * longer awaiting review.
+ * Used by cleanupResolvedReviews to find and purge drafts whose PR is no
+ * longer awaiting review. "Draft" = never started: a task that has worker rows
+ * is a closed-but-resumable review session, kept until its PR merges/closes.
  */
 export function listAutoReviewDrafts(
   repoPath: string,
@@ -765,9 +823,28 @@ export function listAutoReviewDrafts(
       `SELECT t.id AS id, t.pr_number AS pr_number, t.worktree_id AS worktree_id FROM tasks t
          LEFT JOIN worktrees w ON t.worktree_id = w.id
         WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
-          AND t.deleted_at IS NULL`,
+          AND t.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM workers wk WHERE wk.task_id = t.id)`,
     )
     .all(repoPath) as Array<{ id: string; pr_number: number | null; worktree_id: string | null }>;
+}
+
+/**
+ * List idle (closed or never-started) auto-review tasks that still point at a
+ * PR. Used by cleanupResolvedReviews to trash review sessions once their PR is
+ * merged or closed, so reviews never dangle past the PR's life.
+ */
+export function listIdleAutoReviewTasksWithPr(
+  repoPath: string,
+): Array<{ id: string; pr_number: number }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id AS id, t.pr_number AS pr_number FROM tasks t
+         LEFT JOIN worktrees w ON t.worktree_id = w.id
+        WHERE w.repo_path = ? AND t.source = 'auto_review' AND t.runtime_state = 'idle'
+          AND t.pr_number IS NOT NULL AND t.deleted_at IS NULL`,
+    )
+    .all(repoPath) as Array<{ id: string; pr_number: number }>;
 }
 
 /**
@@ -776,18 +853,24 @@ export function listAutoReviewDrafts(
  */
 export function listRunningTasksWithPr(): Task[] {
   return getDb()
-    .prepare(`${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL`)
+    .prepare(
+      `${SELECT_TASK_SQL} WHERE t.runtime_state = 'running' AND t.pr_number IS NOT NULL AND t.workflow_status != 'done'`,
+    )
     .all() as Task[];
 }
 
 /**
- * List tasks that are running or idle with no PR url yet and a branch set.
- * Used by pollPRs to find tasks that need PR detection.
+ * List running/idle tasks with a branch set. Used by pollPRs to detect PRs.
+ * We intentionally keep polling AFTER the first PR is found (no `pr_url IS NULL`
+ * gate): a long-running task can open several slice PRs over its life, and the
+ * poller discovers each `agents/<id>*` branch's PR. The workflow → 'pr'
+ * transition is guarded on the null→non-null flip in pollPRs, so re-polling an
+ * already-PR'd task is idempotent.
  */
 export function listTasksNeedingPrDetection(): Task[] {
   return getDb()
     .prepare(
-      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND t.pr_url IS NULL AND w.branch IS NOT NULL`,
+      `${SELECT_TASK_SQL} WHERE t.runtime_state IN ('running', 'idle') AND w.branch IS NOT NULL`,
     )
     .all() as Task[];
 }
@@ -834,6 +917,48 @@ export function listNoneModeActiveTasks(
     runtime_state: string;
     branch: string | null;
   }>;
+}
+
+/**
+ * List tasks that are candidates for the quiescence → human_review transition.
+ * A task qualifies when:
+ *   - workflow_status = 'in_progress'
+ *   - runtime_state = 'running' (excludes looping / idle / etc.)
+ *   - NOT deleted
+ *   - has at least one worker
+ *   - every non-stopped worker has hook_activity = 'idle'
+ *   - the most-recent hook_activity_updated_at across all non-stopped workers is
+ *     older than debounceMs (continuous idle for at least the debounce window)
+ *
+ * The orchestrator-managed guard and pending-prompt guard are applied in JS
+ * after fetching (simpler to test, no extra joins needed).
+ *
+ * Returns task ids only — callers load full state via getTaskWorkflowStatus.
+ */
+export function listTasksAwaitingQuiescence(debounceMs: number): Array<{ id: string }> {
+  return getDb()
+    .prepare(
+      `SELECT t.id
+         FROM tasks t
+        WHERE t.workflow_status = 'in_progress'
+          AND t.runtime_state = 'running'
+          AND t.deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM workers w WHERE w.task_id = t.id AND w.status != 'stopped'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM workers w
+             WHERE w.task_id = t.id
+               AND w.status != 'stopped'
+               AND w.hook_activity != 'idle'
+          )
+          AND (
+            SELECT MAX(w.hook_activity_updated_at)
+              FROM workers w
+             WHERE w.task_id = t.id AND w.status != 'stopped'
+          ) <= datetime('now', ? || ' seconds')`,
+    )
+    .all(`-${Math.ceil(debounceMs / 1000)}`) as Array<{ id: string }>;
 }
 
 /**

@@ -30,7 +30,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { getManagedTask } from './store.js';
+import { getManagedTask } from '../repositories/orchestrator.js';
 import { childLogger } from '../logger.js';
 import { getTask } from '../repositories/index.js';
 import type { Task } from '../types.js';

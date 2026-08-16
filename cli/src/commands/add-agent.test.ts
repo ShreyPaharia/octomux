@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from '../../../server/bun-test.js';
 import { Command } from 'commander';
 import { registerAddAgent } from './add-agent.js';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 
-function makeAgent(partial: Partial<Agent> = {}): Agent {
+function makeAgent(partial: Partial<Worker> = {}): Worker {
   return {
     id: 'agent-1',
     task_id: 'task-1',
@@ -32,11 +32,8 @@ function makeClient(addAgent: OctomuxClient['addAgent']): OctomuxClient {
     sendMessage: notImpl as never,
     listSkills: notImpl as never,
     getSkill: notImpl as never,
-    createSkill: notImpl as never,
-    deleteSkill: notImpl as never,
     recentRepos: notImpl as never,
     defaultBranch: notImpl as never,
-    getRepoConfig: notImpl as never,
   } as OctomuxClient;
 }
 

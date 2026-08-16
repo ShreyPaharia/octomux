@@ -108,6 +108,5 @@ export async function setupNew(task: Task): Promise<SetupResult> {
     baseBranch: task.base_branch,
     baseSha,
     installHooksAt: worktreePath,
-    runPreflight: true,
   };
 }

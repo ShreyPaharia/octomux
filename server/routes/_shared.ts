@@ -10,13 +10,15 @@ import {
   listUserTerminals,
   listPendingPromptsByTask,
 } from '../repositories/index.js';
+import { listPullRequestsByTask } from '../repositories/pull-requests.js';
+import type { PullRequest } from '../repositories/pull-requests.js';
 import type { PermissionPromptRow } from '../repositories/permission-prompts.js';
-import { findReviewTaskByPrNumber, findReviewTaskBySource } from '../repositories/index.js';
+import { findExistingReviewTask, findReviewTaskBySource } from '../repositories/index.js';
 import { nanoid } from 'nanoid';
 import fs from 'fs';
 import type {
   Task,
-  Agent,
+  Worker,
   UserTerminal,
   Worktree,
   DerivedTaskStatus,
@@ -25,6 +27,7 @@ import type {
   RunMode,
 } from '../types.js';
 import { RUN_MODES } from '../types.js';
+import { getSettings } from '../settings.js';
 import type { OctomuxSettings } from '../settings.js';
 import { generateTitleAndDescription } from '../title-gen.js';
 import { validateAgentName } from '../harnesses/types.js';
@@ -55,51 +58,30 @@ export function throwIfValidationError(
 
 /**
  * Return the id of a live auto_review task pointing at this source — either
- * keyed on `pr_number` (poller-created) or on `review_of_task_id` (manual).
- * Used by both GET /api/tasks/:id and the manual-trigger endpoint.
+ * keyed on `repo_path` + `pr_number` (poller-created) or on `review_of_task_id`
+ * (manual). Used by both GET /api/tasks/:id and the manual-trigger endpoint.
+ *
+ * Repo-scoped on purpose: PR numbers are per-repo, so matching on pr_number
+ * alone can return a review task that belongs to an entirely different repo.
  */
 export function lookupExistingReviewId(task: {
   id: string;
+  repo_path: string;
   pr_number: number | null;
 }): string | null {
   if (task.pr_number != null) {
-    const byPr = findReviewTaskByPrNumber(task.pr_number);
+    const byPr = findExistingReviewTask(task.repo_path, task.pr_number);
     if (byPr) return byPr.id;
   }
   const byLink = findReviewTaskBySource(task.id);
   return byLink?.id ?? null;
 }
 
-/** Recursively merge `incoming` into `base` (objects merged, primitives overwritten). */
-export function deepMerge(
-  base: Record<string, unknown>,
-  incoming: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...base };
-  for (const [key, val] of Object.entries(incoming)) {
-    if (
-      val !== null &&
-      typeof val === 'object' &&
-      !Array.isArray(val) &&
-      typeof result[key] === 'object' &&
-      result[key] !== null &&
-      !Array.isArray(result[key])
-    ) {
-      result[key] = deepMerge(
-        result[key] as Record<string, unknown>,
-        val as Record<string, unknown>,
-      );
-    } else {
-      result[key] = val;
-    }
-  }
-  return result;
-}
-
 export interface TaskRelations {
-  agents: Agent[];
+  workers: Worker[];
   user_terminals: UserTerminal[];
   pending_prompts: PermissionPromptRow[];
+  pull_requests: PullRequest[];
 }
 
 export interface TaskResponseExtras {
@@ -107,15 +89,16 @@ export interface TaskResponseExtras {
   existing_review_id?: string | null;
 }
 
-/** Load a task plus agents, terminals, and pending permission prompts. */
+/** Load a task plus workers, terminals, pending permission prompts, and pull_requests. */
 export function fetchTaskWithRelations(taskId: string): { task: Task; relations: TaskRelations } {
   const task = getTaskRepo(taskId) as Task;
   return {
     task,
     relations: {
-      agents: listAllAgents(taskId),
+      workers: listAllAgents(taskId),
       user_terminals: listUserTerminals(taskId),
       pending_prompts: listPendingPromptsByTask(taskId),
+      pull_requests: listPullRequestsByTask(taskId),
     },
   };
 }
@@ -128,10 +111,19 @@ export function formatTaskResponse(
 ) {
   return {
     ...task,
-    agents: relations.agents,
+    workers: relations.workers,
     pending_prompts: relations.pending_prompts,
-    derived_status: derivedStatus({ runtime_state: task.runtime_state, agents: relations.agents }),
+    derived_status: derivedStatus({
+      runtime_state: task.runtime_state,
+      workers: relations.workers,
+    }),
+    needs_you: needsYou({
+      runtime_state: task.runtime_state,
+      workers: relations.workers,
+      pending_prompts: relations.pending_prompts,
+    }),
     user_terminals: relations.user_terminals,
+    pull_requests: relations.pull_requests,
     ...(extras?.worktree_row !== undefined ? { worktree_row: extras.worktree_row } : {}),
     ...(extras?.existing_review_id !== undefined
       ? { existing_review_id: extras.existing_review_id }
@@ -139,24 +131,40 @@ export function formatTaskResponse(
   };
 }
 
-/** Reload a task with its related agents and user_terminals (mutation-style, no prompts). */
+/** Reload a task with its related workers, user_terminals, and pull_requests (mutation-style, no prompts). */
 export function fetchTaskBundle(taskId: string): Task {
   const { task, relations } = fetchTaskWithRelations(taskId);
-  task.agents = relations.agents;
+  task.workers = relations.workers;
   task.user_terminals = relations.user_terminals;
   return task;
 }
 
 export function derivedStatus(task: {
   runtime_state: string;
-  agents: Array<{ status: string; hook_activity: string }>;
+  workers: Array<{ status: string; hook_activity: string }>;
 }): DerivedTaskStatus | null {
   if (task.runtime_state !== 'running') return null;
-  const activities = task.agents.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
+  const activities = task.workers.filter((a) => a.status !== 'stopped').map((a) => a.hook_activity);
   if (activities.length === 0) return 'done';
   if (activities.includes('active')) return 'working';
   if (activities.includes('waiting')) return 'needs_attention';
   return 'done';
+}
+
+/**
+ * Does this task want the user right now? The single definition of the rule —
+ * every surface (dashboard tab, CLI, anything later) reads `needs_you` off the
+ * task envelope rather than re-deriving it. Distinct from the inbox's
+ * `listNeedsYouTasks()`, which asks the narrower "…and hasn't been seen yet".
+ */
+export function needsYou(task: {
+  runtime_state: string;
+  workers: Array<{ status: string; hook_activity: string }>;
+  pending_prompts: unknown[];
+}): boolean {
+  if (task.runtime_state === 'error') return true;
+  if (task.pending_prompts.length > 0) return true;
+  return derivedStatus(task) === 'needs_attention';
 }
 
 /** Flat Claude launch aliases for `/api/settings` responses (dashboard reads these keys). */
@@ -309,9 +317,29 @@ export function applyDraftUpdates(
 }
 
 /**
+ * Resolve whether AI task naming is enabled: OCTOMUX_AI_TASK_NAMING overrides
+ * settings.json's `aiTaskNaming`, which overrides the hardcoded default (false).
+ */
+export async function resolveAiTaskNamingEnabled(): Promise<boolean> {
+  const aiNamingEnv = process.env.OCTOMUX_AI_TASK_NAMING;
+  if (aiNamingEnv !== undefined) {
+    return aiNamingEnv === '1' || aiNamingEnv.toLowerCase() === 'true';
+  }
+  try {
+    const settings = await getSettings();
+    return settings.aiTaskNaming ?? false;
+  } catch {
+    // settings.json unavailable (e.g. test env with a partial fs mock) — default off
+    return false;
+  }
+}
+
+/**
  * Resolve the task title and description from the request body.
  * Fast path: derives from initial_prompt locally.
- * Optional: if OCTOMUX_AI_TASK_NAMING=1, calls Claude CLI for polish.
+ * Optional: if AI task naming is enabled (OCTOMUX_AI_TASK_NAMING or
+ * settings.json's aiTaskNaming — see resolveAiTaskNamingEnabled), calls the
+ * Claude CLI for polish.
  */
 export async function resolveTaskTitleAndDescription(body: {
   title?: string;
@@ -330,8 +358,7 @@ export async function resolveTaskTitleAndDescription(body: {
     if (!resolvedDescription) resolvedDescription = initialPromptTrimmed;
   }
 
-  const aiNamingEnv = process.env.OCTOMUX_AI_TASK_NAMING ?? '';
-  const aiTaskNamingEnabled = aiNamingEnv === '1' || aiNamingEnv.toLowerCase() === 'true';
+  const aiTaskNamingEnabled = await resolveAiTaskNamingEnabled();
   if (
     initialPromptTrimmed &&
     aiTaskNamingEnabled &&

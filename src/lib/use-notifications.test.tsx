@@ -32,7 +32,7 @@ describe('useNotifications', () => {
         id: 't1',
         title: 'Task one',
         runtime_state: 'running',
-        agents: [
+        workers: [
           makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' }),
         ],
       }),
@@ -50,13 +50,13 @@ describe('useNotifications', () => {
         id: 't1',
         title: 'Task one',
         runtime_state: 'idle',
-        agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' })],
+        workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' })],
       }),
       makeTask({
         id: 't2',
         title: 'Task two',
         runtime_state: 'idle',
-        agents: [makeAgent({ id: 'a2', task_id: 't2', status: 'stopped', hook_activity: 'idle' })],
+        workers: [makeAgent({ id: 'a2', task_id: 't2', status: 'stopped', hook_activity: 'idle' })],
       }),
     ];
     const { rerender } = renderHook(({ t }) => useNotifications(t, navigate), {
@@ -75,13 +75,13 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Task one',
       runtime_state: 'running',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' })],
+      workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' })],
     });
     const closed = makeTask({
       id: 't1',
       title: 'Task one',
       runtime_state: 'idle',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' })],
+      workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' })],
     });
     const { rerender } = renderHook(({ t }) => useNotifications(t, navigate), {
       initialProps: { t: [running] },
@@ -106,14 +106,14 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Task one',
       runtime_state: 'running',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' })],
+      workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' })],
     });
     const errored = makeTask({
       id: 't1',
       title: 'Task one',
       runtime_state: 'error',
       error: 'boom',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' })],
+      workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' })],
     });
     const { rerender } = renderHook(({ t }) => useNotifications(t, navigate), {
       initialProps: { t: [running] },
@@ -132,7 +132,7 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Multi agent',
       runtime_state: 'running',
-      agents: [
+      workers: [
         makeAgent({
           id: 'a1',
           task_id: 't1',
@@ -160,7 +160,7 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Multi agent',
       runtime_state: 'idle',
-      agents: [
+      workers: [
         makeAgent({
           id: 'a1',
           task_id: 't1',
@@ -202,7 +202,7 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Task one',
       runtime_state: 'running',
-      agents: [
+      workers: [
         makeAgent({
           id: 'a1',
           task_id: 't1',
@@ -223,7 +223,7 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Task one',
       runtime_state: 'running',
-      agents: [
+      workers: [
         makeAgent({
           id: 'a1',
           task_id: 't1',
@@ -257,14 +257,16 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Task one',
       runtime_state: 'running',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' })],
+      workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'active' })],
       pending_prompts: [],
     });
     const withPrompt = makeTask({
       id: 't1',
       title: 'Task one',
       runtime_state: 'running',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'waiting' })],
+      workers: [
+        makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'waiting' }),
+      ],
       pending_prompts: [
         {
           id: 'p1',
@@ -304,7 +306,7 @@ describe('useNotifications', () => {
       id: 't1',
       title: 'Stuck task',
       runtime_state: 'idle',
-      agents: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'idle' })],
+      workers: [makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'idle' })],
     });
     const { rerender } = renderHook(({ t }) => useNotifications(t, navigate), {
       initialProps: { t: [stale] },
@@ -325,7 +327,7 @@ describe('useNotifications', () => {
         id: 't1',
         title: 'Task one',
         runtime_state: 'running',
-        agents: [
+        workers: [
           makeAgent({ id: 'a1', task_id: 't1', status: 'running', hook_activity: 'waiting' }),
         ],
         pending_prompts: [

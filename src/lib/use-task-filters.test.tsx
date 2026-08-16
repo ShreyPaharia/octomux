@@ -13,7 +13,9 @@ describe('useTaskFilters', () => {
     makeTask({ id: 't1', runtime_state: 'running', repo_path: '/tmp/alpha' }),
     makeTask({ id: 't2', runtime_state: 'idle', repo_path: '/tmp/beta' }),
     makeTask({ id: 't3', runtime_state: 'idle', repo_path: '/tmp/alpha' }),
-    makeTask({ id: 't4', runtime_state: 'error', repo_path: '/tmp/beta' }),
+    // `needs_you` is computed by the server (see `needsYou` in server/routes/_shared.ts)
+    // and arrives on the task envelope — the hook only reads it.
+    makeTask({ id: 't4', runtime_state: 'error', repo_path: '/tmp/beta', needs_you: true }),
   ];
 
   it('defaults to All filter showing every task', () => {
@@ -30,7 +32,7 @@ describe('useTaskFilters', () => {
     expect(ids).toEqual(['t1']);
   });
 
-  it('Needs You chip includes errored tasks', () => {
+  it('Needs You chip shows tasks the server flagged needs_you', () => {
     const { result } = renderHook(() => useTaskFilters(tasks));
     act(() => result.current.setFilter('status', 'needs_you'));
     const ids = result.current.filtered.map((t) => t.id);
@@ -42,6 +44,7 @@ describe('useTaskFilters', () => {
       id: 't5',
       runtime_state: 'running',
       repo_path: '/tmp/beta',
+      needs_you: true,
       pending_prompts: [
         {
           id: 'pp1',

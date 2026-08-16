@@ -73,8 +73,12 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; the bundled npm is older.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -110,8 +114,7 @@ jobs:
       - name: Publish @octomux/tmux-${{ matrix.platform }}-${{ matrix.arch }}
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         working-directory: packages/tmux-${{ matrix.platform }}-${{ matrix.arch }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+        # No token: OIDC trusted publishing, configured per package on npmjs.com.
         run: |
           set -euo pipefail
           PKG="@octomux/tmux-${{ matrix.platform }}-${{ matrix.arch }}"
@@ -127,5 +130,5 @@ jobs:
           if npm view "$PKG@$VER" version >/dev/null 2>&1; then
             echo "$PKG@$VER already on npm — skipping publish"
           else
-            npm publish --access public
+            npm publish --provenance --access public
           fi

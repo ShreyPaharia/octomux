@@ -26,7 +26,9 @@ vi.mock('child_process', () => ({
           );
         }
         tmuxSessions.add(sess);
-        return cb(null, { stdout: '', stderr: '' });
+        // new-session chains set-option + display-message in one invocation, so
+        // the window index comes back on this call's stdout.
+        return cb(null, { stdout: String(nextWindowIndex), stderr: '' });
       }
       if (args.includes('display-message') || args.includes('list-windows')) {
         return cb(null, { stdout: String(nextWindowIndex), stderr: '' });
@@ -77,15 +79,12 @@ vi.mock('./hook-settings.js', () => ({
 }));
 
 vi.mock('./skills.js', (importOriginal) => {
-  const actual = importOriginal<typeof import('./skills.js')>();
-  return {
-    ...actual,
-    syncSkills: vi.fn().mockResolvedValue(undefined),
-  };
+  return importOriginal<typeof import('./skills.js')>();
 });
 
 vi.mock('./harnesses/index.js', () => {
-  const actual = vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
+  const actual =
+    vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
   const claudeCode = {
     ...actual.getHarness('claude-code'),
     installHooks: vi.fn().mockResolvedValue(undefined),
@@ -114,6 +113,7 @@ vi.mock('./settings.js', () => {
 
 let nextWindowIndex = 0;
 const tmuxSessions = new Set<string>();
+
 
 const { createTestDb, getTask, DEFAULTS } = await import('./test-helpers.js');
 

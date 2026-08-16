@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 import Database from '../sqlite.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -37,8 +37,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../orchestrator/store.js', (importOriginal) => {
-  const actual = importOriginal<typeof import('../orchestrator/store.js')>();
+vi.mock('../repositories/orchestrator.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../repositories/orchestrator.js')>();
   return {
     ...actual,
     isOrchestratorManaged: vi.fn(() => false),
@@ -53,8 +53,7 @@ vi.mock('../hook-base-url.js', () => ({
   hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777'),
 }));
 
-const { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } =
-  await import('../test-helpers.js');
+const { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } = await import('../test-helpers.js');
 
 const {
   buildAgentStartupCommand,
@@ -66,7 +65,7 @@ const {
 } = await import('./launch.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
-const { isOrchestratorManaged } = await import('../orchestrator/store.js');
+const { isOrchestratorManaged } = await import('../repositories/orchestrator.js');
 const { mcpServerInvocation } = await import('../orchestrator/runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -137,9 +136,23 @@ describe('buildAgentStartupCommand', () => {
     });
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
-      'Do the thing',
-      { mode: 0o600, flag: 'wx' },
+      expect.stringContaining('Do the thing'),
+      { mode: 0o600 },
     );
+  });
+
+  it('appends the rename hint to the written prompt', () => {
+    buildAgentStartupCommand({
+      baseCmd: 'claude --session-id abc',
+      prompt: 'Do the thing',
+      worktreePath: '/tmp/wt',
+      agentId: 'agent123',
+    });
+    const call = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-agent123'));
+    expect(call).toBeDefined();
+    expect(String(call![1])).toContain('octomux task rename');
   });
 
   it('does NOT write a prompt file when prompt is absent', () => {
@@ -353,7 +366,7 @@ describe('prepareResumeLaunch', () => {
 
     // setAgentHarnessSessionId should have updated the DB
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string } | undefined;
     expect(updatedAgent?.harness_session_id).toBe('new-session-id-xyz');
   });
@@ -378,7 +391,7 @@ describe('prepareResumeLaunch', () => {
 
     // harness_session_id should remain null (not updated)
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string | null } | undefined;
     expect(updatedAgent?.harness_session_id).toBeNull();
   });
@@ -403,7 +416,7 @@ describe('prepareResumeLaunch', () => {
 
     // harness_session_id should remain the original value (resume path doesn't set it)
     const updatedAgent = db
-      .prepare('SELECT harness_session_id FROM agents WHERE id = ?')
+      .prepare('SELECT harness_session_id FROM workers WHERE id = ?')
       .get(DEFAULTS.agent.id) as { harness_session_id: string } | undefined;
     expect(updatedAgent?.harness_session_id).toBe('existing-session-id');
   });

@@ -4,20 +4,25 @@ import { broadcast } from '../events.js';
 import { readGithubLogin } from '../github-login.js';
 import { childLogger } from '../logger.js';
 import { buildPrReviewPrompt } from '../review-tasks.js';
-import { createReviewTaskFromPr } from '../services/review-service.js';
+import { getWorkflow } from '../workflows/registry.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import {
+  getTask,
   listTaskRepoPaths,
   findExistingPrTask,
+  hasTrashedPrReviewTask,
   listAutoReviewDrafts,
+  listIdleAutoReviewTasksWithPr,
   hardDeleteTask,
   updateTaskPromptAndSha,
   setPrHeadSha,
 } from '../repositories/tasks.js';
 import { deleteWorktree } from '../repositories/worktrees.js';
-import { findFirstActiveAgent } from '../repositories/agent-runtime.js';
-import { checkoutRef, fetchOriginQuiet, isAncestor } from '../task-engine/git.js';
+import { countAgentsForTask, findFirstActiveAgent } from '../repositories/workers.js';
+import { resumeTask, softDeleteTask } from '../task-engine/index.js';
+import { checkoutRef, fetchOriginQuiet } from '../task-engine/git.js';
 import { repoNameWithOwner } from './github-repo.js';
+import type { Task } from '../types.js';
 
 const logger = childLogger('poller');
 const execFile = promisify(execFileCb);
@@ -148,12 +153,13 @@ function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): 
   return `${prompt}\n\nUpdated: head advanced to ${newSha} at ${timestamp}`;
 }
 
-function buildReReviewNudge(pr: OpenReviewPR, previousHeadReachable = true): string {
+function buildReReviewNudge(pr: OpenReviewPR, taskId: string): string {
   return (
-    `Re-review requested for PR #${pr.number}. ` +
+    `Re-review requested for PR #${pr.number} (${pr.url}). ` +
     `Head advanced to ${pr.headRefOid}. ` +
-    `previous_head_unreachable=${!previousHeadReachable}. ` +
-    `Please pull the latest and re-run the /review-pr flow on ${pr.url}.`
+    `Run the /review-artifact re-review flow — redeploy to the same artifact URL with a delta ` +
+    `section, send the Slack ping as before, then close this task again with ` +
+    `\`octomux close-task ${taskId}\`.`
   );
 }
 
@@ -161,13 +167,11 @@ async function nudgeAgentForReReview(
   taskId: string,
   tmuxSession: string,
   pr: OpenReviewPR,
-  previousHeadReachable = true,
 ): Promise<boolean> {
   const agent = findFirstActiveAgent(taskId);
   if (!agent) return false;
   try {
-    const message = buildReReviewNudge(pr, previousHeadReachable);
-    await sendMessageToAgent(tmuxSession, agent.window_index, message);
+    await sendMessageToAgent(tmuxSession, agent.window_index, buildReReviewNudge(pr, taskId));
     return true;
   } catch (err) {
     logger.warn(
@@ -178,10 +182,23 @@ async function nudgeAgentForReReview(
   }
 }
 
+async function checkoutNewHead(taskId: string, worktreePath: string | null, headRefOid: string) {
+  if (!worktreePath) return;
+  try {
+    await fetchOriginQuiet(worktreePath);
+    await checkoutRef(worktreePath, headRefOid);
+  } catch (err) {
+    logger.warn(
+      { task_id: taskId, err: (err as Error).message },
+      'failed to fetch/checkout new head; proceeding — the agent can fetch for itself',
+    );
+  }
+}
+
 async function upsertReviewTask(
   repoPath: string,
   pr: OpenReviewPR,
-): Promise<{ action: 'created' | 'updated' | 'nudged' | 'skipped'; taskId?: string }> {
+): Promise<{ action: 'created' | 'updated' | 'nudged' | 'resumed' | 'skipped'; taskId?: string }> {
   const existing = findExistingPrTask(repoPath, pr.number);
 
   if (existing) {
@@ -189,6 +206,18 @@ async function upsertReviewTask(
     if (existing.pr_head_sha === pr.headRefOid) return { action: 'skipped' };
 
     if (existing.runtime_state === 'idle') {
+      if (countAgentsForTask(existing.id) > 0) {
+        // Closed-but-resumable review session: resume the same conversation
+        // (harness session id) and hand it the re-review prompt.
+        const task = getTask(existing.id) as Task | undefined;
+        if (!task) return { action: 'skipped' };
+        await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
+        await resumeTask(task, { prompt: buildReReviewNudge(pr, existing.id) });
+        setPrHeadSha(existing.id, pr.headRefOid);
+        return { action: 'resumed', taskId: existing.id };
+      }
+
+      // Never-started draft: refresh the prompt + sha; startTask delivers it.
       const updatedPrompt = buildShaUpdateNote(
         existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString(), existing.id),
         pr.headRefOid,
@@ -201,32 +230,8 @@ async function upsertReviewTask(
     if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
 
-      let previousHeadReachable = true;
-      if (existing.worktree_path) {
-        try {
-          await fetchOriginQuiet(existing.worktree_path);
-          await checkoutRef(existing.worktree_path, pr.headRefOid);
-        } catch (err) {
-          logger.warn(
-            { task_id: existing.id, err: (err as Error).message },
-            'failed to fetch/checkout new head; nudging anyway and letting agent retry',
-          );
-        }
-        if (existing.pr_head_sha) {
-          previousHeadReachable = await isAncestor(
-            existing.worktree_path,
-            existing.pr_head_sha,
-            pr.headRefOid,
-          );
-        }
-      }
-
-      const delivered = await nudgeAgentForReReview(
-        existing.id,
-        existing.tmux_session,
-        pr,
-        previousHeadReachable,
-      );
+      await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
+      const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
       if (!delivered) return { action: 'skipped' };
       setPrHeadSha(existing.id, pr.headRefOid);
       return { action: 'nudged', taskId: existing.id };
@@ -235,23 +240,89 @@ async function upsertReviewTask(
     return { action: 'skipped' };
   }
 
-  const { id } = await createReviewTaskFromPr({
-    repo_path: repoPath,
-    pr_number: pr.number,
-    pr_url: pr.url,
-    pr_head_sha: pr.headRefOid,
-    base_branch: pr.baseRefName,
-    title: pr.title,
-    author: pr.author?.login ?? null,
-    requested_at: new Date().toISOString(),
+  // The user deleted this PR's review — don't resurrect it while the trashed
+  // task exists (its worktree is only removed when the trash purges, so an
+  // early recreate would error on the leftover worktree anyway).
+  if (hasTrashedPrReviewTask(repoPath, pr.number)) {
+    return { action: 'skipped' };
+  }
+
+  await getWorkflow('reviewer')!.run!({
+    repoPath,
+    config: {},
+    event: {
+      pr_number: pr.number,
+      pr_url: pr.url,
+      pr_head_sha: pr.headRefOid,
+      base_branch: pr.baseRefName,
+      title: pr.title,
+      author: pr.author?.login ?? null,
+      requested_at: new Date().toISOString(),
+    },
   });
-  return { action: 'created', taskId: id };
+  const created = findExistingPrTask(repoPath, pr.number);
+  if (!created || created.source !== 'auto_review') {
+    return { action: 'skipped' };
+  }
+  return { action: 'created', taskId: created.id };
 }
 
-function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<number>): string[] {
-  const drafts = listAutoReviewDrafts(repoPath);
+/**
+ * Fetch the state (OPEN/MERGED/CLOSED) of a set of PR numbers in one aliased
+ * GraphQL call. Returns an empty map on total failure (skip cleanup this
+ * cycle); a PR that resolves to null (deleted repo/PR) is reported as CLOSED.
+ */
+async function fetchPrStates(nwo: string, numbers: number[]): Promise<Map<number, string>> {
+  const states = new Map<number, string>();
+  const [owner, name] = nwo.split('/');
+  if (!owner || !name || numbers.length === 0) return states;
+
+  const fields = numbers.map((n) => `p${n}: pullRequest(number: ${n}) { state }`).join(' ');
+  const query = `query { repository(owner: "${owner}", name: "${name}") { ${fields} } }`;
+
+  let stdout = '';
+  try {
+    ({ stdout } = await execFile('gh', ['api', 'graphql', '-f', `query=${query}`]));
+  } catch (err) {
+    // gh exits non-zero when the response carries a GraphQL errors array
+    // (e.g. one missing PR) but still prints the partial-data body.
+    stdout = (err as { stdout?: string }).stdout ?? '';
+    if (!stdout) {
+      logger.debug({ nwo, err: (err as Error).message }, 'gh PR state query failed');
+      return states;
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(stdout.trim() || '{}') as {
+      data?: { repository?: Record<string, { state?: string } | null> | null };
+    };
+    const repo = parsed.data?.repository;
+    if (!repo) return states;
+    for (const n of numbers) {
+      states.set(n, repo[`p${n}`]?.state ?? 'CLOSED');
+    }
+  } catch {
+    logger.debug({ nwo }, 'gh PR state query returned unparseable output');
+  }
+  return states;
+}
+
+/**
+ * Two-stage cleanup so reviews never dangle:
+ * 1. Never-started drafts whose PR left the review-requested set — purge
+ *    immediately (no session worth preserving, no API call needed).
+ * 2. Closed-but-resumable sessions — kept while their PR is open (re-review /
+ *    follow-up chat), trashed once the PR is merged or closed.
+ */
+async function cleanupResolvedReviews(
+  repoPath: string,
+  nwo: string,
+  activePrNumbers: Set<number>,
+): Promise<string[]> {
   const deletedIds: string[] = [];
-  for (const draft of drafts) {
+
+  for (const draft of listAutoReviewDrafts(repoPath)) {
     if (draft.pr_number === null) continue;
     if (activePrNumbers.has(draft.pr_number)) continue;
     hardDeleteTask(draft.id);
@@ -259,6 +330,26 @@ function cleanupResolvedReviewDrafts(repoPath: string, activePrNumbers: Set<numb
       deleteWorktree(draft.worktree_id);
     }
     deletedIds.push(draft.id);
+  }
+
+  // Active PRs are open by definition (the search is `is:pr is:open`).
+  const candidates = listIdleAutoReviewTasksWithPr(repoPath).filter(
+    (t) => !activePrNumbers.has(t.pr_number),
+  );
+  if (candidates.length === 0) return deletedIds;
+
+  const states = await fetchPrStates(nwo, [...new Set(candidates.map((t) => t.pr_number))]);
+  for (const candidate of candidates) {
+    const state = states.get(candidate.pr_number);
+    if (state !== 'MERGED' && state !== 'CLOSED') continue;
+    const task = getTask(candidate.id) as Task | undefined;
+    if (!task) continue;
+    await softDeleteTask(task);
+    logger.info(
+      { task_id: candidate.id, pr_number: candidate.pr_number, pr_state: state },
+      'trashed review session for merged/closed PR',
+    );
+    deletedIds.push(candidate.id);
   }
   return deletedIds;
 }
@@ -315,12 +406,23 @@ export async function pollReviewerRequests(): Promise<void> {
           'nudged running agent for PR re-review',
         );
         broadcast({ type: 'task:updated', payload: { taskId: result.taskId! } });
+      } else if (result.action === 'resumed') {
+        logger.info(
+          {
+            task_id: result.taskId,
+            pr_number: pr.number,
+            repo_path: repoPath,
+            head: pr.headRefOid,
+          },
+          'resumed closed review session for PR re-review',
+        );
+        broadcast({ type: 'task:updated', payload: { taskId: result.taskId! } });
       }
     }
 
-    const deletedIds = cleanupResolvedReviewDrafts(repoPath, activePrNumbers);
+    const deletedIds = await cleanupResolvedReviews(repoPath, nwo, activePrNumbers);
     for (const taskId of deletedIds) {
-      logger.info({ task_id: taskId, repo_path: repoPath }, 'removed auto-review draft (resolved)');
+      logger.info({ task_id: taskId, repo_path: repoPath }, 'removed resolved auto-review task');
       broadcast({ type: 'task:deleted', payload: { taskId } });
     }
   }

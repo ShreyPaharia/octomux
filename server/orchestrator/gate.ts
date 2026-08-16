@@ -36,15 +36,15 @@
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from '../logger.js';
-import { classify } from './policy.js';
+import { classify, addRule, capabilityToolName } from './policy.js';
 import {
   createCard,
   getCard,
   resolveCard,
   upsertManagedTask,
   listAllPendingCards,
-} from './store.js';
-import type { ActionCard } from './store.js';
+} from '../repositories/orchestrator.js';
+import type { ActionCard } from '../repositories/orchestrator.js';
 import { pushToConversation } from './stream.js';
 import { getTask } from '../repositories/index.js';
 import {
@@ -97,6 +97,8 @@ export interface ExecuteCardInput {
   edited_input?: Record<string, unknown>;
   /** For 'reject'/'respond': optional text to include in the injection note. */
   respond_text?: string;
+  /** Persist an allow-rule for this command/capability. 'ask' tier ONLY — see policy.ts's addRule. */
+  always_allow?: boolean;
 }
 
 // ─── Command parsing ──────────────────────────────────────────────────────────
@@ -220,7 +222,7 @@ export async function handlePreToolUse(input: PreToolUseInput): Promise<PreToolU
  * Idempotent: no-ops if the card is already resolved.
  */
 export async function executeCard(input: ExecuteCardInput): Promise<void> {
-  const { card_id, decision, edited_input, respond_text } = input;
+  const { card_id, decision, edited_input, respond_text, always_allow } = input;
 
   const card = getCard(card_id);
   if (!card) {
@@ -273,6 +275,18 @@ export async function executeCard(input: ExecuteCardInput): Promise<void> {
     return;
   }
 
+  // ── Capability-registry gate card: task.close/create/move/... (`ask`/
+  //    `always-ask` tier) or an ask_owner question card. Created by
+  //    onGatedInvoke (mcp/gate.ts) via POST /api/hooks/gate-card. Unlike the
+  //    Bash-gate cards below, NOTHING runs server-side here — the MCP
+  //    subprocess itself is blocked in a poll loop waiting for this card's
+  //    status to leave 'pending'. Resolving it (below) is the entire job; see
+  //    mcp/gate.ts's onGatedInvoke for the other side of this handoff.
+  if (card.tool_name.startsWith('capability:')) {
+    await executeCapabilityCard(card, decision, respond_text, always_allow);
+    return;
+  }
+
   // Approve or Edit
   const effectiveInput: Record<string, unknown> = (() => {
     if (decision === 'edit' && edited_input) {
@@ -284,6 +298,31 @@ export async function executeCard(input: ExecuteCardInput): Promise<void> {
       return {};
     }
   })();
+
+  // "Always allow" promotion for the legacy Bash `octomux <subcommand>` gate —
+  // 'ask' tier ONLY. classify() re-derives the tier from the card's own
+  // tool_name/input (not the ORIGINAL decision at deny-time) so a rule added
+  // between then and now is reflected; an always-ask subcommand (delete-task/
+  // close-task) never gets a rule inserted regardless of this flag, matching
+  // policy.ts's addRule doc ("always-ask commands are never promoted").
+  if (decision === 'approve' && always_allow) {
+    try {
+      const { command, args } = parseCommand(card.tool_name, JSON.parse(card.input));
+      const subcommand = args[0];
+      const tier = classify(command, args);
+      if (tier === 'ask' && command === 'octomux' && subcommand) {
+        addRule({ tool_name: 'octomux', match: { subcommand }, effect: 'allow' });
+        logger.info({ card_id, subcommand }, 'gate.executeCard: always-allow rule added');
+      } else {
+        logger.debug(
+          { card_id, tier },
+          'gate.executeCard: always_allow requested but tier is not promotable — ignored',
+        );
+      }
+    } catch (err) {
+      logger.warn({ card_id, err }, 'gate.executeCard: always_allow rule check failed — ignoring');
+    }
+  }
 
   logger.info(
     { card_id, decision, conversation_id: card.conversation_id },
@@ -323,6 +362,94 @@ export async function executeCard(input: ExecuteCardInput): Promise<void> {
   );
 
   logger.info({ card_id, conversation_id: card.conversation_id }, 'gate.executeCard: done');
+}
+
+// ─── executeCapabilityCard ───────────────────────────────────────────────────
+
+/** Parsed shape of a capability-gate card's `input` JSON (set by POST /api/hooks/gate-card). */
+interface CapabilityCardInput {
+  kind?: 'action' | 'question';
+  tier?: 'ask' | 'always-ask';
+  capability_id?: string;
+  args?: Record<string, unknown>;
+  question?: string | null;
+}
+
+/**
+ * Resolve a capability-gate card (approve/edit — reject is already handled
+ * uniformly by the caller before this runs). Only DECIDES; the MCP
+ * subprocess's poll loop (mcp/gate.ts's onGatedInvoke) is what actually lets
+ * the agent's call proceed once it observes the resolution.
+ *
+ * `respondText` carries a question card's free-text ANSWER (the UI sends it
+ * as `decision:'approve', respond_text: <answer>` — see QuestionCard.tsx —
+ * not the unrelated 'respond' decision, which injects a new conductor turn).
+ */
+async function executeCapabilityCard(
+  card: ActionCard,
+  decision: ExecuteCardInput['decision'],
+  respondText: string | undefined,
+  alwaysAllow: boolean | undefined,
+): Promise<void> {
+  let parsed: CapabilityCardInput = {};
+  try {
+    parsed = JSON.parse(card.input) as CapabilityCardInput;
+  } catch {
+    parsed = {};
+  }
+  const capabilityId = parsed.capability_id ?? card.tool_name.slice('capability:'.length);
+  const tier = parsed.tier;
+
+  // 'edit' isn't meaningfully supported yet — the edited args would need to
+  // reach the blocked MCP subprocess, which only polls a decision, not a
+  // payload (it re-runs cap.handler with the ORIGINAL input it was called
+  // with). Approve as-is rather than silently drop the edit; logged so the
+  // gap is visible instead of quietly mis-approving with stale-looking args.
+  if (decision === 'edit') {
+    logger.warn(
+      { card_id: card.id, capability_id: capabilityId },
+      'gate.executeCapabilityCard: edit is not supported for capability cards — approving as-is',
+    );
+  }
+
+  resolveCard(
+    card.id,
+    'approved',
+    respondText !== undefined ? JSON.stringify({ answer: respondText }) : null,
+  );
+
+  // "Always allow" promotion — 'ask' tier ONLY. always-ask must never be
+  // promotable: no rule is inserted for it regardless of this flag (defense
+  // in depth — the UI already hides the checkbox for alwaysAsk cards, but a
+  // client can't be trusted to enforce that on its own).
+  if (alwaysAllow && tier === 'ask') {
+    addRule({ tool_name: capabilityToolName(capabilityId), match: null, effect: 'allow' });
+    logger.info(
+      { card_id: card.id, capability_id: capabilityId },
+      'gate.executeCapabilityCard: always-allow rule added',
+    );
+  } else if (alwaysAllow && tier === 'always-ask') {
+    logger.warn(
+      { card_id: card.id, capability_id: capabilityId },
+      'gate.executeCapabilityCard: always_allow requested on an always-ask capability — refused',
+    );
+  }
+
+  const label = parsed.kind === 'question' ? 'answered' : 'approved';
+  pushToConversation(
+    card.conversation_id,
+    JSON.stringify({
+      type: 'message',
+      role: 'system',
+      text: `[Gate] ${label} — \`${capabilityId}\``,
+      id: card.id,
+    }),
+  );
+
+  logger.info(
+    { card_id: card.id, capability_id: capabilityId },
+    'gate.executeCapabilityCard: done',
+  );
 }
 
 // ─── executeApprovePlan ───────────────────────────────────────────────────────

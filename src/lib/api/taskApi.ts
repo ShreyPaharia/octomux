@@ -13,13 +13,11 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   AddAgentRequest,
-  Agent,
+  Worker,
   UserTerminal,
   Worktree,
   WorktreeSummary,
   MoveTaskRequest,
-  SummaryRequest,
-  NoteRequest,
   AddRefRequest,
   TaskExternalRef,
   TaskUpdate,
@@ -185,6 +183,14 @@ export interface HookExecution {
   stderr_excerpt: string;
 }
 
+/**
+ * Relations the dashboard needs beyond the lean default. `task.list` and
+ * `task.get` return a minimal shape unless asked for more — see
+ * server/registry/capabilities/task.ts.
+ */
+const LIST_INCLUDE = 'workers,pending_prompts,user_terminals';
+const DETAIL_INCLUDE = 'workers,pending_prompts,user_terminals,worktree,existing_review_id';
+
 export const taskApi = {
   browse: (path?: string) =>
     request<BrowseResult>(`/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -196,9 +202,17 @@ export const taskApi = {
     request<string[]>(`/branches?repo_path=${encodeURIComponent(repoPath)}`),
   getDefaultBranch: (repoPath: string) =>
     request<{ branch: string }>(`/default-branch?repo_path=${encodeURIComponent(repoPath)}`),
-  listTasks: (opts?: { trash?: boolean }) =>
-    request<Task[]>(opts?.trash ? '/tasks?trash=true' : '/tasks'),
-  getTask: (id: string) => request<Task>(`/tasks/${id}`),
+  listTasks: (opts?: { trash?: boolean; includeAutomated?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.trash) params.set('trash', 'true');
+    if (opts?.includeAutomated) params.set('includeAutomated', 'true');
+    // task.list is lean by default — one shape for the dashboard, the CLI and
+    // MCP alike. The dashboard needs these relations to render task cards,
+    // attention indicators and the sessions inbox, so it asks for them.
+    params.set('include', LIST_INCLUDE);
+    return request<Task[]>(`/tasks?${params.toString()}`);
+  },
+  getTask: (id: string) => request<Task>(`/tasks/${id}?include=${DETAIL_INCLUDE}`),
   createTask: (data: CreateTaskRequest) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (id: string, data: UpdateTaskRequest) =>
@@ -258,14 +272,17 @@ export const taskApi = {
   deleteComment: (taskId: string, commentId: string) =>
     request<void>(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' }),
   sendAgentMessage: (taskId: string, agentId: string, message: string) =>
-    request<{ ok: boolean }>(`/tasks/${taskId}/agents/${agentId}/message`, {
+    request<{ ok: boolean }>(`/tasks/${taskId}/workers/${agentId}/message`, {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
   addAgent: (taskId: string, data?: AddAgentRequest) =>
-    request<Agent>(`/tasks/${taskId}/agents`, { method: 'POST', body: JSON.stringify(data || {}) }),
+    request<Worker>(`/tasks/${taskId}/workers`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
   stopAgent: (taskId: string, agentId: string) =>
-    request<void>(`/tasks/${taskId}/agents/${agentId}`, { method: 'DELETE' }),
+    request<void>(`/tasks/${taskId}/workers/${agentId}`, { method: 'DELETE' }),
   createUserTerminal: (taskId: string) =>
     request<{ editor: string; windowIndex: number | null }>(`/tasks/${taskId}/user-terminal`, {
       method: 'POST',
@@ -283,10 +300,9 @@ export const taskApi = {
   restoreTask: (id: string) => request<Task>(`/tasks/${id}/restore`, { method: 'POST' }),
   moveTask: (id: string, data: MoveTaskRequest) =>
     request<Task>(`/tasks/${id}/move`, { method: 'POST', body: JSON.stringify(data) }),
-  postTaskSummary: (id: string, data: SummaryRequest) =>
-    request<Task>(`/tasks/${id}/summary`, { method: 'POST', body: JSON.stringify(data) }),
-  postTaskNote: (id: string, data: NoteRequest) =>
-    request<TaskUpdate>(`/tasks/${id}/note`, { method: 'POST', body: JSON.stringify(data) }),
+  // postTaskSummary / postTaskNote retired with POST /api/tasks/:id/summary
+  // and /note (spec §5.5) — narrative now lives in the task's
+  // .octomux/artifact.md, with no HTTP write surface in this pass.
   addTaskRef: (id: string, data: AddRefRequest) =>
     request<TaskExternalRef>(`/tasks/${id}/refs`, { method: 'POST', body: JSON.stringify(data) }),
   deleteTaskRef: (id: string, integration: string) =>
@@ -297,17 +313,17 @@ export const taskApi = {
   getTaskHookExecutions: (id: string, limit?: number) =>
     request<HookExecution[]>(`/tasks/${id}/hooks${limit ? `?limit=${limit}` : ''}`),
 
-  // Agent task hopping (runtime agent row ← tasks table)
+  // Worker task hopping (per-task tmux worker row ← tasks table)
   moveAgentToTask: (agentId: string, taskId: string | null) =>
-    request<Agent>(`/agents/${encodeURIComponent(agentId)}/task`, {
+    request<Worker>(`/workers/${encodeURIComponent(agentId)}/task`, {
       method: 'PATCH',
       body: JSON.stringify({ task_id: taskId }),
     }),
 
   // Chats (standalone runtime agents)
-  listChats: () => request<Agent[]>('/chats'),
+  listChats: () => request<Worker[]>('/chats'),
   closeChat: (id: string) =>
-    request<Agent>(`/chats/${encodeURIComponent(id)}`, {
+    request<Worker>(`/chats/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'stopped' }),
     }),

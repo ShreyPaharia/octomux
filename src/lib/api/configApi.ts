@@ -22,14 +22,11 @@ export interface SkillDetail {
 export interface AgentDefinition {
   name: string;
   description: string;
-  isCustom: boolean;
 }
 
 export interface AgentDetail {
   name: string;
   content: string;
-  defaultContent: string;
-  isCustom: boolean;
 }
 
 export interface OctomuxSettings {
@@ -163,35 +160,14 @@ export const configApi = {
   // Skills
   listSkills: () => request<Skill[]>('/skills'),
   getSkill: (name: string) => request<SkillDetail>(`/skills/${encodeURIComponent(name)}`),
-  createSkill: (data: { name: string; content: string }) =>
-    request<SkillDetail>('/skills', { method: 'POST', body: JSON.stringify(data) }),
-  updateSkill: (name: string, data: { content: string }) =>
-    request<SkillDetail>(`/skills/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-  deleteSkill: (name: string) =>
-    request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
-  // Agents
-  listAgents: () => request<AgentDefinition[]>('/agents'),
-  getAgent: (name: string) => request<AgentDetail>(`/agents/${encodeURIComponent(name)}`),
-  saveAgent: (name: string, content: string) =>
-    request<AgentDetail>(`/agents/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ content }),
-    }),
-  resetAgent: (name: string) =>
-    request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  createAgent: (data: { name: string; content: string }) =>
-    request<AgentDetail>('/agents', { method: 'POST', body: JSON.stringify(data) }),
-  deleteAgent: (name: string) =>
-    request<{ ok: boolean }>(`/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // Agent role definitions (orchestrator/planner/reviewer plugin skeletons) —
+  // not to be confused with `agentsApi` (persistent conductor agents, `/api/agents`).
+  listAgents: () => request<AgentDefinition[]>('/agent-roles'),
+  getAgent: (name: string) => request<AgentDetail>(`/agent-roles/${encodeURIComponent(name)}`),
 
   // Repo Config
   listRepoConfigs: () => request<RepoConfig[]>('/repo-configs'),
-  getRepoConfig: (repoPath: string) =>
-    request<RepoConfig>(`/repo-config?repo_path=${encodeURIComponent(repoPath)}`),
   updateRepoConfig: (repoPath: string, updates: Partial<RepoConfig>) =>
     request<RepoConfig>('/repo-config', {
       method: 'PATCH',

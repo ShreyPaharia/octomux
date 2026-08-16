@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from './bun-test.js';
-import type { Agent } from './types.js';
+import type { Worker } from './types.js';
 
 // Stub the harness's installHooks so the test doesn't write real files.
 vi.mock('./harnesses/index.js', () => {
-  const actual = vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
+  const actual =
+    vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
   return {
     ...actual,
     getHarness: () => ({
@@ -17,7 +18,7 @@ const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('./test
 const { ensureHookToken } = await import('./hook-token.js');
 const { getDb } = await import('./db.js');
 
-function makeAgent(overrides: Partial<Agent> = {}): Agent {
+function makeAgent(overrides: Partial<Worker> = {}): Worker {
   return {
     id: 'a1',
     task_id: null,
@@ -47,7 +48,7 @@ describe('ensureHookToken', () => {
     const agent = makeAgent();
     const token = await ensureHookToken(agent, null);
     expect(token).toMatch(/^[a-f0-9]{64}$/);
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = 'a1'`).get() as {
+    const row = getDb().prepare(`SELECT hook_token FROM workers WHERE id = 'a1'`).get() as {
       hook_token: string;
     };
     expect(row.hook_token).toBe(token);
@@ -69,7 +70,7 @@ describe('ensureHookToken', () => {
     const token = await ensureHookToken(agent, null);
     expect(token).toBe('');
     // DB row should still have empty token — no write occurred.
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = 'a3'`).get() as {
+    const row = getDb().prepare(`SELECT hook_token FROM workers WHERE id = 'a3'`).get() as {
       hook_token: string;
     };
     expect(row.hook_token).toBe('');
@@ -81,7 +82,7 @@ describe('ensureHookToken', () => {
     const agent = makeAgent({ id: 'a4', task_id: 't2' });
     const token = await ensureHookToken(agent, null);
     expect(token).toMatch(/^[a-f0-9]{64}$/);
-    const row = getDb().prepare(`SELECT hook_token FROM agents WHERE id = 'a4'`).get() as {
+    const row = getDb().prepare(`SELECT hook_token FROM workers WHERE id = 'a4'`).get() as {
       hook_token: string;
     };
     expect(row.hook_token).toBe(token);

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import {
+  flagsSuffix,
   formatHarnessFlags,
   formatJsonConfig,
   validateSettingsObject,
@@ -33,8 +34,6 @@ export function validateCursorModel(model: string): string {
   return trimmed;
 }
 
-const OCTOMUX_CURSOR_RULE_PREFIX = 'octomux-agent-';
-
 /**
  * Regex matching the various wordings of Cursor's Workspace Trust prompt.
  * Cursor versions have used phrasings like:
@@ -49,62 +48,6 @@ const TRUST_POLL_TIMEOUT_MS = 5000;
 
 function workspaceCliArg(workspacePath: string): string {
   return ` --workspace ${shellQuoteSingle(workspacePath)}`;
-}
-
-/**
- * Parse the first YAML frontmatter block from an octomux agent Markdown file,
- * returning key/value pairs and the body below the closing `---`.
- */
-function parseAgentMarkdown(content: string): { fm: Record<string, string>; body: string } {
-  const m = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-  if (!m) return { fm: {}, body: content.trim() };
-  const fm: Record<string, string> = {};
-  for (const rawLine of m[1].split('\n')) {
-    const km = rawLine.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!km) continue;
-    let v = km[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-      v = v.slice(1, -1);
-    }
-    fm[km[1]] = v;
-  }
-  return { fm, body: m[2].trim() };
-}
-
-function agentMarkdownToCursorRule(agentName: string, rawContent: string): string {
-  const { fm, body } = parseAgentMarkdown(rawContent);
-  const summary =
-    fm.description || fm.name
-      ? [fm.description, fm.name === agentName ? undefined : fm.name].filter(Boolean).join(' · ')
-      : '';
-  const description = summary.trim() ? summary : `Octomux agent (${agentName})`;
-  const safeDesc = JSON.stringify(description);
-  return `---
-description: ${safeDesc}
-alwaysApply: false
----
-
-<!--
-  Synced from octomux agent definitions for Cursor CLI sessions in this workspace.
-  Personas mirror Claude Code --agent presets; edit definitions under Settings → Agents.
-  Harness → Cursor lets you append CLI flags (--resume, --model, etc.).
--->
-
-${body}
-`;
-}
-
-function pruneOctomuxCursorRules(rulesDir: string): void {
-  if (!fs.existsSync(rulesDir)) return;
-  for (const ent of fs.readdirSync(rulesDir, { withFileTypes: true })) {
-    if (!ent.isFile()) continue;
-    if (
-      ent.name.startsWith(OCTOMUX_CURSOR_RULE_PREFIX) &&
-      (ent.name.endsWith('.mdc') || ent.name.endsWith('.md'))
-    ) {
-      fs.unlinkSync(path.join(rulesDir, ent.name));
-    }
-  }
 }
 
 function hooksJsonObject(bridgeDest: string) {
@@ -151,12 +94,12 @@ export const cursorHarness: Harness = {
 
   buildLaunchCommand({ flags = '', workspacePath }: HarnessLaunchOpts): string {
     const ws = workspacePath ? workspaceCliArg(workspacePath) : '';
-    return `cursor-agent${ws}${flags}`;
+    return `cursor-agent${ws}${flagsSuffix(flags)}`;
   },
 
   buildResumeCommand({ sessionId, flags = '', workspacePath }: HarnessResumeOpts): string {
     const ws = workspacePath ? workspaceCliArg(workspacePath) : '';
-    return `cursor-agent${ws} --resume ${sessionId}${flags}`;
+    return `cursor-agent${ws} --resume ${sessionId}${flagsSuffix(flags)}`;
   },
 
   buildContinueCommand(_opts: HarnessResumeOpts): null {
@@ -208,32 +151,22 @@ export const cursorHarness: Harness = {
     }
   },
 
-  async syncAgents(worktreePath: string): Promise<void> {
-    const { listAgents, getAgent } = await import('../agents.js');
-    const rulesDir = path.join(worktreePath, '.cursor', 'rules');
-    fs.mkdirSync(rulesDir, { recursive: true });
-    pruneOctomuxCursorRules(rulesDir);
-
-    const defs = await listAgents(worktreePath);
-    for (const def of defs) {
-      try {
-        const detail = await getAgent(def.name, worktreePath);
-        const raw = `${OCTOMUX_CURSOR_RULE_PREFIX}${def.name}.mdc`;
-        const dest = path.join(rulesDir, raw);
-        const next = agentMarkdownToCursorRule(def.name, detail.content);
-        try {
-          if (fs.existsSync(dest) && fs.readFileSync(dest, 'utf-8') === next) continue;
-        } catch {
-          /* stale read — overwrite */
-        }
-        fs.writeFileSync(dest, next, 'utf-8');
-      } catch (err) {
-        logger.warn(
-          { worktree_path: worktreePath, agent: def.name, err: (err as Error).message },
-          'cursor syncAgents: failed to mirror agent definition',
-        );
-      }
+  async uninstallHooks(dirPath: string): Promise<void> {
+    // `.cursor/hooks.json` is written wholesale by installHooks and every entry
+    // points at our bridge — drop it only when that still holds, so a
+    // hand-edited file survives.
+    const hooksJsonPath = path.join(dirPath, '.cursor', 'hooks.json');
+    try {
+      const raw = fs.readFileSync(hooksJsonPath, 'utf-8');
+      if (raw.includes('.octomux-hooks')) fs.rmSync(hooksJsonPath, { force: true });
+    } catch {
+      /* absent or unreadable — nothing to clean */
     }
+    fs.rmSync(path.join(dirPath, '.octomux-hooks'), { recursive: true, force: true });
+  },
+
+  async syncAgents(_worktreePath: string): Promise<void> {
+    // Vendored agents ship in the bundled octomux plugin (`--plugin-dir`).
   },
 
   async postLaunch(target: string): Promise<void> {

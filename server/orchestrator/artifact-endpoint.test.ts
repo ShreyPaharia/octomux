@@ -53,11 +53,11 @@ const { default: path } = await import('path');
 const { default: os } = await import('os');
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
-const { createConversation, upsertManagedTask } = await import('./store.js');
+const { createConversation, upsertManagedTask } = await import('../repositories/orchestrator.js');
+const { createApp } = await import('../app.js');
 
 // ─── Lazy import after mocks ──────────────────────────────────────────────────
 
-const { createApp } = await import('../app.js');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

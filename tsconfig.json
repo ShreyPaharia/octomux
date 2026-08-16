@@ -2,13 +2,18 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
   "files": [],
   "references": [
     {
       "path": "./packages/api-client"
+    },
+    {
+      "path": "./packages/capabilities"
     },
     {
       "path": "./packages/diff-engine"

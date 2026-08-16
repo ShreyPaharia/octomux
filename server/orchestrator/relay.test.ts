@@ -1,4 +1,3 @@
-import type { Supervisor } from './supervisor.js';
 /**
  * server/orchestrator/relay.test.ts
  *
@@ -14,6 +13,7 @@ import type { Supervisor } from './supervisor.js';
  *  - The relay is idempotent: a duplicate phase_complete event does not re-fire.
  */
 
+import type { Supervisor } from './supervisor.js';
 import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -44,14 +44,13 @@ vi.mock('./exec.js', () => ({
 
 const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
-const { createConversation, upsertManagedTask, appendEvent, getManagedTask } =
-  await import('./store.js');
-
-// ─── Imports (after mocks) ─────────────────────────────────────────────────
-
+const { createConversation, upsertManagedTask, appendEvent, getManagedTask } = await import('../repositories/orchestrator.js');
 const { createSupervisor } = await import('./supervisor.js');
 const { pushToConversation } = await import('./stream.js');
 const { runSendMessage } = await import('./exec.js');
+
+// ─── Imports (after mocks) ─────────────────────────────────────────────────
+
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

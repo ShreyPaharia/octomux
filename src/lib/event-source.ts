@@ -4,49 +4,19 @@
  * Reconnects with exponential backoff on unexpected disconnects.
  */
 
+import type { ReceivedServerEvent, ServerEventType } from '@octomux/types';
+
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
 
 /**
- * Every event type that can arrive over `/ws/events`. Mirrors the server-side
- * broadcast union in `server/events.ts`; widened from the original three-type
- * stub so consumers no longer need `as`-casts for `task:stuck`, `review:*`, etc.
+ * The consumer-side event shape lives in `@octomux/types` alongside the
+ * server's producer union, so any surface (dashboard, CLI, a future TUI) types
+ * this stream from one definition. Re-exported as `ServerEvent` because that's
+ * what every consumer in this app already imports.
  */
-export type ServerEventType =
-  | 'task:updated'
-  | 'task:created'
-  | 'task:deleted'
-  | 'task:stuck'
-  | 'task:phase_complete'
-  | 'chat:updated'
-  | 'chat:deleted'
-  | 'review:drafts-ready'
-  | 'review:run-failed'
-  | 'review:published'
-  | 'review:head-advanced'
-  | 'loop:emit';
-
-/**
- * A real-time event delivered over `/ws/events`. The payload is intentionally a
- * single flat shape (rather than a discriminated union) so that consumers can
- * read `payload.taskId` / `payload.newHeadSha` / etc. without first narrowing on
- * `type`. All payload fields are optional because they vary by event type.
- */
-export interface ServerEvent {
-  type: ServerEventType;
-  payload: {
-    taskId?: string;
-    chatId?: string;
-    reviewRunId?: string;
-    newHeadSha?: string;
-    github_review_url?: string | null;
-    phase?: string;
-    reason?: string;
-    loopRunId?: string;
-    status?: string;
-    [key: string]: unknown;
-  };
-}
+export type ServerEvent = ReceivedServerEvent;
+export type { ServerEventType };
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;

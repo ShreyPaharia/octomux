@@ -1,0 +1,9 @@
+{
+  "name": "octomux",
+  "version": "1.2.0",
+  "description": "Octomux vendored skills and agent definitions",
+  "author": {
+    "name": "octomux"
+  },
+  "skills": "./skills/"
+}

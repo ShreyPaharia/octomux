@@ -3,7 +3,6 @@ import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
 import {
   getTask,
-  getTaskByWorktreeId,
   listTasks,
   insertTask,
   updateTaskFields,
@@ -23,10 +22,13 @@ import {
   touchAllLastViewed,
   touchUpdatedAt,
   setPrHeadSha,
-  setCurrentSummary,
   unlinkWorktree,
   markTaskRunning,
   countTasks,
+  setDependsOn,
+  validateDependsOn,
+  isDependencyUnmet,
+  listDependentsAwaitingStart,
 } from './tasks.js';
 import { inTransaction } from './tx.js';
 
@@ -112,23 +114,34 @@ describe('repositories/tasks', () => {
       expect(row.pr_number).toBe(42);
       expect(row.pr_head_sha).toBe('abc123');
     });
-  });
 
-  // ─── getTaskByWorktreeId ─────────────────────────────────────────────────────
-
-  describe('getTaskByWorktreeId', () => {
-    it('returns the task linked to a worktree', () => {
-      db.prepare(
-        `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt1', '', 'new', 'available')`,
-      ).run();
-      const id = insertTask({ title: 'T', description: 'D', worktree_id: 'wt1' });
-      const task = getTaskByWorktreeId('wt1');
-      expect(task).toBeDefined();
-      expect(task!.id).toBe(id);
+    it('accepts an optional schedule_id at insert', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBe('sched-1');
     });
 
-    it('returns undefined when no task references the worktree', () => {
-      expect(getTaskByWorktreeId('no-such-wt')).toBeUndefined();
+    it('leaves schedule_id null when not provided', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      const row = db.prepare('SELECT schedule_id FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.schedule_id).toBeNull();
+    });
+
+    // Regression: SELECT_TASK_SQL used to omit t.schedule_id, so every reader of
+    // a getTask()-shaped Task (laneFor in agent-learnings.ts, respawn-agent.ts,
+    // start-task.ts, etc.) saw `schedule_id: undefined` even for a task the
+    // schedule poller stamped — silently routing scheduled agents' learnings
+    // into a fresh loop:<task-id> lane every cron firing instead of the shared
+    // schedule:<id> lane (see plans/2026-07-22-agent-learnings-store.md Task 5).
+    it('getTask surfaces schedule_id on the returned Task', () => {
+      const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
+      expect(getTask(id)!.schedule_id).toBe('sched-1');
     });
   });
 
@@ -168,6 +181,29 @@ describe('repositories/tasks', () => {
       const tasks = listTasks({ trash: true });
       expect(tasks.map((t) => t.id)).toContain('t1');
       expect(tasks.map((t) => t.id)).not.toContain('t2');
+    });
+  });
+
+  describe('listTasks automated filtering', () => {
+    beforeEach(() => {
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('manual', 'manual', '', 'idle', 'backlog', NULL)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+                  VALUES ('drift', 'drift', '', 'idle', 'backlog', 'doc_drift')`,
+      ).run();
+    });
+
+    it('hides tasks with a non-null source by default', () => {
+      const rows = listTasks();
+      expect(rows.map((t) => t.id)).toEqual(['manual']);
+    });
+
+    it('includes automated tasks when asked', () => {
+      const rows = listTasks({ includeAutomated: true });
+      expect(rows.map((t) => t.id).sort()).toEqual(['drift', 'manual']);
     });
   });
 
@@ -351,7 +387,9 @@ describe('repositories/tasks', () => {
     });
   });
 
-  // ─── setPrHeadSha / setCurrentSummary / unlinkWorktree ──────────────────────
+  // ─── setPrHeadSha / unlinkWorktree ──────────────────────────────────────────
+  // current_summary retired (spec §5.5) — see server/artifact.test.ts for its
+  // replacement (setTaskSummary / getArtifactSummary against .octomux/artifact.md).
 
   describe('misc setters', () => {
     it('setPrHeadSha updates the column', () => {
@@ -361,16 +399,6 @@ describe('repositories/tasks', () => {
         pr_head_sha: string | null;
       };
       expect(row.pr_head_sha).toBe('deadbeef');
-    });
-
-    it('setCurrentSummary updates the summary', () => {
-      const id = insertTask({ title: 'T', description: 'D' });
-      setCurrentSummary(id, 'Agent fixed the thing');
-      const row = db
-        .prepare('SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?')
-        .get(id) as { current_summary: string | null; current_summary_updated_at: string | null };
-      expect(row.current_summary).toBe('Agent fixed the thing');
-      expect(row.current_summary_updated_at).not.toBeNull();
     });
 
     it('unlinkWorktree sets worktree_id to NULL', () => {
@@ -543,6 +571,113 @@ describe('inTransaction', () => {
       const before = countTasks();
       insertTask({ title: 'New', description: 'D' });
       expect(countTasks()).toBe(before + 1);
+    });
+  });
+
+  // ─── depends_on primitive (agents/task-depends-on) ─────────────────────────
+
+  describe('depends_on', () => {
+    it('insertTask stores and getTask reads back depends_on', () => {
+      const a = insertTask({ title: 'A', description: 'D' });
+      const b = insertTask({ title: 'B', description: 'D', depends_on: a });
+      expect(getTask(b)?.depends_on).toBe(a);
+    });
+
+    it('setDependsOn writes and clears the link', () => {
+      const a = insertTask({ title: 'A', description: 'D' });
+      const b = insertTask({ title: 'B', description: 'D' });
+      setDependsOn(b, a);
+      expect(getTask(b)?.depends_on).toBe(a);
+      setDependsOn(b, null);
+      expect(getTask(b)?.depends_on).toBeNull();
+    });
+
+    describe('validateDependsOn — cycle safety', () => {
+      it('rejects a nonexistent target task', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(a, 'does-not-exist')).toMatch(/not found/);
+      });
+
+      it('rejects self-dependency', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(a, a)).toMatch(/cannot depend on itself/);
+      });
+
+      it('rejects a 2-cycle: A already depends on B, so B -> A is refused', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        expect(validateDependsOn(a, b)).toBeNull();
+        setDependsOn(a, b); // A -> B
+        expect(validateDependsOn(b, a)).toMatch(/cycle/); // B -> A would close the loop
+      });
+
+      it('rejects a 3-cycle: A -> B -> C exists, so C -> A is refused', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        const c = insertTask({ title: 'C', description: 'D' });
+        setDependsOn(a, b); // A -> B
+        setDependsOn(b, c); // B -> C
+        expect(validateDependsOn(c, a)).toMatch(/cycle/); // C -> A would close the loop
+      });
+
+      it('allows a valid non-cyclic chain', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        const b = insertTask({ title: 'B', description: 'D' });
+        expect(validateDependsOn(a, b)).toBeNull();
+      });
+
+      it('taskId=null (create-time) only checks existence, never a cycle', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        expect(validateDependsOn(null, a)).toBeNull();
+        expect(validateDependsOn(null, 'nope')).toMatch(/not found/);
+      });
+    });
+
+    describe('isDependencyUnmet', () => {
+      it('is false when depends_on is null', () => {
+        expect(isDependencyUnmet(null)).toBe(false);
+      });
+
+      it('is true while the dependency has not reached done', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        setWorkflowStatus(a, 'in_progress');
+        expect(isDependencyUnmet(a)).toBe(true);
+      });
+
+      it('is false once the dependency reaches done', () => {
+        const a = insertTask({ title: 'A', description: 'D' });
+        setWorkflowStatus(a, 'done');
+        expect(isDependencyUnmet(a)).toBe(false);
+      });
+
+      it('treats a dependency task that no longer exists as still unmet (safe default)', () => {
+        expect(isDependencyUnmet('ghost-task')).toBe(true);
+      });
+    });
+
+    describe('listDependentsAwaitingStart', () => {
+      it('finds idle+in_progress tasks blocked on the given dependency', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: dep });
+        setWorkflowStatus(blocked, 'in_progress'); // runtime_state stays 'idle' (default)
+        expect(listDependentsAwaitingStart(dep).map((t) => t.id)).toEqual([blocked]);
+      });
+
+      it('excludes a dependent that is already running', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const running = insertTask({ title: 'Running', description: 'D', depends_on: dep });
+        setWorkflowStatus(running, 'in_progress');
+        setRuntimeState(running, 'running');
+        expect(listDependentsAwaitingStart(dep)).toEqual([]);
+      });
+
+      it('excludes tasks that depend on a different task', () => {
+        const dep = insertTask({ title: 'Dep', description: 'D' });
+        const otherDep = insertTask({ title: 'OtherDep', description: 'D' });
+        const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: otherDep });
+        setWorkflowStatus(blocked, 'in_progress');
+        expect(listDependentsAwaitingStart(dep)).toEqual([]);
+      });
     });
   });
 });

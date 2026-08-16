@@ -1,16 +1,13 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
-import { getSettings } from '../../settings.js';
 import { getHarness } from '../../harnesses/index.js';
 import { hookBaseUrl } from '../../hook-base-url.js';
 import { getOrCreateRepoConfig } from '../../repositories/repo-config.js';
 import { inferRefs } from '../../ref-inference.js';
 import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
-import { syncSkills } from '../../skills.js';
-import type { RepoConfig } from '../../repositories/repo-config.js';
+import { resolveHarnessFlags } from '../../harness-flags.js';
+import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import type { Task, RunMode } from '../../types.js';
 import {
   setRuntimeState,
@@ -31,27 +28,29 @@ import {
 import { runSetup } from '../setup/index.js';
 
 const logger = childLogger('task-engine/lifecycle');
-const execFile = promisify(execFileCb);
 
-export async function preflightWorktree(worktreePath: string, config: RepoConfig): Promise<void> {
+// Note: repo_configs.format_command and lint_command columns still exist in the DB
+// but are no longer used during new-task setup. The format/lint preflight was removed
+// (perf: it blocked agent launch for 30-90s with no agent-observable benefit).
+
+/** Time a startTask stage and log `duration_ms` so slow creates are greppable
+ *  (`grep '"stage_timing":true' ~/.octomux/logs/octomux.log`). Also what
+ *  `scripts/bench-task-create.ts` reads to produce its breakdown. */
+async function timed<T>(taskId: string, stage: string, fn: () => Promise<T>): Promise<T> {
+  const t0 = performance.now();
   try {
-    await execFile('sh', ['-c', config.format_command], { cwd: worktreePath });
-  } catch {
-    // Non-critical: repo may not have this script
-  }
-
-  try {
-    await execFile('sh', ['-c', config.lint_command], { cwd: worktreePath });
-  } catch {
-    // Non-critical
-  }
-
-  const { stdout: diff } = await execFile('git', ['diff', '--name-only'], { cwd: worktreePath });
-  if (diff.trim()) {
-    await execFile('git', ['add', '-A'], { cwd: worktreePath });
-    await execFile('git', ['commit', '-m', 'chore: fix pre-existing formatting'], {
-      cwd: worktreePath,
-    });
+    return await fn();
+  } finally {
+    logger.info(
+      {
+        task_id: taskId,
+        operation: 'createTask',
+        stage,
+        stage_timing: true,
+        duration_ms: Math.round(performance.now() - t0),
+      },
+      `createTask: stage ${stage}`,
+    );
   }
 }
 
@@ -124,15 +123,6 @@ async function inferAndPersistRefs(
   }
 }
 
-async function runPreflight(
-  setup: import('../setup/types.js').SetupResult,
-  task: Task,
-): Promise<void> {
-  if (!setup.runPreflight) return;
-  const repoConfig = await getOrCreateRepoConfig(task.repo_path);
-  await preflightWorktree(setup.worktreePath, repoConfig);
-}
-
 interface FirstAgentLaunchParams {
   agentId: string;
   hookToken: string;
@@ -149,13 +139,17 @@ async function prepareFirstAgentLaunch(
   const agentId = nanoid(12);
   const agentName = task.agent ?? null;
   const hookToken = crypto.randomBytes(32).toString('hex');
-  let flags = harness.resolveFlags(await getSettings());
+  let flags = await resolveHarnessFlags(harness, {
+    skillContentOverrides: await skillContentOverridesForScheduleId(
+      (task as { schedule_id?: string | null }).schedule_id,
+    ),
+  });
 
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.syncAgents(setup.worktreePath);
-  await syncSkills(setup.worktreePath);
-  await harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken);
+  await timed(id, 'install_hooks', () =>
+    harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken),
+  );
 
   flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
 
@@ -244,27 +238,21 @@ export async function startTask(task: Task): Promise<void> {
   let stage = 'validate';
   try {
     stage = 'mode_setup';
-    const setup = await runSetup(task);
+    const setup = await timed(id, 'mode_setup', () => runSetup(task));
 
     persistWorktreeRow(id, task, setup, runMode);
-    await inferAndPersistRefs(id, setup, task);
-
-    if (setup.runPreflight) {
-      stage = 'preflight';
-    }
-    await runPreflight(setup, task);
+    await timed(id, 'infer_refs', () => inferAndPersistRefs(id, setup, task));
 
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
-    const { agentId, hookToken, sessionIdForDb, startupCmd } = await prepareFirstAgentLaunch(
-      id,
-      task,
-      setup,
-      harness,
+    const { agentId, hookToken, sessionIdForDb, startupCmd } = await timed(id, 'launch_agent', () =>
+      prepareFirstAgentLaunch(id, task, setup, harness),
     );
 
     stage = 'tmux_session';
-    const windowIndex = await launchFirstWindow(id, session, setup, startupCmd);
+    const windowIndex = await timed(id, 'tmux_session', () =>
+      launchFirstWindow(id, session, setup, startupCmd),
+    );
 
     persistFirstAgentRow(
       id,

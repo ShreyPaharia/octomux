@@ -326,6 +326,115 @@ describe('OrchestratorPage', () => {
     // Both messages should be in the thread
     expect(screen.getByText('First message')).toBeInTheDocument();
   });
+
+  // ── Capability-gate cards (task.close/create/... + ask_owner) ────────────
+
+  it('renders a question card for a kind:"question" card event and forwards the answer as respond_text', async () => {
+    renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
+
+    await waitFor(() => screen.getByText('My orchestrator chat'));
+    fireEvent.click(screen.getByText('My orchestrator chat'));
+    await waitFor(() => screen.getByPlaceholderText(/message/i));
+
+    act(() => {
+      lastWs?.simulateOpen();
+      lastWs?.simulateMessage({
+        type: 'card',
+        id: 'card-q-1',
+        command: 'ask_owner',
+        args: {},
+        tier: 'always-ask',
+        kind: 'question',
+        question: 'Which repo should I use?',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Which repo should I use?')).toBeInTheDocument();
+    });
+    // Not rendered as an ActionCard — no "Approve"/arg-field affordances.
+    expect(screen.queryByRole('button', { name: /approve this action/i })).toBeNull();
+
+    fireEvent.change(screen.getByRole('textbox', { name: /answer/i }), {
+      target: { value: 'octomux-agents' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
+
+    await waitFor(() => {
+      const decisions = lastWs!.sentMessages
+        .map((m) => JSON.parse(m) as Record<string, unknown>)
+        .filter((m) => m.type === 'card_decision');
+      expect(decisions).toContainEqual({
+        type: 'card_decision',
+        card_id: 'card-q-1',
+        decision: 'approve',
+        respond_text: 'octomux-agents',
+      });
+    });
+  });
+
+  it('a kind:"action" card with tier:"always-ask" renders the destructive badge (fixes the previously-dead tier detection)', async () => {
+    renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
+
+    await waitFor(() => screen.getByText('My orchestrator chat'));
+    fireEvent.click(screen.getByText('My orchestrator chat'));
+    await waitFor(() => screen.getByPlaceholderText(/message/i));
+
+    act(() => {
+      lastWs?.simulateOpen();
+      lastWs?.simulateMessage({
+        type: 'card',
+        id: 'card-a-1',
+        command: 'close_task',
+        args: { task_id: 'task-1' },
+        tier: 'always-ask',
+        kind: 'action',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('close_task')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/destructive/i)).toBeInTheDocument();
+    // Destructive (always-ask) cards never show the "always allow" toggle.
+    expect(screen.queryByRole('checkbox', { name: /always allow/i })).toBeNull();
+  });
+
+  it('an "ask" tier action card shows the "always allow" toggle, and checking it forwards always_allow:true', async () => {
+    renderWithRouter(<OrchestratorPage />, { route: '/orchestrator' });
+
+    await waitFor(() => screen.getByText('My orchestrator chat'));
+    fireEvent.click(screen.getByText('My orchestrator chat'));
+    await waitFor(() => screen.getByPlaceholderText(/message/i));
+
+    act(() => {
+      lastWs?.simulateOpen();
+      lastWs?.simulateMessage({
+        type: 'card',
+        id: 'card-a-2',
+        command: 'create_task',
+        args: { title: 'Add rate limiting' },
+        tier: 'ask',
+        kind: 'action',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('create_task')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /always allow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /approve this action/i }));
+
+    await waitFor(() => {
+      const decisions = lastWs!.sentMessages
+        .map((m) => JSON.parse(m) as Record<string, unknown>)
+        .filter((m) => m.type === 'card_decision');
+      expect(decisions).toContainEqual(
+        expect.objectContaining({ card_id: 'card-a-2', decision: 'approve', always_allow: true }),
+      );
+    });
+  });
 });
 
 // ─── Conductor-leanness indicator tests (SHR-137) ────────────────────────────

@@ -56,7 +56,7 @@ describe('flattenRunningAgents', () => {
       makeTask({
         id: 't1',
         runtime_state: 'running',
-        agents: [
+        workers: [
           makeAgent({ id: 'a1', task_id: 't1', window_index: 0, label: 'Agent A' }),
           makeAgent({
             id: 'a2',
@@ -70,7 +70,7 @@ describe('flattenRunningAgents', () => {
       makeTask({
         id: 't2',
         runtime_state: 'idle',
-        agents: [makeAgent({ id: 'a3', task_id: 't2', window_index: 0 })],
+        workers: [makeAgent({ id: 'a3', task_id: 't2', window_index: 0 })],
       }),
     ]);
     expect(flat).toHaveLength(1);
@@ -83,7 +83,7 @@ describe('flattenRunningAgents', () => {
       makeTask({
         id: 't1',
         runtime_state: 'setting_up',
-        agents: [makeAgent({ id: 'a1', task_id: 't1', window_index: 0 })],
+        workers: [makeAgent({ id: 'a1', task_id: 't1', window_index: 0 })],
       }),
     ]);
     expect(flat).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('GridMonitor page', () => {
         id: 't-a',
         title: 'Task A',
         runtime_state: 'running',
-        agents: [
+        workers: [
           makeAgent({ id: 'a-0', task_id: 't-a', window_index: 0, label: 'A0' }),
           makeAgent({ id: 'a-1', task_id: 't-a', window_index: 1, label: 'A1' }),
         ],
@@ -116,7 +116,7 @@ describe('GridMonitor page', () => {
         id: 't-b',
         title: 'Task B',
         runtime_state: 'running',
-        agents: [makeAgent({ id: 'b-0', task_id: 't-b', window_index: 0, label: 'B0' })],
+        workers: [makeAgent({ id: 'b-0', task_id: 't-b', window_index: 0, label: 'B0' })],
       }),
     ]);
     renderWithRouter(<GridMonitor />);
@@ -135,14 +135,14 @@ describe('GridMonitor page', () => {
         makeTask({
           id: 't1',
           runtime_state: 'running',
-          agents: [makeAgent({ id: 'a1', task_id: 't1', window_index: 0 })],
+          workers: [makeAgent({ id: 'a1', task_id: 't1', window_index: 0 })],
         }),
       ])
       .mockResolvedValue([
         makeTask({
           id: 't1',
           runtime_state: 'running',
-          agents: [
+          workers: [
             makeAgent({ id: 'a1', task_id: 't1', window_index: 0 }),
             makeAgent({ id: 'a2', task_id: 't1', window_index: 1, label: 'Agent B' }),
           ],

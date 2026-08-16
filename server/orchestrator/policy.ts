@@ -20,7 +20,7 @@ import {
   listPermissionRules,
   insertPermissionRule,
   deletePermissionRule,
-} from './store.js';
+} from '../repositories/orchestrator.js';
 import { buildPolicySets } from './command-registry.js';
 
 // ─── Tier sets (derived from command registry at startup) ───────────────────────
@@ -116,6 +116,23 @@ function applyRules(
   }
 
   return baseDecision;
+}
+
+// ─── Capability-registry gate namespace ──────────────────────────────────────
+
+/**
+ * `permission_rules.tool_name` key for a capability-registry gate decision
+ * (`server/orchestrator/mcp/gate.ts`'s `onGatedInvoke`), keyed by capability id
+ * (e.g. 'task.close') rather than the legacy octomux-CLI subcommand namespace
+ * `classify()` above uses. The `capability:` prefix keeps the two namespaces
+ * from ever colliding in the same `permission_rules` table — a rule for Bash
+ * `octomux close-task` (tool_name='octomux', match={subcommand:'close-task'})
+ * is a different row from a rule for the MCP `task.close` capability
+ * (tool_name='capability:task.close', match=null), even though both gate the
+ * same underlying action.
+ */
+export function capabilityToolName(capabilityId: string): string {
+  return `capability:${capabilityId}`;
 }
 
 // ─── addRule ──────────────────────────────────────────────────────────────────

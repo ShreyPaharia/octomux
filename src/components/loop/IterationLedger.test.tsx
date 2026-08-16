@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
-import type { LoopIteration } from '@/lib/api/loopApi';
+import type { LoopIteration } from '@/lib/api/runApi';
 
 const { taskApiProxy, taskApiMock } = await vi.hoisted(async () =>
   (await import('../../test-helpers')).setupApiMock(),

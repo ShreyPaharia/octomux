@@ -16,7 +16,8 @@ export type ReviewInboxStatus =
   | 'drafts-ready'
   | 'head-advanced'
   | 'published'
-  | 'failed';
+  | 'failed'
+  | 'error';
 
 export type PublishedReviewVerdict = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 
@@ -107,11 +108,6 @@ export const reviewApi = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  patchWalkthrough: (taskId: string, runId: string, partial: Record<string, unknown>) =>
-    request<{ walkthrough: string }>(`/tasks/${taskId}/review-runs/${runId}/walkthrough`, {
-      method: 'PATCH',
-      body: JSON.stringify(partial),
-    }),
   publishReview: (taskId: string, payload: { verdict: PublishedReviewVerdict; body?: string }) =>
     request<{ publishedReviewId: string; github_review_url: string; commentCount: number }>(
       `/tasks/${taskId}/publish-review`,
@@ -120,8 +116,9 @@ export const reviewApi = {
   requestReReview: (taskId: string) =>
     request<{ ok: boolean }>(`/tasks/${taskId}/review-runs`, { method: 'POST' }),
   triggerManualReview: (taskId: string) =>
-    request<{ id: string; action: 'created' | 'existing' }>(`/tasks/${taskId}/review`, {
+    request<{ id: string; action: 'created' | 'existing' }>('/reviews', {
       method: 'POST',
+      body: JSON.stringify({ source_task_id: taskId }),
     }),
 
   // ─── Review learnings ─────────────────────────────────────────────────────

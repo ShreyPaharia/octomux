@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
 import Database from '../../sqlite.js';
-import type { Task, Agent } from '../../types.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
+import type { Task, Worker } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -35,8 +35,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../../orchestrator/store.js', (importOriginal) => {
-  const actual = importOriginal<typeof import('../../orchestrator/store.js')>();
+vi.mock('../../repositories/orchestrator.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../../repositories/orchestrator.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 
@@ -50,10 +50,6 @@ vi.mock('../../hook-base-url.js', () => ({
 
 vi.mock('../../settings.js', () => ({
   getSettings: vi.fn(async () => ({})),
-}));
-
-vi.mock('../../skills.js', () => ({
-  syncSkills: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../events.js', () => ({
@@ -95,7 +91,7 @@ beforeEach(() => {
   insertTask(db, { ...DEFAULTS.runningTask });
 });
 
-function makeAgentRow(overrides: Partial<Agent> = {}): Agent {
+function makeAgentRow(overrides: Partial<Worker> = {}): Worker {
   return insertAgent(db, {
     ...DEFAULTS.agent,
     window_index: 1,
@@ -185,7 +181,7 @@ describe('respawnAgentFresh', () => {
     const fs = await import('fs');
     expect(fs.writeFileSync).toHaveBeenCalledWith(
       expect.stringContaining(`.claude-prompt-${agent.id}`),
-      'do the loop thing',
+      expect.stringContaining('do the loop thing'),
       expect.anything(),
     );
   });
@@ -209,7 +205,7 @@ describe('respawnAgentFresh', () => {
     expect(startupCmd).toContain('OCTOMUX_ACTION_TOKEN=');
     expect(startupCmd).toContain('real-hook-token-abc');
 
-    const { checkAgentTokenExists } = await import('../../repositories/agent-runtime.js');
+    const { checkAgentTokenExists } = await import('../../repositories/workers.js');
     expect(checkAgentTokenExists('real-hook-token-abc')).toBe(true);
   });
 

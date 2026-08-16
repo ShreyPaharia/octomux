@@ -316,17 +316,18 @@ describe('inline comments API', () => {
         .send({ status: 'rejected', rejection_why: 'false positive' });
       expect(r.status).toBe(200);
       expect(r.body.status).toBe('rejected');
-      const { listLearningsForRepo } = await import('./repositories/review-learnings.js');
-      const learnings = listLearningsForRepo('/tmp/test-repo');
+      const { listForRead } = await import('./repositories/agent-learnings.js');
+      const learnings = listForRead('/tmp/test-repo', 'review');
       expect(learnings).toHaveLength(1);
-      expect(learnings[0].why).toBe('false positive');
+      expect(learnings[0].lesson).toBe('false positive');
+      expect(learnings[0].lane).toBe('review');
     });
 
     it('does not capture learning when rejection_why is absent', async () => {
       const id = await seed();
       await request(app).patch(`/api/tasks/t1/comments/${id}`).send({ status: 'rejected' });
-      const { listLearningsForRepo } = await import('./repositories/review-learnings.js');
-      const learnings = listLearningsForRepo('/tmp/test-repo');
+      const { listForRead } = await import('./repositories/agent-learnings.js');
+      const learnings = listForRead('/tmp/test-repo', 'review');
       expect(learnings).toHaveLength(0);
     });
 

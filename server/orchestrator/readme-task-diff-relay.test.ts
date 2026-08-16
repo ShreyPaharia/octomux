@@ -1,4 +1,3 @@
-import type { Supervisor } from './supervisor.js';
 /**
  * server/orchestrator/readme-task-diff-relay.test.ts
  *
@@ -29,6 +28,7 @@ import type { Supervisor } from './supervisor.js';
  * impossible. Everything below the conductor (the part that was broken) is real.
  */
 
+import type { Supervisor } from './supervisor.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 
 // ─── Mocks: keep the supervisor off tmux/ws, capture conversation pushes ──────
@@ -65,13 +65,13 @@ vi.mock('./exec.js', () => ({
 
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
+const { createSupervisor } = await import('./supervisor.js');
+const { createConversation, upsertManagedTask, getManagedTask } = await import('../repositories/orchestrator.js');
+const { advancePhaseForLabel } = await import('../hooks.js');
+const { broadcast, subscribeServerEvents } = await import('../events.js');
 
 // Imported after the mocks. broadcast/events.js and hooks.js are intentionally
 // REAL — they are the wiring that was broken.
-const { createSupervisor } = await import('./supervisor.js');
-const { createConversation, upsertManagedTask, getManagedTask } = await import('./store.js');
-const { advancePhaseForLabel } = await import('../hooks.js');
-const { broadcast, subscribeServerEvents } = await import('../events.js');
 
 describe('orchestrator: Update-README task → diff-link update relay', () => {
   let supervisor: Supervisor;

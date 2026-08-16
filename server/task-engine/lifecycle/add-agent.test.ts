@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from '../../bun-test.js';
 import Database from '../../sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../bun-test.js';
 import type { Task } from '../../types.js';
 
 vi.mock('../harnesses/index.js', () => ({
@@ -15,10 +15,6 @@ vi.mock('../harnesses/index.js', () => ({
 
 vi.mock('../settings.js', () => ({
   getSettings: vi.fn(async () => ({})),
-}));
-
-vi.mock('../skills.js', () => ({
-  syncSkills: vi.fn(async () => undefined),
 }));
 
 const { default: fs } = await import('fs');

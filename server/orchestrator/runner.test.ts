@@ -25,11 +25,21 @@ let _lastPastedText = '';
  */
 let _windowIndex = '1';
 
+/**
+ * The foreground command `display-message -p '#{pane_current_command}'` reports.
+ * Defaults to 'node' (a live claude conductor is a node process → alive). A test
+ * sets it to a shell name to simulate a crashed conductor (→ not alive → resume).
+ */
+// A live claude reports a VERSION-like pane_current_command (e.g. '2.1.218'),
+// NOT 'node'/'claude' — liveness must treat that as alive. Tests default to it.
+let _paneCommand = '2.1.218';
+
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
     const cb = typeof optsOrCb === 'function' ? (optsOrCb as Function) : (maybeCb as Function);
     if (args.includes('display-message')) {
-      cb(null, { stdout: _windowIndex, stderr: '' });
+      const isPaneCmd = args.some((a) => a.includes('pane_current_command'));
+      cb(null, { stdout: isPaneCmd ? _paneCommand : _windowIndex, stderr: '' });
     } else if (args.includes('list-windows')) {
       cb(null, { stdout: _windowIndex, stderr: '' });
     } else if (args.includes('send-keys') && args.includes('-l')) {
@@ -63,18 +73,13 @@ vi.mock('fs', (importOriginal) => {
 
 const { execFile } = await import('child_process');
 const { createTestDb } = await import('../test-helpers.js');
+const { startConversation, sendTurn, interruptTurn, stopConversation, resumeConversation, conversationTmuxTarget } = await import('./runner.js');
+const { createConversation, getConversation, updateConversation } = await import('../repositories/orchestrator.js');
+const { ORCHESTRATOR_SYSTEM_PROMPT } = await import('./conductor-flags.js');
 
-const {
-  startConversation,
-  sendTurn,
-  stopConversation,
-  resumeConversation,
-  conversationTmuxTarget,
-} = await import('./runner.js');
 const mockedExecFile = vi.mocked(execFile);
 
 // Import runner under test AFTER mocks are set up
-const { createConversation, getConversation, updateConversation } = await import('./store.js');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -101,8 +106,8 @@ describe('orchestrator runner', () => {
     mockedExecFile.mockClear();
     _lastPastedText = '';
     _windowIndex = '1';
-    // Fake timers are opt-in per test (see the sendTurn cases) — faking them
-    // for every test stalls any code that awaits a real delay.
+    _paneCommand = '2.1.218';
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
@@ -276,6 +281,28 @@ describe('orchestrator runner', () => {
       expect(cwdIndex).toBeGreaterThan(-1);
       expect(newSession![cwdIndex + 1]).toBe('/tmp/test-repo');
     });
+
+    it('defaults to the orchestrator system prompt when opts.systemPrompt is omitted', async () => {
+      const convId = createConversation({ title: 'Default prompt test' });
+      await startConversation(convId, '/tmp/test-repo');
+
+      const newSession = findTmuxCall('new-session');
+      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(startupCmdArg!).toContain('--append-system-prompt');
+      expect(startupCmdArg!).toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
+    });
+
+    it('uses opts.systemPrompt for --append-system-prompt when given (Agents feature)', async () => {
+      const convId = createConversation({ title: 'Agent prompt test' });
+      await startConversation(convId, '/tmp/test-repo', {
+        systemPrompt: 'You are Agent One. Only do X.',
+      });
+
+      const newSession = findTmuxCall('new-session');
+      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(startupCmdArg!).toContain('You are Agent One. Only do X.');
+      expect(startupCmdArg!).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
+    });
   });
 
   // ── resumeConversation ─────────────────────────────────────────────────────
@@ -308,6 +335,18 @@ describe('orchestrator runner', () => {
       expect(cmdArg).toBeDefined();
       // Should launch a new session (no --resume) since no session_id
       expect(cmdArg!).not.toContain('--resume');
+    });
+
+    it('uses opts.systemPrompt for --append-system-prompt when given (Agents feature)', async () => {
+      const convId = createConversation({ title: 'Resume with agent prompt' });
+      await resumeConversation(convId, '/tmp/test-repo', {
+        systemPrompt: 'You are Agent One. Only do X.',
+      });
+
+      const newSession = findTmuxCall('new-session');
+      const cmdArg = newSession!.find((a) => a.includes('claude'));
+      expect(cmdArg!).toContain('You are Agent One. Only do X.');
+      expect(cmdArg!).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
     });
   });
 
@@ -354,7 +393,6 @@ describe('orchestrator runner', () => {
 
   describe('sendTurn', () => {
     it('sends the text via bracketed paste then Enter (two separate send-keys calls)', async () => {
-      vi.useFakeTimers();
       const convId = createConversation({ title: 'SendTurn test' });
       updateConversation(convId, { tmux_window: 'octomux-orch-send:1' });
 
@@ -379,7 +417,6 @@ describe('orchestrator runner', () => {
     });
 
     it('uses capture-pane to confirm text is in the pane before sending Enter', async () => {
-      vi.useFakeTimers();
       const convId = createConversation({ title: 'CapturePane confirm test' });
       updateConversation(convId, { tmux_window: 'octomux-orch-cap:1' });
 
@@ -393,7 +430,6 @@ describe('orchestrator runner', () => {
     });
 
     it('handles multi-line turns (passes the full text including newlines)', async () => {
-      vi.useFakeTimers();
       const convId = createConversation({ title: 'Multi-line turn' });
       updateConversation(convId, { tmux_window: 'octomux-orch-ml:1' });
       const multiLine = 'line one\nline two\nline three';
@@ -413,7 +449,6 @@ describe('orchestrator runner', () => {
     });
 
     it('resumes a dead session (--resume) then delivers the turn', async () => {
-      vi.useFakeTimers();
       // A conversation whose tmux session is gone (server restart / crash / stop):
       // no tmux_window → not alive → sendTurn must resume the SAME claude session
       // and then deliver, instead of throwing.
@@ -440,6 +475,97 @@ describe('orchestrator runner', () => {
           stripSocketArgs(c[1] as string[]).includes('-l'),
       );
       expect(pasteCall).toBeDefined();
+    });
+
+    it('interruptTurn sends the TUI interrupt key (Escape) to a live pane', async () => {
+      const convId = createConversation({ title: 'Interrupt' });
+      updateConversation(convId, { tmux_window: 'octomux-orch-int:1' });
+
+      const p = interruptTurn(convId);
+      await vi.advanceTimersByTimeAsync(500);
+      await p;
+
+      const escapeCall = mockedExecFile.mock.calls.find(
+        (c) =>
+          c[0] === 'tmux' &&
+          stripSocketArgs(c[1] as string[]).includes('send-keys') &&
+          stripSocketArgs(c[1] as string[]).includes('Escape'),
+      );
+      expect(escapeCall).toBeDefined();
+    });
+
+    it('serializes two concurrent turns — keystrokes never interleave', async () => {
+      // Both writers target the SAME conversation/pane. Without the FIFO lock the
+      // two pastes would land back-to-back before either Enter, submitting garbled
+      // input. With it, turn A fully completes (paste → Enter) before turn B pastes.
+      const convId = createConversation({ title: 'Concurrent turns' });
+      updateConversation(convId, { tmux_window: 'octomux-orch-conc:1' });
+
+      const p1 = sendTurn(convId, 'AAA');
+      const p2 = sendTurn(convId, 'BBB');
+      await vi.advanceTimersByTimeAsync(2000);
+      await Promise.all([p1, p2]);
+
+      // Reconstruct the ordered send-keys sequence into 'paste:<text>' / 'enter'.
+      const seq: string[] = [];
+      for (const c of mockedExecFile.mock.calls) {
+        if (c[0] !== 'tmux') continue;
+        const args = stripSocketArgs(c[1] as string[]);
+        if (!args.includes('send-keys')) continue;
+        const lIdx = args.indexOf('-l');
+        if (lIdx !== -1) seq.push(`paste:${args[lIdx + 1]}`);
+        else if (args.includes('Enter')) seq.push('enter');
+      }
+
+      // A's paste and Enter must both precede B's paste (no interleave).
+      expect(seq).toEqual(['paste:AAA', 'enter', 'paste:BBB', 'enter']);
+    });
+
+    it('waits for a booting session (pane shell→claude) instead of resuming', async () => {
+      // A just-launched conductor: the tmux session exists but claude is still
+      // booting, so the pane briefly runs the launch shell. sendTurn must WAIT
+      // for claude to take the foreground and then paste — it must NOT resume
+      // (which would new-session an existing name → "duplicate session", the bug
+      // that dropped the first real Telegram turn).
+      const convId = createConversation({ title: 'Booting', claude_session_id: 'sess-boot' });
+      updateConversation(convId, { tmux_window: 'octomux-orch-boot:1' });
+      _paneCommand = 'zsh'; // claude still launching
+
+      const p = sendTurn(convId, 'hello there');
+      await vi.advanceTimersByTimeAsync(100); // a couple of alive-polls, still booting
+      _paneCommand = 'node'; // claude took the pane foreground
+      await vi.advanceTimersByTimeAsync(1000);
+      await p;
+
+      // No resume happened — it waited, then pasted.
+      expect(findTmuxCall('new-session')).toBeUndefined();
+      const pasteCall = mockedExecFile.mock.calls.find(
+        (c) => c[0] === 'tmux' && stripSocketArgs(c[1] as string[]).includes('-l'),
+      );
+      expect(pasteCall).toBeDefined();
+    });
+
+    it('resumes (does not paste blind) when the pane fell back to a shell', async () => {
+      // Session exists but claude crashed — the pane's foreground command is the
+      // holding shell, not node/claude. Liveness must report DEAD so sendTurn
+      // resumes rather than pasting the chat text into a live shell (which would
+      // run it as a command — the security hazard T9 closes).
+      const convId = createConversation({
+        title: 'Crashed conductor',
+        claude_session_id: 'sess-crashed-1',
+      });
+      updateConversation(convId, { tmux_window: 'octomux-orch-crashed:1' });
+      _paneCommand = 'zsh'; // pane fell back to the holding shell
+
+      const promise = sendTurn(convId, 'are you there?');
+      await vi.advanceTimersByTimeAsync(500);
+      await promise;
+
+      // It must have resumed the SAME claude session before delivering.
+      const newSession = findTmuxCall('new-session');
+      expect(newSession).toBeDefined();
+      const cmd = newSession!.find((a) => a.includes('claude'));
+      expect(cmd).toContain('--resume sess-crashed-1');
     });
   });
 });

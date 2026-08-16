@@ -1,5 +1,3 @@
-import type { ServiceError as ServiceErrorType } from './errors.js';
-import type { CreateTaskServiceInput } from './task-service.js';
 /**
  * Unit tests for the task-creation service (SHR-176).
  *
@@ -10,13 +8,16 @@ import type { CreateTaskServiceInput } from './task-service.js';
  *  - UNIQUE constraint → ServiceError(409).
  */
 
+import type { CreateTaskServiceInput } from './task-service.js';
 import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mock side-effecting deps (mirror orchestrator/exec.test.ts) ────────────
 
 const mockStartTask = vi.fn().mockResolvedValue(undefined);
+const mockResumeTask = vi.fn().mockResolvedValue(undefined);
 vi.mock('../task-engine/index.js', () => ({
   startTask: vi.fn((...args: unknown[]) => mockStartTask(...args)),
+  resumeTask: vi.fn((...args: unknown[]) => mockResumeTask(...args)),
 }));
 
 const mockBroadcast = vi.fn();
@@ -33,11 +34,12 @@ vi.mock('nanoid', () => ({
 
 const { createTestDb } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
+const { createTask, unblockDependents } = await import('./task-service.js');
+const { ServiceError } = await import('./errors.js');
+const { insertTask, setWorkflowStatus } = await import('../repositories/tasks.js');
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-const { createTask } = await import('./task-service.js');
-const { ServiceError } = await import('./errors.js');
 
 let seq = 0;
 function uniqueId(): string {
@@ -135,7 +137,101 @@ describe('task-service.createTask', () => {
     }
 
     expect(caught).toBeInstanceOf(ServiceError);
-    expect((caught as ServiceErrorType).status).toBe(409);
-    expect((caught as ServiceErrorType).message).toMatch(/UNIQUE constraint/);
+    expect((caught as InstanceType<typeof ServiceError>).status).toBe(409);
+    expect((caught as InstanceType<typeof ServiceError>).message).toMatch(/UNIQUE constraint/);
+  });
+
+  // ─── depends_on (agents/task-depends-on) ─────────────────────────────────
+
+  it('rejects a nonexistent depends_on task with ServiceError(400), and never fires startTask', async () => {
+    let caught: unknown;
+    try {
+      await createTask(baseInput({ depends_on: 'does-not-exist' }));
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ServiceError);
+    expect((caught as InstanceType<typeof ServiceError>).status).toBe(400);
+    expect(mockStartTask).not.toHaveBeenCalled();
+  });
+
+  it('does NOT kick startTask when depends_on has not reached done, and stores runtime_state idle', async () => {
+    const depId = insertTask({ title: 'Dependency', description: 'D' }); // defaults to workflow_status 'backlog'
+
+    const task = await createTask(
+      baseInput({
+        is_draft: false,
+        workflow_status: 'in_progress',
+        runtime_state: 'setting_up',
+        depends_on: depId,
+      }),
+    );
+
+    expect(mockStartTask).not.toHaveBeenCalled();
+    expect(task.runtime_state).toBe('idle');
+    expect(task.workflow_status).toBe('in_progress');
+    expect(task.depends_on).toBe(depId);
+  });
+
+  it('kicks startTask when depends_on has already reached done', async () => {
+    const depId = insertTask({ title: 'Dependency', description: 'D' });
+    setWorkflowStatus(depId, 'done');
+
+    const task = await createTask(baseInput({ is_draft: false, depends_on: depId }));
+
+    expect(mockStartTask).toHaveBeenCalledTimes(1);
+    expect(task.depends_on).toBe(depId);
+  });
+});
+
+describe('task-service.unblockDependents', () => {
+  beforeEach(() => {
+    createTestDb();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('starts a blocked dependent that has no worktree yet', () => {
+    const dep = insertTask({ title: 'Dep', description: 'D' });
+    const blocked = insertTask({ title: 'Blocked', description: 'D', depends_on: dep });
+    setWorkflowStatus(blocked, 'in_progress'); // runtime_state stays 'idle' (default)
+
+    unblockDependents(dep);
+
+    expect(mockStartTask).toHaveBeenCalledTimes(1);
+    expect(mockStartTask).toHaveBeenCalledWith(expect.objectContaining({ id: blocked }));
+    expect(mockResumeTask).not.toHaveBeenCalled();
+  });
+
+  it('resumes (not starts) a blocked dependent that already has a worktree', () => {
+    const dep = insertTask({ title: 'Dep', description: 'D' });
+    const wtId = 'wt-resume-1';
+    getDb()
+      .prepare(
+        `INSERT INTO worktrees (id, path, mode, status) VALUES (?, '/tmp/existing-wt', 'new', 'in_use')`,
+      )
+      .run(wtId);
+    const blocked = insertTask({
+      title: 'Blocked',
+      description: 'D',
+      depends_on: dep,
+      worktree_id: wtId,
+    });
+    setWorkflowStatus(blocked, 'in_progress');
+
+    unblockDependents(dep);
+
+    expect(mockResumeTask).toHaveBeenCalledTimes(1);
+    expect(mockStartTask).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when no dependent is waiting on this task', () => {
+    const dep = insertTask({ title: 'Dep', description: 'D' });
+    unblockDependents(dep);
+    expect(mockStartTask).not.toHaveBeenCalled();
+    expect(mockResumeTask).not.toHaveBeenCalled();
   });
 });

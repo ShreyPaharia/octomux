@@ -57,6 +57,5 @@ export async function setupNone(task: Task): Promise<SetupResult> {
     baseBranch: targetBranch,
     baseSha,
     installHooksAt: task.repo_path,
-    runPreflight: false,
   };
 }

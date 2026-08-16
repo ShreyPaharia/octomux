@@ -43,6 +43,10 @@ async function commit(dir: string, files: Record<string, string>, msg: string): 
   await execFile('git', ['-C', dir, 'commit', '-q', '-m', msg]);
 }
 
+// Every case here drives real `git` subprocesses against a temp repo, which
+// costs ~2.5-3.7s per test on its own. Under the full suite's parallel load that
+// overruns the default timeout and the file flakes; the suite runs with
+// --timeout 15000, which leaves headroom without hiding a genuine hang.
 describe('decorateDiffSummaryWithReviewState', () => {
   let repo: string;
   let baseSha: string;

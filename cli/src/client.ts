@@ -1,7 +1,7 @@
 import { createRequestCore, qs } from '@octomux/api-client';
 import type {
   AddRefRequest,
-  Agent,
+  Worker,
   CreateTaskRequest,
   RunMode,
   Task,
@@ -11,7 +11,7 @@ import type {
   WorkflowStatus,
 } from '@octomux/types';
 
-export type { Agent, RunMode, Task, TaskExternalRef, TaskUpdate, WorkflowStatus };
+export type { Worker, RunMode, Task, TaskExternalRef, TaskUpdate, WorkflowStatus };
 
 export interface InlineCommentRow {
   id: string;
@@ -58,6 +58,56 @@ export interface LoopRunResult {
   updated_at: string;
 }
 
+export interface LoopIterationResult {
+  id: string;
+  loop_run_id: string;
+  n: number;
+  sha_from: string | null;
+  sha_to: string | null;
+  verify_passed: number | null;
+  tokens: number | null;
+  emit_status: string | null;
+  emit_reason: string | null;
+  created_at: string;
+}
+
+export interface LoopGroupResult {
+  id: string;
+  n: number;
+  repo_path: string;
+  base_branch: string;
+  judge_status: string;
+  winner_loop_run_id: string | null;
+  judge_rationale: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Polymorphic `runs` row — what POST/GET /api/runs(/:id) return post-collapse
+ * (see server/routes/runs.ts's module doc). `loop` is set for a loop-backed run
+ * (workflow_kind 'loop', 'doc-drift', 'prod-log-triage', ...); `loopGroup` is
+ * set only for workflow_kind 'loop-group'. Exactly one of the two is non-null
+ * for a startLoop/startLoopGroup response.
+ */
+export interface RunResult {
+  id: string;
+  workflow_kind: string;
+  trigger: string;
+  schedule_id: string | null;
+  task_id: string | null;
+  chat_id: string | null;
+  loop_run_id: string | null;
+  status: string;
+  effective_status: string;
+  result_json: string | null;
+  error: string | null;
+  started_at: string;
+  ended_at: string | null;
+  loop: (LoopRunResult & { iterations: LoopIterationResult[] }) | null;
+  loopGroup: (LoopGroupResult & { candidates: LoopRunResult[] }) | null;
+}
+
 export interface IntegrationRow {
   id: string;
   kind: string;
@@ -86,23 +136,20 @@ export interface OctomuxClient {
       skeleton?: string;
       notify_agent_id?: string | null;
     },
-  ): Promise<Agent>;
+  ): Promise<Worker>;
   stopAgent(taskId: string, agentId: string): Promise<void>;
-  startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<LoopRunResult>;
+  startLoop(data: { taskId: string; spec: LoopSpecInput }): Promise<RunResult>;
+  startLoopGroup(data: {
+    repoPath: string;
+    baseBranch: string;
+    spec: LoopSpecInput;
+    n: number;
+  }): Promise<RunResult>;
   sendMessage(taskId: string, agentId: string, message: string): Promise<{ success: boolean }>;
   listSkills(): Promise<{ name: string; description: string }[]>;
   getSkill(name: string): Promise<{ name: string; content: string }>;
-  createSkill(data: { name: string; content: string }): Promise<{ name: string; content: string }>;
-  deleteSkill(name: string): Promise<void>;
   recentRepos(): Promise<{ repo_path: string; last_used: string }[]>;
   defaultBranch(repoPath: string): Promise<{ branch: string }>;
-  getRepoConfig(repoPath: string): Promise<{
-    repo_path: string;
-    base_branch: string | null;
-    test_command: string;
-    format_command: string;
-    lint_command: string;
-  }>;
   postComment(taskId: string, data: PostCommentInput): Promise<InlineCommentRow>;
   listComments(
     taskId: string,
@@ -115,8 +162,6 @@ export interface OctomuxClient {
   ): Promise<InlineCommentRow>;
   deleteComment(taskId: string, commentId: string): Promise<void>;
   moveTask(taskId: string, data: { workflow_status: WorkflowStatus; note?: string }): Promise<Task>;
-  postTaskSummary(taskId: string, data: { summary: string; author?: string }): Promise<Task>;
-  postTaskNote(taskId: string, data: { note: string; author?: string }): Promise<{ ok: boolean }>;
   addTaskRef(taskId: string, data: AddRefRequest): Promise<TaskExternalRef>;
   deleteTaskRef(taskId: string, integration: string): Promise<void>;
   getTaskUpdates(taskId: string): Promise<{ updates: TaskUpdate[] }>;
@@ -155,6 +200,9 @@ export function createClient(serverUrl: string): OctomuxClient {
     baseUrl,
     alwaysJsonContentType: true,
     onFetchError: cliFetchError,
+    // A human at a terminal, not an agent — see the capability gate's caller
+    // classes. Agents reach the server over MCP or with a hook token instead.
+    clientClass: 'cli',
   });
 
   return {
@@ -165,7 +213,11 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<Task>('/tasks', { method: 'POST', body: JSON.stringify(data) });
     },
     listTasks(params) {
-      return request<Task[]>(`/tasks${qs({ repo_path: params?.repo_path })}`);
+      // The dashboard board hides automated tasks (doc-drift, prod-log-triage, …) by default;
+      // the CLI is an operator surface and must keep showing every task, as it always has.
+      return request<Task[]>(
+        `/tasks${qs({ repo_path: params?.repo_path, includeAutomated: 'true' })}`,
+      );
     },
     getTask(id) {
       return request<Task>(`/tasks/${encodeURIComponent(id)}`);
@@ -180,23 +232,32 @@ export function createClient(serverUrl: string): OctomuxClient {
       return request<void>(`/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
     },
     addAgent(taskId, data) {
-      return request<Agent>(`/tasks/${encodeURIComponent(taskId)}/agents`, {
+      return request<Worker>(`/tasks/${encodeURIComponent(taskId)}/workers`, {
         method: 'POST',
         body: JSON.stringify(data || {}),
       });
     },
     stopAgent(taskId, agentId) {
       return request<void>(
-        `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}`,
+        `/tasks/${encodeURIComponent(taskId)}/workers/${encodeURIComponent(agentId)}`,
         { method: 'DELETE' },
       );
     },
     startLoop(data) {
-      return request<LoopRunResult>('/loops', { method: 'POST', body: JSON.stringify(data) });
+      return request<RunResult>('/runs', {
+        method: 'POST',
+        body: JSON.stringify({ workflowKind: 'loop', ...data }),
+      });
+    },
+    startLoopGroup(data) {
+      return request<RunResult>('/runs', {
+        method: 'POST',
+        body: JSON.stringify({ workflowKind: 'loop-group', ...data }),
+      });
     },
     sendMessage(taskId, agentId, message) {
       return request<{ success: boolean }>(
-        `/tasks/${encodeURIComponent(taskId)}/agents/${encodeURIComponent(agentId)}/message`,
+        `/tasks/${encodeURIComponent(taskId)}/workers/${encodeURIComponent(agentId)}/message`,
         { method: 'POST', body: JSON.stringify({ message }) },
       );
     },
@@ -206,23 +267,11 @@ export function createClient(serverUrl: string): OctomuxClient {
     getSkill(name) {
       return request<{ name: string; content: string }>(`/skills/${encodeURIComponent(name)}`);
     },
-    createSkill(data) {
-      return request<{ name: string; content: string }>('/skills', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    deleteSkill(name) {
-      return request<void>(`/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    },
     recentRepos() {
       return request<{ repo_path: string; last_used: string }[]>('/recent-repos');
     },
     defaultBranch(repoPath) {
       return request<{ branch: string }>(`/default-branch${qs({ repo_path: repoPath })}`);
-    },
-    getRepoConfig(repoPath) {
-      return request(`/repo-config${qs({ repo_path: repoPath })}`);
     },
     postComment(taskId, data) {
       return request<InlineCommentRow>(`/tasks/${encodeURIComponent(taskId)}/comments`, {
@@ -249,18 +298,6 @@ export function createClient(serverUrl: string): OctomuxClient {
     },
     moveTask(taskId, data) {
       return request<Task>(`/tasks/${encodeURIComponent(taskId)}/move`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    postTaskSummary(taskId, data) {
-      return request<Task>(`/tasks/${encodeURIComponent(taskId)}/summary`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    },
-    postTaskNote(taskId, data) {
-      return request<{ ok: boolean }>(`/tasks/${encodeURIComponent(taskId)}/note`, {
         method: 'POST',
         body: JSON.stringify(data),
       });

@@ -3,6 +3,11 @@
   "version": "1.0.30",
   "description": "Prebuilt static tmux for octomux (linux arm64)",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShreyPaharia/octomux.git",
+    "directory": "packages/tmux-linux-arm64"
+  },
   "os": [
     "linux"
   ],

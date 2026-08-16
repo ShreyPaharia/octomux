@@ -3,8 +3,9 @@
  *
  * Verifies POST /api/hooks/stop dispatches to the loop engine — and bypasses
  * human_review/task_updates/fireHook/summarizer entirely — when the stopping
- * agent's task has runtime_state='looping'. A non-looping task keeps the
- * existing B4 behavior unchanged.
+ * agent's task has runtime_state='looping'. A non-looping task sets the agent
+ * idle and defers the in_progress → human_review transition to the quiescence
+ * poller (no longer happens synchronously in the Stop handler).
  */
 import Database from './sqlite.js';
 import { describe, it, expect, beforeEach, vi } from './bun-test.js';
@@ -71,10 +72,12 @@ describe('Stop hook: loop guard', () => {
         expect(fireHook).not.toHaveBeenCalled();
         expect(summarizeAgentProgress).not.toHaveBeenCalled();
       } else {
+        // For a running (non-looping) task, Stop no longer transitions to human_review
+        // synchronously — the quiescence poller handles that after the debounce window.
         expect(handleLoopIterationBoundary).not.toHaveBeenCalled();
-        expect(task.workflow_status).toBe('human_review');
-        expect(update).not.toBeUndefined();
-        expect(fireHook).toHaveBeenCalled();
+        expect(task.workflow_status).toBe('in_progress');
+        expect(update).toBeUndefined();
+        expect(fireHook).not.toHaveBeenCalledWith('workflow_status_changed', expect.anything());
         expect(summarizeAgentProgress).toHaveBeenCalled();
       }
     },

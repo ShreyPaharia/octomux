@@ -17,6 +17,7 @@ interface Props {
   reviewedFiles: Set<string>;
   onToggleReviewed: (path: string, currentlyReviewed: boolean) => void;
   onSelect: (path: string) => void;
+  hideFileSummaries?: boolean;
 }
 
 interface FileCounts {
@@ -56,6 +57,7 @@ interface FileRowProps {
   reviewedFiles: Set<string>;
   onToggleReviewed: (path: string, currentlyReviewed: boolean) => void;
   onSelect: (path: string) => void;
+  hideFileSummaries?: boolean;
 }
 
 function FileRow({
@@ -65,6 +67,7 @@ function FileRow({
   reviewedFiles,
   onToggleReviewed,
   onSelect,
+  hideFileSummaries = false,
 }: FileRowProps) {
   const open = counts?.open ?? 0;
   const stale = counts?.stale ?? 0;
@@ -116,14 +119,14 @@ function FileRow({
             </Badge>
           )}
         </span>
-        {file.summary && (
+        {file.summary && !hideFileSummaries ? (
           <ClampedExplainer
             text={file.summary}
             lines={2}
             clampChars={120}
             className="text-[10px] leading-snug text-muted-foreground"
           />
-        )}
+        ) : null}
       </button>
       {(open > 0 || stale > 0) && (
         <div className="flex shrink-0 flex-col items-end gap-1 pt-1">
@@ -163,6 +166,7 @@ export function ReviewFileTree({
   reviewedFiles,
   onToggleReviewed,
   onSelect,
+  hideFileSummaries = false,
 }: Props) {
   const groups = useMemo(() => buildGroups(files, walkthrough), [files, walkthrough]);
   const counts = useMemo(() => countsByFile(comments), [comments]);
@@ -288,6 +292,7 @@ export function ReviewFileTree({
                       reviewedFiles={reviewedFiles}
                       onToggleReviewed={onToggleReviewed}
                       onSelect={onSelect}
+                      hideFileSummaries={hideFileSummaries}
                     />
                   ))}
                 </ul>

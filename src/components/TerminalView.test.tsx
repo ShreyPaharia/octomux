@@ -255,7 +255,7 @@ describe('TerminalView', () => {
     expect(queryByTestId('terminal-disconnected-overlay')).not.toBeNull();
   });
 
-  it('shows the connecting placeholder before the first message and hides it once the ws opens', async () => {
+  it('keeps the connecting placeholder up after the ws opens, until data arrives', async () => {
     const TerminalView = await importTerminalView();
     const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
 
@@ -264,8 +264,12 @@ describe('TerminalView', () => {
     expect(ws.readyState).toBe(MockWebSocket.CONNECTING);
     expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
 
-    // Once the ws opens, the placeholder disappears.
+    // The socket opens in a few ms but the server's first frame lands later —
+    // clearing here would leave a blank black rectangle with no feedback.
     act(() => ws._open());
+    expect(queryByTestId('terminal-connecting-placeholder')).not.toBeNull();
+
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
     expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
   });
 
@@ -288,6 +292,7 @@ describe('TerminalView', () => {
 
     const ws = MockWebSocket.instances[0];
     act(() => ws._open());
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
     expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
 
     // Non-normal close triggers a reconnect; advancing past the backoff delay
@@ -348,5 +353,34 @@ describe('TerminalView', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
     const stale = MockWebSocket.instances.find((ws, idx) => idx >= 2 && ws.url.endsWith('/0'));
     expect(stale).toBeUndefined();
+  });
+
+  it('reconnects immediately on tab return when the socket is dead', async () => {
+    // Background tabs throttle the backoff timer, so a scheduled reconnect can
+    // sit for minutes. Returning to the tab must not wait for it.
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws1 = MockWebSocket.instances[0];
+    act(() => ws1._open());
+    act(() => ws1._close(1006)); // abnormal close → reconnect scheduled with backoff
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('does not open a duplicate socket on tab return while connected', async () => {
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    act(() => MockWebSocket.instances[0]._open());
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 });

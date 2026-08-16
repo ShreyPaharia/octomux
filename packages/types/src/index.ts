@@ -1,4 +1,61 @@
 export type RuntimeState = 'idle' | 'setting_up' | 'running' | 'error' | 'looping';
+
+/** PR-extract output contract — shared by server/routes/pr-extracts.ts (ajv validation) and the
+ * client's schema-driven default detail view for the `pr-extract` workflow kind. */
+export const PR_EXTRACT_OUTPUT_SCHEMA = {
+  type: 'object',
+  required: ['area', 'risk', 'has_migration', 'surface', 'loc'],
+  properties: {
+    area: { type: 'string', minLength: 1 },
+    risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+    has_migration: { type: 'boolean' },
+    surface: { type: 'string', minLength: 1 },
+    loc: { type: 'integer', minimum: 0 },
+  },
+  additionalProperties: false,
+} as const;
+/** Universal run-result envelope. Every workflow finishes its run with this shape; kind-specific
+ * `output` schemas merge their own fields in alongside these keys. Stored as `runs.result_json`,
+ * rendered by the unified /runs feed. See `spec/workflow-consolidation.md` §5. */
+export interface RunResult {
+  outcome: 'done' | 'blocked' | 'failed';
+  /** Agent-authored prose: what happened. */
+  summary: string;
+  links?: { label: string; url: string }[];
+  [key: string]: unknown;
+}
+
+/** Envelope keys every workflow `output` schema must require. Merge into kind-specific schemas
+ * rather than validating separately — one ajv compile per kind, not two. */
+export const RUN_RESULT_SCHEMA = {
+  type: 'object',
+  required: ['outcome', 'summary'],
+  properties: {
+    outcome: { type: 'string', enum: ['done', 'blocked', 'failed'] },
+    summary: { type: 'string', minLength: 1 },
+    links: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['label', 'url'],
+        properties: { label: { type: 'string' }, url: { type: 'string' } },
+        additionalProperties: false,
+      },
+    },
+  },
+} as const;
+
+/** Type guard for the render path — `runs.result_json` is untrusted TEXT that predates this
+ * envelope, so older rows will not match. Callers must also guard `JSON.parse` itself. */
+export function isRunResult(v: unknown): v is RunResult {
+  if (typeof v !== 'object' || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    (o.outcome === 'done' || o.outcome === 'blocked' || o.outcome === 'failed') &&
+    typeof o.summary === 'string'
+  );
+}
+
 /** Workflow status — human-facing board column. */
 export type WorkflowStatus = 'backlog' | 'planned' | 'in_progress' | 'human_review' | 'pr' | 'done';
 export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
@@ -10,11 +67,11 @@ export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
   'done',
 ] as const;
 
-export type AgentStatus = 'running' | 'idle' | 'waiting' | 'stopped';
+export type WorkerStatus = 'running' | 'idle' | 'waiting' | 'stopped';
 export type HookActivity = 'active' | 'idle' | 'waiting';
 export type DerivedTaskStatus = 'working' | 'needs_attention' | 'done';
 
-export type TaskSource = 'auto_review' | null;
+export type TaskSource = 'auto_review' | 'pr_extract' | 'prod_log_triage' | 'doc_drift' | null;
 
 export type RunMode = 'new' | 'existing' | 'none' | 'scratch';
 
@@ -86,6 +143,10 @@ export interface Task {
   model: string | null;
   /** If set, poller sends a completion message to this task's active agent when this task finishes. */
   notify_task_id: string | null;
+  /** Set when this task was created by a cron schedule run. */
+  schedule_id?: string | null;
+  /** Another task's id this one depends on — must reach 'done' before this task auto-starts. Null = no dependency. */
+  depends_on: string | null;
   harness_id: string;
   error: string | null;
   /** Summary text set by agent or user. */
@@ -93,23 +154,25 @@ export interface Task {
   current_summary_updated_at: string | null;
   created_at: string;
   updated_at: string;
-  agents?: Agent[];
+  workers?: Worker[];
   user_terminals?: UserTerminal[];
   pending_prompts?: PermissionPrompt[];
   derived_status?: DerivedTaskStatus | null;
+  /** Server-computed "wants the user right now". Never re-derive this client-side. */
+  needs_you?: boolean;
   external_refs?: TaskExternalRef[];
   recent_updates?: TaskUpdate[];
   /** Live review task pointing at this source (or this PR). Set by GET /api/tasks/:id. */
   existing_review_id?: string | null;
 }
 
-export interface Agent {
+export interface Worker {
   id: string;
   /** Phase 2a: null for standalone agents (orchestrator, chats). */
   task_id: string | null;
   window_index: number;
   label: string;
-  status: AgentStatus;
+  status: WorkerStatus;
   harness_id: string;
   harness_session_id: string | null;
   /** Per-agent token used to authenticate hook callbacks. */
@@ -222,14 +285,6 @@ export interface MoveTaskRequest {
   note?: string;
 }
 
-export interface SummaryRequest {
-  summary: string;
-}
-
-export interface NoteRequest {
-  body: string;
-}
-
 export interface AddRefRequest {
   integration: string;
   ref: string;
@@ -262,4 +317,75 @@ export interface ListTaskBranchesResponse {
   branches: string[];
   current: string | null;
   default: string | null;
+}
+
+/**
+ * Every event broadcast over `/ws/events`. Producers (the server) use this
+ * discriminated union so `broadcast()` rejects a payload that doesn't match its
+ * type. Consumers use `ReceivedServerEvent` below.
+ */
+export type ServerEvent =
+  | { type: 'task:updated' | 'task:created' | 'task:deleted'; payload: { taskId: string } }
+  | { type: 'chat:updated' | 'chat:deleted'; payload: { chatId: string } }
+  | {
+      type: 'review:drafts-ready' | 'review:run-failed';
+      payload: { taskId: string; reviewRunId: string };
+    }
+  | {
+      type: 'review:published';
+      payload: { taskId: string; github_review_url: string | null };
+    }
+  | {
+      type: 'review:head-advanced';
+      payload: { taskId: string; newHeadSha: string };
+    }
+  | {
+      type: 'task:phase_complete';
+      payload: { taskId: string; phase: string; [key: string]: unknown };
+    }
+  | {
+      type: 'task:stuck';
+      payload: { taskId: string; reason?: string; [key: string]: unknown };
+    }
+  | {
+      type: 'loop:emit';
+      // runId is the `runs.id` this loop's run row lives under (see
+      // server/routes/runs.ts's module doc) — loopRunId is the underlying
+      // loop_runs.id, kept for callers that still key off it.
+      payload: { taskId: string; runId: string; loopRunId: string; status: string; reason: string };
+    }
+  | {
+      type: 'pr_extract:created';
+      payload: { taskId: string; extractId: string };
+    }
+  | {
+      type: 'loop_group:judging' | 'loop_group:judged';
+      payload: { groupId: string; runId: string };
+    };
+
+export type ServerEventType = ServerEvent['type'];
+
+/**
+ * Consumer-side view of a `/ws/events` message: payload fields flattened and
+ * optional, so a subscriber can filter on `payload.taskId` without narrowing on
+ * `type` first. Kept next to `ServerEvent` deliberately — the two must be edited
+ * together, and one file makes that obvious.
+ */
+export interface ReceivedServerEvent {
+  type: ServerEventType;
+  payload: {
+    taskId?: string;
+    chatId?: string;
+    reviewRunId?: string;
+    newHeadSha?: string;
+    github_review_url?: string | null;
+    phase?: string;
+    reason?: string;
+    runId?: string;
+    loopRunId?: string;
+    groupId?: string;
+    status?: string;
+    extractId?: string;
+    [key: string]: unknown;
+  };
 }

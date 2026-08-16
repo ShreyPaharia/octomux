@@ -58,13 +58,13 @@ const taskA = makeTask({
   id: 'task-A',
   title: 'Task A',
   tmux_session: 'octomux-agent-task-A',
-  agents: [makeAgent({ id: 'a-A', task_id: 'task-A', window_index: 0 })],
+  workers: [makeAgent({ id: 'a-A', task_id: 'task-A', window_index: 0 })],
 });
 const taskB = makeTask({
   id: 'task-B',
   title: 'Task B',
   tmux_session: 'octomux-agent-task-B',
-  agents: [makeAgent({ id: 'a-B', task_id: 'task-B', window_index: 0 })],
+  workers: [makeAgent({ id: 'a-B', task_id: 'task-B', window_index: 0 })],
 });
 
 // Helper child that captures the real router-bound navigate so the test can

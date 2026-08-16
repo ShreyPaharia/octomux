@@ -42,6 +42,15 @@ export const IGNORED_DENY_PREFIXES = [
   '.DS_Store',
 ];
 
+/** Files inside any dot-directory (`.claude/`, `.octomux/`, …) are tool/config
+ *  noise in a review — demote them to the ignored group instead of the main diff. */
+export function isDotFolderPath(p: string): boolean {
+  return p
+    .split('/')
+    .slice(0, -1)
+    .some((seg) => seg.startsWith('.'));
+}
+
 export type FileStatus = 'A' | 'M' | 'D' | 'B';
 
 export interface DiffFileEntry {
@@ -269,7 +278,9 @@ export async function getDiffSummary(opts: GetDiffSummaryOptions): Promise<DiffS
           ? null
           : await blobAt({ worktree, commit: newRefForBlob, relPath: p });
     }
-    files.push({ path: p, status, additions, deletions, post_blob_sha });
+    const entry: DiffFileEntry = { path: p, status, additions, deletions, post_blob_sha };
+    if (isDotFolderPath(p)) entry.ignored = true;
+    files.push(entry);
   }
 
   const summary: DiffSummary = {

@@ -97,9 +97,9 @@ describe('POST /api/reviews', () => {
     expect(review!.repo_path).toBe('/repos/myrepo');
     expect(review!.branch).toMatch(/^review\/.+-pr-42$/);
     expect(review!.base_branch).toBe('main');
-    expect(String(review!.initial_prompt)).toContain('/review-walkthrough');
+    expect(String(review!.initial_prompt)).toContain('/review-artifact');
     expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
-    expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);
+    expect(String(review!.initial_prompt)).toContain(`close-task ${res.body.id}`);
     expect(startTask).toHaveBeenCalled();
   });
 

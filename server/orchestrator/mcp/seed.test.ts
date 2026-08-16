@@ -1,4 +1,3 @@
-import type { LinearIssueSummary, SubTaskItem } from './seed.js';
 /**
  * server/orchestrator/mcp/seed.test.ts
  *
@@ -11,6 +10,8 @@ import type { LinearIssueSummary, SubTaskItem } from './seed.js';
  * Spec refs: §5 #4 (plan-first batch card), §12 Phase 4.
  */
 
+import type { LinearIssueSummary } from './seed.js';
+import type { SubTaskItem } from './seed.js';
 import { describe, it, expect, beforeEach, vi, afterEach } from '../../bun-test.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -42,10 +43,11 @@ vi.mock('../../integrations/linear/graphql.js', (importOriginal) => {
 
 const { createTestDb, insertTask } = await import('../../test-helpers.js');
 const { getDb } = await import('../../db.js');
-const { createConversation, upsertManagedTask } = await import('../store.js');
-
+const { createConversation, upsertManagedTask } = await import('../../repositories/orchestrator.js');
 const { handlePullLinearIssue, buildBatchPlanCard, LinearApiError } = await import('./seed.js');
+
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

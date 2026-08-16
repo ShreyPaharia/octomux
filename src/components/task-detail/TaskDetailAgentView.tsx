@@ -46,14 +46,14 @@ export function TaskDetailAgentView({
   onMoveDialogClose,
   onMoved,
 }: TaskDetailAgentViewProps) {
-  const agents = task.agents || [];
+  const workers = task.workers || [];
 
   return (
     <div className={mode === 'agents' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
       <div className="flex shrink-0 items-center gap-1">
         <div className="min-w-0 flex-1">
           <AgentTabs
-            agents={agents}
+            agents={workers}
             activeIndex={activeWindow ?? 0}
             onSelect={onSelectWindow}
             onAddAgent={onAddAgent}
@@ -66,7 +66,7 @@ export function TaskDetailAgentView({
             onDetachAgent={isRunning ? onDetachAgent : undefined}
           />
         </div>
-        {agents.filter((a) => a.status !== 'stopped').length > 1 && (
+        {workers.filter((a) => a.status !== 'stopped').length > 1 && (
           <Button
             type="button"
             size="xs"
@@ -86,14 +86,14 @@ export function TaskDetailAgentView({
           onOpenChange={(open) => !open && onMoveDialogClose()}
           agentId={movingAgentId}
           currentTaskId={task.id}
-          agentLabel={task.agents?.find((a) => a.id === movingAgentId)?.label}
+          agentLabel={task.workers?.find((a) => a.id === movingAgentId)?.label}
           onMoved={onMoved}
         />
       )}
       {gridView ? (
         <div data-testid="task-agent-grid" className="min-h-0 flex-1 overflow-auto p-2">
           {(() => {
-            const running = agents.filter((a) => a.status !== 'stopped');
+            const running = workers.filter((a) => a.status !== 'stopped');
             const cols = gridColumns(running.length);
             return (
               <div

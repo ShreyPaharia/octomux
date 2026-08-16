@@ -25,7 +25,9 @@ const apiCases = [
   {
     name: 'listTasks',
     call: () => taskApi.listTasks(),
-    expectedUrl: '/api/tasks',
+    // task.list is lean by default; the dashboard asks for the relations it
+    // renders. See LIST_INCLUDE in src/lib/api/taskApi.ts.
+    expectedUrl: '/api/tasks?include=workers%2Cpending_prompts%2Cuser_terminals',
     expectedMethod: undefined,
     expectedBody: undefined,
     response: [{ id: 't1', title: 'Test' }],
@@ -33,7 +35,8 @@ const apiCases = [
   {
     name: 'getTask',
     call: () => taskApi.getTask('t1'),
-    expectedUrl: '/api/tasks/t1',
+    expectedUrl:
+      '/api/tasks/t1?include=workers,pending_prompts,user_terminals,worktree,existing_review_id',
     expectedMethod: undefined,
     expectedBody: undefined,
     response: { id: 't1' },
@@ -74,7 +77,7 @@ const apiCases = [
   {
     name: 'addAgent with prompt',
     call: () => taskApi.addAgent('t1', { prompt: 'Write tests' }),
-    expectedUrl: '/api/tasks/t1/agents',
+    expectedUrl: '/api/tasks/t1/workers',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({ prompt: 'Write tests' }),
     response: { id: 'a1' },
@@ -82,7 +85,7 @@ const apiCases = [
   {
     name: 'addAgent without data',
     call: () => taskApi.addAgent('t1'),
-    expectedUrl: '/api/tasks/t1/agents',
+    expectedUrl: '/api/tasks/t1/workers',
     expectedMethod: 'POST',
     expectedBody: JSON.stringify({}),
     response: { id: 'a1' },
@@ -90,7 +93,7 @@ const apiCases = [
   {
     name: 'stopAgent',
     call: () => taskApi.stopAgent('t1', 'a1'),
-    expectedUrl: '/api/tasks/t1/agents/a1',
+    expectedUrl: '/api/tasks/t1/workers/a1',
     expectedMethod: 'DELETE',
     expectedBody: undefined,
     response: undefined,

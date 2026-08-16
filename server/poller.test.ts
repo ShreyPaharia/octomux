@@ -17,7 +17,9 @@ vi.mock('child_process', () => ({
 vi.mock('./task-engine/index.js', () => ({
   closeTask: vi.fn(),
   deleteTask: vi.fn(async () => undefined),
+  softDeleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
+  resumeTask: vi.fn(async () => undefined),
   addAgent: vi.fn().mockResolvedValue({ id: 'a2', label: 'Agent 2', window_index: 1 }),
 }));
 
@@ -73,11 +75,13 @@ const {
 } = await import('./poller.js');
 const { execFile } = await import('child_process');
 const { sendMessageToAgent } = await import('./tmux-input.js');
-const { closeTask, deleteTask, startTask, addAgent } = await import('./task-engine/index.js');
+const { closeTask, deleteTask, softDeleteTask, startTask, resumeTask, addAgent } =
+  await import('./task-engine/index.js');
 const { installHookSettings } = await import('./hook-settings.js');
 const { broadcast } = await import('./events.js');
 const { readGithubLogin } = await import('./github-login.js');
 const { getSettings } = await import('./settings.js');
+await import('./workflows/index.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -498,13 +502,11 @@ describe('pollPRs', () => {
     expect(task.pr_number).toBe(99);
   });
 
-  const pollPRSkipCases = [
-    {
-      name: 'already has a PR',
-      overrides: { pr_url: 'https://github.com/org/repo/pull/1', pr_number: 1 },
-    },
-    { name: 'has no branch', overrides: { branch: null } },
-  ];
+  // Note: a task that "already has a PR" is intentionally NOT skipped anymore —
+  // the poller keeps looking so it can discover additional slice-branch PRs on a
+  // long-running task. The null→'pr' workflow flip is still guarded (see
+  // pr-detection.test.ts). Only a missing branch skips detection.
+  const pollPRSkipCases = [{ name: 'has no branch', overrides: { branch: null } }];
 
   it.each([...pollPRSkipCases])('skips tasks that $name', async ({ overrides }) => {
     insertTask(db, { ...DEFAULTS.runningTask, ...overrides });
@@ -593,6 +595,20 @@ describe('checkMergedPRs', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
+  it('does not re-close a task already marked done (resumed after auto-close)', async () => {
+    insertTask(db, {
+      ...DEFAULTS.runningTask,
+      pr_number: 42,
+      pr_url: 'https://github.com/org/repo/pull/42',
+      workflow_status: 'done',
+    });
+    mockPrStates({ pr0: 'MERGED' });
+
+    await checkMergedPRs();
+
+    expect(closeTask).not.toHaveBeenCalled();
+  });
+
   it('skips tasks without pr_number', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
@@ -655,6 +671,60 @@ describe('checkMergedPRs', () => {
     await checkMergedPRs();
 
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  describe('pr-extract trigger', () => {
+    it('creates a pr_extract task when a tracked PR merges', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: 'sha-merged',
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+
+      const extractTask = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .get(42);
+      expect(extractTask).toBeTruthy();
+    });
+
+    it('does not create a pr_extract task when the merged task has no pr_head_sha', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: null,
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+
+      const extractTask = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .get(42);
+      expect(extractTask).toBeFalsy();
+    });
+
+    it('does not create a second pr_extract task on a repeat poll (same head sha)', async () => {
+      insertTask(db, {
+        ...DEFAULTS.runningTask,
+        pr_number: 42,
+        pr_url: 'https://github.com/org/repo/pull/42',
+        pr_head_sha: 'sha-merged',
+      });
+      mockPrStates({ pr0: 'MERGED' });
+
+      await checkMergedPRs();
+      await checkMergedPRs();
+
+      const rows = db
+        .prepare(`SELECT * FROM tasks WHERE source = 'pr_extract' AND pr_number = ?`)
+        .all(42);
+      expect(rows).toHaveLength(1);
+    });
   });
 });
 
@@ -837,11 +907,11 @@ describe('pollReviewerRequests', () => {
     expect((created!.branch as string).startsWith('review/')).toBe(true);
     expect(created!.branch).toContain('pr-42');
     expect(created!.title).toContain('#42');
-    expect((created!.initial_prompt as string).startsWith('/review-walkthrough')).toBe(true);
+    expect(created!.initial_prompt).toContain('/review-artifact');
     expect(created!.initial_prompt).toContain('https://github.com');
-    // Prompt pins the new review task's own id for the review CLI.
+    // Prompt pins the new review task's own id so the agent closes the right task.
     expect(created!.initial_prompt).toContain(`Review task id: ${created!.id}`);
-    expect(created!.initial_prompt).toContain(`--task ${created!.id}`);
+    expect(created!.initial_prompt).toContain(`octomux close-task ${created!.id}`);
     expect(broadcast).toHaveBeenCalledWith({
       type: 'task:created',
       payload: { taskId: created!.id },
@@ -861,6 +931,20 @@ describe('pollReviewerRequests', () => {
     expect(startTask).toHaveBeenCalledTimes(1);
     const calledWith = vi.mocked(startTask).mock.calls[0][0];
     expect((calledWith as { id: string }).id).toBe(created.id);
+  });
+
+  it('does not resurrect a soft-deleted review task for the same PR', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, { id: 'trashed', repo_path: REPO, pr_number: 42, source: 'auto_review' });
+    db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 'trashed'`).run();
+    mockPrList([makePR()]);
+
+    await pollReviewerRequests();
+
+    const created = db
+      .prepare(`SELECT id FROM tasks WHERE source = 'auto_review' AND deleted_at IS NULL`)
+      .all();
+    expect(created).toHaveLength(0);
   });
 
   it('skips when owner is not in reviewRequests (e.g. already reviewed)', async () => {
@@ -1021,64 +1105,64 @@ describe('pollReviewerRequests', () => {
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
   });
 
-  it('falls back to full re-review when prev head is unreachable from new head', async () => {
+  it('resumes a closed review session with a re-review prompt when head advances', async () => {
     insertTask(db, { id: 'seed', repo_path: REPO });
     insertTask(db, {
-      id: 'running-review',
+      id: 'closed-review',
       repo_path: REPO,
-      worktree: '/wt',
-      runtime_state: 'running',
-      tmux_session: 'octomux-agent-running-review',
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
       pr_number: 42,
       pr_head_sha: 'sha-old',
       source: 'auto_review',
     });
+    // The task ran before: it has a (stopped) worker → not a draft.
     insertAgent(db, {
       id: 'agent-a',
-      task_id: 'running-review',
+      task_id: 'closed-review',
       window_index: 0,
-      status: 'running',
+      status: 'stopped',
     });
-
-    // PR list mock + override merge-base --is-ancestor to fail.
-    const searchNodes = [
-      {
-        number: 42,
-        title: 'Add thing',
-        url: 'https://github.com/org/repo/pull/42',
-        author: { login: 'teammate' },
-        headRefOid: 'sha-new',
-        headRefName: 'feat/thing',
-        baseRefName: 'main',
-        repository: { nameWithOwner: 'org/repo' },
-        reviewRequests: {
-          nodes: [{ requestedReviewer: { __typename: 'User', login: OWNER } }],
-        },
-      },
-    ];
-    const graphqlBody = JSON.stringify({ data: { search: { nodes: searchNodes } } });
-
-    vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-      const cb = findCallback(...args)!;
-      const cmd = args[0] as string;
-      const cmdArgs = args[1] as string[];
-      if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
-        cb(null, { stdout: graphqlBody, stderr: '' });
-      } else if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
-        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
-      } else if (cmd === 'git' && cmdArgs?.includes('merge-base')) {
-        cb(new Error('not an ancestor'));
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-      return undefined as unknown as ReturnType<typeof execFile>;
-    });
+    mockPrList([makePR({ headRefOid: 'sha-new' })]);
 
     await pollReviewerRequests();
 
-    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
-    const nudgeMessage = vi.mocked(sendMessageToAgent).mock.calls[0][2];
-    expect(nudgeMessage).toMatch(/previous_head_unreachable=true/);
+    expect(vi.mocked(resumeTask)).toHaveBeenCalledOnce();
+    const [task, opts] = vi.mocked(resumeTask).mock.calls[0] as [Task, { prompt?: string }];
+    expect(task.id).toBe('closed-review');
+    expect(opts.prompt).toContain('/review-artifact');
+    expect(opts.prompt).toContain('sha-new');
+    expect(opts.prompt).toContain('octomux close-task closed-review');
+    // Prompt refresh must not happen — the resumed conversation gets the nudge.
+    expect(getTask(db, 'closed-review')!.pr_head_sha).toBe('sha-new');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:updated',
+      payload: { taskId: 'closed-review' },
+    });
+  });
+
+  it('does not resume a closed review session when head SHA is unchanged', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrList([makePR({ headRefOid: 'sha-aaa' })]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(resumeTask)).not.toHaveBeenCalled();
   });
 
   it('does not re-nudge a running review when head SHA is unchanged', async () => {
@@ -1188,6 +1272,86 @@ describe('pollReviewerRequests', () => {
     expect(getTask(db, 'running-review')).toBeDefined();
   });
 
+  /**
+   * Like mockPrList([]), but also answers the aliased pullRequest-state GraphQL
+   * query (issued by cleanupResolvedReviews) with the given per-number states.
+   */
+  function mockPrListWithStates(states: Record<number, string>) {
+    const searchBody = JSON.stringify({ data: { search: { nodes: [] } } });
+    const repoFields = Object.fromEntries(
+      Object.entries(states).map(([n, state]) => [`p${n}`, { state }]),
+    );
+    const statesBody = JSON.stringify({ data: { repository: repoFields } });
+
+    vi.mocked(execFile).mockImplementation((...args: any[]) => {
+      const cb = findCallback(...args)!;
+      const cmd = args[0] as string;
+      const cmdArgs = args[1] as string[];
+      if (cmd === 'gh' && cmdArgs?.[0] === 'api' && cmdArgs?.[1] === 'graphql') {
+        const q = cmdArgs.find((a) => a.startsWith('query=')) ?? '';
+        cb(null, { stdout: q.includes('review-requested') ? searchBody : statesBody, stderr: '' });
+      } else if (cmd === 'git' && cmdArgs?.includes('remote') && cmdArgs?.includes('get-url')) {
+        cb(null, { stdout: 'git@github.com:org/repo.git\n', stderr: '' });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+      return undefined as any;
+    });
+  }
+
+  it('keeps a closed review session while its PR is still open', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      pr_number: 99,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrListWithStates({ 99: 'OPEN' });
+
+    await pollReviewerRequests();
+
+    expect(getTask(db, 'closed-review')).toBeDefined();
+    expect(vi.mocked(softDeleteTask)).not.toHaveBeenCalled();
+  });
+
+  it('trashes a closed review session once its PR is merged', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      pr_number: 99,
+      pr_head_sha: 'sha-old',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrListWithStates({ 99: 'MERGED' });
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(softDeleteTask)).toHaveBeenCalledOnce();
+    const trashed = vi.mocked(softDeleteTask).mock.calls[0][0] as Task;
+    expect(trashed.id).toBe('closed-review');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'task:deleted',
+      payload: { taskId: 'closed-review' },
+    });
+  });
+
   it('does nothing when there are no tracked repos', async () => {
     mockPrList([]);
 
@@ -1250,6 +1414,64 @@ describe('sweepStuckReviewRuns', () => {
     };
     expect(row.status).toBe('failed');
     expect(row.error).toMatch(/timeout/);
+  });
+
+  it('fails a post-walkthrough run whose task is no longer running', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t1', 'x', '', 'idle', 'backlog', 'auto_review')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, started_at)
+       VALUES ('r1', 't1', 'sha', '{"global":{}}', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status, error FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+      error: string | null;
+    };
+    expect(row.status).toBe('failed');
+    expect(row.error).toMatch(/no longer running/);
+  });
+
+  it('fails a stale run whose PR head advanced past its sha', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source, pr_head_sha)
+       VALUES ('t1', 'x', '', 'running', 'backlog', 'auto_review', 'sha-new')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, started_at)
+       VALUES ('r1', 't1', 'sha-old', '{"global":{}}', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status, error FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+      error: string | null;
+    };
+    expect(row.status).toBe('failed');
+    expect(row.error).toMatch(/superseded/);
+  });
+
+  it('leaves an old post-walkthrough run alone while its task still runs on the same head', async () => {
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source, pr_head_sha)
+       VALUES ('t1', 'x', '', 'running', 'backlog', 'auto_review', 'sha')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, walkthrough, status, started_at)
+       VALUES ('r1', 't1', 'sha', '{"global":{}}', 'running', datetime('now', '-16 minutes'))`,
+    ).run();
+
+    const { sweepStuckReviewRuns } = await import('./poller.js');
+    await sweepStuckReviewRuns();
+    const row = db.prepare(`SELECT status FROM review_runs WHERE id = 'r1'`).get() as {
+      status: string;
+    };
+    expect(row.status).toBe('running');
   });
 
   it('leaves a fresh review_run alone', async () => {
@@ -1421,7 +1643,7 @@ describe('pollAgentWindows', () => {
     );
 
     const agentRow = db
-      .prepare('SELECT status FROM agents WHERE id = ?')
+      .prepare('SELECT status FROM workers WHERE id = ?')
       .get('worker-agent-01') as { status: string };
     expect(agentRow.status).toBe('stopped');
   });

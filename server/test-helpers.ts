@@ -12,7 +12,7 @@ import {
 } from '@octomux/test-fixtures';
 import { getDb, initDb, setDb } from './db.js';
 import { SELECT_TASK_SQL } from './task-select.js';
-import type { Task, Agent, UserTerminal } from './types.js';
+import type { Task, Worker, UserTerminal } from './types.js';
 
 // ─── Default Fixtures ────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ export function createTestDb(): Database {
 export function insertTask(db: Database, overrides: Partial<Task> = {}): Task {
   const task: Task = {
     ...DEFAULTS.task,
-    agents: undefined,
+    workers: undefined,
     ...overrides,
   } as Task;
 
@@ -73,8 +73,8 @@ export function insertTask(db: Database, overrides: Partial<Task> = {}): Task {
   const workflowStatus = (task as any).workflow_status ?? 'backlog';
 
   db.prepare(
-    `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, current_summary, current_summary_updated_at, notify_task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, tmux_session, pr_url, pr_number, pr_head_sha, user_window_index, initial_prompt, last_viewed_at, source, worktree_id, error, notify_task_id, depends_on, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.title,
@@ -91,9 +91,8 @@ export function insertTask(db: Database, overrides: Partial<Task> = {}): Task {
     task.source ?? null,
     wtId,
     task.error,
-    (task as any).current_summary ?? null,
-    (task as any).current_summary_updated_at ?? null,
     (task as any).notify_task_id ?? null,
+    (task as any).depends_on ?? null,
     task.created_at,
     task.updated_at,
   );
@@ -103,14 +102,14 @@ export function insertTask(db: Database, overrides: Partial<Task> = {}): Task {
   return task;
 }
 
-export function insertAgent(db: Database, overrides: Partial<Agent> = {}): Agent {
-  const agent: Agent = {
+export function insertAgent(db: Database, overrides: Partial<Worker> = {}): Worker {
+  const agent: Worker = {
     ...DEFAULTS.agent,
     ...overrides,
-  } as Agent;
+  } as Worker;
 
   db.prepare(
-    'INSERT INTO agents (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO workers (id, task_id, window_index, label, status, harness_session_id, hook_activity, hook_token, notify_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
     agent.id,
     agent.task_id,
@@ -138,8 +137,8 @@ export function getTask(db: Database, id: string): Task | undefined {
   return db.prepare(`${SELECT_TASK_SQL} WHERE t.id = ?`).get(id) as Task | undefined;
 }
 
-export function getAgents(db: Database, taskId: string): Agent[] {
-  return db.prepare('SELECT * FROM agents WHERE task_id = ?').all(taskId) as Agent[];
+export function getAgents(db: Database, taskId: string): Worker[] {
+  return db.prepare('SELECT * FROM workers WHERE task_id = ?').all(taskId) as Worker[];
 }
 
 export function insertPermissionPrompt(
@@ -257,8 +256,11 @@ export function countExecCalls(mock: ReturnType<typeof vi.fn>, match: ShellCallM
 
 // ─── Agent Activity Helper ───────────────────────────────────────────────────
 
-export function getAgentActivity(db: Database, agentId: string): { hook_activity: string } {
-  return db.prepare('SELECT hook_activity FROM agents WHERE id = ?').get(agentId) as {
+export function getAgentActivity(
+  db: Database,
+  agentId: string,
+): { hook_activity: string } {
+  return db.prepare('SELECT hook_activity FROM workers WHERE id = ?').get(agentId) as {
     hook_activity: string;
   };
 }
@@ -313,8 +315,6 @@ export const TASKS_TABLE_COLUMNS = [
   'last_viewed_at',
   'source',
   'error',
-  'current_summary',
-  'current_summary_updated_at',
   'created_at',
   'updated_at',
   'agent',
@@ -360,6 +360,20 @@ export const PERMISSION_PROMPTS_TABLE_COLUMNS = [
   'status',
   'created_at',
   'resolved_at',
+];
+
+export const PR_EXTRACTS_TABLE_COLUMNS = [
+  'id',
+  'task_id',
+  'repo_path',
+  'pr_number',
+  'pr_head_sha',
+  'area',
+  'risk',
+  'has_migration',
+  'surface',
+  'loc',
+  'created_at',
 ];
 
 export const USER_TERMINALS_TABLE_COLUMNS = [

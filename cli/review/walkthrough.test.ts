@@ -29,6 +29,8 @@ beforeEach(() => {
 });
 
 const VALID = {
+  verdict: 'Adds a thing; low risk.',
+  highlights: [{ title: 'Look here', file: 'server/db.ts', line: 1, side: 'new' }],
   global: {
     type: 'Enhancement',
     risk: 'low',
@@ -37,7 +39,6 @@ const VALID = {
     security_concerns: null,
     ticket_compliance: [],
     summary: 's',
-    key_review_points: ['x'],
   },
   groups: [
     {

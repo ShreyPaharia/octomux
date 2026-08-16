@@ -3,12 +3,12 @@ import fs from 'fs';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { childLogger } from '../logger.js';
 import { mcpServerInvocation } from '../orchestrator/runner.js';
-import { isOrchestratorManaged } from '../orchestrator/store.js';
+import { isOrchestratorManaged } from '../repositories/orchestrator.js';
 import { shellQuoteSingle } from '../shell-quote.js';
 import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { setAgentHarnessSessionId } from '../repositories/index.js';
 import type { Harness } from '../harnesses/index.js';
-import type { Agent } from '../types.js';
+import type { Worker } from '../types.js';
 
 const logger = childLogger('task-engine/launch');
 
@@ -59,7 +59,12 @@ export function buildAgentStartupCommand(args: {
   let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
     const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
-    fs.writeFileSync(promptFile, args.prompt, { mode: 0o600, flag: 'wx' });
+    // Board cards otherwise show the first 80 chars of the raw prompt, which is
+    // unreadable. Nudge the agent to rename the task once it has enough context.
+    const promptWithRenameHint =
+      args.prompt +
+      '\n\nOnce you understand what this task actually is, give it a readable name: run `octomux task rename --title "<short title, under 60 chars>"`. Do this once, early.';
+    fs.writeFileSync(promptFile, promptWithRenameHint, { mode: 0o600 });
     // `--` ends option parsing so the positional prompt can't be swallowed by a
     // preceding variadic flag. `--mcp-config` (appended for orchestrator-managed
     // tasks) is variadic in Claude Code: without the separator it consumes the
@@ -219,7 +224,7 @@ export function applyOrchestratorMcpConfig(
  * writes (setAgentWindowRunning / hopAgentToTask).
  */
 export function prepareResumeLaunch(opts: {
-  agent: Agent;
+  agent: Worker;
   harness: Harness;
   flags: string;
   model: string | null;

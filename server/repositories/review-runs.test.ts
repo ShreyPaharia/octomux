@@ -1,12 +1,11 @@
-import { describe, it, expect, beforeEach } from '../bun-test.js';
-import { createTestDb } from '../test-helpers.js';
-import {
-  createReviewRun,
-  getReviewRun,
-  getCurrentRun,
-  completeRun,
-  failRun,
-} from './review-runs.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
+
+vi.mock('../events.js', () => ({ broadcast: vi.fn() }));
+
+const { createTestDb } = await import('../test-helpers.js');
+const { createReviewRun, getReviewRun, getCurrentRun, getLatestRun, completeRun } = await import('./review-runs.js');
+const { broadcast } = await import('../events.js');
+
 
 const TASK_ID = 't_task1';
 
@@ -23,6 +22,7 @@ describe('review-runs', () => {
   beforeEach(() => {
     db = createTestDb();
     insertTask(db);
+    vi.mocked(broadcast).mockClear();
   });
 
   it('createReviewRun inserts a row with status=running', () => {
@@ -40,21 +40,17 @@ describe('review-runs', () => {
     expect(current?.id).toBe(newer.id);
   });
 
-  it('completeRun stores walkthrough JSON and marks completed', () => {
+  it('completeRun stores walkthrough JSON, marks completed, and broadcasts drafts-ready', () => {
     const run = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     completeRun(run.id, { walkthrough: '{"global":{}}' });
     const fresh = getReviewRun(run.id);
     expect(fresh?.status).toBe('completed');
     expect(fresh?.walkthrough).toBe('{"global":{}}');
     expect(fresh?.completed_at).not.toBeNull();
-  });
-
-  it('failRun records error and marks failed', () => {
-    const run = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
-    failRun(run.id, 'agent crashed');
-    const fresh = getReviewRun(run.id);
-    expect(fresh?.status).toBe('failed');
-    expect(fresh?.error).toBe('agent crashed');
+    expect(broadcast).toHaveBeenCalledWith({
+      type: 'review:drafts-ready',
+      payload: { taskId: TASK_ID, reviewRunId: run.id },
+    });
   });
 
   it('unique index prevents two running runs on the same task+sha', () => {
@@ -64,7 +60,7 @@ describe('review-runs', () => {
 
   it('failed run on the same sha can be retried (creates a new running row)', () => {
     const a = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
-    failRun(a.id, 'timeout');
+    db.prepare(`UPDATE review_runs SET status = 'failed' WHERE id = ?`).run(a.id);
     const b = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha1' });
     expect(b.id).not.toBe(a.id);
     expect(b.status).toBe('running');
@@ -78,5 +74,53 @@ describe('review-runs', () => {
     ).run();
     const run = createReviewRun({ task_id: 't1', pr_head_sha: 'sha1' });
     expect(run.deep_review_attached).toBe(0);
+  });
+
+  it('createReviewRun supersedes an older running run on a different head sha', () => {
+    const old = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha-old' });
+    const fresh = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha-new' });
+
+    const oldRow = db
+      .prepare(`SELECT status, error, completed_at FROM review_runs WHERE id = ?`)
+      .get(old.id) as { status: string; error: string | null; completed_at: string | null };
+    expect(oldRow.status).toBe('failed');
+    expect(oldRow.error).toMatch(/superseded/);
+    expect(oldRow.completed_at).not.toBeNull();
+    expect(fresh.status).toBe('running');
+  });
+
+  it('createReviewRun leaves completed runs and other tasks untouched', () => {
+    const done = createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha-done' });
+    db.prepare(`UPDATE review_runs SET status = 'completed' WHERE id = ?`).run(done.id);
+    db.prepare(
+      `INSERT INTO tasks (id, title, description, runtime_state, workflow_status, source)
+       VALUES ('t_other', 'x', '', 'idle', 'backlog', 'auto_review')`,
+    ).run();
+    const other = createReviewRun({ task_id: 't_other', pr_head_sha: 'sha-x' });
+
+    createReviewRun({ task_id: TASK_ID, pr_head_sha: 'sha-new' });
+
+    const doneRow = db.prepare(`SELECT status FROM review_runs WHERE id = ?`).get(done.id) as {
+      status: string;
+    };
+    expect(doneRow.status).toBe('completed');
+    const otherRow = db.prepare(`SELECT status FROM review_runs WHERE id = ?`).get(other.id) as {
+      status: string;
+    };
+    expect(otherRow.status).toBe('running');
+  });
+
+  it('getLatestRun returns the latest run including failed ones', () => {
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, status, started_at)
+       VALUES ('r-old', ?, 'sha-1', 'completed', datetime('now', '-10 minutes')),
+              ('r-new', ?, 'sha-2', 'failed', datetime('now'))`,
+    ).run(TASK_ID, TASK_ID);
+
+    expect(getLatestRun(TASK_ID)?.id).toBe('r-new');
+  });
+
+  it('getLatestRun returns null when the task has no runs', () => {
+    expect(getLatestRun(TASK_ID)).toBeNull();
   });
 });

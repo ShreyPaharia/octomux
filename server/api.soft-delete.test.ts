@@ -16,7 +16,7 @@ vi.mock('./task-engine/index.js', () => {
                           updated_at = datetime('now')
            WHERE id = ?`,
       ).run(task.id);
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE task_id = ?`).run(task.id);
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE task_id = ?`).run(task.id);
     }),
     deleteTask: vi.fn(),
     resumeTask: vi.fn(),

@@ -28,6 +28,12 @@ vi.mock('fs', () => ({
   },
 }));
 
+// resolveHookTimeoutMs() dynamic-imports ./settings.js; default mock returns
+// no hookTimeoutMs so every other test in this file keeps hitting the
+// hardcoded 30000ms default, matching pre-existing behavior.
+const mockGetSettings = vi.fn(async () => ({}) as { hookTimeoutMs?: number });
+vi.mock('./settings.js', () => ({ getSettings: () => mockGetSettings() }));
+
 const { default: path } = await import('path');
 const { default: os } = await import('os');
 
@@ -211,6 +217,60 @@ describe('fireHook', () => {
 
     // unlinkSync should have been called 5 times (55 - 50 = 5 oldest files pruned)
     expect(mockUnlinkSync).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe('resolveHookTimeoutMs', () => {
+  let resolveHookTimeoutMs: typeof import('./hook-dispatcher.js').resolveHookTimeoutMs;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    delete process.env.OCTOMUX_HOOK_TIMEOUT_MS;
+    mockGetSettings.mockResolvedValue({});
+    ({ resolveHookTimeoutMs } = await import('./hook-dispatcher.js'));
+  });
+
+  afterEach(() => {
+    delete process.env.OCTOMUX_HOOK_TIMEOUT_MS;
+  });
+
+  it.each([
+    { name: 'env overrides a stored settings value', env: '5000', stored: 60000, expected: 5000 },
+    {
+      name: 'stored settings value is used when env is absent',
+      env: undefined,
+      stored: 60000,
+      expected: 60000,
+    },
+    {
+      name: 'hardcoded default is used when both env and stored are absent',
+      env: undefined,
+      stored: undefined,
+      expected: 30000,
+    },
+    {
+      name: 'invalid env falls through to the stored settings value',
+      env: 'not-a-number',
+      stored: 45000,
+      expected: 45000,
+    },
+    {
+      name: 'a non-positive env value falls through to the stored settings value',
+      env: '0',
+      stored: 45000,
+      expected: 45000,
+    },
+  ])('$name', async ({ env, stored, expected }) => {
+    if (env !== undefined) process.env.OCTOMUX_HOOK_TIMEOUT_MS = env;
+    mockGetSettings.mockResolvedValue({ hookTimeoutMs: stored });
+
+    await expect(resolveHookTimeoutMs()).resolves.toBe(expected);
+  });
+
+  it('falls back to the default when settings.js throws', async () => {
+    mockGetSettings.mockRejectedValue(new Error('settings unavailable'));
+    await expect(resolveHookTimeoutMs()).resolves.toBe(30000);
   });
 });
 

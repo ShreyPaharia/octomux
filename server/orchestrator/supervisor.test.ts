@@ -1,4 +1,3 @@
-import type { Supervisor, SupervisorInjection } from './supervisor.js';
 /**
  * server/orchestrator/supervisor.test.ts
  *
@@ -10,6 +9,8 @@ import type { Supervisor, SupervisorInjection } from './supervisor.js';
  *  - Serialized per-conversation queue (notes never interleave).
  */
 
+import type { Supervisor } from './supervisor.js';
+import type { SupervisorInjection } from './supervisor.js';
 import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // We need to capture runSendMessage calls from supervisor's spec branch
@@ -52,21 +53,13 @@ vi.mock('./exec.js', () => ({
 
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
-const {
-  createConversation,
-  upsertManagedTask,
-  appendEvent,
-  getManagedTask,
-  setGlobalMonitor,
-  clearGlobalMonitor,
-  getGlobalMonitorConversation,
-} = await import('./store.js');
+const { createConversation, upsertManagedTask, appendEvent, getManagedTask, setGlobalMonitor, clearGlobalMonitor, getGlobalMonitorConversation } = await import('../repositories/orchestrator.js');
+const { createSupervisor } = await import('./supervisor.js');
+const { pushToConversation } = await import('./stream.js');
 
 // ─── Imports (after mocks) ─────────────────────────────────────────────────
 
 // Import supervisor after mocks are set up
-const { createSupervisor } = await import('./supervisor.js');
-const { pushToConversation } = await import('./stream.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

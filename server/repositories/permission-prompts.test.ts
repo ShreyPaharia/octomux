@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
-import { insertAgent } from './agent-runtime.js';
+import { insertAgent } from './workers.js';
 import {
   listPendingPromptsByTask,
   listPendingPromptsByTasks,

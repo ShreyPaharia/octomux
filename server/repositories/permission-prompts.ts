@@ -60,7 +60,7 @@ export function listPendingPromptsByTask(taskId: string): PermissionPromptRow[] 
     .prepare(
       `SELECT pp.*, a.label as agent_label
        FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
+       LEFT JOIN workers a ON pp.agent_id = a.id
        WHERE pp.task_id = ? AND pp.status = 'pending'
        ORDER BY pp.created_at ASC`,
     )
@@ -79,7 +79,7 @@ export function listPendingPromptsByTasks(taskIds: string[]): PermissionPromptRo
     .prepare(
       `SELECT pp.*, a.label as agent_label
        FROM permission_prompts pp
-       LEFT JOIN agents a ON pp.agent_id = a.id
+       LEFT JOIN workers a ON pp.agent_id = a.id
        WHERE pp.task_id IN (${placeholders}) AND pp.status = 'pending'
        ORDER BY pp.created_at ASC`,
     )

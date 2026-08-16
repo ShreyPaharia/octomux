@@ -24,10 +24,40 @@ export interface OctomuxSettings {
   /** Hours a soft-deleted task waits before permanent purge. Default 6 when absent. */
   deleteGraceHours?: number;
 
+  /**
+   * Per-card approval timeout (ms). Overridden by OCTOMUX_APPROVAL_TIMEOUT_MS.
+   * Default 30 minutes (DEFAULT_APPROVAL_TIMEOUT_MS in orchestrator/approval-timeout.ts) when absent.
+   */
+  approvalTimeoutMs?: number;
+  /**
+   * Hook script / integration-provider handler timeout (ms). Overridden by
+   * OCTOMUX_HOOK_TIMEOUT_MS. Default 30000 (hook-dispatcher.ts) when absent.
+   */
+  hookTimeoutMs?: number;
+  /**
+   * When true, task creation polishes an omitted title/description via the
+   * Claude CLI. Overridden by OCTOMUX_AI_TASK_NAMING. Default false.
+   */
+  aiTaskNaming?: boolean;
+  /**
+   * KILL SWITCH for the capability registry's ask/always-ask gate
+   * (server/orchestrator/mcp/gate.ts). When false, every `ask`/`always-ask`
+   * MCP capability call (task.create/start/move/close/delete, ask_owner) runs
+   * immediately with no card and no human decision — same as before this gate
+   * existed. Overridden by OCTOMUX_CAPABILITY_GATE_ENABLED. Default true
+   * (gating ON) when absent.
+   */
+  capabilityGateEnabled?: boolean;
+
   /** @deprecated promoted into harnesses['claude-code'] on next save */
   claudeFlags?: string;
   /** @deprecated */
   dangerouslySkipPermissions?: boolean;
+}
+
+/** A finite, positive number — the shape required of *TimeoutMs settings. */
+function parsePositiveIntSetting(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 export const DEFAULT_SETTINGS: OctomuxSettings = {
@@ -116,7 +146,48 @@ export async function getSettings(): Promise<OctomuxSettings> {
       typeof parsed.onboardingCompletedAt === 'string' ? parsed.onboardingCompletedAt : undefined,
     deleteGraceHours:
       typeof parsed.deleteGraceHours === 'number' ? parsed.deleteGraceHours : undefined,
+    approvalTimeoutMs: parsePositiveIntSetting(parsed.approvalTimeoutMs),
+    hookTimeoutMs: parsePositiveIntSetting(parsed.hookTimeoutMs),
+    aiTaskNaming: typeof parsed.aiTaskNaming === 'boolean' ? parsed.aiTaskNaming : undefined,
+    capabilityGateEnabled:
+      typeof parsed.capabilityGateEnabled === 'boolean' ? parsed.capabilityGateEnabled : undefined,
   };
+}
+
+/**
+ * Synchronous, single-field read of the stored settings.json, for the
+ * capability gate's kill switch (server/orchestrator/mcp/gate.ts), which —
+ * like the approval-timeout sweep — resolves its setting synchronously from
+ * the MCP subprocess and can't await getSettings(). Mirrors
+ * getStoredApprovalTimeoutMs()'s shape for this field only.
+ */
+export function getStoredCapabilityGateEnabled(): boolean | undefined {
+  try {
+    const raw = fs.readFileSync(settingsPath(), 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed.capabilityGateEnabled === 'boolean'
+      ? parsed.capabilityGateEnabled
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Synchronous, single-field read of the stored settings.json, for the one
+ * caller (the approval-timeout sweep) that resolves its timeout as a
+ * synchronous default-parameter expression and can't await getSettings().
+ * Mirrors getSettings()'s parsing for this field only — no harness
+ * validation, no promotion of deprecated keys.
+ */
+export function getStoredApprovalTimeoutMs(): number | undefined {
+  try {
+    const raw = fs.readFileSync(settingsPath(), 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsePositiveIntSetting(parsed.approvalTimeoutMs);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<OctomuxSettings> {
@@ -138,6 +209,35 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     patch.defaultTracker !== 'linear'
   ) {
     throw new Error(`Invalid defaultTracker: ${patch.defaultTracker}. Must be 'jira' or 'linear'.`);
+  }
+
+  if (
+    patch.approvalTimeoutMs !== undefined &&
+    parsePositiveIntSetting(patch.approvalTimeoutMs) === undefined
+  ) {
+    throw new Error(
+      `Invalid approvalTimeoutMs: ${patch.approvalTimeoutMs}. Must be a positive number.`,
+    );
+  }
+
+  if (
+    patch.hookTimeoutMs !== undefined &&
+    parsePositiveIntSetting(patch.hookTimeoutMs) === undefined
+  ) {
+    throw new Error(`Invalid hookTimeoutMs: ${patch.hookTimeoutMs}. Must be a positive number.`);
+  }
+
+  if (patch.aiTaskNaming !== undefined && typeof patch.aiTaskNaming !== 'boolean') {
+    throw new Error(`Invalid aiTaskNaming: ${patch.aiTaskNaming}. Must be a boolean.`);
+  }
+
+  if (
+    patch.capabilityGateEnabled !== undefined &&
+    typeof patch.capabilityGateEnabled !== 'boolean'
+  ) {
+    throw new Error(
+      `Invalid capabilityGateEnabled: ${patch.capabilityGateEnabled}. Must be a boolean.`,
+    );
   }
 
   const current = await getSettings();
@@ -194,6 +294,14 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
         : current.onboardingCompletedAt,
     deleteGraceHours:
       patch.deleteGraceHours !== undefined ? patch.deleteGraceHours : current.deleteGraceHours,
+    approvalTimeoutMs:
+      patch.approvalTimeoutMs !== undefined ? patch.approvalTimeoutMs : current.approvalTimeoutMs,
+    hookTimeoutMs: patch.hookTimeoutMs !== undefined ? patch.hookTimeoutMs : current.hookTimeoutMs,
+    aiTaskNaming: patch.aiTaskNaming !== undefined ? patch.aiTaskNaming : current.aiTaskNaming,
+    capabilityGateEnabled:
+      patch.capabilityGateEnabled !== undefined
+        ? patch.capabilityGateEnabled
+        : current.capabilityGateEnabled,
   };
 
   const filePath = settingsPath();

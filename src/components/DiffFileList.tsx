@@ -15,7 +15,7 @@ import {
   type DiffRange,
   type FileDiffResponse,
 } from '@/lib/api/taskApi';
-import type { Agent } from '@octomux/types';
+import type { Worker } from '@octomux/types';
 import { getDiffExpanded, setDiffExpanded } from '@/lib/diff-state';
 import { findHunkLine } from '@/lib/diff-hunks';
 import { useScrollSpy } from '@/hooks/useScrollSpy';
@@ -43,13 +43,15 @@ interface Props {
   onToggleReviewed: (path: string) => void;
   onActiveChange?: (path: string | null) => void;
   range?: DiffRange;
-  agents?: Agent[];
+  agents?: Worker[];
   rangeIsBase?: boolean;
   enableComments?: boolean;
   /** When provided, render sticky group-name dividers above each group's files. */
   groups?: RenderGroup[];
   /** Render diffs side-by-side (split) when true, unified/inline when false. */
   sideBySide?: boolean;
+  /** Hide per-file walkthrough explainers above each diff row. */
+  hideExplainers?: boolean;
 }
 
 function readHashPath(): string | null {
@@ -76,6 +78,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
     enableComments = false,
     groups,
     sideBySide = true,
+    hideExplainers = false,
   },
   ref,
 ) {
@@ -571,7 +574,7 @@ export const DiffFileList = forwardRef<DiffFileListHandle, Props>(function DiffF
               agents={agents}
               rangeIsBase={rangeIsBase}
               enableComments={enableComments}
-              explainer={fileSummaries.get(path)}
+              explainer={hideExplainers ? undefined : fileSummaries.get(path)}
               sideBySide={sideBySide}
             />
           </div>

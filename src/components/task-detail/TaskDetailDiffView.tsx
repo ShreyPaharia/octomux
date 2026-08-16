@@ -7,7 +7,7 @@ import { CommentsSidePanel } from '@/components/CommentsSidePanel';
 import { DiffKeybindCheatSheet } from '@/components/task-detail/DiffKeybindCheatSheet';
 import { CommentsContext } from '@/hooks/useTaskComments';
 import type { DiffRange, DiffSummaryResponse } from '@/lib/api/taskApi';
-import type { Agent, Task } from '@octomux/types';
+import type { Worker, Task } from '@octomux/types';
 import type { DiffFileListHandle } from '@/components/DiffFileList';
 import type { QueuedComment } from '@/hooks/useReviewQueue';
 
@@ -64,7 +64,7 @@ export function TaskDetailDiffView({
   onQueueJumpTo,
   onSendBatch,
 }: TaskDetailDiffViewProps) {
-  const agents: Agent[] = task.agents ?? [];
+  const workers: Worker[] = task.workers ?? [];
 
   return (
     <CommentsContext.Provider value={taskComments}>
@@ -114,13 +114,13 @@ export function TaskDetailDiffView({
               range={range}
               listRef={diffListRef}
               enableComments={true}
-              agents={agents}
+              agents={workers}
               onFilesChange={onFilesChange}
             />
           </div>
           {showCommentsPanel ? (
             <CommentsSidePanel
-              agents={agents}
+              agents={workers}
               filesInDiff={filesInDiffSet}
               rangeIsBase={range.kind === 'base'}
               onJumpTo={onJumpToComment}

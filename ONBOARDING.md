@@ -52,7 +52,7 @@ octomux create-task -t "Spike UI" -r . --harness cursor  # Cursor CLI
 
 **Per-agent mix:** on a running task, **Add agent** can attach a second window under either harness (e.g. Claude plans, Cursor implements).
 
-Custom agent personas live under **Settings → Agents** (`.md` files). Claude uses them via `--agent`; Cursor gets matching rules under each worktree’s `.cursor/rules/`.
+Agent role definitions (orchestrator, planner, reviewer) ship in octomux's bundled plugin and reach both harnesses via `--plugin-dir` — there is no repo or home tier to edit. Your own skills and subagents go in Claude Code's native `~/.claude/skills/`, `~/.claude/agents/`, or `<repo>/.claude/`, which the harness reads directly and octomux does not manage.
 
 ## 4. GitHub CLI (optional)
 
@@ -101,18 +101,21 @@ Draft first if you want to edit title, prompt, and branch before agents start �
 
 ## 7. Where things live
 
-| Path                          | Purpose                                                 |
-| ----------------------------- | ------------------------------------------------------- |
-| `~/.octomux/settings.json`    | Defaults (editor, Jira, harness flags, default harness) |
-| `~/.octomux/data/tasks.db`    | Task state (production)                                 |
-| `./data/tasks.db`             | Task state (development)                                |
-| `~/.octomux/logs/`            | Server + hook logs                                      |
-| `~/.octomux/hooks/<event>.d/` | Lifecycle hooks                                         |
-| `~/.octomux/agents/`          | Custom agent definitions (Claude + Cursor)              |
-| `~/.claude/skills/`           | Skills installed for Claude Code                        |
-| `<repo>/.worktrees/<task-id>` | Per-task git worktree                                   |
-| `<worktree>/.octomux-hooks/`  | Cursor hook bridge (Cursor tasks)                       |
-| `<worktree>/.cursor/rules/`   | Cursor rules synced from agent definitions              |
+| Path                               | Purpose                                                 |
+| ---------------------------------- | ------------------------------------------------------- |
+| `~/.octomux/settings.json`         | Defaults (editor, Jira, harness flags, default harness) |
+| `~/.octomux/data/tasks.db`         | Task state (production)                                 |
+| `./data/tasks.db`                  | Task state (development)                                |
+| `~/.octomux/logs/`                 | Server + hook logs                                      |
+| `~/.octomux/hooks/<event>.d/`      | Lifecycle hooks (global)                                |
+| `<repo>/.octomux/hooks/<event>.d/` | Lifecycle hooks (repo-local; run after the global ones) |
+| `~/.octomux/kinds/`                | Your own schedule-kind presets (Settings → Kinds)       |
+| `~/.claude/skills/`                | Your own Claude Code skills (read by the harness)       |
+| `~/.claude/workflows/`             | Review workflow scripts installed by `octomux init`     |
+| `<repo>/.worktrees/<task-id>`      | Per-task git worktree                                   |
+| `<worktree>/.octomux-hooks/`       | Cursor hook bridge (Cursor tasks)                       |
+
+Set `OCTOMUX_DATA_DIR` to move the `~/.octomux` root elsewhere — the desktop app does this so it never shares the CLI's data directory.
 
 ## Troubleshooting
 

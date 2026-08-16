@@ -18,23 +18,36 @@ import {
   upsertManagedTask,
   eventsSince,
   createConversation,
-} from './orchestrator/store.js';
-import { advancePhaseForLabel } from './hooks.js';
+  getCard,
+  listAllPendingCards,
+  setGlobalMonitor,
+} from './repositories/orchestrator.js';
+import { advancePhaseForLabel, resolveGateCardConversationId } from './hooks.js';
+import { getArtifactSummary } from './artifact.js';
 
 describe('Hook endpoints', () => {
   let db: Database;
   let app: ReturnType<typeof createApp>;
+  // Real worktree dir: current_summary now lives in .octomux/artifact.md
+  // (spec §5.5), so post-tool-use / Stop hooks need an actual directory to
+  // write into, not just a DB row.
+  let worktreeDir: string;
 
   beforeEach(() => {
     db = createTestDb();
     app = createApp();
-    insertTask(db, { id: 't1', runtime_state: 'running' });
+    worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-hooks-test-'));
+    insertTask(db, { id: 't1', runtime_state: 'running', worktree: worktreeDir });
     insertAgent(db, {
       id: 'a1',
       task_id: 't1',
       harness_session_id: 'sess-123',
       hook_token: 'tok-test',
     } as any);
+  });
+
+  afterEach(() => {
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
   });
 
   describe('POST /api/hooks/user-prompt-submit', () => {
@@ -46,7 +59,7 @@ describe('Hook endpoints', () => {
     it.each([...activatableCases])(
       'sets $description to active when user submits a prompt',
       async ({ from }) => {
-        db.prepare(`UPDATE agents SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
+        db.prepare(`UPDATE workers SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
 
         await request(app)
           .post('/api/hooks/user-prompt-submit?token=tok-test')
@@ -58,7 +71,7 @@ describe('Hook endpoints', () => {
     );
 
     it('no-ops (200) when session_id is missing — valid token, nothing to attribute', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app).post('/api/hooks/user-prompt-submit?token=tok-test').send({}).expect(200);
 
@@ -135,7 +148,7 @@ describe('Hook endpoints', () => {
     });
 
     it('does not override idle state (Stop hook may have fired first)', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
@@ -223,11 +236,9 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', ...body })
         .expect(200);
 
-      const row = db
-        .prepare(`SELECT current_summary, current_summary_updated_at FROM tasks WHERE id = ?`)
-        .get('t1') as { current_summary: string | null; current_summary_updated_at: string | null };
-      expect(row.current_summary).toBe(expected);
-      expect(row.current_summary_updated_at).not.toBeNull();
+      const result = getArtifactSummary(worktreeDir);
+      expect(result.current_summary).toBe(expected);
+      expect(result.current_summary_updated_at).not.toBeNull();
     });
 
     it('truncates very long tool details to ≤ 100 chars with ellipsis', async () => {
@@ -237,12 +248,11 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: long } })
         .expect(200);
 
-      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
-        current_summary: string;
-      };
-      expect(row.current_summary.length).toBeLessThanOrEqual(100);
-      expect(row.current_summary.startsWith('Bash: ')).toBe(true);
-      expect(row.current_summary.endsWith('…')).toBe(true);
+      const { current_summary } = getArtifactSummary(worktreeDir);
+      expect(current_summary).not.toBeNull();
+      expect(current_summary!.length).toBeLessThanOrEqual(100);
+      expect(current_summary!.startsWith('Bash: ')).toBe(true);
+      expect(current_summary!.endsWith('…')).toBe(true);
     });
 
     it('leaves current_summary unchanged when tool_name is missing', async () => {
@@ -251,15 +261,15 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_input: { command: 'noop' } })
         .expect(200);
 
-      const row = db.prepare(`SELECT current_summary FROM tasks WHERE id = ?`).get('t1') as {
-        current_summary: string | null;
-      };
-      expect(row.current_summary).toBeNull();
+      expect(getArtifactSummary(worktreeDir).current_summary).toBeNull();
     });
   });
 
   describe('POST /api/hooks/stop', () => {
-    it('resolves all pending prompts and sets agent to idle', async () => {
+    it('sets agent to idle but does NOT blanket-resolve pending permission prompts', async () => {
+      // Subagents inherit the parent hook token and post under the same worker row.
+      // Blanket-resolving on Stop would clobber subagent prompts — so Stop must
+      // no longer call resolveAgentPermissionPrompts.
       insertPermissionPrompt(db, {
         id: 'pp1',
         task_id: 't1',
@@ -278,9 +288,11 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', stop_hook_active: false })
         .expect(200);
 
+      // Prompts must remain pending — Stop no longer blanket-resolves them
       const prompts = getPermissionPrompts(db, 't1');
-      expect(prompts.every((p) => p.status === 'resolved')).toBe(true);
+      expect(prompts.every((p) => p.status === 'pending')).toBe(true);
 
+      // Agent activity still flips to idle
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
 
@@ -300,7 +312,7 @@ describe('Hook endpoints', () => {
     // (resume / compaction / manual relaunch). Hooks then arrive with a session
     // id we never recorded.
     it('reattaches a drifted session to the sole agent and rebinds harness_session_id', async () => {
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
@@ -308,7 +320,7 @@ describe('Hook endpoints', () => {
         .expect(200);
 
       // Rebound so subsequent hooks exact-match…
-      const row = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a1') as {
+      const row = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a1') as {
         harness_session_id: string;
       };
       expect(row.harness_session_id).toBe('sess-NEW');
@@ -324,17 +336,17 @@ describe('Hook endpoints', () => {
         hook_token: 'tok-test',
         hook_activity: 'idle',
       } as any);
-      db.prepare(`UPDATE agents SET hook_activity = 'idle' WHERE id = ?`).run('a1');
+      db.prepare(`UPDATE workers SET hook_activity = 'idle' WHERE id = ?`).run('a1');
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
         .send({ session_id: 'sess-NEW' })
         .expect(200);
 
-      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+      const a1 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a1'`).get() as {
         harness_session_id: string;
       };
-      const a2 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a2'`).get() as {
+      const a2 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a2'`).get() as {
         harness_session_id: string;
       };
       expect(a1.harness_session_id).toBe('sess-123');
@@ -344,14 +356,14 @@ describe('Hook endpoints', () => {
     });
 
     it('does not resurrect a stopped agent (no live match for the token)', async () => {
-      db.prepare(`UPDATE agents SET status = 'stopped' WHERE id = 'a1'`).run();
+      db.prepare(`UPDATE workers SET status = 'stopped' WHERE id = 'a1'`).run();
 
       await request(app)
         .post('/api/hooks/user-prompt-submit?token=tok-test')
         .send({ session_id: 'sess-NEW' })
         .expect(200);
 
-      const a1 = db.prepare(`SELECT harness_session_id FROM agents WHERE id = 'a1'`).get() as {
+      const a1 = db.prepare(`SELECT harness_session_id FROM workers WHERE id = 'a1'`).get() as {
         harness_session_id: string;
       };
       expect(a1.harness_session_id).toBe('sess-123');
@@ -412,7 +424,7 @@ describe('findAgentByTokenAndSession', () => {
     const row = findAgentByTokenAndSession('tok-2', 'sess-bound');
     expect(row).toMatchObject({ id: 'a2', task_id: 't1' });
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a2') as {
+    const reread = db.prepare(`SELECT harness_session_id FROM workers WHERE id = ?`).get('a2') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-bound');
@@ -464,7 +476,9 @@ describe('POST /api/hooks/session-start', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({});
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+    const reread = db
+      .prepare(`SELECT harness_session_id FROM workers WHERE id = ?`)
+      .get('a-ss') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('chat-xyz');
@@ -490,7 +504,9 @@ describe('POST /api/hooks/session-start', () => {
       .send({ session_id: 'sess-from-fallback' });
     expect(res.status).toBe(200);
 
-    const reread = db.prepare(`SELECT harness_session_id FROM agents WHERE id = ?`).get('a-ss') as {
+    const reread = db
+      .prepare(`SELECT harness_session_id FROM workers WHERE id = ?`)
+      .get('a-ss') as {
       harness_session_id: string;
     };
     expect(reread.harness_session_id).toBe('sess-from-fallback');
@@ -599,8 +615,10 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
     } as any);
   });
 
-  it('auto-transitions in_progress → human_review for UN-managed tasks (existing behavior)', async () => {
-    // task-m is NOT in managed_tasks → existing B4 behavior applies
+  it('Stop hook does NOT synchronously transition to human_review (debounced via poller)', async () => {
+    // The B4 synchronous transition has been removed — Stop now only sets the agent idle.
+    // The quiescence poller (pollQuiescence) handles the in_progress → human_review
+    // transition after the debounce window expires.
     await request(app)
       .post('/api/hooks/stop?token=tok-m')
       .send({ session_id: 'sess-m' })
@@ -609,7 +627,8 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
     const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get('task-m') as {
       workflow_status: string;
     };
-    expect(row.workflow_status).toBe('human_review');
+    // Must remain in_progress — quiescence poller decides after debounce
+    expect(row.workflow_status).toBe('in_progress');
   });
 
   it('SUPPRESSES in_progress → human_review auto-transition for orchestrator-managed tasks', async () => {
@@ -1102,4 +1121,206 @@ describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
       expect(payload.phase).toBe(label);
     },
   );
+});
+
+// ─── POST /api/hooks/gate-card ────────────────────────────────────────────
+//
+// Part B of the worker-ask-owner change: a worker's MCP subprocess never has
+// OCTOMUX_CONVERSATION_ID (only the conductor does — see
+// orchestrator/mcp/write.ts's module doc), so it sends task_id instead and
+// this route must resolve the OWNING conversation via `managed_tasks`
+// (findConversationForTask) rather than requiring the caller to know its own
+// conversation. This is routing (a worker's question goes to the conductor
+// supervising it), not a lookup for which human to interrupt — see the
+// route's own doc comment in hooks.ts. The conductor's existing
+// conversation_id-direct path must keep working unchanged.
+//
+// The routing table (resolveGateCardConversationId's three-branch order) is
+// the deliverable below: owner wins when one exists; the global-monitor
+// conversation is the fallback ONLY when there is no owner; and with neither,
+// the request fails closed instead of hanging or creating an orphaned card.
+describe('POST /api/hooks/gate-card', () => {
+  let db: Database;
+  let app: ReturnType<typeof createApp>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    app = createApp();
+    insertTask(db, { id: 'task-gc', runtime_state: 'running', workflow_status: 'in_progress' });
+    insertAgent(db, {
+      id: 'agent-gc',
+      task_id: 'task-gc',
+      harness_session_id: 'sess-gc',
+      hook_token: 'tok-gc',
+    } as any);
+  });
+
+  it('conductor path: conversation_id given directly still creates a card', async () => {
+    const convId = createConversation({ title: 'conductor-conv' });
+
+    const res = await request(app)
+      .post(`/api/hooks/gate-card?token=tok-gc&conversation_id=${convId}`)
+      .send({
+        capability_id: 'task.close',
+        tier: 'always-ask',
+        kind: 'action',
+        command: 'close_task',
+        args: { task_id: 'task-gc' },
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+  });
+
+  // ── Routing branch 1: OWNER wins ──────────────────────────────────────────
+
+  it('worker with a conductor: task_id resolves the OWNING conversation via managed_tasks (not the global monitor)', async () => {
+    const convId = createConversation({ title: 'worker-owning-conv' });
+    upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+    // A global monitor is ALSO configured, to prove owner takes precedence —
+    // if resolution ever preferred the monitor, or the owner lookup broke and
+    // fell through, this card would land there instead.
+    const monitorConvId = createConversation({ title: 'global-monitor-conv' });
+    setGlobalMonitor(monitorConvId);
+
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    // The resolved conversation is the one managed_tasks points at, not one
+    // the worker had to know or supply, and NOT the global monitor.
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(convId);
+    expect(getCard(res.body.result.card_id)!.conversation_id).not.toBe(monitorConvId);
+  });
+
+  // ── Routing branch 2: no owner → the global monitor ───────────────────────
+
+  it('no owner + global monitor configured: card lands in the GLOBAL MONITOR conversation', async () => {
+    // task-gc exists but has no managed_tasks row — not orchestrator-managed,
+    // i.e. no owner.
+    const monitorConvId = createConversation({ title: 'global-monitor-conv' });
+    setGlobalMonitor(monitorConvId);
+
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(true);
+    expect(res.body.result.card_id).toBeTruthy();
+    expect(getCard(res.body.result.card_id)!.conversation_id).toBe(monitorConvId);
+  });
+
+  // ── Routing branch 3: no owner, no monitor → fail closed ──────────────────
+
+  it('plain standalone task (no managed_tasks row) and no global monitor: fails CLOSED with a distinct error — never a hang, never an orphaned card', async () => {
+    // task-gc exists but has no managed_tasks row (no owner), and this test
+    // never calls setGlobalMonitor (no fallback human either).
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200); // hook endpoints report failure IN the body, not via HTTP status
+
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toMatch(/no owner for this session/);
+    expect(res.body.error).toMatch(/no.*global-monitor/);
+    expect(res.body.result).toBeUndefined();
+    // Never an orphaned card: nothing was written to action_cards.
+    expect(listAllPendingCards()).toEqual([]);
+  });
+
+  it('neither conversation_id nor task_id, no global monitor: fails CLOSED with a distinct error', async () => {
+    const res = await request(app)
+      .post('/api/hooks/gate-card?token=tok-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+        question: 'which approach?',
+      })
+      .expect(200);
+
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toBeTruthy();
+    expect(res.body.result).toBeUndefined();
+    expect(listAllPendingCards()).toEqual([]);
+  });
+
+  // ── resolveGateCardConversationId directly (unit-level, no HTTP) ──────────
+
+  describe('resolveGateCardConversationId', () => {
+    it('owner beats a configured global monitor', () => {
+      // task-gc is inserted by this describe block's beforeEach — managed_tasks
+      // has a FK on task_id, so the owner lookup needs a real task row.
+      const convId = createConversation({ title: 'owner-conv' });
+      upsertManagedTask({ conversation_id: convId, task_id: 'task-gc' });
+      setGlobalMonitor(createConversation({ title: 'monitor-conv' }));
+
+      const result = resolveGateCardConversationId(undefined, 'task-gc');
+
+      expect(result).toEqual({ conversationId: convId });
+    });
+
+    it('falls back to the global monitor when there is no owner', () => {
+      const monitorConvId = createConversation({ title: 'monitor-conv' });
+      setGlobalMonitor(monitorConvId);
+
+      const result = resolveGateCardConversationId(undefined, 'task-unowned');
+
+      expect(result).toEqual({ conversationId: monitorConvId });
+    });
+
+    it('fails closed with a distinct error when there is neither an owner nor a global monitor', () => {
+      const result = resolveGateCardConversationId(undefined, 'task-unowned');
+
+      expect('error' in result).toBe(true);
+      expect((result as { error: string }).error).toMatch(/no owner for this session/);
+    });
+  });
+
+  it('returns 401 when hook_token is missing or unrecognized', async () => {
+    await request(app)
+      .post('/api/hooks/gate-card?task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+      })
+      .expect(401);
+
+    await request(app)
+      .post('/api/hooks/gate-card?token=bad-token&task_id=task-gc')
+      .send({
+        capability_id: 'owner.ask',
+        tier: 'always-ask',
+        kind: 'question',
+        command: 'ask_owner',
+      })
+      .expect(401);
+  });
 });

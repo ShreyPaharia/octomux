@@ -82,14 +82,24 @@ vi.mock('@/lib/api/configApi', () => ({
 }));
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
+vi.mock('@/lib/api/kindsApi', () => ({
+  kindsApi: {
+    listKinds: vi.fn().mockResolvedValue({ kinds: [] }),
+    savePreset: vi.fn().mockResolvedValue({
+      kind: 'my-custom-kind',
+      displayName: 'My Custom Kind',
+      execution: 'session',
+      source: 'home',
+    }),
+    deletePreset: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 vi.mock('../lib/hooks', (importOriginal) => {
   const actual = importOriginal() as Record<string, unknown>;
   return {
     ...actual,
-    useSkills: () => ({ skills: [], loading: false, error: null, refresh: vi.fn() }),
     useRepoConfigs: () => ({ configs: [], loading: false, error: null, refresh: vi.fn() }),
-    useAgents: () => ({ agents: [], loading: false, error: null, refresh: vi.fn() }),
   };
 });
 
@@ -117,7 +127,7 @@ describe('C5: HooksSection', () => {
     });
   });
 
-  it('renders HOOKS nav item between SKILLS and REPOSITORIES', async () => {
+  it('renders HOOKS nav item between GENERAL and REPOSITORIES', async () => {
     renderWithRouter(<SettingsPage />);
     await waitFor(() => {
       expect(screen.getByTestId('settings-nav-hooks')).toBeInTheDocument();
@@ -126,12 +136,12 @@ describe('C5: HooksSection', () => {
     const nav = screen
       .getAllByRole('button')
       .filter((b) =>
-        ['settings-nav-skills', 'settings-nav-hooks', 'settings-nav-repositories'].includes(
+        ['settings-nav-general', 'settings-nav-hooks', 'settings-nav-repositories'].includes(
           b.getAttribute('data-testid') ?? '',
         ),
       );
     const ids = nav.map((b) => b.getAttribute('data-testid'));
-    expect(ids.indexOf('settings-nav-skills')).toBeLessThan(ids.indexOf('settings-nav-hooks'));
+    expect(ids.indexOf('settings-nav-general')).toBeLessThan(ids.indexOf('settings-nav-hooks'));
     expect(ids.indexOf('settings-nav-hooks')).toBeLessThan(
       ids.indexOf('settings-nav-repositories'),
     );

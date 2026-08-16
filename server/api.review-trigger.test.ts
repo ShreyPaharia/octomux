@@ -24,7 +24,7 @@ const { getDb } = await import('./db.js');
 
 const { startTask } = await import('./task-engine/index.js');
 
-describe('POST /api/tasks/:taskId/review', () => {
+describe('POST /api/reviews (source_task_id)', () => {
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -49,7 +49,7 @@ describe('POST /api/tasks/:taskId/review', () => {
       pr_number: null,
     });
 
-    const res = await request(app).post('/api/tasks/src1/review').send();
+    const res = await request(app).post('/api/reviews').send({ source_task_id: 'src1' });
 
     expect(res.status).toBe(201);
     expect(res.body.action).toBe('created');
@@ -73,7 +73,7 @@ describe('POST /api/tasks/:taskId/review', () => {
     expect(review!.repo_path).toBe('/repos/foo');
     expect(review!.branch).toMatch(/^review\/.+-task-src1$/);
     expect(review!.base_branch).toBe('main');
-    expect(String(review!.initial_prompt)).toContain('/review-walkthrough');
+    expect(String(review!.initial_prompt)).toContain('/octomux:review-walkthrough');
     // The prompt must pin the review task's OWN id for --task, not the source id.
     expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
     expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);
@@ -96,7 +96,7 @@ describe('POST /api/tasks/:taskId/review', () => {
       pr_head_sha: 'prhead2222222222222222222222222222222222',
     });
 
-    const res = await request(app).post('/api/tasks/src2/review').send();
+    const res = await request(app).post('/api/reviews').send({ source_task_id: 'src2' });
 
     expect(res.status).toBe(201);
     expect(res.body.action).toBe('created');
@@ -119,7 +119,10 @@ describe('POST /api/tasks/:taskId/review', () => {
     expect(String(review!.initial_prompt)).toContain('PR:');
     expect(String(review!.initial_prompt)).toContain('#42');
     expect(String(review!.initial_prompt)).toContain(`Review task id: ${res.body.id}`);
-    expect(String(review!.initial_prompt)).toContain(`--task ${res.body.id}`);
+    // The PR-bearing shape runs the artifact flow and closes by the review
+    // task's OWN id; only the pre-PR shape threads `--task`.
+    expect(String(review!.initial_prompt)).toContain('/review-artifact');
+    expect(String(review!.initial_prompt)).toContain(`close-task ${res.body.id}`);
   });
 
   it('returns existing review when manual review already exists for the source', async () => {
@@ -132,12 +135,12 @@ describe('POST /api/tasks/:taskId/review', () => {
       runtime_state: 'running',
     });
 
-    const first = await request(app).post('/api/tasks/src3/review').send();
+    const first = await request(app).post('/api/reviews').send({ source_task_id: 'src3' });
     expect(first.status).toBe(201);
     expect(first.body.action).toBe('created');
 
     vi.mocked(startTask).mockClear();
-    const second = await request(app).post('/api/tasks/src3/review').send();
+    const second = await request(app).post('/api/reviews').send({ source_task_id: 'src3' });
     expect(second.status).toBe(200);
     expect(second.body.action).toBe('existing');
     expect(second.body.id).toBe(first.body.id);
@@ -170,7 +173,7 @@ describe('POST /api/tasks/:taskId/review', () => {
                'https://github.com/o/r/pull/7', 7, 'sha7777', '/r-o', 'auto_review', 'wt-poller')`,
     ).run();
 
-    const res = await request(app).post('/api/tasks/src4/review').send();
+    const res = await request(app).post('/api/reviews').send({ source_task_id: 'src4' });
     expect(res.status).toBe(200);
     expect(res.body.action).toBe('existing');
     expect(res.body.id).toBe('poller-rev');
@@ -184,13 +187,13 @@ describe('POST /api/tasks/:taskId/review', () => {
       branch: null,
       initial_prompt: null,
     });
-    const res = await request(app).post('/api/tasks/draft1/review').send();
+    const res = await request(app).post('/api/reviews').send({ source_task_id: 'draft1' });
     expect(res.status).toBe(400);
     expect(String(res.body.error)).toMatch(/start/i);
   });
 
   it('returns 404 for a non-existent task', async () => {
-    const res = await request(app).post('/api/tasks/missing/review').send();
+    const res = await request(app).post('/api/reviews').send({ source_task_id: 'missing' });
     expect(res.status).toBe(404);
   });
 });

@@ -2,6 +2,7 @@ import { childLogger } from '../logger.js';
 import { pollPRs } from './pr-detection.js';
 import { pollReviewerRequests } from './reviewer-requests.js';
 import { sweepStuckReviewRuns } from './review-runs.js';
+import { reconcileReviewerRuns } from '../workflows/reviewer/finish-run.js';
 
 const logger = childLogger('poller');
 
@@ -21,5 +22,10 @@ export async function pollPRsAndReviewers(): Promise<void> {
     await sweepStuckReviewRuns();
   } catch (err) {
     logger.error({ err, operation: 'sweepStuckReviewRuns' }, 'sweepStuckReviewRuns failed');
+  }
+  try {
+    reconcileReviewerRuns();
+  } catch (err) {
+    logger.error({ err, operation: 'reconcileReviewerRuns' }, 'reconcileReviewerRuns failed');
   }
 }

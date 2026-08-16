@@ -1,7 +1,7 @@
-import { WebSocket } from 'ws';
 import type { Server } from 'http';
-import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
+import { WebSocket } from 'ws';
 import Database from './sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -30,15 +30,20 @@ const mockExecFile = vi.fn(
       if (execFileShouldFail) {
         process.nextTick(() => callback(new Error('tmux failed'), '', ''));
       } else {
-        process.nextTick(() => callback(null, '', ''));
+        const stdout = _args?.includes('list-clients')
+          ? '/dev/ttys001\n'
+          : _args?.includes('capture-pane')
+            ? 'line one\nline two\n'
+            : '';
+        process.nextTick(() => callback(null, stdout, ''));
       }
     }
     return { on: vi.fn() };
   },
 );
 
-vi.mock('child_process', () => ({
-  execFile: (...args: any[]) => {
+vi.mock('child_process', () => {
+  const execFile = (...args: any[]) => {
     // promisify passes options as 3rd arg and callback as 4th; find callback from end
     let cb: ((...a: any[]) => void) | undefined;
     for (let i = args.length - 1; i >= 0; i--) {
@@ -48,13 +53,27 @@ vi.mock('child_process', () => ({
       }
     }
     return mockExecFile(args[0], args[1], cb);
-  },
-}));
+  };
+  // The real execFile resolves { stdout, stderr } under util.promisify; without
+  // this a plain mock resolves the bare stdout string, breaking execTmux
+  // callers that destructure { stdout }.
+  (execFile as any)[Symbol.for('nodejs.util.promisify.custom')] = (
+    cmd: string,
+    cmdArgs: string[],
+  ) =>
+    new Promise((resolve, reject) => {
+      mockExecFile(cmd, cmdArgs, (err: Error | null, stdout: string, stderr: string) =>
+        err ? reject(err) : resolve({ stdout, stderr }),
+      );
+    });
+  return { execFile };
+});
 
 const { createServer } = await import('http');
 const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('./test-helpers.js');
 
-const { setupTerminalWebSocket, handleTerminalUpgrade } = await import('./terminal.js');
+const { setupTerminalWebSocket, handleTerminalUpgrade, getActiveConnections } =
+  await import('./terminal.js');
 const nodePty = await import('./pty.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -126,7 +145,7 @@ describe('terminal WebSocket', () => {
     { name: 'non-numeric window', path: '/ws/terminal/abc/xyz' },
   ];
 
-  it.each([...invalidUrls])('rejects connection for $name ($path)', async ({ path }) => {
+  it.each(invalidUrls)('rejects connection for $name ($path)', async ({ path }) => {
     await expect(connectWs(path)).rejects.toThrow();
   });
 
@@ -218,6 +237,29 @@ describe('terminal WebSocket', () => {
     ws.close();
   });
 
+  it('sends a capture-pane snapshot as the first frame, before any PTY data', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    const frames: string[] = [];
+    ws.on('message', (d) => frames.push(d.toString()));
+    await waitForSetup();
+
+    // Snapshot targets the shared session's window, not the viewer session.
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'tmux',
+      expect.arrayContaining(['capture-pane', '-t', `${DEFAULTS.runningTask.tmux_session}:0`]),
+      expect.any(Function),
+    );
+
+    // First frame paints the pane into the alternate screen with CRLF line ends,
+    // so tmux's own `\e[?1049h\e[H\e[J` + repaint overwrites identical content.
+    expect(frames[0]).toBe('\x1b[?1049h\x1b[H\x1b[J' + 'line one\r\nline two\r\n');
+
+    ws.close();
+  });
+
   it('closes with 4005 when grouped session creation fails', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
@@ -249,6 +291,78 @@ describe('terminal WebSocket', () => {
     onDataCb('hello terminal');
 
     expect(await received).toBe('hello terminal');
+    ws.close();
+  });
+
+  it('coalesces PTY output into one frame while the socket is congested', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const serverWs = getActiveConnections().get(`${DEFAULTS.task.id}:0`)![0].ws;
+    // Simulate a congested slow link: bufferedAmount above the backpressure limit
+    let buffered = 1024 * 1024;
+    Object.defineProperty(serverWs, 'bufferedAmount', {
+      get: () => buffered,
+      configurable: true,
+    });
+
+    const messages: string[] = [];
+    ws.on('message', (data) => messages.push(data.toString()));
+
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+    onDataCb('repaint-1');
+    await new Promise((r) => setTimeout(r, 50));
+    onDataCb('repaint-2');
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Nothing sent while congested
+    expect(messages).toEqual([]);
+
+    // Link drains → both chunks arrive merged as a single frame
+    buffered = 0;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(messages).toEqual(['repaint-1repaint-2']);
+
+    ws.close();
+  });
+
+  it('discards output while paused and repaints on resume', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const messages: string[] = [];
+    ws.on('message', (data) => messages.push(data.toString()));
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+
+    ws.send(JSON.stringify({ type: 'pause' }));
+    await new Promise((r) => setTimeout(r, 50));
+    onDataCb('hidden output');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(messages).toEqual([]);
+    // Control messages are not forwarded to the PTY as input
+    expect(mockPty.write).not.toHaveBeenCalled();
+
+    ws.send(JSON.stringify({ type: 'resume' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resume forces a full repaint of this viewer's tmux client
+    expect(mockExecFile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining(['refresh-client', '-t', '/dev/ttys001']),
+      expect.any(Function),
+    );
+
+    onDataCb('visible again');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(messages).toEqual(['visible again']);
+
     ws.close();
   });
 

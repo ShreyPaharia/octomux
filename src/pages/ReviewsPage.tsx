@@ -21,6 +21,7 @@ const STATUS_PILL: Record<
   'head-advanced': { label: 'head advanced', variant: 'secondary' },
   published: { label: 'published', variant: 'outline' },
   failed: { label: 'failed', variant: 'destructive' },
+  error: { label: 'error', variant: 'destructive' },
 };
 
 function formatActivityAt(iso: string): string {

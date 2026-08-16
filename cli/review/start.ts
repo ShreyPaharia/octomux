@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
 import { createReviewRun, getCurrentRun } from '../../server/repositories/review-runs.js';
 import { getLatestPublishedReview } from '../../server/repositories/published-reviews.js';
-import { listLearningsForRepo } from '../../server/repositories/review-learnings.js';
+import { listForRead } from '../../server/repositories/agent-learnings.js';
 import { findInstructionFiles } from '../../server/instruction-files.js';
 import { markStaleDrafts } from '../../server/review-staleness.js';
 import { readPlaybook } from '../../server/review-playbook.js';
@@ -106,7 +106,7 @@ export async function runStart(argv: string[]): Promise<void> {
   }
 
   const repoPath = task.repo_path ?? '';
-  const learnings = repoPath ? listLearningsForRepo(repoPath) : [];
+  const learnings = repoPath ? listForRead(repoPath, 'review') : [];
   const instruction_files = task.worktree ? findInstructionFiles(task.worktree) : [];
   const playbook = repoPath ? readPlaybook(repoPath) : { index: null, files: [] };
   const walkthrough = run.walkthrough ? safeParse(run.walkthrough) : null;
@@ -130,7 +130,7 @@ export async function runStart(argv: string[]): Promise<void> {
         pr_url: task.pr_url ?? null,
         worktree: task.worktree ?? null,
         previous_review,
-        learnings: learnings.map((l) => ({ id: l.id, why: l.why })),
+        learnings: learnings.map((l) => ({ id: l.id, why: l.lesson })),
         instruction_files,
         carry_forward,
         playbook,

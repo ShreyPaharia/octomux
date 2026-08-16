@@ -1,4 +1,4 @@
-import type { Agent, Task, UserTerminal } from '@octomux/types';
+import type { Worker, Task, UserTerminal } from '@octomux/types';
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -33,23 +33,23 @@ const AGENT_FIXTURE_BASE = {
   agent: null,
   notify_agent_id: null,
   created_at: FIXTURE_TIMESTAMP,
-} satisfies Omit<Agent, 'id' | 'harness_session_id'>;
+} satisfies Omit<Worker, 'id' | 'harness_session_id'>;
 
 /** Server test default — includes orchestrator-assigned session id. */
-export const SERVER_AGENT_DEFAULTS: Agent = {
+export const SERVER_AGENT_DEFAULTS: Worker = {
   ...AGENT_FIXTURE_BASE,
   id: 'test-agent-01',
   harness_session_id: 'test-session-uuid-01',
 };
 
 /** Frontend test default — harness issues session id at runtime. */
-export const FRONTEND_AGENT_DEFAULTS: Agent = {
+export const FRONTEND_AGENT_DEFAULTS: Worker = {
   ...AGENT_FIXTURE_BASE,
   id: 'agent-01',
   harness_session_id: null,
 };
 
-export function makeAgent(overrides: Partial<Agent> = {}): Agent {
+export function makeAgent(overrides: Partial<Worker> = {}): Worker {
   return { ...FRONTEND_AGENT_DEFAULTS, ...overrides };
 }
 
@@ -73,6 +73,7 @@ const TASK_FIXTURE_BASE = {
   agent: null,
   model: null,
   notify_task_id: null,
+  depends_on: null,
   error: null,
   current_summary: null,
   current_summary_updated_at: null,

@@ -8,130 +8,81 @@
  *
  * Tests call the handler functions directly; no MCP transport is exercised here.
  */
-import { describe, it, expect, beforeEach } from '../../bun-test.js';
-import { createTestDb, insertTask, insertAgent } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
-import {
-  handleListTasks,
-  handleGetTask,
-  handleMonitorStatus,
-  handleGetTaskOutput,
-  handleRecentRepos,
-  handleDefaultBranch,
-} from './read.js';
-import { upsertManagedTask } from '../store.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
+
+// Controllable tmux mock for get_agent_output (hoisted so the factory can close over it).
+const tmuxState = vi.hoisted(() => ({ hasSession: true, capture: '' }));
+vi.mock('../../tmux-bin.js', () => ({
+  execTmux: vi.fn(async (args: string[]) => {
+    if (args.includes('has-session')) {
+      if (!tmuxState.hasSession) throw new Error("can't find session");
+      return { stdout: '', stderr: '' };
+    }
+    if (args.includes('capture-pane')) return { stdout: tmuxState.capture, stderr: '' };
+    return { stdout: '', stderr: '' };
+  }),
+}));
+
+const { createTestDb, insertTask, insertAgent } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const { handleMonitorStatus, handleGetTaskOutput, handleGetAgentOutput, handleRecentRepos, handleDefaultBranch, handleSearchLearnings } = await import('./read.js');
+const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
+const { addLearning, SHARED_LANE } = await import('../../repositories/agent-learnings.js');
+const { POLICY_ONLY_COMMANDS } = await import('../command-registry.js');
+
 
 describe('orchestrator mcp read tools', () => {
   beforeEach(() => {
     createTestDb();
   });
 
-  // ─── list_tasks ────────────────────────────────────────────────────────────
+  // list_tasks / get_task now live in server/registry/capabilities/task.test.ts
+  // (task.list / task.get) — see that file's 'returns the lean summary by
+  // default' / 'expands to the full task row + ... via include' tests, which
+  // cover the same lean-shape + agent_count/phase/current_summary contract
+  // these handlers used to test directly.
 
-  describe('handleListTasks', () => {
-    it('returns lean summary fields — only id, title, status, workflow_status', () => {
+  // ─── get_agent_output ──────────────────────────────────────────────────────
+  describe('handleGetAgentOutput', () => {
+    beforeEach(() => {
+      tmuxState.hasSession = true;
+      tmuxState.capture = '';
+    });
+
+    it('returns the tail of the live agent terminal', async () => {
       const db = getDb();
       insertTask(db, {
-        id: 'task-lt-01',
-        title: 'Build feature A',
-        workflow_status: 'in_progress',
-        runtime_state: 'running',
+        id: 'task-ao-01',
+        title: 'Live task',
+        tmux_session: 'octomux-agent-task-ao-01',
       });
-      insertTask(db, {
-        id: 'task-lt-02',
-        title: 'Fix bug B',
-        workflow_status: 'backlog',
-        runtime_state: 'idle',
-      });
+      insertAgent(db, { id: 'agent-ao-01', task_id: 'task-ao-01' });
+      tmuxState.hasSession = true;
+      tmuxState.capture = 'building...\n\nawaiting plan approval to implement\n';
 
-      const result = handleListTasks({});
-      expect(Array.isArray(result)).toBe(true);
-      const task = result.find((t) => t.id === 'task-lt-01');
-      expect(task).toBeDefined();
-      // Lean summary: only these fields
-      expect(task).toHaveProperty('id');
-      expect(task).toHaveProperty('title');
-      expect(task).toHaveProperty('runtime_state');
-      expect(task).toHaveProperty('workflow_status');
-      // Must NOT include full rows
-      expect(task).not.toHaveProperty('description');
-      expect(task).not.toHaveProperty('initial_prompt');
-      expect(task).not.toHaveProperty('error');
+      const result = await handleGetAgentOutput({ task_id: 'task-ao-01' });
+      expect(result.live).toBe(true);
+      expect(result.agent_count).toBe(1);
+      expect(result.output).toContain('awaiting plan approval to implement');
+      // blank lines are dropped
+      expect(result.output).not.toMatch(/\n\n/);
     });
 
-    it('filters by workflow_status when provided', () => {
+    it('reports not-live when the agent session is gone (stopped)', async () => {
       const db = getDb();
-      insertTask(db, {
-        id: 'task-lt-03',
-        title: 'Running task',
-        workflow_status: 'in_progress',
-        runtime_state: 'running',
-      });
-      insertTask(db, {
-        id: 'task-lt-04',
-        title: 'Done task',
-        workflow_status: 'done',
-        runtime_state: 'idle',
-      });
+      insertTask(db, { id: 'task-ao-02', title: 'Stopped task' });
+      tmuxState.hasSession = false;
 
-      const result = handleListTasks({ workflow_status: 'in_progress' });
-      expect(result.every((t) => t.workflow_status === 'in_progress')).toBe(true);
-      expect(result.find((t) => t.id === 'task-lt-03')).toBeDefined();
-      expect(result.find((t) => t.id === 'task-lt-04')).toBeUndefined();
+      const result = await handleGetAgentOutput({ task_id: 'task-ao-02' });
+      expect(result.live).toBe(false);
+      expect(result.output).toBe('');
+      expect(result.note).toMatch(/stopped|not started/i);
     });
 
-    it('returns empty array when no tasks match', () => {
-      const result = handleListTasks({ workflow_status: 'pr' });
-      expect(result).toEqual([]);
-    });
-
-    it('excludes soft-deleted tasks', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-lt-05', title: 'Active task', workflow_status: 'backlog' });
-      // Mark as deleted
-      db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = 'task-lt-05'`).run();
-      const result = handleListTasks({});
-      expect(result.find((t) => t.id === 'task-lt-05')).toBeUndefined();
-    });
-  });
-
-  // ─── get_task ──────────────────────────────────────────────────────────────
-
-  describe('handleGetTask', () => {
-    it('returns lean task summary for an existing task', () => {
-      const db = getDb();
-      insertTask(db, {
-        id: 'task-gt-01',
-        title: 'Implement auth',
-        workflow_status: 'in_progress',
-        runtime_state: 'running',
-      });
-
-      const result = handleGetTask({ task_id: 'task-gt-01' });
-      expect(result).not.toBeNull();
-      expect(result!.id).toBe('task-gt-01');
-      expect(result!.title).toBe('Implement auth');
-      expect(result!.workflow_status).toBe('in_progress');
-      expect(result!.runtime_state).toBe('running');
-      // Lean: no description/initial_prompt/error in the summary
-      expect(result).not.toHaveProperty('initial_prompt');
-    });
-
-    it('returns null for an unknown task_id', () => {
-      const result = handleGetTask({ task_id: 'nonexistent-task' });
-      expect(result).toBeNull();
-    });
-
-    it('includes agent count (pointer, not agent rows)', () => {
-      const db = getDb();
-      insertTask(db, { id: 'task-gt-02', title: 'Task with agents', worktree: null });
-      insertAgent(db, { id: 'agent-gt-01', task_id: 'task-gt-02' });
-      insertAgent(db, { id: 'agent-gt-02', task_id: 'task-gt-02', window_index: 1 });
-
-      const result = handleGetTask({ task_id: 'task-gt-02' });
-      expect(result!.agent_count).toBe(2);
-      // Must not include full agent rows
-      expect(result).not.toHaveProperty('agents');
+    it('returns a note for an unknown task', async () => {
+      const result = await handleGetAgentOutput({ task_id: 'nope' });
+      expect(result.live).toBe(false);
+      expect(result.note).toMatch(/not found/i);
     });
   });
 
@@ -462,6 +413,70 @@ describe('orchestrator mcp read tools', () => {
       // A directory that exists but is not a git repo
       const result = await handleDefaultBranch({ repo_path: '/tmp' });
       expect(result).toEqual({ branch: 'main' });
+    });
+  });
+
+  // ─── search_learnings ──────────────────────────────────────────────────────
+
+  describe('handleSearchLearnings', () => {
+    it('returns matching shared-lane rows as lean summaries', () => {
+      addLearning({
+        repo_path: '/tmp/repo-a',
+        lane: SHARED_LANE,
+        trigger: 'retry',
+        lesson: 'hedging retry lives in retry.ts',
+        evidence: 'retry.ts',
+      });
+      addLearning({
+        repo_path: '/tmp/repo-b',
+        lane: SHARED_LANE,
+        trigger: 'tests',
+        lesson: 'vitest needs default: mocked',
+        evidence: 'setup.ts',
+      });
+
+      const result = handleSearchLearnings({ query: 'retry' });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({
+        trigger: 'retry',
+        lesson: 'hedging retry lives in retry.ts',
+        evidence: 'retry.ts',
+        repo_path: '/tmp/repo-a',
+      });
+      // Lean shape only — no id, usage_count, or other internal fields.
+      expect(result[0]).not.toHaveProperty('id');
+      expect(result[0]).not.toHaveProperty('usage_count');
+    });
+
+    it('filters by repo when given', () => {
+      addLearning({
+        repo_path: '/tmp/repo-a',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'in a',
+        evidence: null,
+      });
+      addLearning({
+        repo_path: '/tmp/repo-b',
+        lane: SHARED_LANE,
+        trigger: 't',
+        lesson: 'in b',
+        evidence: null,
+      });
+
+      const result = handleSearchLearnings({ query: 'in', repo: '/tmp/repo-a' });
+      expect(result.map((r) => r.lesson)).toEqual(['in a']);
+    });
+
+    it('returns empty array when nothing matches', () => {
+      const result = handleSearchLearnings({ query: 'nonexistent-keyword' });
+      expect(result).toEqual([]);
+    });
+
+    it('is registered as an auto-approved (policy-only) tool', () => {
+      const entry = POLICY_ONLY_COMMANDS.find((c) => c.mcpName === 'search_learnings');
+      expect(entry).toBeDefined();
+      expect(entry!.tier).toBe('auto');
     });
   });
 });

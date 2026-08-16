@@ -45,6 +45,84 @@ describe('GET /api/integrations/providers', () => {
     expect((jira as any).configSchema).toBeDefined();
     expect((jira as any).events).toContain('workflow_status_changed');
   });
+
+  it.each([
+    ['slack-gateway', 'Slack Gateway'],
+    ['telegram-gateway', 'Telegram Gateway'],
+  ])('returns the %s provider with an empty events list', async (kind, displayName) => {
+    const app = createApp();
+    const res = await request(app).get('/api/integrations/providers');
+    expect(res.status).toBe(200);
+    const provider = (res.body as Array<{ kind: string }>).find((p) => p.kind === kind);
+    expect(provider).toMatchObject({ kind, displayName, events: [] });
+  });
+});
+
+describe('gateway integrations (slack-gateway / telegram-gateway)', () => {
+  let db: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('creates a slack-gateway integration and masks both tokens on read', async () => {
+    const app = createApp();
+    const createRes = await request(app)
+      .post('/api/integrations')
+      .send({
+        kind: 'slack-gateway',
+        name: 'Slack',
+        config: { bot_token: 'xoxb-secret', app_token: 'xapp-secret', allow: 'U1,U2' },
+      });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.config.bot_token).toBe('••••');
+    expect(createRes.body.config.app_token).toBe('••••');
+    // allow is not a secret field — round-trips in the clear
+    expect(createRes.body.config.allow).toBe('U1,U2');
+
+    const listRes = await request(app).get('/api/integrations');
+    expect(listRes.body[0].config.bot_token).toBe('••••');
+    expect(listRes.body[0].config.app_token).toBe('••••');
+  });
+
+  it('creates a telegram-gateway integration and masks the token on read', async () => {
+    const app = createApp();
+    const createRes = await request(app)
+      .post('/api/integrations')
+      .send({ kind: 'telegram-gateway', name: 'Telegram', config: { token: 'secret-token' } });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.config.token).toBe('••••');
+  });
+
+  it('preserves the stored slack-gateway bot_token when the masked sentinel is sent back', async () => {
+    const app = createApp();
+    const created = await request(app)
+      .post('/api/integrations')
+      .send({
+        kind: 'slack-gateway',
+        name: 'Slack',
+        config: { bot_token: 'xoxb-original', app_token: 'xapp-original' },
+      });
+
+    const patchRes = await request(app)
+      .patch(`/api/integrations/${created.body.id}`)
+      .send({ config: { bot_token: '••••', app_token: 'xapp-rotated' } });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.config.bot_token).toBe('••••');
+    expect(patchRes.body.config.app_token).toBe('••••');
+  });
+
+  it('rejects a non-string allow field for telegram-gateway', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post('/api/integrations')
+      .send({ kind: 'telegram-gateway', name: 'Telegram', config: { allow: ['U1'] } });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('POST /api/integrations', () => {

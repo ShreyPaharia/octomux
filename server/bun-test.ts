@@ -251,7 +251,10 @@ export const vi = {
   }): void => {
     const { now, shouldAdvanceTime, advanceTimeDelta = 20 } = options ?? {};
     jest.useFakeTimers(now === undefined ? undefined : { now });
-    if (now !== undefined) vi.setSystemTime(now);
+    // vitest freezes Date.now() from useFakeTimers() onward and moves it with the
+    // timers. Seed the clock even when no explicit `now` was given, or code that
+    // polls against a Date.now() deadline never sees time pass and loops forever.
+    vi.setSystemTime(now ?? realDateNow());
     if (autoAdvance) realClearInterval(autoAdvance);
     autoAdvance = shouldAdvanceTime
       ? realSetInterval(() => vi.advanceTimersByTime(advanceTimeDelta), advanceTimeDelta)
@@ -498,7 +501,10 @@ export const vi = {
    * bun's own per-test timeout, that stalls the test forever instead of failing.
    */
   advanceTimersByTimeAsync: async (ms: number): Promise<void> => {
-    const step = 10;
+    // Step proportional to the span so the round count stays bounded — a fixed
+    // small step turns a 30s advance into thousands of drain cycles and the
+    // test looks hung. ~100 rounds is plenty for chained timers to reschedule.
+    const step = Math.max(1, Math.ceil(ms / 100));
     for (let elapsed = 0; elapsed < ms; elapsed += step) {
       for (let i = 0; i < 5; i++) await Promise.resolve();
       vi.advanceTimersByTime(Math.min(step, ms - elapsed));

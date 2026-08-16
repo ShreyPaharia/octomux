@@ -15,15 +15,17 @@ beforeEach(() => {
 });
 
 describe('octomux review learning add', () => {
-  it('inserts a row and prints the new id', async () => {
+  it('inserts a row into agent_learnings (review lane) and prints the new id', async () => {
     await runLearning(['add', '--repo-path', '/r', '--why', "don't memoize"]);
     const out = JSON.parse(stdoutBuf);
     expect(out.id).toBeTruthy();
-    const row = getDb()
-      .prepare(`SELECT * FROM review_learnings WHERE id = ?`)
-      .get(out.id) as Record<string, unknown>;
+    const row = getDb().prepare(`SELECT * FROM agent_learnings WHERE id = ?`).get(out.id) as Record<
+      string,
+      unknown
+    >;
     expect(row.repo_path).toBe('/r');
-    expect(row.why).toBe("don't memoize");
+    expect(row.lesson).toBe("don't memoize");
+    expect(row.lane).toBe('review');
   });
 });
 
@@ -33,7 +35,7 @@ describe('octomux review learning touch', () => {
     const id = JSON.parse(stdoutBuf).id as string;
     stdoutBuf = '';
     await runLearning(['touch', '--id', id]);
-    const row = getDb().prepare(`SELECT * FROM review_learnings WHERE id = ?`).get(id) as Record<
+    const row = getDb().prepare(`SELECT * FROM agent_learnings WHERE id = ?`).get(id) as Record<
       string,
       unknown
     >;

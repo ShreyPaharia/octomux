@@ -3,19 +3,19 @@
  *
  * Called fire-and-forget after the Stop hook handler resolves.
  * Reads recent task_updates + permission_prompts, shells out to `claude -p`
- * (Haiku) to produce a one-sentence narrative, writes it to
- * tasks.current_summary, broadcasts, and fires the 'summary_updated' hook.
- * All errors are swallowed.
+ * (Haiku) to produce a one-sentence narrative, writes it to the task's
+ * `.octomux/artifact.md` Summary section (server/artifact.ts), broadcasts,
+ * and fires the 'summary_updated' hook. All errors are swallowed.
  */
 import { childLogger } from './logger.js';
 import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { runClaudePrint } from './claude-cli.js';
+import { setTaskSummary } from './artifact-task.js';
 import {
   getHookEnabled,
   listTaskUpdatesForTranscript,
   listRecentResolvedByAgent,
-  setCurrentSummary,
 } from './repositories/index.js';
 
 const logger = childLogger('summarize');
@@ -97,7 +97,7 @@ export async function summarizeAgentProgress(taskId: string, agentId: string): P
     const summary = stdout.slice(0, 120);
     if (!summary) return;
 
-    setCurrentSummary(taskId, summary);
+    setTaskSummary(taskId, summary);
 
     broadcast({ type: 'task:updated', payload: { taskId } });
 

@@ -30,6 +30,9 @@ export const ORCHESTRATOR_SYSTEM_PROMPT = [
   '- TRACK progress with your read tools only: mcp__octomux__list_tasks, mcp__octomux__get_task, mcp__octomux__monitor_status, mcp__octomux__get_task_output. Do not read or edit the repo directly — inspect tasks and their artifacts through these tools.',
   '- KEEP THE USER INFORMED: when you create a task, tell them its id and the goal; when a worker finishes a phase, summarize the outcome and propose the next step.',
   '',
+  '',
+  'APPROVALS & REPORTING OVER CHAT: assume I may not be able to open dashboard/artifact links, so never make an approval depend on one. When a task needs plan/spec approval, write a short PROSE gist — the goal, the files it touches, and any open questions — and ask me to approve. NEVER paste raw JSON (plan.json or otherwise), full spec markdown, or full file contents into chat; summarize in your own words and keep the whole message comfortably under ~1500 characters. When work is done and needs a go-ahead to open the PR, send a short gist of what got done and what the PR will contain, then ask. A link can go at the end as a bonus, never as the only way to see it.',
+  '',
   'You are a thin coordination layer: set the goal, delegate, track it, report status. Never plan the implementation, never touch the code.',
 ].join('\n');
 
@@ -38,6 +41,13 @@ export interface OrchestratorConductorFlagsOpts {
   /** Path to the conductor mcp-config.json (octomux read tools), or null. */
   mcpConfigPath?: string | null;
   extraFlags?: string;
+  /**
+   * Overrides `ORCHESTRATOR_SYSTEM_PROMPT` in `--append-system-prompt`. Used
+   * by the Agents feature so a long-running agent's session runs with its own
+   * configured prompt. Defaults to `ORCHESTRATOR_SYSTEM_PROMPT` — omitting
+   * this must produce byte-identical flags for existing orchestrator conversations.
+   */
+  systemPrompt?: string;
 }
 
 /**
@@ -52,12 +62,13 @@ export function buildOrchestratorConductorFlags({
   settingsPath,
   mcpConfigPath,
   extraFlags = '',
+  systemPrompt = ORCHESTRATOR_SYSTEM_PROMPT,
 }: OrchestratorConductorFlagsOpts): string {
   let flags = ` --settings ${shellQuoteSingle(settingsPath)}`;
   if (mcpConfigPath) {
     flags += ` --mcp-config ${shellQuoteSingle(mcpConfigPath)} --strict-mcp-config`;
   }
-  flags += ` --append-system-prompt ${shellQuoteSingle(ORCHESTRATOR_SYSTEM_PROMPT)}`;
+  flags += ` --append-system-prompt ${shellQuoteSingle(systemPrompt)}`;
   if (extraFlags) {
     flags += extraFlags.startsWith(' ') ? extraFlags : ` ${extraFlags}`;
   }

@@ -2,7 +2,7 @@ import { vi } from './bun-test.js';
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
-import type { Task, Agent } from '@octomux/types';
+import type { Task, Worker } from '@octomux/types';
 import {
   FRONTEND_AGENT_DEFAULTS,
   FRONTEND_TASK_DEFAULTS,
@@ -15,7 +15,7 @@ import {
 export const AGENT_DEFAULTS = FRONTEND_AGENT_DEFAULTS;
 export const TASK_DEFAULTS = FRONTEND_TASK_DEFAULTS;
 
-export function makeAgent(overrides: Partial<Agent> = {}): Agent {
+export function makeAgent(overrides: Partial<Worker> = {}): Worker {
   return makeAgentFixture(overrides);
 }
 
@@ -83,14 +83,24 @@ export function setupRouterNavigateMock() {
 type ApiMock = ReturnType<typeof mockTaskApi> &
   ReturnType<typeof mockReviewApi> &
   ReturnType<typeof mockConfigApi> &
-  ReturnType<typeof mockLoopApi> &
+  ReturnType<typeof mockRunApi> &
+  ReturnType<typeof mockExtractApi> &
+  ReturnType<typeof mockSchedulesApi> &
+  ReturnType<typeof mockKindsApi> &
+  ReturnType<typeof mockWorkflowsApi> &
+  ReturnType<typeof mockAgentsApi> &
   Record<string, unknown>;
 
 export function setupApiMock(overrides: Record<string, unknown> = {}) {
   const taskApiMock = mockTaskApi(overrides);
   const reviewApiMock = mockReviewApi(overrides);
   const configApiMock = mockConfigApi(overrides);
-  const loopApiMock = mockLoopApi(overrides);
+  const runApiMock = mockRunApi(overrides);
+  const extractApiMock = mockExtractApi(overrides);
+  const schedulesApiMock = mockSchedulesApi(overrides);
+  const kindsApiMock = mockKindsApi(overrides);
+  const workflowsApiMock = mockWorkflowsApi(overrides);
+  const agentsApiMock = mockAgentsApi(overrides);
   const taskApiProxy = new Proxy(
     {},
     { get: (_target, prop: string) => taskApiMock[prop as keyof typeof taskApiMock] },
@@ -103,9 +113,29 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     {},
     { get: (_target, prop: string) => configApiMock[prop as keyof typeof configApiMock] },
   );
-  const loopApiProxy = new Proxy(
+  const runApiProxy = new Proxy(
     {},
-    { get: (_target, prop: string) => loopApiMock[prop as keyof typeof loopApiMock] },
+    { get: (_target, prop: string) => runApiMock[prop as keyof typeof runApiMock] },
+  );
+  const extractApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => extractApiMock[prop as keyof typeof extractApiMock] },
+  );
+  const schedulesApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => schedulesApiMock[prop as keyof typeof schedulesApiMock] },
+  );
+  const kindsApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => kindsApiMock[prop as keyof typeof kindsApiMock] },
+  );
+  const workflowsApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => workflowsApiMock[prop as keyof typeof workflowsApiMock] },
+  );
+  const agentsApiProxy = new Proxy(
+    {},
+    { get: (_target, prop: string) => agentsApiMock[prop as keyof typeof agentsApiMock] },
   );
   const apiMock = new Proxy(
     {},
@@ -114,7 +144,14 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
         if (prop in taskApiMock) return taskApiMock[prop as keyof typeof taskApiMock];
         if (prop in reviewApiMock) return reviewApiMock[prop as keyof typeof reviewApiMock];
         if (prop in configApiMock) return configApiMock[prop as keyof typeof configApiMock];
-        if (prop in loopApiMock) return loopApiMock[prop as keyof typeof loopApiMock];
+        if (prop in runApiMock) return runApiMock[prop as keyof typeof runApiMock];
+        if (prop in extractApiMock) return extractApiMock[prop as keyof typeof extractApiMock];
+        if (prop in schedulesApiMock)
+          return schedulesApiMock[prop as keyof typeof schedulesApiMock];
+        if (prop in kindsApiMock) return kindsApiMock[prop as keyof typeof kindsApiMock];
+        if (prop in workflowsApiMock)
+          return workflowsApiMock[prop as keyof typeof workflowsApiMock];
+        if (prop in agentsApiMock) return agentsApiMock[prop as keyof typeof agentsApiMock];
         return overrides[prop];
       },
       set: (_target, prop: string, value) => {
@@ -130,8 +167,28 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
           (configApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
-        if (prop in loopApiMock) {
-          (loopApiMock as Record<string, unknown>)[prop] = value;
+        if (prop in runApiMock) {
+          (runApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in extractApiMock) {
+          (extractApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in schedulesApiMock) {
+          (schedulesApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in kindsApiMock) {
+          (kindsApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in workflowsApiMock) {
+          (workflowsApiMock as Record<string, unknown>)[prop] = value;
+          return true;
+        }
+        if (prop in agentsApiMock) {
+          (agentsApiMock as Record<string, unknown>)[prop] = value;
           return true;
         }
         overrides[prop] = value;
@@ -147,11 +204,21 @@ export function setupApiMock(overrides: Record<string, unknown> = {}) {
     taskApiMock,
     reviewApiMock,
     configApiMock,
-    loopApiMock,
+    runApiMock,
+    extractApiMock,
+    schedulesApiMock,
+    kindsApiMock,
+    workflowsApiMock,
+    agentsApiMock,
     taskApiProxy,
     reviewApiProxy,
     configApiProxy,
-    loopApiProxy,
+    runApiProxy,
+    extractApiProxy,
+    schedulesApiProxy,
+    kindsApiProxy,
+    workflowsApiProxy,
+    agentsApiProxy,
     apiMock,
     apiProxy,
   };
@@ -247,17 +314,6 @@ export function mockTaskApi(overrides: Record<string, unknown> = {}) {
     deleteDone: vi.fn().mockResolvedValue({ deleted: 0 }),
     restoreTask: vi.fn().mockResolvedValue(undefined),
     moveTask: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    postTaskSummary: vi.fn().mockResolvedValue(TASK_DEFAULTS),
-    postTaskNote: vi.fn().mockResolvedValue({
-      id: 'u1',
-      task_id: 'test-task-01',
-      agent_id: null,
-      kind: 'note' as const,
-      from_status: null,
-      to_status: null,
-      body: 'test note',
-      created_at: '2026-01-01 00:00:00',
-    }),
     addTaskRef: vi.fn().mockResolvedValue({
       task_id: 'test-task-01',
       integration: 'jira',
@@ -282,7 +338,6 @@ export function mockReviewApi(overrides: Record<string, unknown> = {}) {
     listReviewsInbox: vi.fn().mockResolvedValue([]),
     getReviewDetail: vi.fn().mockResolvedValue(null),
     patchComment: vi.fn().mockResolvedValue({ id: 'c1', status: 'accepted' }),
-    patchWalkthrough: vi.fn().mockResolvedValue({ walkthrough: '{}' }),
     publishReview: vi.fn().mockResolvedValue({ publishedReviewId: 'pr1', commentCount: 0 }),
     requestReReview: vi.fn().mockResolvedValue({ ok: true }),
     triggerManualReview: vi.fn().mockResolvedValue({ id: 'rev1', action: 'created' as const }),
@@ -332,32 +387,12 @@ export function mockConfigApi(overrides: Record<string, unknown> = {}) {
     ]),
     listSkills: vi.fn().mockResolvedValue([]),
     getSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
-    createSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Test' }),
-    updateSkill: vi.fn().mockResolvedValue({ name: 'test-skill', content: '# Updated' }),
-    deleteSkill: vi.fn().mockResolvedValue(undefined),
     listAgents: vi.fn().mockResolvedValue([]),
     getAgent: vi.fn().mockResolvedValue({
       name: 'test-agent',
       content: '# Test',
-      defaultContent: '# Test',
-      isCustom: false,
     }),
-    saveAgent: vi.fn().mockResolvedValue({
-      name: 'test-agent',
-      content: '# Test',
-      defaultContent: '# Test',
-      isCustom: true,
-    }),
-    resetAgent: vi.fn().mockResolvedValue({ ok: true }),
-    createAgent: vi.fn().mockResolvedValue({
-      name: 'test-agent',
-      content: '# Test',
-      defaultContent: '# Test',
-      isCustom: true,
-    }),
-    deleteAgent: vi.fn().mockResolvedValue({ ok: true }),
     listRepoConfigs: vi.fn().mockResolvedValue([]),
-    getRepoConfig: vi.fn().mockResolvedValue(null),
     updateRepoConfig: vi.fn().mockResolvedValue(null),
     listProviders: vi.fn().mockResolvedValue([]),
     listIntegrations: vi.fn().mockResolvedValue([]),
@@ -394,23 +429,259 @@ export function mockConfigApi(overrides: Record<string, unknown> = {}) {
   return { ...defaults, ...overrides };
 }
 
-export function mockLoopApi(overrides: Record<string, unknown> = {}) {
+/** Base fields shared by every mocked `runs` row / detail envelope below. */
+function baseRunFields(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'run-1',
+    workflow_kind: 'loop',
+    trigger: 'manual',
+    schedule_id: null,
+    task_id: 'test-task-01',
+    chat_id: null,
+    loop_run_id: 'loop-1',
+    status: 'running',
+    effective_status: 'running',
+    result_json: null,
+    error: null,
+    started_at: '2026-01-01 00:00:00',
+    ended_at: null,
+    ...overrides,
+  };
+}
+
+export function mockRunApi(overrides: Record<string, unknown> = {}) {
   const defaults = {
-    listLoops: vi.fn().mockResolvedValue([]),
-    getLoop: vi.fn().mockResolvedValue(null),
-    createLoop: vi.fn().mockResolvedValue({
-      id: 'loop-1',
-      task_id: 'test-task-01',
-      spec_json: '{}',
+    listRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    getRun: vi.fn().mockResolvedValue(null),
+    startLoop: vi.fn().mockResolvedValue({
+      ...baseRunFields(),
+      loop: {
+        id: 'loop-1',
+        task_id: 'test-task-01',
+        status: 'running',
+        iteration: 0,
+        max_iterations: 10,
+        termination_reason: null,
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        iterations: [],
+      },
+      loopGroup: null,
+    }),
+    startLoopGroup: vi.fn().mockResolvedValue({
+      ...baseRunFields({
+        id: 'run-group-1',
+        workflow_kind: 'loop-group',
+        task_id: null,
+        loop_run_id: null,
+      }),
+      loop: null,
+      loopGroup: {
+        id: 'group-1',
+        spec_json: '{}',
+        n: 3,
+        repo_path: '/repo',
+        base_branch: 'main',
+        judge_status: 'not_run',
+        winner_loop_run_id: null,
+        judge_rationale: null,
+        run_id: 'run-group-1',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        candidates: [],
+      },
+    }),
+    stopRun: vi.fn().mockResolvedValue({
+      ...baseRunFields({ status: 'blocked', effective_status: 'blocked' }),
+      loop: {
+        id: 'loop-1',
+        task_id: 'test-task-01',
+        status: 'needs_human',
+        iteration: 0,
+        max_iterations: 10,
+        termination_reason: 'stopped',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        iterations: [],
+      },
+      loopGroup: null,
+    }),
+    judgeLoopGroup: vi.fn().mockResolvedValue({
+      ...baseRunFields({
+        id: 'run-group-1',
+        workflow_kind: 'loop-group',
+        task_id: null,
+        loop_run_id: null,
+      }),
+      loop: null,
+      loopGroup: {
+        id: 'group-1',
+        spec_json: '{}',
+        n: 3,
+        repo_path: '/repo',
+        base_branch: 'main',
+        judge_status: 'running',
+        winner_loop_run_id: null,
+        judge_rationale: null,
+        run_id: 'run-group-1',
+        created_at: '2026-01-01 00:00:00',
+        updated_at: '2026-01-01 00:00:00',
+        candidates: [],
+      },
+    }),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockExtractApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    listExtracts: vi.fn().mockResolvedValue([]),
+    getExtract: vi.fn().mockResolvedValue(null),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockSchedulesApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    listSchedules: vi.fn().mockResolvedValue([]),
+    getScheduleKinds: vi.fn().mockResolvedValue({
+      kinds: [
+        {
+          kind: 'prod-log-triage',
+          displayName: 'Prod Log Triage',
+          configSchema: null,
+          execution: 'task' as const,
+          promptRequired: false,
+          supportsTimeout: false,
+        },
+      ],
+    }),
+    createSchedule: vi.fn().mockResolvedValue({
+      id: 'sched-1',
+      kind: 'prod-log-triage',
+      repo_path: '/repo',
+      cron: '0 7 * * *',
+      enabled: 1,
+      last_run_at: null,
+      config_json: null,
+    }),
+    updateSchedule: vi.fn().mockResolvedValue({
+      id: 'sched-1',
+      kind: 'prod-log-triage',
+      repo_path: '/repo',
+      cron: '0 7 * * *',
+      enabled: 0,
+      last_run_at: null,
+      config_json: null,
+    }),
+    deleteSchedule: vi.fn().mockResolvedValue(undefined),
+    runScheduleNow: vi.fn().mockResolvedValue({ ok: true }),
+    getScheduleRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    exportSchedule: vi.fn().mockResolvedValue({
+      octomuxSchedule: 1,
+      kind: 'prod-log-triage',
+      name: null,
+      cron: '0 7 * * *',
+      timezone: null,
+      enabled: true,
+      model: null,
+      timeoutMs: null,
+      config: undefined,
+      prompt: null,
+    }),
+    importSchedule: vi.fn().mockResolvedValue({
+      id: 'sched-imported',
+      kind: 'prod-log-triage',
+      repo_path: '/repo',
+      cron: '0 7 * * *',
+      enabled: 1,
+      last_run_at: null,
+      config_json: null,
+    }),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockKindsApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    listKinds: vi.fn().mockResolvedValue({
+      kinds: [
+        {
+          kind: 'prod-log-triage',
+          displayName: 'Prod Log Triage',
+          execution: 'task' as const,
+          source: 'builtin' as const,
+        },
+      ],
+    }),
+    savePreset: vi.fn().mockResolvedValue({
+      kind: 'my-custom-kind',
+      displayName: 'My Custom Kind',
+      execution: 'session' as const,
+      source: 'home' as const,
+    }),
+    deletePreset: vi.fn().mockResolvedValue(undefined),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockWorkflowsApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    listWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
+    listAllRuns: vi.fn().mockResolvedValue({ runs: [] }),
+  };
+  return { ...defaults, ...overrides };
+}
+
+export function mockAgentsApi(overrides: Record<string, unknown> = {}) {
+  const defaults = {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn().mockResolvedValue({
+      id: 'agent-1',
+      name: 'test-agent',
+      system_prompt: 'You are a helpful agent.',
+      channel: null,
+      channel_config: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+      status: 'stopped',
+      session_id: null,
+    }),
+    get: vi.fn().mockResolvedValue({
+      id: 'agent-1',
+      name: 'test-agent',
+      system_prompt: 'You are a helpful agent.',
+      channel: null,
+      channel_config: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+      status: 'stopped',
+      session_id: null,
+    }),
+    update: vi.fn().mockResolvedValue({
+      id: 'agent-1',
+      name: 'test-agent',
+      system_prompt: 'You are a helpful agent.',
+      channel: null,
+      channel_config: null,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+      status: 'stopped',
+      session_id: null,
+    }),
+    remove: vi.fn().mockResolvedValue(undefined),
+    ensureSession: vi.fn().mockResolvedValue({
+      id: 'conv-1',
+      title: 'test-agent',
+      tmux_window: null,
+      claude_session_id: null,
+      transcript_path: null,
       status: 'running',
-      iteration: 0,
-      max_iterations: 10,
-      budget_json: null,
-      termination_reason: null,
+      is_global_monitor: 0,
+      agent_id: 'agent-1',
       created_at: '2026-01-01 00:00:00',
       updated_at: '2026-01-01 00:00:00',
     }),
-    stopLoop: vi.fn().mockResolvedValue({ id: 'loop-1', status: 'needs_human' }),
   };
   return { ...defaults, ...overrides };
 }
@@ -420,7 +691,12 @@ export function mockApi(overrides: Record<string, unknown> = {}) {
     ...mockTaskApi(),
     ...mockReviewApi(),
     ...mockConfigApi(),
-    ...mockLoopApi(),
+    ...mockRunApi(),
+    ...mockExtractApi(),
+    ...mockSchedulesApi(),
+    ...mockKindsApi(),
+    ...mockWorkflowsApi(),
+    ...mockAgentsApi(),
     ...overrides,
   };
 }
