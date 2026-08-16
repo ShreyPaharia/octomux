@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from '../bun-test.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';

@@ -18,9 +18,7 @@
  *  - model/effort right-sizing: create-task honors model+effort hints (§6.7).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb, insertTask } from '../test-helpers.js';
-import { getDb } from '../db.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mock startTask (avoids real tmux/git side-effects) ─────────────────────
 
@@ -40,9 +38,10 @@ vi.mock('../task-engine/index.js', () => ({
   stopAgent: vi.fn().mockResolvedValue(undefined),
 }));
 
-// ─── Import after mocks ───────────────────────────────────────────────────────
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
 
-import {
+const {
   runCreateTask,
   runAddAgent,
   runSetStatus,
@@ -55,7 +54,8 @@ import {
   WORKFLOW_KIND,
   buildWorkflowTemplate,
   buildImplementWrapper,
-} from './exec.js';
+} = await import('./exec.js');
+// ─── Import after mocks ───────────────────────────────────────────────────────
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import type Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
+import type Database from '../sqlite.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { createExtract, getExtract, getExtractByTaskId, listExtracts } from './pr-extracts.js';
 
 describe('pr-extracts repository', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

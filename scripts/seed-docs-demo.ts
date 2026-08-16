@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
+import Database from '../server/sqlite.js';
 import { initDb } from '../server/db.js';
 import { insertTask, insertAgent, insertPermissionPrompt } from '../server/test-helpers.js';
 

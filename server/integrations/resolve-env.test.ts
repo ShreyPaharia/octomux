@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from '../bun-test.js';
 import { resolveEnvVars } from './resolve-env.js';
 
 describe('resolveEnvVars', () => {

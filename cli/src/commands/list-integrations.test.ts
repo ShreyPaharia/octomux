@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../../server/bun-test.js';
 import { toTrackerDefaults } from './list-integrations.js';
 import type { IntegrationRow } from '../client.js';
 

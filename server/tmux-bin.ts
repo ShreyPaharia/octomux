@@ -227,7 +227,7 @@ export async function execTmux(
 }
 
 /**
- * Convenience for node-pty: returns { file, args, env } to spawn an attach.
+ * Convenience for the pty layer: returns { file, args, env } to spawn an attach.
  * extraArgs should be the tmux subcommand + its args (e.g. ['attach-session', '-t', target]).
  */
 export function tmuxSpawnSpec(extraArgs: string[]): {

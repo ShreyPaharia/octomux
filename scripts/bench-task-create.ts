@@ -12,7 +12,7 @@
  * startTask, captured here via a pino stream.
  */
 import { Writable } from 'stream';
-import Database from 'better-sqlite3';
+import Database from '../server/sqlite.js';
 import { pino } from 'pino';
 import { nanoid } from 'nanoid';
 import { initDb, setDb } from '../server/db.js';

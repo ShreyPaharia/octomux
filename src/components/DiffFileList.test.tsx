@@ -1,13 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useRef } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import type { DiffFileListHandle } from './DiffFileList';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
 );
-vi.mock('@/lib/api/taskApi', async () => {
-  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+vi.mock('@/lib/api/taskApi', () => {
+  const actual = vi.importActual('@/lib/api/taskApi') as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };
 });
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
@@ -26,7 +24,11 @@ vi.mock('@monaco-editor/react', () => ({
   },
 }));
 
-import { DiffFileList, type DiffFileListHandle } from './DiffFileList';
+const { useRef } = await import('react');
+const { act, render, screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+
+const { DiffFileList } = await import('./DiffFileList');
 import type { DiffFileEntry } from '@/lib/api/taskApi';
 
 // ─── Controllable IntersectionObserver stub ──────────────────────────────────

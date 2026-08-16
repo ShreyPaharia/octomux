@@ -4,7 +4,7 @@
  * SHR-161 — assistant markdown renders safely (no XSS).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import { render, screen } from '@testing-library/react';
 import { Markdown } from './Markdown';
 

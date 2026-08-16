@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb, insertTask, insertAgent as insertTestAgent } from '../test-helpers.js';
 import {
   getWorker,
@@ -22,10 +22,10 @@ import {
   deleteUserTerminal,
   countAgentsForTask,
 } from './workers.js';
-import type Database from 'better-sqlite3';
+import type Database from '../sqlite.js';
 
 describe('repositories/workers', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

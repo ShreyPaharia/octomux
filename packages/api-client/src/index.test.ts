@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from '../../../server/bun-test.js';
 import { CLIENT_CLASS_HEADER, createRequestCore, qs } from './index.js';
 
 describe('qs', () => {

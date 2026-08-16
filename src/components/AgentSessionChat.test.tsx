@@ -5,7 +5,7 @@
  * Mirrors the WS mock pattern from src/pages/OrchestratorPage.test.tsx.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 import { screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { AgentSessionChat } from './AgentSessionChat';
 import { renderWithRouter } from '../test-helpers';

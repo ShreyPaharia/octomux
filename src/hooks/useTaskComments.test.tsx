@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -8,7 +7,9 @@ vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
 
-import { useTaskComments } from './useTaskComments';
+const { renderHook, act, waitFor } = await import('@testing-library/react');
+
+const { useTaskComments } = await import('./useTaskComments');
 import type { InlineCommentRow, InlineCommentWithOutdated } from '@/lib/api/taskApi';
 
 function row(o: Partial<InlineCommentRow> = {}): InlineCommentRow {

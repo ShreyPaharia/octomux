@@ -8,20 +8,17 @@
     "url": "https://github.com/ShreyPaharia/octomux.git"
   },
   "bin": {
-    "octomux": "./bin/octomux.js"
+    "octomux": "./bin/octomux"
   },
   "engines": {
     "node": ">=20"
   },
   "files": [
-    "bin/",
-    "dist/",
-    "dist-server/",
-    "!dist-server/*.test.*",
-    "!dist-server/test-helpers.*",
-    "cli/dist/",
-    "cli/package.json",
-    "scripts/",
+    "bin/octomux",
+    "bin/cli-wrapper.cjs",
+    "bin/platform.cjs",
+    "scripts/install-binary.cjs",
+    "scripts/postinstall.sh",
     "plugin/",
     "templates/",
     "workflows/",
@@ -36,18 +33,17 @@
   ],
   "scripts": {
     "dev": "concurrently \"bun:dev:server\" \"bun:dev:client\"",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "bun --watch server/index.ts",
     "dev:client": "vite",
-    "build": "bun run build:diff-engine && bun run build:types && bun run build:test-fixtures && bun run build:api-client && bun run build:capabilities && vite build && bun run build:server && bun run cli:build && node scripts/verify-build.js",
+    "build": "bun run build:diff-engine && bun run build:types && bun run build:test-fixtures && bun run build:api-client && bun run build:capabilities && bun run build:binary",
     "build:diff-engine": "tsc -b packages/diff-engine",
     "build:types": "tsc -b packages/types",
     "build:test-fixtures": "tsc -b packages/test-fixtures",
     "build:api-client": "tsc -b packages/api-client",
-    "build:server": "tsup --entry.index=server/index.ts --entry.startup=server/startup.ts --entry.cli-review=cli/review/index.ts --entry.orchestrator/mcp/server=server/orchestrator/mcp/server.ts --entry.agent-session/mcp/submit-result-server=server/agent-session/mcp/submit-result-server.ts --format esm --minify --out-dir dist-server --external better-sqlite3 --external node-pty --external ws --external @octomux/tmux-darwin-arm64 --external @octomux/tmux-darwin-x64 --external @octomux/tmux-linux-x64 --external @octomux/tmux-linux-arm64",
-    "start": "NODE_ENV=production node dist-server/index.js",
-    "test": "vitest run",
+    "start": "bun run bin/main.js start",
+    "test": "bun run test:server && bun run test:client && bun run test:units",
     "bench:task-create": "NODE_ENV=test tsx scripts/bench-task-create.ts",
-    "test:watch": "vitest",
+    "test:watch": "NODE_ENV=test bun test ./server --watch",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:mobile-terminal": "playwright test e2e/mobile-terminal-scroll.spec.ts",
@@ -57,15 +53,22 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "cli:build": "cd cli && tsc",
     "typecheck": "tsc -b",
-    "prepublishOnly": "bun run build",
-    "postinstall": "bash scripts/postinstall.sh",
+    "prepublishOnly": "bun run build:npm",
+    "postinstall": "node scripts/install-binary.cjs && bash scripts/postinstall.sh",
     "prepare": "husky",
     "changelog": "conventional-changelog -p conventionalcommits -i CHANGELOG.md -s",
     "build:electron": "tsc -p electron/tsconfig.json",
     "dist:electron": "bun run build && bun run build:electron && electron-builder",
-    "build:capabilities": "tsc -b packages/capabilities"
+    "build:capabilities": "tsc -b packages/capabilities",
+    "test:server": "NODE_ENV=test bun test ./server ./cli/review --parallel --timeout 15000",
+    "test:client": "NODE_ENV=test bun test ./src --preload ./src/bun-test-setup.ts --parallel --timeout 15000",
+    "test:units": "NODE_ENV=test bun test ./cli/src ./packages ./bin --parallel --timeout 30000",
+    "build:assets": "bun scripts/bundle-assets.mjs",
+    "build:binary": "vite build && bun run build:assets && bun build --compile --minify bin/main.js --outfile dist-bin/octomux",
+    "build:binary:all": "vite build && bun run build:assets && bun build --compile --minify --target=bun-darwin-arm64 bin/main.js --outfile dist-bin/octomux-darwin-arm64 && bun build --compile --minify --target=bun-darwin-x64 bin/main.js --outfile dist-bin/octomux-darwin-x64 && bun build --compile --minify --target=bun-linux-arm64 bin/main.js --outfile dist-bin/octomux-linux-arm64 && bun build --compile --minify --target=bun-linux-x64 bin/main.js --outfile dist-bin/octomux-linux-x64 && bun build --compile --minify --target=bun-linux-arm64-musl bin/main.js --outfile dist-bin/octomux-linux-arm64-musl && bun build --compile --minify --target=bun-linux-x64-musl bin/main.js --outfile dist-bin/octomux-linux-x64-musl",
+    "build:npm": "bun run build:binary:all && bun run sign:macos && bun scripts/build-npm-packages.mjs",
+    "sign:macos": "bash scripts/sign-macos.sh"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -77,9 +80,7 @@
     ]
   },
   "trustedDependencies": [
-    "better-sqlite3",
-    "husky",
-    "node-pty"
+    "husky"
   ],
   "dependencies": {
     "@base-ui/react": "^1.2.0",
@@ -100,7 +101,6 @@
     "@slack/web-api": "^8.0.0",
     "@xterm/addon-webgl": "0.18.0",
     "ajv": "^8.20.0",
-    "better-sqlite3": "^12.0.0",
     "chalk": "^5.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -114,7 +114,6 @@
     "js-yaml": "^4.2.0",
     "monaco-editor": "^0.55.1",
     "nanoid": "^5.0.9",
-    "node-pty": "^1.0.0",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
     "pino-roll": "^4.0.0",
@@ -138,12 +137,12 @@
     "@commitlint/config-conventional": "^20.0.0",
     "@electron/rebuild": "^3.0.0",
     "@eslint/js": "^9.0.0",
+    "@happy-dom/global-registrator": "^20.11.2",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/better-sqlite3": "^7.6.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
@@ -156,6 +155,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
+    "bun-types": "^1.3.14",
     "concurrently": "^9.1.0",
     "conventional-changelog-cli": "^5.0.0",
     "electron": "^33.0.0",
@@ -164,7 +164,6 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^16.0.0",
     "husky": "^9.0.0",
-    "jsdom": "^28.1.0",
     "lint-staged": "^16.0.0",
     "prettier": "^3.5.0",
     "react": "^19.0.0",
@@ -173,11 +172,9 @@
     "react-router-dom": "^7.0.0",
     "supertest": "^7.2.2",
     "tailwindcss": "^4.0.0",
-    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.0.0",
-    "vite": "^6.0.0",
-    "vitest": "^3.2.4"
+    "vite": "^6.0.0"
   }
 }

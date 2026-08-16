@@ -12,7 +12,7 @@
  *  - Args with no fields still render gracefully (approve-only card).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { ActionCard, type ActionCardDecision, type ActionCardProps } from './ActionCard';
 import { renderWithRouter } from '../../test-helpers';

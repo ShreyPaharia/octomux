@@ -8,19 +8,21 @@
  *
  * Poller-level tests live in server/poller/quiescence.test.ts.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import request from 'supertest';
-import { createTestDb, insertTask, insertAgent, insertPermissionPrompt } from './test-helpers.js';
-import { createApp } from './app.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 vi.mock('./hook-dispatcher.js', () => ({
   fireHook: vi.fn(),
   getTaskHookExecutions: vi.fn(async () => []),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, insertAgent, insertPermissionPrompt } =
+  await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+
 describe('B4 (removed): POST /api/hooks/stop no longer synchronously transitions to human_review', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

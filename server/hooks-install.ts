@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
 import { octomuxRoot } from './octomux-root.js';
+import { assetRoot } from './assets.js';
 
 const logger = childLogger('hooks-install');
 
@@ -15,6 +16,7 @@ export interface TemplateManifest {
 
 export function resolveTemplatesHooksDir(): string {
   const candidates = [
+    path.join(assetRoot(), 'templates', 'hooks'),
     path.resolve(__dirname, '..', 'templates', 'hooks'),
     path.resolve(__dirname, '..', '..', 'templates', 'hooks'),
   ];

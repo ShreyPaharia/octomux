@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 import { EventEmitter } from 'events';
 import type { WebSocketServer, WebSocket } from 'ws';
 import { installHeartbeat } from './ws-heartbeat.js';

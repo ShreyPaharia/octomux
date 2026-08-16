@@ -11,7 +11,7 @@
  *    has no args to edit and always-ask is never promotable.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../../bun-test.js';
 import { screen, fireEvent } from '@testing-library/react';
 import { QuestionCard, type QuestionCardProps } from './QuestionCard';
 import { renderWithRouter } from '../../test-helpers';

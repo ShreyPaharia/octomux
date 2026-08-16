@@ -1,9 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import fs from 'fs';
-import path from 'path';
-import pino from 'pino';
-import { setLogger } from './logger.js';
-import { builtInSkillsDir } from './octomux-paths.js';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 vi.mock('fs', () => {
   const promises = {
@@ -13,6 +8,12 @@ vi.mock('fs', () => {
   };
   return { default: { promises }, promises };
 });
+
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: pino } = await import('pino');
+const { setLogger } = await import('./logger.js');
+const { builtInSkillsDir } = await import('./octomux-paths.js');
 
 const { listSkills, getSkill } = await import('./skills.js');
 

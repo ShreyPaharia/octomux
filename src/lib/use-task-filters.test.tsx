@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { renderHook, act } from '@testing-library/react';
 import { useTaskFilters } from './use-task-filters';
 import { makeTask } from '../test-helpers';

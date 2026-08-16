@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { screen } from '@testing-library/react';
 import { StatusBadge } from './StatusBadge';
 import { renderWithRouter, TASK_STATUSES } from '../test-helpers';
@@ -14,7 +14,7 @@ describe('StatusBadge', () => {
     ['error', 'ERROR', '✕'],
   ];
 
-  it.each(statusLabels)(
+  it.each([...statusLabels])(
     'renders "%s" with label "%s" prefixed by glyph "%s"',
     (status, label, glyph) => {
       renderWithRouter(<StatusBadge status={status} />);
@@ -30,7 +30,7 @@ describe('StatusBadge', () => {
 
   // ─── Glyph is always present ──────────────────────────────────────────────
 
-  it.each(TASK_STATUSES)('renders a StatusGlyph for "%s"', (status) => {
+  it.each([...TASK_STATUSES])('renders a StatusGlyph for "%s"', (status) => {
     const { container } = renderWithRouter(<StatusBadge status={status} />);
     expect(container.querySelector('[role="img"]')).toBeInTheDocument();
   });

@@ -4,66 +4,13 @@
  *
  * Tracks PR fix/multi-task-shared-main-session-start.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { createTestDb, getTask, DEFAULTS } from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 import type { Task } from './types.js';
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
-  const mocked = {
-    ...actual,
-    existsSync: vi.fn(() => true),
-    mkdirSync: vi.fn(),
-    copyFileSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    unlinkSync: vi.fn(),
-    rmSync: vi.fn(),
-    readdirSync: vi.fn(() => [] as any),
-  };
-  return { ...mocked, default: mocked };
-});
-
-vi.mock('./hook-settings.js', () => ({
-  installHookSettings: vi.fn(),
-}));
-
-vi.mock('./skills.js', async (importOriginal) => {
-  return await importOriginal<typeof import('./skills.js')>();
-});
-
-vi.mock('./harnesses/index.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
-  const claudeCode = {
-    ...actual.getHarness('claude-code'),
-    installHooks: vi.fn().mockResolvedValue(undefined),
-    syncAgents: vi.fn().mockResolvedValue(undefined),
-  };
-  return {
-    ...actual,
-    getHarness: (id?: string | null) => {
-      const h = actual.getHarness(id);
-      return h.id === 'claude-code' ? claudeCode : h;
-    },
-  };
-});
-
-vi.mock('./settings.js', async () => {
-  const actual = await vi.importActual<typeof import('./settings.js')>('./settings.js');
-  return {
-    ...actual,
-    getSettings: vi.fn().mockResolvedValue({
-      editor: 'nvim',
-      defaultHarnessId: 'claude-code',
-      harnesses: {},
-    }),
-  };
-});
-
-let nextWindowIndex = 0;
-const tmuxSessions = new Set<string>();
-
+// Mocked first on purpose: mocking ./harnesses/index.js below snapshots the
+// real module, and loading it pulls in tmux-bin, which captures
+// promisify(execFile) at module scope. That capture must see the mock.
 vi.mock('child_process', () => ({
   execFile: vi.fn(
     (cmd: string, args: string[], optsOrCb: Function | object, maybeCb?: Function) => {
@@ -112,9 +59,65 @@ vi.mock('child_process', () => ({
   ),
 }));
 
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
+  const mocked = {
+    ...actual,
+    existsSync: vi.fn(() => true),
+    mkdirSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    rmSync: vi.fn(),
+    readdirSync: vi.fn(() => [] as any),
+  };
+  return { ...mocked, default: mocked };
+});
+
+vi.mock('./hook-settings.js', () => ({
+  installHookSettings: vi.fn(),
+}));
+
+vi.mock('./skills.js', (importOriginal) => {
+  return importOriginal<typeof import('./skills.js')>();
+});
+
+vi.mock('./harnesses/index.js', () => {
+  const actual = vi.importActual<typeof import('./harnesses/index.js')>('./harnesses/index.js');
+  const claudeCode = {
+    ...actual.getHarness('claude-code'),
+    installHooks: vi.fn().mockResolvedValue(undefined),
+    syncAgents: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    ...actual,
+    getHarness: (id?: string | null) => {
+      const h = actual.getHarness(id);
+      return h.id === 'claude-code' ? claudeCode : h;
+    },
+  };
+});
+
+vi.mock('./settings.js', () => {
+  const actual = vi.importActual<typeof import('./settings.js')>('./settings.js');
+  return {
+    ...actual,
+    getSettings: vi.fn().mockResolvedValue({
+      editor: 'nvim',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
+    }),
+  };
+});
+
+let nextWindowIndex = 0;
+const tmuxSessions = new Set<string>();
+
+const { createTestDb, getTask, DEFAULTS } = await import('./test-helpers.js');
+
 const { startTask } = await import('./task-engine/index.js');
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

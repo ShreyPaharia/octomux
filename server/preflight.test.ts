@@ -1,17 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestDb } from './test-helpers';
-import { getDb } from './db';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
-vi.mock('util', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('util')>();
+vi.mock('util', (importOriginal) => {
+  const actual = importOriginal<typeof import('util')>();
   return { ...actual, promisify: (fn: unknown) => fn };
 });
 
-import { execFile } from 'child_process';
-import { preflightNoneMode } from './preflight';
+const { createTestDb } = await import('./test-helpers');
+const { getDb } = await import('./db');
+
+const { execFile } = await import('child_process');
+const { preflightNoneMode } = await import('./preflight');
 
 const mockedExec = execFile as unknown as ReturnType<typeof vi.fn>;
 

@@ -1,13 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import pino from 'pino';
-import { createTestDb } from '../test-helpers.js';
-import { createSchedule } from '../repositories/schedules.js';
-import { insertRun, listRunsForSchedule } from '../repositories/runs.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 const mockRun = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('../workflows/registry.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../workflows/registry.js')>();
+vi.mock('../workflows/registry.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../workflows/registry.js')>();
   return {
     ...actual,
     getWorkflow: (kind: string) =>
@@ -17,7 +13,11 @@ vi.mock('../workflows/registry.js', async (importOriginal) => {
   };
 });
 
-import { executeScheduleRun } from './execute-schedule-run.js';
+const { default: pino } = await import('pino');
+const { createTestDb } = await import('../test-helpers.js');
+const { createSchedule } = await import('../repositories/schedules.js');
+const { insertRun, listRunsForSchedule } = await import('../repositories/runs.js');
+const { executeScheduleRun } = await import('./execute-schedule-run.js');
 
 /** Collect pino JSON log lines into memory for assertions. */
 function bufferStream() {

@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { spawn, type IPty } from 'node-pty';
+import { spawn, type Pty } from './pty.js';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
@@ -9,7 +9,7 @@ import { installHeartbeat } from './ws-heartbeat.js';
 
 interface TerminalConnection {
   ws: WebSocket;
-  pty: IPty;
+  pty: Pty;
 }
 
 const connections = new Map<string, TerminalConnection[]>();
@@ -53,7 +53,7 @@ function attachToTmuxSession(
   linkedSession?: string,
   pendingMessages?: (Buffer | string)[],
 ): void {
-  let pty: IPty;
+  let pty: Pty;
   try {
     const spec = tmuxSpawnSpec(['attach-session', '-t', tmuxTarget]);
     pty = spawn(spec.file, spec.args, {

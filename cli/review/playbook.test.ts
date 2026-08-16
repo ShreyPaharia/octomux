@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../server/bun-test.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -7,7 +7,6 @@ import { runPlaybook } from './playbook.js';
 
 let stdoutBuf = '';
 let tmpHome: string;
-let origHome: string | undefined;
 
 beforeEach(() => {
   stdoutBuf = '';
@@ -16,11 +15,12 @@ beforeEach(() => {
     return true;
   }) as typeof process.stdout.write);
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-pbcli-'));
-  origHome = process.env.HOME;
-  process.env.HOME = tmpHome;
+  // Spy on homedir rather than setting $HOME: bun resolves os.homedir() once
+  // at startup and ignores later env changes.
+  vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
 });
 afterEach(() => {
-  process.env.HOME = origHome;
+  vi.restoreAllMocks();
   fs.rmSync(tmpHome, { recursive: true, force: true });
   vi.restoreAllMocks();
 });

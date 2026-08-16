@@ -1,7 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderWithRouter } from '@/test-helpers';
+import { describe, it, expect, vi } from '../bun-test.js';
 
 vi.mock('@/lib/api/runApi', () => ({
   runApi: { getRun: vi.fn(), judgeLoopGroup: vi.fn() },
@@ -10,6 +7,10 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { renderWithRouter } = await import('@/test-helpers');
 
 function makeRun(groupOverrides: Record<string, unknown> = {}) {
   return {

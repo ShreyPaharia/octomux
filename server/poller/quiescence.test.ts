@@ -1,29 +1,24 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
+import Database from '../sqlite.js';
 import { createTestDb, insertTask, insertAgent, insertPermissionPrompt } from '../test-helpers.js';
 import { upsertManagedTask, createConversation } from '../repositories/orchestrator.js';
 import { pollQuiescence } from './quiescence.js';
 
 // Helper to set hook_activity and hook_activity_updated_at directly
-function setWorkerActivity(
-  db: Database.Database,
-  agentId: string,
-  activity: string,
-  updatedAtExpr: string,
-) {
+function setWorkerActivity(db: Database, agentId: string, activity: string, updatedAtExpr: string) {
   db.prepare(
     `UPDATE workers SET hook_activity = ?, hook_activity_updated_at = ${updatedAtExpr} WHERE id = ?`,
   ).run(activity, agentId);
 }
 
-function getWorkflowStatus(db: Database.Database, taskId: string): string {
+function getWorkflowStatus(db: Database, taskId: string): string {
   const row = db.prepare(`SELECT workflow_status FROM tasks WHERE id = ?`).get(taskId) as {
     workflow_status: string;
   };
   return row.workflow_status;
 }
 
-function countTaskUpdates(db: Database.Database, taskId: string): number {
+function countTaskUpdates(db: Database, taskId: string): number {
   const row = db
     .prepare(`SELECT COUNT(*) as n FROM task_updates WHERE task_id = ?`)
     .get(taskId) as { n: number };
@@ -31,7 +26,7 @@ function countTaskUpdates(db: Database.Database, taskId: string): number {
 }
 
 describe('pollQuiescence', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -40,7 +35,7 @@ describe('pollQuiescence', () => {
   const cases = [
     {
       name: '(a) task idle > debounce, no pending prompts, not managed → transitions once + fires hook',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, { id: 'task-q1', runtime_state: 'running', workflow_status: 'in_progress' });
         insertAgent(db, {
           id: 'agent-q1',
@@ -56,7 +51,7 @@ describe('pollQuiescence', () => {
     },
     {
       name: '(b) idle but WITHIN debounce window → no transition',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, { id: 'task-q2', runtime_state: 'running', workflow_status: 'in_progress' });
         insertAgent(db, {
           id: 'agent-q2',
@@ -72,7 +67,7 @@ describe('pollQuiescence', () => {
     },
     {
       name: '(c) a worker still active → no transition',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, { id: 'task-q3', runtime_state: 'running', workflow_status: 'in_progress' });
         insertAgent(db, {
           id: 'agent-q3',
@@ -87,7 +82,7 @@ describe('pollQuiescence', () => {
     },
     {
       name: '(c2) a worker waiting → no transition',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, { id: 'task-q4', runtime_state: 'running', workflow_status: 'in_progress' });
         insertAgent(db, {
           id: 'agent-q4',
@@ -102,7 +97,7 @@ describe('pollQuiescence', () => {
     },
     {
       name: '(d) pending permission prompt present → no transition',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, { id: 'task-q5', runtime_state: 'running', workflow_status: 'in_progress' });
         insertAgent(db, {
           id: 'agent-q5',
@@ -124,7 +119,7 @@ describe('pollQuiescence', () => {
     },
     {
       name: '(e) orchestrator-managed → no transition',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, { id: 'task-q6', runtime_state: 'running', workflow_status: 'in_progress' });
         insertAgent(db, {
           id: 'agent-q6',
@@ -141,7 +136,7 @@ describe('pollQuiescence', () => {
     },
     {
       name: '(f) already human_review → no transition',
-      setup: (db: Database.Database) => {
+      setup: (db: Database) => {
         insertTask(db, {
           id: 'task-q7',
           runtime_state: 'running',

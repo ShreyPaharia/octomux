@@ -12,7 +12,7 @@
  *    for a "plain" session with no env at all.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 
 // Mock the DB and store so the server module can be imported without a real DB
 vi.mock('../../db.js', () => ({
@@ -25,8 +25,8 @@ vi.mock('../../db.js', () => ({
   })),
 }));
 
-vi.mock('../../repositories/orchestrator.js', async () => {
-  const actual = await vi.importActual<typeof import('../../repositories/orchestrator.js')>(
+vi.mock('../../repositories/orchestrator.js', () => {
+  const actual = vi.importActual<typeof import('../../repositories/orchestrator.js')>(
     '../../repositories/orchestrator.js',
   );
   return {

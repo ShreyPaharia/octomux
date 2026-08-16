@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { condenseForChat, CHAT_MAX_CHARS } from './condense.js';
 
 const PLAN = {

@@ -1,15 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { execFile } from 'child_process';
-import { findExecCall, countExecCalls } from '../test-helpers.js';
-import {
-  tmuxWindowSubstrate,
-  getActiveWindowIndex,
-  getLastWindowIndex,
-} from './substrate-tmux-windowed.js';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
+
+const { execFile } = await import('child_process');
+const { findExecCall, countExecCalls } = await import('../test-helpers.js');
+const { tmuxWindowSubstrate, getActiveWindowIndex, getLastWindowIndex } =
+  await import('./substrate-tmux-windowed.js');
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -8,9 +8,7 @@
  *
  * Tests call the handler functions directly; no MCP transport is exercised here.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTask, insertAgent } from '../../test-helpers.js';
-import { getDb } from '../../db.js';
+import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
 
 // Controllable tmux mock for get_agent_output (hoisted so the factory can close over it).
 const tmuxState = vi.hoisted(() => ({ hasSession: true, capture: '' }));
@@ -25,17 +23,19 @@ vi.mock('../../tmux-bin.js', () => ({
   }),
 }));
 
-import {
+const { createTestDb, insertTask, insertAgent } = await import('../../test-helpers.js');
+const { getDb } = await import('../../db.js');
+const {
   handleMonitorStatus,
   handleGetTaskOutput,
   handleGetAgentOutput,
   handleRecentRepos,
   handleDefaultBranch,
   handleSearchLearnings,
-} from './read.js';
-import { upsertManagedTask } from '../../repositories/orchestrator.js';
-import { addLearning, SHARED_LANE } from '../../repositories/agent-learnings.js';
-import { POLICY_ONLY_COMMANDS } from '../command-registry.js';
+} = await import('./read.js');
+const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
+const { addLearning, SHARED_LANE } = await import('../../repositories/agent-learnings.js');
+const { POLICY_ONLY_COMMANDS } = await import('../command-registry.js');
 
 describe('orchestrator mcp read tools', () => {
   beforeEach(() => {

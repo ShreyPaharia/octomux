@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkflow } from '../registry.js';
-import { DOC_DRIFT_CONFIG_SCHEMA } from './schema.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockCreateDocDriftTaskFromSchedule = vi.fn().mockResolvedValue({ id: 'task1' });
 
@@ -8,6 +6,9 @@ vi.mock('./run.js', () => ({
   createDocDriftTaskFromSchedule: (...args: unknown[]) =>
     mockCreateDocDriftTaskFromSchedule(...args),
 }));
+
+const { getWorkflow } = await import('../registry.js');
+const { DOC_DRIFT_CONFIG_SCHEMA } = await import('./schema.js');
 
 import './index.js';
 

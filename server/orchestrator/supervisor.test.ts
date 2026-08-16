@@ -9,18 +9,9 @@
  *  - Serialized per-conversation queue (notes never interleave).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb, insertTask } from '../test-helpers.js';
-import { getDb } from '../db.js';
-import {
-  createConversation,
-  upsertManagedTask,
-  appendEvent,
-  getManagedTask,
-  setGlobalMonitor,
-  clearGlobalMonitor,
-  getGlobalMonitorConversation,
-} from '../repositories/orchestrator.js';
+import type { Supervisor } from './supervisor.js';
+import type { SupervisorInjection } from './supervisor.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // We need to capture runSendMessage calls from supervisor's spec branch
 const mockRunSendMessage = vi.fn().mockResolvedValue(undefined);
@@ -60,11 +51,23 @@ vi.mock('./exec.js', () => ({
   buildWorkflowTemplate: vi.fn().mockReturnValue('workflow template'),
 }));
 
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const {
+  createConversation,
+  upsertManagedTask,
+  appendEvent,
+  getManagedTask,
+  setGlobalMonitor,
+  clearGlobalMonitor,
+  getGlobalMonitorConversation,
+} = await import('../repositories/orchestrator.js');
+const { createSupervisor } = await import('./supervisor.js');
+const { pushToConversation } = await import('./stream.js');
+
 // ─── Imports (after mocks) ─────────────────────────────────────────────────
 
 // Import supervisor after mocks are set up
-import { createSupervisor, type Supervisor, type SupervisorInjection } from './supervisor.js';
-import { pushToConversation } from './stream.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

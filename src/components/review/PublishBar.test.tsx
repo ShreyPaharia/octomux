@@ -1,7 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { PublishBar } from './PublishBar';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const { mockPublishReview, mockRequestReReview, mockDeleteTask } = await vi.hoisted(async () => ({
   mockPublishReview: vi.fn(),
@@ -25,6 +22,10 @@ vi.mock('@/lib/api/taskApi', () => ({
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+
+const { render, screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { PublishBar } = await import('./PublishBar');
 
 function defaultProps(overrides: Partial<Parameters<typeof PublishBar>[0]> = {}) {
   return {

@@ -1,13 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { TaskCard } from './TaskCard';
-import { renderWithRouter, makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { TaskCard } = await import('./TaskCard');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
 
 describe('TaskCard', () => {
   const onClose = vi.fn();
@@ -26,7 +27,7 @@ describe('TaskCard', () => {
     { name: 'branch', task: makeTask(), expected: 'agents/test-task-01' },
   ];
 
-  it.each(contentCases)('renders $name', ({ task, expected }) => {
+  it.each([...contentCases])('renders $name', ({ task, expected }) => {
     renderWithRouter(<TaskCard task={task} onClose={onClose} onDelete={onDelete} />);
     expect(screen.getByText(expected)).toBeInTheDocument();
   });
@@ -140,7 +141,7 @@ describe('TaskCard', () => {
     { path: '/a/b/c/d', expected: 'd' },
   ];
 
-  it.each(repoPaths)('extracts repo name "$expected" from "$path"', ({ path, expected }) => {
+  it.each([...repoPaths])('extracts repo name "$expected" from "$path"', ({ path, expected }) => {
     renderWithRouter(
       <TaskCard task={makeTask({ repo_path: path })} onClose={onClose} onDelete={onDelete} />,
     );

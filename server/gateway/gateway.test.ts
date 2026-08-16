@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { createGateway, type GatewayConductor } from './gateway.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';

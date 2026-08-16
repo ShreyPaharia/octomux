@@ -1,12 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestDb } from './test-helpers.js';
+import { describe, it, expect, vi, beforeEach } from './bun-test.js';
 
 vi.mock('./inline-comments-outdated.js', () => ({
   isAnchorOutdated: vi.fn(),
 }));
 
-import { markStaleDrafts, autoResolvePublished } from './review-staleness.js';
-import { isAnchorOutdated } from './inline-comments-outdated.js';
+const { createTestDb } = await import('./test-helpers.js');
+
+const { markStaleDrafts, autoResolvePublished } = await import('./review-staleness.js');
+const { isAnchorOutdated } = await import('./inline-comments-outdated.js');
 
 const TASK_ID = 't1';
 

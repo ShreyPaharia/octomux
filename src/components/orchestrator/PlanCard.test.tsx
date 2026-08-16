@@ -13,7 +13,7 @@
  *  - Shows an error state when fetch fails.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import { screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { PlanCard, type PlanCardProps } from './PlanCard';
 import { renderWithRouter } from '../../test-helpers';

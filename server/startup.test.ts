@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import pino from 'pino';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -22,6 +21,8 @@ vi.mock('./binary-check.js', () => ({
   brewInstall: vi.fn(),
   hasBrew: vi.fn(() => false),
 }));
+
+const { default: pino } = await import('pino');
 
 const { execFileSync } = await import('child_process');
 const { probeBinary, brewInstall } = await import('./binary-check.js');
@@ -96,7 +97,7 @@ describe('ensureBinary', () => {
     vi.mocked(probeBinary).mockReturnValueOnce({ ok: false }).mockReturnValueOnce({ ok: true });
     vi.mocked(brewInstall).mockReturnValue(true);
 
-    ensureBinary({ cmd, checkArgs, brewPkg, name });
+    ensureBinary({ cmd, checkArgs: [...checkArgs], brewPkg, name });
 
     expect(brewInstall).toHaveBeenCalledWith(brewPkg, { cmd, checkArgs });
     expect(mockExit).not.toHaveBeenCalled();

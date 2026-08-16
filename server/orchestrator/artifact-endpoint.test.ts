@@ -14,19 +14,12 @@
  *  - Worktree not found for task → 404
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { createTestDb, insertTask } from '../test-helpers.js';
-import { getDb } from '../db.js';
-import { createConversation, upsertManagedTask } from '../repositories/orchestrator.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('../task-engine/index.js', async () => {
-  const { getDb } = await import('../db.js');
+vi.mock('../task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('../db.js')>('../db.js');
   return {
     startTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -54,9 +47,16 @@ vi.mock('../task-engine/index.js', async () => {
   };
 });
 
-// ─── Lazy import after mocks ──────────────────────────────────────────────────
+const { default: request } = await import('supertest');
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const { createConversation, upsertManagedTask } = await import('../repositories/orchestrator.js');
+const { createApp } = await import('../app.js');
 
-import { createApp } from '../app.js';
+// ─── Lazy import after mocks ──────────────────────────────────────────────────
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

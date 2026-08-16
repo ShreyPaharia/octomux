@@ -1,11 +1,8 @@
 /**
  * Tests: GET /api/tasks/:id returns pull_requests array and legacy pr_url field.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import type Database from 'better-sqlite3';
-import { createTestDb, insertTask } from './test-helpers.js';
-import { upsertPullRequest } from './repositories/pull-requests.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
+import type Database from './sqlite.js';
 
 // ─── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +33,10 @@ vi.mock('./hook-token.js', () => ({
   ensureHookToken: vi.fn(async () => 'tok'),
 }));
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask } = await import('./test-helpers.js');
+const { upsertPullRequest } = await import('./repositories/pull-requests.js');
+
 // Note: do NOT mock 'fs' globally — migrations.ts uses fs.readFileSync to read kind presets
 // (catches ENOENT gracefully), and mocking it without that function causes 500s.
 
@@ -44,7 +45,7 @@ const { createApp } = await import('./app.js');
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/tasks/:id — pull_requests field', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

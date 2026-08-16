@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type Database from '../sqlite.js';
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS worktrees (
@@ -221,7 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_pull_requests_state ON pull_requests(state);
 `;
 
 /** Apply SQLite pragmas required for octomux (WAL + foreign keys). */
-export function applyPragmas(instance: Database.Database): void {
+export function applyPragmas(instance: Database): void {
   instance.pragma('journal_mode = WAL');
   instance.pragma('foreign_keys = ON');
 }

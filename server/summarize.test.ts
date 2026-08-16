@@ -3,15 +3,8 @@
  *
  * Covers: builtin-disabled fallback, success path, error swallowed, CLI args.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
-import request from 'supertest';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { createTestDb, insertTask, insertAgent, findCallback } from './test-helpers.js';
-import { createApp } from './app.js';
-import { getArtifactSummary } from './artifact.js';
+import Database from './sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
 // ─── child_process mock ──────────────────────────────────────────────────────
 
@@ -30,13 +23,21 @@ vi.mock('./hook-dispatcher.js', () => ({
   invalidateHookEnabledCache: vi.fn(),
 }));
 
-import { summarizeAgentProgress } from './summarize.js';
-import { execFile } from 'child_process';
+const { default: request } = await import('supertest');
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createTestDb, insertTask, insertAgent, findCallback } = await import('./test-helpers.js');
+const { createApp } = await import('./app.js');
+const { getArtifactSummary } = await import('./artifact.js');
+const { summarizeAgentProgress } = await import('./summarize.js');
+const { execFile } = await import('child_process');
+
 const mockedExecFile = vi.mocked(execFile);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function enableBuiltin(db: Database.Database, enabled: boolean) {
+function enableBuiltin(db: Database, enabled: boolean) {
   db.prepare(
     `INSERT INTO hook_settings (scope, key, enabled, updated_at)
      VALUES ('builtin', 'summarize-progress', ?, datetime('now'))
@@ -70,7 +71,7 @@ function mockClaudeFail(err: Error) {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('C3: summarizeAgentProgress', () => {
-  let db: Database.Database;
+  let db: Database;
   let worktreeDir: string;
 
   beforeEach(() => {
@@ -195,7 +196,7 @@ describe('C3: summarizeAgentProgress', () => {
 });
 
 describe('C3: Stop hook calls summarizeAgentProgress when enabled', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

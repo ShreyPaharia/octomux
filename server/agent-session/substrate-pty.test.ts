@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest';
+/**
+ * Moved off vitest: these drive a real PTY, and the PTY is now `Bun.Terminal`,
+ * which doesn't exist under Node. Run with:
+ *
+ *   bun test ./server/agent-session/substrate-pty.bun-test.ts
+ */
+
+import { describe, it, expect } from 'bun:test';
 import { ptySubstrate } from './substrate-pty.js';
 
 const CWD = process.cwd();

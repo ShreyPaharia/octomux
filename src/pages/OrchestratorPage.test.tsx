@@ -10,7 +10,7 @@
  *  - Incoming ws message events render incrementally in the thread.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 import { screen, waitFor, fireEvent, act } from '@testing-library/react';
 import OrchestratorPage from './OrchestratorPage';
 import { renderWithRouter } from '../test-helpers';
@@ -294,7 +294,7 @@ describe('OrchestratorPage', () => {
     // Should show a title input / confirm dialog or immediately create
     // (implementation-defined — just assert fetch was called with POST)
     await waitFor(() => {
-      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
       const calls = fetchMock.mock.calls as Array<[string, RequestInit?]>;
       const postCalls = calls.filter(
         ([url, opts]) => url === '/api/orchestrator/conversations' && opts?.method === 'POST',

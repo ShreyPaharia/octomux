@@ -24,10 +24,7 @@
  * faked.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTestDb } from '../../test-helpers.js';
-import { createConversation, createCard, resolveCard } from '../../repositories/orchestrator.js';
-import { addRule, capabilityToolName } from '../policy.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../bun-test.js';
 import type { Capability } from '../../registry/types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -37,8 +34,13 @@ vi.mock('./write.js', () => ({
   callGateCard: (...args: unknown[]) => mockCallGateCard(...args),
 }));
 
+const { createTestDb } = await import('../../test-helpers.js');
+const { createConversation, createCard, resolveCard } =
+  await import('../../repositories/orchestrator.js');
+const { addRule, capabilityToolName } = await import('../policy.js');
+const { onGatedInvoke } = await import('./gate.js');
+
 // Imported after the mock so gate.ts picks up the mocked write.js.
-import { onGatedInvoke } from './gate.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,7 +146,12 @@ describe('onGatedInvoke', () => {
   // ── Timeout → handler does NOT run, distinct from reject/creation-failure ──
 
   it('timeout (card never resolved) THROWS a distinct "timed out" error', async () => {
-    vi.useFakeTimers();
+    // Real timers, with the generous per-test timeout below.
+    //
+    // The poll loop's deadline is approvalTimeoutMs + a fixed POLL_GRACE_MS of
+    // 10s, ticking once a second, so this genuinely costs ~10s of wall clock.
+    // Driving it with fake timers instead means advancing a Date.now() deadline
+    // across an async tick that awaits real DB work — which never converges.
     process.env.OCTOMUX_APPROVAL_TIMEOUT_MS = '100';
     mockCallGateCard.mockImplementation(async () => {
       const cardId = seedCard('task.close', 'always-ask', 'action');
@@ -154,10 +161,8 @@ describe('onGatedInvoke', () => {
     });
 
     const pending = onGatedInvoke(makeCap(), 'always-ask', {});
-    const assertion = expect(pending).rejects.toThrow(/timed out/);
-    await vi.advanceTimersByTimeAsync(30_000);
-    await assertion;
-  });
+    await expect(pending).rejects.toThrow(/timed out/);
+  }, 30_000);
 
   // ── The security property: always-ask is NEVER promotable ────────────────
 

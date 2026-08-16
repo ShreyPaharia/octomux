@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import {
   listEnabledSchedules,

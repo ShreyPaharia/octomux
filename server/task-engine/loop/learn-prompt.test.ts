@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../../bun-test.js';
 import { createTestDb, insertTask, DEFAULTS } from '../../test-helpers.js';
 import { addLearning, SHARED_LANE } from '../../repositories/agent-learnings.js';
 import { seedLearnings, LEARN_INSTRUCTION } from './learn-prompt.js';

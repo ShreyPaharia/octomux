@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from '../../bun-test.js';
+import type Database from '../../sqlite.js';
 import { getCapability, resetRegistry } from '../index.js';
 import type { CapabilityContext } from '../types.js';
 import { createTestDb, insertTask, insertAgent } from '../../test-helpers.js';
@@ -11,7 +11,7 @@ import { registerRunCapabilities } from './run.js';
 
 const ctx: CapabilityContext = { caller: 'agent' };
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

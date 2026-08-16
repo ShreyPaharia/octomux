@@ -1,8 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createServer, type Server } from 'http';
+import type { Server } from 'http';
 import { WebSocket } from 'ws';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS } from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -14,7 +13,7 @@ const mockPty = {
   kill: vi.fn(),
 };
 
-vi.mock('node-pty', () => ({
+vi.mock('./pty.js', () => ({
   spawn: vi.fn(() => mockPty),
 }));
 
@@ -70,13 +69,16 @@ vi.mock('child_process', () => {
   return { execFile };
 });
 
+const { createServer } = await import('http');
+const { createTestDb, insertTask, insertAgent, DEFAULTS } = await import('./test-helpers.js');
+
 const { setupTerminalWebSocket, handleTerminalUpgrade, getActiveConnections } =
   await import('./terminal.js');
-const nodePty = await import('node-pty');
+const nodePty = await import('./pty.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 let server: Server;
 let port: number;
 
@@ -125,6 +127,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   db.close();
+  // server.close() waits for open sockets to drain, and the terminal WebSockets
+  // stay open — under bun that never resolves and hangs the file. Drop them.
+  server.closeAllConnections?.();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -189,7 +194,7 @@ describe('terminal WebSocket', () => {
     ws.close();
   });
 
-  it('spawns node-pty attaching to the grouped session (not the main session)', async () => {
+  it('spawns a pty attaching to the grouped session (not the main session)', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
@@ -434,7 +439,7 @@ describe('terminal WebSocket', () => {
 
   // ─── PTY spawn failure ─────────────────────────────────────────────────────
 
-  it('closes with 4005 when node-pty spawn fails', async () => {
+  it('closes with 4005 when pty spawn fails', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
+import Database from './sqlite.js';
 import {
   createTestDb,
   insertTask,
@@ -20,7 +20,7 @@ import {
 import { getDb, initDb } from './db.js';
 
 describe('Database', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

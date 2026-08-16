@@ -1,8 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb, insertTestTask } from './test-helpers.js';
-import { getDb } from './db.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 // Minimal mocks so createApp doesn't fail on missing native deps
 vi.mock('./task-engine/index.js', () => ({
@@ -25,6 +21,11 @@ vi.mock('./tmux-input.js', () => ({
 vi.mock('./workflows/reviewer/publish-review.js', () => ({
   publishReview: vi.fn().mockResolvedValue({ github_review_url: 'https://github.com/test' }),
 }));
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb, insertTestTask } = await import('./test-helpers.js');
+const { getDb } = await import('./db.js');
 
 const { startTask } = await import('./task-engine/index.js');
 const { sendMessageToAgent } = await import('./tmux-input.js');

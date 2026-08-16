@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../bun-test.js';
 import { SocketModeClient } from '@slack/socket-mode';
 import type { WebClient } from '@slack/web-api';
 import { buildSlack, createSlackAdapter } from './slack.js';

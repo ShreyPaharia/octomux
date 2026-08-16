@@ -4,7 +4,7 @@
  * Unit coverage for the `.octomux/artifact.md` Summary section — the
  * read/write path that replaces `tasks.current_summary` (+`_updated_at`).
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';

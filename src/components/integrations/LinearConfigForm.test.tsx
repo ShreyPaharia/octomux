@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { LinearConfigForm } from './LinearConfigForm.js';
-import { configApi } from '@/lib/api/configApi';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 vi.mock('@/lib/api/configApi', () => ({
   configApi: {
     prefillLinear: vi.fn(),
   },
 }));
+
+const { render, screen } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { LinearConfigForm } = await import('./LinearConfigForm.js');
+const { configApi } = await import('@/lib/api/configApi');
 
 describe('LinearConfigForm', () => {
   beforeEach(() => vi.clearAllMocks());

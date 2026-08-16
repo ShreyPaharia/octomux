@@ -1,3 +1,4 @@
+import type { SQLQueryBindings } from '../sqlite.js';
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
@@ -126,7 +127,7 @@ export function searchShared(
 ): AgentLearning[] {
   const q = `%${query.trim()}%`;
   const where = ['lane = ?', 'superseded_at IS NULL', '(trigger LIKE ? OR lesson LIKE ?)'];
-  const params: unknown[] = [SHARED_LANE, q, q];
+  const params: SQLQueryBindings[] = [SHARED_LANE, q, q];
   if (opts.repo) {
     where.unshift('repo_path = ?');
     params.unshift(opts.repo);

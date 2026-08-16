@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../../bun-test.js';
 import Ajv from 'ajv';
 import { OVERNIGHT_LOG_SUMMARY_SCHEMA } from './schema.js';
 

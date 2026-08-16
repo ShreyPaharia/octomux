@@ -9,16 +9,13 @@
  * hand-written route) — this file covers the 4 that stayed hand-written,
  * plus the run-adoption fix proof.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb, insertTask, insertAgent } from './test-helpers.js';
-import { createLoopRun, appendIteration } from './repositories/loop-runs.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
-vi.mock('./task-engine/index.js', async () => {
-  const { getDb } = await import('./db.js');
-  const { insertAgent: insertAgentHelper } = await import('./test-helpers.js');
-  const { nanoid } = await import('nanoid');
+vi.mock('./task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
+  const { insertAgent: insertAgentHelper } =
+    vi.importActual<typeof import('./test-helpers.js')>('./test-helpers.js');
+  const { nanoid } = vi.importActual<typeof import('nanoid')>('nanoid');
   return {
     // Fakes the worktree/tmux/first-agent setup real startTask performs, so
     // downstream startLoop() (real, exercised in this file) finds an active agent.
@@ -45,8 +42,8 @@ vi.mock('./task-engine/index.js', async () => {
   };
 });
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -75,8 +72,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('./repositories/orchestrator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./repositories/orchestrator.js')>();
+vi.mock('./repositories/orchestrator.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./repositories/orchestrator.js')>();
   return { ...actual, isOrchestratorManaged: vi.fn(() => false) };
 });
 vi.mock('./orchestrator/runner.js', () => ({ mcpServerInvocation: vi.fn(() => null) }));
@@ -99,6 +96,11 @@ vi.mock('./harnesses/index.js', () => ({
     postLaunch: vi.fn(async () => undefined),
   })),
 }));
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb, insertTask, insertAgent } = await import('./test-helpers.js');
+const { createLoopRun, appendIteration } = await import('./repositories/loop-runs.js');
 
 const VALID_GROUP_SPEC = { prompt: 'improve X', verify: 'true', maxIterations: 3 };
 
@@ -341,7 +343,8 @@ describe('runs API — loop/loop-group surface', () => {
       const run = createLoopRun({ task_id: 't1', spec_json: '{}' });
       appendIteration(run.id, { sha_from: 'a1', sha_to: 'a2' });
       appendIteration(run.id, { sha_from: 'a2', sha_to: 'a3' });
-      const { insertRun } = await import('./repositories/runs.js');
+      const { insertRun } =
+        vi.importActual<typeof import('./repositories/runs.js')>('./repositories/runs.js');
       const runsRow = insertRun({
         workflowKind: 'loop',
         trigger: 'manual',

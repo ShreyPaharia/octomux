@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # postinstall.sh — runs after npm/bun install
-# Installs subdirectory deps, fixes node-pty, and installs missing system deps.
+# Installs bundled skills and any missing system dependencies.
 # Never exits non-zero — failures print warnings but don't block install.
 
 set -u
@@ -8,18 +8,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ─── 1. Install cli/ subdirectory dependencies ──────────────────────────────
-
-if [ -d "$ROOT_DIR/cli" ] && [ -f "$ROOT_DIR/cli/package.json" ]; then
-  if [ ! -d "$ROOT_DIR/cli/node_modules" ]; then
-    echo "Installing cli/ dependencies..."
-    (cd "$ROOT_DIR/cli" && npm install --ignore-scripts 2>/dev/null) || {
-      echo "⚠  Could not install cli/ dependencies. Run manually: cd cli && npm install"
-    }
-  fi
-fi
-
-# ─── 2. Install skills to ~/.claude/skills/ ──────────────────────────────────
+# ─── 1. Install skills to ~/.claude/skills/ ──────────────────────────────────
 
 SKILLS_SRC="$ROOT_DIR/skills"
 SKILLS_DST="$HOME/.claude/skills"
@@ -37,11 +26,7 @@ if [ -d "$SKILLS_SRC" ]; then
   done
 fi
 
-# ─── 3. Fix node-pty spawn-helper permissions (macOS) ────────────────────────
-
-chmod +x "$ROOT_DIR/node_modules/node-pty/prebuilds/darwin-"*/spawn-helper 2>/dev/null || true
-
-# ─── 4. Install missing system dependencies ──────────────────────────────────
+# ─── 2. Install missing system dependencies ──────────────────────────────────
 
 install_with_brew() {
   local pkg="$1"

@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Command } from 'commander';
-import { registerTaskRefAdd } from './task-ref-add.js';
+import { describe, it, expect, vi, beforeEach } from '../../../server/bun-test.js';
 
 vi.mock('../action.js', () => ({
   getContext: (_cmd: unknown) => ({
@@ -8,6 +6,9 @@ vi.mock('../action.js', () => ({
     json: false,
   }),
 }));
+
+const { Command } = await import('commander');
+const { registerTaskRefAdd } = await import('./task-ref-add.js');
 
 describe('task-ref-add CLI', () => {
   let addTaskRef: ReturnType<typeof vi.fn>;

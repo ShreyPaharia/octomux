@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../bun-test.js';
 import { renderHook, act } from '@testing-library/react';
 import { useInlineCommentZones } from './useInlineCommentZones';
 import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';

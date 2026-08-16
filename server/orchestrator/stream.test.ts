@@ -14,35 +14,10 @@
  * The runner (tmux) is mocked so tests run without tmux.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import { createServer, type Server } from 'http';
+import type { Server } from 'http';
 import { WebSocket } from 'ws';
-import { createApp } from '../app.js';
-import { createTestDb } from '../test-helpers.js';
-import {
-  createConversation,
-  getConversation,
-  listMessages,
-  appendMessage,
-  createCard,
-  resolveCard,
-} from '../repositories/orchestrator.js';
-import {
-  dispatchUserTurn,
-  persistAndPush,
-  setupOrchestratorWebSocket,
-  handleOrchestratorUpgrade,
-  chatEventToWsEvent,
-  cardRowToWsEvent,
-  replayConnectionState,
-  registerTranscriptConsumer,
-  registerConversationMessageListener,
-  pushToConversation,
-  cleanupOrchestratorClients,
-} from './stream.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 import type { OrchestratorWsEvent } from './stream.js';
-import { tailTranscript } from './transcript.js';
 import type { ActionCard } from '../repositories/orchestrator.js';
 import type { ChatEvent } from './transcript.js';
 import type { IncomingMessage } from 'http';
@@ -60,8 +35,8 @@ vi.mock('./runner.js', () => ({
 }));
 
 // Mock tailTranscript to avoid real filesystem watching
-vi.mock('./transcript.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./transcript.js')>();
+vi.mock('./transcript.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./transcript.js')>();
   return {
     ...actual,
     tailTranscript: vi.fn().mockResolvedValue(() => {}),
@@ -97,6 +72,33 @@ vi.mock('../events.js', () => ({
   getEventClientCount: vi.fn().mockReturnValue(0),
   replayEventsSince: vi.fn(),
 }));
+
+const { default: request } = await import('supertest');
+const { createServer } = await import('http');
+const { createApp } = await import('../app.js');
+const { createTestDb } = await import('../test-helpers.js');
+const {
+  createConversation,
+  getConversation,
+  listMessages,
+  appendMessage,
+  createCard,
+  resolveCard,
+} = await import('../repositories/orchestrator.js');
+const {
+  dispatchUserTurn,
+  persistAndPush,
+  setupOrchestratorWebSocket,
+  handleOrchestratorUpgrade,
+  chatEventToWsEvent,
+  cardRowToWsEvent,
+  replayConnectionState,
+  registerTranscriptConsumer,
+  registerConversationMessageListener,
+  pushToConversation,
+  cleanupOrchestratorClients,
+} = await import('./stream.js');
+const { tailTranscript } = await import('./transcript.js');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

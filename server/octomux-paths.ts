@@ -1,8 +1,6 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { octomuxRoot } from './octomux-root.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { assetRoot } from './assets.js';
 
 /** Repo-local octomux config root: `<repo>/.octomux/`. */
 export function repoOctomuxDir(repoPath: string): string {
@@ -28,11 +26,11 @@ export function repoFilesDir(repoPath: string): string {
  * octomux does not manage.
  */
 export function builtInSkillsDir(): string {
-  return path.resolve(__dirname, '..', 'plugin', 'skills');
+  return path.join(assetRoot(), 'plugin', 'skills');
 }
 
 export function builtInAgentsDir(): string {
-  return path.resolve(__dirname, '..', 'plugin', 'agents');
+  return path.join(assetRoot(), 'plugin', 'agents');
 }
 
 /**
@@ -40,7 +38,7 @@ export function builtInAgentsDir(): string {
  * (see spec/schedule-kinds-as-presets.md §3.1). Read-only.
  */
 export function builtInKindsDir(): string {
-  return path.resolve(__dirname, '..', 'kinds');
+  return path.join(assetRoot(), 'kinds');
 }
 
 /**

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 // resolveAiTaskNamingEnabled reads settings.js's getSettings() when
 // OCTOMUX_AI_TASK_NAMING is unset — stub it so tests control the resolution
@@ -11,9 +11,9 @@ vi.mock('../settings.js', () => ({ getSettings: () => mockGetSettings() }));
 // but must not blow up module resolution.
 vi.mock('../title-gen.js', () => ({ generateTitleAndDescription: vi.fn() }));
 
-import { resolveAiTaskNamingEnabled, lookupExistingReviewId } from './_shared.js';
-import { createTestDb, insertTask } from '../test-helpers.js';
-import { getDb } from '../db.js';
+const { resolveAiTaskNamingEnabled, lookupExistingReviewId } = await import('./_shared.js');
+const { createTestDb, insertTask } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
 
 describe('resolveAiTaskNamingEnabled', () => {
   beforeEach(() => {

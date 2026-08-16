@@ -14,7 +14,7 @@
  * shrinks, down to empty when migration is done.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from '../bun-test.js';
 import { createApp } from '../app.js';
 import { listMountedRoutes } from './route-inventory.js';
 import { findUndeclaredRoutes, resetRegistry } from './index.js';

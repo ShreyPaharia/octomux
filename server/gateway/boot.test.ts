@@ -1,6 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { createTestDb } from '../test-helpers.js';
-import { createIntegration, setEnabled } from '../integrations/store.js';
+import { describe, it, expect, afterEach, beforeEach, vi } from '../bun-test.js';
 
 const mockCreateTelegramAdapter = vi.fn();
 const mockCreateSlackAdapter = vi.fn();
@@ -12,7 +10,9 @@ vi.mock('./slack.js', () => ({
   createSlackAdapter: (bot: string, app: string) => mockCreateSlackAdapter(bot, app),
 }));
 
-import { startGatewayIfConfigured } from './boot.js';
+const { createTestDb } = await import('../test-helpers.js');
+const { createIntegration, setEnabled } = await import('../integrations/store.js');
+const { startGatewayIfConfigured } = await import('./boot.js');
 
 function fakeAdapter(id: string) {
   return { id, start: vi.fn(async () => {}), sendTyping: vi.fn(async () => {}), send: vi.fn() };

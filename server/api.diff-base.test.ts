@@ -1,4 +1,5 @@
 // Focused tests for the fix: the per-file diff endpoint must use the resolved
+import Database from './sqlite.js';
 // live base SHA (from resolveDiffBase), not task.base_sha — and both endpoints
 // must surface BaseUnavailableError as a 503 with the `base_unavailable` code.
 //
@@ -6,10 +7,7 @@
 // `./@octomux/diff-engine`, which the shared test would have to thread through every
 // existing test.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, DEFAULTS } from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 
 vi.mock('./task-engine/index.js', () => ({
   startTask: vi.fn(),
@@ -51,9 +49,8 @@ vi.mock('./diff-review-state.js', () => ({
   })),
 }));
 
-vi.mock('@octomux/diff-engine', async () => {
-  const actual =
-    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+vi.mock('@octomux/diff-engine', () => {
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
@@ -69,11 +66,14 @@ vi.mock('@octomux/diff-engine', async () => {
   };
 });
 
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, DEFAULTS } = await import('./test-helpers.js');
+
 const diffMod = await import('@octomux/diff-engine');
 const diffBaseMod = diffMod;
 const { createApp } = await import('./app.js');
 
-let db: Database.Database;
+let db: Database;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {

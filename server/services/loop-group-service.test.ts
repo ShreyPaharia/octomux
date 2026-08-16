@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestDb, insertTask } from '../test-helpers.js';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 vi.mock('./task-service.js', () => ({ createTask: vi.fn() }));
 vi.mock('../task-engine/loop/engine.js', () => ({ startLoop: vi.fn() }));
+
+const { createTestDb, insertTask } = await import('../test-helpers.js');
 
 describe('loop-group-service', () => {
   let db: ReturnType<typeof createTestDb>;

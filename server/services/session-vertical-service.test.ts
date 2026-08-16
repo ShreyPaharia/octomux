@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const mockRunAgentSession = vi.fn();
 const mockGetHarness = vi.fn();
@@ -13,9 +13,9 @@ vi.mock('../harnesses/registry.js', () => ({
   getHarness: (...args: unknown[]) => mockGetHarness(...args),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { runSessionVertical } = await import('./session-vertical-service.js');
 
-import { runSessionVertical } from './session-vertical-service.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 describe('runSessionVertical', () => {
   beforeEach(() => {

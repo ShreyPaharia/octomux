@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from '../bun-test.js';
 import { renderHook } from '@testing-library/react';
 import { useRef } from 'react';
 import { useDiffEditorHostSize } from './useDiffEditorHostSize';

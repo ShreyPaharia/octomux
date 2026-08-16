@@ -18,27 +18,10 @@
  * is observable — not just the phase column advancing.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import request from 'supertest';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { createTestDb, insertTask, insertAgent } from '../test-helpers.js';
-import { createApp } from '../app.js';
-import { subscribeServerEvents, type ServerEvent } from '../events.js';
-import { createSupervisor, type Supervisor } from './supervisor.js';
-import {
-  createConversation,
-  upsertManagedTask,
-  getManagedTask,
-  eventsSince,
-  listPendingCards,
-  createCard,
-  resolveCard,
-  appendEvent,
-} from '../repositories/orchestrator.js';
-import { hasAlreadyRelayed } from '../hooks.js';
+import type { Supervisor } from './supervisor.js';
+import type { ServerEvent } from '../events.js';
+import Database from '../sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 
 // Capture runSendMessage calls from the supervisor's spec-relay branch.
 const mockRunSendMessage = vi.fn().mockResolvedValue(undefined);
@@ -64,8 +47,28 @@ vi.mock('./stream.js', () => ({
   persistAndPush: vi.fn(),
 }));
 
+const { default: request } = await import('supertest');
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { default: os } = await import('os');
+const { createTestDb, insertTask, insertAgent } = await import('../test-helpers.js');
+const { createApp } = await import('../app.js');
+const { subscribeServerEvents } = await import('../events.js');
+const { createSupervisor } = await import('./supervisor.js');
+const {
+  createConversation,
+  upsertManagedTask,
+  getManagedTask,
+  eventsSince,
+  listPendingCards,
+  createCard,
+  resolveCard,
+  appendEvent,
+} = await import('../repositories/orchestrator.js');
+const { hasAlreadyRelayed } = await import('../hooks.js');
+
 describe('re-fire guard (hasAlreadyRelayed) — spec/plan relay does not double-fire', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
   let worktreeDir: string;
   let supervisor: Supervisor;
@@ -245,7 +248,7 @@ describe('re-fire guard (hasAlreadyRelayed) — spec/plan relay does not double-
 // predicate carries the weight on its own — exactly the shape it will be
 // relied on for once managed_tasks.phase is deleted.
 describe('hasAlreadyRelayed — guard predicate in isolation (no phase gate involved)', () => {
-  let db: Database.Database;
+  let db: Database;
   let worktreeDir: string;
 
   beforeEach(() => {

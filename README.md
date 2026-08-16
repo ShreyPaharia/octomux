@@ -15,6 +15,9 @@ npm install -g octomux && octomux init && cd your-repo && octomux start
 
 Open **[localhost:7777](http://localhost:7777)**, describe a task, pick **Claude Code** or **Cursor**, and watch it work.
 
+octomux ships as a single self-contained binary — no runtime to install, nothing
+to compile. macOS (Apple silicon, Intel) and Linux (arm64, x64; glibc or musl).
+
 ![octomux demo](assets/demo.gif)
 
 ---
@@ -165,7 +168,7 @@ Issues and PRs are welcome — the roadmap is shaped in the open.
 git clone https://github.com/ShreyPaharia/octomux && cd octomux
 bun install
 bun run dev        # Express :7777 + Vite
-bun run test       # vitest
+bun run test       # server + frontend + unit suites (bun test)
 ```
 
 Then open a PR **against `next`** with a short description of the change. See

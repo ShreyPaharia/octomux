@@ -1,19 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTestDb, execFileOk, execFileFail } from '../test-helpers.js';
-import type Database from 'better-sqlite3';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
+import type Database from '../sqlite.js';
 
 // Mock child_process before importing the module under test
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
-import { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } from './repo-config.js';
-import { execFile } from 'child_process';
+const { createTestDb, execFileOk, execFileFail } = await import('../test-helpers.js');
+
+const { getOrCreateRepoConfig, updateRepoConfig, listRepoConfigs } =
+  await import('./repo-config.js');
+const { execFile } = await import('child_process');
 
 const mockExecFile = vi.mocked(execFile);
 
 describe('repo-config', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

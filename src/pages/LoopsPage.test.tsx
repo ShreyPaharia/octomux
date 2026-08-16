@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import LoopsPage from './LoopsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { RunRow } from '@/lib/api/runApi';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, runApiProxy, apiMock } = await vi.hoisted(
@@ -22,6 +18,11 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: LoopsPage } = await import('./LoopsPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 function makeRun(overrides: Partial<RunRow> = {}): RunRow {
   return {

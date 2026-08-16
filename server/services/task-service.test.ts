@@ -8,9 +8,8 @@
  *  - UNIQUE constraint → ServiceError(409).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb } from '../test-helpers.js';
-import { getDb } from '../db.js';
+import type { CreateTaskServiceInput } from './task-service.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 // ─── Mock side-effecting deps (mirror orchestrator/exec.test.ts) ────────────
 
@@ -33,11 +32,13 @@ vi.mock('nanoid', () => ({
   nanoid: (...args: unknown[]) => mockNanoid(...args),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { createTestDb } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const { createTask, unblockDependents } = await import('./task-service.js');
+const { ServiceError } = await import('./errors.js');
+const { insertTask, setWorkflowStatus } = await import('../repositories/tasks.js');
 
-import { createTask, unblockDependents, type CreateTaskServiceInput } from './task-service.js';
-import { ServiceError } from './errors.js';
-import { insertTask, setWorkflowStatus } from '../repositories/tasks.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 let seq = 0;
 function uniqueId(): string {
@@ -135,8 +136,8 @@ describe('task-service.createTask', () => {
     }
 
     expect(caught).toBeInstanceOf(ServiceError);
-    expect((caught as ServiceError).status).toBe(409);
-    expect((caught as ServiceError).message).toMatch(/UNIQUE constraint/);
+    expect((caught as InstanceType<typeof ServiceError>).status).toBe(409);
+    expect((caught as InstanceType<typeof ServiceError>).message).toMatch(/UNIQUE constraint/);
   });
 
   // ─── depends_on (agents/task-depends-on) ─────────────────────────────────
@@ -149,7 +150,7 @@ describe('task-service.createTask', () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(ServiceError);
-    expect((caught as ServiceError).status).toBe(400);
+    expect((caught as InstanceType<typeof ServiceError>).status).toBe(400);
     expect(mockStartTask).not.toHaveBeenCalled();
   });
 

@@ -1,21 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import request from 'supertest';
-import Database from 'better-sqlite3';
-import {
-  createTestDb,
-  insertTask,
-  insertAgent,
-  insertPermissionPrompt,
-  insertUserTerminal,
-  getTask,
-  DEFAULTS,
-} from './test-helpers.js';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
 import type { Task, Worker } from './types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('./task-engine/index.js', async () => {
-  const { getDb } = await import('./db.js');
+// Mocked first on purpose: the ./task-engine mock below loads real modules,
+// and git-commits captures promisify(execFile) at module scope. That capture
+// must see the mock or the git routes shell out for real.
+vi.mock('child_process', () => ({
+  execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
+    const cb = _rest.find((a: any) => typeof a === 'function');
+    if (cb) cb(null, { stdout: '', stderr: '' });
+    return undefined;
+  }),
+}));
+
+vi.mock('./task-engine/index.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   return {
     startTask: vi.fn(async (task: any) => {
       const db = getDb();
@@ -72,7 +73,7 @@ vi.mock('./task-engine/index.js', async () => {
       return { editor: 'nvim', windowIndex: 5 };
     }),
     createShellTerminal: vi.fn(async (task: any) => {
-      const { getDb } = await import('./db.js');
+      const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
       const db = getDb();
       db.prepare(
         `INSERT INTO user_terminals (id, task_id, window_index, label, status) VALUES (?, ?, ?, ?, ?)`,
@@ -88,7 +89,7 @@ vi.mock('./task-engine/index.js', async () => {
     }),
     closeShellTerminal: vi.fn(),
     hopAgent: vi.fn(async (agent: any, toTaskId: string | null) => {
-      const { getDb } = await import('./db.js');
+      const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
       const db = getDb();
       db.prepare(
         `UPDATE workers SET task_id = ?, window_index = ?, tmux_session = ?, status = 'running' WHERE id = ?`,
@@ -116,8 +117,8 @@ vi.mock('fs', () => ({
   },
 }));
 
-vi.mock('./chats.js', async () => {
-  const { getDb } = await import('./db.js');
+vi.mock('./chats.js', () => {
+  const { getDb } = vi.importActual<typeof import('./db.js')>('./db.js');
   let counter = 0;
   return {
     createChat: vi.fn(
@@ -159,14 +160,6 @@ vi.mock('./chats.js', async () => {
   };
 });
 
-vi.mock('child_process', () => ({
-  execFile: vi.fn((_cmd: string, _args: string[], ..._rest: any[]) => {
-    const cb = _rest.find((a: any) => typeof a === 'function');
-    if (cb) cb(null, { stdout: '', stderr: '' });
-    return undefined;
-  }),
-}));
-
 vi.mock('./skills.js', () => ({
   listSkills: vi.fn(),
   getSkill: vi.fn(),
@@ -207,9 +200,8 @@ vi.mock('./diff-review-state.js', () => ({
   })),
 }));
 
-vi.mock('@octomux/diff-engine', async () => {
-  const actual =
-    await vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
+vi.mock('@octomux/diff-engine', () => {
+  const actual = vi.importActual<typeof import('@octomux/diff-engine')>('@octomux/diff-engine');
   return {
     ...actual,
     getDiffSummary: vi.fn(),
@@ -217,10 +209,21 @@ vi.mock('@octomux/diff-engine', async () => {
   };
 });
 
+const { default: request } = await import('supertest');
+const {
+  createTestDb,
+  insertTask,
+  insertAgent,
+  insertPermissionPrompt,
+  insertUserTerminal,
+  getTask,
+  DEFAULTS,
+} = await import('./test-helpers.js');
+
 const fs = (await import('fs')).default;
 const diffModule = await import('@octomux/diff-engine');
 
-const { createApp } = await import('./app.js');
+const { createApp } = vi.importActual<typeof import('./app.js')>('./app.js');
 const {
   startTask,
   closeTask,
@@ -237,7 +240,7 @@ const { updateSettings } = await import('./settings.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {

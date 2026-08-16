@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createTestDb, insertTestTask } from '../test-helpers.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 const mockIngest = vi.fn().mockResolvedValue(0);
 vi.mock('../services/comment-feedback.js', () => ({
   ingestReviewComments: (...args: unknown[]) => mockIngest(...args),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { createTestDb, insertTestTask } = await import('../test-helpers.js');
+const { checkTriagePrComments, pollTriagePrComments } = await import('./triage-pr-comments.js');
 
-import { checkTriagePrComments, pollTriagePrComments } from './triage-pr-comments.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 describe('checkTriagePrComments', () => {
   beforeEach(() => {

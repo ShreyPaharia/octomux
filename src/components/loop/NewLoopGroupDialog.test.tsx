@@ -1,8 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderWithRouter } from '@/test-helpers';
-import { NewLoopGroupDialog } from './NewLoopGroupDialog';
+import { describe, it, expect, vi } from '../../bun-test.js';
 
 vi.mock('@/lib/api/runApi', () => ({
   runApi: { startLoopGroup: vi.fn() },
@@ -17,6 +13,11 @@ vi.mock('@/components/fields/BranchPickerField', () => ({
     <input data-testid="branch-field" value={value} onChange={(e) => onChange(e.target.value)} />
   ),
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { renderWithRouter } = await import('@/test-helpers');
+const { NewLoopGroupDialog } = await import('./NewLoopGroupDialog');
 
 describe('NewLoopGroupDialog', () => {
   it('submits repo/branch/spec/n and calls onCreated with the result', async () => {

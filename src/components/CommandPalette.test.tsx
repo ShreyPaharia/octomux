@@ -1,10 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
-import { TasksProvider } from '@/lib/tasks-context';
-import { CommandPalette } from './CommandPalette';
-import { makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { Task } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -30,6 +24,13 @@ const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { render, screen, act } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { MemoryRouter } = await import('react-router-dom');
+const { TasksProvider } = await import('@/lib/tasks-context');
+const { CommandPalette } = await import('./CommandPalette');
+const { makeTask } = await import('../test-helpers');
 
 function renderPalette(tasks: Task[]) {
   mockTasksRef.current = tasks;

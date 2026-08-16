@@ -1,9 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from '../bun-test.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getArtifactSummary } from '../artifact.js';
-import Database from 'better-sqlite3';
+import Database from '../sqlite.js';
 import { SCHEMA, applyPragmas } from './schema.js';
 import { runMigrations } from './migrations.js';
 import {
@@ -14,7 +14,7 @@ import {
 } from '../test-helpers.js';
 
 describe('runMigrations (isolated)', () => {
-  let db: Database.Database;
+  let db: Database;
 
   afterEach(() => {
     db?.close();
@@ -95,7 +95,7 @@ describe('runMigrations (isolated)', () => {
      * an upgrade install needs them added back by hand before runMigrations can
      * exercise the back-fill path.
      */
-    function oldInstall(worktree: string | null): Database.Database {
+    function oldInstall(worktree: string | null): Database {
       const instance = new Database(':memory:');
       applyPragmas(instance);
       instance.exec(SCHEMA);
@@ -169,7 +169,7 @@ describe('runMigrations (isolated)', () => {
     /** Simulate a pre-migration DB: SCHEMA no longer creates `schedule_skills`,
      * so an upgrade install needs it added back by hand before `runMigrations`
      * can exercise the backfill-then-drop path. */
-    function addLegacyScheduleSkillsTable(instance: Database.Database): void {
+    function addLegacyScheduleSkillsTable(instance: Database): void {
       instance.exec(`
         CREATE TABLE schedule_skills (
           kind        TEXT PRIMARY KEY,
@@ -180,7 +180,7 @@ describe('runMigrations (isolated)', () => {
       `);
     }
 
-    function tableNames(instance: Database.Database): string[] {
+    function tableNames(instance: Database): string[] {
       return (
         instance.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
           name: string;

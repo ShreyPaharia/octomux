@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkflow, listWorkflows, listCronWorkflowKinds } from '../registry.js';
-import { resolveWorkflowConfig, applyConfigDefaults } from '../config.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 import type { ScheduleRow } from '../../repositories/schedules.js';
 
 const mockRunSlackWatcher = vi.fn().mockResolvedValue({ result: {} });
@@ -8,6 +6,9 @@ const mockRunSlackWatcher = vi.fn().mockResolvedValue({ result: {} });
 vi.mock('./run.js', () => ({
   runSlackWatcher: (...args: unknown[]) => mockRunSlackWatcher(...args),
 }));
+
+const { getWorkflow, listWorkflows, listCronWorkflowKinds } = await import('../registry.js');
+const { resolveWorkflowConfig, applyConfigDefaults } = await import('../config.js');
 
 import './index.js';
 

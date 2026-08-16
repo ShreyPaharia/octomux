@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { createTestDb, findCallback, execFileOk, execFileFail } from './test-helpers.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from './bun-test.js';
+import Database from './sqlite.js';
 
 vi.mock('child_process', () => ({
   execFile: vi.fn((...args: any[]) => {
@@ -10,11 +9,13 @@ vi.mock('child_process', () => ({
   }),
 }));
 
+const { createTestDb, findCallback, execFileOk, execFileFail } = await import('./test-helpers.js');
+
 const { ensureGithubLogin, readGithubLogin, resetGithubLoginCache } =
   await import('./github-login.js');
 const { execFile } = await import('child_process');
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

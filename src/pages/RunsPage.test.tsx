@@ -1,10 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import RunsPage from './RunsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { WorkflowRunRow } from '@/lib/api/workflowsApi';
-import { registerWorkflowUI } from '@/workflows/registry';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, runApiProxy, workflowsApiProxy, apiMock } =
   await vi.hoisted(async () => (await import('../test-helpers')).setupApiMock());
@@ -23,6 +18,12 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: RunsPage } = await import('./RunsPage');
+const { renderWithRouter } = await import('../test-helpers');
+const { registerWorkflowUI } = await import('@/workflows/registry');
 
 function makeRun(overrides: Partial<WorkflowRunRow> = {}): WorkflowRunRow {
   return {

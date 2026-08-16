@@ -1,8 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createApp } from './app.js';
-import { createTestDb } from './test-helpers.js';
-import { updateConversation } from './repositories/orchestrator.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 
 /**
  * Fake conductor runtime: no real tmux. `startConversation` stamps a
@@ -12,8 +8,8 @@ import { updateConversation } from './repositories/orchestrator.js';
  */
 let aliveOverride: (() => Promise<boolean>) | null = null;
 
-vi.mock('./orchestrator/runner.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./orchestrator/runner.js')>();
+vi.mock('./orchestrator/runner.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('./orchestrator/runner.js')>();
   return {
     ...actual,
     startConversation: vi.fn(async (convId: string) => {
@@ -25,6 +21,11 @@ vi.mock('./orchestrator/runner.js', async (importOriginal) => {
     isConversationSessionAlive: vi.fn(async () => (aliveOverride ? aliveOverride() : true)),
   };
 });
+
+const { default: request } = await import('supertest');
+const { createApp } = await import('./app.js');
+const { createTestDb } = await import('./test-helpers.js');
+const { updateConversation } = await import('./repositories/orchestrator.js');
 
 describe('agents CRUD routes', () => {
   let app: ReturnType<typeof createApp>;

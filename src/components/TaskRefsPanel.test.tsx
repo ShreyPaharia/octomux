@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderWithRouter } from '../test-helpers';
-import { TaskRefsPanel } from './TaskRefsPanel';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { TaskExternalRef } from '@octomux/types';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
@@ -11,6 +7,11 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
 vi.mock('@/lib/api/taskApi', () => ({ taskApi: taskApiProxy }));
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
 vi.mock('@/lib/api/configApi', () => ({ configApi: configApiProxy }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { renderWithRouter } = await import('../test-helpers');
+const { TaskRefsPanel } = await import('./TaskRefsPanel');
 
 function makeRef(overrides: Partial<TaskExternalRef> = {}): TaskExternalRef {
   return {

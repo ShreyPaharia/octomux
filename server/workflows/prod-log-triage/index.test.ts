@@ -1,12 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getWorkflow } from '../registry.js';
-import { PROD_LOG_TRIAGE_CONFIG_SCHEMA } from './schema.js';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const mockCreateTriageTaskFromSchedule = vi.fn().mockResolvedValue({ id: 'task1' });
 
 vi.mock('./run.js', () => ({
   createTriageTaskFromSchedule: (...args: unknown[]) => mockCreateTriageTaskFromSchedule(...args),
 }));
+
+const { getWorkflow } = await import('../registry.js');
+const { PROD_LOG_TRIAGE_CONFIG_SCHEMA } = await import('./schema.js');
 
 import './index.js';
 

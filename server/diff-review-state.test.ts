@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -45,9 +45,9 @@ async function commit(dir: string, files: Record<string, string>, msg: string): 
 
 // Every case here drives real `git` subprocesses against a temp repo, which
 // costs ~2.5-3.7s per test on its own. Under the full suite's parallel load that
-// overruns vitest's 5s default and the file flakes. 20s leaves headroom without
-// hiding a genuine hang.
-describe('decorateDiffSummaryWithReviewState', { timeout: 20_000 }, () => {
+// overruns the default timeout and the file flakes; the suite runs with
+// --timeout 15000, which leaves headroom without hiding a genuine hang.
+describe('decorateDiffSummaryWithReviewState', () => {
   let repo: string;
   let baseSha: string;
 

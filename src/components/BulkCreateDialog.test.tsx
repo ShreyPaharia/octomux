@@ -1,9 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { BulkCreateDialog, parsePastePrompts, parseIssueNumbers } from './BulkCreateDialog';
-import { renderWithRouter } from '../test-helpers';
-import { TasksProvider } from '../lib/tasks-context';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -20,6 +15,13 @@ const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { BulkCreateDialog, parsePastePrompts, parseIssueNumbers } =
+  await import('./BulkCreateDialog');
+const { renderWithRouter } = await import('../test-helpers');
+const { TasksProvider } = await import('../lib/tasks-context');
 
 function renderDialog() {
   return renderWithRouter(

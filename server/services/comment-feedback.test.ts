@@ -1,18 +1,18 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createTestDb } from '../test-helpers.js';
-import { listForRead, SHARED_LANE } from '../repositories/agent-learnings.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 
 const mockFetch = vi.fn();
 vi.mock('../github-client.js', () => ({
   fetchPrReviewComments: (...args: unknown[]) => mockFetch(...args),
 }));
 
-// ─── Import after mocks ─────────────────────────────────────────────────────
+const { default: fs } = await import('fs');
+const { default: os } = await import('os');
+const { default: path } = await import('path');
+const { createTestDb } = await import('../test-helpers.js');
+const { listForRead, SHARED_LANE } = await import('../repositories/agent-learnings.js');
+const { ingestReviewComments } = await import('./comment-feedback.js');
 
-import { ingestReviewComments } from './comment-feedback.js';
+// ─── Import after mocks ─────────────────────────────────────────────────────
 
 describe('ingestReviewComments', () => {
   let repoPath: string;

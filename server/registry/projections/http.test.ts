@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../../bun-test.js';
 import express from 'express';
 import type { Express, Request } from 'express';
 import request from 'supertest';
 import { z } from 'zod';
-import type Database from 'better-sqlite3';
+import type Database from '../../sqlite.js';
 import { mountCapabilities, mergeInput, resolveCallerFromRequest } from './http.js';
 import { CLIENT_CLASS_HEADER } from '@octomux/api-client';
 import { defineCapability, resetRegistry } from '../index.js';
@@ -33,7 +33,7 @@ function appWithRegistry(): Express {
   return app;
 }
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

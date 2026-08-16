@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from '../bun-test.js';
 import express from 'express';
 import type { Express } from 'express';
 import request from 'supertest';
 import { Command } from 'commander';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type Database from 'better-sqlite3';
+import type Database from '../sqlite.js';
 import {
   installCapabilities,
   mountCapabilityRoutes,
@@ -59,7 +59,7 @@ function findCommand(program: Command, ...path: string[]): Command | undefined {
   return current;
 }
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import AgentsPage from './AgentsPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { AgentWithStatus } from '@/lib/api/agentsApi';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, agentsApiProxy, apiMock } = await vi.hoisted(
@@ -22,6 +18,11 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: AgentsPage } = await import('./AgentsPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 function makeAgent(overrides: Partial<AgentWithStatus> = {}): AgentWithStatus {
   return {

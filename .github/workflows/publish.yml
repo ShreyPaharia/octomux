@@ -42,11 +42,25 @@ jobs:
             echo "package.json already at $PKG_VERSION; skipping bump"
           fi
 
-      - run: bun run build
+      # Builds all six platform binaries and stages one npm package per target
+      # in dist-npm/. Signing is skipped on Linux (codesign is macOS-only) — run
+      # `bun run sign:macos` on a macOS runner if you ship outside npm.
+      - run: bun run build:npm
 
       # No token: authenticated via OIDC trusted publishing configured on
       # npmjs.com (package settings -> Publishing access -> GitHub Actions).
-      - run: npm publish --provenance --access public
+      #
+      # Platform packages go first: the root package's optionalDependencies pin
+      # this exact version, so publishing it before them would resolve to nothing.
+      - name: Publish platform packages
+        run: |
+          for pkg in dist-npm/*/; do
+            echo "publishing $pkg"
+            npm publish "$pkg" --provenance --access public
+          done
+
+      - name: Publish root package
+        run: npm publish --provenance --access public
 
       # electron-release.yml runs on the same v* tag and its
       # `electron-builder --publish always` (releaseType: release) creates the

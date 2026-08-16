@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from './sqlite.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -32,9 +32,9 @@ export function getDataDir(): string {
   return path.dirname(DB_PATH);
 }
 
-let db: Database.Database;
+let db: Database;
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   if (!db) {
     fs.mkdirSync(DB_DIR, { recursive: true });
 
@@ -59,7 +59,7 @@ export function getDb(): Database.Database {
 }
 
 /** Replace the singleton db instance (for testing). */
-export function setDb(instance: Database.Database): void {
+export function setDb(instance: Database): void {
   db = instance;
 }
 
@@ -69,7 +69,7 @@ export function pingDb(): void {
 }
 
 /** Initialize a database with schema and pragmas. */
-export function initDb(instance: Database.Database): void {
+export function initDb(instance: Database): void {
   applyPragmas(instance);
   // Must run before SCHEMA — see the doc comment on renameAgentWorkerTables
   // for why (SCHEMA's `CREATE TABLE IF NOT EXISTS workers` would otherwise

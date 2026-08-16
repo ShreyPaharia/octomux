@@ -1,8 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
-import fs from 'fs';
-import path from 'path';
-import { createTestDb, insertTask, DEFAULTS } from '../../test-helpers.js';
+import Database from '../../sqlite.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../../bun-test.js';
 import type { Task } from '../../types.js';
 
 vi.mock('../harnesses/index.js', () => ({
@@ -20,9 +17,13 @@ vi.mock('../settings.js', () => ({
   getSettings: vi.fn(async () => ({})),
 }));
 
+const { default: fs } = await import('fs');
+const { default: path } = await import('path');
+const { createTestDb, insertTask, DEFAULTS } = await import('../../test-helpers.js');
+
 const { validateAndResolveAddAgentOpts } = await import('./add-agent.js');
 
-let db: Database.Database;
+let db: Database;
 let worktreePath: string;
 
 beforeEach(() => {

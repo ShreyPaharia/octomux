@@ -13,7 +13,7 @@
  *    hand-written registerWriteTools (ensuring the refactor is a pure rename).
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { COMMANDS, getCommandByAction, buildPolicySets } from './command-registry.js';
 import type { OrchestratorAction } from './command-registry.js';

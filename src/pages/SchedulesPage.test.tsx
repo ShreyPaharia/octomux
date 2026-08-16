@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import SchedulesPage from './SchedulesPage';
-import { renderWithRouter } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { ScheduleRow } from '@/lib/api/schedulesApi';
 
 const {
@@ -61,6 +57,11 @@ const { routerMockFactory, mockNavigate } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
 vi.mock('react-router-dom', routerMockFactory);
+
+const { screen, waitFor, within } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: SchedulesPage } = await import('./SchedulesPage');
+const { renderWithRouter } = await import('../test-helpers');
 
 function makeSchedule(overrides: Partial<ScheduleRow> = {}): ScheduleRow {
   return {

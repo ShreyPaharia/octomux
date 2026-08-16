@@ -6,6 +6,7 @@
  */
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
+import type { SQLQueryBindings } from '../sqlite.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -169,7 +170,7 @@ export function updateConversation(
   >,
 ): void {
   const sets: string[] = [`updated_at = datetime('now')`];
-  const vals: unknown[] = [];
+  const vals: SQLQueryBindings[] = [];
   if (fields.title !== undefined) {
     sets.push('title = ?');
     vals.push(fields.title);
@@ -374,8 +375,8 @@ export interface UpsertManagedTaskInput {
  */
 export function upsertManagedTask(input: UpsertManagedTaskInput): void {
   const setClauses: string[] = [];
-  const setValues: unknown[] = [];
-  const setField = (col: string, value: unknown) => {
+  const setValues: SQLQueryBindings[] = [];
+  const setField = (col: string, value: SQLQueryBindings) => {
     setClauses.push(`${col} = ?`);
     setValues.push(value);
   };

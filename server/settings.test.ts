@@ -1,17 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  getSettings,
-  updateSettings,
-  resolveClaudeFlags,
-  getStoredApprovalTimeoutMs,
-  getStoredCapabilityGateEnabled,
-  DEFAULT_SETTINGS,
-} from './settings.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 import type { OctomuxSettings } from './settings.js';
 
 // Mock fs
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
+vi.mock('fs', () => {
+  const actual = vi.importActual<typeof import('fs')>('fs');
   return {
     ...actual,
     default: {
@@ -97,7 +89,16 @@ vi.mock('./harnesses/index.js', () => ({
   }),
 }));
 
-import fs from 'fs';
+const {
+  getSettings,
+  updateSettings,
+  resolveClaudeFlags,
+  getStoredApprovalTimeoutMs,
+  getStoredCapabilityGateEnabled,
+  DEFAULT_SETTINGS,
+} = await import('./settings.js');
+const { default: fs } = await import('fs');
+
 const mockFs = vi.mocked(fs.promises);
 
 describe('settings', () => {
@@ -425,7 +426,7 @@ describe('getStoredApprovalTimeoutMs', () => {
   let prevDataDir: string | undefined;
 
   beforeEach(async () => {
-    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const fsSync = vi.importActual<typeof import('fs')>('fs');
     const os = await import('os');
     const path = await import('path');
     dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'octomux-settings-test-'));
@@ -434,7 +435,7 @@ describe('getStoredApprovalTimeoutMs', () => {
   });
 
   afterEach(async () => {
-    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const fsSync = vi.importActual<typeof import('fs')>('fs');
     if (prevDataDir === undefined) delete process.env.OCTOMUX_DATA_DIR;
     else process.env.OCTOMUX_DATA_DIR = prevDataDir;
     fsSync.rmSync(dir, { recursive: true, force: true });
@@ -446,7 +447,7 @@ describe('getStoredApprovalTimeoutMs', () => {
     ['{}', undefined],
     ['not json', undefined],
   ])('reads %s as %p from settings.json on disk', async (contents, expected) => {
-    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const fsSync = vi.importActual<typeof import('fs')>('fs');
     const path = await import('path');
     fsSync.writeFileSync(path.join(dir, 'settings.json'), contents);
     expect(getStoredApprovalTimeoutMs()).toBe(expected);
@@ -463,7 +464,7 @@ describe('getStoredCapabilityGateEnabled (capability-gate kill switch)', () => {
   let prevDataDir: string | undefined;
 
   beforeEach(async () => {
-    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const fsSync = vi.importActual<typeof import('fs')>('fs');
     const os = await import('os');
     const path = await import('path');
     dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'octomux-settings-gate-test-'));
@@ -472,7 +473,7 @@ describe('getStoredCapabilityGateEnabled (capability-gate kill switch)', () => {
   });
 
   afterEach(async () => {
-    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const fsSync = vi.importActual<typeof import('fs')>('fs');
     if (prevDataDir === undefined) delete process.env.OCTOMUX_DATA_DIR;
     else process.env.OCTOMUX_DATA_DIR = prevDataDir;
     fsSync.rmSync(dir, { recursive: true, force: true });
@@ -484,7 +485,7 @@ describe('getStoredCapabilityGateEnabled (capability-gate kill switch)', () => {
     ['{}', undefined],
     ['not json', undefined],
   ])('reads %s as %p from settings.json on disk', async (contents, expected) => {
-    const fsSync = await vi.importActual<typeof import('fs')>('fs');
+    const fsSync = vi.importActual<typeof import('fs')>('fs');
     const path = await import('path');
     fsSync.writeFileSync(path.join(dir, 'settings.json'), contents);
     expect(getStoredCapabilityGateEnabled()).toBe(expected);

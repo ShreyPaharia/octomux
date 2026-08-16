@@ -1,11 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } from '../test-helpers.js';
+import Database from '../sqlite.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('fs')>();
+vi.mock('fs', (importOriginal) => {
+  const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
     existsSync: vi.fn(() => true),
@@ -38,8 +37,8 @@ vi.mock('child_process', () => ({
   ),
 }));
 
-vi.mock('../repositories/orchestrator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../repositories/orchestrator.js')>();
+vi.mock('../repositories/orchestrator.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../repositories/orchestrator.js')>();
   return {
     ...actual,
     isOrchestratorManaged: vi.fn(() => false),
@@ -53,6 +52,9 @@ vi.mock('../orchestrator/runner.js', () => ({
 vi.mock('../hook-base-url.js', () => ({
   hookBaseUrl: vi.fn(() => 'http://127.0.0.1:7777'),
 }));
+
+const { createTestDb, insertTask, insertAgent, DEFAULTS, findExecCall } =
+  await import('../test-helpers.js');
 
 const {
   buildAgentStartupCommand,
@@ -69,7 +71,7 @@ const { mcpServerInvocation } = await import('../orchestrator/runner.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

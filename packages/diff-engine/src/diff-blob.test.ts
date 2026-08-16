@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../../../server/bun-test.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
-import { execFile } from 'child_process';
-import { blobAt } from './diff.js';
 
+const { execFile } = await import('child_process');
+const { blobAt } = await import('./diff.js');
 describe('blobAt', () => {
   it('returns blob sha when ls-tree finds the path', async () => {
     vi.mocked(execFile).mockImplementation(((

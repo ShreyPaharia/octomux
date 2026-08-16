@@ -1,3 +1,4 @@
+import { vi } from './bun-test.js';
 import { render, type RenderOptions } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactElement } from 'react';
@@ -57,8 +58,11 @@ export function renderWithRouter(
  */
 export function setupRouterNavigateMock() {
   const mockNavigate = vi.fn();
-  const routerMockFactory = async (importOriginal: () => Promise<unknown>) => {
-    const actual = (await importOriginal()) as Record<string, unknown>;
+  // Synchronous on purpose: an async mock.module factory deadlocks when the
+  // mocked module is imported synchronously (which components do). The shim's
+  // importOriginal returns the module directly for exactly this reason.
+  const routerMockFactory = (importOriginal: () => unknown) => {
+    const actual = importOriginal() as Record<string, unknown>;
     return { ...actual, useNavigate: () => mockNavigate };
   };
   return { mockNavigate, routerMockFactory };

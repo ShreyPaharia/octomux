@@ -1,8 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import LoopDetailPage from './LoopDetailPage';
-import { renderWithRouter, makeTask } from '../test-helpers';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import type { RunDetail } from '@/lib/api/runApi';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, runApiProxy, apiMock } = await vi.hoisted(
@@ -17,8 +13,8 @@ vi.mock('@/lib/event-source', () => ({
   subscribe: vi.fn(() => () => {}),
   subscribeConnectionState: vi.fn(() => () => {}),
 }));
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock('react-router-dom', (importOriginal) => {
+  const actual = importOriginal() as Record<string, unknown>;
   return { ...actual, useParams: () => ({ id: 'run-1' }) };
 });
 vi.mock('../components/loop/IterationLedger', () => ({
@@ -31,6 +27,11 @@ vi.mock('../components/TerminalView', () => ({
     <div data-testid="terminal-view-stub">window {windowIndex}</div>
   ),
 }));
+
+const { screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
+const { default: LoopDetailPage } = await import('./LoopDetailPage');
+const { renderWithRouter, makeTask } = await import('../test-helpers');
 
 function makeRun(overrides: Partial<NonNullable<RunDetail['loop']>> = {}): RunDetail {
   return {

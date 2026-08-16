@@ -1,7 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import request from 'supertest';
-import { createTestDb, insertTask, insertAgent, DEFAULTS, findCallback } from './test-helpers.js';
-import { getLearning, listForRead } from './repositories/agent-learnings.js';
+import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 import type { Task } from './types.js';
 
 vi.mock('fs', () => ({
@@ -13,6 +10,11 @@ vi.mock('fs', () => ({
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
+
+const { default: request } = await import('supertest');
+const { createTestDb, insertTask, insertAgent, DEFAULTS, findCallback } =
+  await import('./test-helpers.js');
+const { getLearning, listForRead } = await import('./repositories/agent-learnings.js');
 
 const { execFile } = await import('child_process');
 const { createApp } = await import('./app.js');

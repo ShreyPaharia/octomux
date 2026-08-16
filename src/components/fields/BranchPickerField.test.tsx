@@ -1,7 +1,4 @@
-import { screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
-import { BranchPickerField } from './BranchPickerField';
-import { renderWithRouter } from '../../test-helpers';
+import { describe, it, expect, vi } from '../../bun-test.js';
 
 vi.mock('@/lib/api/taskApi', () => ({
   taskApi: {
@@ -9,6 +6,10 @@ vi.mock('@/lib/api/taskApi', () => ({
     getDefaultBranch: vi.fn().mockResolvedValue({ branch: 'main' }),
   },
 }));
+
+const { screen } = await import('@testing-library/react');
+const { BranchPickerField } = await import('./BranchPickerField');
+const { renderWithRouter } = await import('../../test-helpers');
 
 describe('BranchPickerField', () => {
   it('shows disabled state when no repo', () => {

@@ -3,11 +3,8 @@
 // task's activeWindow caused setActiveWindow to bail (same value), so the
 // LRU-promotion effect never ran to refill the LRU that the task-switch
 // effect had just cleared — leaving the terminal pane empty until reload.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 import TaskDetail, { _resetPerTaskUiState } from './TaskDetail';
-import { makeTask, makeAgent } from '../test-helpers';
 
 let eventCallbacks: Set<(event: unknown) => void>;
 vi.mock('@/lib/event-source', () => ({
@@ -22,8 +19,8 @@ const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoist
   (await import('../test-helpers')).setupApiMock(),
 );
 
-vi.mock('@/lib/api/taskApi', async () => {
-  const actual = (await vi.importActual('@/lib/api/taskApi')) as Record<string, unknown>;
+vi.mock('@/lib/api/taskApi', () => {
+  const actual = vi.importActual('@/lib/api/taskApi') as Record<string, unknown>;
   return { ...actual, taskApi: taskApiProxy };
 });
 vi.mock('@/lib/api/reviewApi', () => ({ reviewApi: reviewApiProxy }));
@@ -52,6 +49,10 @@ vi.mock('@/components/TerminalView', () => ({
 vi.mock('@monaco-editor/react', () => ({
   DiffEditor: () => <div data-testid="monaco-diff" />,
 }));
+
+const { render, screen, waitFor, act } = await import('@testing-library/react');
+const { MemoryRouter, Routes, Route, useNavigate } = await import('react-router-dom');
+const { makeTask, makeAgent } = await import('../test-helpers');
 
 const taskA = makeTask({
   id: 'task-A',

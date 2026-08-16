@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from '../bun-test.js';
 
 const useMediaQueryMock = vi.fn((..._args: unknown[]) => false);
 vi.mock('@/lib/use-media-query', () => ({
@@ -61,6 +60,8 @@ vi.mock('@xterm/addon-fit', () => ({
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class {},
 }));
+
+const { render, act } = await import('@testing-library/react');
 
 // ─── Mock WebSocket ──────────────────────────────────────────────────────────
 // Records each instance; tests drive open/close manually so timing is deterministic.

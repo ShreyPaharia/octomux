@@ -6,7 +6,7 @@
  * tmux/worktrees.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 
 const mockRunCreateTask = vi.fn().mockResolvedValue({ task_id: 't-new', title: 'New Task' });
 const mockRunSendMessage = vi.fn().mockResolvedValue(undefined);
@@ -31,8 +31,8 @@ vi.mock('./stream.js', () => ({
   pushToConversation: (...a: unknown[]) => mockPush(...a),
 }));
 
-import { createTestDb } from '../test-helpers.js';
-import { runOrchestratorAction, ORCHESTRATOR_ACTIONS } from './actions.js';
+const { createTestDb } = await import('../test-helpers.js');
+const { runOrchestratorAction, ORCHESTRATOR_ACTIONS } = await import('./actions.js');
 
 describe('runOrchestratorAction', () => {
   beforeEach(() => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../bun-test.js';
 import { screen } from '@testing-library/react';
 import { MobileBottomNav } from './MobileBottomNav';
 import { renderWithRouter } from '../test-helpers';

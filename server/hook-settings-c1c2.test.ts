@@ -1,14 +1,14 @@
 /**
  * C1 + C2: hook_settings table migration and dispatcher enabled-flag tests.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from './sqlite.js';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
 import { createTestDb } from './test-helpers.js';
 import { initDb } from './db.js';
 import { isHookEnabled, invalidateHookEnabledCache } from './hook-dispatcher.js';
 
 describe('C1: hook_settings table migration', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -68,7 +68,7 @@ describe('C1: hook_settings table migration', () => {
 });
 
 describe('C2: isHookEnabled respects hook_settings', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -134,7 +134,7 @@ describe('C2: isHookEnabled respects hook_settings', () => {
 });
 
 describe('C2: fireHook skips disabled scripts', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

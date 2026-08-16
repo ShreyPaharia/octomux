@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../bun-test.js';
 import { screen } from '@testing-library/react';
 import { renderWithRouter } from '@/test-helpers';
 import { registerWorkflowUI } from './registry';

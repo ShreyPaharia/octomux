@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, afterEach } from './bun-test.js';
+import Database from './sqlite.js';
 import request from 'supertest';
 import fs from 'fs';
 import path from 'path';
@@ -26,7 +26,7 @@ import { advancePhaseForLabel, resolveGateCardConversationId } from './hooks.js'
 import { getArtifactSummary } from './artifact.js';
 
 describe('Hook endpoints', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
   // Real worktree dir: current_summary now lives in .octomux/artifact.md
   // (spec §5.5), so post-tool-use / Stop hooks need an actual directory to
@@ -56,7 +56,7 @@ describe('Hook endpoints', () => {
       { from: 'waiting', description: 'waiting agent' },
     ];
 
-    it.each(activatableCases)(
+    it.each([...activatableCases])(
       'sets $description to active when user submits a prompt',
       async ({ from }) => {
         db.prepare(`UPDATE workers SET hook_activity = ? WHERE id = ?`).run(from, 'a1');
@@ -230,7 +230,7 @@ describe('Hook endpoints', () => {
       },
     ];
 
-    it.each(summaryCases)('populates current_summary: $name', async ({ body, expected }) => {
+    it.each([...summaryCases])('populates current_summary: $name', async ({ body, expected }) => {
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', ...body })
@@ -393,7 +393,7 @@ describe('Hook endpoints', () => {
 });
 
 describe('findAgentByTokenAndSession', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -454,7 +454,7 @@ describe('findAgentByTokenAndSession', () => {
 });
 
 describe('POST /api/hooks/session-start', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -516,7 +516,7 @@ describe('POST /api/hooks/session-start', () => {
 // ─── Task 2.1: phase-complete hook + Stop reconciliation ───────────────────────
 
 describe('POST /api/hooks/phase-complete', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -600,7 +600,7 @@ describe('POST /api/hooks/phase-complete', () => {
 });
 
 describe('Stop hook suppression for orchestrator-managed tasks', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -653,7 +653,7 @@ describe('Stop hook suppression for orchestrator-managed tasks', () => {
 });
 
 describe('phase-complete + Stop ordering contract (§6.5, R3-I1)', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -729,7 +729,7 @@ describe('phase-complete + Stop ordering contract (§6.5, R3-I1)', () => {
 // ─── maybeSignalPhaseComplete — multi-phase dispatch (SHR-143) ─────────────────
 
 describe('maybeSignalPhaseComplete — Stop hook phase dispatch', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
   let worktreeDir: string;
 
@@ -934,7 +934,7 @@ describe('maybeSignalPhaseComplete — Stop hook phase dispatch', () => {
 // ─── advancePhaseForLabel — label→column mapping + idempotency (SHR-160) ──────
 
 describe('advancePhaseForLabel', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -1080,7 +1080,7 @@ describe('advancePhaseForLabel', () => {
 // ─── phase-complete endpoint uses advancePhaseForLabel label→column map (SHR-160) ──
 
 describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -1140,7 +1140,7 @@ describe('POST /api/hooks/phase-complete with SHR-160 LABEL semantics', () => {
 // conversation is the fallback ONLY when there is no owner; and with neither,
 // the request fails closed instead of hanging or creating an orphaned card.
 describe('POST /api/hooks/gate-card', () => {
-  let db: Database.Database;
+  let db: Database;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {

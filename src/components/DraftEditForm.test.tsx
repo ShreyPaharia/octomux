@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy, apiMock } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupApiMock(),
@@ -22,9 +20,11 @@ vi.mock('./fields/BranchPickerField', () => ({
   ),
 }));
 
-import { DraftEditForm } from './DraftEditForm';
-import { makeTask } from '../test-helpers';
+const { render, screen, waitFor } = await import('@testing-library/react');
+const { default: userEvent } = await import('@testing-library/user-event');
 
+const { DraftEditForm } = await import('./DraftEditForm');
+const { makeTask } = await import('../test-helpers');
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.updateTask.mockResolvedValue(makeTask());

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from '../bun-test.js';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { InlineCommentThread } from './InlineCommentThread';
 import type { InlineCommentWithOutdated } from '@/lib/api/taskApi';

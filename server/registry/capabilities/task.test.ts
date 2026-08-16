@@ -1,8 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type Database from 'better-sqlite3';
-import { getCapability, resetRegistry } from '../index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from '../../bun-test.js';
+import type Database from '../../sqlite.js';
 import type { CapabilityContext } from '../types.js';
-import { createTestDb, insertTestTask, insertAgent, getTask } from '../../test-helpers.js';
 
 // ─── Mocks: every side-effecting boundary the handlers cross ──────────────────
 //
@@ -22,28 +20,26 @@ vi.mock('../../hook-token.js', () => ({
   ensureHookToken: vi.fn().mockResolvedValue('backfilled-token'),
 }));
 vi.mock('../../hook-dispatcher.js', () => ({ fireHook: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../../orchestrator/exec.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../orchestrator/exec.js')>();
+vi.mock('../../orchestrator/exec.js', (importOriginal) => {
+  const actual = importOriginal<typeof import('../../orchestrator/exec.js')>();
   return { ...actual, runCloseTask: vi.fn().mockResolvedValue(undefined) };
 });
 
-import { registerTaskCapabilities } from './task.js';
-import {
-  startTask,
-  closeTask,
-  resumeTask,
-  softDeleteTask,
-  deleteTask,
-} from '../../task-engine/index.js';
-import { broadcast } from '../../events.js';
-import { ensureHookToken } from '../../hook-token.js';
-import { fireHook } from '../../hook-dispatcher.js';
-import { runCloseTask } from '../../orchestrator/exec.js';
-import { upsertManagedTask } from '../../repositories/orchestrator.js';
+const { getCapability, resetRegistry } = await import('../index.js');
+const { createTestDb, insertTestTask, insertAgent, getTask } =
+  await import('../../test-helpers.js');
+const { registerTaskCapabilities } = await import('./task.js');
+const { startTask, closeTask, resumeTask, softDeleteTask, deleteTask } =
+  await import('../../task-engine/index.js');
+const { broadcast } = await import('../../events.js');
+const { ensureHookToken } = await import('../../hook-token.js');
+const { fireHook } = await import('../../hook-dispatcher.js');
+const { runCloseTask } = await import('../../orchestrator/exec.js');
+const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
 
 const ctx: CapabilityContext = { caller: 'agent' };
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = createTestDb();

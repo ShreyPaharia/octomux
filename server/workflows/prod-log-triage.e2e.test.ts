@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createTestDb } from '../test-helpers.js';
-import { getDb } from '../db.js';
+import { describe, it, expect, beforeEach, vi, afterEach } from '../bun-test.js';
 
 const mockStartTask = vi.fn();
 vi.mock('../task-engine/index.js', () => ({
@@ -17,12 +15,15 @@ vi.mock('../events.js', () => ({
   broadcast: vi.fn((...args: unknown[]) => mockBroadcast(...args)),
 }));
 
+const { createTestDb } = await import('../test-helpers.js');
+const { getDb } = await import('../db.js');
+const { createSchedule } = await import('../repositories/schedules.js');
+const { getWorkflow } = await import('./registry.js');
+const { applyConfigDefaults } = await import('./config.js');
+const { pollSchedules } = await import('../poller/schedule-cron.js');
+
 // ─── Import after mocks — side-effect registers the workflow + schedule handler ──
 
-import { createSchedule } from '../repositories/schedules.js';
-import { getWorkflow } from './registry.js';
-import { applyConfigDefaults } from './config.js';
-import { pollSchedules } from '../poller/schedule-cron.js';
 import './prod-log-triage/index.js';
 
 function insertActiveAgent(taskId: string): void {
