@@ -1,7 +1,7 @@
 /**
  * Settings → Kinds (spec/schedule-kinds-as-presets.md §6.1). Replaces the
- * deleted "Schedule skills" section. Lists all presets (built-in + home),
- * with New/Edit/Copy-to-custom/Delete/Export/Import — the kind editor takes
+ * deleted "Schedule skills" section. Lists all presets (built-in + plugin +
+ * home), with New/Edit/Copy-to-custom/Delete/Export/Import — the kind editor takes
  * raw JSON in a validated textarea for `config`/`output`; no schema-builder
  * UI (explicitly out of scope, §1.1).
  */
@@ -313,8 +313,11 @@ export function KindsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null
     if (p.source === 'home') {
       setEditorTarget({ kindLocked: true, draft: p });
     } else {
-      // Built-in: "Copy to custom" clones it under a new kind id (§6.1).
-      setEditorTarget({ kindLocked: false, draft: { ...p, kind: `${p.kind}-custom` } });
+      // Built-in/plugin: "Copy to custom" clones it under a new kind id (§6.1).
+      // Plugin ids are namespaced (`pkg:kind`) — KIND_NAME_RE forbids ':', so
+      // sanitize before seeding the clone id or the save 400s.
+      const cloneKind = `${p.kind.replace(/:/g, '-')}-custom`;
+      setEditorTarget({ kindLocked: false, draft: { ...p, kind: cloneKind } });
     }
   }, []);
 
@@ -387,8 +390,15 @@ export function KindsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null
                 <Badge variant="outline" className="font-mono text-[10px]">
                   {p.kind}
                 </Badge>
-                <Badge variant="outline" className="text-[10px]">
-                  {p.source === 'builtin' ? 'built-in' : 'custom'}
+                <Badge
+                  variant={p.source === 'plugin' ? 'secondary' : 'outline'}
+                  className="text-[10px]"
+                >
+                  {p.source === 'builtin'
+                    ? 'built-in'
+                    : p.source === 'plugin'
+                      ? 'plugin'
+                      : 'custom'}
                 </Badge>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -406,7 +416,7 @@ export function KindsSection({ scrollRef }: { scrollRef: (el: HTMLElement | null
                   data-testid={`kind-edit-${p.kind}`}
                   onClick={() => handleEdit(p)}
                 >
-                  {p.source === 'builtin' ? 'Copy to custom' : 'Edit'}
+                  {p.source === 'home' ? 'Edit' : 'Copy to custom'}
                 </Button>
                 {p.source === 'home' && (
                   <button
