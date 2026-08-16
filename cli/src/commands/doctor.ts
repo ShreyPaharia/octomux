@@ -1,25 +1,14 @@
 import fs from 'fs';
-import path from 'path';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { octomuxRoot } from '../../../server/octomux-root.js';
+import { pluginReportPath } from '../../../server/plugins/paths.js';
 import { getContext } from '../action.js';
 import { heading, label, outputJson } from '../format.js';
 import type { LoadReport } from '@octomux/plugin-api';
 
-/**
- * Keep this path in sync with `pluginReportPath()` in `server/index.ts` — the
- * server persists a `LoadReport` there after every `loadPlugins()` run on
- * boot. `doctor` reads that file directly and never boots or contacts the
- * server: a plugin that broke boot is exactly the case this needs to work in.
- */
-function reportPath(): string {
-  return path.join(octomuxRoot(), 'plugin-load-report.json');
-}
-
 function readReport(): LoadReport | null {
   try {
-    return JSON.parse(fs.readFileSync(reportPath(), 'utf-8')) as LoadReport;
+    return JSON.parse(fs.readFileSync(pluginReportPath(), 'utf-8')) as LoadReport;
   } catch {
     return null;
   }
@@ -36,19 +25,21 @@ export function registerDoctor(program: Command): void {
       const report = readReport();
 
       if (json) {
-        outputJson({ reportPath: reportPath(), report });
+        outputJson({ reportPath: pluginReportPath(), report });
         return;
       }
 
       if (!report) {
-        console.log(`No plugin load report at ${reportPath()} yet — start octomux at least once.`);
+        console.log(
+          `No plugin load report at ${pluginReportPath()} yet — start octomux at least once.`,
+        );
         return;
       }
 
       heading('octomux doctor');
       console.log(label('Manifest', report.manifestPath));
       console.log(label('Safe mode', report.safeMode ? 'ON — plugin rows skipped' : 'off'));
-      console.log(label('Report file', reportPath()));
+      console.log(label('Report file', pluginReportPath()));
       console.log('');
 
       console.log(chalk.bold(`Loaded (${report.loaded.length})`));

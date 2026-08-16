@@ -39,3 +39,13 @@ export function pluginKindsDir(pkg: string): string {
 export function manifestPath(): string {
   return process.env.OCTOMUX_PLUGIN_MANIFEST || path.join(octomuxRoot(), 'octomux.yml');
 }
+
+/**
+ * Where boot persists the `LoadReport` from the last `loadPlugins()` run.
+ *
+ * `octomux doctor` reads this file directly rather than asking a running
+ * server — a plugin that broke boot is exactly the case it has to work in.
+ */
+export function pluginReportPath(): string {
+  return path.join(octomuxRoot(), 'plugin-load-report.json');
+}

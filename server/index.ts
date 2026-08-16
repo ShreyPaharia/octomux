@@ -15,7 +15,7 @@ import { getBindHost, isRemoteMode, isUpgradeAuthorized, ensureToken } from './r
 import { getDb } from './db.js';
 import { octomuxRoot } from './octomux-root.js';
 import { loadPlugins } from './plugins/loader.js';
-import { manifestPath, pluginModulesDir } from './plugins/paths.js';
+import { manifestPath, pluginModulesDir, pluginReportPath } from './plugins/paths.js';
 import {
   setupTerminalWebSocket,
   handleTerminalUpgrade,
@@ -51,17 +51,6 @@ import { startGatewayIfConfigured } from './gateway/boot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = childLogger('index');
-
-/**
- * Where the plugin loader's LoadReport is persisted so `octomux doctor` can
- * read it without booting a server — a plugin that broke boot is exactly the
- * case that command exists for. Keep this in sync with
- * `cli/src/commands/doctor.ts`'s copy of the same path; it can't import this
- * module directly (that would boot the whole server as a side effect).
- */
-function pluginReportPath(): string {
-  return path.join(octomuxRoot(), 'plugin-load-report.json');
-}
 
 // Refuse to boot a second server against the same database (see incident: a
 // stale dev build kept re-closing a resumed task via the merged-PR poller).
