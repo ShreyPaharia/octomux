@@ -8,8 +8,7 @@
     "declarationMap": true,
     "outDir": "dist",
     "rootDir": "src",
-    "lib": ["ES2022"],
-    "types": ["vitest/globals"]
+    "lib": ["ES2022"]
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],

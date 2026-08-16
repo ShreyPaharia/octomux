@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from '../bun-test.js';
 
 const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () => {
-  const { vi } = await import('vitest');
   const helpers = await import('../test-helpers');
   return helpers.setupApiMock({
     getSettings: vi.fn().mockResolvedValue({

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
 
 const { kindsApiProxy, kindsApiMock } = await vi.hoisted(async () => {
-  const { vi } = await import('vitest');
   const listKinds = vi.fn().mockResolvedValue({
     kinds: [
       {

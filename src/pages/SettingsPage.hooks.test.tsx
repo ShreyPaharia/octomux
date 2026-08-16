@@ -50,7 +50,6 @@ const getHooksRegistryMock = vi.fn();
 const updateHookEnabledMock = vi.fn();
 
 const { taskApiProxy, reviewApiProxy, configApiProxy } = await vi.hoisted(async () => {
-  const { vi } = await import('vitest');
   const helpers = await import('../test-helpers');
   return helpers.setupApiMock({
     getSettings: vi.fn().mockResolvedValue({
