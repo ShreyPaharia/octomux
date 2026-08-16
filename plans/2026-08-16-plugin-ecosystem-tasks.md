@@ -10,6 +10,30 @@ W1-A packaging/publish, W1-D DB safety net + `plugin_kv`. Do not schedule them.
 
 ---
 
+## Post-rebase deltas (the bun migration landed on `next`)
+
+Rebased on `origin/next` @ `adbee6b`. Four things changed that every task below
+inherits — **CLAUDE.md is stale on the first two**:
+
+| Was                        | Now                                                                  |
+| -------------------------- | -------------------------------------------------------------------- |
+| vitest                     | **`bun test`** — `import … from 'bun:test'`, `mock`/`spyOn` not `vi` |
+| `bun run test` = one suite | three: `test:server`, `test:client`, `test:units`                    |
+| `better-sqlite3`, node-pty | `server/sqlite.ts`, `server/pty.ts` shims                            |
+| ad-hoc `import.meta.url`   | `assetRoot()` in `server/assets.ts` for bundled assets               |
+
+Run only your own slice: `NODE_ENV=test bun test ./server/<yours> --timeout 15000`.
+
+Baseline before STEP-0: **3082 server + 1263 client + 233 unit passing, 0 fail,
+`tsc -b` clean.** Any failure you see that isn't in your own files is yours to
+report, not to fix.
+
+S2 still stands — `assetRoot()` solved the _bundled asset_ case, but the eleven
+files listed below still derive disk paths from `import.meta.url`, and plugin
+paths must not join them.
+
+---
+
 ## Spike results — unknowns, now known
 
 Four things were tested before writing these tasks. Two changed the design.
