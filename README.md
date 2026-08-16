@@ -27,7 +27,7 @@ Four acts, one window — from prompt to merged PR:
 - **① Dispatch** — Type a task (or paste a Jira/Linear/GitHub link, or a whole list). Each one gets its own worktree, branch, and agent. Pick the model and the harness per task.
 - **② Run unattended** — Attach a verify command and the agent **loops in fresh context until that command exits 0**. Put it on a **cron** and it does that at 3am. Hand a goal to the **orchestrator** and it plans, splits, and dispatches child tasks for you to approve.
 - **③ Watch, or don't** — Every agent's live terminal on one **Monitor grid**, the diff as it grows, and every "allow this tool?" prompt collected in a single **inbox** instead of scattered across panes.
-- **④ Review & ship** — An agent drafts a walkthrough and inline comments grounded on the real diff. You read it in-app, mark files reviewed, send comments back for a fix, and publish as one batched GitHub review when *you* accept it. octomux spots the PR by branch and closes the task when it merges.
+- **④ Review & ship** — An agent drafts a walkthrough and inline comments grounded on the real diff. You read it in-app, mark files reviewed, send comments back for a fix, and publish as one batched GitHub review when _you_ accept it. octomux spots the PR by branch and closes the task when it merges.
 
 Crash, reboot, close the lid — `octomux start` restores every task, branch, and session.
 
