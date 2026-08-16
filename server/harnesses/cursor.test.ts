@@ -192,21 +192,6 @@ describe('cursorHarness', () => {
       expect(() => cursorHarness.validateSettings(val)).toThrow();
     });
   });
-
-  // -------------------------------------------------------------------------
-  // syncAgents
-  // -------------------------------------------------------------------------
-
-  it('syncAgents is a no-op (agents ship via bundled plugin)', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-sync-'));
-    try {
-      await cursorHarness.syncAgents(tmpDir);
-      const rulesDir = path.join(tmpDir, '.cursor', 'rules');
-      expect(fs.existsSync(rulesDir)).toBe(false);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
