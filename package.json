@@ -27,6 +27,7 @@
   "workspaces": [
     "packages/api-client",
     "packages/capabilities",
+    "packages/plugin-api",
     "packages/diff-engine",
     "packages/types",
     "packages/test-fixtures"

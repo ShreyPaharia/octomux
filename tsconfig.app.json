@@ -19,7 +19,10 @@
   "references": [
     { "path": "./packages/api-client" },
     { "path": "./packages/diff-engine" },
-    { "path": "./packages/types" },
+    { "path": "./packages/plugin-api" },
+    {
+      "path": "./packages/types"
+    },
     { "path": "./packages/test-fixtures" }
   ]
 }
