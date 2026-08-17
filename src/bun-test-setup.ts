@@ -46,11 +46,16 @@ afterEach(cleanup);
 
 // Testing Library's default asyncUtilTimeout is 1000ms, which is fine on a
 // developer laptop and not fine on a 2-core CI runner: a `waitFor` around a
-// lazy `Suspense` boundary loses the race and reports "Unable to find an
-// element", which reads like a real assertion failure rather than a timeout.
-// Raising the ceiling costs nothing when the element appears promptly — the
-// poll exits as soon as the assertion passes.
-configure({ asyncUtilTimeout: 5000 });
+// lazy `Suspense` boundary or a terminal-mounting tree loses the race and
+// reports "Unable to find an element", which reads like a real assertion
+// failure rather than the timeout it is.
+//
+// 10s, not 5s: 5s still lost on CI for TaskDetail's terminal tree, where two
+// bun workers share two cores and each test mounts a heavy React tree. This
+// costs nothing when the element appears promptly — waitFor exits as soon as
+// the assertion passes — and the 15s per-test timeout still catches a genuine
+// hang.
+configure({ asyncUtilTimeout: 10_000 });
 
 // happy-dom doesn't implement matchMedia — stub it for components that use media queries
 Object.defineProperty(window, 'matchMedia', {
