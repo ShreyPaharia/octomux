@@ -70,6 +70,8 @@
     "build:binary": "vite build && bun run build:assets && bun build --compile --minify bin/main.js --outfile dist-bin/octomux",
     "build:binary:all": "vite build && bun run build:assets && bun build --compile --minify --target=bun-darwin-arm64 bin/main.js --outfile dist-bin/octomux-darwin-arm64 && bun build --compile --minify --target=bun-darwin-x64 bin/main.js --outfile dist-bin/octomux-darwin-x64 && bun build --compile --minify --target=bun-linux-arm64 bin/main.js --outfile dist-bin/octomux-linux-arm64 && bun build --compile --minify --target=bun-linux-x64 bin/main.js --outfile dist-bin/octomux-linux-x64 && bun build --compile --minify --target=bun-linux-arm64-musl bin/main.js --outfile dist-bin/octomux-linux-arm64-musl && bun build --compile --minify --target=bun-linux-x64-musl bin/main.js --outfile dist-bin/octomux-linux-x64-musl",
     "build:npm": "bun run build:binary:all && bun run sign:macos && bun scripts/build-npm-packages.mjs",
+    "publish:npm": "bash scripts/publish-npm.sh",
+    "publish:npm:dry": "bash scripts/publish-npm.sh --dry-run",
     "sign:macos": "bash scripts/sign-macos.sh"
   },
   "lint-staged": {
