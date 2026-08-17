@@ -133,7 +133,7 @@ describe('orchestrator runner', () => {
       expect(newSession).toBeDefined();
 
       // The startup command should NOT contain -p (no --print / headless mode)
-      const startupCmdArg = newSession!.find((a) => a.includes('claude') && !a.startsWith('-'));
+      const startupCmdArg = newSession!.find((a) => a.includes('claude '));
       expect(startupCmdArg).toBeDefined();
       expect(startupCmdArg!).not.toContain(' -p ');
       expect(startupCmdArg!).not.toContain('--print');
@@ -242,7 +242,7 @@ describe('orchestrator runner', () => {
       await startConversation(convId, '/tmp/test-repo');
 
       const newSession = findTmuxCall('new-session');
-      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      const startupCmdArg = newSession!.find((a) => a.includes('claude '));
       expect(startupCmdArg!).toContain('--mcp-config');
       expect(startupCmdArg!).toContain('--strict-mcp-config');
 
@@ -295,7 +295,7 @@ describe('orchestrator runner', () => {
       await startConversation(convId, '/tmp/test-repo');
 
       const newSession = findTmuxCall('new-session');
-      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      const startupCmdArg = newSession!.find((a) => a.includes('claude '));
       expect(startupCmdArg!).toContain('--append-system-prompt');
       expect(startupCmdArg!).toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
     });
@@ -307,7 +307,7 @@ describe('orchestrator runner', () => {
       });
 
       const newSession = findTmuxCall('new-session');
-      const startupCmdArg = newSession!.find((a) => a.includes('claude'));
+      const startupCmdArg = newSession!.find((a) => a.includes('claude '));
       expect(startupCmdArg!).toContain('You are Agent One. Only do X.');
       expect(startupCmdArg!).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
     });
@@ -327,7 +327,7 @@ describe('orchestrator runner', () => {
       // The startup command must include --resume <session_id>
       const newSession = findTmuxCall('new-session');
       expect(newSession).toBeDefined();
-      const cmdArg = newSession!.find((a) => a.includes('claude'));
+      const cmdArg = newSession!.find((a) => a.includes('claude '));
       expect(cmdArg).toBeDefined();
       expect(cmdArg!).toContain('--resume');
       expect(cmdArg!).toContain('some-session-uuid');
@@ -339,7 +339,7 @@ describe('orchestrator runner', () => {
 
       const newSession = findTmuxCall('new-session');
       expect(newSession).toBeDefined();
-      const cmdArg = newSession!.find((a) => a.includes('claude'));
+      const cmdArg = newSession!.find((a) => a.includes('claude '));
       expect(cmdArg).toBeDefined();
       // Should launch a new session (no --resume) since no session_id
       expect(cmdArg!).not.toContain('--resume');
@@ -352,7 +352,7 @@ describe('orchestrator runner', () => {
       });
 
       const newSession = findTmuxCall('new-session');
-      const cmdArg = newSession!.find((a) => a.includes('claude'));
+      const cmdArg = newSession!.find((a) => a.includes('claude '));
       expect(cmdArg!).toContain('You are Agent One. Only do X.');
       expect(cmdArg!).not.toContain(ORCHESTRATOR_SYSTEM_PROMPT.slice(0, 40));
     });
@@ -472,7 +472,7 @@ describe('orchestrator runner', () => {
       // It recreated the tmux session via `claude --resume <session_id>`.
       const newSession = findTmuxCall('new-session');
       expect(newSession).toBeDefined();
-      const cmd = newSession!.find((a) => a.includes('claude'));
+      const cmd = newSession!.find((a) => a.includes('claude '));
       expect(cmd).toContain('--resume sess-resume-1');
 
       // And then delivered the turn (a `-l` paste).
@@ -572,7 +572,7 @@ describe('orchestrator runner', () => {
       // It must have resumed the SAME claude session before delivering.
       const newSession = findTmuxCall('new-session');
       expect(newSession).toBeDefined();
-      const cmd = newSession!.find((a) => a.includes('claude'));
+      const cmd = newSession!.find((a) => a.includes('claude '));
       expect(cmd).toContain('--resume sess-crashed-1');
     });
   });
