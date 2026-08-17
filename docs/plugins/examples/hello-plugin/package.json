@@ -1,0 +1,8 @@
+{
+  "name": "octomux-plugin-hello",
+  "version": "1.0.0",
+  "description": "Minimal example octomux plugin — a workflow-status webhook and a session kind preset.",
+  "type": "module",
+  "main": "index.mjs",
+  "files": ["index.mjs", "kinds"]
+}
