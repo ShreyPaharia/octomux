@@ -90,7 +90,8 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
       // whenever that request resolved after hydration. That race made a
       // deep link's base branch depend on network timing.
       const sameRepo = 'repo' in state && state.repo === repo;
-      const keptBranch = sameRepo ? (state.branch ?? null ?? defaultBranch) : defaultBranch;
+      const existingBranch = 'branch' in state ? state.branch : null;
+      const keptBranch = sameRepo && existingBranch ? existingBranch : defaultBranch;
 
       // Preserve worktree-on when we were already in `new` (and carry any fork intent).
       if (state.mode === 'new') {
