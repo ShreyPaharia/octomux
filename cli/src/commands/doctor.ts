@@ -6,11 +6,56 @@ import { getContext } from '../action.js';
 import { heading, label, outputJson } from '../format.js';
 import type { LoadReport } from '@octomux/plugin-api';
 
-function readReport(): LoadReport | null {
+/**
+ * `@octomux/plugin-api`'s `LoadReport` is gaining `manifestError?: string`
+ * and `loadedAt: string` (a sibling change, not landed yet) so `doctor` can
+ * tell "manifest failed to parse, nothing loaded" apart from "cleanly loaded
+ * zero plugins". Declared locally so this file type-checks against the shape
+ * doctor needs today; once the upstream type lands this becomes a no-op
+ * (still-correct) intersection and can be dropped.
+ */
+type LoadReportWithMeta = LoadReport & {
+  manifestError?: string;
+  loadedAt?: string;
+};
+
+// A `failed[].error` string comes straight from a plugin's own thrown Error —
+// fully attacker-controlled. Printed raw through chalk it could repaint the
+// terminal diagnosing it (cursor moves, screen clears, faked output). Strip
+// C0/DEL control bytes (keep \n so multi-line messages still read) before any
+// plugin-controlled text reaches the console.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS_RE = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/g;
+function sanitize(text: string): string {
+  return text.replace(CONTROL_CHARS_RE, '');
+}
+
+type ReadResult =
+  | { status: 'missing' }
+  | { status: 'corrupt'; error: string }
+  | { status: 'ok'; report: LoadReportWithMeta; mtime: Date };
+
+/** Distinguishes "no report has ever been persisted" (fresh install, fine)
+ * from "a report exists but isn't valid JSON" (boot died mid-write — a real
+ * signal, not silence) instead of collapsing both into one bare catch. */
+function readReport(): ReadResult {
+  const file = pluginReportPath();
+  let raw: string;
+  let mtime: Date;
   try {
-    return JSON.parse(fs.readFileSync(pluginReportPath(), 'utf-8')) as LoadReport;
-  } catch {
-    return null;
+    mtime = fs.statSync(file).mtime;
+    raw = fs.readFileSync(file, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'missing' };
+    }
+    return { status: 'corrupt', error: err instanceof Error ? err.message : String(err) };
+  }
+
+  try {
+    return { status: 'ok', report: JSON.parse(raw) as LoadReportWithMeta, mtime };
+  } catch (err) {
+    return { status: 'corrupt', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -22,24 +67,59 @@ export function registerDoctor(program: Command): void {
     )
     .action((_opts, cmd: Command) => {
       const { json } = getContext(cmd);
-      const report = readReport();
+      const result = readReport();
+      const reportPath = pluginReportPath();
 
-      if (json) {
-        outputJson({ reportPath: pluginReportPath(), report });
+      if (result.status === 'missing') {
+        if (json) {
+          outputJson({ reportPath, report: null });
+          return;
+        }
+        console.log(`No plugin load report at ${reportPath} yet — start octomux at least once.`);
         return;
       }
 
-      if (!report) {
+      if (result.status === 'corrupt') {
+        const error = sanitize(result.error);
+        if (json) {
+          outputJson({ reportPath, report: null, corrupt: true, error });
+          return;
+        }
+        heading('octomux doctor');
+        console.log(chalk.bold.red('✗ Report file exists but is not valid JSON'));
+        console.log(label('Report file', reportPath));
+        console.log(label('Parse error', error));
         console.log(
-          `No plugin load report at ${pluginReportPath()} yet — start octomux at least once.`,
+          chalk.dim('This usually means a boot died mid-write. Restart octomux to regenerate it.'),
         );
         return;
       }
 
+      const { report, mtime } = result;
+
+      if (json) {
+        outputJson({ reportPath, report });
+        return;
+      }
+
       heading('octomux doctor');
+
+      // A manifest parse failure means Loaded/Failed below are both empty
+      // for the wrong reason — nothing ran, not "nothing to report". Lead
+      // with that instead of burying it as another line among many.
+      if (report.manifestError) {
+        console.log(chalk.bold.red('✗ Manifest failed to parse — no plugins were loaded'));
+        console.log(label('Manifest error', sanitize(report.manifestError)));
+        console.log('');
+      }
+
       console.log(label('Manifest', report.manifestPath));
       console.log(label('Safe mode', report.safeMode ? 'ON — plugin rows skipped' : 'off'));
-      console.log(label('Report file', pluginReportPath()));
+      console.log(label('Report file', reportPath));
+      console.log(
+        label('Report generated', report.loadedAt ?? chalk.dim('unknown (older report)')),
+      );
+      console.log(label('Report file last modified', mtime.toISOString()));
       console.log('');
 
       console.log(chalk.bold(`Loaded (${report.loaded.length})`));
@@ -59,7 +139,9 @@ export function registerDoctor(program: Command): void {
         console.log(chalk.dim('  none'));
       } else {
         for (const f of report.failed) {
-          console.log(`  ${chalk.red('✗')} ${f.id} (${f.name}) [${f.phase}] — ${f.error}`);
+          console.log(
+            `  ${chalk.red('✗')} ${f.id} (${f.name}) [${f.phase}] — ${sanitize(f.error)}`,
+          );
         }
       }
     });

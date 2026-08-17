@@ -116,4 +116,60 @@ plugins:
     expect(errorSpy).toHaveBeenCalled();
     expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
   });
+
+  it('refuses to write a config value that would round-trip into an unparseable manifest', async () => {
+    // A config string with a newline immediately followed by "&" parses in
+    // fine (it's a quoted scalar), but `yaml.dump` re-emits it as an
+    // unquoted block scalar on the way out, which the manifest's
+    // anchor/alias guard then rejects on the next read. Disabling this
+    // plugin must not brick the manifest that way.
+    writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+    config:
+      note: "line1\\n&weird"
+`);
+    const before = fs.readFileSync(manifestPath, 'utf-8');
+
+    const program = makeProgram();
+    await expect(
+      program.parseAsync(['node', 'octomux', 'plugins', 'disable', 'demo']),
+    ).rejects.toThrow(/process\.exit/);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalled();
+    const errText = String(errorSpy.mock.calls.at(-1)?.[0]);
+    expect(errText).toContain('demo');
+
+    // Nothing was written — the original manifest, still parseable, is intact.
+    expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
+    expect(fs.readdirSync(tmpDir)).toEqual(['octomux.yml']);
+  });
+
+  it('an interrupted write cannot leave a truncated manifest on disk', async () => {
+    writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+`);
+    const before = fs.readFileSync(manifestPath, 'utf-8');
+
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw new Error('simulated crash mid-write');
+    });
+
+    const program = makeProgram();
+    await expect(
+      program.parseAsync(['node', 'octomux', 'plugins', 'disable', 'demo']),
+    ).rejects.toThrow(/process\.exit/);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    renameSpy.mockRestore();
+
+    // The failed rename never touched the target file, and the temp file it
+    // wrote first was cleaned up rather than left behind.
+    expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
+    expect(fs.readdirSync(tmpDir)).toEqual(['octomux.yml']);
+  });
 });

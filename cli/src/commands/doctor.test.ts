@@ -95,4 +95,77 @@ describe('octomux doctor', () => {
     const logged = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
     expect(logged).toEqual({ reportPath, report });
   });
+
+  it('leads with the manifest error instead of a clean bill of health', async () => {
+    // Cast: `manifestError`/`loadedAt` land on LoadReport via a sibling
+    // change not yet merged — see the type note in doctor.ts.
+    writeReport({
+      loaded: [],
+      failed: [],
+      manifestPath: '/fake/octomux.yml',
+      safeMode: false,
+      manifestError: 'invalid plugin manifest: YAML anchors/aliases are not allowed',
+      loadedAt: '2026-08-17T00:00:00.000Z',
+    } as LoadReport);
+
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'doctor']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).toContain('Manifest failed to parse');
+    expect(output).toContain('YAML anchors/aliases are not allowed');
+    expect(output).toContain('Loaded (0)');
+    expect(output).toContain('2026-08-17T00:00:00.000Z');
+    // The manifest-error headline must be the first thing printed, not a
+    // footnote after Loaded/Failed.
+    expect(output.indexOf('Manifest failed to parse')).toBeLessThan(output.indexOf('Loaded (0)'));
+  });
+
+  it('distinguishes a corrupt report file from no report at all', async () => {
+    fs.writeFileSync(reportPath, '{ not valid json', 'utf-8');
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', '--json', 'doctor']);
+
+    const logged = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string) as {
+      reportPath: string;
+      report: null;
+      corrupt: boolean;
+      error: string;
+    };
+    expect(logged.report).toBeNull();
+    expect(logged.corrupt).toBe(true);
+    expect(logged.error).toBeTruthy();
+  });
+
+  it('strips control characters from a plugin-controlled error before printing', async () => {
+    writeReport({
+      loaded: [],
+      failed: [
+        {
+          id: 'boom',
+          name: 'boom-plugin',
+          // ESC + a cursor-repaint escape sequence, e.g. an attempt to hide
+          // the rest of the diagnostic output.
+          error: 'kaboom\x1b[2K\x1b[1A fake clean output',
+          phase: 'apply',
+        },
+      ],
+      manifestPath: '/fake/octomux.yml',
+      safeMode: false,
+    });
+
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'doctor']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).toContain('kaboom');
+    expect(output).toContain('fake clean output');
+    // eslint-disable-next-line no-control-regex
+    expect(output).not.toMatch(/\x1b\[/);
+  });
 });
