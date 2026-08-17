@@ -19,8 +19,10 @@
 #
 #   npm i --prefix /tmp/smoke octomux@latest && /tmp/smoke/node_modules/.bin/octomux --help
 #
-# Note: build-binaries.yml still auto-publishes the @octomux/tmux-* packages on
-# the same v* tag. That is a separate set of packages from the CLI binaries.
+# Note: build-binaries.yml runs on the same v* tag but only BUILDS the
+# @octomux/tmux-* packages and uploads them as artifacts — cb0bdb8 removed its
+# publish step. Nothing in CI publishes to npm; every publish is the manual
+# sequence above.
 
 name: Release
 
