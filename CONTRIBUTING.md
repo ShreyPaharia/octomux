@@ -33,14 +33,17 @@ server/           Express backend (API, terminal streaming, task lifecycle, DB)
   orchestrator/   the conductor — command gate/schemas, MCP server, approvals
   gateway/        Telegram + Slack chat front end onto the conductor (see its README.md)
   integrations/   provider registry + credential store (jira, linear, *-gateway)
+  plugins/        manifest parsing, loader, PluginContext — the third-party extension point
+                  (see "Contributing a plugin" below)
   db.ts           SQLite singleton with getDb() / setDb() / initDb()
   db/             schema.ts + forward-only migrations.ts
   types.ts        re-exports @octomux/types + review-orchestrator types
 src/              React SPA (pages, components, lib/api.ts)
   workflows/      front-end workflow-UI registry behind the /w/:kind/:id route
 cli/              CLI tool for task management
-packages/         bun workspaces: types, diff-engine, api-client, test-fixtures,
-                  plus the prebuilt tmux-{darwin,linux}-{arm64,x64} binaries
+packages/         bun workspaces: types, capabilities, diff-engine, api-client, test-fixtures,
+                  plugin-api (types-only, published for plugin authors), plus the prebuilt
+                  tmux-{darwin,linux}-{arm64,x64} binaries
 plugin/           bundled Claude Code plugin (skills/, agents/) — the only tier agents see
 kinds/            built-in schedule-kind presets (*.json), read by server/workflows/presets.ts
 workflows/        Claude Code workflow scripts (review-deep.js) — `octomux init` copies these
@@ -48,6 +51,60 @@ workflows/        Claude Code workflow scripts (review-deep.js) — `octomux ini
 electron/         macOS desktop shell
 e2e/              Playwright E2E tests
 ```
+
+## Contributing a plugin
+
+octomux is a metaharness: a third-party npm package can register a **workflow**, an
+**integration provider**, or a **harness** by exporting `apply(ctx)` and listing itself in
+`~/.octomux/octomux.yml`. This is the highest-leverage way to contribute right now — most
+plugins ship as their own package, on their own release cadence, with no PR against this repo
+at all.
+
+**What we merge.** Standalone packages, not PRs adding a fourth built-in harness or a fifth
+built-in integration to this repo. If your idea genuinely belongs in core (it's something every
+octomux install needs, not something a subset of users want), open an issue and make that case
+first — the bar for adding to core is higher than the bar for publishing a plugin.
+
+**A good octomux plugin:**
+
+- does one thing a real workflow, tracker, chat surface, CI system, or coding agent needs, not
+  a grab-bag of unrelated registrations in one package
+- fails loud and isolated — a plugin whose `apply()` throws should never take down boot for
+  everyone else (the loader already isolates this; don't fight it by swallowing your own errors
+  into a state that looks "loaded" but does nothing)
+- states its trust surface honestly in its own README — a harness plugin runs shell commands
+  it builds itself, an integration plugin's handler receives resolved credentials in cleartext
+  today (see `CLAUDE.md`'s Plugins section); say so, don't bury it
+- has a test for its `apply()` at minimum — a manifest fixture load that asserts the
+  registration happened is enough
+
+**Naming convention** — not enforced by the loader, but expected: `octomux-harness-<name>` for
+a harness, `octomux-kind-<name>` for a kinds-only package (no `apply()` needed — see below),
+`octomux-plugin-<name>` for everything else (a workflow or an integration provider).
+
+**Kinds-only plugins need no loader at all.** If your idea is a scheduled-workflow preset —
+a cron job with a prompt and a config form, nothing custom — ship a `kinds/*.json` file (same
+shape as the built-in ones in `<repo>/kinds/`) in an `octomux-kind-<name>` package with **no
+`apply()` export**. `server/workflows/presets.ts` scans `<pkg>/kinds/` for any package listed
+in the manifest, qualifies each kind to `<pkg>:<kind>`, and it shows up in the UI. This is the
+easiest first plugin to ship — no server code, no `@octomux/plugin-api` import, just JSON.
+
+**How to build one:** start from the authoring guide —
+**[docs/plugins/README.md](./docs/plugins/README.md)** — which walks through `apply(ctx)`,
+each registrar, and the full `PluginContext` surface (**[API reference](./docs/plugins/api-reference.md)**).
+Depend on `@octomux/plugin-api` for the types; nothing else in this repo is a runtime
+dependency of a plugin.
+
+**How to get it listed:** open a PR against this repo adding a row to
+**[PLUGIN-IDEAS.md](./PLUGIN-IDEAS.md)**'s "Built" section (package name, one line, link) once
+it's published to npm. There's no separate plugin registry yet — this list is it.
+
+**Review bar for that PR:** the package installs and its `apply()` runs clean against a real
+octomux (`octomux doctor` shows it loaded, not failed); the README states what it does and what
+credentials/permissions it needs; the naming convention above is followed; and it doesn't
+duplicate an existing entry without a stated reason (a second Jira-alternative tracker plugin is
+fine, a second identical Slack notifier isn't). We are not reviewing your plugin's own code line
+by line — that's your repo, your call — only whether the listing is honest and it actually works.
 
 ## Task Lifecycle
 
