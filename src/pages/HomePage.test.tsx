@@ -121,6 +121,10 @@ describe('HomePage', () => {
         }),
       );
     });
-    expect(mockNavigate).toHaveBeenLastCalledWith('/tasks/spawned');
+    // Inside waitFor: navigation happens a tick after createTask resolves, so a
+    // bare assertion here races the effect and fails on a slow CI runner.
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenLastCalledWith('/tasks/spawned');
+    });
   });
 });
