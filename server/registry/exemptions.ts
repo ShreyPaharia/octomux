@@ -13,7 +13,7 @@
  * instead — a route waiting on a capability, not one exempt from ever
  * having one.
  *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md
+ * Design doc: spec/surface-consolidation-and-centaur.md
  */
 
 import { exemptRoute } from './index.js';

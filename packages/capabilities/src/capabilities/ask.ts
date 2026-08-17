@@ -34,7 +34,7 @@
  * turn, blocking on an answer before it can proceed — there is no synchronous
  * REST/CLI caller that would want the same blocking semantics.
  *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md
+ * Design doc: spec/surface-consolidation-and-centaur.md
  */
 
 import { z } from 'zod';

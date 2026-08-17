@@ -3,7 +3,7 @@
  *
  * HTTP projection generator. Mounts every capability carrying an `http`
  * projection onto an Express router — the REST surface described in
- * docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md §5.1.
+ * spec/surface-consolidation-and-centaur.md §5.1.
  */
 
 import type { Router, Request, Response } from 'express';

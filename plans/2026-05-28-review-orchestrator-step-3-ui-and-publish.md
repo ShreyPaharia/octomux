@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19 + React Router 7 + Vite + Tailwind CSS 4 + shadcn/ui (`@base-ui/react`). Express 5 + better-sqlite3 + Octokit for the GitHub publish call. SSE/WS via the existing `events.ts` broadcast channel. Vitest for unit + component tests; Playwright for E2E.
 
-**Spec reference:** `docs/superpowers/specs/2026-05-27-review-orchestrator-design.md`, sections 4 (Publish flow + UI) and 5 (failure modes — GitHub-side handling).
+**Spec reference:** design doc was never committed; see `spec/workflow-framework.md` for the shipped review-orchestrator flow.
 
 **Working assumptions about the codebase** (verify with the current source, do not rely on memory):
 

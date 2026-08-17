@@ -18,7 +18,7 @@
  * register; the tier only changes what happens when the tool is actually
  * called (see `onGatedInvoke` below), not whether it shows up in the tool list.
  *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md
+ * Design doc: spec/surface-consolidation-and-centaur.md
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
