@@ -18,7 +18,7 @@
 #   npm version <x.y.z> --no-git-tag-version --allow-same-version
 #   npm publish --access public
 #
-# Each package is independent — an unavailable runner (e.g. macos-13 Intel) only
+# Each package is independent — an unavailable runner (e.g. the Intel macOS runner) only
 # holds up its own platform. Publishing is idempotent in the sense that npm
 # refuses a version that already exists, so re-running a partial release is safe.
 #
@@ -59,7 +59,7 @@ jobs:
             arch: arm64
 
           # macOS x64 (Intel)
-          - runner: macos-13
+          - runner: macos-15-intel
             platform: darwin
             arch: x64
 

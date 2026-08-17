@@ -36,7 +36,7 @@ jobs:
         include:
           - runner: macos-14 # Apple Silicon
             arch: arm64
-          - runner: macos-13 # Intel
+          - runner: macos-15-intel # Intel
             arch: x64
 
     steps:
@@ -67,7 +67,7 @@ jobs:
         run: bun install
 
       # Build the statically-linked tmux for THIS runner's arch (scripts/build-tmux.sh
-      # keys off uname, so macos-14 -> darwin-arm64, macos-13 -> darwin-x64).
+      # keys off uname, so macos-14 -> darwin-arm64, macos-15-intel -> darwin-x64).
       - name: Build bundled static tmux
         run: bash scripts/build-tmux.sh
 
