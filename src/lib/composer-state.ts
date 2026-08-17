@@ -83,13 +83,22 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
       }
       const isDraft = 'isDraft' in state ? state.isDraft : false;
       const agent = carryAgent(state);
+      // The fetched default only wins when the repo actually CHANGED. Picking
+      // the same repo again must not clobber the branch already selected —
+      // `getDefaultBranch` is async, so a `?branch=` hydrated from the URL at
+      // mount would otherwise be silently overwritten with the repo default
+      // whenever that request resolved after hydration. That race made a
+      // deep link's base branch depend on network timing.
+      const sameRepo = 'repo' in state && state.repo === repo;
+      const keptBranch = sameRepo ? (state.branch ?? null ?? defaultBranch) : defaultBranch;
+
       // Preserve worktree-on when we were already in `new` (and carry any fork intent).
       if (state.mode === 'new') {
         const forkOf = state.forkOf;
         return {
           mode: 'new',
           repo,
-          branch: defaultBranch,
+          branch: keptBranch,
           isDraft,
           agent,
           ...(forkOf ? { forkOf } : {}),
@@ -97,7 +106,7 @@ export function reduce(state: ComposerState, action: ComposerAction): ComposerSt
       }
       // First repo pick from empty / scratch, and repo swap from `none`:
       // worktree checkbox starts OFF → `none` mode.
-      return { mode: 'none', repo, branch: defaultBranch, isDraft, agent };
+      return { mode: 'none', repo, branch: keptBranch, isDraft, agent };
     }
 
     case 'clearRepo': {

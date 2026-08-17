@@ -597,3 +597,30 @@ describe('reduce / exhaustiveness (action × mode)', () => {
     expect(typeof next.mode).toBe('string');
   });
 });
+
+describe('pickRepo does not clobber an already-selected branch', () => {
+  it('keeps a URL-hydrated branch when getDefaultBranch resolves for the SAME repo', () => {
+    // The real sequence: hydrateFromUrl runs synchronously at mount with
+    // ?branch=agents/abc, then RepoField's async getDefaultBranch resolves and
+    // dispatches pickRepo for the repo already selected. Before the fix that
+    // second dispatch overwrote the branch with the repo default, so a deep
+    // link's base branch depended on whether the fetch beat the user's click.
+    const hydrated = reduce(INITIAL_STATE, {
+      type: 'hydrateFromUrl',
+      params: new URLSearchParams('repo=/r&mode=new&branch=agents%2Fabc'),
+    });
+    expect(hydrated).toMatchObject({ mode: 'new', repo: '/r', branch: 'agents/abc' });
+
+    const after = reduce(hydrated, { type: 'pickRepo', repo: '/r', defaultBranch: 'main' });
+    expect(after).toMatchObject({ mode: 'new', repo: '/r', branch: 'agents/abc' });
+  });
+
+  it('still adopts the default branch when the repo actually changes', () => {
+    const hydrated = reduce(INITIAL_STATE, {
+      type: 'hydrateFromUrl',
+      params: new URLSearchParams('repo=/r&mode=new&branch=agents%2Fabc'),
+    });
+    const after = reduce(hydrated, { type: 'pickRepo', repo: '/other', defaultBranch: 'main' });
+    expect(after).toMatchObject({ mode: 'new', repo: '/other', branch: 'main' });
+  });
+});
