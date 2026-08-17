@@ -151,7 +151,31 @@ class TestWebSocket {
   removeEventListener(): void {}
 }
 
+/**
+ * Inert fetch, for the same reason as TestWebSocket above.
+ *
+ * Several components dial out on mount without going through the mocked
+ * `@/lib/api/*` modules — `chats-section.tsx` hits `/api/chats`, the
+ * orchestrator cards fetch artifact URLs, BulkCreateDialog hits the GitHub
+ * API. With a real origin configured those become genuine HTTP requests to
+ * localhost, and the ECONNREFUSED surfaces as an unhandled error that fails
+ * whichever test happens to be running — not the one that made the request.
+ * That read as an unrelated flaky test on CI.
+ *
+ * Tests that care about fetch already override this with
+ * `vi.stubGlobal('fetch', ...)`; this is only the floor.
+ *
+ * It REJECTS rather than returning an empty 200: components already handle a
+ * failed request (that is what they were getting from the real socket), while
+ * a successful empty body is a state they never saw and changes what they
+ * render. The goal is to remove the socket, not the failure.
+ */
+function inertFetch(): Promise<Response> {
+  return Promise.reject(new Error('fetch is stubbed in tests (src/bun-test-setup.ts)'));
+}
+
 export function installDomObservers(): void {
+  globalThis.fetch = inertFetch as unknown as typeof fetch;
   globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket;
   globalThis.IntersectionObserver =
     TestIntersectionObserver as unknown as typeof IntersectionObserver;
