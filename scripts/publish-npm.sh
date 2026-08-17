@@ -16,8 +16,14 @@
 #   bash scripts/publish-npm.sh               # publish
 #   bash scripts/publish-npm.sh --otp 123456  # 2FA accounts, if not using a token
 #
-# Auth: an automation token in ~/.npmrc avoids OTP entirely and is the sane path
-# for a seven-step publish — a 30-second code does not survive six uploads.
+# Auth, in order of least pain:
+#   automation token in ~/.npmrc   no OTP at all; the only hands-off option
+#   interactive (no --otp flag)    npm prompts per publish; type a fresh TOTP
+#                                  each time. Run this from a real terminal.
+#   --otp <code>                   one code for the whole run. A TOTP window is
+#                                  30s and six uploads are not, so expect it to
+#                                  cover the first few — then just re-run, the
+#                                  script skips whatever already landed.
 #
 # Run `bun run build:npm` first; this script only publishes what is in dist-npm/.
 
@@ -37,6 +43,20 @@ done
 VERSION=$(node -p "require('./package.json').version")
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# With no --otp and a real terminal, let npm own stdin/stdout so its OTP prompt
+# is visible and answerable. Capturing output here would hide the prompt and
+# look like a hang. Otherwise capture, so the log stays readable.
+INTERACTIVE_OTP=0
+if [ "${#OTP_ARGS[@]}" -eq 0 ] && [ -t 0 ]; then INTERACTIVE_OTP=1; fi
+
+npm_publish() { # $@ = npm publish args
+  if [ "$INTERACTIVE_OTP" = "1" ]; then
+    npm publish "$@"
+  else
+    out=$(npm publish "$@" 2>&1) || { printf '%s\n' "$out" | tail -4 >&2; return 1; }
+  fi
+}
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 
@@ -99,13 +119,11 @@ for d in "${PKG_DIRS[@]}"; do
     say "  = $n already at $VERSION"
     continue
   fi
-  printf '  → %s ... ' "$n"
-  if out=$(npm publish "$d" --access public "${OTP_ARGS[@]+"${OTP_ARGS[@]}"}" 2>&1); then
-    say "published"
+  say "  → $n"
+  if npm_publish "$d" --access public "${OTP_ARGS[@]+"${OTP_ARGS[@]}"}"; then
+    say "    published"
   else
-    say "FAILED"
-    printf '%s\n' "$out" | tail -4 >&2
-    die "stopped before the root publish — nothing is half-released, re-run when fixed"
+    die "stopped before the root publish — nothing is half-released, re-run to resume"
   fi
 done
 
@@ -129,14 +147,12 @@ done
 say ""
 [ "$missing" = "0" ] || die "platform packages still not readable — root NOT published, re-run later"
 
-printf '  → octomux (root) ... '
+say "  → octomux (root)"
 # --ignore-scripts: prepublishOnly would trigger a full rebuild of what we just
 # verified, and a rebuild between verification and upload defeats the point.
-if out=$(npm publish --ignore-scripts "${OTP_ARGS[@]+"${OTP_ARGS[@]}"}" 2>&1); then
-  say "published"
+if npm_publish --ignore-scripts "${OTP_ARGS[@]+"${OTP_ARGS[@]}"}"; then
+  say "    published"
 else
-  say "FAILED"
-  printf '%s\n' "$out" | tail -4 >&2
   die "platform packages are up but the root is not — re-run to finish"
 fi
 
