@@ -92,6 +92,14 @@ export interface LoadReport {
   }>;
   manifestPath: string;
   safeMode: boolean;
+  /** Set when the manifest itself failed to read/parse — distinguishes "zero
+   *  plugins configured" from "boot couldn't even read the manifest". */
+  manifestError?: string;
+  /** ISO timestamp of when this report was produced, so a stale report from a
+   *  boot that died doesn't read as current. Optional so existing/synthetic
+   *  `LoadReport` literals (older persisted reports, fixtures) stay valid —
+   *  `loadPlugins()` itself always sets it. */
+  loadedAt?: string;
 }
 
 export const PLUGIN_API_VERSION = 0;

@@ -71,6 +71,11 @@ async function runStart(startArgs) {
       i++;
     } else if (startArgs[i] === '--no-open') {
       autoOpen = false;
+    } else if (startArgs[i] === '--safe-mode') {
+      // Read by server/plugins/loader.ts: skips every manifest plugin row,
+      // but core harnesses/providers still register (they're side effects of
+      // importing harnesses/index.js and integrations/index.js, unconditional).
+      process.env.OCTOMUX_SAFE_MODE = '1';
     }
   }
 

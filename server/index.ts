@@ -5,12 +5,17 @@
 import 'dotenv/config';
 import { createServer, type IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
+import fs from 'fs';
 import path from 'path';
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { createApp } from './app.js';
 import { assetRoot } from './assets.js';
 import { getBindHost, isRemoteMode, isUpgradeAuthorized, ensureToken } from './remote-auth.js';
+import { getDb } from './db.js';
+import { octomuxRoot } from './octomux-root.js';
+import { loadPlugins } from './plugins/loader.js';
+import { manifestPath, pluginModulesDir, pluginReportPath } from './plugins/paths.js';
 import {
   setupTerminalWebSocket,
   handleTerminalUpgrade,
@@ -50,6 +55,38 @@ const logger = childLogger('index');
 // Refuse to boot a second server against the same database (see incident: a
 // stale dev build kept re-closing a resumed task via the merged-PR poller).
 acquireInstanceLock();
+
+// Force the DB singleton open here, before the plugin loader runs. Otherwise a
+// plugin's apply() touching ctx.kv would trigger the first initDb() call
+// *inside* the loader's try/catch, which never throws — a plugin could
+// silently swallow a migration failure (plans/2026-08-16-plugin-ecosystem.md,
+// "THE BOOT-ORDER CONTRACT"). Deliberate one-off exception to the
+// repository-layer guard below — this is the boot entrypoint forcing the
+// singleton open once, not a raw query bypassing server/repositories/.
+// eslint-disable-next-line no-restricted-syntax
+getDb();
+
+// `await loadPlugins(...)` MUST run here — between acquireInstanceLock() and
+// createApp() — and nowhere else. createApp() is synchronous and
+// `server/api.ts`'s setupRoutes() snapshots the workflow registry by
+// iterating listWorkflows() the moment it's called; there is no second window
+// to register a plugin workflow's router after this point (spike S4).
+const pluginReport = await loadPlugins({
+  manifestPath: manifestPath(),
+  resolveFrom: pluginModulesDir(),
+});
+try {
+  fs.mkdirSync(octomuxRoot(), { recursive: true });
+  fs.writeFileSync(pluginReportPath(), JSON.stringify(pluginReport, null, 2));
+} catch (err) {
+  logger.warn({ err }, 'failed to persist plugin load report');
+}
+if (pluginReport.failed.length > 0) {
+  logger.warn(
+    { failed: pluginReport.failed, safeMode: pluginReport.safeMode },
+    'one or more plugins failed to load',
+  );
+}
 
 const app = createApp();
 const server = createServer(app);

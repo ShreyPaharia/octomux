@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from '../bun-test.js';
+import { describe, it, expect, beforeEach, afterEach } from '../bun-test.js';
 import {
   getHarness,
   listHarnesses,
@@ -47,6 +47,16 @@ function withCapturedLogs(fn: () => void): Array<Record<string, unknown>> {
 }
 
 describe('registry', () => {
+  // Seed explicitly rather than relying on the barrel's import side effect.
+  // Another test file in the same process may have called `resetHarnesses()`,
+  // and ESM caches module evaluation — so re-importing `./index.js` would NOT
+  // re-register. Depending on ambient registration makes these tests pass or
+  // fail on file ordering.
+  beforeEach(() => {
+    registerHarness(claudeCodeHarness);
+    registerHarness(cursorHarness);
+  });
+
   it('returns claude-code by id', () => {
     const h = getHarness('claude-code');
     expect(h.id).toBe('claude-code');

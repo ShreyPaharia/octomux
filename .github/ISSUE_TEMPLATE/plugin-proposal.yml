@@ -1,0 +1,64 @@
+name: Plugin proposal
+description: Propose a new octomux plugin (workflow, integration, harness, or kind).
+title: '[plugin] '
+labels:
+  - plugin
+body:
+  - type: markdown
+    attributes:
+      value: |
+        See [PLUGIN-IDEAS.md](../../PLUGIN-IDEAS.md) for ideas already scoped out, and
+        [CONTRIBUTING.md](../../CONTRIBUTING.md#contributing-a-plugin) for the naming
+        convention and review bar. Most plugins ship as their own npm package — this
+        issue is for proposing the idea or announcing it's built, not for requesting
+        we build it for you.
+  - type: input
+    id: name
+    attributes:
+      label: Package name
+      description: Following the convention — `octomux-harness-<name>`, `octomux-kind-<name>`, or `octomux-plugin-<name>`.
+      placeholder: octomux-plugin-discord
+    validations:
+      required: true
+  - type: dropdown
+    id: registrar
+    attributes:
+      label: Registrar
+      options:
+        - workflows (ctx.workflows.register)
+        - integrations (ctx.integrations.register)
+        - harnesses (ctx.harnesses.register)
+        - kinds only (no apply() — kinds/*.json)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it does
+      description: One or two sentences. What triggers it, what it produces.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it's valuable
+      description: Who needs this and what they can't do without it today.
+    validations:
+      required: true
+  - type: input
+    id: status
+    attributes:
+      label: Status
+      description: Idea, in progress, or published (link it)?
+      placeholder: 'Published: https://www.npmjs.com/package/octomux-plugin-discord'
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked PLUGIN-IDEAS.md and this isn't already listed with the same scope.
+          required: true
+        - label: If published, `octomux doctor` shows it loading clean, not failed.
+          required: false

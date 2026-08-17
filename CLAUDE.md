@@ -73,10 +73,14 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
     `registerWorkflowUI(kind, { navLabel, icon, ListView, DetailView })` (`loops/register.tsx`)
     backs the generic `/w/:kind/:id` route; a kind that registers `getItem` + `outputSchema`
     instead of a `DetailView` falls back to the schema-driven `DefaultDetailView`.
-- `cli/` — CLI tool; one file per subcommand in `cli/src/commands/` (create-task, list-tasks,
-  get-task, close-task, resume-task, delete-task, add-agent, send-message, stop-agent, init,
-  emit, loop-start, loop-start-group, learn/recall/unlearn, post-review,
-  task-move/note/summary/updates, skills, files, …)
+- `cli/` — CLI tool. `task` commands (list/get/create/start/move/delete) are generated from
+  `@octomux/capabilities`' zod schemas (`registerCapabilityCommands`, `cli/src/index.ts`), so
+  they can't drift from server-side validation; everything else is one file per subcommand in
+  `cli/src/commands/` (close-task, resume-task, add-agent, send-message, stop-agent, init,
+  emit, loop-start, loop-start-group, learn/recall/unlearn, post-review, task-updates,
+  task-ref-add/rm, list-skills/get-skill, files, plugins, doctor, …). `task-move`/`task-note`/
+  `task-summary` were retired with the `/note` and `/summary` routes — narrative now lives in
+  the task's `.octomux/artifact.md`, no CLI write surface for it.
 - `packages/` — bun workspaces: `types`, `diff-engine`, `api-client`, `test-fixtures`, plus
   the prebuilt `tmux-{darwin,linux}-{arm64,x64}` binaries
 - `electron/` — macOS desktop app wrapper (`build:electron` / `dist:electron`)
@@ -166,7 +170,8 @@ octomux emit --run <loop-run-id> --status done|blocked|needs_human --reason "<wh
 - Each iteration appends to a curated playbook in the worktree so the next fresh context sees
   what earlier ones tried.
 - UI at `/loops` (list) and `/w/loops/:id` (detail, via the workflow-UI registry); `/loops/:id`
-  is a legacy redirect. REST in `server/routes/loops.ts`.
+  is a legacy redirect. REST is the generic `/api/runs` surface (`server/routes/runs.ts`), not
+  a loops-specific router.
 - Spec: `spec/workflow-framework.md`; plans: `plans/2026-07-12-loop-harness-*.md`.
 
 ### Learnings
@@ -228,6 +233,48 @@ then `/plugin install octomux@octomux`.
 The six cron-kind `SKILL.md` files were folded into `kinds/*.json`; the prompt lives there
 now, and the overlay plugin (`server/octomux-plugin.ts`) is the only delivery path for
 task-backed schedule prompts.
+
+## Plugins
+
+octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
+(`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
+tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
+`createPluginContext()` in `server/plugins/context.ts`) exposes exactly three registrars —
+`ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()` — plus
+`ctx.logger`, `ctx.settings` (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
+Types are pinned in `@octomux/plugin-api` (`packages/plugin-api/src/index.ts`) — **types only**,
+nothing runtime crosses that package boundary, because under `bun build --compile` a plugin has
+no host `node_modules` tree to import a runtime value from even by accident.
+
+- **Boot order is the correctness property.** `await loadPlugins(...)` runs in `server/index.ts`
+  between `acquireInstanceLock()` and the synchronous `createApp()` — `createApp()` snapshots
+  the workflow/capability registries, so any registration after it is a silent no-op. Core
+  harnesses/integrations register and freeze (`freezeCoreHarnesses()` etc.) before any plugin
+  row loads; a plugin can never redefine `claude-code`, `cursor`, `jira`, or `linear`.
+  `reconcile?(ctx)` is in `OctomuxPlugin` but **no wave calls it yet** — don't describe it as
+  wired.
+- Every plugin id gets qualified as `<pluginId>:<localKind>` (`server/plugins/qualify.ts`)
+  before it reaches the real registry, so a plugin never sees or chooses the qualified form.
+- Per-row failure is isolated and never throws: a bad resolve/import/apply becomes a
+  `LoadReport.failed` entry (`phase: 'resolve' | 'import' | 'apply' | 'reconcile'`) plus a
+  `logger.warn`, persisted to `~/.octomux/plugin-load-report.json` for `octomux doctor` to read
+  without a running server. `octomux start --safe-mode` (`OCTOMUX_SAFE_MODE=1`) skips every
+  plugin row; core harnesses/integrations still register.
+- `octomux plugins list|disable|enable` edit `octomux.yml` directly, no server required. There
+  is no `plugins add`/install command — getting a package onto disk (`npm install --prefix
+~/.octomux <pkg>`) is on the user today.
+- **Known gaps — do not describe as working:** `ctx.kv` throws on every call (`plugin_kv`
+  storage hasn't landed); `PluginRow.integrity` is parsed and typechecked but never verified
+  against the resolved tarball; harness command builders still return a shell **string**, not
+  argv (the injection-safety burden the plan assigns to argv conversion hasn't landed); a
+  plugin integration provider's `handler` receives the **resolved** secret in cleartext
+  (`server/hook-dispatcher.ts` calls `resolveEnvVars` before invoking it — there's no broker
+  yet). Trust model: a plugin runs in-process with the DB handle, every credential, and
+  `process.env` — no sandbox, none planned. State that plainly wherever plugins are documented.
+- Plan + status: `plans/2026-08-16-plugin-ecosystem.md` (design, "Trust model" section has the
+  full threat writeup) and `plans/2026-08-16-plugin-ecosystem-tasks.md` (execution log — STEP-0
+  through STEP-2 shipped on `next`; WAVE-3's integration outbound broker, WAVE-4's harness leaks,
+  and WAVE-5's argv conversion have not).
 
 ## Testing Patterns
 

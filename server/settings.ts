@@ -352,10 +352,19 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
   return merged;
 }
 
-/** A plugin's settings blob, or {} if it has none saved. Never validated. */
+/**
+ * A plugin's settings blob, or {} if it has none saved. Never validated.
+ *
+ * `Object.hasOwn` guard is required: `KIND_NAME_RE` (server/plugins/qualify.ts)
+ * admits `constructor`, and plain `settings.plugins[id]` walks the prototype
+ * chain for that id — `settings.plugins.constructor` resolves to
+ * `Object.prototype.constructor` (the `Object` function itself), which is
+ * truthy and defeats the `?? {}` fallback. Same class of bug as the write-side
+ * `setOwn()` above, read half.
+ */
 export async function getPluginSettings(id: string): Promise<Record<string, unknown>> {
   const settings = await getSettings();
-  return settings.plugins[id] ?? {};
+  return Object.hasOwn(settings.plugins, id) ? settings.plugins[id] : {};
 }
 
 /**

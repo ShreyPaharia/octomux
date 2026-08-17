@@ -1,0 +1,7 @@
+{
+  "kind": "hello",
+  "displayName": "Hello Session",
+  "execution": "session",
+  "defaultCron": "0 9 * * *",
+  "prompt": "Say hello, then summarize any open PRs in this repo."
+}
