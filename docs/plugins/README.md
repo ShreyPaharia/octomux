@@ -80,12 +80,12 @@ instead of a boot crash.
 
 ### `ctx.workflows.register(wf)`
 
-| Field | Required? | Checked how |
-|---|---|---|
-| `kind` | yes, non-empty string | `requireLocalId` |
-| `apiRouter` | no | if present, must be a function |
-| `run` | no | if present, must be a function |
-| everything else (`displayName`, `surfaces`, `execution`, `config`, `output`, `trigger`, …) | not validated by the host | — |
+| Field                                                                                      | Required?                 | Checked how                    |
+| ------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------ |
+| `kind`                                                                                     | yes, non-empty string     | `requireLocalId`               |
+| `apiRouter`                                                                                | no                        | if present, must be a function |
+| `run`                                                                                      | no                        | if present, must be a function |
+| everything else (`displayName`, `surfaces`, `execution`, `config`, `output`, `trigger`, …) | not validated by the host | —                              |
 
 Full shape: `WorkflowType` in `server/workflows/types.ts`.
 
@@ -101,14 +101,14 @@ impossible.
 
 ### `ctx.integrations.register(p)`
 
-| Field | Required? | Checked how |
-|---|---|---|
-| `kind` | yes, non-empty string | `requireLocalId` |
-| `validate` | yes | `requireFunctionField` |
-| `handler` | yes | `requireFunctionField` |
-| `events` | yes, must be an array | `requireArrayField` |
-| `test` | no | if present, must be a function |
-| `displayName`, `configSchema` | not validated by the host | — |
+| Field                         | Required?                 | Checked how                    |
+| ----------------------------- | ------------------------- | ------------------------------ |
+| `kind`                        | yes, non-empty string     | `requireLocalId`               |
+| `validate`                    | yes                       | `requireFunctionField`         |
+| `handler`                     | yes                       | `requireFunctionField`         |
+| `events`                      | yes, must be an array     | `requireArrayField`            |
+| `test`                        | no                        | if present, must be a function |
+| `displayName`, `configSchema` | not validated by the host | —                              |
 
 Full shape: `IntegrationProvider` in `server/integrations/types.ts`.
 `events` is `HookEventName[]` — `workflow_status_changed`, `summary_updated`,
@@ -123,16 +123,16 @@ core kind never does, so the collision path is dead code for anything going
 through `ctx.integrations.register`. It only exists in case something calls
 `registerProvider` directly.
 
-An integration provider's *instance* config (what `validate`/`handler`
+An integration provider's _instance_ config (what `validate`/`handler`
 receive) is set through the existing integrations API —
 `POST /api/integrations` with `{ kind: "myplugin:notify", name, config }`
 (`server/routes/integrations.ts`) — not through `ctx.settings` (below).
 
 ### `ctx.harnesses.register(h)`
 
-| Field | Required? |
-|---|---|
-| `id` | yes, non-empty string |
+| Field                                                                                                                                                    | Required?                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `id`                                                                                                                                                     | yes, non-empty string        |
 | `newSessionId`, `buildLaunchCommand`, `buildResumeCommand`, `buildContinueCommand`, `installHooks`, `uninstallHooks`, `resolveFlags`, `validateSettings` | yes, each must be a function |
 
 Full shape (including several **unwired** optional members —
@@ -161,7 +161,7 @@ one file per kind (`spec/schedule-kinds-as-presets.md` §3,
 **The trap everyone hits:** the file's `kind` field must be the **bare**
 local kind, and it must equal the filename stem. `kinds/changelog.json` must
 declare `"kind": "changelog"` — not `"myplugin:changelog"`. Qualification
-happens *after* shape validation (`loadPluginPresetsFor` calls `qualify()`
+happens _after_ shape validation (`loadPluginPresetsFor` calls `qualify()`
 only once `checkPresetShape` has already passed), so a pre-qualified string
 in the file is rejected outright, with a `logger.warn` + skip, never a boot
 crash.
@@ -229,11 +229,11 @@ The loader (`server/plugins/loader.ts::loadPlugins`) **never throws** — every
 row is isolated in its own try/catch, and a bad plugin becomes a
 `LoadReport.failed` entry, not a broken boot:
 
-| Phase | When |
-|---|---|
-| `resolve` | bare package name doesn't resolve under `<prefix>/node_modules` |
-| `import` | the module throws on import, or has no `apply` export (named or default) |
-| `apply` | `apply(ctx)` throws, rejects, or overruns the timeout |
+| Phase       | When                                                                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolve`   | bare package name doesn't resolve under `<prefix>/node_modules`                                                                                          |
+| `import`    | the module throws on import, or has no `apply` export (named or default)                                                                                 |
+| `apply`     | `apply(ctx)` throws, rejects, or overruns the timeout                                                                                                    |
 | `reconcile` | reserved — `reconcile()` is on the `OctomuxPlugin` interface but the loader **does not call it yet**. There is no `reconcile` failure today; see Limits. |
 
 Both the `import()` and the `apply()` call get a **10 second** default timeout

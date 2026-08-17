@@ -34,7 +34,7 @@ runtime yet either — it's reserved for a future compatibility check.
 
 ```ts
 export interface PluginContext {
-  readonly id: string;               // this row's bare manifest id
+  readonly id: string; // this row's bare manifest id
   readonly logger: PluginLogger;
   readonly settings: PluginSettingsScope;
   readonly kv: PluginKv;
@@ -97,9 +97,15 @@ storage hasn't landed. See README §"`ctx.kv` throws today".
 ### `ctx.workflows` / `ctx.integrations` / `ctx.harnesses`
 
 ```ts
-interface WorkflowRegistrar    { register(wf: PluginWorkflow): void; }
-interface IntegrationRegistrar { register(p: PluginIntegrationProvider): void; }
-interface HarnessRegistrar     { register(h: PluginHarness): void; }
+interface WorkflowRegistrar {
+  register(wf: PluginWorkflow): void;
+}
+interface IntegrationRegistrar {
+  register(p: PluginIntegrationProvider): void;
+}
+interface HarnessRegistrar {
+  register(h: PluginHarness): void;
+}
 ```
 
 `PluginWorkflow`, `PluginIntegrationProvider`, `PluginHarness` are all
@@ -109,43 +115,43 @@ runtime shape your object needs, field by field, is below.
 
 #### `WorkflowType` (`server/workflows/types.ts`)
 
-| Field | Type | Required by `ctx.workflows.register`? |
-|---|---|---|
-| `kind` | `string` | **yes** — non-empty, becomes the local half of `<row-id>:<kind>` |
-| `displayName` | `string` | no (not host-validated) |
-| `surfaces` | `SurfaceKind[]` (`'session' \| 'artifact' \| 'feed'`) | no |
-| `execution` | `'session' \| 'task' \| 'chat'` | no |
-| `config` | `JsonSchema` | no |
-| `output` | `JsonSchema` | no |
-| `apiRouter` | `express.Router` | no, but **must be a function** (an Express router is one) if present |
-| `trigger` | `{ kind: 'cron' \| 'github' \| 'manual'; event?: string }` | no |
-| `run` | `(ctx: RunContext) => Promise<void>` | no, but must be a function if present |
+| Field         | Type                                                       | Required by `ctx.workflows.register`?                                |
+| ------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| `kind`        | `string`                                                   | **yes** — non-empty, becomes the local half of `<row-id>:<kind>`     |
+| `displayName` | `string`                                                   | no (not host-validated)                                              |
+| `surfaces`    | `SurfaceKind[]` (`'session' \| 'artifact' \| 'feed'`)      | no                                                                   |
+| `execution`   | `'session' \| 'task' \| 'chat'`                            | no                                                                   |
+| `config`      | `JsonSchema`                                               | no                                                                   |
+| `output`      | `JsonSchema`                                               | no                                                                   |
+| `apiRouter`   | `express.Router`                                           | no, but **must be a function** (an Express router is one) if present |
+| `trigger`     | `{ kind: 'cron' \| 'github' \| 'manual'; event?: string }` | no                                                                   |
+| `run`         | `(ctx: RunContext) => Promise<void>`                       | no, but must be a function if present                                |
 
 `RunContext` your `run` receives:
 
 ```ts
 interface RunContext {
   repoPath: string;
-  config: unknown;          // validated against your `config` schema, defaults applied
-  scheduleId?: string;      // present for cron triggers
-  event?: unknown;          // present for github triggers
+  config: unknown; // validated against your `config` schema, defaults applied
+  scheduleId?: string; // present for cron triggers
+  event?: unknown; // present for github triggers
   trigger?: 'cron' | 'manual';
-  model?: string | null;    // per-schedule model override
+  model?: string | null; // per-schedule model override
   timeoutMs?: number | null;
 }
 ```
 
 #### `IntegrationProvider` (`server/integrations/types.ts`)
 
-| Field | Type | Required by `ctx.integrations.register`? |
-|---|---|---|
-| `kind` | `string` | **yes** — non-empty |
-| `displayName` | `string` | no (not host-validated) |
-| `configSchema` | `JsonSchema` | no (not host-validated, but drives the UI form once you have one) |
-| `events` | `HookEventName[]` | **yes**, must be an array |
-| `validate` | `(config: unknown) => ValidationResult` | **yes**, must be a function |
-| `handler` | `(envelope: HookEnvelope, config: unknown) => Promise<void>` | **yes**, must be a function |
-| `test` | `(config: unknown) => Promise<{ ok: boolean; message: string }>` | no, but must be a function if present |
+| Field          | Type                                                             | Required by `ctx.integrations.register`?                          |
+| -------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `kind`         | `string`                                                         | **yes** — non-empty                                               |
+| `displayName`  | `string`                                                         | no (not host-validated)                                           |
+| `configSchema` | `JsonSchema`                                                     | no (not host-validated, but drives the UI form once you have one) |
+| `events`       | `HookEventName[]`                                                | **yes**, must be an array                                         |
+| `validate`     | `(config: unknown) => ValidationResult`                          | **yes**, must be a function                                       |
+| `handler`      | `(envelope: HookEnvelope, config: unknown) => Promise<void>`     | **yes**, must be a function                                       |
+| `test`         | `(config: unknown) => Promise<{ ok: boolean; message: string }>` | no, but must be a function if present                             |
 
 `HookEventName` (`server/hook-types.ts`): `workflow_status_changed` |
 `summary_updated` | `note_added` | `ref_added` | `ref_removed` |
@@ -161,25 +167,25 @@ that integration's task.
 
 #### `Harness` (`server/harnesses/types.ts`)
 
-| Field | Type | Required by `ctx.harnesses.register`? |
-|---|---|---|
-| `id` | `string` | **yes** — non-empty, becomes `<row-id>:<local>` |
-| `displayName` | `string` | no |
-| `sessionIdMode` | `'orchestrator-assigned' \| 'harness-issued'` | no |
-| `newSessionId()` | `() => string` | **yes**, must be a function |
-| `buildLaunchCommand(opts)` | `(HarnessLaunchOpts) => string` | **yes** |
-| `buildResumeCommand(opts)` | `(HarnessResumeOpts) => string` | **yes** |
-| `buildContinueCommand(opts)` | `(HarnessResumeOpts) => string \| null` | **yes** |
-| `installHooks(worktreePath, baseUrl, hookToken)` | `(string, string, string) => Promise<void>` | **yes** |
-| `uninstallHooks(dirPath)` | `(string) => Promise<void>` | **yes** |
-| `resolveFlags(settings)` | `(OctomuxSettings) => string` | **yes** |
-| `validateSettings(blob)` | `(unknown) => Record<string, unknown>` | **yes** |
-| `validateAgentName(name)` | `(string) => string` | on the interface, **not** in the required-field check, **not called via `h.validateAgentName()` anywhere** — every call site imports the free function from `harnesses/types.ts` instead |
-| `postLaunch(target)` | `(string) => Promise<void>` | no — optional, called after launch for harnesses with an interactive first-run gate |
-| `supportsClaudePlugins` | `boolean` | no — descriptive only, nothing reads it yet |
-| `buildPromptDelivery(baseCmd, promptFile)` | `(string, string) => string` | no — **unwired**, no call site reads it yet |
-| `attachMcp(flags, worktreePath, configPath)` | `(string, string, string) => string` | no — **unwired**. If you implement it: quote your own inputs (`shellQuoteSingle` in `server/shell-quote.ts`) — this is a real shell-injection surface if you don't |
-| `sendMessage(target, text)` | `(string, string) => Promise<void>` | no — **unwired**. Same quoting caveat as `attachMcp` |
+| Field                                            | Type                                          | Required by `ctx.harnesses.register`?                                                                                                                                                    |
+| ------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                             | `string`                                      | **yes** — non-empty, becomes `<row-id>:<local>`                                                                                                                                          |
+| `displayName`                                    | `string`                                      | no                                                                                                                                                                                       |
+| `sessionIdMode`                                  | `'orchestrator-assigned' \| 'harness-issued'` | no                                                                                                                                                                                       |
+| `newSessionId()`                                 | `() => string`                                | **yes**, must be a function                                                                                                                                                              |
+| `buildLaunchCommand(opts)`                       | `(HarnessLaunchOpts) => string`               | **yes**                                                                                                                                                                                  |
+| `buildResumeCommand(opts)`                       | `(HarnessResumeOpts) => string`               | **yes**                                                                                                                                                                                  |
+| `buildContinueCommand(opts)`                     | `(HarnessResumeOpts) => string \| null`       | **yes**                                                                                                                                                                                  |
+| `installHooks(worktreePath, baseUrl, hookToken)` | `(string, string, string) => Promise<void>`   | **yes**                                                                                                                                                                                  |
+| `uninstallHooks(dirPath)`                        | `(string) => Promise<void>`                   | **yes**                                                                                                                                                                                  |
+| `resolveFlags(settings)`                         | `(OctomuxSettings) => string`                 | **yes**                                                                                                                                                                                  |
+| `validateSettings(blob)`                         | `(unknown) => Record<string, unknown>`        | **yes**                                                                                                                                                                                  |
+| `validateAgentName(name)`                        | `(string) => string`                          | on the interface, **not** in the required-field check, **not called via `h.validateAgentName()` anywhere** — every call site imports the free function from `harnesses/types.ts` instead |
+| `postLaunch(target)`                             | `(string) => Promise<void>`                   | no — optional, called after launch for harnesses with an interactive first-run gate                                                                                                      |
+| `supportsClaudePlugins`                          | `boolean`                                     | no — descriptive only, nothing reads it yet                                                                                                                                              |
+| `buildPromptDelivery(baseCmd, promptFile)`       | `(string, string) => string`                  | no — **unwired**, no call site reads it yet                                                                                                                                              |
+| `attachMcp(flags, worktreePath, configPath)`     | `(string, string, string) => string`          | no — **unwired**. If you implement it: quote your own inputs (`shellQuoteSingle` in `server/shell-quote.ts`) — this is a real shell-injection surface if you don't                       |
+| `sendMessage(target, text)`                      | `(string, string) => Promise<void>`           | no — **unwired**. Same quoting caveat as `attachMcp`                                                                                                                                     |
 
 The eight bold-"yes" functions are exactly `HARNESS_REQUIRED_FN_FIELDS` in
 `server/plugins/context.ts` — every member core calls unconditionally on a
@@ -190,14 +196,16 @@ resolution).
 
 ```ts
 interface PluginRow {
-  id: string;                       // bare, ^[a-z0-9][a-z0-9-]*$
-  name: string;                     // npm package name, or an absolute path
-  version?: string;                 // exact, not a range — never checked against the installed version
-  integrity?: string;               // parsed as a string; NEVER VERIFIED against the tarball
+  id: string; // bare, ^[a-z0-9][a-z0-9-]*$
+  name: string; // npm package name, or an absolute path
+  version?: string; // exact, not a range — never checked against the installed version
+  integrity?: string; // parsed as a string; NEVER VERIFIED against the tarball
   config?: Record<string, unknown>; // not read by anything in this package — see note below
   disabled?: boolean;
 }
-interface PluginManifest { plugins: PluginRow[] }
+interface PluginManifest {
+  plugins: PluginRow[];
+}
 ```
 
 Parsed and shape-checked by `server/plugins/manifest.ts` — the YAML trust
@@ -224,12 +232,22 @@ future use, not consumed by `ctx` today.
 
 ```ts
 interface LoadedPlugin {
-  id: string; name: string; version: string; resolvedPath: string;
-  order: number; applyMs: number; reconcileMs?: number; // reconcileMs: reserved, never set today
+  id: string;
+  name: string;
+  version: string;
+  resolvedPath: string;
+  order: number;
+  applyMs: number;
+  reconcileMs?: number; // reconcileMs: reserved, never set today
 }
 interface LoadReport {
   loaded: LoadedPlugin[];
-  failed: Array<{ id: string; name: string; error: string; phase: 'resolve' | 'import' | 'apply' | 'reconcile' }>;
+  failed: Array<{
+    id: string;
+    name: string;
+    error: string;
+    phase: 'resolve' | 'import' | 'apply' | 'reconcile';
+  }>;
   manifestPath: string;
   safeMode: boolean;
 }
