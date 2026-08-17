@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, vitest, supertest, better-sqlite3, React 19, Linear GraphQL API. ESM modules.
 
-**Spec reference:** `docs/superpowers/specs/2026-05-28-linear-integration-design.md`.
+**Spec reference:** design doc was never committed; this plan and the shipped `server/integrations/linear/` implementation are the record.
 
 **Working assumptions about the codebase** (verify with the current source, do not rely on memory):
 

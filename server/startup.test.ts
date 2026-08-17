@@ -167,10 +167,11 @@ describe('checkNeovimVersion', () => {
     expect(logs.text()).toContain('Neovim version too old');
   });
 
-  it('exits when version cannot be determined', () => {
+  it('warns without exiting when version cannot be determined', () => {
     mockExecFileSync.mockReturnValue('unknown output');
-    expect(() => checkNeovimVersion()).toThrow('process.exit');
-    expect(mockExit).toHaveBeenCalledWith(1);
+    checkNeovimVersion();
+    expect(mockExit).not.toHaveBeenCalled();
+    expect(logs.text()).toContain('Could not determine neovim version');
   });
 });
 

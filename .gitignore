@@ -8,11 +8,6 @@ data/
 *.db-shm
 .env
 coverage
-# docs/ is scratch (screenshots, superpowers plans) EXCEPT the plugin docs,
-# which ship. Must be `docs/*` not `docs` — git cannot re-include a path
-# inside an excluded directory, so `docs` + `!docs/plugins` silently fails.
-docs/*
-!docs/plugins
 test-results/
 playwright-report/
 blob-report/
@@ -27,7 +22,6 @@ demo-fixtures/
 # optional local husky hook (not tracked)
 .husky/prepare-commit-msg
 .config/nvim/.luarc.json
-docs/superpowers
 .superpowers/
 designs/
 octomux.pen

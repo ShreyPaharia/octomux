@@ -7,7 +7,7 @@
  * to remember the full list of capability/exemption modules to import and
  * the three projection generators to invoke.
  *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md
+ * Design doc: spec/surface-consolidation-and-centaur.md
  */
 
 import express from 'express';
