@@ -22,8 +22,8 @@ import path from 'path';
 import { childLogger } from '../logger.js';
 import { readManifest } from './manifest.js';
 import { manifestPath as defaultManifestPath } from './paths.js';
-import { createPluginContext } from './context.js';
-import type { LoadReport, LoadedPlugin, PluginContext, PluginRow } from '@octomux/plugin-api';
+import { createPluginContext, revokePluginContext } from './context.js';
+import type { LoadReport, LoadedPlugin, PluginContext } from '@octomux/plugin-api';
 
 const logger = childLogger('plugins/loader');
 
@@ -50,10 +50,13 @@ async function resolveViaAnchor(resolveFrom: string, name: string): Promise<stri
 }
 
 /**
- * Races `promise` against an injectable timeout. Uses the ambient
- * `setTimeout`, deliberately — that's what lets a test's fake timers
- * (`vi.useFakeTimers()` / `vi.advanceTimersByTimeAsync()`) trip it instead of
- * a real wall-clock sleep.
+ * Races `promise` against an injectable timeout, in milliseconds. The `ms`
+ * parameter is what makes this testable — pass a small real timeout
+ * (`applyTimeoutMs: 10`) rather than reaching for fake timers. Fake timers
+ * (`vi.useFakeTimers()`) don't work here: `loadPlugins` awaits real async
+ * work (a dynamic `import()`) before it ever reaches this `setTimeout`, so
+ * `advanceTimersByTimeAsync` would resolve before the timer is even
+ * scheduled, then hang forever on a timer that never fires.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -80,15 +83,6 @@ export interface LoadPluginsOptions {
   resolveFrom: string;
   /** TEST SEAM. Defaults to the real S1 resolution (anchor.js + createRequire). */
   resolve?: (name: string) => Promise<string>;
-  /**
-   * TEST SEAM. Defaults to the real `createPluginContext(row.id)`.
-   *
-   * Deliberately not a no-op stub: a context whose registrars silently do
-   * nothing makes a plugin report as loaded while registering nothing, which
-   * is the same "appears to persist, doesn't" failure `ctx.kv` throws to
-   * avoid. Tests that want inertness inject it explicitly.
-   */
-  makeContext?: (row: PluginRow) => PluginContext;
   /** Injectable per-plugin `apply()` timeout, in ms. Default 10s. */
   applyTimeoutMs?: number;
 }
@@ -112,20 +106,22 @@ function pluginApply(mod: Record<string, unknown>): ((ctx: PluginContext) => unk
  */
 export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport> {
   const safeMode = isSafeMode();
-  const empty = (): LoadReport => ({
+  const empty = (manifestError?: string): LoadReport => ({
     loaded: [],
     failed: [],
     manifestPath: opts.manifestPath,
     safeMode,
+    ...(manifestError !== undefined ? { manifestError } : {}),
+    loadedAt: new Date().toISOString(),
   });
 
-  // Core registries must be frozen before any plugin row loads. Importing
-  // these barrels is what performs the freeze — `freezeCoreHarnesses()` /
-  // `freezeCoreProviders()` run as a module-scope side effect in
-  // harnesses/index.ts / integrations/index.ts respectively, after their
-  // core registrations. Both are idempotent (a `frozen` flag), so this is
-  // safe to call again even if boot already imported them.
-  await Promise.all([import('../harnesses/index.js'), import('../integrations/index.js')]);
+  // Core registries must be frozen (harnesses/integrations barrels imported,
+  // triggering their module-scope `freezeCore*()` calls) before any plugin
+  // row loads. That already happens by the time this function runs: the only
+  // production caller is `server/index.ts`, which statically imports
+  // `app.js` (which statically imports both barrels) before it ever calls
+  // `loadPlugins()`. ESM evaluates the whole static-import graph first, so
+  // the freeze is guaranteed done. No dynamic re-import needed here.
 
   // "No explicit manifest" — the caller passed exactly the unconfigured
   // default (`paths.ts`'s `manifestPath()`, which falls back to the real
@@ -133,9 +129,22 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
   // NODE_ENV=test, treat that as "nothing configured" and skip disk
   // entirely — the alternative is every test that forgets to override it
   // silently reading (or racing on) the developer's real home directory,
-  // flagged as the plan's highest-volume flake source. A fixture manifest
-  // path used by a real test never equals this, so it never trips the guard.
-  if (process.env.NODE_ENV === 'test' && opts.manifestPath === defaultManifestPath()) {
+  // flagged as the plan's highest-volume flake source.
+  //
+  // The path-equality check alone is not sufficient: `defaultManifestPath()`
+  // itself returns `OCTOMUX_PLUGIN_MANIFEST` when set, and stubbing that var
+  // to point at a fixture is exactly this repo's convention for pointing
+  // tests at a real manifest (`presets.test.ts`, `routes/kinds.test.ts`,
+  // `cli/src/commands/plugins.test.ts`). A test that stubs the var and then
+  // passes `defaultManifestPath()` through unchanged would have
+  // `opts.manifestPath === defaultManifestPath()` trivially true, so the old
+  // path-only check swallowed it. Require the var to be unset too, so an
+  // explicit fixture manifest (however it was pointed at) is never skipped.
+  if (
+    process.env.NODE_ENV === 'test' &&
+    opts.manifestPath === defaultManifestPath() &&
+    !process.env.OCTOMUX_PLUGIN_MANIFEST
+  ) {
     logger.debug(
       'NODE_ENV=test with the unconfigured default manifest path — skipping, no fs read',
     );
@@ -151,32 +160,29 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
 
   const manifest = (() => {
     try {
-      return readManifest(opts.manifestPath);
+      return { ok: true as const, manifest: readManifest(opts.manifestPath) };
     } catch (err) {
       logger.warn(
         { err, manifestPath: opts.manifestPath },
         'plugin manifest unreadable — loading zero plugins',
       );
-      return null;
+      return { ok: false as const, error: errorMessage(err) };
     }
   })();
-  if (manifest === null) return empty();
+  if (!manifest.ok) return empty(manifest.error);
 
   const resolve = opts.resolve ?? ((name: string) => resolveViaAnchor(opts.resolveFrom, name));
-  const makeContext = opts.makeContext ?? ((row: PluginRow) => createPluginContext(row.id));
   const applyTimeoutMs = opts.applyTimeoutMs ?? DEFAULT_APPLY_TIMEOUT_MS;
 
   const loaded: LoadedPlugin[] = [];
   const failed: LoadReport['failed'] = [];
   let order = 0;
 
-  for (const row of manifest.plugins) {
+  for (const row of manifest.manifest.plugins) {
     if (row.disabled) {
       logger.info({ id: row.id, name: row.name }, 'plugin disabled — skipped');
       continue;
     }
-
-    const start = performance.now();
 
     let resolvedPath: string;
     try {
@@ -187,9 +193,31 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
       continue;
     }
 
+    // Reject bare-name resolutions that escaped the plugin prefix.
+    // `createRequire` walks up the directory tree, so a package not actually
+    // installed under `resolveFrom` (`pluginModulesDir()`) can still resolve
+    // from `~/node_modules` or `/node_modules` — an unmanaged location — and
+    // silently report `loaded`. Absolute-path rows (the documented dev loop)
+    // are intentionally outside the prefix, so only bare-name resolutions are
+    // checked.
+    if (!path.isAbsolute(row.name)) {
+      const rel = path.relative(opts.resolveFrom, resolvedPath);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        const message = `resolved path "${resolvedPath}" escapes the plugin prefix "${opts.resolveFrom}"`;
+        logger.warn({ id: row.id, name: row.name, resolvedPath }, message);
+        failed.push({ id: row.id, name: row.name, error: message, phase: 'resolve' });
+        continue;
+      }
+    }
+
     let mod: Record<string, unknown>;
     try {
-      mod = await import(resolvedPath);
+      // Timeout-wrapped like apply() below. Does NOT save you from a plugin
+      // that blocks the event loop synchronously at import time, or calls
+      // process.exit() — those still win regardless of any timeout here;
+      // surviving that needs running the plugin in a worker, deliberately
+      // out of scope for this loader.
+      mod = await withTimeout(import(resolvedPath), applyTimeoutMs, `plugin "${row.id}" import`);
     } catch (err) {
       logger.warn({ id: row.id, name: row.name, resolvedPath, err }, 'plugin import failed');
       failed.push({ id: row.id, name: row.name, error: errorMessage(err), phase: 'import' });
@@ -204,10 +232,18 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
       continue;
     }
 
+    // `start` is measured right here, not before resolve()/import() above —
+    // `applyMs` on `LoadedPlugin` should mean what it says.
+    const start = performance.now();
+    const ctx = createPluginContext(row.id);
     try {
-      const ctx = makeContext(row);
       await withTimeout(Promise.resolve(apply(ctx)), applyTimeoutMs, `plugin "${row.id}" apply()`);
     } catch (err) {
+      // A timed-out apply() races on, uncancelled, in the background. Revoke
+      // the context now so a late registration after the deadline can never
+      // reach the live registries — a plugin reported `failed` must not be
+      // able to silently install a harness/provider/workflow later.
+      revokePluginContext(ctx);
       logger.warn({ id: row.id, name: row.name, err }, 'plugin apply() failed');
       failed.push({ id: row.id, name: row.name, error: errorMessage(err), phase: 'apply' });
       continue;
@@ -223,5 +259,11 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
     });
   }
 
-  return { loaded, failed, manifestPath: opts.manifestPath, safeMode };
+  return {
+    loaded,
+    failed,
+    manifestPath: opts.manifestPath,
+    safeMode,
+    loadedAt: new Date().toISOString(),
+  };
 }

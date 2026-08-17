@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { loadPlugins } from './loader.js';
 import { manifestPath as defaultManifestPath } from './paths.js';
+import { listHarnesses, resetHarnesses } from '../harnesses/registry.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -173,7 +174,20 @@ plugins:
     expect(resolveSpy).not.toHaveBeenCalled();
   });
 
-  it('NODE_ENV=test with the unconfigured default manifestPath does zero filesystem work', async () => {
+  it('NODE_ENV=test with the unconfigured default manifestPath does zero filesystem work, even when a real manifest file exists on disk', async () => {
+    // A weaker version of this test only stubs nothing and asserts readSpy was
+    // never called — but readManifest() does existsSync() first, so on a
+    // machine with no real ~/.octomux/octomux.yml, readFileSync was *never*
+    // going to be called either way. That version can't tell "the guard
+    // worked" from "there was nothing to read". Point OCTOMUX_DATA_DIR at a
+    // tmpdir holding a real, valid manifest so the guard has something to
+    // actually skip.
+    vi.stubEnv('OCTOMUX_DATA_DIR', tmpDir);
+    fs.writeFileSync(
+      path.join(tmpDir, 'octomux.yml'),
+      'plugins:\n  - id: poison\n    name: poison-pkg\n',
+      'utf-8',
+    );
     const readSpy = spyOn(fs, 'readFileSync');
 
     const report = await loadPlugins({
@@ -189,6 +203,7 @@ plugins:
       failed: [],
       manifestPath: defaultManifestPath(),
       safeMode: false,
+      loadedAt: expect.any(String),
     });
     expect(readSpy).not.toHaveBeenCalled();
     readSpy.mockRestore();
@@ -205,9 +220,187 @@ plugins:
 `);
     const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
 
-    expect(report).toEqual({ loaded: [], failed: [], manifestPath, safeMode: true });
+    expect(report).toEqual({
+      loaded: [],
+      failed: [],
+      manifestPath,
+      safeMode: true,
+      loadedAt: expect.any(String),
+    });
     expect(readSpy).not.toHaveBeenCalled();
     readSpy.mockRestore();
+  });
+
+  it('a resolved bare-name path that escapes the plugin prefix is rejected (phase resolve), never imported', async () => {
+    // createRequire walks up the directory tree, so a bare package name not
+    // actually installed under resolveFrom (pluginModulesDir()) can still
+    // resolve from an ancestor node_modules — an unmanaged location. Simulate
+    // that "escaped" resolution directly via the resolve seam.
+    const outside = writeModule('escaped.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: escaped
+    name: some-bare-pkg
+`);
+
+    const report = await loadPlugins({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      resolve: async () => outside,
+    });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({
+      id: 'escaped',
+      name: 'some-bare-pkg',
+      phase: 'resolve',
+    });
+    expect(report.failed[0].error).toContain('escapes the plugin prefix');
+  });
+
+  it('an absolute-path row is never subject to the plugin-prefix check, even though it sits outside resolveFrom', async () => {
+    const abs = writeModule('outside-abs.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: absok
+    name: ${abs}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toEqual([]);
+    expect(report.loaded).toHaveLength(1);
+  });
+
+  it('an import that throws synchronously at module load is reported with phase import, not resolve', async () => {
+    const boom = writeModule('boom-import.mjs', "throw new Error('boom-import');\n");
+    const manifestPath = writeManifest(`
+plugins:
+  - id: boomimport
+    name: ${boom}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'boomimport', phase: 'import' });
+    expect(report.failed[0].error).toContain('boom-import');
+  });
+
+  it('an import() that never settles hits the injected timeout instead of hanging loadPlugins forever', async () => {
+    // Top-level await that never resolves — the module body itself never
+    // finishes, so the bare `await import(resolvedPath)` this loader used to
+    // have would never return either.
+    const hang = writeModule(
+      'hang-import.mjs',
+      'await new Promise(() => {});\nexport async function apply() {}\n',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: hangimport
+    name: ${hang}
+`);
+
+    const startedAt = Date.now();
+    const report = await loadPlugins({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      applyTimeoutMs: 10,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'hangimport', phase: 'import' });
+    expect(report.failed[0].error).toContain('timed out');
+    expect(elapsedMs).toBeLessThan(5000);
+  });
+
+  it('a module with no apply() export at all is reported as failed, not silently skipped', async () => {
+    const noApply = writeModule('no-apply.mjs', 'export const notApply = 1;\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: noapply
+    name: ${noApply}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'noapply', phase: 'import' });
+    expect(report.failed[0].error).toContain('apply()');
+  });
+
+  it('order increments per successfully loaded row, in manifest order', async () => {
+    const a = writeModule('order-a.mjs', 'export async function apply() {}\n');
+    const b = writeModule('order-b.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: aa
+    name: ${a}
+  - id: bb
+    name: ${b}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toEqual([]);
+    expect(report.loaded).toHaveLength(2);
+    expect(report.loaded[0]).toMatchObject({ id: 'aa', order: 0 });
+    expect(report.loaded[1]).toMatchObject({ id: 'bb', order: 1 });
+  });
+
+  it('a manifest that fails to parse returns a report with manifestError set, and does not throw', async () => {
+    const manifestPath = path.join(tmpDir, 'poison.yml');
+    fs.writeFileSync(manifestPath, 'plugins: [\n', 'utf-8');
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toEqual([]);
+    expect(typeof report.manifestError).toBe('string');
+    expect(report.manifestError).toBeTruthy();
+    expect(report.loadedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('a plugin whose apply() times out cannot register after the fact — the context is revoked', async () => {
+    resetHarnesses();
+    const late = writeModule(
+      'late-register.mjs',
+      `export function apply(ctx) {
+         return new Promise((resolve) => {
+           setTimeout(() => {
+             try { ctx.harnesses.register({ id: 'sneaky' }); } catch {}
+             resolve();
+           }, 150);
+         });
+       }\n`,
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: late
+    name: ${late}
+`);
+
+    const report = await loadPlugins({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      applyTimeoutMs: 10,
+    });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'late', phase: 'apply' });
+
+    // Let the plugin's late continuation actually run and attempt to
+    // register — proving the revoke, not just the timeout, is what stops it.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(listHarnesses().some((h) => h.id === 'late:sneaky')).toBe(false);
+
+    resetHarnesses();
   });
 });
 
