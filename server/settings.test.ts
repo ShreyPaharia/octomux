@@ -638,5 +638,26 @@ describe('settings.plugins', () => {
       const writtenJson = mockFs.writeFile.mock.calls[0][1] as string;
       expect(JSON.parse(writtenJson).plugins['weird-plugin']).toEqual(weird);
     });
+
+    it.each(['constructor', '__proto__', 'prototype'])(
+      'getPluginSettings("%s") returns {} rather than walking the prototype chain',
+      async (id) => {
+        mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+        const result = await getPluginSettings(id);
+        expect(result).toEqual({});
+        // The historical bug: plain `settings.plugins[id]` resolves
+        // `constructor` to `Object.prototype.constructor` (a function) and
+        // `prototype`/`__proto__` similarly — none of those are plain objects.
+        expect(typeof result).toBe('object');
+        expect(result).not.toBe(Object);
+      },
+    );
+
+    it('getPluginSettings("constructor") returns the stored blob when one is actually saved', async () => {
+      mockFs.readFile.mockResolvedValue(
+        JSON.stringify({ ...DEFAULT_SETTINGS, plugins: { constructor: { real: true } } }),
+      );
+      expect(await getPluginSettings('constructor')).toEqual({ real: true });
+    });
   });
 });
