@@ -212,6 +212,7 @@ vi.mock('@octomux/diff-engine', () => {
 const { default: request } = await import('supertest');
 const {
   createTestDb,
+  createTestHttpServer,
   insertTask,
   insertAgent,
   insertPermissionPrompt,
@@ -243,10 +244,15 @@ const { updateSettings } = await import('./settings.js');
 let db: Database;
 let app: ReturnType<typeof createApp>;
 
+// One listening server for the whole file, re-pointed at each test's app.
+// `request(http_.server)` would listen+close per request; see createTestHttpServer.
+const http_ = createTestHttpServer();
+
 beforeEach(() => {
   vi.restoreAllMocks();
   db = createTestDb();
   app = createApp();
+  http_.use(app as unknown as (req: unknown, res: unknown) => void);
 });
 
 afterEach(() => {
@@ -296,7 +302,9 @@ const notFoundCases = [
 
 describe('404 for nonexistent resources', () => {
   it.each(notFoundCases)('$name → 404', async ({ method, url, body }) => {
-    const res = body ? await request(app)[method](url).send(body) : await request(app)[method](url);
+    const res = body
+      ? await request(http_.server)[method](url).send(body)
+      : await request(http_.server)[method](url);
     expect(res.status).toBe(404);
   });
 });
@@ -305,7 +313,7 @@ describe('404 for nonexistent resources', () => {
 
 describe('GET /api/tasks', () => {
   it('returns empty array when no tasks exist', async () => {
-    const res = await request(app).get('/api/tasks');
+    const res = await request(http_.server).get('/api/tasks');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
@@ -314,7 +322,7 @@ describe('GET /api/tasks', () => {
     insertTask(db);
     insertAgent(db);
 
-    const res = await request(app).get('/api/tasks?include=workers');
+    const res = await request(http_.server).get('/api/tasks?include=workers');
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe(DEFAULTS.task.id);
     expect(res.body[0].workers).toHaveLength(1);
@@ -325,13 +333,13 @@ describe('GET /api/tasks', () => {
     insertTask(db, { id: 'old', created_at: '2026-01-01 00:00:00' });
     insertTask(db, { id: 'new', created_at: '2026-02-01 00:00:00' });
 
-    const res = await request(app).get('/api/tasks');
+    const res = await request(http_.server).get('/api/tasks');
     expect(res.body.map((t: Task) => t.id)).toEqual(['new', 'old']);
   });
 
   it('returns empty agents array for tasks without agents', async () => {
     insertTask(db);
-    const res = await request(app).get('/api/tasks?include=workers');
+    const res = await request(http_.server).get('/api/tasks?include=workers');
     expect(res.body[0].workers).toEqual([]);
   });
 
@@ -340,7 +348,7 @@ describe('GET /api/tasks', () => {
     insertTask(db, { id: 'task-b', repo_path: '/repo/beta' });
     insertTask(db, { id: 'task-c', repo_path: '/repo/alpha' });
 
-    const res = await request(app).get('/api/tasks?repo_path=/repo/alpha');
+    const res = await request(http_.server).get('/api/tasks?repo_path=/repo/alpha');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
     // repo_path itself isn't in the lean default shape — the filter's effect is
@@ -352,14 +360,14 @@ describe('GET /api/tasks', () => {
     insertTask(db, { id: 'task-a', repo_path: '/repo/alpha' });
     insertTask(db, { id: 'task-b', repo_path: '/repo/beta' });
 
-    const res = await request(app).get('/api/tasks');
+    const res = await request(http_.server).get('/api/tasks');
     expect(res.body).toHaveLength(2);
   });
 
   it('returns empty array when repo_path matches no tasks', async () => {
     insertTask(db, { id: 'task-a', repo_path: '/repo/alpha' });
 
-    const res = await request(app).get('/api/tasks?repo_path=/repo/nonexistent');
+    const res = await request(http_.server).get('/api/tasks?repo_path=/repo/nonexistent');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
@@ -368,7 +376,7 @@ describe('GET /api/tasks', () => {
     insertTask(db, { id: 'regular', source: null });
     insertTask(db, { id: 'review', source: 'auto_review' });
 
-    const res = await request(app).get('/api/tasks');
+    const res = await request(http_.server).get('/api/tasks');
     expect(res.status).toBe(200);
     expect(res.body.map((t: Task) => t.id)).toEqual(['regular']);
   });
@@ -377,7 +385,7 @@ describe('GET /api/tasks', () => {
     insertTask(db, { id: 'manual', source: null });
     insertTask(db, { id: 'drift', source: 'doc_drift' });
 
-    const res = await request(app).get('/api/tasks');
+    const res = await request(http_.server).get('/api/tasks');
     expect(res.status).toBe(200);
     expect(res.body.map((t: Task) => t.id)).toEqual(['manual']);
   });
@@ -386,7 +394,7 @@ describe('GET /api/tasks', () => {
     insertTask(db, { id: 'manual', source: null });
     insertTask(db, { id: 'drift', source: 'doc_drift' });
 
-    const res = await request(app).get('/api/tasks?includeAutomated=true');
+    const res = await request(http_.server).get('/api/tasks?includeAutomated=true');
     expect(res.status).toBe(200);
     expect(res.body.map((t: Task) => t.id).sort()).toEqual(['drift', 'manual']);
   });
@@ -400,14 +408,14 @@ describe('GET /api/tasks/inbox', () => {
     insertTask(db, { id: 'err', runtime_state: 'error', last_viewed_at: null, updated_at: now });
     insertTask(db, { id: 'closed', runtime_state: 'idle', last_viewed_at: null, updated_at: now });
 
-    const res = await request(app).get('/api/tasks/inbox');
+    const res = await request(http_.server).get('/api/tasks/inbox');
     expect(res.status).toBe(200);
     expect(res.body.needs_you.map((t: Task) => t.id)).toEqual(['err']);
     expect(res.body.activity.map((t: Task) => t.id)).toEqual(['closed']);
   });
 
   it('returns empty arrays when no tasks match', async () => {
-    const res = await request(app).get('/api/tasks/inbox');
+    const res = await request(http_.server).get('/api/tasks/inbox');
     expect(res.body).toEqual({ needs_you: [], activity: [] });
   });
 
@@ -428,7 +436,7 @@ describe('GET /api/tasks/inbox', () => {
       updated_at: now,
     });
 
-    const res = await request(app).get('/api/tasks/inbox');
+    const res = await request(http_.server).get('/api/tasks/inbox');
     expect(res.body.needs_you.map((t: Task) => t.id)).toEqual(['regular-err']);
   });
 });
@@ -439,7 +447,7 @@ describe('PATCH /api/tasks/:id/viewed', () => {
     const before = getTask(db, DEFAULTS.task.id);
     expect(before?.last_viewed_at).toBeNull();
 
-    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}/viewed`);
+    const res = await request(http_.server).patch(`/api/tasks/${DEFAULTS.task.id}/viewed`);
     expect(res.status).toBe(200);
     expect(res.body.last_viewed_at).toBeTruthy();
 
@@ -448,7 +456,7 @@ describe('PATCH /api/tasks/:id/viewed', () => {
   });
 
   it('returns 404 for missing task', async () => {
-    const res = await request(app).patch('/api/tasks/nope/viewed');
+    const res = await request(http_.server).patch('/api/tasks/nope/viewed');
     expect(res.status).toBe(404);
   });
 });
@@ -459,7 +467,7 @@ describe('POST /api/tasks/viewed-all', () => {
     insertTask(db, { id: 'b' });
     insertTask(db, { id: 'c' });
 
-    const res = await request(app).post('/api/tasks/viewed-all');
+    const res = await request(http_.server).post('/api/tasks/viewed-all');
     expect(res.status).toBe(200);
     expect(res.body.updated).toBe(3);
 
@@ -469,7 +477,7 @@ describe('POST /api/tasks/viewed-all', () => {
   });
 
   it('returns 0 when no tasks', async () => {
-    const res = await request(app).post('/api/tasks/viewed-all');
+    const res = await request(http_.server).post('/api/tasks/viewed-all');
     expect(res.body.updated).toBe(0);
   });
 });
@@ -481,7 +489,7 @@ describe('GET /api/tasks/:id', () => {
     insertTask(db);
     insertAgent(db);
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.task.id}?include=workers`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.task.id}?include=workers`);
     expect(res.status).toBe(200);
     expect(res.body.title).toBe(DEFAULTS.task.title);
     expect(res.body.workers).toHaveLength(1);
@@ -494,7 +502,7 @@ describe('GET /api/tasks/:id', () => {
       pr_number: 42,
     });
 
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.task.id}?include=workers,pull_requests,user_terminals`,
     );
     expect(res.body.pr_url).toBe('https://github.com/org/repo/pull/42');
@@ -514,7 +522,7 @@ describe('POST /api/tasks', () => {
   };
 
   it('creates task and returns 201', async () => {
-    const res = await request(app).post('/api/tasks').send(validPayload);
+    const res = await request(http_.server).post('/api/tasks').send(validPayload);
 
     expect(res.status).toBe(201);
     expect(res.body.title).toBe(validPayload.title);
@@ -524,12 +532,12 @@ describe('POST /api/tasks', () => {
   });
 
   it('generates 12-char nanoid', async () => {
-    const res = await request(app).post('/api/tasks').send(validPayload);
+    const res = await request(http_.server).post('/api/tasks').send(validPayload);
     expect(res.body.id).toHaveLength(12);
   });
 
   it('persists to database', async () => {
-    await request(app).post('/api/tasks').send(validPayload);
+    await request(http_.server).post('/api/tasks').send(validPayload);
     const tasks = db.prepare('SELECT * FROM tasks').all() as Task[];
     expect(tasks).toHaveLength(1);
     expect(tasks[0].title).toBe(validPayload.title);
@@ -546,18 +554,18 @@ describe('POST /api/tasks', () => {
   ];
 
   it.each(missingFieldCases)('returns 400 when $name', async ({ body }) => {
-    const res = await request(app).post('/api/tasks').send(body);
+    const res = await request(http_.server).post('/api/tasks').send(body);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('required');
   });
 
   it('does not call startTask on validation failure', async () => {
-    await request(app).post('/api/tasks').send({});
+    await request(http_.server).post('/api/tasks').send({});
     expect(startTask).not.toHaveBeenCalled();
   });
 
   it('does not call startTask when draft=true', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/tasks')
       .send({ ...validPayload, draft: true });
 
@@ -567,14 +575,14 @@ describe('POST /api/tasks', () => {
   });
 
   it('calls startTask when draft is not set', async () => {
-    await request(app).post('/api/tasks').send(validPayload);
+    await request(http_.server).post('/api/tasks').send(validPayload);
     await vi.waitFor(() => {
       expect(startTask).toHaveBeenCalledOnce();
     });
   });
 
   it('stores branch and base_branch when provided', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/tasks')
       .send({ ...validPayload, branch: 'feat/my-feature', base_branch: 'develop' });
 
@@ -588,7 +596,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('auto-generates branch when not provided', async () => {
-    const res = await request(app).post('/api/tasks').send(validPayload);
+    const res = await request(http_.server).post('/api/tasks').send(validPayload);
 
     // Branch is set by startTask (runs in background), not in the immediate response
     expect(res.body.branch).toBeNull();
@@ -601,7 +609,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('stores initial_prompt when provided', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/tasks')
       .send({ ...validPayload, initial_prompt: 'Fix the bug in orders.ts' });
 
@@ -611,7 +619,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('stores run_mode=none when provided', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/tasks')
       .send({ ...validPayload, run_mode: 'none' });
 
@@ -621,7 +629,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('allows run_mode=none with base_branch (new behavior)', async () => {
-    const res = await request(app).post('/api/tasks').send({
+    const res = await request(http_.server).post('/api/tasks').send({
       title: 't',
       description: 'd',
       run_mode: 'none',
@@ -634,7 +642,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('still rejects run_mode=none with branch', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/tasks')
       .send({ title: 't', description: 'd', run_mode: 'none', repo_path: '/r', branch: 'x' });
     expect(res.status).toBe(400);
@@ -642,7 +650,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('still rejects run_mode=none with worktree_path', async () => {
-    const res = await request(app).post('/api/tasks').send({
+    const res = await request(http_.server).post('/api/tasks').send({
       title: 't',
       description: 'd',
       run_mode: 'none',
@@ -653,7 +661,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('defaults run_mode to new when not provided', async () => {
-    const res = await request(app).post('/api/tasks').send(validPayload);
+    const res = await request(http_.server).post('/api/tasks').send(validPayload);
 
     expect(res.status).toBe(201);
     const task = getTask(db, res.body.id);
@@ -661,7 +669,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('persists model when provided', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/tasks')
       .send({ ...validPayload, model: 'claude-sonnet-4-6' });
 
@@ -672,7 +680,7 @@ describe('POST /api/tasks', () => {
   });
 
   it('returns null model when not provided', async () => {
-    const res = await request(app).post('/api/tasks').send(validPayload);
+    const res = await request(http_.server).post('/api/tasks').send(validPayload);
     expect(res.status).toBe(201);
     expect(res.body.model).toBeNull();
   });
@@ -684,7 +692,7 @@ describe('POST /api/tasks/:id/start', () => {
   it('starts a draft task', async () => {
     insertTask(db);
 
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/start`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/start`);
     expect(res.status).toBe(200);
     expect(startTask).toHaveBeenCalledOnce();
     expect(vi.mocked(startTask).mock.calls[0][0].id).toBe(DEFAULTS.task.id);
@@ -694,7 +702,7 @@ describe('POST /api/tasks/:id/start', () => {
 
   it.each(nonDraftStates)('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { runtime_state: state as any });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/start`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/start`);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('draft');
   });
@@ -707,7 +715,7 @@ describe('PATCH /api/tasks/:id', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'idle' });
 
@@ -719,7 +727,7 @@ describe('PATCH /api/tasks/:id', () => {
   it('updates updated_at timestamp', async () => {
     insertTask(db, { updated_at: '2020-01-01 00:00:00' });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'idle' });
 
@@ -730,13 +738,15 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('calls closeTask when runtime_state=idle', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ runtime_state: 'idle' });
+    await request(http_.server)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ runtime_state: 'idle' });
     expect(closeTask).toHaveBeenCalledOnce();
   });
 
   it('does not call closeTask for non-terminal status changes', async () => {
     insertTask(db);
-    await request(app)
+    await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'running' } as any);
     expect(closeTask).not.toHaveBeenCalled();
@@ -744,7 +754,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('handles PATCH with empty body gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
+    const res = await request(http_.server).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
     expect(res.status).toBe(200);
     expect(res.body.runtime_state).toBe('running'); // unchanged
     expect(closeTask).not.toHaveBeenCalled();
@@ -754,7 +764,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('returns 400 when resuming a non-closed/non-error task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
@@ -766,7 +776,7 @@ describe('PATCH /api/tasks/:id', () => {
   it.each(resumableStates)('returns 400 when worktree missing for %s task', async (state) => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
@@ -776,7 +786,7 @@ describe('PATCH /api/tasks/:id', () => {
   it.each(resumableStates)('calls resumeTask for %s task with valid worktree', async (state) => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'running' });
     expect(res.status).toBe(200);
@@ -791,7 +801,7 @@ describe('PATCH /api/tasks/:id', () => {
       run_mode: 'none',
       worktree: DEFAULTS.runningTask.repo_path,
     });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ runtime_state: 'running' });
     expect(res.status).toBe(200);
@@ -808,7 +818,7 @@ describe('PATCH /api/tasks/:id', () => {
         run_mode: 'none',
         worktree: DEFAULTS.runningTask.repo_path,
       });
-      const res = await request(app)
+      const res = await request(http_.server)
         .patch(`/api/tasks/${DEFAULTS.task.id}`)
         .send({ runtime_state: 'running' });
       expect(res.status).toBe(400);
@@ -820,7 +830,7 @@ describe('PATCH /api/tasks/:id', () => {
   it('updates draft task fields', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     insertTask(db); // default runtime_state is 'idle' (draft)
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ title: 'Updated title', description: 'Updated desc', repo_path: '/tmp/other-repo' });
     expect(res.status).toBe(200);
@@ -831,7 +841,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('rejects field updates on non-draft tasks', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ title: 'New title' });
     expect(res.status).toBe(400);
@@ -840,14 +850,16 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('rejects empty title on draft update', async () => {
     insertTask(db);
-    const res = await request(app).patch(`/api/tasks/${DEFAULTS.task.id}`).send({ title: '   ' });
+    const res = await request(http_.server)
+      .patch(`/api/tasks/${DEFAULTS.task.id}`)
+      .send({ title: '   ' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('title');
   });
 
   it('rejects empty description on draft update', async () => {
     insertTask(db);
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ description: '' });
     expect(res.status).toBe(400);
@@ -857,7 +869,7 @@ describe('PATCH /api/tasks/:id', () => {
   it('rejects non-existent repo_path on draft update', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     insertTask(db);
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ repo_path: '/nonexistent/path' });
     expect(res.status).toBe(400);
@@ -867,7 +879,7 @@ describe('PATCH /api/tasks/:id', () => {
   it('updates updated_at on draft field change', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     insertTask(db, { updated_at: '2020-01-01 00:00:00' });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ title: 'New title' });
     expect(res.body.updated_at).not.toBe('2020-01-01 00:00:00');
@@ -875,7 +887,7 @@ describe('PATCH /api/tasks/:id', () => {
 
   it('updates run_mode on draft task', async () => {
     insertTask(db);
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
       .send({ run_mode: 'none' });
     expect(res.status).toBe(200);
@@ -889,7 +901,7 @@ describe('PATCH /api/tasks/:id', () => {
 describe('DELETE /api/tasks/:id', () => {
   it('soft-deletes task by default and returns 204 (row still exists)', async () => {
     insertTask(db);
-    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
+    const res = await request(http_.server).delete(`/api/tasks/${DEFAULTS.task.id}`);
     expect(res.status).toBe(204);
     // Row still exists — soft delete, not hard delete
     const row = db
@@ -902,7 +914,7 @@ describe('DELETE /api/tasks/:id', () => {
   it('?purge=true hard-deletes a soft-deleted task and calls deleteTask', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     db.prepare(`UPDATE tasks SET deleted_at = datetime('now') WHERE id = ?`).run(DEFAULTS.task.id);
-    await request(app).delete(`/api/tasks/${DEFAULTS.task.id}?purge=true`);
+    await request(http_.server).delete(`/api/tasks/${DEFAULTS.task.id}?purge=true`);
     expect(deleteTask).toHaveBeenCalledOnce();
     expect(getTask(db, DEFAULTS.task.id)).toBeUndefined();
   });
@@ -910,7 +922,7 @@ describe('DELETE /api/tasks/:id', () => {
   it('soft-delete sets stopped on agents (does not cascade-delete them)', async () => {
     insertTask(db);
     insertAgent(db);
-    await request(app).delete(`/api/tasks/${DEFAULTS.task.id}`);
+    await request(http_.server).delete(`/api/tasks/${DEFAULTS.task.id}`);
     // Agents still exist but are stopped
     const agents = db
       .prepare('SELECT * FROM workers WHERE task_id = ?')
@@ -925,7 +937,7 @@ describe('DELETE /api/tasks/:id', () => {
 describe('POST /api/tasks/:id/move', () => {
   it('updates workflow_status without auto-starting for non-in_progress moves', async () => {
     insertTask(db, { workflow_status: 'backlog', initial_prompt: 'do the thing' });
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/move`)
       .send({ workflow_status: 'planned', note: 'queued for next sprint' });
 
@@ -943,7 +955,7 @@ describe('POST /api/tasks/:id/move', () => {
       worktree: null,
     });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/move`)
       .send({ workflow_status: 'in_progress' });
 
@@ -964,7 +976,7 @@ describe('POST /api/tasks/:id/move', () => {
       workflow_status: 'planned',
     });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/move`)
       .send({ workflow_status: 'in_progress' });
 
@@ -981,7 +993,7 @@ describe('POST /api/tasks/:id/move', () => {
       error: 'previous failure',
     });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/move`)
       .send({ workflow_status: 'in_progress', note: 'retry it' });
 
@@ -998,7 +1010,7 @@ describe('POST /api/tasks/:id/move', () => {
   it('does not auto-start when task is already running', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, workflow_status: 'planned' });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/move`)
       .send({ workflow_status: 'in_progress' });
 
@@ -1018,7 +1030,7 @@ describe('GET /api/tasks/:id/diff', () => {
   });
 
   it('returns 404 when task does not exist', async () => {
-    const res = await request(app).get('/api/tasks/missing/diff');
+    const res = await request(http_.server).get('/api/tasks/missing/diff');
     expect(res.status).toBe(404);
   });
 
@@ -1029,7 +1041,7 @@ describe('GET /api/tasks/:id/diff', () => {
       `UPDATE worktrees SET path = '' WHERE id = (SELECT worktree_id FROM tasks WHERE id = ?)`,
     ).run(DEFAULTS.runningTask.id);
     db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = ?`).run(DEFAULTS.runningTask.id);
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/worktree/i);
   });
@@ -1037,13 +1049,13 @@ describe('GET /api/tasks/:id/diff', () => {
   it('returns 400 when worktree dir no longer exists', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     (fs.existsSync as any).mockReturnValue(false);
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
   });
 
   it('returns 400 when task has no base_sha', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, base_sha: null });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/base_sha/i);
   });
@@ -1055,7 +1067,7 @@ describe('GET /api/tasks/:id/diff', () => {
       base_sha: null,
       worktree: '/scratch/x',
     });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/scratch/i);
   });
@@ -1065,7 +1077,7 @@ describe('GET /api/tasks/:id/diff', () => {
     (diffModule.getDiffSummary as any).mockResolvedValue({
       files: [{ path: 'a.txt', status: 'M', additions: 1, deletions: 1 }],
     });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff`);
     expect(res.status).toBe(200);
     expect(res.body.files).toEqual([
       {
@@ -1092,13 +1104,13 @@ describe('GET /api/tasks/:id/diff/:path', () => {
   });
 
   it('returns 404 when task does not exist', async () => {
-    const res = await request(app).get('/api/tasks/missing/diff/a.txt');
+    const res = await request(http_.server).get('/api/tasks/missing/diff/a.txt');
     expect(res.status).toBe(404);
   });
 
   it('rejects path traversal', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.runningTask.id}/diff/..%2Fetc%2Fpasswd`,
     );
     expect(res.status).toBe(400);
@@ -1113,7 +1125,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
       tooLarge: false,
       binary: false,
     });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt`);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       oldContent: 'old\n',
@@ -1133,7 +1145,9 @@ describe('GET /api/tasks/:id/diff/:path', () => {
       tooLarge: false,
       binary: false,
     });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/diff/src/lib/foo.ts`);
+    const res = await request(http_.server).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/diff/src/lib/foo.ts`,
+    );
     expect(res.status).toBe(200);
     expect(diffModule.getFileDiff).toHaveBeenCalledWith(
       expect.objectContaining({ relPath: 'src/lib/foo.ts' }),
@@ -1149,7 +1163,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
       tooLarge: false,
       binary: false,
     });
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt?range=working`,
     );
     expect(res.status).toBe(200);
@@ -1160,7 +1174,7 @@ describe('GET /api/tasks/:id/diff/:path', () => {
 
   it('rejects malformed range param with 400', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.runningTask.id}/diff/a.txt?range=garbage`,
     );
     expect(res.status).toBe(400);
@@ -1193,7 +1207,7 @@ describe('GET /api/tasks/:id/branches', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/branches`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/branches`);
     expect(res.status).toBe(200);
     expect(res.body.branches).toEqual(['feature', 'main', 'topic']);
     expect(res.body.current).toBe('feature');
@@ -1207,7 +1221,7 @@ describe('GET /api/tasks/:id/branches', () => {
       base_sha: null,
       worktree: '/scratch/x',
     });
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/branches`);
+    const res = await request(http_.server).get(`/api/tasks/${DEFAULTS.runningTask.id}/branches`);
     expect(res.status).toBe(400);
   });
 });
@@ -1232,7 +1246,9 @@ describe('GET /api/tasks/:id/commits', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get(`/api/tasks/${DEFAULTS.runningTask.id}/commits?limit=1`);
+    const res = await request(http_.server).get(
+      `/api/tasks/${DEFAULTS.runningTask.id}/commits?limit=1`,
+    );
     expect(res.status).toBe(200);
     expect(res.body.commits).toHaveLength(1);
     expect(res.body.commits[0]).toEqual({
@@ -1248,7 +1264,7 @@ describe('GET /api/tasks/:id/commits', () => {
 
   it('returns empty for working range without calling git log', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.runningTask.id}/commits?range=working`,
     );
     expect(res.status).toBe(200);
@@ -1257,7 +1273,7 @@ describe('GET /api/tasks/:id/commits', () => {
 
   it('rejects malformed range with 400', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.runningTask.id}/commits?range=commit:not-hex`,
     );
     expect(res.status).toBe(400);
@@ -1283,7 +1299,7 @@ describe('PATCH /api/tasks/:id/base', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
       .send({ base_branch: 'develop' });
     expect(res.status).toBe(200);
@@ -1310,7 +1326,7 @@ describe('PATCH /api/tasks/:id/base', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
       .send({ base_branch: 'bogus' });
     expect(res.status).toBe(400);
@@ -1323,7 +1339,7 @@ describe('PATCH /api/tasks/:id/base', () => {
       base_sha: null,
       worktree: '/scratch/x',
     });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
       .send({ base_branch: 'main' });
     expect(res.status).toBe(400);
@@ -1331,7 +1347,7 @@ describe('PATCH /api/tasks/:id/base', () => {
 
   it('returns 409 for draft task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: 'idle' });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
       .send({ base_branch: 'main' });
     expect(res.status).toBe(409);
@@ -1339,7 +1355,9 @@ describe('PATCH /api/tasks/:id/base', () => {
 
   it('returns 400 when base_branch is missing', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`).send({});
+    const res = await request(http_.server)
+      .patch(`/api/tasks/${DEFAULTS.runningTask.id}/base`)
+      .send({});
     expect(res.status).toBe(400);
   });
 });
@@ -1353,7 +1371,7 @@ describe('POST /api/tasks/:id/workers', () => {
 
   it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { runtime_state: state as any });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/workers`).send({});
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/workers`).send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('running');
   });
@@ -1361,7 +1379,7 @@ describe('POST /api/tasks/:id/workers', () => {
   it('creates agent for running task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers`)
       .send({ prompt: 'Write tests' });
 
@@ -1372,7 +1390,7 @@ describe('POST /api/tasks/:id/workers', () => {
 
   it('passes prompt to addAgent', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await request(app)
+    await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers`)
       .send({ prompt: 'Write comprehensive tests' });
 
@@ -1387,7 +1405,7 @@ describe('POST /api/tasks/:id/workers', () => {
 
   it('works without prompt', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/workers`).send({});
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/workers`).send({});
     expect(res.status).toBe(201);
     expect(vi.mocked(addAgent).mock.lastCall?.[1]).toMatchObject({ prompt: undefined });
   });
@@ -1398,7 +1416,9 @@ describe('POST /api/tasks/:id/workers', () => {
 describe('DELETE /api/tasks/:id/workers/:agentId', () => {
   it('returns 404 for nonexistent agent on existing task', async () => {
     insertTask(db);
-    const res = await request(app).delete(`/api/tasks/${DEFAULTS.task.id}/workers/nonexistent`);
+    const res = await request(http_.server).delete(
+      `/api/tasks/${DEFAULTS.task.id}/workers/nonexistent`,
+    );
     expect(res.status).toBe(404);
   });
 
@@ -1407,7 +1427,7 @@ describe('DELETE /api/tasks/:id/workers/:agentId', () => {
     insertTask(db, { id: 'task-b' });
     insertAgent(db, { id: 'agent-on-b', task_id: 'task-b' });
 
-    const res = await request(app).delete('/api/tasks/task-a/workers/agent-on-b');
+    const res = await request(http_.server).delete('/api/tasks/task-a/workers/agent-on-b');
     expect(res.status).toBe(404);
   });
 
@@ -1415,7 +1435,7 @@ describe('DELETE /api/tasks/:id/workers/:agentId', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app).delete(
+    const res = await request(http_.server).delete(
       `/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}`,
     );
     expect(res.status).toBe(200);
@@ -1435,7 +1455,7 @@ describe('GET /api/browse', () => {
       throw new Error('ENOENT');
     });
 
-    const res = await request(app).get('/api/browse?path=/home/user');
+    const res = await request(http_.server).get('/api/browse?path=/home/user');
     expect(res.status).toBe(200);
     expect(res.body.current).toBe('/home/user');
     expect(res.body.entries).toHaveLength(2);
@@ -1450,7 +1470,7 @@ describe('GET /api/browse', () => {
     vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any);
     vi.mocked(fs.promises.readdir).mockResolvedValue([] as any);
 
-    const res = await request(app).get('/api/browse?path=/home/user');
+    const res = await request(http_.server).get('/api/browse?path=/home/user');
     expect(res.body.parent).toBe('/home');
   });
 
@@ -1458,14 +1478,14 @@ describe('GET /api/browse', () => {
     vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any);
     vi.mocked(fs.promises.readdir).mockResolvedValue([] as any);
 
-    const res = await request(app).get('/api/browse?path=/');
+    const res = await request(http_.server).get('/api/browse?path=/');
     expect(res.body.parent).toBeNull();
   });
 
   it('returns 400 when path is not a directory', async () => {
     vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => false } as any);
 
-    const res = await request(app).get('/api/browse?path=/tmp/file.txt');
+    const res = await request(http_.server).get('/api/browse?path=/tmp/file.txt');
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('not a directory');
   });
@@ -1473,7 +1493,7 @@ describe('GET /api/browse', () => {
   it('returns 400 when path does not exist', async () => {
     vi.mocked(fs.promises.stat).mockRejectedValue(new Error('ENOENT'));
 
-    const res = await request(app).get('/api/browse?path=/nonexistent');
+    const res = await request(http_.server).get('/api/browse?path=/nonexistent');
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('does not exist');
   });
@@ -1488,7 +1508,7 @@ describe('GET /api/browse', () => {
     vi.mocked(fs.promises.readdir).mockResolvedValue(['dir1', 'file.txt'] as any);
     vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
 
-    const res = await request(app).get('/api/browse?path=/tmp');
+    const res = await request(http_.server).get('/api/browse?path=/tmp');
     expect(res.body.entries).toHaveLength(1);
     expect(res.body.entries[0].name).toBe('dir1');
   });
@@ -1498,7 +1518,7 @@ describe('GET /api/browse', () => {
     vi.mocked(fs.promises.readdir).mockResolvedValue(['.hidden', 'visible'] as any);
     vi.mocked(fs.promises.access).mockRejectedValue(new Error('ENOENT'));
 
-    const res = await request(app).get('/api/browse?path=/tmp');
+    const res = await request(http_.server).get('/api/browse?path=/tmp');
     expect(res.body.entries[0].name).toBe('visible');
     expect(res.body.entries[1].name).toBe('.hidden');
   });
@@ -1508,7 +1528,7 @@ describe('GET /api/browse', () => {
 
 describe('GET /api/branches', () => {
   it('returns 400 when repo_path is missing', async () => {
-    const res = await request(app).get('/api/branches');
+    const res = await request(http_.server).get('/api/branches');
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('repo_path');
   });
@@ -1525,7 +1545,7 @@ describe('GET /api/branches', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get('/api/branches?repo_path=/tmp/repo');
+    const res = await request(http_.server).get('/api/branches?repo_path=/tmp/repo');
     expect(res.status).toBe(200);
     expect(res.body).toEqual(['main', 'develop', 'feature']);
   });
@@ -1542,7 +1562,7 @@ describe('GET /api/branches', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get('/api/branches?repo_path=/tmp/repo');
+    const res = await request(http_.server).get('/api/branches?repo_path=/tmp/repo');
     expect(res.body).not.toContain('HEAD');
   });
 
@@ -1554,7 +1574,7 @@ describe('GET /api/branches', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get('/api/branches?repo_path=/tmp/not-a-repo');
+    const res = await request(http_.server).get('/api/branches?repo_path=/tmp/not-a-repo');
     expect(res.status).toBe(400);
   });
 });
@@ -1563,7 +1583,7 @@ describe('GET /api/branches', () => {
 
 describe('GET /api/default-branch', () => {
   it('returns 400 when repo_path is missing', async () => {
-    const res = await request(app).get('/api/default-branch');
+    const res = await request(http_.server).get('/api/default-branch');
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('repo_path');
   });
@@ -1580,7 +1600,7 @@ describe('GET /api/default-branch', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get('/api/default-branch?repo_path=/tmp/repo');
+    const res = await request(http_.server).get('/api/default-branch?repo_path=/tmp/repo');
     expect(res.status).toBe(200);
     expect(res.body.branch).toBe('develop');
   });
@@ -1593,7 +1613,7 @@ describe('GET /api/default-branch', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app).get('/api/default-branch?repo_path=/tmp/repo');
+    const res = await request(http_.server).get('/api/default-branch?repo_path=/tmp/repo');
     expect(res.status).toBe(200);
     expect(res.body.branch).toBe('main');
   });
@@ -1603,7 +1623,7 @@ describe('GET /api/default-branch', () => {
 
 describe('GET /api/recent-repos', () => {
   it('returns empty array when no tasks exist', async () => {
-    const res = await request(app).get('/api/recent-repos');
+    const res = await request(http_.server).get('/api/recent-repos');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
@@ -1613,7 +1633,7 @@ describe('GET /api/recent-repos', () => {
     insertTask(db, { id: 'task-2', repo_path: '/repo/b', created_at: '2026-02-01 00:00:00' });
     insertTask(db, { id: 'task-3', repo_path: '/repo/a', created_at: '2026-03-01 00:00:00' });
 
-    const res = await request(app).get('/api/recent-repos');
+    const res = await request(http_.server).get('/api/recent-repos');
     expect(res.body).toHaveLength(2);
     expect(res.body[0].repo_path).toBe('/repo/a');
     expect(res.body[1].repo_path).toBe('/repo/b');
@@ -1624,7 +1644,7 @@ describe('GET /api/recent-repos', () => {
       insertTask(db, { id: `task-${i}`, repo_path: `/repo/${i}` });
     }
 
-    const res = await request(app).get('/api/recent-repos');
+    const res = await request(http_.server).get('/api/recent-repos');
     expect(res.body).toHaveLength(10);
   });
 });
@@ -1634,7 +1654,7 @@ describe('GET /api/recent-repos', () => {
 describe('POST /api/tasks/:id/user-terminal', () => {
   it('creates user terminal and returns window index', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ editor: 'nvim', windowIndex: 5 });
@@ -1642,13 +1662,13 @@ describe('POST /api/tasks/:id/user-terminal', () => {
   });
 
   it('returns 404 for nonexistent task', async () => {
-    const res = await request(app).post('/api/tasks/nonexistent/user-terminal');
+    const res = await request(http_.server).post('/api/tasks/nonexistent/user-terminal');
     expect(res.status).toBe(404);
   });
 
   it('returns 400 when task has no tmux session', async () => {
     insertTask(db, { tmux_session: null, runtime_state: 'running' });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('tmux');
   });
@@ -1657,7 +1677,7 @@ describe('POST /api/tasks/:id/user-terminal', () => {
 
   it.each(nonRunningStates)('returns 400 when task runtime_state is %s', async (state) => {
     insertTask(db, { ...DEFAULTS.runningTask, runtime_state: state });
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/user-terminal`);
     expect(res.status).toBe(400);
   });
 });
@@ -1668,7 +1688,7 @@ describe('POST /api/tasks/:id/terminals', () => {
   it('creates a terminal for a running task', async () => {
     insertTask(db, DEFAULTS.runningTask);
     insertAgent(db);
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.runningTask.id}/terminals`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.runningTask.id}/terminals`);
     expect(res.status).toBe(201);
     expect(res.body.label).toBe('Terminal 1');
     expect(createShellTerminal).toHaveBeenCalled();
@@ -1676,12 +1696,12 @@ describe('POST /api/tasks/:id/terminals', () => {
 
   it('returns 400 for non-running task', async () => {
     insertTask(db);
-    const res = await request(app).post(`/api/tasks/${DEFAULTS.task.id}/terminals`);
+    const res = await request(http_.server).post(`/api/tasks/${DEFAULTS.task.id}/terminals`);
     expect(res.status).toBe(400);
   });
 
   it('returns 404 for unknown task', async () => {
-    const res = await request(app).post('/api/tasks/unknown/terminals');
+    const res = await request(http_.server).post('/api/tasks/unknown/terminals');
     expect(res.status).toBe(404);
   });
 });
@@ -1692,7 +1712,7 @@ describe('DELETE /api/tasks/:id/terminals/:terminalId', () => {
   it('closes a terminal', async () => {
     insertTask(db, DEFAULTS.runningTask);
     insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
-    const res = await request(app).delete(
+    const res = await request(http_.server).delete(
       `/api/tasks/${DEFAULTS.runningTask.id}/terminals/${DEFAULTS.userTerminal.id}`,
     );
     expect(res.status).toBe(204);
@@ -1701,7 +1721,7 @@ describe('DELETE /api/tasks/:id/terminals/:terminalId', () => {
 
   it('returns 404 for unknown terminal', async () => {
     insertTask(db, DEFAULTS.runningTask);
-    const res = await request(app).delete(
+    const res = await request(http_.server).delete(
       `/api/tasks/${DEFAULTS.runningTask.id}/terminals/unknown`,
     );
     expect(res.status).toBe(404);
@@ -1715,7 +1735,7 @@ describe('GET /api/tasks/:id — user_terminals', () => {
     insertTask(db, DEFAULTS.runningTask);
     insertAgent(db);
     insertUserTerminal(db, { task_id: DEFAULTS.runningTask.id });
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       `/api/tasks/${DEFAULTS.runningTask.id}?include=user_terminals`,
     );
     expect(res.status).toBe(200);
@@ -1738,7 +1758,7 @@ describe('GET /api/tasks with permission prompts', () => {
       tool_input: '{"command":"npm test"}',
     });
 
-    const res = await request(app).get('/api/tasks?include=pending_prompts').expect(200);
+    const res = await request(http_.server).get('/api/tasks?include=pending_prompts').expect(200);
     const task = res.body[0];
     expect(task.pending_prompts).toHaveLength(1);
     expect(task.pending_prompts[0].tool_name).toBe('Bash');
@@ -1756,7 +1776,7 @@ describe('GET /api/tasks with permission prompts', () => {
       status: 'resolved' as any,
     });
 
-    const res = await request(app).get('/api/tasks?include=pending_prompts').expect(200);
+    const res = await request(http_.server).get('/api/tasks?include=pending_prompts').expect(200);
     expect(res.body[0].pending_prompts).toHaveLength(0);
   });
 
@@ -1781,7 +1801,7 @@ describe('GET /api/tasks with permission prompts', () => {
         });
       });
 
-      const res = await request(app).get('/api/tasks?include=workers').expect(200);
+      const res = await request(http_.server).get('/api/tasks?include=workers').expect(200);
       expect(res.body[0].derived_status).toBe(expected);
     },
   );
@@ -1833,7 +1853,9 @@ describe('GET /api/tasks with permission prompts', () => {
       });
       if (prompt) insertPermissionPrompt(db, { id: 'pp1', task_id: 't1', agent_id: 'a1' });
 
-      const res = await request(app).get('/api/tasks?include=workers,pending_prompts').expect(200);
+      const res = await request(http_.server)
+        .get('/api/tasks?include=workers,pending_prompts')
+        .expect(200);
       expect(res.body[0].needs_you).toBe(expected);
     },
   );
@@ -1841,10 +1863,12 @@ describe('GET /api/tasks with permission prompts', () => {
   it('omits needs_you when its inputs are not included', async () => {
     insertTask(db, { id: 't1', runtime_state: 'error' });
 
-    const lean = await request(app).get('/api/tasks?include=workers').expect(200);
+    const lean = await request(http_.server).get('/api/tasks?include=workers').expect(200);
     expect(lean.body[0]).not.toHaveProperty('needs_you');
 
-    const full = await request(app).get('/api/tasks?include=workers,pending_prompts').expect(200);
+    const full = await request(http_.server)
+      .get('/api/tasks?include=workers,pending_prompts')
+      .expect(200);
     expect(full.body[0].needs_you).toBe(true);
   });
 
@@ -1852,14 +1876,14 @@ describe('GET /api/tasks with permission prompts', () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'idle' });
 
-    const res = await request(app).get('/api/tasks?include=workers').expect(200);
+    const res = await request(http_.server).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
   it('derived_status is done when task has no agents', async () => {
     insertTask(db, { id: 't1', runtime_state: 'running' });
 
-    const res = await request(app).get('/api/tasks?include=workers').expect(200);
+    const res = await request(http_.server).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBe('done');
   });
 
@@ -1868,7 +1892,7 @@ describe('GET /api/tasks with permission prompts', () => {
     insertAgent(db, { id: 'a1', task_id: 't1', status: 'stopped', hook_activity: 'active' });
     insertAgent(db, { id: 'a2', task_id: 't1', window_index: 1, hook_activity: 'waiting' });
 
-    const res = await request(app).get('/api/tasks?include=workers').expect(200);
+    const res = await request(http_.server).get('/api/tasks?include=workers').expect(200);
     // Stopped agent's 'active' is ignored; only running agent's 'waiting' counts
     expect(res.body[0].derived_status).toBe('needs_attention');
   });
@@ -1876,7 +1900,7 @@ describe('GET /api/tasks with permission prompts', () => {
   it('derived_status is null for non-running tasks', async () => {
     insertTask(db, { id: 't1', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/tasks?include=workers').expect(200);
+    const res = await request(http_.server).get('/api/tasks?include=workers').expect(200);
     expect(res.body[0].derived_status).toBeNull();
   });
 
@@ -1891,7 +1915,9 @@ describe('GET /api/tasks with permission prompts', () => {
       tool_input: '{"file_path":"server/api.ts"}',
     });
 
-    const res = await request(app).get('/api/tasks/t1?include=workers,pending_prompts').expect(200);
+    const res = await request(http_.server)
+      .get('/api/tasks/t1?include=workers,pending_prompts')
+      .expect(200);
     expect(res.body.pending_prompts).toHaveLength(1);
     expect(res.body.derived_status).toBe('working');
   });
@@ -1911,7 +1937,7 @@ describe('POST /api/tasks/:id/workers/:agentId/message', () => {
       return undefined as any;
     }) as any);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({ message: 'hello agent' });
 
@@ -1948,7 +1974,7 @@ describe('POST /api/tasks/:id/workers/:agentId/message', () => {
   it('returns 404 when agent not found on existing task', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers/nonexistent/message`)
       .send({ message: 'hello' });
 
@@ -1960,7 +1986,7 @@ describe('POST /api/tasks/:id/workers/:agentId/message', () => {
     insertTask(db, { runtime_state: 'idle' });
     insertAgent(db);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({ message: 'hello' });
 
@@ -1972,7 +1998,7 @@ describe('POST /api/tasks/:id/workers/:agentId/message', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({});
 
@@ -1984,7 +2010,7 @@ describe('POST /api/tasks/:id/workers/:agentId/message', () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
 
-    const res = await request(app)
+    const res = await request(http_.server)
       .post(`/api/tasks/${DEFAULTS.task.id}/workers/${DEFAULTS.agent.id}/message`)
       .send({ message: '' });
 
@@ -1998,21 +2024,21 @@ describe('POST /api/tasks/:id/workers/:agentId/message', () => {
 describe('Skills API', () => {
   it('GET /api/skills returns skill list', async () => {
     vi.mocked(listSkills).mockResolvedValue([{ name: 'my-skill', description: 'A test skill' }]);
-    const res = await request(app).get('/api/skills');
+    const res = await request(http_.server).get('/api/skills');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([{ name: 'my-skill', description: 'A test skill' }]);
   });
 
   it('GET /api/skills/:name returns skill content', async () => {
     vi.mocked(getSkill).mockResolvedValue({ name: 'my-skill', content: '# My Skill' });
-    const res = await request(app).get('/api/skills/my-skill');
+    const res = await request(http_.server).get('/api/skills/my-skill');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ name: 'my-skill', content: '# My Skill' });
   });
 
   it('GET /api/skills/:name returns 404 for missing', async () => {
     vi.mocked(getSkill).mockRejectedValue(new Error('Skill not found: missing'));
-    const res = await request(app).get('/api/skills/missing');
+    const res = await request(http_.server).get('/api/skills/missing');
     expect(res.status).toBe(404);
     expect(res.body.error).toContain('not found');
   });
@@ -2026,7 +2052,7 @@ describe('GET /api/settings', () => {
   });
 
   it('returns default settings with envOverrides', async () => {
-    const res = await request(app).get('/api/settings');
+    const res = await request(http_.server).get('/api/settings');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       editor: 'nvim',
@@ -2040,7 +2066,7 @@ describe('GET /api/settings', () => {
 
   it('surfaces OCTOMUX_CLAUDE_FLAGS in envOverrides when set', async () => {
     process.env.OCTOMUX_CLAUDE_FLAGS = '--model opus';
-    const res = await request(app).get('/api/settings');
+    const res = await request(http_.server).get('/api/settings');
     expect(res.status).toBe(200);
     expect(res.body.envOverrides).toEqual({ claudeFlags: '--model opus' });
   });
@@ -2053,14 +2079,14 @@ describe('PATCH /api/settings', () => {
       defaultHarnessId: 'claude-code',
       harnesses: {},
     });
-    const res = await request(app).patch('/api/settings').send({ editor: 'cursor' });
+    const res = await request(http_.server).patch('/api/settings').send({ editor: 'cursor' });
     expect(res.status).toBe(200);
     expect(res.body.editor).toBe('cursor');
   });
 
   it('rejects invalid editor', async () => {
     vi.mocked(updateSettings).mockRejectedValue(new Error('Invalid editor: emacs'));
-    const res = await request(app).patch('/api/settings').send({ editor: 'emacs' });
+    const res = await request(http_.server).patch('/api/settings').send({ editor: 'emacs' });
     expect(res.status).toBe(400);
   });
 
@@ -2068,7 +2094,9 @@ describe('PATCH /api/settings', () => {
     vi.mocked(updateSettings).mockRejectedValue(
       new Error('Invalid claudeFlags: backticks are not allowed'),
     );
-    const res = await request(app).patch('/api/settings').send({ claudeFlags: '`whoami`' });
+    const res = await request(http_.server)
+      .patch('/api/settings')
+      .send({ claudeFlags: '`whoami`' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Invalid claudeFlags');
   });
@@ -2076,7 +2104,7 @@ describe('PATCH /api/settings', () => {
 
 describe('Chats API (standalone agents)', () => {
   it('POST /api/chats creates a standalone agent (task_id=NULL)', async () => {
-    const res = await request(app).post('/api/chats').send({ label: 'My chat' });
+    const res = await request(http_.server).post('/api/chats').send({ label: 'My chat' });
     expect(res.status).toBe(201);
     expect(res.body.task_id).toBeNull();
     expect(res.body.label).toBe('My chat');
@@ -2084,15 +2112,15 @@ describe('Chats API (standalone agents)', () => {
   });
 
   it('GET /api/chats lists standalone agents in creation order', async () => {
-    const a = await request(app).post('/api/chats').send({ label: 'Chat A' });
-    const res = await request(app).get('/api/chats');
+    const a = await request(http_.server).post('/api/chats').send({ label: 'Chat A' });
+    const res = await request(http_.server).get('/api/chats');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body[0].id).toBe(a.body.id);
   });
 
   it('POST /api/chats accepts an agent name and persists it on the row', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/chats')
       .send({ label: 'Run as orchestrator', agent: 'orchestrator' });
     expect(res.status).toBe(201);
@@ -2100,63 +2128,63 @@ describe('Chats API (standalone agents)', () => {
   });
 
   it('GET /api/chats/:id returns a chat by id', async () => {
-    const created = await request(app).post('/api/chats').send({ label: 'Chat B' });
-    const res = await request(app).get(`/api/chats/${created.body.id}`);
+    const created = await request(http_.server).post('/api/chats').send({ label: 'Chat B' });
+    const res = await request(http_.server).get(`/api/chats/${created.body.id}`);
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(created.body.id);
     expect(res.body.label).toBe('Chat B');
   });
 
   it('GET /api/chats/:id returns 404 for unknown id', async () => {
-    const res = await request(app).get('/api/chats/does-not-exist');
+    const res = await request(http_.server).get('/api/chats/does-not-exist');
     expect(res.status).toBe(404);
   });
 
   it("PATCH /api/chats/:id with status='stopped' closes the chat", async () => {
-    const created = await request(app).post('/api/chats').send({ label: 'To close' });
+    const created = await request(http_.server).post('/api/chats').send({ label: 'To close' });
     const id = created.body.id as string;
 
-    const res = await request(app).patch(`/api/chats/${id}`).send({ status: 'stopped' });
+    const res = await request(http_.server).patch(`/api/chats/${id}`).send({ status: 'stopped' });
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('stopped');
 
-    const fetched = await request(app).get(`/api/chats/${id}`);
+    const fetched = await request(http_.server).get(`/api/chats/${id}`);
     expect(fetched.body.status).toBe('stopped');
   });
 
   it('PATCH /api/chats/:id rejects unsupported status values', async () => {
-    const created = await request(app).post('/api/chats').send({ label: 'Bad patch' });
-    const res = await request(app)
+    const created = await request(http_.server).post('/api/chats').send({ label: 'Bad patch' });
+    const res = await request(http_.server)
       .patch(`/api/chats/${created.body.id}`)
       .send({ runtime_state: 'running' });
     expect(res.status).toBe(400);
   });
 
   it('PATCH /api/chats/:id returns 404 for unknown id', async () => {
-    const res = await request(app).patch('/api/chats/missing').send({ status: 'stopped' });
+    const res = await request(http_.server).patch('/api/chats/missing').send({ status: 'stopped' });
     expect(res.status).toBe(404);
   });
 
   it('DELETE /api/chats/:id removes the chat row', async () => {
-    const created = await request(app).post('/api/chats').send({ label: 'To delete' });
+    const created = await request(http_.server).post('/api/chats').send({ label: 'To delete' });
     const id = created.body.id as string;
 
-    const del = await request(app).delete(`/api/chats/${id}`);
+    const del = await request(http_.server).delete(`/api/chats/${id}`);
     expect(del.status).toBe(204);
 
-    const fetched = await request(app).get(`/api/chats/${id}`);
+    const fetched = await request(http_.server).get(`/api/chats/${id}`);
     expect(fetched.status).toBe(404);
   });
 
   it('DELETE /api/chats/:id returns 404 for unknown id', async () => {
-    const res = await request(app).delete('/api/chats/missing');
+    const res = await request(http_.server).delete('/api/chats/missing');
     expect(res.status).toBe(404);
   });
 });
 
 describe('GET /api/worktrees', () => {
   it('returns an empty list when no worktrees exist', async () => {
-    const res = await request(app).get('/api/worktrees');
+    const res = await request(http_.server).get('/api/worktrees');
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
@@ -2168,7 +2196,7 @@ describe('GET /api/worktrees', () => {
     ).run();
     insertTask(db, { id: 'tX', worktree_id: 'wt1', runtime_state: 'running' });
 
-    const res = await request(app).get('/api/worktrees');
+    const res = await request(http_.server).get('/api/worktrees');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].id).toBe('wt1');
@@ -2205,7 +2233,7 @@ describe('GET /api/worktrees', () => {
       updated_at: '2026-01-03 00:00:00',
     });
 
-    const res = await request(app).get('/api/worktrees');
+    const res = await request(http_.server).get('/api/worktrees');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     const row = res.body[0];
@@ -2228,7 +2256,7 @@ describe('GET /api/worktrees', () => {
     insertTask(db, { id: 't1', worktree_id: 'wtMain', runtime_state: 'idle' });
     insertTask(db, { id: 't2', worktree_id: 'wtFeat', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/worktrees');
+    const res = await request(http_.server).get('/api/worktrees');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
   });
@@ -2241,7 +2269,7 @@ describe('GET /api/worktrees', () => {
        VALUES ('wtOrphan','','','','new','available')`,
     ).run();
 
-    const res = await request(app).get('/api/worktrees');
+    const res = await request(http_.server).get('/api/worktrees');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(0);
   });
@@ -2249,7 +2277,7 @@ describe('GET /api/worktrees', () => {
 
 describe('GET /api/worktrees/:id', () => {
   it('returns 404 for unknown id', async () => {
-    const res = await request(app).get('/api/worktrees/does-not-exist');
+    const res = await request(http_.server).get('/api/worktrees/does-not-exist');
     expect(res.status).toBe(404);
   });
 
@@ -2266,7 +2294,7 @@ describe('GET /api/worktrees/:id', () => {
       updated_at: '2026-01-01 00:00:00',
     });
 
-    const res = await request(app).get('/api/worktrees/wtD1');
+    const res = await request(http_.server).get('/api/worktrees/wtD1');
     expect(res.status).toBe(200);
     expect(res.body.worktree.id).toBe('wtD1');
     expect(res.body.active_task?.id).toBe('tActive');
@@ -2279,7 +2307,7 @@ describe('GET /api/worktrees/:id', () => {
     ).run();
     insertTask(db, { id: 'tX', worktree_id: 'wtD2', runtime_state: 'idle' });
 
-    const res = await request(app).get('/api/worktrees/wtD2');
+    const res = await request(http_.server).get('/api/worktrees/wtD2');
     expect(res.status).toBe(200);
     expect(res.body.active_task).toBeNull();
     expect(res.body.history).toHaveLength(1);
@@ -2288,7 +2316,7 @@ describe('GET /api/worktrees/:id', () => {
 
 describe('DELETE /api/worktrees/:id', () => {
   it('returns 404 for unknown id', async () => {
-    const res = await request(app).delete('/api/worktrees/does-not-exist');
+    const res = await request(http_.server).delete('/api/worktrees/does-not-exist');
     expect(res.status).toBe(404);
   });
 
@@ -2296,7 +2324,7 @@ describe('DELETE /api/worktrees/:id', () => {
     db.prepare(
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wtU1','/tmp/wtU1','new','in_use')`,
     ).run();
-    const res = await request(app).delete('/api/worktrees/wtU1');
+    const res = await request(http_.server).delete('/api/worktrees/wtU1');
     expect(res.status).toBe(409);
   });
 
@@ -2306,7 +2334,7 @@ describe('DELETE /api/worktrees/:id', () => {
     ).run();
     insertTask(db, { id: 'tRun', worktree_id: 'wtA1', runtime_state: 'running' });
 
-    const res = await request(app).delete('/api/worktrees/wtA1');
+    const res = await request(http_.server).delete('/api/worktrees/wtA1');
     expect(res.status).toBe(409);
   });
 
@@ -2316,7 +2344,7 @@ describe('DELETE /api/worktrees/:id', () => {
     ).run();
     insertTask(db, { id: 'tTerm', worktree_id: 'wtOK', runtime_state: 'idle' });
 
-    const res = await request(app).delete('/api/worktrees/wtOK');
+    const res = await request(http_.server).delete('/api/worktrees/wtOK');
     expect(res.status).toBe(204);
     const remaining = db.prepare(`SELECT id FROM worktrees WHERE id = 'wtOK'`).get();
     expect(remaining).toBeUndefined();
@@ -2329,26 +2357,30 @@ describe('DELETE /api/worktrees/:id', () => {
 
 describe('PATCH /api/workers/:id/task', () => {
   it('404 when agent does not exist', async () => {
-    const res = await request(app).patch('/api/workers/missing/task').send({ task_id: null });
+    const res = await request(http_.server)
+      .patch('/api/workers/missing/task')
+      .send({ task_id: null });
     expect(res.status).toBe(404);
   });
 
   it('400 when body missing task_id key', async () => {
     insertAgent(db, { id: 'aBody', task_id: null });
-    const res = await request(app).patch('/api/workers/aBody/task').send({});
+    const res = await request(http_.server).patch('/api/workers/aBody/task').send({});
     expect(res.status).toBe(400);
   });
 
   it('400 when task_id equals current task_id (no-op)', async () => {
     insertTask(db, { id: 'tSame', runtime_state: 'running' });
     insertAgent(db, { id: 'aSame', task_id: 'tSame' });
-    const res = await request(app).patch('/api/workers/aSame/task').send({ task_id: 'tSame' });
+    const res = await request(http_.server)
+      .patch('/api/workers/aSame/task')
+      .send({ task_id: 'tSame' });
     expect(res.status).toBe(400);
   });
 
   it('404 when target task does not exist', async () => {
     insertAgent(db, { id: 'aOrph', task_id: null });
-    const res = await request(app)
+    const res = await request(http_.server)
       .patch('/api/workers/aOrph/task')
       .send({ task_id: 'does-not-exist' });
     expect(res.status).toBe(404);
@@ -2357,7 +2389,9 @@ describe('PATCH /api/workers/:id/task', () => {
   it('409 when target task is not active', async () => {
     insertTask(db, { id: 'tClosed', runtime_state: 'idle' });
     insertAgent(db, { id: 'aC', task_id: null });
-    const res = await request(app).patch('/api/workers/aC/task').send({ task_id: 'tClosed' });
+    const res = await request(http_.server)
+      .patch('/api/workers/aC/task')
+      .send({ task_id: 'tClosed' });
     expect(res.status).toBe(409);
   });
 
@@ -2365,7 +2399,7 @@ describe('PATCH /api/workers/:id/task', () => {
     insertTask(db, { id: 'tFrom', runtime_state: 'running' });
     insertAgent(db, { id: 'aDet', task_id: 'tFrom' });
 
-    const res = await request(app).patch('/api/workers/aDet/task').send({ task_id: null });
+    const res = await request(http_.server).patch('/api/workers/aDet/task').send({ task_id: null });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBeNull();
     expect(res.body.tmux_session).toBe('octomux-chat-aDet');
@@ -2376,7 +2410,9 @@ describe('PATCH /api/workers/:id/task', () => {
     insertTask(db, { id: 'tB', runtime_state: 'running' });
     insertAgent(db, { id: 'aMove', task_id: 'tA' });
 
-    const res = await request(app).patch('/api/workers/aMove/task').send({ task_id: 'tB' });
+    const res = await request(http_.server)
+      .patch('/api/workers/aMove/task')
+      .send({ task_id: 'tB' });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBe('tB');
   });
@@ -2387,7 +2423,9 @@ describe('PATCH /api/workers/:id/task', () => {
     // Standalone agents carry their own tmux_session.
     db.prepare(`UPDATE workers SET tmux_session = 'octomux-chat-aChat' WHERE id = 'aChat'`).run();
 
-    const res = await request(app).patch('/api/workers/aChat/task').send({ task_id: 'tTarget' });
+    const res = await request(http_.server)
+      .patch('/api/workers/aChat/task')
+      .send({ task_id: 'tTarget' });
     expect(res.status).toBe(200);
     expect(res.body.task_id).toBe('tTarget');
   });
@@ -2399,7 +2437,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
       `INSERT INTO worktrees (id, path, mode, status) VALUES ('wt2','/tmp/wt2','existing','in_use')`,
     ).run();
     insertTask(db, { id: 'tJ', worktree_id: 'wt2' });
-    const res = await request(app).get('/api/tasks/tJ?include=worktree');
+    const res = await request(http_.server).get('/api/tasks/tJ?include=worktree');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeTruthy();
     expect(res.body.worktree_row.id).toBe('wt2');
@@ -2409,7 +2447,7 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
   it('worktree_row is null when task has no worktree_id', async () => {
     insertTask(db, { id: 'tK' });
     db.prepare(`UPDATE tasks SET worktree_id = NULL WHERE id = 'tK'`).run();
-    const res = await request(app).get('/api/tasks/tK?include=worktree');
+    const res = await request(http_.server).get('/api/tasks/tK?include=worktree');
     expect(res.status).toBe(200);
     expect(res.body.worktree_row).toBeNull();
   });
@@ -2419,17 +2457,17 @@ describe('GET /api/tasks/:id — worktree_row join', () => {
 
 describe('GET /api/preflight/none-mode', () => {
   it('400s when repo_path is missing', async () => {
-    const res = await request(app).get('/api/preflight/none-mode?base_branch=main');
+    const res = await request(http_.server).get('/api/preflight/none-mode?base_branch=main');
     expect(res.status).toBe(400);
   });
 
   it('400s when base_branch is missing', async () => {
-    const res = await request(app).get('/api/preflight/none-mode?repo_path=/r');
+    const res = await request(http_.server).get('/api/preflight/none-mode?repo_path=/r');
     expect(res.status).toBe(400);
   });
 
   it('returns 400 from execFile failure on a fake repo path', async () => {
-    const res = await request(app).get(
+    const res = await request(http_.server).get(
       '/api/preflight/none-mode?repo_path=/tmp/octomux-not-a-repo&base_branch=main',
     );
     // Fake repo path will surface as 400 from execFile failure. We just want to
@@ -2443,19 +2481,19 @@ describe('GET /api/preflight/none-mode', () => {
 
 describe('POST /api/preflight/stash', () => {
   it('400s when repo_path is missing', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/preflight/stash')
       .send({ target_branch: 'feature-x' });
     expect(res.status).toBe(400);
   });
 
   it('400s when target_branch is missing', async () => {
-    const res = await request(app).post('/api/preflight/stash').send({ repo_path: '/r' });
+    const res = await request(http_.server).post('/api/preflight/stash').send({ repo_path: '/r' });
     expect(res.status).toBe(400);
   });
 
   it('returns 400 from execFile failure on a fake repo path', async () => {
-    const res = await request(app)
+    const res = await request(http_.server)
       .post('/api/preflight/stash')
       .send({ repo_path: '/tmp/octomux-not-a-repo', target_branch: 'feature-x' });
     expect([200, 400]).toContain(res.status);
@@ -2475,7 +2513,7 @@ describe('agent name validation', () => {
 
   describe('POST /api/tasks', () => {
     it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
-      const res = await request(app)
+      const res = await request(http_.server)
         .post('/api/tasks')
         .send({ title: 'T', description: 'D', repo_path: '/tmp', agent });
       expect(res.status).toBe(400);
@@ -2486,7 +2524,7 @@ describe('agent name validation', () => {
   describe('POST /api/tasks/:id/workers', () => {
     it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
       insertTask(db, { ...DEFAULTS.runningTask });
-      const res = await request(app)
+      const res = await request(http_.server)
         .post(`/api/tasks/${DEFAULTS.runningTask.id}/workers`)
         .send({ agent });
       expect(res.status).toBe(400);
@@ -2496,7 +2534,7 @@ describe('agent name validation', () => {
 
   describe('POST /api/chats', () => {
     it.each(invalidAgentCases)('rejects $name as agent → 400', async ({ agent }) => {
-      const res = await request(app).post('/api/chats').send({ agent });
+      const res = await request(http_.server).post('/api/chats').send({ agent });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/Invalid agent name/);
     });
@@ -2504,7 +2542,7 @@ describe('agent name validation', () => {
 
   describe('GET /api/harnesses', () => {
     it('returns registered harnesses with id, displayName, sessionIdMode', async () => {
-      const res = await request(app).get('/api/harnesses');
+      const res = await request(http_.server).get('/api/harnesses');
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body).toEqual(
@@ -2526,7 +2564,7 @@ describe('agent name validation', () => {
 
   describe('POST /api/tasks with harness_id', () => {
     it('accepts harness_id: "cursor" and persists it', async () => {
-      const res = await request(app).post('/api/tasks').send({
+      const res = await request(http_.server).post('/api/tasks').send({
         title: 'Cursor task',
         description: 'd',
         repo_path: '/tmp/x',
@@ -2538,7 +2576,7 @@ describe('agent name validation', () => {
     });
 
     it('defaults to claude-code when harness_id is omitted', async () => {
-      const res = await request(app).post('/api/tasks').send({
+      const res = await request(http_.server).post('/api/tasks').send({
         title: 'Default task',
         description: 'd',
         repo_path: '/tmp/x',
@@ -2549,7 +2587,7 @@ describe('agent name validation', () => {
     });
 
     it('rejects unknown harness_id with 400', async () => {
-      const res = await request(app).post('/api/tasks').send({
+      const res = await request(http_.server).post('/api/tasks').send({
         title: 'Bad task',
         description: 'd',
         repo_path: '/tmp/x',

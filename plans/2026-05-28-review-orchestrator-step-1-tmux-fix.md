@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, vitest, `execFile` via `child_process` + `promisify`. ESM modules.
 
-**Spec reference:** `docs/superpowers/specs/2026-05-27-review-orchestrator-design.md`, Section 0.
+**Spec reference:** design doc was never committed; see `spec/workflow-framework.md` for the shipped review-orchestrator flow.
 
 **Working assumptions about the codebase** (verify with the current source, do not rely on memory):
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, better-sqlite3 (SQLite 3.49+), Express 5, vitest, pino logger, nanoid(12), node-pty + tmux for runtime. ESM modules. CLI uses the `commander`-style pattern already present in `bin/octomux.js`.
 
-**Spec reference:** `docs/superpowers/specs/2026-05-27-review-orchestrator-design.md`. Step 2 implements sections 2 (data model), 3 (runtime / orchestration flow) including the auto-staleness, draft carry-forward, incremental re-review, force-push fallback, update-while-triaging signal, watchdog, and the new CLI surface; plus the `review-orchestrator` skill. Step 3 implements section 4 (publish + UI) and section 5's GitHub-side failure-mode handling.
+**Spec reference:** design doc was never committed; see `spec/workflow-framework.md` for the shipped review-orchestrator flow. Step 2 implements the data model, runtime / orchestration flow including the auto-staleness, draft carry-forward, incremental re-review, force-push fallback, update-while-triaging signal, watchdog, and the new CLI surface; plus the `review-orchestrator` skill. Step 3 implements the publish + UI flow and GitHub-side failure-mode handling.
 
 **Working assumptions about the codebase** (verify with the current source, do not rely on memory):
 

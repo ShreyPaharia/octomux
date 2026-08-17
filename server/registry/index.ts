@@ -4,7 +4,7 @@
  * The capability registry. Capabilities are defined once here and projected
  * onto transports by the generators in `server/registry/projections/`.
  *
- * Design doc: docs/superpowers/specs/2026-08-12-surface-consolidation-and-centaur-design.md
+ * Design doc: spec/surface-consolidation-and-centaur.md
  */
 
 import { childLogger } from '../logger.js';

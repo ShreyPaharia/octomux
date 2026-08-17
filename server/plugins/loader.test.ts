@@ -134,16 +134,19 @@ plugins:
     name: ${hang}
 `);
 
-    // A real 10ms timer, not fake timers. loadPlugins awaits real async work
-    // (barrel imports, then a dynamic import of the plugin) BEFORE it reaches
-    // the setTimeout, so under fake timers `advanceTimersByTimeAsync` runs to
-    // completion before the timer is ever scheduled — and the loader then
-    // hangs forever on a timer that will never fire. 10ms of wall clock is
-    // cheaper than the ordering hazard.
+    // A real timer, not fake ones: loadPlugins awaits a dynamic import() before
+    // it reaches the setTimeout, so under fake timers `advanceTimersByTimeAsync`
+    // returns before the timer is ever scheduled and the loader then waits
+    // forever on a timer that never fires.
+    //
+    // The budget has to clear real import latency, because the same
+    // `applyTimeoutMs` also bounds the import() above apply(). At 10ms a loaded
+    // machine loses the race on the import instead, and this fails with
+    // phase 'import' — flakily, only under the parallel suite.
     const report = await loadPlugins({
       manifestPath,
       resolveFrom: nodeModulesDir,
-      applyTimeoutMs: 10,
+      applyTimeoutMs: 250,
     });
 
     expect(report.loaded).toEqual([]);

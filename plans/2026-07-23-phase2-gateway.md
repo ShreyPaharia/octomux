@@ -492,11 +492,11 @@ Then `server/repositories/gateway.ts` with the four functions (parameterized `IN
 
 **Files:**
 
-- Create: `docs/gateway-setup.md`
+- Create: `server/gateway/README.md` (shipped location; plan originally specified `docs/gateway-setup.md`)
 - Modify: gateway MCP config so the assistant conversation attaches outward MCP servers read-only (via the conductor's existing `--mcp-config` / `writeOrchestratorMcpConfig` path).
 
 - [ ] **Step 1:** Read `server/orchestrator/runner.ts` `writeOrchestratorMcpConfig` and confirm how the octomux MCP server is attached. Add an optional block that also attaches, for gateway conversations, the outward MCP servers from config — **GitHub MCP with `--read-only` over stdio + a read-scoped PAT**, and any already-configured Slack/Jira/Linear/Notion MCP servers, read-scoped.
-- [ ] **Step 2:** Write `docs/gateway-setup.md`: (a) create a Telegram bot via BotFather, set `OCTOMUX_GATEWAY_TELEGRAM_TOKEN`; (b) add your Telegram numeric id to `OCTOMUX_GATEWAY_TELEGRAM_ALLOW`; (c) create a GitHub fine-grained **read-only** PAT, wire the GitHub MCP `--read-only`; (d) `octomux start`, DM the bot, verify the four-beat (recall → dispatch → approve[v2] → status).
+- [ ] **Step 2:** Write `server/gateway/README.md`: (a) create a Telegram bot via BotFather, set `OCTOMUX_GATEWAY_TELEGRAM_TOKEN`; (b) add your Telegram numeric id to `OCTOMUX_GATEWAY_TELEGRAM_ALLOW`; (c) create a GitHub fine-grained **read-only** PAT, wire the GitHub MCP `--read-only`; (d) `octomux start`, DM the bot, verify the four-beat (recall → dispatch → approve[v2] → status).
 - [ ] **Step 3 (manual smoke — not CI):** run it once locally with real tokens; confirm an allowed DM gets a reply and a non-allowlisted id is silently ignored. Record the result in the doc.
 - [ ] **Step 4: Commit** `docs(gateway): setup + read-only outward MCP config`.
 

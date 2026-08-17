@@ -1,3 +1,4 @@
+import http from 'http';
 import Database from './sqlite.js';
 import { vi } from './bun-test.js';
 import {
@@ -381,3 +382,47 @@ export const USER_TERMINALS_TABLE_COLUMNS = [
   'status',
   'created_at',
 ];
+
+/**
+ * One listening HTTP server per test FILE, forwarding to whatever app the
+ * current test built.
+ *
+ * `request(app)` on a non-listening express app makes supertest `listen(0)` and
+ * tear the server down for every single request. Across ~3200 tests that is
+ * thousands of listen/close cycles — one run left 813 sockets in TIME_WAIT —
+ * and under `--parallel` a close racing an in-flight request surfaces as a
+ * spurious `ECONNRESET` on whichever test happened to be running. It looked
+ * like four unrelated flaky tests; it was one.
+ *
+ * Usage: create it once at module scope, point it at each new app in
+ * `beforeEach`, and pass the server (not the app) to supertest.
+ *
+ *   const h = createTestHttpServer();
+ *   beforeEach(() => h.use(createApp()));
+ *   afterAll(() => h.close());
+ *   ... request(h.server)
+ */
+export function createTestHttpServer(): {
+  server: import('http').Server;
+  use(app: (req: unknown, res: unknown) => void): void;
+  close(): void;
+} {
+  let current: ((req: unknown, res: unknown) => void) | undefined;
+  const server = http.createServer((req, res) => {
+    if (!current) {
+      res.statusCode = 500;
+      res.end('createTestHttpServer: no app registered — call use() in beforeEach');
+      return;
+    }
+    current(req as unknown, res as unknown);
+  });
+  server.listen(0);
+  server.unref();
+  return {
+    server,
+    use: (app) => {
+      current = app;
+    },
+    close: () => server.close(),
+  };
+}

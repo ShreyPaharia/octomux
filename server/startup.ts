@@ -53,12 +53,12 @@ export function checkNeovimVersion(): void {
       nvimVersion = { major: parseInt(match[1], 10), minor: parseInt(match[2], 10), raw: match[0] };
     }
   } catch {
-    // shouldn't happen — ensureBinary already verified nvim exists
+    // nvim missing — warnBinary already surfaced it; neovim is optional
   }
 
   if (!nvimVersion) {
-    logger.error('Could not determine neovim version');
-    process.exit(1);
+    logger.warn('Could not determine neovim version — install from the Setup page');
+    return;
   }
 
   if (nvimVersion.major === 0 && nvimVersion.minor < 10) {
