@@ -41,8 +41,16 @@ expect.extend(matchers as unknown as Parameters<typeof expect.extend>[0]);
 // React Testing Library auto-registers its cleanup against vitest/jest globals.
 // Under bun those don't exist, so mounted trees (and their timers, observers and
 // event listeners) survive between tests and keep the process alive.
-const { cleanup } = await import('@testing-library/react');
+const { cleanup, configure } = await import('@testing-library/react');
 afterEach(cleanup);
+
+// Testing Library's default asyncUtilTimeout is 1000ms, which is fine on a
+// developer laptop and not fine on a 2-core CI runner: a `waitFor` around a
+// lazy `Suspense` boundary loses the race and reports "Unable to find an
+// element", which reads like a real assertion failure rather than a timeout.
+// Raising the ceiling costs nothing when the element appears promptly — the
+// poll exits as soon as the assertion passes.
+configure({ asyncUtilTimeout: 5000 });
 
 // happy-dom doesn't implement matchMedia — stub it for components that use media queries
 Object.defineProperty(window, 'matchMedia', {
