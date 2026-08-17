@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+// Static import, not a disk read: inside a compiled binary there is no
+// package.json next to the entry, and a static import gets bundled.
+import pkg from '../../package.json';
 import { registerCapabilityCommands, TASK_CAPABILITY_META } from '@octomux/capabilities';
 import { createClient } from './client.js';
 import { errorMessage } from './format.js';
@@ -40,7 +43,7 @@ const program = new Command();
 program
   .name('octomux')
   .description('CLI for managing octomux agent tasks')
-  .version('0.1.0')
+  .version(pkg.version)
   .option(
     '-s, --server-url <url>',
     'server URL',

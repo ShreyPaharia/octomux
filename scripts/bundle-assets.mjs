@@ -18,7 +18,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TREES = ['skills', 'agents', 'templates', 'workflows', 'dist'];
+// `plugin`, not `skills`/`agents`: the skills and agent roles live at
+// plugin/skills and plugin/agents, and builtInSkillsDir() resolves
+// `<assetRoot()>/plugin/skills`. Naming the leaf dirs here silently bundled
+// neither — the compiled binary shipped zero skills until this was fixed.
+const TREES = ['plugin', 'kinds', 'templates', 'workflows', 'dist'];
 const OUT = path.join(root, 'server', 'assets.generated.json');
 
 function walk(dir, base, out) {
