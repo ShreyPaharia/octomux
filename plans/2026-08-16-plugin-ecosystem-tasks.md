@@ -10,6 +10,57 @@ W1-A packaging/publish, W1-D DB safety net + `plugin_kv`. Do not schedule them.
 
 ---
 
+## STATUS — all three steps shipped
+
+Landed on `next` at `0a13108`. **3212 server + 1265 client + 205 unit passing,
+0 fail; `tsc -b`, lint and format clean.**
+
+| Step   | Tasks                            | Landed                                            |
+| ------ | -------------------------------- | ------------------------------------------------- |
+| STEP-0 | foundation                       | `b211532`                                         |
+| STEP-1 | T1 T2 T3 T4 T5 (parallel)        | `766651f` `8c737fe` `2a3c2d7` `0ccdfcb` `be6e04c` |
+| review | 4 Critical + 7 Issues, all fixed | R1–R4, `8c73180`…`02efa7b`                        |
+| STEP-2 | T7, T6, T8                       | `3e8e477` `8f78541` `4e604d7`                     |
+
+### Corrections to the text below
+
+The task text is left as written for provenance. These four turned out wrong:
+
+| Said                                     | Actually                                                          |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `bin/octomux.js` owns `--safe-mode`      | `bin/main.js` — `bin/octomux` is a launcher that execs the binary |
+| `updatePluginSettings → OctomuxSettings` | `Promise<void>`                                                   |
+| the plugin namespace is the package name | the manifest row's `id` (`name` may be a path or contain `/`)     |
+| `pluginKindsDir()` takes no argument     | `pluginKindsDir(pkg)`; the directory scan was deleted outright    |
+
+### What the parallel split actually cost
+
+Five concurrent agents plus a foundation agent produced **three cross-task seams**
+`tsc -b` caught at merge, all in test files, none in production code. Worth the
+wall-clock. The recurring failures were procedural, not technical:
+
+- every agent worktree was branched from **main's release history, not `next`** —
+  six independent recoveries of the same harness bug
+- `bun test <directory>` **hangs** without `--parallel`; two agents burned ~15 min
+  each looping on it, and stray processes survived to slow later runs. Always name
+  individual files, always prefix `timeout 120`.
+- `vi.useFakeTimers()` around an awaited dynamic `import()` **deadlocks**:
+  `advanceTimersByTimeAsync` returns before the timer is scheduled, then the code
+  waits on a timer that never fires. Use a small real timeout.
+
+### Still open
+
+- `plugins disable`/`enable` re-serializes the whole YAML — comments, key order
+  and formatting in a hand-edited `octomux.yml` are destroyed on first write
+- the CLI is outside `tsc -b` entirely (root tsconfig never references
+  `cli/tsconfig.json`), and `cli/src/commands/{plugins,doctor}.ts` now reach into
+  `server/plugins/*` by relative path
+- `server/index.test.ts` asserts boot order by reading source text, not by
+  executing it — `index.ts` binds a port on import
+- W1-A (publish) and W1-D (`plugin_kv`, which `ctx.kv` throws for) still held
+
+---
+
 ## Post-rebase deltas (the bun migration landed on `next`)
 
 Rebased on `origin/next` @ `adbee6b`. Four things changed that every task below
