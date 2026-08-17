@@ -71,16 +71,21 @@ publish:
   releaseType: release
 
 # macOS target
+# NO explicit `arch` list: electron-builder then builds for whatever the
+# CLI passes (`--arm64` / `--x64`), defaulting to the host.
+#
+# Listing both arches here made the arm64 CI runner emit an x64 app as well,
+# even though the workflow passed `--mac --arm64` — and that job only stages
+# `@octomux/tmux-darwin-arm64`. The result shipped to every Intel Mac user was
+# an x86_64 app bundling an arm64 tmux, which cannot exec. Verified against
+# the published v1.5.0 x64 zip:
+#   app binary   -> Mach-O 64-bit executable x86_64
+#   bundled tmux -> Mach-O 64-bit executable arm64
+# Each matrix leg must build only its own arch, alongside the matching tmux.
 mac:
   target:
     - target: dmg
-      arch:
-        - arm64
-        - x64
     - target: zip
-      arch:
-        - arm64
-        - x64
   category: public.app-category.developer-tools
   # No Developer ID → disable electron-builder's signing; the afterPack hook
   # (scripts/electron-adhoc-sign.cjs) ad-hoc signs with `codesign --sign -`,
