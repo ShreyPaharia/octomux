@@ -236,20 +236,20 @@ row is isolated in its own try/catch, and a bad plugin becomes a
 | `apply` | `apply(ctx)` throws, rejects, or overruns the timeout |
 | `reconcile` | reserved — `reconcile()` is on the `OctomuxPlugin` interface but the loader **does not call it yet**. There is no `reconcile` failure today; see Limits. |
 
-`apply()` gets a **10 second** default timeout
-(`DEFAULT_APPLY_TIMEOUT_MS` in `loader.ts`; `withTimeout` races it, not
-configurable from the manifest or a CLI flag today). On timeout, the plugin
-is recorded as `failed` with `phase: 'apply'`. Note what this timeout does
-and doesn't do: `apply()` itself is **never cancelled** — there's no
-`AbortSignal` wired up. In principle a `PluginContext.revoke()` mechanism
-exists to stop a timed-out plugin from registering anything after the fact
-(`revokePluginContext` in `context.ts`, exercised in
-`context.test.ts`) — **but as of this writing `loader.ts` never calls it** on
-the timeout path (`grep revoke server/plugins/loader.ts` finds nothing). In
-practice: if your `apply()` hangs past 10s, you're reported `failed`, and if
-it later actually resolves in the background, its registrations can still
-land in the live registries. Don't rely on this gap; keep `apply()` fast and
-synchronous where you can.
+Both the `import()` and the `apply()` call get a **10 second** default timeout
+(`DEFAULT_APPLY_TIMEOUT_MS` in `loader.ts`; `withTimeout` races each, not
+configurable from the manifest or a CLI flag today). On timeout the plugin is
+recorded as `failed` with the matching phase.
+
+Note what the timeout does and doesn't do. `apply()` itself is **never
+cancelled** — there's no `AbortSignal` on `PluginContext`. What stops a
+late-finishing plugin from taking effect is revocation: the loader calls
+`revokePluginContext(ctx)` in its `apply()` catch, after which every registrar
+on that context throws. So a plugin that overruns and then resolves in the
+background cannot register anything — its report and the live registries agree.
+
+Keep `apply()` fast anyway. Registration is the only thing revocation protects;
+anything else your `apply()` set in motion keeps running.
 
 A manifest that's missing is `{ plugins: [] }` (fine, fresh install). A
 manifest that exists but fails to parse — bad YAML, an unknown top-level key,
