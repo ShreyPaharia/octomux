@@ -26,22 +26,23 @@ vi.mock('fs', (importOriginal) => {
   return { ...actual, default: { ...actual, promises }, promises };
 });
 
-// settings.ts dynamically imports this for harness-blob validation on every
-// getSettings()/updateSettings() call. Plugin settings never touch it, so an
-// empty registry is enough — this just keeps the real settings.ts from
-// exploding on the `await import('./harnesses/index.js')` inside it.
-vi.mock('../harnesses/index.js', () => ({
-  listHarnesses: vi.fn(() => []),
-  getHarness: vi.fn(() => {
-    throw new Error('unexpected getHarness call in context.test.ts');
-  }),
-}));
+// settings.ts dynamically imports `./harnesses/index.js` for harness-blob
+// validation on every getSettings()/updateSettings() call. That resolves to
+// the same `harnesses/registry.js` singleton this file imports directly
+// below, so `resetHarnesses()` in `beforeEach` is enough to keep it empty
+// for the ctx.settings tests — no module mock needed. (Deliberately NOT
+// mocked: `vi.mock('../harnesses/index.js', ...)` is process-global in bun
+// and is never unregistered, so it poisoned every sibling test file that
+// imports the real module afterwards — e.g. `bun test
+// ./server/plugins/context.test.ts ./server/harnesses/registry.test.ts`
+// failed 11 tests in registry.test.ts. `bun run test:server`'s `--parallel`
+// flag hid this by isolating each file into its own process.)
 
-// context.ts imports settings.js and harnesses/index.js statically — both
-// mocks above must be registered before it (or the real one it evaluated)
-// gets pulled in. bun's mock.module doesn't hoist, so this must be a dynamic
-// import, not a static one at the top of the file.
-const { createPluginContext } = await import('./context.js');
+// context.ts imports settings.js statically, which in turn reaches the real
+// fs module through the mock above — that mock must be registered before
+// context.ts is pulled in. bun's mock.module doesn't hoist, so this must be
+// a dynamic import, not a static one at the top of the file.
+const { createPluginContext, revokePluginContext } = await import('./context.js');
 const { qualify } = await import('./qualify.js');
 const { getLogger, setLogger } = await import('../logger.js');
 const { default: pino } = await import('pino');
@@ -72,6 +73,12 @@ function captureLogs() {
   };
 }
 
+// workflows/registry.ts has no resetWorkflows() (deliberately not owned by
+// this task — see the plugins/context.ts F3 write-up), so the kinds this
+// file registers directly (not through ctx.workflows.register, which always
+// namespaces under the plugin id) outlive every test in this process. Using
+// distinctly-prefixed literals ('ctxtest-...') instead of an exact reset
+// keeps that leak from ever colliding with a real workflow kind.
 beforeEach(() => {
   fileContent = undefined;
   resetProviders();
@@ -164,13 +171,17 @@ describe('ctx.workflows', () => {
   });
 
   it('cannot land on a bare (unqualified) core kind through the registrar', () => {
-    registerWorkflow({ kind: 'core-guard-kind', displayName: 'Core', surfaces: ['feed'] });
+    registerWorkflow({ kind: 'ctxtest-core-guard-kind', displayName: 'Core', surfaces: ['feed'] });
     const ctx = createPluginContext('attacker');
 
-    ctx.workflows.register({ kind: 'core-guard-kind', displayName: 'Hijack', surfaces: ['feed'] });
+    ctx.workflows.register({
+      kind: 'ctxtest-core-guard-kind',
+      displayName: 'Hijack',
+      surfaces: ['feed'],
+    });
 
-    expect(getWorkflow('core-guard-kind')?.displayName).toBe('Core');
-    expect(getWorkflow('attacker:core-guard-kind')?.displayName).toBe('Hijack');
+    expect(getWorkflow('ctxtest-core-guard-kind')?.displayName).toBe('Core');
+    expect(getWorkflow('attacker:ctxtest-core-guard-kind')?.displayName).toBe('Hijack');
   });
 });
 
@@ -221,10 +232,25 @@ describe('ctx.integrations', () => {
   });
 });
 
+// Minimal stand-in for the 8 `Harness` members core calls unconditionally
+// (see HARNESS_REQUIRED_FN_FIELDS in context.ts) — every test that expects
+// harnesses.register() to actually reach the registry needs all of these,
+// or the new shape guard rejects it before qualification is even relevant.
+const stubHarnessFns = {
+  newSessionId: () => 'session-id',
+  buildLaunchCommand: () => 'launch',
+  buildResumeCommand: () => 'resume',
+  buildContinueCommand: () => null,
+  installHooks: async () => {},
+  uninstallHooks: async () => {},
+  resolveFlags: () => '',
+  validateSettings: (blob: unknown) => blob as Record<string, unknown>,
+};
+
 describe('ctx.harnesses', () => {
   it('qualifies a local harness id', () => {
     const ctx = createPluginContext('demo-harness');
-    ctx.harnesses.register({ id: 'foo', displayName: 'Foo' });
+    ctx.harnesses.register({ id: 'foo', displayName: 'Foo', ...stubHarnessFns });
 
     expect(listHarnesses().map((h) => h.id)).toContain(qualify('demo-harness', 'foo'));
     expect(() => getHarness('foo')).toThrow(/unknown harness/i); // never registered bare
@@ -232,7 +258,7 @@ describe('ctx.harnesses', () => {
 
   it('throws when the payload is missing a local "id"', () => {
     const ctx = createPluginContext('demo-harness-2');
-    expect(() => ctx.harnesses.register({ displayName: 'No id' })).toThrow(/id/);
+    expect(() => ctx.harnesses.register({ displayName: 'No id', ...stubHarnessFns })).toThrow(/id/);
   });
 
   it('cannot land on a core harness id, frozen or not', () => {
@@ -243,9 +269,111 @@ describe('ctx.harnesses', () => {
     freezeCoreHarnesses();
     const ctx = createPluginContext('attacker');
 
-    ctx.harnesses.register({ id: 'claude-code', displayName: 'Hijack' });
+    ctx.harnesses.register({ id: 'claude-code', displayName: 'Hijack', ...stubHarnessFns });
 
     expect(getHarness('claude-code').displayName).toBe('Core Claude Code');
     expect(listHarnesses().map((h) => h.id)).toContain('attacker:claude-code');
+  });
+
+  describe('payload shape guard (F2)', () => {
+    it.each(['newSessionId', 'buildLaunchCommand', 'resolveFlags', 'validateSettings'])(
+      'throws when required function field "%s" is missing',
+      (field) => {
+        const ctx = createPluginContext('shape-harness');
+        const payload: Record<string, unknown> = { id: 'x', displayName: 'X', ...stubHarnessFns };
+        delete payload[field];
+        expect(() => ctx.harnesses.register(payload)).toThrow(new RegExp(field));
+        expect(() => getHarness(qualify('shape-harness', 'x'))).toThrow(/unknown harness/i);
+      },
+    );
+
+    it('throws when a required function field is present but not a function', () => {
+      const ctx = createPluginContext('shape-harness-2');
+      const payload = { id: 'x', displayName: 'X', ...stubHarnessFns, installHooks: 'nope' };
+      expect(() => ctx.harnesses.register(payload)).toThrow(/installHooks/);
+    });
+  });
+});
+
+describe('workflow + provider payload shape guards (F2)', () => {
+  const provider = () => ({
+    kind: 'thing',
+    validate: () => ({ ok: true }),
+    handler: async () => {},
+    events: ['workflow_status_changed'],
+  });
+
+  it('rejects a workflow whose apiRouter is not a function', () => {
+    const ctx = createPluginContext('wfguard');
+    // The concrete crash this prevents: server/api.ts does
+    // `app.use(wf.apiRouter)` on any truthy value, and express 5 throws
+    // "app.use() requires a middleware function" — killing createApp() AFTER
+    // the plugin was already recorded as loaded.
+    expect(() => ctx.workflows.register({ kind: 'k', apiRouter: {} })).toThrow(/apiRouter/);
+    expect(getWorkflow(qualify('wfguard', 'k'))).toBeUndefined();
+  });
+
+  it('rejects a workflow whose run is not a function', () => {
+    const ctx = createPluginContext('wfguard2');
+    expect(() => ctx.workflows.register({ kind: 'k', run: 'nope' })).toThrow(/run/);
+    expect(getWorkflow(qualify('wfguard2', 'k'))).toBeUndefined();
+  });
+
+  it.each(['validate', 'handler', 'events'])(
+    'rejects a provider missing required field "%s"',
+    (field) => {
+      const ctx = createPluginContext('provguard');
+      const payload: Record<string, unknown> = provider();
+      delete payload[field];
+      expect(() => ctx.integrations.register(payload)).toThrow(new RegExp(field));
+      expect(getProvider(qualify('provguard', 'thing'))).toBeUndefined();
+    },
+  );
+
+  it('rejects a provider whose events is not an array', () => {
+    const ctx = createPluginContext('provguard2');
+    // hook-dispatcher.ts calls events.includes() OUTSIDE the handler's
+    // try/catch, so a non-array here throws unhandled for every hook event
+    // dispatched — not just this plugin's.
+    expect(() => ctx.integrations.register({ ...provider(), events: 'nope' })).toThrow(/events/);
+  });
+});
+
+describe('revokePluginContext (F3)', () => {
+  const harness = () => ({ id: 'late', displayName: 'Late', ...stubHarnessFns });
+
+  it('every registrar throws after revoke, and nothing reaches a registry', () => {
+    const ctx = createPluginContext('slowplug');
+    revokePluginContext(ctx);
+
+    expect(() => ctx.harnesses.register(harness())).toThrow(/revoked/);
+    expect(() => ctx.workflows.register({ kind: 'k' })).toThrow(/revoked/);
+    expect(() =>
+      ctx.integrations.register({
+        kind: 'k',
+        validate: () => ({ ok: true }),
+        handler: async () => {},
+        events: [],
+      }),
+    ).toThrow(/revoked/);
+
+    expect(listHarnesses().map((h) => h.id)).not.toContain('slowplug:late');
+    expect(getWorkflow(qualify('slowplug', 'k'))).toBeUndefined();
+    expect(getProvider(qualify('slowplug', 'k'))).toBeUndefined();
+  });
+
+  it('the error names the plugin and says why', () => {
+    const ctx = createPluginContext('slowplug2');
+    revokePluginContext(ctx);
+    expect(() => ctx.harnesses.register(harness())).toThrow(/slowplug2/);
+  });
+
+  it('revoking one context does not disarm another', () => {
+    const dead = createPluginContext('deadplug');
+    const alive = createPluginContext('aliveplug');
+    revokePluginContext(dead);
+
+    alive.harnesses.register(harness());
+    expect(listHarnesses().map((h) => h.id)).toContain('aliveplug:late');
   });
 });
