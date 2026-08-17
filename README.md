@@ -153,6 +153,8 @@ octomux is a bet on what that surface should look like: not a chat box bolted on
 | `octomux loop-start`                 | Loop a task until `--verify` passes (`--prompt`, `--max-iterations`) |
 | `octomux loop-start-group`           | Fan out `--n` competing loop candidates from one prompt              |
 | `octomux learn` / `recall`           | Record and retrieve durable notes for future runs on a repo          |
+| `octomux plugins list`               | List plugins in `octomux.yml` (`disable <id>` / `enable <id>`)       |
+| `octomux doctor`                     | Report plugin boot health from the last load report                  |
 
 Full setup, Jira/Linear, and orchestrator skills: **[ONBOARDING.md](./ONBOARDING.md)**.
 
@@ -185,14 +187,67 @@ octomux keeps a clean line between the **agent backend** (done for you) and the 
 - **REST API** (~130 endpoints) over tasks, agents, diffs, reviews, chats, workspaces, skills.
 - **Three live WebSocket channels** — `/ws/events` for task/chat/review events, `/ws/terminal/*` for bidirectional xterm ↔ tmux, and `/ws/orchestrator/:convId` for the conductor's conversation stream.
 - **A queryable SQLite schema** — tasks, agents, permission prompts, review runs, comments, learnings.
-- **A pluggable harness interface** — add a new agent backend by implementing one interface and registering it.
 - **User hook scripts** — drop executables in `~/.octomux/hooks/<event>.d/` (or `<repo>/.octomux/hooks/<event>.d/`) to fire on task-lifecycle events.
 
-There isn't a drop-in plugin API for custom UI views yet — adding one means building against
-these blocks in the codebase. A first-class way to author and share views is the direction
-we're building toward; if that's what you want, [open an issue](https://github.com/ShreyPaharia/octomux/issues).
+There still isn't a drop-in API for custom **UI views** — adding one means building against
+these blocks in the codebase. For workflows, integration providers, and harnesses, though, see
+below: that line moved.
 
 </details>
+
+## Plugins
+
+octomux is a **metaharness** — a third-party npm package can register a **workflow**, an
+**integration provider**, or a **harness** without forking octomux. List it in
+`~/.octomux/octomux.yml`, export one `apply(ctx)` function, and octomux calls it at boot.
+
+| Registrar                     | Adds                                                             | Example                           |
+| ----------------------------- | ---------------------------------------------------------------- | --------------------------------- |
+| `ctx.workflows.register()`    | a workflow kind — cron-triggered or run-based, own config schema | a nightly "translate strings" job |
+| `ctx.integrations.register()` | a handler for task lifecycle events (issue tracker, chat, CI)    | GitHub Issues instead of Jira     |
+| `ctx.harnesses.register()`    | a new coding-agent backend                                       | Aider, Codex CLI, OpenHands       |
+
+The smallest possible plugin — a workflow that logs on every run:
+
+```js
+// index.js
+export function apply(ctx) {
+  ctx.workflows.register({
+    kind: 'hello',
+    displayName: 'Hello World',
+    surfaces: ['session'],
+    run: async (runCtx) => {
+      ctx.logger.info({ repo: runCtx.repoPath }, 'hello from a plugin');
+    },
+  });
+}
+```
+
+Installing one today is manual — there's no `octomux plugins add` yet:
+
+```bash
+npm install --prefix ~/.octomux octomux-plugin-hello
+```
+
+```yaml
+# ~/.octomux/octomux.yml
+plugins:
+  - id: hello
+    name: octomux-plugin-hello # or an absolute path, while developing one locally
+    version: 1.0.0
+```
+
+Restart octomux. `octomux plugins list` shows what's in the manifest; `octomux doctor` reports
+whether each row actually loaded, and how long its `apply()` took.
+
+Full authoring guide and the pinned `@octomux/plugin-api` types:
+**[docs/plugins/README.md](./docs/plugins/README.md)** ·
+**[API reference](./docs/plugins/api-reference.md)**.
+
+**Security, plainly:** a plugin runs in-process with the DB handle, every stored credential,
+and full `process.env` — there is no sandbox and none is planned. Only install a plugin you'd
+trust with `npm install`'s postinstall scripts. `octomux start --safe-mode` skips every plugin
+row at boot if one goes bad.
 
 ## FAQ
 
@@ -216,7 +271,7 @@ Issues and PRs are welcome — the roadmap is shaped in the open.
 git clone https://github.com/ShreyPaharia/octomux && cd octomux
 bun install
 bun run dev        # Express :7777 + Vite
-bun run test       # vitest
+bun run test       # bun test
 ```
 
 Then open a PR **against `next`** with a short description of the change. See
