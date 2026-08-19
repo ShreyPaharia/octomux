@@ -962,6 +962,50 @@ export function listTasksAwaitingQuiescence(debounceMs: number): Array<{ id: str
 }
 
 /**
+ * Auto-review tasks whose agent looks stalled: still running, but no hook
+ * activity for stallMs. A turn that dies on a dropped API stream never fires
+ * the Stop hook, so hook_activity stays 'active' with a stale timestamp —
+ * unlike quiescence, this deliberately does NOT require hook_activity='idle'.
+ *
+ * Nudge bookkeeping lives in task_updates (kind='note', body='auto: stall
+ * nudge'): tasks already nudged maxNudges times, or nudged within the last
+ * stallMs, are excluded so the sweep can't spam a dead session.
+ */
+export function listStalledAutoReviewTasks(
+  stallMs: number,
+  maxNudges: number,
+): Array<{ id: string; tmux_session: string }> {
+  const cutoff = `-${Math.ceil(stallMs / 1000)}`;
+  return getDb()
+    .prepare(
+      `SELECT t.id, t.tmux_session
+         FROM tasks t
+        WHERE t.source = 'auto_review'
+          AND t.runtime_state = 'running'
+          AND t.deleted_at IS NULL
+          AND t.tmux_session IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM workers w WHERE w.task_id = t.id AND w.status != 'stopped'
+          )
+          AND (
+            SELECT MAX(w.hook_activity_updated_at)
+              FROM workers w
+             WHERE w.task_id = t.id AND w.status != 'stopped'
+          ) <= datetime('now', ? || ' seconds')
+          AND (
+            SELECT COUNT(*) FROM task_updates u
+             WHERE u.task_id = t.id AND u.kind = 'note' AND u.body = 'auto: stall nudge'
+          ) < ?
+          AND NOT EXISTS (
+            SELECT 1 FROM task_updates u
+             WHERE u.task_id = t.id AND u.kind = 'note' AND u.body = 'auto: stall nudge'
+               AND u.created_at > datetime('now', ? || ' seconds')
+          )`,
+    )
+    .all(cutoff, maxNudges, cutoff) as Array<{ id: string; tmux_session: string }>;
+}
+
+/**
  * Tasks that need the user's attention right now: pending permission prompts,
  * or errored tasks whose error hasn't been viewed. Used by the inbox.
  */
