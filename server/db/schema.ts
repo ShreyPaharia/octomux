@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     pr_url                       TEXT,
     pr_number                    INTEGER,
     pr_head_sha                  TEXT,
+    pr_review_requested_at       TEXT,
     user_window_index            INTEGER,
     initial_prompt               TEXT,
     last_viewed_at               TEXT,
