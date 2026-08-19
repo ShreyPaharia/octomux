@@ -92,7 +92,7 @@ const REVIEW_REQUESTED_GRAPHQL_QUERY = `query {
             }
           }
         }
-        timelineItems(last: 10, itemTypes: [REVIEW_REQUESTED_EVENT]) {
+        timelineItems(last: 50, itemTypes: [REVIEW_REQUESTED_EVENT]) {
           nodes {
             ... on ReviewRequestedEvent {
               createdAt
@@ -163,7 +163,11 @@ function isOwnerStillRequested(pr: OpenReviewPR, ownerLogin: string): boolean {
   );
 }
 
-/** Latest review-request timestamp for the owner (ISO strings compare lexicographically). */
+/**
+ * Latest review-request timestamp for the owner (ISO strings compare
+ * lexicographically). Direct user requests only — team re-requests carry no
+ * `login` and are dropped, matching isOwnerStillRequested's scope.
+ */
 function latestReviewRequestAt(pr: OpenReviewPR, ownerLogin: string): string | null {
   let latest: string | null = null;
   for (const ev of pr.reviewRequestEvents) {
@@ -267,6 +271,8 @@ async function upsertReviewTask(
       return { action: 'skipped' };
     }
 
+    // Written only after the trigger actually lands — a failed nudge/resume
+    // must leave the baseline behind so the next poll cycle retries.
     const markTriggered = () => {
       setPrHeadSha(existing.id, pr.headRefOid);
       if (requestedAt) setPrReviewRequestedAt(existing.id, requestedAt);
@@ -278,7 +284,7 @@ async function upsertReviewTask(
         // (harness session id) and hand it the re-review prompt.
         const task = getTask(existing.id) as Task | undefined;
         if (!task) return { action: 'skipped' };
-        await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
+        if (headChanged) await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
         await resumeTask(task, { prompt: buildReReviewNudge(pr, existing.id, headChanged) });
         markTriggered();
         return { action: 'resumed', taskId: existing.id };
@@ -301,7 +307,7 @@ async function upsertReviewTask(
     if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
 
-      await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
+      if (headChanged) await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
       const delivered = await nudgeAgentForReReview(
         existing.id,
         existing.tmux_session,
