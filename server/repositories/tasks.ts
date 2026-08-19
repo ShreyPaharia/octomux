@@ -507,6 +507,15 @@ export function setPrHeadSha(id: string, prHeadSha: string): void {
     .run(prHeadSha, id);
 }
 
+/** Set pr_review_requested_at (latest review-request event seen for the owner). */
+export function setPrReviewRequestedAt(id: string, requestedAt: string): void {
+  getDb()
+    .prepare(
+      `UPDATE tasks SET pr_review_requested_at = ?, updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(requestedAt, id);
+}
+
 /** Touch last_viewed_at for a single task. */
 export function touchLastViewed(id: string): void {
   getDb().prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`).run(id);
@@ -759,6 +768,7 @@ export function findExistingPrTask(
       runtime_state: string;
       source: string | null;
       pr_head_sha: string | null;
+      pr_review_requested_at: string | null;
       initial_prompt: string | null;
       tmux_session: string | null;
       worktree_path: string | null;
@@ -768,7 +778,9 @@ export function findExistingPrTask(
     .prepare(
       `SELECT t.id AS id, t.runtime_state AS runtime_state,
               t.source AS source,
-              t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
+              t.pr_head_sha AS pr_head_sha,
+              t.pr_review_requested_at AS pr_review_requested_at,
+              t.initial_prompt AS initial_prompt,
               t.tmux_session AS tmux_session,
               w.path AS worktree_path
          FROM tasks t
@@ -783,6 +795,7 @@ export function findExistingPrTask(
         runtime_state: string;
         source: string | null;
         pr_head_sha: string | null;
+        pr_review_requested_at: string | null;
         initial_prompt: string | null;
         tmux_session: string | null;
         worktree_path: string | null;
